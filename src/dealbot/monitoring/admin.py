@@ -1,29 +1,33 @@
-"""관리자 개인 챗: 알림(발행/실패/에러/일일 요약) + 명령어(/status 등)."""
+"""관리자 개인 챗: 알림(발행/실패/에러/수동 링크 요청/일일 요약) + 명령어(/status /link /post ...)."""
 
 from __future__ import annotations
 
 import html
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from telegram import Bot, Update
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
-from telegram.ext import Application, CommandHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from dealbot import __version__
 from dealbot.config import MonitoringConfig, Settings
+from dealbot.links import LinkRouter
 from dealbot.models import Deal, PublishResult
 from dealbot.monitoring.state import BotState
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import normalize_chat_id
 from dealbot.publisher.templates import TemplateRenderer
-from dealbot.storage.db import Database, PeriodSummary
+from dealbot.shops import Shop, ShopRegistry, find_urls
+from dealbot.storage.db import Database, PeriodSummary, QueueItem
 from dealbot.utils.text import truncate
 from dealbot.utils.timeutil import fmt_local, humanize_delta, utcnow
 
 log = logging.getLogger(__name__)
+_QUEUE_REF_RE = re.compile(r"#(\d+)")
 
 
 class AdminNotifier:
@@ -73,10 +77,11 @@ class AdminNotifier:
         p = deal.product
         tag = "DRY-RUN " if result.dry_run else ""
         reasons = ", ".join(deal.verdict.reasons) or "-"
+        price = f"{p.price:,}원" if p.has_price else "가격 없음"
         text = (
-            f"✅ <b>{tag}발행</b> [{html.escape(p.source)}]\n"
+            f"✅ <b>{tag}발행</b> [{html.escape(p.shop)}/{html.escape(p.source)}]\n"
             f"{html.escape(truncate(p.name, 80))}\n"
-            f"{p.price:,}원 · 점수 {deal.verdict.score:g} · {html.escape(reasons)}"
+            f"{price} · 점수 {deal.verdict.score:g} · {html.escape(reasons)}"
         )
         if deal.affiliate_url:
             text += f"\n{html.escape(deal.affiliate_url)}"
@@ -87,7 +92,25 @@ class AdminNotifier:
             return
         p = deal.product
         head = "❌ <b>발행 실패 (포기)</b>" if final else "⚠️ <b>발행 실패 (재시도 예정)</b>"
-        await self.send(f"{head} [{html.escape(p.source)}]\n{html.escape(truncate(p.name, 80))}\n<code>{html.escape(error[:500])}</code>")
+        await self.send(f"{head} [{html.escape(p.shop)}]\n{html.escape(truncate(p.name, 80))}\n<code>{html.escape(error[:500])}</code>")
+
+    async def notify_manual_link(self, item: QueueItem, shop: Shop) -> None:
+        """자동 변환이 안 되는 쇼핑몰: 관리자에게 링크 생성을 요청."""
+        if not self.cfg.notify_on_manual_link:
+            return
+        p = item.deal.product
+        price = f" — {p.price:,}원" if p.has_price else ""
+        hint = shop.manual_hint or "앱/사이트에서 내 제휴 링크를 만들어 보내주세요"
+        text = (
+            f"🔗 <b>링크 필요 #{item.id}</b> [{html.escape(shop.name)}]\n"
+            f"{html.escape(truncate(p.name, 80))}{price}\n"
+            f"원본: {html.escape(p.url)}\n"
+            + (f"글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
+            + f"\n👉 {html.escape(hint)}\n"
+            f"만든 링크를 <b>이 메시지에 답장</b>하거나  <code>/link {item.id} https://...</code>\n"
+            f"건너뛰기: <code>/skip {item.id}</code>"
+        )
+        await self.send(text)
 
     async def notify_error(self, kind: str, message: str) -> None:
         if not self.cfg.notify_on_error:
@@ -106,7 +129,7 @@ class AdminNotifier:
 
 
 class StatusReporter:
-    """/status, /queue, 일일 요약 텍스트 생성."""
+    """/status, /queue, /pending, 일일 요약 텍스트 생성."""
 
     def __init__(
         self,
@@ -115,12 +138,16 @@ class StatusReporter:
         state: BotState,
         rate_limiter: RateLimiter,
         renderer: TemplateRenderer,
+        registry: ShopRegistry | None = None,
+        links: LinkRouter | None = None,
     ) -> None:
         self.settings = settings
         self.db = db
         self.state = state
         self.rate = rate_limiter
         self.renderer = renderer
+        self.registry = registry or settings.shop_registry()
+        self.links = links
 
     def _collector_rows(self, now: datetime) -> list[dict[str, Any]]:
         tz = self.settings.app.timezone
@@ -148,6 +175,13 @@ class StatusReporter:
             )
         return rows
 
+    def _shop_rows(self) -> list[dict[str, Any]]:
+        rows = []
+        for s in self.registry.all():
+            mode = self.links.describe(s) if self.links else s.link_mode
+            rows.append({"key": s.key, "name": s.name, "enabled": s.enabled, "mode": mode})
+        return rows
+
     def status_context(self) -> dict[str, Any]:
         now = utcnow()
         tz = self.settings.app.timezone
@@ -161,6 +195,7 @@ class StatusReporter:
             "has_coupang": self.settings.secrets.has_coupang,
             "has_channel": self.settings.secrets.has_channel,
             "collectors": self._collector_rows(now),
+            "shops": self._shop_rows(),
             "rate": self.rate.snapshot(now),
             "queue": self.db.queue_counts(),
             "products": self.db.product_count(),
@@ -174,15 +209,33 @@ class StatusReporter:
     def status_text(self) -> str:
         return self.renderer.render("status.j2", **self.status_context())
 
+    def _item_line(self, it: QueueItem) -> str:
+        p = it.deal.product
+        price = f" — {p.price:,}원" if p.has_price else ""
+        return f"• #{it.id} [{html.escape(p.shop)}] {html.escape(truncate(p.name, 50))}{price} (점수 {it.score:g}, 시도 {it.attempts})"
+
     def queue_text(self, limit: int = 10) -> str:
         items = self.db.pending_items(limit)
         counts = self.db.queue_counts()
-        lines = [f"🗂 <b>대기열</b> pending {counts.get('pending', 0)} · failed {counts.get('failed', 0)} · expired {counts.get('expired', 0)}"]
-        for it in items:
-            p = it.deal.product
-            lines.append(f"• [{p.source}] {html.escape(truncate(p.name, 50))} — {p.price:,}원 (점수 {it.score:g}, 시도 {it.attempts})")
+        lines = [
+            f"🗂 <b>대기열</b> pending {counts.get('pending', 0)} · 링크대기 {counts.get('awaiting_link', 0)} · failed {counts.get('failed', 0)} · expired {counts.get('expired', 0)}"
+        ]
+        lines += [self._item_line(it) for it in items]
         if not items:
             lines.append("(대기 중인 특가 없음)")
+        return "\n".join(lines)
+
+    def pending_text(self, limit: int = 15) -> str:
+        items = self.db.awaiting_items(limit)
+        lines = ["🔗 <b>내 링크가 필요한 항목</b>"]
+        for it in items:
+            p = it.deal.product
+            lines.append(self._item_line(it))
+            lines.append(f"   원본: {html.escape(p.url)}")
+        if not items:
+            lines.append("(없음)")
+        else:
+            lines.append("\n답장 또는 <code>/link 번호 링크</code> · 건너뛰기 <code>/skip 번호</code>")
         return "\n".join(lines)
 
     def recent_text(self, limit: int = 10) -> str:
@@ -202,7 +255,7 @@ class StatusReporter:
         lines = ["🚨 <b>최근 에러</b>"]
         for e in events:
             when = fmt_local(datetime.fromisoformat(e["ts"]), tz)
-            lines.append(f"• {when} <code>{html.escape(e['kind'])}</code> {html.escape(truncate(e['message'], 160))}")
+            lines.append(f"• {when} <code>{html.escape(e['kind'])}</code> {html.escape(truncate(e['message'].splitlines()[0], 160))}")
         if not events:
             lines.append("(없음)")
         return "\n".join(lines)
@@ -224,16 +277,26 @@ class BotController(Protocol):
 
     def collector_names(self) -> list[str]: ...
 
+    async def attach_link(self, queue_id: int, url: str) -> str: ...
+
+    def skip_item(self, queue_id: int) -> str: ...
+
+    async def submit_manual(self, text: str) -> str: ...
+
 
 HELP_TEXT = (
     "🤖 <b>DealBot 명령어</b>\n"
     "/status — 현재 상태\n"
     "/queue — 발행 대기열\n"
+    "/pending — 내가 링크를 만들어 줘야 하는 항목\n"
+    "/link 번호 링크 — 만든 제휴 링크 붙이기 (또는 요청 메시지에 답장)\n"
+    "/skip 번호 — 항목 건너뛰기\n"
+    "/post — 직접 딜 올리기. 예)\n"
+    "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
     "/recent — 최근 발행 목록\n"
     "/errors — 최근 에러\n"
     "/run [수집기이름] — 지금 바로 수집 실행\n"
-    "/pause — 수집/발행 일시정지\n"
-    "/resume — 재개\n"
+    "/pause · /resume — 일시정지/재개\n"
     "/help — 도움말"
 )
 
@@ -258,6 +321,9 @@ def register_admin_handlers(
     async def cmd_queue(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.queue_text())
 
+    async def cmd_pending(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, reporter.pending_text())
+
     async def cmd_recent(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.recent_text())
 
@@ -276,11 +342,45 @@ def register_admin_handlers(
         name = ctx.args[0] if ctx.args else None
         await reply(update, controller.request_run(name))
 
+    async def cmd_link(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if len(args) < 2 or not args[0].lstrip("#").isdigit():
+            await reply(update, "사용법: <code>/link 번호 https://...</code>")
+            return
+        await reply(update, await controller.attach_link(int(args[0].lstrip("#")), args[1]))
+
+    async def cmd_skip(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args or not args[0].lstrip("#").isdigit():
+            await reply(update, "사용법: <code>/skip 번호</code>")
+            return
+        await reply(update, controller.skip_item(int(args[0].lstrip("#"))))
+
+    async def cmd_post(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        text = update.effective_message.text if update.effective_message else ""
+        await reply(update, await controller.submit_manual(text or ""))
+
     async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, HELP_TEXT)
 
+    async def on_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        """관리자의 일반 메시지: (1) 링크 요청에 답장 → 링크 붙이기, (2) URL 포함 메시지 → 직접 발행."""
+        msg = update.effective_message
+        if msg is None or not msg.text:
+            return
+        urls = find_urls(msg.text)
+        replied = msg.reply_to_message
+        if replied is not None and replied.text and urls:
+            m = _QUEUE_REF_RE.search(replied.text)
+            if m:
+                await reply(update, await controller.attach_link(int(m.group(1)), urls[0]))
+                return
+        if urls:
+            await reply(update, await controller.submit_manual(msg.text))
+            return
+        await reply(update, "링크가 포함된 메시지나 명령어를 보내주세요. /help")
+
     async def cmd_unknown_chat(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        # 관리자 외 사용자의 명령: 채팅 ID 만 알려주고 무시 (chat-id 확인용)
         if update.effective_chat and update.effective_message:
             await update.effective_message.reply_text(
                 f"이 봇은 개인 관리용입니다. (chat id: {update.effective_chat.id})"
@@ -289,13 +389,18 @@ def register_admin_handlers(
     for cmd, fn in (
         ("status", cmd_status),
         ("queue", cmd_queue),
+        ("pending", cmd_pending),
         ("recent", cmd_recent),
         ("errors", cmd_errors),
         ("pause", cmd_pause),
         ("resume", cmd_resume),
         ("run", cmd_run),
+        ("link", cmd_link),
+        ("skip", cmd_skip),
+        ("post", cmd_post),
         ("help", cmd_help),
         ("start", cmd_help),
     ):
         app.add_handler(CommandHandler(cmd, fn, filters=only_admin))
+    app.add_handler(MessageHandler(only_admin & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(CommandHandler(["start", "status", "help"], cmd_unknown_chat, filters=~only_admin))

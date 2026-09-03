@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
+
+from dealbot.shops import DEFAULT_SHOPS, LINK_MODES, Shop, ShopRegistry
 
 
 class AppConfig(BaseModel):
@@ -48,6 +51,27 @@ class CollectorConfig(BaseModel):
         return v
 
 
+class ShopConfig(BaseModel):
+    """config.yaml 의 shops[] 항목. key 만 있으면 기본값을 덮어쓴다."""
+
+    key: str
+    name: str | None = None
+    aliases: list[str] | None = None
+    domains: list[str] | None = None
+    link_mode: str | None = None
+    provider: str | None = None
+    disclosure: str | None = None
+    enabled: bool | None = None
+    manual_hint: str | None = None
+
+    @field_validator("link_mode")
+    @classmethod
+    def _mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in LINK_MODES:
+            raise ValueError(f"link_mode must be one of {LINK_MODES}")
+        return v
+
+
 class DealConfig(BaseModel):
     min_discount_rate: float = 30
     history_days: int = 30
@@ -55,6 +79,10 @@ class DealConfig(BaseModel):
     min_history_samples: int = 3
     min_price: int = 1000
     exclude_keywords: list[str] = Field(default_factory=list)
+    # (c) 커뮤니티 추천 수가 이 값 이상이면 가격 조건과 무관하게 특가로 인정 (0 이면 비활성)
+    community_min_recommend: int = 5
+    # 쿠폰/이벤트(가격 없음) 글을 다룰지. 다루면 규칙 (c) 로만 판정
+    accept_coupons_and_events: bool = True
 
 
 class PublishConfig(BaseModel):
@@ -65,9 +93,11 @@ class PublishConfig(BaseModel):
     min_interval_seconds: int = 180
     dedup_days: int = 7
     queue_ttl_hours: int = 6
+    manual_link_ttl_hours: int = 12  # 내 링크 입력을 기다리는 항목의 유효 시간
     max_publish_attempts: int = 3
     publisher_tick_seconds: int = 20
     send_photo: bool = True
+    allow_raw_links: bool = True  # 제휴 변환이 불가능한 쇼핑몰은 원본 링크로라도 발행
     templates_dir: Path = Path("templates")
     template: str = "deal_post.j2"
 
@@ -81,6 +111,7 @@ class MonitoringConfig(BaseModel):
     notify_on_publish: bool = True
     notify_on_failure: bool = True
     notify_on_error: bool = True
+    notify_on_manual_link: bool = True
     error_alert_cooldown_minutes: int = 30
     daily_summary_time: str = "21:00"
 
@@ -99,6 +130,8 @@ class Secrets(BaseModel):
     coupang_access_key: str | None = None
     coupang_secret_key: str | None = None
     coupang_sub_id: str | None = None
+    linkprice_affiliate_id: str | None = None
+    adpick_affid: str | None = None
     telegram_bot_token: str | None = None
     telegram_channel_id: str | None = None
     telegram_admin_chat_id: int | None = None
@@ -106,6 +139,14 @@ class Secrets(BaseModel):
     @property
     def has_coupang(self) -> bool:
         return bool(self.coupang_access_key and self.coupang_secret_key)
+
+    @property
+    def has_linkprice(self) -> bool:
+        return bool(self.linkprice_affiliate_id)
+
+    @property
+    def has_adpick(self) -> bool:
+        return bool(self.adpick_affid)
 
     @property
     def has_telegram(self) -> bool:
@@ -124,6 +165,7 @@ class Settings(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
     collectors: list[CollectorConfig] = Field(default_factory=list)
+    shops: list[ShopConfig] = Field(default_factory=list)
     deal: DealConfig = Field(default_factory=DealConfig)
     publish: PublishConfig = Field(default_factory=PublishConfig)
     links: LinksConfig = Field(default_factory=LinksConfig)
@@ -149,6 +191,20 @@ class Settings(BaseModel):
             return d
         base = self.config_path.parent if self.config_path else Path.cwd()
         return (base / d).resolve()
+
+    def shop_registry(self) -> ShopRegistry:
+        """기본 쇼핑몰 목록 + config.shops 오버라이드."""
+        shops: dict[str, Shop] = {
+            s.key: dataclasses.replace(s, aliases=list(s.aliases), domains=list(s.domains)) for s in DEFAULT_SHOPS
+        }
+        for o in self.shops:
+            base = shops.get(o.key) or Shop(key=o.key, name=o.name or o.key)
+            for f in ("name", "aliases", "domains", "link_mode", "provider", "disclosure", "enabled", "manual_hint"):
+                v = getattr(o, f)
+                if v is not None:
+                    setattr(base, f, v)
+            shops[o.key] = base
+        return ShopRegistry(list(shops.values()))
 
     @field_validator("collectors")
     @classmethod
@@ -198,6 +254,8 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         coupang_access_key=_env_str("COUPANG_ACCESS_KEY"),
         coupang_secret_key=_env_str("COUPANG_SECRET_KEY"),
         coupang_sub_id=_env_str("COUPANG_SUB_ID"),
+        linkprice_affiliate_id=_env_str("LINKPRICE_AFFILIATE_ID"),
+        adpick_affid=_env_str("ADPICK_AFFID"),
         telegram_bot_token=_env_str("TELEGRAM_BOT_TOKEN"),
         telegram_channel_id=_env_str("TELEGRAM_CHANNEL_ID"),
         telegram_admin_chat_id=_env_int("TELEGRAM_ADMIN_CHAT_ID"),

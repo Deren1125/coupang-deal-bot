@@ -14,25 +14,30 @@ from dealbot.utils.timeutil import utcnow
 
 
 def test_render_deal_post(repo_root: Path) -> None:
+    from dealbot.shops import ShopRegistry
+
     r = TemplateRenderer(repo_root / "templates")
-    text = r.render_deal(sample_deal(), "https://link.coupang.com/a/sample")
-    assert "<b>29,900원</b>" in text
-    assert "<s>49,900원</s>" in text
-    assert "40% 할인" in text
-    assert "42,000원 대비 <b>29%</b>" in text
-    assert "🚀 로켓배송 · 📦 무료배송" in text
-    assert '<a href="https://link.coupang.com/a/sample">' in text
-    assert "쿠팡 파트너스 활동의 일환" in text
+    text = r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", shop=ShopRegistry().get("coupang"))
+    lines = text.splitlines()
+    assert lines[0] == "[샘플 · 오늘의 특가]" and lines[1] == ""
+    assert "상품: [샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L" in text
+    assert "가격: 29,900원 (정가 49,900원) · 40% 할인" in text
+    assert "최근 30일 평균가 42,000원 대비 29% 저렴" in text
+    assert "\nhttps://link.coupang.com/a/sample\n" in text
+    assert text.endswith("이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.")
     assert len(text) < 1024
 
 
 def test_render_escapes_html(repo_root: Path) -> None:
     r = TemplateRenderer(repo_root / "templates")
-    p = Product(source="s", product_id="1", name="<script>alert(1)</script> & 상품", price=1000, url="u")
+    p = Product(source="s", product_id="x:1", shop="temu", name="<script>alert(1)</script> & 상품", price=1000, url="u")
     d = Deal(product=p, verdict=DealVerdict(is_deal=True), affiliate_url="https://l")
     text = r.render_deal(d, "https://l")
     assert "&lt;script&gt;" in text and "&amp;" in text
-    assert "할인" not in text and "평균가" not in text
+    assert "할인" not in text and "평균가" not in text and "포스팅" not in text  # 고지 문구 없는 몰
+    coupon = Product(source="s", product_id="coupang:c", shop="coupang", name="10% 쿠폰", price=0, url="u", deal_kind="coupon")
+    t2 = r.render_deal(Deal(product=coupon, verdict=DealVerdict(is_deal=True)), "https://l")
+    assert "가격:" not in t2 and "상품: 10% 쿠폰" in t2
 
 
 def test_status_and_summary_templates_render(repo_root: Path, db: Database) -> None:
@@ -52,6 +57,7 @@ def test_status_and_summary_templates_render(repo_root: Path, db: Database) -> N
             {"name": "b", "type": "t", "enabled": False},
             {"name": "c", "type": "t", "enabled": True, "available": False, "unavailable_reason": "no key"},
         ],
+        "shops": [{"key": "coupang", "name": "쿠팡", "enabled": True, "mode": "자동 변환(coupang)"}, {"key": "temu", "name": "테무", "enabled": False, "mode": "꺼짐"}],
         "rate": {"posts_hour": 1, "posts_day": 2, "max_hour": 6, "max_day": 40, "last_post_at": utcnow()},
         "queue": {"pending": 2},
         "products": 10,
@@ -63,6 +69,7 @@ def test_status_and_summary_templates_render(repo_root: Path, db: Database) -> N
     }
     text = r.render("status.j2", **ctx)
     assert "DRY-RUN" in text and "쿠팡 API 키 미설정" in text and "b — 꺼짐" in text and "no key" in text
+    assert "• 쿠팡: 자동 변환(coupang)" in text and "테무" not in text
     assert "boom &lt;x&gt;" in text
 
     s = db.summary(utcnow() - timedelta(days=1))

@@ -68,8 +68,9 @@ CREATE TABLE IF NOT EXISTS deal_queue (
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_pending_product
-    ON deal_queue(product_id) WHERE status = 'pending';
+DROP INDEX IF EXISTS idx_queue_pending_product;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_open_product
+    ON deal_queue(product_id) WHERE status IN ('pending', 'awaiting_link');
 CREATE INDEX IF NOT EXISTS idx_queue_status ON deal_queue(status, score DESC, created_at);
 
 CREATE TABLE IF NOT EXISTS source_items (
@@ -149,6 +150,7 @@ class PeriodSummary:
     skipped: int = 0
     errors: int = 0
     pending: int = 0
+    awaiting: int = 0
     top_posts: list[dict[str, Any]] | None = None
 
 
@@ -164,6 +166,12 @@ class Database:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}
+        if "url" not in cols:
+            self._conn.execute("ALTER TABLE source_items ADD COLUMN url TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -333,7 +341,7 @@ class Database:
 
     # -------------------------------------------------------------- queue
     def enqueue(self, deal: Deal, *, score: float, now: datetime | None = None) -> bool:
-        """대기열에 추가. 이미 pending 이면 False."""
+        """대기열에 추가. 이미 열려 있으면(pending/awaiting_link) False."""
         now = now or utcnow()
         ts = to_iso(now)
         payload = json.dumps(deal.to_dict(), ensure_ascii=False)
@@ -403,14 +411,46 @@ class Database:
                 (status, error, to_iso(now), 1 if increment_attempts else 0, item_id),
             )
 
-    def expire_queue(self, older_than: datetime, now: datetime | None = None) -> int:
+    def get_queue_item(self, item_id: int) -> QueueItem | None:
+        row = self._one("SELECT * FROM deal_queue WHERE id = ?", (item_id,))
+        return self._row_to_queue_item(row) if row else None
+
+    def awaiting_items(self, limit: int = 20) -> list[QueueItem]:
+        rows = self._q(
+            "SELECT * FROM deal_queue WHERE status = 'awaiting_link' ORDER BY created_at ASC LIMIT ?", (limit,)
+        )
+        return [self._row_to_queue_item(r) for r in rows]
+
+    def set_queue_link(self, item_id: int, url: str, now: datetime | None = None) -> QueueItem | None:
+        """관리자가 만든 제휴 링크를 붙이고 다시 pending 으로."""
+        item = self.get_queue_item(item_id)
+        if item is None:
+            return None
+        item.deal.affiliate_url = url
+        self.update_queue_item(item_id, status="pending", error=None, deal=item.deal, now=now)
+        return self.get_queue_item(item_id)
+
+    def expire_queue(
+        self,
+        older_than: datetime,
+        now: datetime | None = None,
+        *,
+        awaiting_older_than: datetime | None = None,
+    ) -> int:
         now = now or utcnow()
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE deal_queue SET status = 'expired', updated_at = ? WHERE status = 'pending' AND created_at < ?",
                 (to_iso(now), to_iso(older_than)),
             )
-            return cur.rowcount
+            n = cur.rowcount
+            if awaiting_older_than is not None:
+                cur2 = self._conn.execute(
+                    "UPDATE deal_queue SET status = 'expired', updated_at = ? WHERE status = 'awaiting_link' AND created_at < ?",
+                    (to_iso(now), to_iso(awaiting_older_than)),
+                )
+                n += cur2.rowcount
+            return n
 
     def queue_counts(self) -> dict[str, int]:
         rows = self._q("SELECT status, COUNT(*) AS c FROM deal_queue GROUP BY status")
@@ -422,13 +462,38 @@ class Database:
             "SELECT 1 FROM source_items WHERE source = ? AND external_id = ?", (source, external_id)
         ) is not None
 
-    def mark_seen(self, source: str, external_id: str, product_id: str | None = None, now: datetime | None = None) -> None:
+    def mark_seen(
+        self,
+        source: str,
+        external_id: str,
+        product_id: str | None = None,
+        now: datetime | None = None,
+        *,
+        url: str | None = None,
+    ) -> None:
         now = now or utcnow()
         with self._lock:
             self._conn.execute(
-                "INSERT OR IGNORE INTO source_items (source, external_id, product_id, first_seen_at) VALUES (?, ?, ?, ?)",
-                (source, external_id, product_id, to_iso(now)),
+                "INSERT OR IGNORE INTO source_items (source, external_id, product_id, first_seen_at, url) VALUES (?, ?, ?, ?, ?)",
+                (source, external_id, product_id, to_iso(now), url),
             )
+
+    def seen_item(self, source: str, external_id: str) -> tuple[str | None, str | None] | None:
+        """(product_id, url) 또는 None."""
+        row = self._one(
+            "SELECT product_id, url FROM source_items WHERE source = ? AND external_id = ?", (source, external_id)
+        )
+        return (row["product_id"], row["url"]) if row else None
+
+    def seen_product_id(self, source: str, external_id: str) -> str | None:
+        row = self._one(
+            "SELECT product_id FROM source_items WHERE source = ? AND external_id = ?", (source, external_id)
+        )
+        return row["product_id"] if row else None
+
+    def product_url(self, product_id: str) -> str | None:
+        row = self._one("SELECT url FROM products WHERE product_id = ?", (product_id,))
+        return row["url"] if row else None
 
     # ------------------------------------------------------- collector runs
     def start_run(self, collector: str, now: datetime | None = None) -> int:
@@ -550,7 +615,9 @@ class Database:
         out.publish_failed = by_status.get("failed", 0)
         out.expired = by_status.get("expired", 0)
         out.skipped = by_status.get("skipped", 0)
-        out.pending = self.queue_counts().get("pending", 0)
+        counts = self.queue_counts()
+        out.pending = counts.get("pending", 0)
+        out.awaiting = counts.get("awaiting_link", 0)
 
         row = self._one(
             "SELECT COUNT(*) AS c FROM events WHERE level = 'ERROR' AND ts >= ? AND ts <= ?", (s, u)

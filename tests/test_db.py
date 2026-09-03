@@ -70,8 +70,10 @@ def test_queue_lifecycle(db: Database) -> None:
 
 def test_seen_runs_events_kv_summary(db: Database) -> None:
     assert not db.is_seen("ppomppu", "123")
-    db.mark_seen("ppomppu", "123", "1")
+    db.mark_seen("ppomppu", "123", "coupang:1", url="https://www.coupang.com/vp/products/1")
     assert db.is_seen("ppomppu", "123")
+    assert db.seen_item("ppomppu", "123") == ("coupang:1", "https://www.coupang.com/vp/products/1")
+    assert db.seen_item("ppomppu", "nope") is None
 
     run_id = db.start_run("goldbox")
     db.finish_run(run_id, status="ok", collected=10, deals=2, queued=1)
@@ -103,3 +105,25 @@ def test_prune(db: Database) -> None:
     res = db.prune(price_history_days=180, events_days=30, now=now)
     assert res["price_history"] == 1 and res["events"] == 1
     assert db.price_history_count() == 1
+
+
+def test_queue_awaiting_link_flow(db: Database) -> None:
+    now = utcnow()
+    assert db.enqueue(_deal("t"), score=5, now=now)
+    item = db.next_pending()
+    assert item is not None
+    db.update_queue_item(item.id, status="awaiting_link", error="manual link required")
+    assert db.next_pending() is None
+    assert not db.enqueue(_deal("t"), score=9, now=now)  # 링크 대기 중에도 중복 등록 불가
+    assert [i.id for i in db.awaiting_items()] == [item.id]
+    assert db.get_queue_item(item.id).status == "awaiting_link"  # type: ignore[union-attr]
+
+    updated = db.set_queue_link(item.id, "https://toss.im/_m/MINE")
+    assert updated is not None and updated.status == "pending" and updated.deal.affiliate_url == "https://toss.im/_m/MINE"
+    assert db.set_queue_link(999, "x") is None
+
+    db.update_queue_item(item.id, status="awaiting_link")
+    assert db.expire_queue(now - timedelta(hours=1), now, awaiting_older_than=now + timedelta(seconds=1)) == 1
+    assert db.queue_counts() == {"expired": 1}
+    s = db.summary(now - timedelta(hours=1))
+    assert s.awaiting == 0 and s.expired == 1

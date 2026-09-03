@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from dealbot.models import Deal
+from dealbot.shops import Shop
 from dealbot.utils.text import format_won
 
 
@@ -48,11 +49,18 @@ class TemplateRenderer:
         ctx.setdefault("now", datetime.now(self.tz))
         return template.render(**ctx).strip()
 
-    def render_deal(self, deal: Deal, link: str, template: str = "deal_post.j2") -> str:
+    def render_deal(self, deal: Deal, link: str, *, shop: Shop | None = None, template: str = "deal_post.j2") -> str:
         p = deal.product
+        shop_ctx = {
+            "key": shop.key if shop else p.shop,
+            "name": shop.name if shop else p.shop,
+            "disclosure": shop.disclosure if shop else None,
+            "link_mode": shop.link_mode if shop else "raw",
+        }
         return self.render(
             template,
             product=p,
+            shop=shop_ctx,
             verdict=deal.verdict,
             link=link,
             discount_rate=deal.verdict.discount_rate if deal.verdict.discount_rate is not None else p.effective_discount_rate(),

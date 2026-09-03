@@ -27,7 +27,9 @@ def _settings(args: argparse.Namespace) -> Settings:
 def sample_deal() -> Deal:
     p = Product(
         source="goldbox",
-        product_id="0000000",
+        product_id="coupang:0000000",
+        shop="coupang",
+        headline="샘플 · 오늘의 특가",
         name="[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L",
         price=29900,
         url="https://www.coupang.com/vp/products/0000000",
@@ -94,6 +96,9 @@ async def cmd_check(args: argparse.Namespace) -> int:
 
     bot = DealBot(s)
     try:
+        print("shops:")
+        for shop in bot.registry.all():
+            print(f"  - {shop.name:8s} {bot.links.describe(shop)}")
         # 템플릿
         try:
             bot.publisher.render(sample_deal())
@@ -192,7 +197,8 @@ def cmd_render(args: argparse.Namespace) -> int:
 
     s = _settings(args)
     r = TemplateRenderer(s.templates_dir, s.app.timezone)
-    print(r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", template=s.publish.template))
+    shop = s.shop_registry().get("coupang")
+    print(r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", shop=shop, template=s.publish.template))
     return 0
 
 

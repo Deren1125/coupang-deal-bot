@@ -6,7 +6,7 @@ from dealbot.pricing.evaluator import DealEvaluator
 
 
 def _p(price: int, **kw) -> Product:  # type: ignore[no-untyped-def]
-    return Product(source="s", product_id="1", name=kw.pop("name", "상품"), price=price, url="u", **kw)
+    return Product(source="s", product_id="coupang:1", shop="coupang", name=kw.pop("name", "상품"), price=price, url="u", **kw)
 
 
 def test_rule_a_displayed_discount() -> None:
@@ -25,11 +25,30 @@ def test_rule_a_computed_from_original_price() -> None:
 def test_rule_b_below_average_requires_samples() -> None:
     ev = DealEvaluator(DealConfig())
     stats = PriceStats(count=2, avg=10000, min=9500, max=10500)
-    assert not ev.evaluate(_p(8000), stats).is_deal  # 샘플 부족
+    assert not ev.evaluate(_p(8000), stats).is_deal
     stats.count = 3
     v = ev.evaluate(_p(8000), stats)
     assert v.is_deal and v.below_avg_pct == 20.0 and v.reasons == ["below_30d_avg>=15%"]
-    assert not ev.evaluate(_p(9000), stats).is_deal  # 10% 만 저렴
+    assert not ev.evaluate(_p(9000), stats).is_deal
+
+
+def test_rule_c_community_recommend() -> None:
+    ev = DealEvaluator(DealConfig(community_min_recommend=5))
+    assert not ev.evaluate(_p(9000, recommend_count=4), PriceStats()).is_deal
+    v = ev.evaluate(_p(9000, recommend_count=7), PriceStats())
+    assert v.is_deal and v.reasons == ["recommend>=5"] and v.score == 7
+    assert not DealEvaluator(DealConfig(community_min_recommend=0)).evaluate(_p(9000, recommend_count=99), PriceStats()).is_deal
+
+
+def test_coupons_and_events_only_by_recommend() -> None:
+    ev = DealEvaluator(DealConfig(community_min_recommend=3))
+    coupon = _p(0, deal_kind="coupon", name="토스 25% 쿠폰", recommend_count=2)
+    assert ev.evaluate(coupon, PriceStats()).reasons == ["no_price_low_recommend"]
+    coupon.recommend_count = 3
+    v = ev.evaluate(coupon, PriceStats())
+    assert v.is_deal and v.reasons == ["recommend>=3"]
+    ev2 = DealEvaluator(DealConfig(accept_coupons_and_events=False))
+    assert ev2.evaluate(coupon, PriceStats()).reasons == ["no_price"]
 
 
 def test_thresholds_configurable() -> None:

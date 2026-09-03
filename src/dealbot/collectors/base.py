@@ -14,6 +14,7 @@ from dealbot.models import Product
 if TYPE_CHECKING:
     from dealbot.config import Settings
     from dealbot.coupang.client import CoupangClient
+    from dealbot.shops import ShopRegistry
     from dealbot.storage.db import Database
 
 
@@ -25,6 +26,7 @@ class CollectorContext:
     http: httpx.AsyncClient
     db: Database
     coupang: CoupangClient | None = None
+    shops: ShopRegistry | None = None
 
 
 class CollectorUnavailable(Exception):

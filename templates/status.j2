@@ -1,7 +1,8 @@
 {# /status 응답 및 시작 알림. 변수: version, uptime, paused, dry_run, publish_enabled, has_coupang, has_channel,
    collectors[] (name, type, enabled, available, unavailable_reason, running, interval_minutes, last_status,
                  last_run_ago, collected, deals, queued, error, next_in),
-   rate (posts_hour, posts_day, max_hour, max_day, last_post_at), queue{pending,failed,...},
+   shops[] (key, name, enabled, mode),
+   rate (posts_hour, posts_day, max_hour, max_day, last_post_at), queue{pending,awaiting_link,failed,...},
    products, price_points, db_mb, last_error, last_error_at #}
 🤖 <b>DealBot v{{ version }}</b> · 가동 {{ uptime }}
 {% if paused %}⏸ <b>일시정지</b>{% else %}▶️ 실행 중{% endif %}{% if dry_run %} · <b>DRY-RUN</b>(실제 발행 안 함){% endif %}{% if not publish_enabled %} · 발행 비활성화{% endif +%}
@@ -26,8 +27,13 @@
 {% endif %}
 {% endfor %}
 
+🏬 <b>쇼핑몰 링크 처리</b>
+{% for s in shops if s.enabled %}
+• {{ s.name }}: {{ s.mode }}
+{% endfor %}
+
 📤 <b>발행</b> 최근 1시간 {{ rate.posts_hour }}/{{ rate.max_hour }} · 24시간 {{ rate.posts_day }}/{{ rate.max_day }}{% if rate.last_post_at %} · 마지막 {{ rate.last_post_at | local }}{% endif +%}
-🗂 대기열 {{ queue.get('pending', 0) }} 대기 · {{ queue.get('failed', 0) }} 실패 · {{ queue.get('expired', 0) }} 만료
+🗂 대기열 {{ queue.get('pending', 0) }} 대기 · {{ queue.get('awaiting_link', 0) }} 링크대기 · {{ queue.get('failed', 0) }} 실패 · {{ queue.get('expired', 0) }} 만료
 🗄 상품 {{ products }}개 · 가격 기록 {{ price_points }}건 · DB {{ db_mb }}MB
 {% if last_error %}
 

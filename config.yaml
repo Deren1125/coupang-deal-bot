@@ -6,20 +6,36 @@
 
 app:
   timezone: Asia/Seoul
-  log_level: INFO            # DEBUG | INFO | WARNING | ERROR
-  scheduler_tick_seconds: 30 # 수집 스케줄러가 "실행할 때가 됐나" 확인하는 주기
-  prune_price_history_days: 180  # 이보다 오래된 가격 이력은 정리
+  log_level: INFO
+  scheduler_tick_seconds: 30
+  prune_price_history_days: 180
   prune_events_days: 30
 
 http:
   timeout_seconds: 20
-  max_retries: 3             # 네트워크/5xx 오류 시 재시도 횟수
-  retry_backoff_seconds: 2   # 재시도 간격(지수 증가: 2s, 4s, 8s ...)
+  max_retries: 3
+  retry_backoff_seconds: 2
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
 # ----------------------------------------------------------------------------
+# 쇼핑몰별 링크 처리. 기본값(src/dealbot/shops.py)을 key 단위로 덮어씁니다.
+#   link_mode: api    = 자동 변환 (provider: coupang | linkprice)
+#              manual = 내가 앱/사이트에서 만든 링크를 텔레그램으로 넘겨줘야 발행 (토스, 네이버, 올리브영, 컬리, 무신사)
+#              raw    = 원본 링크 그대로 발행 (수익 없음, 정보 공유용)
+#              skip   = 발행 안 함
+# 기본 등록: coupang, toss, naver, oliveyoung, kurly, musinsa, 11st, gmarket, auction, ssg, lotteon,
+#            aliexpress, temu, daiso, ohouse
+# ----------------------------------------------------------------------------
+shops:
+  - { key: coupang, enabled: true }
+  - { key: toss, enabled: true }
+  - { key: naver, enabled: true }
+  # 예) 네이버는 링크 만들기 귀찮으니 원본 링크로만: - { key: naver, link_mode: raw }
+  # 예) 테무는 아예 제외:                            - { key: temu, enabled: false }
+
+# ----------------------------------------------------------------------------
 # 수집기(플러그인). type 은 내장 수집기 이름이거나 "패키지.모듈:클래스" 경로.
-# 내장: coupang_goldbox | coupang_category_best | ppomppu
+# 내장: coupang_goldbox | coupang_category_best | ppomppu | adpick_hotdeal
 # ----------------------------------------------------------------------------
 collectors:
   - name: goldbox
@@ -36,71 +52,82 @@ collectors:
     interval_minutes: 180
     options:
       limit: 30
-      # 쿠팡 카테고리 ID (파트너스 API 문서 기준)
-      # 1001 여성패션  1002 남성패션  1010 뷰티        1011 출산/유아동  1012 식품
-      # 1013 주방용품  1014 생활용품  1015 홈인테리어  1016 가전디지털   1017 스포츠/레저
-      # 1018 자동차용품 1019 도서/음반 1020 완구/취미  1021 문구/오피스  1024 헬스/건강식품
-      # 1025 국내여행  1026 해외여행  1029 반려동물용품 1030 유아동패션
+      # 1001 여성패션 1002 남성패션 1010 뷰티 1011 출산/유아동 1012 식품 1013 주방용품 1014 생활용품
+      # 1015 홈인테리어 1016 가전디지털 1017 스포츠/레저 1018 자동차용품 1019 도서/음반 1020 완구/취미
+      # 1021 문구/오피스 1024 헬스/건강식품 1029 반려동물용품 1030 유아동패션
       category_ids: [1016, 1012, 1014, 1010]
       image_size: "512x512"
       delay_between_categories_seconds: 3
 
+  # 뽐뿌 핫딜 게시판: 쿠팡/토스/네이버/11번가/G마켓/알리... 등록된 모든 쇼핑몰의 글을 수집
   - name: ppomppu
     type: ppomppu
     enabled: true
     interval_minutes: 20
     options:
-      board_id: ppomppu          # 뽐뿌 핫딜 게시판 id (zboard.php?id=ppomppu)
-      pages: 1                   # 목록 몇 페이지까지 볼지
-      shop_keywords: ["쿠팡"]     # 제목에 이 단어가 있는 글만 수집
-      request_delay_seconds: 2   # 글 상세 페이지 요청 간 간격(서버 배려)
+      board_id: ppomppu          # 핫딜 게시판. 해외핫딜은 ppomppu4
+      pages: 1
+      shops: []                  # 비우면 등록된 모든 쇼핑몰. 예) ["coupang", "toss", "naver"]
+      unknown_shop: skip         # 등록되지 않은 쇼핑몰 글: skip | raw(원본 링크로 발행)
+      request_delay_seconds: 2
       max_detail_fetch_per_run: 15
       # 사이트 구조가 바뀌면 아래 셀렉터만 고치면 됩니다.
       list_row_selector: "tr.baseList"
       title_selector: "a.baseList-title"
       thumb_selector: "img"
+      rec_selector: "td.baseList-rec"
+      views_selector: "td.baseList-views"
+
+  # 애드픽 쇼핑메이트 핫딜 API (ADPICK_AFFID 필요). 제휴 링크가 포함된 여러 쇼핑몰 핫딜 목록.
+  - name: adpick
+    type: adpick_hotdeal
+    enabled: false
+    interval_minutes: 30
+    options: {}
 
 # ----------------------------------------------------------------------------
-# 특가 판정 규칙: (a) 또는 (b) 중 하나만 만족하면 특가
+# 특가 판정: (a) 또는 (b) 또는 (c) 중 하나만 만족하면 특가
 # ----------------------------------------------------------------------------
 deal:
   min_discount_rate: 30          # (a) 표시 할인율 N% 이상
   history_days: 30               # (b) 최근 N일 평균가 기준
   min_below_average_pct: 15      # (b) 평균가 대비 N% 이상 저렴
-  min_history_samples: 3         # (b) 평균가 계산에 필요한 최소 관측 횟수 (오판 방지)
-  min_price: 1000                # 이 금액 미만 상품은 무시
-  exclude_keywords: []           # 상품명에 포함되면 제외 (예: ["리퍼", "중고"])
+  min_history_samples: 3         # (b) 평균가 계산에 필요한 최소 관측 횟수
+  community_min_recommend: 5     # (c) 커뮤니티 추천 수 N 이상 (0 이면 비활성)
+  accept_coupons_and_events: true  # 가격 없는 쿠폰/이벤트 글도 (c) 로 판정해 발행
+  min_price: 1000
+  exclude_keywords: []           # 예: ["리퍼", "중고", "품절"]
 
 # ----------------------------------------------------------------------------
 # 발행 (텔레그램 채널)
 # ----------------------------------------------------------------------------
 publish:
   enabled: true
-  dry_run: false                 # true 면 실제 전송 없이 로그만 (환경변수 DEALBOT_DRY_RUN 으로도 설정 가능)
-  max_per_hour: 6                # 시간당 최대 발행 수 (파트너스 약관/스팸 리스크 관리)
-  max_per_day: 40                # 24시간 최대 발행 수
-  min_interval_seconds: 180      # 연속 발행 최소 간격
-  dedup_days: 7                  # 이미 올린 상품은 N일 동안 다시 올리지 않음
-  queue_ttl_hours: 6             # 대기열에서 N시간 넘게 못 나간 특가는 만료 처리
-  max_publish_attempts: 3        # 발행 실패 시 재시도 횟수
-  publisher_tick_seconds: 20     # 대기열 확인 주기
-  send_photo: true               # 이미지와 함께 발행 (실패 시 텍스트로 자동 대체)
+  dry_run: false
+  max_per_hour: 6
+  max_per_day: 40
+  min_interval_seconds: 180
+  dedup_days: 7
+  queue_ttl_hours: 6             # 자동 발행 대기 항목 유효 시간
+  manual_link_ttl_hours: 12      # 내 링크 입력을 기다리는 항목 유효 시간
+  max_publish_attempts: 3
+  publisher_tick_seconds: 20
+  send_photo: true
+  allow_raw_links: true          # 제휴 변환 수단이 없는 쇼핑몰은 원본 링크로 발행 (false 면 건너뜀)
   templates_dir: templates
   template: deal_post.j2
 
-# ----------------------------------------------------------------------------
-# 링크 변환
-# ----------------------------------------------------------------------------
 links:
-  always_deeplink: false         # true 면 API가 준 파트너스 링크도 항상 딥링크(short URL)로 재변환
-  resolve_short_links: true      # link.coupang.com/a/xxx 형태(타인 링크)를 원본 상품 URL로 풀어서 내 링크로 변환
+  always_deeplink: false
+  resolve_short_links: true
 
 # ----------------------------------------------------------------------------
 # 모니터링 (관리자 개인 챗)
 # ----------------------------------------------------------------------------
 monitoring:
-  notify_on_publish: true        # 발행 성공 시 알림
-  notify_on_failure: true        # 발행 실패 시 알림
-  notify_on_error: true          # 수집/기타 에러 알림
-  error_alert_cooldown_minutes: 30   # 같은 종류의 에러 알림은 N분에 1번만
-  daily_summary_time: "21:00"    # 일일 요약 전송 시각 (timezone 기준)
+  notify_on_publish: true
+  notify_on_failure: true
+  notify_on_error: true
+  notify_on_manual_link: true    # 토스/네이버 등 수동 링크가 필요할 때 알림
+  error_alert_cooldown_minutes: 30
+  daily_summary_time: "21:00"

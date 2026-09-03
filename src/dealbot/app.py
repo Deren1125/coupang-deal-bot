@@ -1,11 +1,10 @@
 """파이프라인 오케스트레이터.
 
-수집기 → 가격 이력 저장 → 특가 판정 → 대기열 → (속도 제한/중복 확인) → 링크 변환 → 채널 발행 → 관리자 알림
+수집기 → 가격 이력 저장 → 특가 판정 → 대기열 → (속도 제한/중복 확인) → 링크 변환(자동/수동) → 채널 발행 → 관리자 알림
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import traceback
 from datetime import timedelta
@@ -24,14 +23,23 @@ from dealbot.collectors import (
 )
 from dealbot.config import Settings
 from dealbot.coupang.client import CoupangClient
-from dealbot.links import LinkConversionError, LinkConverter
-from dealbot.models import Deal
+from dealbot.links import (
+    CoupangDeeplinkProvider,
+    LinkConversionError,
+    LinkPriceProvider,
+    LinkRouter,
+    ManualLinkRequired,
+    ShopSkipped,
+)
+from dealbot.manual import parse_manual_post
+from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import AdminNotifier, StatusReporter, register_admin_handlers
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
+from dealbot.shops import ShopRegistry
 from dealbot.storage.db import Database, QueueItem
 from dealbot.utils.timeutil import to_iso, utcnow
 
@@ -43,11 +51,15 @@ class DealBot:
         self.settings = settings
         self.state = BotState(dry_run=settings.publish.dry_run)
         self.db = Database(settings.db_path)
+        self.registry: ShopRegistry = settings.shop_registry()
         self.http = httpx.AsyncClient(
             timeout=settings.http.timeout_seconds,
             headers={"User-Agent": settings.http.user_agent, "Accept-Language": "ko-KR,ko;q=0.9"},
             follow_redirects=False,
         )
+
+        # ---- 링크 변환기(제휴 프로그램별)
+        providers: dict[str, Any] = {}
         self.coupang: CoupangClient | None = None
         if settings.secrets.has_coupang:
             self.coupang = CoupangClient(
@@ -58,15 +70,23 @@ class DealBot:
                 max_retries=settings.http.max_retries,
                 retry_backoff=settings.http.retry_backoff_seconds,
             )
+            providers["coupang"] = CoupangDeeplinkProvider(self.coupang, self.http, settings.links)
         else:
             log.warning("COUPANG_ACCESS_KEY/SECRET_KEY not set — coupang collectors & deeplink disabled")
+        if settings.secrets.has_linkprice:
+            providers["linkprice"] = LinkPriceProvider(
+                settings.secrets.linkprice_affiliate_id or "",
+                self.http,
+                retries=settings.http.max_retries,
+                backoff=settings.http.retry_backoff_seconds,
+            )
+        self.links = LinkRouter(self.registry, settings.links, settings.publish, providers=providers)
 
         self.evaluator = DealEvaluator(settings.deal)
-        self.links = LinkConverter(settings.links, coupang=self.coupang, http=self.http)
         self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone)
         self.rate_limiter = RateLimiter(self.db, settings.publish)
 
-        # 텔레그램: 토큰이 있으면 Application (관리자 명령 처리), 없으면 오프라인(dry-run)
+        # ---- 텔레그램
         self.application: Application | None = None  # type: ignore[type-arg]
         self.bot: Bot | None = None
         if settings.secrets.has_telegram:
@@ -74,7 +94,6 @@ class DealBot:
             self.bot = self.application.bot
         else:
             log.warning("TELEGRAM_BOT_TOKEN not set — running offline (dry-run publish, no admin notices)")
-
         if not settings.secrets.has_channel and not settings.publish.dry_run:
             log.warning("TELEGRAM_CHANNEL_ID not set — publishing falls back to dry-run")
             self.state.dry_run = True
@@ -83,6 +102,7 @@ class DealBot:
             self.bot,
             settings.secrets.telegram_channel_id,
             self.renderer,
+            registry=self.registry,
             template=settings.publish.template,
             send_photo=settings.publish.send_photo,
             dry_run=self.state.dry_run,
@@ -90,9 +110,10 @@ class DealBot:
         self.notifier = AdminNotifier(
             self.bot, settings.secrets.telegram_admin_chat_id, settings.monitoring, self.renderer, settings.app.timezone
         )
-        self.reporter = StatusReporter(settings, self.db, self.state, self.rate_limiter, self.renderer)
+        self.reporter = StatusReporter(settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links)
 
-        ctx = CollectorContext(settings=settings, http=self.http, db=self.db, coupang=self.coupang)
+        # ---- 수집기
+        ctx = CollectorContext(settings=settings, http=self.http, db=self.db, coupang=self.coupang, shops=self.registry)
         self.collectors: list[BaseCollector] = []
         for ccfg in settings.collectors:
             status = CollectorStatus(name=ccfg.name, type=ccfg.type, interval_minutes=ccfg.interval_minutes, enabled=ccfg.enabled)
@@ -164,7 +185,75 @@ class DealBot:
             self.state.collectors[t].run_requested = True
         return f"▶️ 실행 예약: {', '.join(targets)} (다음 스케줄러 틱에 실행)"
 
+    async def attach_link(self, queue_id: int, url: str) -> str:
+        item = self.db.get_queue_item(queue_id)
+        if item is None:
+            return f"#{queue_id} 항목이 없습니다."
+        if item.status not in ("awaiting_link", "pending", "failed"):
+            return f"#{queue_id} 은(는) 현재 '{item.status}' 상태라 링크를 붙일 수 없습니다."
+        if not url.startswith("http"):
+            return "링크는 http(s):// 로 시작해야 합니다."
+        self.db.set_queue_link(queue_id, url.strip())
+        self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
+        return f"🔗 #{queue_id} 링크 저장됨. 곧 발행됩니다."
+
+    def skip_item(self, queue_id: int) -> str:
+        item = self.db.get_queue_item(queue_id)
+        if item is None:
+            return f"#{queue_id} 항목이 없습니다."
+        if item.status in ("published",):
+            return f"#{queue_id} 은(는) 이미 발행되었습니다."
+        self.db.update_queue_item(queue_id, status="skipped", error="skipped by admin")
+        return f"⏭ #{queue_id} 건너뜀."
+
+    async def submit_manual(self, text: str) -> str:
+        """관리자가 직접 보낸 딜을 대기열 맨 앞에 넣는다 (링크는 관리자가 만든 제휴 링크로 간주)."""
+        try:
+            post = parse_manual_post(text, self.registry)
+        except ValueError as e:
+            return f"⚠️ {e}"
+        shop = self.registry.get(post.shop_key)
+        now = utcnow()
+        product = Product(
+            source="manual",
+            product_id=ShopRegistry.product_key(post.shop_key, post.url),
+            shop=post.shop_key,
+            deal_kind="hotdeal" if post.price else "event",
+            name=post.name,
+            price=post.price,
+            url=post.url,
+            headline=post.headline,
+            image_url=post.image_url,
+            affiliate_url=post.url,
+        )
+        if product.has_price:
+            stats = self.db.price_stats(product.product_id, self.settings.deal.history_days, now)
+            verdict = self.evaluator.evaluate(product, stats)
+            self.db.record_observation(product, now)
+        else:
+            verdict = DealVerdict(is_deal=True)
+        verdict.is_deal = True
+        verdict.reasons = ["manual"] + [r for r in verdict.reasons if r != "manual"]
+        verdict.score = 1000.0
+        deal = Deal(product=product, verdict=verdict, affiliate_url=post.url, detected_at=now)
+        if self.db.posted_within(product.product_id, self.settings.publish.dedup_days, now):
+            return f"⚠️ 최근 {self.settings.publish.dedup_days}일 안에 이미 발행한 상품입니다: {product.name[:40]}"
+        if not self.db.enqueue(deal, score=1000.0, now=now):
+            return "⚠️ 이미 대기열에 있는 상품입니다."
+        shop_name = shop.name if shop else post.shop_key
+        return (
+            f"📝 대기열 맨 앞에 추가 [{shop_name}] {product.name[:50]}"
+            + (f" — {product.price:,}원" if product.has_price else "")
+            + "\n속도 제한 안에서 바로 발행됩니다."
+        )
+
     # ------------------------------------------------------------- pipeline
+    def _shop_allowed(self, product: Product) -> bool:
+        shop = self.registry.get(product.shop)
+        if shop is None:
+            return self.settings.publish.allow_raw_links
+        return shop.enabled and shop.link_mode != "skip"
+
     async def run_collector(self, collector: BaseCollector) -> dict[str, Any]:
         """수집기 1회 실행: 수집 → 가격 이력 저장 → 판정 → 대기열 등록."""
         name = collector.name
@@ -179,9 +268,12 @@ class DealBot:
             now = utcnow()
             deals = queued = 0
             for p in products:
+                if not self._shop_allowed(p):
+                    continue
                 stats = self.db.price_stats(p.product_id, cfg.deal.history_days, now)
                 verdict = self.evaluator.evaluate(p, stats)
-                self.db.record_observation(p, now)
+                if p.has_price:
+                    self.db.record_observation(p, now)
                 if not verdict.is_deal:
                     continue
                 deals += 1
@@ -191,7 +283,7 @@ class DealBot:
                 deal = Deal(product=p, verdict=verdict, detected_at=now)
                 if self.db.enqueue(deal, score=verdict.score, now=now):
                     queued += 1
-                    log.info("deal queued [%s] %s %s원 (%s)", name, p.name[:40], f"{p.price:,}", ", ".join(verdict.reasons))
+                    log.info("deal queued [%s/%s] %s %s원 (%s)", name, p.shop, p.name[:40], f"{p.price:,}", ", ".join(verdict.reasons))
             result.update(collected=len(products), deals=deals, queued=queued)
             self.db.finish_run(run_id, status="ok", collected=len(products), deals=deals, queued=queued)
             log.info("collector '%s' done: collected=%d deals=%d queued=%d", name, len(products), deals, queued)
@@ -211,29 +303,43 @@ class DealBot:
             status.running = False
         return result
 
-    async def _ensure_link(self, item: QueueItem) -> tuple[bool, str | None]:
+    async def _ensure_link(self, item: QueueItem) -> tuple[str, str | None]:
+        """returns (state, error): state ∈ ok | manual | skip | fail"""
         deal = item.deal
         if deal.affiliate_url:
-            return True, None
+            # 관리자가 /link 로 붙였거나 직접 올린 딜: 그대로 사용
+            return "ok", None
         try:
             deal.affiliate_url = await self.links.to_affiliate(deal.product)
-            return True, None
+            return "ok", None
+        except ManualLinkRequired as e:
+            return "manual", e.shop.key
+        except ShopSkipped as e:
+            return "skip", str(e)
         except LinkConversionError as e:
             if self.state.dry_run:
                 deal.affiliate_url = deal.product.url
                 log.warning("[DRY-RUN] link conversion unavailable (%s) — using raw url", e)
-                return True, None
-            return False, str(e)
+                return "ok", None
+            return "fail", str(e)
         except Exception as e:  # noqa: BLE001
-            return False, f"{type(e).__name__}: {e}"
+            return "fail", f"{type(e).__name__}: {e}"
+
+    def _expire_queue(self, now: Any) -> None:
+        cfg = self.settings.publish
+        expired = self.db.expire_queue(
+            now - timedelta(hours=cfg.queue_ttl_hours),
+            now,
+            awaiting_older_than=now - timedelta(hours=cfg.manual_link_ttl_hours),
+        )
+        if expired:
+            log.info("expired %d stale queue items", expired)
 
     async def process_queue_once(self) -> bool:
         """대기열에서 1건 발행 시도. 무언가 처리했으면 True."""
         cfg = self.settings.publish
         now = utcnow()
-        expired = self.db.expire_queue(now - timedelta(hours=cfg.queue_ttl_hours), now)
-        if expired:
-            log.info("expired %d stale queue items", expired)
+        self._expire_queue(now)
 
         if self.state.paused or not cfg.enabled:
             return False
@@ -250,8 +356,18 @@ class DealBot:
             self.db.update_queue_item(item.id, status="skipped", error="already posted")
             return True
 
-        ok, err = await self._ensure_link(item)
-        if not ok:
+        state, err = await self._ensure_link(item)
+        if state == "manual":
+            shop = self.registry.get(err or "")
+            self.db.update_queue_item(item.id, status="awaiting_link", error="manual link required", deal=deal)
+            if shop is not None:
+                await self.notifier.notify_manual_link(item, shop)
+            log.info("queue #%d awaiting manual link (%s)", item.id, err)
+            return True
+        if state == "skip":
+            self.db.update_queue_item(item.id, status="skipped", error=err)
+            return True
+        if state == "fail":
             await self._handle_publish_failure(item, err or "link conversion failed")
             return True
 
@@ -266,7 +382,7 @@ class DealBot:
             )
             self.db.update_queue_item(item.id, status="published", deal=deal)
             self.db.log_event("INFO", "publish", f"{pid} {deal.product.name[:60]} {deal.product.price}")
-            log.info("published [%s] %s (%s)", deal.product.source, deal.product.name[:50], "dry-run" if result.dry_run else result.message_id)
+            log.info("published [%s/%s] %s (%s)", deal.product.source, deal.product.shop, deal.product.name[:50], "dry-run" if result.dry_run else result.message_id)
             await self.notifier.notify_published(deal, result)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
@@ -284,7 +400,6 @@ class DealBot:
         await self.notifier.notify_publish_failed(item.deal, error, final=final)
 
     async def drain_queue(self, max_items: int | None = None) -> int:
-        """속도 제한이 허용하는 만큼 대기열을 비운다 (once 모드용)."""
         n = 0
         while max_items is None or n < max_items:
             if not await self.process_queue_once():
@@ -320,9 +435,6 @@ class DealBot:
             events_days=self.settings.app.prune_events_days,
         )
         log.info("maintenance: pruned %s", pruned)
-
-    async def wait_shutdown_hook(self) -> None:  # pragma: no cover - placeholder for future hooks
-        await asyncio.sleep(0)
 
     def __repr__(self) -> str:
         return f"<DealBot v{__version__} collectors={self.collector_names()} dry_run={self.state.dry_run}>"

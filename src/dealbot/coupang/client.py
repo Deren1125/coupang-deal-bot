@@ -190,7 +190,8 @@ def parse_api_product(raw: dict[str, Any], source: str) -> Product | None:
 
     return Product(
         source=source,
-        product_id=str(pid),
+        product_id=f"coupang:{pid}",
+        shop="coupang",
         name=str(name).strip(),
         price=price,
         url=f"https://www.coupang.com/vp/products/{pid}",

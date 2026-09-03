@@ -10,6 +10,7 @@ from telegram.error import BadRequest, RetryAfter, TelegramError
 
 from dealbot.models import Deal, PublishResult
 from dealbot.publisher.templates import TemplateRenderer
+from dealbot.shops import ShopRegistry
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class TelegramPublisher:
         channel_id: str | int | None,
         renderer: TemplateRenderer,
         *,
+        registry: ShopRegistry | None = None,
         template: str = "deal_post.j2",
         send_photo: bool = True,
         dry_run: bool = False,
@@ -40,13 +42,15 @@ class TelegramPublisher:
         self.bot = bot
         self.channel_id = normalize_chat_id(channel_id)
         self.renderer = renderer
+        self.registry = registry or ShopRegistry()
         self.template = template
         self.send_photo = send_photo
         self.dry_run = dry_run or bot is None or channel_id is None
 
     def render(self, deal: Deal) -> str:
         link = deal.affiliate_url or deal.product.url
-        return self.renderer.render_deal(deal, link, template=self.template)
+        shop = self.registry.get(deal.product.shop)
+        return self.renderer.render_deal(deal, link, shop=shop, template=self.template)
 
     async def publish(self, deal: Deal) -> PublishResult:
         text = self.render(deal)

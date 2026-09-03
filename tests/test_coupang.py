@@ -65,7 +65,7 @@ async def test_goldbox_and_parse() -> None:
     parsed = [p for p in (parse_api_product(r, "goldbox") for r in raw) if p]
     assert len(parsed) == 1
     p = parsed[0]
-    assert p.product_id == "123" and p.price == 12900 and p.name == "테스트 상품"
+    assert p.product_id == "coupang:123" and p.shop == "coupang" and p.price == 12900 and p.name == "테스트 상품"
     assert p.url == "https://www.coupang.com/vp/products/123"
     assert p.affiliate_url and "lptag=AF1" in p.affiliate_url
     assert p.is_rocket is True and p.category == "식품"

@@ -26,7 +26,7 @@ def available_types() -> list[str]:
 
 def _ensure_builtins() -> None:
     # 내장 수집기 모듈을 import 해서 데코레이터가 실행되게 함
-    for mod in ("coupang_goldbox", "coupang_category_best", "ppomppu"):
+    for mod in ("coupang_goldbox", "coupang_category_best", "ppomppu", "adpick_hotdeal"):
         importlib.import_module(f"dealbot.collectors.{mod}")
 
 

@@ -17,7 +17,9 @@ def test_load_repo_config(repo_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setenv("DEALBOT_DRY_RUN", "true")
 
     s = load_settings(repo_root / "config.yaml", load_env=False)
-    assert [c.name for c in s.collectors] == ["goldbox", "category_best", "ppomppu"]
+    assert [c.name for c in s.collectors] == ["goldbox", "category_best", "ppomppu", "adpick"]
+    assert {sh.key for sh in s.shops} >= {"coupang", "toss", "naver"}
+    assert s.deal.community_min_recommend == 5
     assert s.deal.min_discount_rate == 30
     assert s.deal.min_below_average_pct == 15
     assert s.secrets.has_coupang and s.secrets.has_channel and s.secrets.has_admin
