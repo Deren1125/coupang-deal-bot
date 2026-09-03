@@ -1,0 +1,23 @@
+services:
+  dealbot:
+    image: ghcr.io/deren1125/coupang-deal-bot:latest
+    build: .
+    container_name: coupang-deal-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Asia/Seoul
+      DEALBOT_DATA_DIR: /data
+    volumes:
+      - dealbot-data:/data
+      # 설정을 이미지 재빌드 없이 바꾸고 싶으면 아래 주석을 해제하세요.
+      # - ./config.yaml:/app/config.yaml:ro
+      # - ./templates:/app/templates:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  dealbot-data:

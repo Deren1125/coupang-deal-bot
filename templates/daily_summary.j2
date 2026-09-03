@@ -1,0 +1,20 @@
+{# 일일 요약. 변수: s (PeriodSummary: since, until, runs, run_errors, collected, deals_found, published,
+   publish_failed, expired, skipped, errors, pending, top_posts[]), tz #}
+📊 <b>일일 요약</b> ({{ s.since | local('%m/%d %H:%M') }} ~ {{ s.until | local('%m/%d %H:%M') }})
+
+📥 수집 실행 {{ s.runs }}회{% if s.run_errors %} (실패 {{ s.run_errors }}){% endif %} · 상품 {{ s.collected }}건 관측
+🎯 특가 감지 {{ s.deals_found }}건
+📤 발행 <b>{{ s.published }}</b>건 · 실패 {{ s.publish_failed }} · 만료 {{ s.expired }} · 스킵 {{ s.skipped }}
+🗂 현재 대기 {{ s.pending }}건
+{% if s.errors %}
+🚨 에러 {{ s.errors }}건 — /errors 로 확인
+{% else %}
+✅ 에러 없음
+{% endif %}
+{% if s.top_posts %}
+
+<b>최근 발행</b>
+{% for p in s.top_posts %}
+• {{ p.posted_at | local('%H:%M') }} {{ (p.name or p.product_id)[:40] }} — {{ p.price | won }}
+{% endfor %}
+{% endif %}

@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ─── coupang-deal-bot ───
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example

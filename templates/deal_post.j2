@@ -1,0 +1,32 @@
+{#
+  채널 발행 메시지 템플릿 (텔레그램 HTML 서식)
+  사용 가능한 변수:
+    product.name / product.price / product.original_price / product.category
+    product.is_rocket / product.is_free_shipping / product.source / product.image_url
+    discount_rate  (표시 할인율 %, 없으면 None)
+    avg_price      (최근 N일 평균가, 없으면 None)
+    below_avg_pct  (평균가 대비 저렴한 비율 %, 없으면 None)
+    verdict.reasons / verdict.score
+    link           (내 파트너스 링크)
+    detected_at    (특가 감지 시각)
+  필터: won (12,900원), pct (35%), local (시간 → 한국시간 문자열)
+  ⚠️ HTML 특수문자는 자동 이스케이프됩니다. <b> <i> <s> <code> <a href> 만 사용 가능.
+  ⚠️ 한 줄을 통째로 차지하는 {% if %} / {% endif %} 줄은 출력에서 사라집니다.
+     내용 줄 "안"에서 조건을 쓸 때는 줄 끝의 endif 를 {% endif +%} 로 써야 줄바꿈이 유지됩니다.
+#}
+🔥 <b>{{ product.name }}</b>
+
+💰 <b>{{ product.price | won }}</b>{% if product.original_price %}  <s>{{ product.original_price | won }}</s>{% endif %}{% if discount_rate %}  (<b>{{ discount_rate | pct }} 할인</b>){% endif +%}
+{% if avg_price and below_avg_pct and below_avg_pct > 0 %}
+📉 최근 30일 평균가 {{ avg_price | won }} 대비 <b>{{ below_avg_pct | pct }}</b> 저렴
+{% endif %}
+{% if product.is_rocket or product.is_free_shipping %}
+{% if product.is_rocket %}🚀 로켓배송{% endif %}{% if product.is_rocket and product.is_free_shipping %} · {% endif %}{% if product.is_free_shipping %}📦 무료배송{% endif +%}
+{% endif %}
+{% if product.category %}
+🏷 {{ product.category }}
+{% endif %}
+
+👉 <a href="{{ link }}">쿠팡에서 보기</a>
+
+<i>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>
