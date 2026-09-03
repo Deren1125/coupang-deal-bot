@@ -34,6 +34,7 @@ from dealbot.links import (
 from dealbot.manual import parse_manual_post
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import AdminNotifier, StatusReporter, register_admin_handlers
+from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.publisher.rate_limiter import RateLimiter
@@ -107,8 +108,14 @@ class DealBot:
             send_photo=settings.publish.send_photo,
             dry_run=self.state.dry_run,
         )
+        self.push = PushNotifier(settings.monitoring.push, settings.secrets, self.http)
         self.notifier = AdminNotifier(
-            self.bot, settings.secrets.telegram_admin_chat_id, settings.monitoring, self.renderer, settings.app.timezone
+            self.bot,
+            settings.secrets.telegram_admin_chat_id,
+            settings.monitoring,
+            self.renderer,
+            settings.app.timezone,
+            push=self.push,
         )
         self.reporter = StatusReporter(settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links)
 
@@ -143,6 +150,11 @@ class DealBot:
             return
         await self.application.initialize()
         await self.application.start()
+        try:
+            me = await self.application.bot.get_me()
+            self.notifier.bot_username = me.username
+        except Exception as e:  # noqa: BLE001
+            log.warning("get_me failed: %s", e)
         if polling and self.settings.secrets.telegram_admin_chat_id and self.application.updater:
             await self.application.updater.start_polling(allowed_updates=[Update.MESSAGE], drop_pending_updates=True)
 
@@ -246,6 +258,64 @@ class DealBot:
             + (f" — {product.price:,}원" if product.has_price else "")
             + "\n속도 제한 안에서 바로 발행됩니다."
         )
+
+    async def test_post(self) -> str:
+        """샘플 딜을 관리자 챗에 보내 양식 확인."""
+        from dealbot.cli import sample_deal
+
+        if self.bot is None or not self.notifier.enabled:
+            return "텔레그램 봇 토큰과 관리자 챗 ID 가 필요합니다."
+        original = (self.publisher.channel_id, self.publisher.dry_run)
+        try:
+            self.publisher.channel_id = self.notifier.chat_id
+            self.publisher.dry_run = False
+            result = await self.publisher.publish(sample_deal())
+        finally:
+            self.publisher.channel_id, self.publisher.dry_run = original
+        return "✅ 샘플 발행 완료 (위 메시지)" if result.ok else f"❌ 실패: {result.error}"
+
+    async def self_check(self) -> list[tuple[bool | None, str]]:
+        """(ok|None=skip, 설명) 목록. 시작 알림과 `dealbot check` 가 공유."""
+        out: list[tuple[bool | None, str]] = []
+        try:
+            self.publisher.render(__import__("dealbot.cli", fromlist=["sample_deal"]).sample_deal())
+            out.append((True, "템플릿 렌더링"))
+        except Exception as e:  # noqa: BLE001
+            out.append((False, f"템플릿: {e}"))
+
+        if self.coupang is None:
+            out.append((None, "쿠팡 API: 키 미설정 (쿠팡 수집/딥링크 꺼짐)"))
+        else:
+            try:
+                n = await self.coupang.ping()
+                out.append((True, f"쿠팡 API 연결 (골드박스 {n}건)"))
+            except Exception as e:  # noqa: BLE001
+                out.append((False, f"쿠팡 API: {e}"))
+
+        if self.bot is not None:
+            try:
+                me = await self.bot.get_me()
+                out.append((True, f"텔레그램 봇 @{me.username}"))
+                if self.publisher.channel_id is not None:
+                    chat = await self.bot.get_chat(self.publisher.channel_id)
+                    member = await self.bot.get_chat_member(self.publisher.channel_id, me.id)
+                    if member.status in ("administrator", "creator"):
+                        out.append((True, f"채널 '{chat.title or chat.username}' 관리자 권한"))
+                    else:
+                        out.append((False, f"채널 '{chat.title or chat.username}' 에서 봇이 관리자가 아님 (메시지 게시 권한 필요)"))
+                else:
+                    out.append((None, "채널: TELEGRAM_CHANNEL_ID 미설정 (dry-run)"))
+            except Exception as e:  # noqa: BLE001
+                out.append((False, f"텔레그램: {e}"))
+        else:
+            out.append((None, "텔레그램: 토큰 미설정 (오프라인)"))
+
+        out.append((True, f"휴대폰 푸시: {self.push.provider}") if self.push.enabled else (None, "휴대폰 푸시: 미설정 (텔레그램 알림만)"))
+        if self.settings.secrets.has_linkprice:
+            out.append((True, "링크프라이스 ID 설정됨"))
+        else:
+            out.append((None, "링크프라이스: 미설정 (11번가/G마켓/알리 등은 원본 링크)"))
+        return out
 
     # ------------------------------------------------------------- pipeline
     def _shop_allowed(self, product: Product) -> bool:

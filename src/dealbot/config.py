@@ -107,7 +107,16 @@ class LinksConfig(BaseModel):
     resolve_short_links: bool = True
 
 
+class PushConfig(BaseModel):
+    """휴대폰 푸시 (텔레그램과 별개). provider: auto | ntfy | pushover | none"""
+
+    provider: str = "auto"
+    events: list[str] = Field(default_factory=lambda: ["manual_link"])  # manual_link | publish_failed | error | daily_summary | startup
+    ntfy_url: str = "https://ntfy.sh"
+
+
 class MonitoringConfig(BaseModel):
+    push: PushConfig = Field(default_factory=PushConfig)
     notify_on_publish: bool = True
     notify_on_failure: bool = True
     notify_on_error: bool = True
@@ -135,6 +144,18 @@ class Secrets(BaseModel):
     telegram_bot_token: str | None = None
     telegram_channel_id: str | None = None
     telegram_admin_chat_id: int | None = None
+    ntfy_topic: str | None = None
+    ntfy_token: str | None = None
+    pushover_user_key: str | None = None
+    pushover_app_token: str | None = None
+
+    @property
+    def has_ntfy(self) -> bool:
+        return bool(self.ntfy_topic)
+
+    @property
+    def has_pushover(self) -> bool:
+        return bool(self.pushover_user_key and self.pushover_app_token)
 
     @property
     def has_coupang(self) -> bool:
@@ -259,6 +280,10 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         telegram_bot_token=_env_str("TELEGRAM_BOT_TOKEN"),
         telegram_channel_id=_env_str("TELEGRAM_CHANNEL_ID"),
         telegram_admin_chat_id=_env_int("TELEGRAM_ADMIN_CHAT_ID"),
+        ntfy_topic=_env_str("NTFY_TOPIC"),
+        ntfy_token=_env_str("NTFY_TOKEN"),
+        pushover_user_key=_env_str("PUSHOVER_USER_KEY"),
+        pushover_app_token=_env_str("PUSHOVER_APP_TOKEN"),
     )
 
     settings = Settings(

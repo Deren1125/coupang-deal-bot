@@ -4,6 +4,13 @@ Railway 는 GitHub 저장소를 연결하면 Dockerfile 로 자동 빌드·배�
 
 저장소에 `railway.json` (Dockerfile 빌더, 재시작 정책 ALWAYS) 이 포함되어 있습니다.
 
+## 아이패드/휴대폰만 있어도 됩니다
+
+Railway 는 브라우저만으로 배포·설정·로그 확인이 다 되므로 컴퓨터가 없어도 운영할 수 있습니다. 터미널이 필요한 단계는 없습니다.
+- 코드: GitHub 저장소를 브라우저에서 연결 (수정은 GitHub 웹 편집기나 Claude Code 로)
+- 설정: Railway Variables 화면에 키 입력
+- 확인: 봇이 켜지면 텔레그램 관리자 챗으로 자기 점검 결과가 오고, `/status` `/test` 로 확인
+
 ## 절차
 
 1. https://railway.app 가입 (GitHub 로그인 권장).

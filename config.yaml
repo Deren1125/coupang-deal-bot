@@ -125,6 +125,11 @@ links:
 # 모니터링 (관리자 개인 챗)
 # ----------------------------------------------------------------------------
 monitoring:
+  # 휴대폰 푸시 (NTFY_TOPIC 또는 PUSHOVER_* 가 .env 에 있으면 자동 사용)
+  push:
+    provider: auto             # auto | ntfy | pushover | none
+    events: [manual_link]      # manual_link | publish_failed | error | daily_summary | startup
+    ntfy_url: https://ntfy.sh
   notify_on_publish: true
   notify_on_failure: true
   notify_on_error: true

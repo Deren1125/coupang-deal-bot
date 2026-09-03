@@ -115,7 +115,11 @@ async def run_forever(bot: DealBot) -> None:
     log.info("DealBot started: %r (tz=%s)", bot, ZoneInfo(bot.settings.app.timezone))
     bot.db.log_event("INFO", "lifecycle", "started")
     try:
-        await bot.notifier.notify_startup(bot.reporter.status_text())
+        checks = await bot.self_check()
+        lines = [("✅ " if ok else "⚠️ " if ok is None else "❌ ") + text for ok, text in checks]
+        for line in lines:
+            log.info("self-check: %s", line)
+        await bot.notifier.notify_startup(bot.reporter.status_text(), lines)
     except Exception as e:  # noqa: BLE001
         log.warning("startup notice failed: %s", e)
 

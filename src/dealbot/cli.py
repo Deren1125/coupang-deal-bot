@@ -99,58 +99,21 @@ async def cmd_check(args: argparse.Namespace) -> int:
         print("shops:")
         for shop in bot.registry.all():
             print(f"  - {shop.name:8s} {bot.links.describe(shop)}")
-        # 템플릿
-        try:
-            bot.publisher.render(sample_deal())
-            print("[OK] templates render")
-        except Exception as e:  # noqa: BLE001
-            ok = False
-            print(f"[FAIL] template: {e}")
-
-        # 쿠팡
-        if bot.coupang is None:
-            print("[SKIP] coupang api: COUPANG_ACCESS_KEY/SECRET_KEY not set")
+        await bot.start_telegram(polling=False)
+        for status, text in await bot.self_check():
+            tag = "[OK]" if status else "[SKIP]" if status is None else "[FAIL]"
+            ok = ok and status is not False
+            print(f"{tag} {text}")
+        if bot.notifier.enabled:
+            sent = await bot.notifier.send("🔧 dealbot check: 관리자 알림 연결 확인", silent=True)
+            print("[OK] 관리자 챗: 메시지 전송" if sent else "[FAIL] 관리자 챗: 전송 실패 (봇에게 /start 를 먼저 보내세요)")
+            ok = ok and sent
         else:
-            try:
-                n = await bot.coupang.ping()
-                print(f"[OK] coupang api: goldbox reachable ({n} item)")
-            except Exception as e:  # noqa: BLE001
-                ok = False
-                print(f"[FAIL] coupang api: {e}")
-
-        # 텔레그램
-        if bot.bot is None:
-            print("[SKIP] telegram: TELEGRAM_BOT_TOKEN not set")
-        else:
-            try:
-                await bot.start_telegram(polling=False)
-                me = await bot.bot.get_me()
-                print(f"[OK] telegram bot: @{me.username}")
-            except Exception as e:  # noqa: BLE001
-                ok = False
-                print(f"[FAIL] telegram bot token: {e}")
-            else:
-                if bot.publisher.channel_id is not None:
-                    try:
-                        chat = await bot.bot.get_chat(bot.publisher.channel_id)
-                        member = await bot.bot.get_chat_member(bot.publisher.channel_id, me.id)
-                        can_post = getattr(member, "can_post_messages", None)
-                        status = member.status
-                        print(f"[OK] channel: {chat.title or chat.username} ({chat.id}) bot status={status} can_post={can_post}")
-                        if status not in ("administrator", "creator"):
-                            ok = False
-                            print("[FAIL] bot is not an administrator of the channel — add it as admin with 'Post messages'")
-                    except Exception as e:  # noqa: BLE001
-                        ok = False
-                        print(f"[FAIL] channel access: {e}")
-                else:
-                    print("[SKIP] channel: TELEGRAM_CHANNEL_ID not set")
-                if bot.notifier.enabled:
-                    sent = await bot.notifier.send("🔧 dealbot check: 관리자 알림 연결 확인", silent=True)
-                    print("[OK] admin chat: message sent" if sent else "[FAIL] admin chat: could not send (start a chat with the bot first)")
-                    ok = ok and sent
-                else:
-                    print("[SKIP] admin chat: TELEGRAM_ADMIN_CHAT_ID not set")
+            print("[SKIP] 관리자 챗: TELEGRAM_ADMIN_CHAT_ID 미설정")
+        if bot.push.enabled:
+            sent = await bot.push.send("dealbot check", "휴대폰 푸시 연결 확인", click_url=bot.notifier.telegram_link)
+            print(f"[OK] 휴대폰 푸시({bot.push.provider}): 전송" if sent else f"[FAIL] 휴대폰 푸시({bot.push.provider}): 전송 실패")
+            ok = ok and sent
     finally:
         await bot.close()
     print("RESULT:", "OK" if ok else "PROBLEMS FOUND")

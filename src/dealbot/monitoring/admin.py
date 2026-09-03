@@ -17,6 +17,7 @@ from dealbot import __version__
 from dealbot.config import MonitoringConfig, Settings
 from dealbot.links import LinkRouter
 from dealbot.models import Deal, PublishResult
+from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import normalize_chat_id
@@ -38,17 +39,29 @@ class AdminNotifier:
         cfg: MonitoringConfig,
         renderer: TemplateRenderer,
         tz: str,
+        push: PushNotifier | None = None,
     ) -> None:
         self.bot = bot
         self.chat_id = normalize_chat_id(admin_chat_id)
         self.cfg = cfg
         self.renderer = renderer
         self.tz = tz
+        self.push = push
+        self.bot_username: str | None = None
         self._last_alert: dict[str, datetime] = {}
 
     @property
     def enabled(self) -> bool:
         return self.bot is not None and self.chat_id is not None
+
+    @property
+    def telegram_link(self) -> str | None:
+        return f"https://t.me/{self.bot_username}" if self.bot_username else None
+
+    async def _push(self, event: str, title: str, message: str, *, priority: str = "default", tags: list[str] | None = None) -> None:
+        if self.push is None or not self.push.wants(event):
+            return
+        await self.push.send(title, message, click_url=self.telegram_link, priority=priority, tags=tags)
 
     async def send(self, text: str, *, silent: bool = False) -> bool:
         if not self.enabled:
@@ -68,8 +81,13 @@ class AdminNotifier:
             log.error("admin notify failed: %s", e)
             return False
 
-    async def notify_startup(self, status_text: str) -> None:
-        await self.send(f"🟢 <b>DealBot v{__version__} 시작</b>\n\n{status_text}", silent=True)
+    async def notify_startup(self, status_text: str, check_lines: list[str] | None = None) -> None:
+        text = f"🟢 <b>DealBot v{__version__} 시작</b>\n"
+        if check_lines:
+            text += "\n<b>자기 점검</b>\n" + "\n".join(html.escape(line) for line in check_lines) + "\n"
+        text += f"\n{status_text}"
+        await self.send(text, silent=True)
+        await self._push("startup", "DealBot 시작", "\n".join(check_lines or [])[:500] or "봇이 시작되었습니다.")
 
     async def notify_published(self, deal: Deal, result: PublishResult) -> None:
         if not self.cfg.notify_on_publish:
@@ -93,6 +111,8 @@ class AdminNotifier:
         p = deal.product
         head = "❌ <b>발행 실패 (포기)</b>" if final else "⚠️ <b>발행 실패 (재시도 예정)</b>"
         await self.send(f"{head} [{html.escape(p.shop)}]\n{html.escape(truncate(p.name, 80))}\n<code>{html.escape(error[:500])}</code>")
+        if final:
+            await self._push("publish_failed", f"발행 실패 [{p.shop}]", f"{truncate(p.name, 60)}\n{error[:200]}")
 
     async def notify_manual_link(self, item: QueueItem, shop: Shop) -> None:
         """자동 변환이 안 되는 쇼핑몰: 관리자에게 링크 생성을 요청."""
@@ -111,6 +131,13 @@ class AdminNotifier:
             f"건너뛰기: <code>/skip {item.id}</code>"
         )
         await self.send(text)
+        await self._push(
+            "manual_link",
+            f"링크 필요 #{item.id} [{shop.name}]",
+            f"{truncate(p.name, 70)}{price}\n{p.url}\n\n{hint}",
+            priority="high",
+            tags=["link"],
+        )
 
     async def notify_error(self, kind: str, message: str) -> None:
         if not self.cfg.notify_on_error:
@@ -123,9 +150,12 @@ class AdminNotifier:
             return
         self._last_alert[kind] = now
         await self.send(f"🚨 <b>에러</b> <code>{html.escape(kind)}</code>\n<code>{html.escape(message[:1500])}</code>")
+        await self._push("error", f"에러 {kind}", message[:300], tags=["warning"])
 
     async def notify_daily_summary(self, text: str) -> None:
         await self.send(text)
+        plain = re.sub(r"<[^>]+>", "", text)
+        await self._push("daily_summary", "DealBot 일일 요약", plain[:800])
 
 
 class StatusReporter:
@@ -283,6 +313,8 @@ class BotController(Protocol):
 
     async def submit_manual(self, text: str) -> str: ...
 
+    async def test_post(self) -> str: ...
+
 
 HELP_TEXT = (
     "🤖 <b>DealBot 명령어</b>\n"
@@ -293,6 +325,7 @@ HELP_TEXT = (
     "/skip 번호 — 항목 건너뛰기\n"
     "/post — 직접 딜 올리기. 예)\n"
     "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
+    "/test — 샘플 딜을 이 챗에 보내 양식 확인\n"
     "/recent — 최근 발행 목록\n"
     "/errors — 최근 에러\n"
     "/run [수집기이름] — 지금 바로 수집 실행\n"
@@ -363,6 +396,9 @@ def register_admin_handlers(
     async def cmd_help(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, HELP_TEXT)
 
+    async def cmd_test(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, await controller.test_post())
+
     async def on_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """관리자의 일반 메시지: (1) 링크 요청에 답장 → 링크 붙이기, (2) URL 포함 메시지 → 직접 발행."""
         msg = update.effective_message
@@ -398,6 +434,7 @@ def register_admin_handlers(
         ("link", cmd_link),
         ("skip", cmd_skip),
         ("post", cmd_post),
+        ("test", cmd_test),
         ("help", cmd_help),
         ("start", cmd_help),
     ):

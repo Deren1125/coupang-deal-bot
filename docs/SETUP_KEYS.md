@@ -10,6 +10,7 @@
 | `COUPANG_ACCESS_KEY`, `COUPANG_SECRET_KEY` | 쿠팡파트너스 → 링크 생성 → API | 쿠팡 자동화 |
 | `LINKPRICE_AFFILIATE_ID` | 링크프라이스 어필리에이트 센터 | 11번가/G마켓/옥션/SSG/롯데온/알리 자동화 |
 | `ADPICK_AFFID` | 애드픽 | 애드픽 핫딜 API 수집 |
+| `NTFY_TOPIC` 또는 `PUSHOVER_USER_KEY`+`PUSHOVER_APP_TOKEN` | ntfy 앱 / pushover.net | 휴대폰 푸시 알림 (선택) |
 | (계정만) 토스 쉐어링크, 네이버 쇼핑커넥트, 올리브영/컬리/무신사 큐레이터 | 각 앱/사이트 | 반자동 발행 |
 
 ---
@@ -21,11 +22,19 @@
    - 공개 채널: `TELEGRAM_CHANNEL_ID=@채널아이디`
    - 비공개 채널: `-100...` 숫자 ID (아래 4번으로 확인)
 3. **관리자 챗**: 내 봇을 검색해 `/start` 전송 (봇은 먼저 말을 못 걸어서 필요).
-4. **ID 확인**: 채널에 아무 글이나 하나 올린 뒤
-   ```bash
-   python -m dealbot chat-id
-   ```
-   → `private id=123456789` 가 `TELEGRAM_ADMIN_CHAT_ID`, `channel id=-100...` 가 `TELEGRAM_CHANNEL_ID`.
+4. **ID 확인** (컴퓨터 없이): 텔레그램에서 @userinfobot 에게 아무 메시지나 보내면 내 ID(숫자)를 알려줍니다 → `TELEGRAM_ADMIN_CHAT_ID`.
+   채널 ID 는 채널의 글 하나를 @userinfobot 또는 @getidsbot 에게 전달(forward)하면 `-100...` 으로 알려줍니다 → `TELEGRAM_CHANNEL_ID`.
+   공개 채널이면 그냥 `@채널아이디` 를 써도 됩니다.
+   (컴퓨터가 있으면 `python -m dealbot chat-id` 로도 확인 가능)
+
+## 1-1. 휴대폰 푸시 알림 (선택, 추천)
+
+토스/네이버 딜처럼 내가 링크를 만들어 줘야 하는 항목이 생기면 텔레그램 외에 **폰 푸시**로 따로 알립니다. 텔레그램 알림이 많아 묻히는 걸 막기 위한 용도입니다.
+
+- **ntfy (무료)**: App Store/Play 에서 `ntfy` 설치 → 앱에서 "구독" → 토픽 이름을 남이 못 맞출 긴 문자열로 (예: `dealbot-7f3a9c2e`) → `.env` 의 `NTFY_TOPIC` 에 같은 이름. 끝.
+  기본 서버 ntfy.sh 는 무료이며, 알림을 누르면 봇 챗이 열립니다.
+- **Pushover (유료, 1회 결제)**: pushover.net 가입 → User Key, Application 생성 → Token → `PUSHOVER_USER_KEY`, `PUSHOVER_APP_TOKEN`.
+- 어떤 이벤트를 푸시로 받을지는 `config.yaml` 의 `monitoring.push.events` (기본: 링크 필요만).
 
 ## 2. 쿠팡파트너스 Open API
 
@@ -78,9 +87,12 @@
 
 ## 8. 최종 확인
 
+컴퓨터가 없어도 됩니다. 봇이 켜지면 관리자 챗으로 **자기 점검 결과**(쿠팡 API 연결, 채널 관리자 권한, 푸시 설정 등)가 옵니다. 관리자 챗에서 `/test` 를 보내면 샘플 발행 양식을 볼 수 있고, `/status` 로 상태를 봅니다.
+
+컴퓨터가 있으면:
 ```bash
-python -m dealbot check                 # 키/토큰/채널 권한/쇼핑몰별 처리 방식 출력
-python -m dealbot test-post             # 관리자 챗에 샘플 발행 → 양식 확인
+python -m dealbot check                 # 위 자기 점검을 콘솔에서
+python -m dealbot test-post             # 관리자 챗에 샘플 발행
 python -m dealbot once --dry-run        # 수집 + 판정, 발행은 로그만
 ```
 
