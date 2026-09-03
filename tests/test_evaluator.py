@@ -11,15 +11,16 @@ def _p(price: int, **kw) -> Product:  # type: ignore[no-untyped-def]
 
 def test_rule_a_displayed_discount() -> None:
     ev = DealEvaluator(DealConfig())
-    v = ev.evaluate(_p(7000, discount_rate=35), PriceStats())
-    assert v.is_deal and v.reasons == ["discount_rate>=30%"] and v.score == 35
+    assert not ev.evaluate(_p(7000, discount_rate=35), PriceStats()).is_deal  # 기본 임계값 50
+    v = ev.evaluate(_p(7000, discount_rate=55), PriceStats())
+    assert v.is_deal and v.reasons == ["discount_rate>=50%"] and v.score == 55
 
 
 def test_rule_a_computed_from_original_price() -> None:
     ev = DealEvaluator(DealConfig())
-    v = ev.evaluate(_p(6000, original_price=10000), PriceStats())
-    assert v.is_deal and v.discount_rate == 40.0
-    assert not ev.evaluate(_p(8000, original_price=10000), PriceStats()).is_deal
+    v = ev.evaluate(_p(4000, original_price=10000), PriceStats())
+    assert v.is_deal and v.discount_rate == 60.0
+    assert not ev.evaluate(_p(6000, original_price=10000), PriceStats()).is_deal
 
 
 def test_rule_b_below_average_requires_samples() -> None:
@@ -66,5 +67,5 @@ def test_min_price_and_exclude_keywords() -> None:
 
 def test_both_rules_score_is_max() -> None:
     ev = DealEvaluator(DealConfig())
-    v = ev.evaluate(_p(5000, discount_rate=31), PriceStats(count=5, avg=10000))
-    assert v.is_deal and len(v.reasons) == 2 and v.score == 50.0
+    v = ev.evaluate(_p(5000, discount_rate=51), PriceStats(count=5, avg=10000))
+    assert v.is_deal and len(v.reasons) == 2 and v.score == 51.0

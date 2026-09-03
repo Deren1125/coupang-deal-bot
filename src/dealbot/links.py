@@ -145,7 +145,9 @@ class LinkRouter:
             return "꺼짐"
         if shop.link_mode == "api":
             if self.provider_for(shop):
-                return f"자동 변환({shop.provider})"
+                return f"자동 변환({shop.provider})" + (", 실패 시 수동" if shop.manual_fallback else "")
+            if shop.manual_fallback:
+                return "수동 링크(자동 변환기 없음)"
             return "원본 링크(제휴 키 없음)" if self._publish.allow_raw_links else "발행 불가(제휴 키 없음)"
         if shop.link_mode == "manual":
             return "수동 링크(관리자 입력)"
@@ -174,8 +176,18 @@ class LinkRouter:
         if provider is None:
             if product.affiliate_url:
                 return product.affiliate_url
+            if shop.manual_fallback:
+                raise ManualLinkRequired(shop)
             if self._publish.allow_raw_links:
                 log.info("no provider for %s — posting raw link", shop.key)
                 return product.url
             raise LinkConversionError(f"no link provider configured for shop '{shop.key}' ({shop.provider})")
-        return await provider.convert(product.url)
+        try:
+            return await provider.convert(product.url)
+        except Exception as e:  # noqa: BLE001
+            if shop.manual_fallback:
+                log.warning("auto link (%s) failed for %s: %s — falling back to manual", shop.provider, shop.key, e)
+                raise ManualLinkRequired(shop) from e
+            if isinstance(e, LinkConversionError):
+                raise
+            raise LinkConversionError(f"{shop.provider}: {type(e).__name__}: {e}") from e

@@ -46,7 +46,7 @@ def bot(settings: Settings) -> DealBot:
 
 async def test_collect_evaluate_queue_publish(bot: DealBot) -> None:
     FakeCollector.products = [
-        _p("1", 7000, discount_rate=40),
+        _p("1", 7000, discount_rate=60),
         _p("2", 9000, discount_rate=10),
         _p("3", 500, discount_rate=90),
     ]

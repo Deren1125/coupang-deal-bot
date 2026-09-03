@@ -65,9 +65,18 @@
 2. 링크 만들기: 쇼핑커넥트 사이트에서 상품 URL 붙여넣기 → 커넥트 링크 생성.
 3. 봇 연동은 토스와 같습니다(답장 또는 `/link`). 귀찮으면 `config.yaml` 의 `shops` 에 `{ key: naver, link_mode: raw }` 를 넣으면 원본 링크로 자동 발행됩니다(수익 없음).
 
+### 4-1. 브라우저 자동화로 링크 자동 생성 (실험적)
+
+서버 안의 크로미움이 네이버에 로그인해 두고, 딜이 잡히면 쇼핑커넥트 화면에서 링크를 대신 만들어 봅니다. 실패하면 자동으로 수동 요청으로 넘어갑니다.
+
+1. `config.yaml`: `browser.enabled: true`, `shops` 에 `- { key: naver, link_mode: api, provider: naver_connect, manual_fallback: true }` 추가 후 재시작 (Docker 이미지에 크로미움 포함).
+2. 관리자 챗에서 `/naverlogin` → 봇이 네이버 로그인 QR 스크린샷을 보냄 → 네이버 앱 렌즈로 스캔 → "로그인 완료" 메시지.
+3. `/naverlink https://smartstore.naver.com/.../products/123` 으로 테스트. 실패 메시지가 나오면 `/shot https://connect.naver.com/...` 스크린샷을 보고 `browser.naver_connect.create_url` 과 `selectors` 를 맞춥니다 (첫 시도는 거의 확실히 조정이 필요합니다. 스크린샷과 에러를 보내주시면 맞춰 드립니다).
+4. 주의: 네이버가 자동화 접속을 감지하면 캡차나 계정 보호가 걸릴 수 있습니다. 문제가 생기면 `browser.enabled: false` 로 끄면 수동 흐름으로 돌아갑니다.
+
 ## 5. 링크프라이스 (11번가 · G마켓 · 옥션 · SSG · 롯데온 · 알리 · 오늘의집)
 
-1. https://ac.linkprice.net/join 에서 어필리에이트(무료) 가입 → 채널(텔레그램 채널 URL) 등록 → 승인.
+1. https://ac.linkprice.net/join 에서 어필리에이트 가입 → 채널(텔레그램 채널 URL) 등록 → 승인. **가입·이용은 무료**이고(광고주 쪽만 유료), 딥링크 API 는 어필리에이트에게 제공되는 기능이라 프로그램으로 호출해도 됩니다. 머천트별로 "커뮤니티/메신저 게시 금지" 같은 개별 규정이 있으니 제휴 신청 화면의 조건을 확인하세요.
 2. 어필리에이트 센터에서 각 머천트(11번가, G마켓 …) **제휴 신청** → 승인된 머천트만 링크가 만들어집니다.
 3. 내 **어필리에이트 ID(a_id, 예: A100xxxxx)** 를 `LINKPRICE_AFFILIATE_ID` 에 넣으면 봇이 딥링크 API 로 자동 변환합니다.
 4. 첫 실행 후 관리자 챗 `/errors` 에 `linkprice` 에러가 있으면 응답 형식이 다른 것이니 알려주세요(응답 파싱은 계정 승인 후 검증 필요).

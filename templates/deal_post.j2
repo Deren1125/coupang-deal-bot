@@ -12,6 +12,7 @@
     shop.name / shop.key / shop.disclosure   쇼핑몰 표시명 / 키 / 하단 고지 문구
     discount_rate         표시 할인율 %, 없으면 None
     avg_price / below_avg_pct   최근 N일 평균가 / 평균가 대비 저렴한 비율 %
+    market_price / market_source / below_market_pct   시중가(쿠팡 검색) / 출처 / 시중가 대비 저렴한 비율 %
     link                  발행할 링크 (내 제휴 링크 또는 원본)
   필터: won (12,900원), pct (35%), local (시간 → 한국시간 문자열)
 
@@ -26,6 +27,9 @@
 상품: {{ product.name }}
 {% if product.has_price %}
 가격: {{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %} · {{ discount_rate | pct }} 할인{% endif +%}
+{% endif %}
+{% if market_price and below_market_pct and below_market_pct > 0 %}
+쿠팡 최저가 {{ market_price | won }} 대비 {{ below_market_pct | pct }} 저렴
 {% endif %}
 {% if avg_price and below_avg_pct and below_avg_pct > 0 %}
 최근 30일 평균가 {{ avg_price | won }} 대비 {{ below_avg_pct | pct }} 저렴

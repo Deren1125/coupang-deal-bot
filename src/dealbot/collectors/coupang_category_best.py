@@ -6,7 +6,7 @@ import asyncio
 
 from dealbot.collectors.base import BaseCollector
 from dealbot.collectors.registry import register
-from dealbot.coupang.client import parse_api_product
+from dealbot.coupang.client import CoupangRateLimited, parse_api_product
 from dealbot.models import Product
 
 DEFAULT_CATEGORIES = [1016, 1012, 1014]
@@ -31,6 +31,10 @@ class CoupangCategoryBestCollector(BaseCollector):
                 await asyncio.sleep(delay)
             try:
                 raw = await self.ctx.coupang.best_category(cid, limit=limit, image_size=image_size)
+            except CoupangRateLimited as e:
+                self.log.warning("api budget exhausted — stopping at category %s (%s)", cid, e)
+                errors.append(f"{cid}: budget")
+                break
             except Exception as e:  # noqa: BLE001 — 한 카테고리 실패가 전체를 막지 않게
                 self.log.warning("category %s failed: %s", cid, e)
                 errors.append(f"{cid}: {e}")

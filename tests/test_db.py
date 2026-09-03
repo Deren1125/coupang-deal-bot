@@ -127,3 +127,21 @@ def test_queue_awaiting_link_flow(db: Database) -> None:
     assert db.queue_counts() == {"expired": 1}
     s = db.summary(now - timedelta(hours=1))
     assert s.awaiting == 0 and s.expired == 1
+
+
+def test_market_quotes_and_community_stats(db: Database) -> None:
+    now = utcnow()
+    assert db.get_market_quote("toss:1", 24) is None
+    db.set_market_quote("toss:1", price=17900, source="coupang", title="t", url="u", now=now - timedelta(hours=2))
+    q = db.get_market_quote("toss:1", 24, now)
+    assert q and q["price"] == 17900
+    assert db.get_market_quote("toss:1", 1, now) is None  # 만료
+
+    db.mark_seen("ppomppu", "1", "coupang:1", title="a", recommend=0, views=10, now=now)
+    db.mark_seen("ppomppu", "2", "toss:1", title="b", recommend=6, views=10, now=now)
+    db.mark_seen("ppomppu", "3", None, title="c", recommend=12, views=10, now=now)
+    db.touch_seen("ppomppu", "1", recommend=3, views=50, now=now)
+    stats = db.community_stats(now - timedelta(hours=1))
+    assert stats["ppomppu"]["posts"] == 3
+    assert stats["ppomppu"]["rec_ge"] == {1: 3, 3: 3, 5: 2, 10: 1, 20: 0}
+    assert db.summary(now - timedelta(hours=1)).community["ppomppu"]["posts"] == 3  # type: ignore[index]

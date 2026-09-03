@@ -22,7 +22,7 @@ from dealbot.collectors import (
     build_collector,
 )
 from dealbot.config import Settings
-from dealbot.coupang.client import CoupangClient
+from dealbot.coupang.client import ApiBudget, CoupangClient
 from dealbot.links import (
     CoupangDeeplinkProvider,
     LinkConversionError,
@@ -37,6 +37,7 @@ from dealbot.monitoring.admin import AdminNotifier, StatusReporter, register_adm
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.pricing.evaluator import DealEvaluator
+from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
@@ -62,6 +63,10 @@ class DealBot:
         # ---- 링크 변환기(제휴 프로그램별)
         providers: dict[str, Any] = {}
         self.coupang: CoupangClient | None = None
+        self.budget = ApiBudget(
+            settings.coupang.max_calls_per_hour, reserve={"deeplink": settings.coupang.deeplink_reserve}
+        )
+        self.market: CoupangMarketReference | None = None
         if settings.secrets.has_coupang:
             self.coupang = CoupangClient(
                 settings.secrets.coupang_access_key or "",
@@ -70,10 +75,31 @@ class DealBot:
                 sub_id=settings.secrets.coupang_sub_id,
                 max_retries=settings.http.max_retries,
                 retry_backoff=settings.http.retry_backoff_seconds,
+                budget=self.budget,
             )
             providers["coupang"] = CoupangDeeplinkProvider(self.coupang, self.http, settings.links)
+            if settings.deal.market.enabled:
+                self.market = CoupangMarketReference(self.coupang, settings.deal.market)
         else:
             log.warning("COUPANG_ACCESS_KEY/SECRET_KEY not set — coupang collectors & deeplink disabled")
+
+        # ---- 브라우저 자동화 (네이버 쇼핑커넥트)
+        self.browser: Any = None
+        self.naver_connect: Any = None
+        if settings.browser.enabled:
+            try:
+                from dealbot.browser.naver_connect import NaverConnectProvider
+                from dealbot.browser.session import BrowserSession
+
+                self.browser = BrowserSession(
+                    settings.data_dir / settings.browser.profile_dir,
+                    headless=settings.browser.headless,
+                    executable_path=settings.browser.executable_path,
+                )
+                self.naver_connect = NaverConnectProvider(self.browser, settings.browser.naver_connect)
+                providers["naver_connect"] = self.naver_connect
+            except Exception as e:  # noqa: BLE001
+                log.warning("browser automation unavailable: %s", e)
         if settings.secrets.has_linkprice:
             providers["linkprice"] = LinkPriceProvider(
                 settings.secrets.linkprice_affiliate_id or "",
@@ -117,7 +143,9 @@ class DealBot:
             settings.app.timezone,
             push=self.push,
         )
-        self.reporter = StatusReporter(settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links)
+        self.reporter = StatusReporter(
+            settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget
+        )
 
         # ---- 수집기
         ctx = CollectorContext(settings=settings, http=self.http, db=self.db, coupang=self.coupang, shops=self.registry)
@@ -172,6 +200,8 @@ class DealBot:
 
     async def close(self) -> None:
         await self.stop_telegram()
+        if self.browser is not None:
+            await self.browser.close()
         await self.http.aclose()
         self.db.close()
 
@@ -274,6 +304,45 @@ class DealBot:
             self.publisher.channel_id, self.publisher.dry_run = original
         return "✅ 샘플 발행 완료 (위 메시지)" if result.ok else f"❌ 실패: {result.error}"
 
+    async def naver_login(self) -> tuple[bytes | None, str]:
+        if self.naver_connect is None:
+            return None, "브라우저 자동화가 꺼져 있습니다. config.yaml 의 browser.enabled: true 로 켜고 재시작하세요."
+        try:
+            if await self.naver_connect.is_logged_in():
+                return None, "이미 네이버에 로그인되어 있습니다. 다시 하려면 프로필 폴더를 지우고 재시작하세요."
+            png = await self.naver_connect.start_qr_login()
+            return png, "네이버 앱 → 렌즈(QR) 로 이 화면의 QR 을 스캔하고 숫자를 선택하세요. 2분 안에 로그인되면 알려드립니다."
+        except Exception as e:  # noqa: BLE001
+            log.exception("naver login failed")
+            return None, f"❌ 로그인 화면 열기 실패: {e}"
+
+    async def naver_login_wait(self) -> str:
+        if self.naver_connect is None:
+            return "브라우저 자동화가 꺼져 있습니다."
+        ok = await self.naver_connect.wait_login(timeout_seconds=120)
+        if ok:
+            self.db.log_event("INFO", "naver", "logged in via QR")
+            return "✅ 네이버 로그인 완료. 이제 네이버 딜은 자동으로 링크를 만듭니다 (실패하면 수동 요청)."
+        return "⏰ 2분 안에 로그인이 확인되지 않았습니다. /naverlogin 을 다시 보내세요."
+
+    async def screenshot(self, url: str) -> tuple[bytes | None, str]:
+        if self.browser is None:
+            return None, "브라우저 자동화가 꺼져 있습니다 (browser.enabled)."
+        try:
+            png = await self.browser.screenshot(url)
+            return png, url
+        except Exception as e:  # noqa: BLE001
+            return None, f"❌ 스크린샷 실패: {e}"
+
+    async def naver_link_test(self, url: str) -> str:
+        if self.naver_connect is None:
+            return "브라우저 자동화가 꺼져 있습니다 (browser.enabled)."
+        try:
+            link = await self.naver_connect.convert(url)
+            return f"✅ {link}"
+        except Exception as e:  # noqa: BLE001
+            return f"❌ 실패: {e}\n/shot {self.settings.browser.naver_connect.create_url} 로 화면을 확인해 셀렉터를 조정하세요."
+
     async def self_check(self) -> list[tuple[bool | None, str]]:
         """(ok|None=skip, 설명) 목록. 시작 알림과 `dealbot check` 가 공유."""
         out: list[tuple[bool | None, str]] = []
@@ -311,6 +380,19 @@ class DealBot:
             out.append((None, "텔레그램: 토큰 미설정 (오프라인)"))
 
         out.append((True, f"휴대폰 푸시: {self.push.provider}") if self.push.enabled else (None, "휴대폰 푸시: 미설정 (텔레그램 알림만)"))
+        if self.market is not None:
+            out.append((True, f"시중가 대조: 쿠팡 검색 (시간당 {self.settings.deal.market.max_checks_per_hour}회)"))
+        else:
+            out.append((None, "시중가 대조: 꺼짐 (쿠팡 키 필요)"))
+        if self.settings.browser.enabled:
+            if self.naver_connect is None:
+                out.append((False, "브라우저 자동화: 켜져 있으나 playwright/크로미움 없음"))
+            else:
+                try:
+                    logged = await self.naver_connect.is_logged_in()
+                    out.append((True, "네이버 브라우저 로그인 유지 중") if logged else (None, "네이버 브라우저: 로그인 필요 (/naverlogin)"))
+                except Exception as e:  # noqa: BLE001
+                    out.append((False, f"브라우저: {e}"))
         if self.settings.secrets.has_linkprice:
             out.append((True, "링크프라이스 ID 설정됨"))
         else:
@@ -344,6 +426,9 @@ class DealBot:
                 verdict = self.evaluator.evaluate(p, stats)
                 if p.has_price:
                     self.db.record_observation(p, now)
+                if self._needs_market_check(p, verdict):
+                    quote = await self._market_quote(p)
+                    verdict = self.evaluator.evaluate(p, stats, quote, market_available=True)
                 if not verdict.is_deal:
                     continue
                 deals += 1
@@ -372,6 +457,27 @@ class DealBot:
         finally:
             status.running = False
         return result
+
+    def _needs_market_check(self, p: Product, verdict: DealVerdict) -> bool:
+        """시중가 대조는 쿠팡 검색 예산을 쓰므로 '후보'에만: 다른 몰 + 가격 있음 + (판정 통과 또는 표시 할인율 후보)."""
+        if self.market is None or p.shop == "coupang" or not p.has_price:
+            return False
+        if self.db.posted_within(p.product_id, self.settings.publish.dedup_days):
+            return False
+        candidate = verdict.is_deal or (
+            p.effective_discount_rate() is not None and p.effective_discount_rate() >= self.settings.deal.min_discount_rate  # type: ignore[operator]
+        )
+        return bool(candidate)
+
+    async def _market_quote(self, p: Product) -> MarketQuote | None:
+        assert self.market is not None
+        cached = self.db.get_market_quote(p.product_id, self.settings.deal.market.cache_hours)
+        if cached:
+            return MarketQuote(price=int(cached["price"]), source=cached["source"], title=cached.get("title") or "", url=cached.get("url"))
+        quote = await self.market.lookup(p)
+        if quote is not None:
+            self.db.set_market_quote(p.product_id, price=quote.price, source=quote.source, title=quote.title, url=quote.url)
+        return quote
 
     async def _ensure_link(self, item: QueueItem) -> tuple[str, str | None]:
         """returns (state, error): state ∈ ok | manual | skip | fail"""

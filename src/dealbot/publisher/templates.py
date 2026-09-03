@@ -66,5 +66,8 @@ class TemplateRenderer:
             discount_rate=deal.verdict.discount_rate if deal.verdict.discount_rate is not None else p.effective_discount_rate(),
             avg_price=deal.verdict.avg_price,
             below_avg_pct=deal.verdict.below_avg_pct,
+            market_price=deal.verdict.market_price,
+            market_source=deal.verdict.market_source,
+            below_market_pct=deal.verdict.below_market_pct,
             detected_at=deal.detected_at,
         )

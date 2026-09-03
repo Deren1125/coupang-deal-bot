@@ -11,6 +11,13 @@
 {% else %}
 ✅ 에러 없음
 {% endif %}
+{% if s.community %}
+
+<b>커뮤니티 글 통계</b> (추천 수 임계값이 필터 구실을 하는지 보세요)
+{% for src, st in s.community.items() %}
+• {{ src }}: 글 {{ st.posts }}개 — 추천≥1 {{ st.rec_ge[1] }} · ≥3 {{ st.rec_ge[3] }} · ≥5 {{ st.rec_ge[5] }} · ≥10 {{ st.rec_ge[10] }} · ≥20 {{ st.rec_ge[20] }}
+{% endfor %}
+{% endif %}
 {% if s.top_posts %}
 
 <b>최근 발행</b>

@@ -107,6 +107,15 @@ CREATE TABLE IF NOT EXISTS kv (
     key            TEXT PRIMARY KEY,
     value          TEXT
 );
+
+CREATE TABLE IF NOT EXISTS market_quotes (
+    product_id     TEXT PRIMARY KEY,
+    price          INTEGER NOT NULL,
+    source         TEXT NOT NULL,
+    title          TEXT,
+    url            TEXT,
+    checked_at     TEXT NOT NULL
+);
 """
 
 
@@ -151,6 +160,7 @@ class PeriodSummary:
     errors: int = 0
     pending: int = 0
     awaiting: int = 0
+    community: dict[str, dict[str, Any]] | None = None
     top_posts: list[dict[str, Any]] | None = None
 
 
@@ -170,8 +180,9 @@ class Database:
 
     def _migrate(self) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}
-        if "url" not in cols:
-            self._conn.execute("ALTER TABLE source_items ADD COLUMN url TEXT")
+        for col, typ in (("url", "TEXT"), ("title", "TEXT"), ("recommend", "INTEGER"), ("views", "INTEGER"), ("updated_at", "TEXT")):
+            if col not in cols:
+                self._conn.execute(f"ALTER TABLE source_items ADD COLUMN {col} {typ}")
 
     def close(self) -> None:
         with self._lock:
@@ -470,13 +481,43 @@ class Database:
         now: datetime | None = None,
         *,
         url: str | None = None,
+        title: str | None = None,
+        recommend: int | None = None,
+        views: int | None = None,
     ) -> None:
         now = now or utcnow()
         with self._lock:
             self._conn.execute(
-                "INSERT OR IGNORE INTO source_items (source, external_id, product_id, first_seen_at, url) VALUES (?, ?, ?, ?, ?)",
-                (source, external_id, product_id, to_iso(now), url),
+                """
+                INSERT OR IGNORE INTO source_items (source, external_id, product_id, first_seen_at, url, title, recommend, views, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (source, external_id, product_id, to_iso(now), url, title, recommend, views, to_iso(now)),
             )
+
+    def touch_seen(self, source: str, external_id: str, *, recommend: int | None, views: int | None, now: datetime | None = None) -> None:
+        """이미 본 글의 추천/조회수를 최신값으로 갱신 (통계용)."""
+        now = now or utcnow()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE source_items SET recommend = COALESCE(?, recommend), views = COALESCE(?, views), updated_at = ? WHERE source = ? AND external_id = ?",
+                (recommend, views, to_iso(now), source, external_id),
+            )
+
+    def community_stats(self, since: datetime, thresholds: tuple[int, ...] = (1, 3, 5, 10, 20)) -> dict[str, dict[str, Any]]:
+        """소스별: 기간 내 처음 본 글 수와 추천 N개 이상 글 수 (규칙 (c) 임계값이 필터 구실을 하는지 보기 위함)."""
+        rows = self._q(
+            "SELECT source, recommend FROM source_items WHERE first_seen_at >= ? AND recommend IS NOT NULL",
+            (to_iso(since),),
+        )
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            d = out.setdefault(r["source"], {"posts": 0, "rec_ge": {t: 0 for t in thresholds}})
+            d["posts"] += 1
+            for t in thresholds:
+                if int(r["recommend"]) >= t:
+                    d["rec_ge"][t] += 1
+        return out
 
     def seen_item(self, source: str, external_id: str) -> tuple[str | None, str | None] | None:
         """(product_id, url) 또는 None."""
@@ -572,6 +613,29 @@ class Database:
         rows = self.recent_events(1, level="ERROR")
         return rows[0] if rows else None
 
+    # ------------------------------------------------------ market quotes
+    def get_market_quote(self, product_id: str, max_age_hours: int, now: datetime | None = None) -> dict[str, Any] | None:
+        now = now or utcnow()
+        row = self._one("SELECT * FROM market_quotes WHERE product_id = ?", (product_id,))
+        if not row:
+            return None
+        checked = from_iso(row["checked_at"])
+        if checked is None or checked < now - timedelta(hours=max_age_hours):
+            return None
+        return dict(row)
+
+    def set_market_quote(self, product_id: str, *, price: int, source: str, title: str | None, url: str | None, now: datetime | None = None) -> None:
+        now = now or utcnow()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO market_quotes (product_id, price, source, title, url, checked_at) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(product_id) DO UPDATE SET price = excluded.price, source = excluded.source,
+                    title = excluded.title, url = excluded.url, checked_at = excluded.checked_at
+                """,
+                (product_id, price, source, title, url, to_iso(now)),
+            )
+
     # ----------------------------------------------------------------- kv
     def kv_get(self, key: str, default: str | None = None) -> str | None:
         row = self._one("SELECT value FROM kv WHERE key = ?", (key,))
@@ -624,6 +688,7 @@ class Database:
         )
         out.errors = int(row["c"]) if row else 0
 
+        out.community = self.community_stats(since) or None
         out.top_posts = [
             dict(r)
             for r in self._q(

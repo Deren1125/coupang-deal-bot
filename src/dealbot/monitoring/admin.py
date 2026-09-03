@@ -170,6 +170,7 @@ class StatusReporter:
         renderer: TemplateRenderer,
         registry: ShopRegistry | None = None,
         links: LinkRouter | None = None,
+        budget: Any | None = None,
     ) -> None:
         self.settings = settings
         self.db = db
@@ -178,6 +179,7 @@ class StatusReporter:
         self.renderer = renderer
         self.registry = registry or settings.shop_registry()
         self.links = links
+        self.budget = budget
 
     def _collector_rows(self, now: datetime) -> list[dict[str, Any]]:
         tz = self.settings.app.timezone
@@ -231,6 +233,15 @@ class StatusReporter:
             "products": self.db.product_count(),
             "price_points": self.db.price_history_count(),
             "db_mb": round(self.db.db_size_bytes() / 1024 / 1024, 1),
+            "api_budget": (
+                {
+                    "used": self.budget.used(),
+                    "max": self.budget.max_per_hour,
+                    "by_kind": ", ".join(f"{k} {v}" for k, v in sorted(self.budget.usage().items())),
+                }
+                if self.budget is not None and self.settings.secrets.has_coupang
+                else None
+            ),
             "last_error": truncate(last_err["message"].splitlines()[0], 300) if last_err else None,
             "last_error_at": fmt_local(datetime.fromisoformat(last_err["ts"]), tz) if last_err else None,
             "tz": tz,
@@ -290,6 +301,19 @@ class StatusReporter:
             lines.append("(없음)")
         return "\n".join(lines)
 
+    def community_stats_text(self) -> str:
+        lines = ["📈 <b>커뮤니티 글 통계</b> (추천 수 분포 → (c) 임계값 조정용)"]
+        for label, hours in (("최근 24시간", 24), ("최근 7일", 24 * 7)):
+            stats = self.db.community_stats(utcnow() - timedelta(hours=hours))
+            lines.append(f"\n<b>{label}</b>")
+            if not stats:
+                lines.append("(데이터 없음)")
+            for src, st in stats.items():
+                ge = st["rec_ge"]
+                lines.append(f"• {src}: 글 {st['posts']}개 — 추천≥1 {ge[1]} · ≥3 {ge[3]} · ≥5 {ge[5]} · ≥10 {ge[10]} · ≥20 {ge[20]}")
+        lines.append(f"\n현재 임계값 community_min_recommend = {self.settings.deal.community_min_recommend}")
+        return "\n".join(lines)
+
     def summary_text(self, summary: PeriodSummary) -> str:
         return self.renderer.render("daily_summary.j2", s=summary, tz=self.settings.app.timezone)
 
@@ -315,6 +339,14 @@ class BotController(Protocol):
 
     async def test_post(self) -> str: ...
 
+    async def naver_login(self) -> tuple[bytes | None, str]: ...
+
+    async def naver_login_wait(self) -> str: ...
+
+    async def screenshot(self, url: str) -> tuple[bytes | None, str]: ...
+
+    async def naver_link_test(self, url: str) -> str: ...
+
 
 HELP_TEXT = (
     "🤖 <b>DealBot 명령어</b>\n"
@@ -326,6 +358,10 @@ HELP_TEXT = (
     "/post — 직접 딜 올리기. 예)\n"
     "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
     "/test — 샘플 딜을 이 챗에 보내 양식 확인\n"
+    "/ppstats — 커뮤니티 글 추천 수 분포 (필터 기준 조정용)\n"
+    "/naverlogin — 네이버 QR 로그인 (브라우저 자동화 켰을 때)\n"
+    "/naverlink 상품URL — 쇼핑커넥트 링크 자동 생성 테스트\n"
+    "/shot URL — 서버 브라우저 스크린샷 (셀렉터 조정용)\n"
     "/recent — 최근 발행 목록\n"
     "/errors — 최근 에러\n"
     "/run [수집기이름] — 지금 바로 수집 실행\n"
@@ -399,6 +435,44 @@ def register_admin_handlers(
     async def cmd_test(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.test_post())
 
+    async def cmd_ppstats(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, reporter.community_stats_text())
+
+    async def _send_photo(update: Update, data: bytes | None, caption: str) -> None:
+        msg = update.effective_message
+        if msg is None:
+            return
+        if data:
+            await msg.reply_photo(photo=data, caption=caption[:1000])
+        else:
+            await msg.reply_text(caption[:4096])
+
+    async def cmd_naverlogin(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        data, text = await controller.naver_login()
+        await _send_photo(update, data, text)
+        if data:
+            async def _wait() -> None:
+                result = await controller.naver_login_wait()
+                if update.effective_message:
+                    await update.effective_message.reply_text(result)
+
+            ctx.application.create_task(_wait())
+
+    async def cmd_shot(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args or not args[0].startswith("http"):
+            await reply(update, "사용법: <code>/shot https://...</code>")
+            return
+        data, text = await controller.screenshot(args[0])
+        await _send_photo(update, data, text)
+
+    async def cmd_naverlink(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args or not args[0].startswith("http"):
+            await reply(update, "사용법: <code>/naverlink https://smartstore.naver.com/...</code>")
+            return
+        await reply(update, await controller.naver_link_test(args[0]))
+
     async def on_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         """관리자의 일반 메시지: (1) 링크 요청에 답장 → 링크 붙이기, (2) URL 포함 메시지 → 직접 발행."""
         msg = update.effective_message
@@ -435,6 +509,10 @@ def register_admin_handlers(
         ("skip", cmd_skip),
         ("post", cmd_post),
         ("test", cmd_test),
+        ("ppstats", cmd_ppstats),
+        ("naverlogin", cmd_naverlogin),
+        ("naverlink", cmd_naverlink),
+        ("shot", cmd_shot),
         ("help", cmd_help),
         ("start", cmd_help),
     ):

@@ -11,6 +11,27 @@ app:
   prune_price_history_days: 180
   prune_events_days: 30
 
+# 쿠팡파트너스 API 호출 예산 (시간당). 검색 API 기준 시간당 10회 제한이 알려져 있어 보수적으로 잡음.
+# 문서에서 더 높은 한도를 확인하면 올리세요. 0 = 무제한.
+coupang:
+  max_calls_per_hour: 10
+  deeplink_reserve: 3          # 발행용 딥링크 호출을 위해 항상 남겨 둘 몫
+
+# 네이버 쇼핑커넥트 브라우저 자동화 (선택). 켜면 /naverlogin 으로 QR 로그인 후 네이버 딜 링크를 자동 생성 시도,
+# 실패하면 수동(관리자 링크) 으로 넘어감. 아래 shops 에서 naver 를 link_mode: api 로 바꿔야 동작.
+browser:
+  enabled: false
+  headless: true
+  profile_dir: browser-profile
+  naver_connect:
+    login_url: https://nid.naver.com/nidlogin.login
+    create_url: https://connect.naver.com/     # 실제 링크 생성 페이지 주소로 수정 필요 (/shot 으로 확인)
+    selectors:
+      qr_tab: "text=QR코드"
+      url_input: "input[type='url'], input[placeholder*='URL'], input[placeholder*='주소'], input[type='text']"
+      create_button: "text=링크 발급"
+      result: "input[readonly], textarea[readonly], a[href*='naver.me'], a[href*='connect']"
+
 http:
   timeout_seconds: 20
   max_retries: 3
@@ -30,6 +51,7 @@ shops:
   - { key: coupang, enabled: true }
   - { key: toss, enabled: true }
   - { key: naver, enabled: true }
+  # 브라우저 자동화를 켰다면:  - { key: naver, link_mode: api, provider: naver_connect, manual_fallback: true }
   # 예) 네이버는 링크 만들기 귀찮으니 원본 링크로만: - { key: naver, link_mode: raw }
   # 예) 테무는 아예 제외:                            - { key: temu, enabled: false }
 
@@ -41,7 +63,7 @@ collectors:
   - name: goldbox
     type: coupang_goldbox
     enabled: true
-    interval_minutes: 60
+    interval_minutes: 120
     options:
       limit: 50
       image_size: "512x512"
@@ -49,13 +71,13 @@ collectors:
   - name: category_best
     type: coupang_category_best
     enabled: true
-    interval_minutes: 180
+    interval_minutes: 240
     options:
       limit: 30
       # 1001 여성패션 1002 남성패션 1010 뷰티 1011 출산/유아동 1012 식품 1013 주방용품 1014 생활용품
       # 1015 홈인테리어 1016 가전디지털 1017 스포츠/레저 1018 자동차용품 1019 도서/음반 1020 완구/취미
       # 1021 문구/오피스 1024 헬스/건강식품 1029 반려동물용품 1030 유아동패션
-      category_ids: [1016, 1012, 1014, 1010]
+      category_ids: [1016, 1012, 1014]   # 호출 예산(시간당 10회)을 생각해 3개만
       image_size: "512x512"
       delay_between_categories_seconds: 3
 
@@ -78,6 +100,21 @@ collectors:
       rec_selector: "td.baseList-rec"
       views_selector: "td.baseList-views"
 
+  # 알구몬: 뽐뿌·루리웹·클리앙·퀘이사존 등 커뮤니티 핫딜 통합. 페이지 구조 확인 전이라 기본 꺼짐.
+  # 켜서 돌린 뒤 /errors 에 "no rows matched ... DOM:" 이 뜨면 그 내용을 알려주세요 → options.selectors 를 맞춥니다.
+  - name: algumon
+    type: algumon
+    enabled: false
+    interval_minutes: 15
+    options:
+      url: https://www.algumon.com/n/deal
+      request_delay_seconds: 2
+      max_detail_fetch_per_run: 10
+      unknown_shop: skip
+      # selectors:
+      #   row: "li.post-li"
+      #   title: "a.product-link"
+
   # 애드픽 쇼핑메이트 핫딜 API (ADPICK_AFFID 필요). 제휴 링크가 포함된 여러 쇼핑몰 핫딜 목록.
   - name: adpick
     type: adpick_hotdeal
@@ -86,10 +123,19 @@ collectors:
     options: {}
 
 # ----------------------------------------------------------------------------
-# 특가 판정: (a) 또는 (b) 또는 (c) 중 하나만 만족하면 특가
+# 특가 판정: (a)(b)(c)(d) 중 하나만 만족하면 특가. 단 (d) 대조 결과 쿠팡보다 비싸면 탈락(veto).
 # ----------------------------------------------------------------------------
 deal:
-  min_discount_rate: 30          # (a) 표시 할인율 N% 이상
+  # (d) 시중가 대조: 다른 몰의 딜을 쿠팡 검색으로 찾은 같은 상품 가격과 비교 (쿠팡 API 키 필요)
+  market:
+    enabled: true
+    min_below_market_pct: 10     # 쿠팡가보다 N% 이상 싸면 특가
+    veto_if_not_cheaper: true    # 쿠팡가보다 싸지 않으면 (a)/(c) 로 잡혀도 탈락
+    require_for_discount_rule: true  # 대조가 가능한 환경이면 (a) 표시 할인율만으로는 통과 못 함
+    max_checks_per_hour: 3       # 쿠팡 검색 API 호출 (전체 예산 10회 안에서)
+    cache_hours: 24
+    min_token_match: 0.6         # 상품명 토큰 일치 비율 (수량 토큰은 반드시 일치)
+  min_discount_rate: 50          # (a) 표시 할인율 N% 이상 — 쿠팡 표시 할인율은 부풀려진 경우가 많아 50 으로
   history_days: 30               # (b) 최근 N일 평균가 기준
   min_below_average_pct: 15      # (b) 평균가 대비 N% 이상 저렴
   min_history_samples: 3         # (b) 평균가 계산에 필요한 최소 관측 횟수

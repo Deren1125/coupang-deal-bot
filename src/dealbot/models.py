@@ -67,6 +67,9 @@ class DealVerdict:
     below_avg_pct: float | None = None
     sample_count: int = 0
     score: float = 0.0
+    market_price: int | None = None  # 시중가(쿠팡 검색) 대조 결과
+    market_source: str | None = None
+    below_market_pct: float | None = None
 
 
 @dataclass(slots=True)

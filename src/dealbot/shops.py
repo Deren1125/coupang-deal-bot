@@ -31,6 +31,7 @@ class Shop:
     disclosure: str | None = None
     enabled: bool = True
     manual_hint: str | None = None  # manual 모드일 때 관리자에게 보여줄 안내
+    manual_fallback: bool = False  # api 모드에서 자동 변환이 실패하면 수동(관리자 링크)으로 넘길지
 
     def matches_url(self, url: str) -> bool:
         try:
@@ -70,8 +71,10 @@ DEFAULT_SHOPS: list[Shop] = [
         aliases=["네이버", "네이버쇼핑", "네이버플러스", "스마트스토어", "브랜드스토어", "naver", "n플러스"],
         domains=["naver.com", "naver.me"],
         link_mode="manual",
+        provider="naver_connect",  # browser.enabled + link_mode: api 로 바꾸면 브라우저 자동화 시도
         disclosure=_d("네이버 쇼핑커넥트"),
         manual_hint="쇼핑커넥트(connect.naver.com) 에서 상품 URL 로 링크 생성",
+        manual_fallback=True,
     ),
     Shop(
         key="oliveyoung",

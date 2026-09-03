@@ -1,12 +1,15 @@
 """쿠팡파트너스 Open API 클라이언트 (골드박스 / 카테고리 베스트 / 검색 / 딥링크).
 
-엔드포인트 경로는 파트너스 문서(https://partners.coupang.com → 링크 생성 → API)와
-다를 수 있으니, 4xx 가 나면 아래 PATH_* 상수를 문서와 대조하세요.
+- 엔드포인트 경로는 파트너스 문서와 다를 수 있으니 4xx 가 나면 PATH_* 를 대조하세요.
+- 파트너스 API 는 호출 횟수 제한이 빡빡합니다(검색 API 기준 시간당 10회로 알려짐). ApiBudget 으로
+  시간당 총 호출 수를 관리하고, 발행에 꼭 필요한 딥링크 호출 몫(reserve)을 남겨 둡니다.
 """
 
 from __future__ import annotations
 
 import logging
+import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -34,11 +37,52 @@ class CoupangApiError(Exception):
         self.status = status
 
 
+class CoupangRateLimited(CoupangApiError):
+    """시간당 호출 예산 소진 (로컬 예산). 재시도하지 않고 다음 주기로 넘긴다."""
+
+
 @dataclass(slots=True)
 class DeeplinkResult:
     original_url: str
     shorten_url: str
     landing_url: str | None = None
+
+
+class ApiBudget:
+    """슬라이딩 1시간 창의 호출 예산. reserve 에 적힌 종류(예: deeplink)는 예약 몫까지 쓸 수 있다."""
+
+    def __init__(self, max_per_hour: int = 10, reserve: dict[str, int] | None = None) -> None:
+        self.max_per_hour = max(0, max_per_hour)
+        self.reserve = dict(reserve or {})
+        self._calls: deque[tuple[float, str]] = deque()
+
+    def _prune(self, now: float) -> None:
+        while self._calls and now - self._calls[0][0] > 3600:
+            self._calls.popleft()
+
+    def used(self, now: float | None = None) -> int:
+        self._prune(now if now is not None else time.monotonic())
+        return len(self._calls)
+
+    def available(self, kind: str = "general", now: float | None = None) -> bool:
+        """일반 호출은 (최대 - 예약 합계)까지, 예약된 종류는 (최대 - 다른 종류의 예약 합계)까지."""
+        if self.max_per_hour <= 0:
+            return True
+        used = self.used(now)
+        reserved_total = sum(self.reserve.values())
+        if kind in self.reserve:
+            return used < self.max_per_hour - (reserved_total - self.reserve[kind])
+        return used < self.max_per_hour - reserved_total
+
+    def record(self, kind: str = "general", now: float | None = None) -> None:
+        self._calls.append((now if now is not None else time.monotonic(), kind))
+
+    def usage(self) -> dict[str, int]:
+        self._prune(time.monotonic())
+        out: dict[str, int] = {}
+        for _, k in self._calls:
+            out[k] = out.get(k, 0) + 1
+        return out
 
 
 class CoupangClient:
@@ -52,6 +96,7 @@ class CoupangClient:
         max_retries: int = 3,
         retry_backoff: float = 2.0,
         base_url: str = BASE_URL,
+        budget: ApiBudget | None = None,
     ) -> None:
         self._ak = access_key
         self._sk = secret_key
@@ -60,6 +105,7 @@ class CoupangClient:
         self._retries = max_retries
         self._backoff = retry_backoff
         self._base = base_url.rstrip("/")
+        self.budget = budget
 
     # ------------------------------------------------------------------ core
     async def _request(
@@ -69,10 +115,15 @@ class CoupangClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
+        kind: str = "general",
     ) -> Any:
+        if self.budget is not None and not self.budget.available(kind):
+            raise CoupangRateLimited(f"coupang api hourly budget exhausted (kind={kind}, used={self.budget.usage()})")
         clean = {k: v for k, v in (params or {}).items() if v is not None}
         query = urlencode(clean, doseq=True)
         url = f"{self._base}{path}" + (f"?{query}" if query else "")
+        if self.budget is not None:
+            self.budget.record(kind)
 
         async def _do() -> Any:
             headers = {
@@ -104,7 +155,7 @@ class CoupangClient:
     # ------------------------------------------------------------- endpoints
     async def goldbox(self, *, limit: int | None = None, image_size: str | None = None) -> list[dict[str, Any]]:
         data = await self._request(
-            "GET", PATH_GOLDBOX, params={"subId": self.sub_id, "imageSize": image_size, "limit": limit}
+            "GET", PATH_GOLDBOX, params={"subId": self.sub_id, "imageSize": image_size, "limit": limit}, kind="goldbox"
         )
         return list(data or [])
 
@@ -113,7 +164,7 @@ class CoupangClient:
     ) -> list[dict[str, Any]]:
         path = PATH_BEST_CATEGORY.format(category_id=category_id)
         data = await self._request(
-            "GET", path, params={"limit": limit, "subId": self.sub_id, "imageSize": image_size}
+            "GET", path, params={"limit": limit, "subId": self.sub_id, "imageSize": image_size}, kind="bestcategory"
         )
         return list(data or [])
 
@@ -122,6 +173,7 @@ class CoupangClient:
             "GET",
             PATH_SEARCH,
             params={"keyword": keyword, "limit": limit, "subId": self.sub_id, "imageSize": image_size},
+            kind="search",
         )
         if isinstance(data, dict):
             return list(data.get("productData") or [])
@@ -133,7 +185,7 @@ class CoupangClient:
         body: dict[str, Any] = {"coupangUrls": urls}
         if self.sub_id:
             body["subId"] = self.sub_id
-        data = await self._request("POST", PATH_DEEPLINK, json=body)
+        data = await self._request("POST", PATH_DEEPLINK, json=body, kind="deeplink")
         results: list[DeeplinkResult] = []
         for item in data or []:
             results.append(
@@ -173,8 +225,7 @@ def _to_float(v: Any) -> float | None:
 def parse_api_product(raw: dict[str, Any], source: str) -> Product | None:
     """API 응답 한 건을 Product 로 변환. 필수 필드가 없으면 None.
 
-    할인율/정가는 API 응답에 항상 있는 필드가 아니므로 있을 때만 채운다
-    (없으면 가격 이력 기반 규칙(b)만으로 판정).
+    할인율/정가는 API 응답에 항상 있는 필드가 아니므로 있을 때만 채운다.
     """
     pid = raw.get("productId")
     name = raw.get("productName")

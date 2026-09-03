@@ -63,6 +63,7 @@ class ShopConfig(BaseModel):
     disclosure: str | None = None
     enabled: bool | None = None
     manual_hint: str | None = None
+    manual_fallback: bool | None = None
 
     @field_validator("link_mode")
     @classmethod
@@ -72,8 +73,28 @@ class ShopConfig(BaseModel):
         return v
 
 
+class CoupangConfig(BaseModel):
+    """파트너스 API 호출 예산 (시간당). 0 이면 무제한."""
+
+    max_calls_per_hour: int = 10
+    deeplink_reserve: int = 3  # 발행용 딥링크 호출을 위해 남겨 둘 몫
+
+
+class MarketCheckConfig(BaseModel):
+    """(d) 시중가 대조: 다른 몰의 딜을 쿠팡 검색 API 로 찾은 같은 상품 가격과 비교."""
+
+    enabled: bool = True
+    min_below_market_pct: float = 10  # 쿠팡가보다 N% 이상 싸면 특가
+    veto_if_not_cheaper: bool = True  # 쿠팡가보다 싸지 않으면 (a)/(c) 로 잡혀도 탈락
+    require_for_discount_rule: bool = True  # 대조가 가능한 환경이면 (a) 표시 할인율만으로는 통과 못 함
+    max_checks_per_hour: int = 3  # 쿠팡 검색 API 호출 예산 (전체 예산 안에서)
+    cache_hours: int = 24
+    min_token_match: float = 0.6  # 상품명 토큰 일치 비율
+
+
 class DealConfig(BaseModel):
-    min_discount_rate: float = 30
+    market: MarketCheckConfig = Field(default_factory=MarketCheckConfig)
+    min_discount_rate: float = 50
     history_days: int = 30
     min_below_average_pct: float = 15
     min_history_samples: int = 3
@@ -113,6 +134,31 @@ class PushConfig(BaseModel):
     provider: str = "auto"
     events: list[str] = Field(default_factory=lambda: ["manual_link"])  # manual_link | publish_failed | error | daily_summary | startup
     ntfy_url: str = "https://ntfy.sh"
+
+
+class NaverConnectConfig(BaseModel):
+    """네이버 쇼핑커넥트 브라우저 자동화. 셀렉터는 실제 화면을 보고 맞춰야 함 (/shot 으로 확인)."""
+
+    login_url: str = "https://nid.naver.com/nidlogin.login"
+    create_url: str = "https://connect.naver.com/"
+    login_cookie: str = "NID_AUT"
+    timeout_seconds: int = 30
+    selectors: dict[str, str] = Field(
+        default_factory=lambda: {
+            "qr_tab": "text=QR코드",
+            "url_input": "input[type='url'], input[placeholder*='URL'], input[placeholder*='주소'], input[type='text']",
+            "create_button": "text=링크 발급",
+            "result": "input[readonly], textarea[readonly], a[href*='naver.me'], a[href*='connect']",
+        }
+    )
+
+
+class BrowserConfig(BaseModel):
+    enabled: bool = False
+    headless: bool = True
+    profile_dir: str = "browser-profile"  # data_dir 아래
+    executable_path: str | None = None  # 크로미움 실행 파일 (비우면 자동 탐색, 환경변수 DEALBOT_CHROMIUM_PATH 도 가능)
+    naver_connect: NaverConnectConfig = Field(default_factory=NaverConnectConfig)
 
 
 class MonitoringConfig(BaseModel):
@@ -185,6 +231,8 @@ class Secrets(BaseModel):
 class Settings(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
+    coupang: CoupangConfig = Field(default_factory=CoupangConfig)
+    browser: BrowserConfig = Field(default_factory=BrowserConfig)
     collectors: list[CollectorConfig] = Field(default_factory=list)
     shops: list[ShopConfig] = Field(default_factory=list)
     deal: DealConfig = Field(default_factory=DealConfig)
@@ -220,7 +268,7 @@ class Settings(BaseModel):
         }
         for o in self.shops:
             base = shops.get(o.key) or Shop(key=o.key, name=o.name or o.key)
-            for f in ("name", "aliases", "domains", "link_mode", "provider", "disclosure", "enabled", "manual_hint"):
+            for f in ("name", "aliases", "domains", "link_mode", "provider", "disclosure", "enabled", "manual_hint", "manual_fallback"):
                 v = getattr(o, f)
                 if v is not None:
                     setattr(base, f, v)

@@ -250,6 +250,10 @@ class PpomppuCollector(BaseCollector):
             tag = item.get("shop_tag")
             shop = registry.by_alias(tag) if tag else None
             if shop is None and unknown_policy != "raw":
+                if not self.ctx.db.is_seen(self.name, item["external_id"]):
+                    self.ctx.db.mark_seen(self.name, item["external_id"], None, title=item["title"], recommend=item.get("recommend"), views=item.get("views"))
+                else:
+                    self.ctx.db.touch_seen(self.name, item["external_id"], recommend=item.get("recommend"), views=item.get("views"))
                 continue
             if shop is not None and (not shop.enabled or shop.link_mode == "skip"):
                 continue
@@ -260,7 +264,8 @@ class PpomppuCollector(BaseCollector):
 
             ext = item["external_id"]
             if self.ctx.db.is_seen(self.name, ext):
-                # 이미 본 글: 추천 수가 올라왔으면 저장된 링크로 다시 판정 대상에
+                # 이미 본 글: 추천/조회수 갱신(통계용). 추천 수가 올라왔으면 저장된 링크로 다시 판정 대상에
+                self.ctx.db.touch_seen(self.name, ext, recommend=item.get("recommend"), views=item.get("views"))
                 rec = item.get("recommend") or 0
                 if reyield_min_rec > 0 and rec >= reyield_min_rec:
                     seen = self.ctx.db.seen_item(self.name, ext)
@@ -287,7 +292,10 @@ class PpomppuCollector(BaseCollector):
                 # 링크가 없으면 뽐뿌 글 자체를 링크로 (쿠폰/이벤트 안내글 등)
                 deal_url = item["post_url"]
             product = self._build_product(item, shop, deal_url)
-            self.ctx.db.mark_seen(self.name, ext, product.product_id, url=deal_url)
+            self.ctx.db.mark_seen(
+                self.name, ext, product.product_id, url=deal_url,
+                title=item["title"], recommend=item.get("recommend"), views=item.get("views"),
+            )
             products.append(product)
 
         self.log.info("ppomppu(%s): %d listed, %d detail fetched, %d products", board, len(listed), fetched, len(products))
