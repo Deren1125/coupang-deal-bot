@@ -424,7 +424,7 @@ class DealBot:
                     continue
                 stats = self.db.price_stats(p.product_id, cfg.deal.history_days, now)
                 verdict = self.evaluator.evaluate(p, stats)
-                if p.has_price:
+                if p.has_price and self._should_record(p.product_id, now):
                     self.db.record_observation(p, now)
                 if self._needs_market_check(p, verdict):
                     quote = await self._market_quote(p)
@@ -457,6 +457,13 @@ class DealBot:
         finally:
             status.running = False
         return result
+
+    def _should_record(self, product_id: str, now: Any) -> bool:
+        gap = self.settings.deal.observation_min_gap_hours
+        if gap <= 0:
+            return True
+        last = self.db.last_observed_at(product_id)
+        return last is None or (now - last) >= timedelta(hours=gap)
 
     def _needs_market_check(self, p: Product, verdict: DealVerdict) -> bool:
         """시중가 대조는 쿠팡 검색 예산을 쓰므로 '후보'에만: 다른 몰 + 가격 있음 + (판정 통과 또는 표시 할인율 후보)."""

@@ -111,6 +111,7 @@ class DealConfig(BaseModel):
     history_days: int = 30
     min_below_average_pct: float = 15
     min_history_samples: int = 3
+    observation_min_gap_hours: float = 6  # 같은 상품 가격 기록은 이 간격으로만 (재판정 때 중복 기록 방지)
     min_price: int = 1000
     exclude_keywords: list[str] = Field(default_factory=list)
     # (c) 커뮤니티 추천 수가 이 값 이상이면 가격 조건과 무관하게 특가로 인정 (0 이면 비활성)

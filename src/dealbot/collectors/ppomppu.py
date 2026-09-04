@@ -2,7 +2,8 @@
 
 - 목록에서 제목 "[쇼핑몰] 상품명 (가격/배송)" 을 파싱하고, 등록된 쇼핑몰(config.shops) 글만 고른다.
 - 새 글은 상세 페이지를 열어 쇼핑몰 링크를 찾는다. 이미 본 글은 다시 열지 않지만,
-  추천 수가 기준 이상으로 올라오면 저장된 정보로 다시 판정 대상에 올린다.
+  추천/댓글/조회수가 관심도 게이트 기준을 넘어서면 저장된 링크로 다시 판정 대상에 올린다
+  (중복 발행은 dedup 이 막고, 가격 기록은 observation_min_gap_hours 간격으로만 남긴다).
 - 사이트 구조가 바뀌면 options.*_selector 만 고치면 된다.
 """
 
@@ -233,8 +234,16 @@ class PpomppuCollector(BaseCollector):
         comments_sel = self.opt("comments_selector", "span.baseList-c")
         only_shops = {s.lower() for s in self.opt("shops", [])}  # 비우면 등록된 모든 쇼핑몰
         unknown_policy = self.opt("unknown_shop", "skip")  # skip | raw
-        reyield_min_rec = int(self.opt("reyield_min_recommend", self.ctx.settings.deal.community_min_recommend))
+        interest = self.ctx.settings.deal.interest
         registry = self.registry
+
+        def passes_gate(it: dict[str, Any]) -> bool:
+            rec, com, views = it.get("recommend") or 0, it.get("comments") or 0, it.get("views") or 0
+            return (
+                (interest.min_recommend > 0 and rec >= interest.min_recommend)
+                or (interest.min_comments > 0 and com >= interest.min_comments)
+                or (interest.min_views > 0 and views >= interest.min_views)
+            )
 
         listed: list[dict[str, Any]] = []
         for page in range(1, pages + 1):
@@ -271,8 +280,7 @@ class PpomppuCollector(BaseCollector):
             if self.ctx.db.is_seen(self.name, ext):
                 # 이미 본 글: 추천/조회수 갱신(통계용). 추천 수가 올라왔으면 저장된 링크로 다시 판정 대상에
                 self.ctx.db.touch_seen(self.name, ext, recommend=item.get("recommend"), views=item.get("views"), comments=item.get("comments"))
-                rec = item.get("recommend") or 0
-                if reyield_min_rec > 0 and rec >= reyield_min_rec:
+                if passes_gate(item):
                     seen = self.ctx.db.seen_item(self.name, ext)
                     if seen and seen[0] and seen[1]:
                         p = self._build_product(item, shop, seen[1])

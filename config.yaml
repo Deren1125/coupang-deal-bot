@@ -147,6 +147,7 @@ deal:
   history_days: 30               # (b) 최근 N일 평균가 기준
   min_below_average_pct: 15      # (b) 평균가 대비 N% 이상 저렴
   min_history_samples: 3         # (b) 평균가 계산에 필요한 최소 관측 횟수
+  observation_min_gap_hours: 6   # 같은 상품 가격은 6시간에 1번만 기록 (재판정 때 같은 값이 쌓이는 것 방지)
   community_min_recommend: 5     # (c) 커뮤니티 추천 수 N 이상 (0 이면 비활성)
   accept_coupons_and_events: true  # 가격 없는 쿠폰/이벤트 글도 (c) 로 판정해 발행
   min_price: 1000

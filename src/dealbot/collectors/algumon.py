@@ -160,6 +160,18 @@ class AlgumonCollector(BaseCollector):
             ext = item["external_id"]
             if self.ctx.db.is_seen(self.name, ext):
                 self.ctx.db.touch_seen(self.name, ext, recommend=item.get("recommend"), views=None)
+                interest = self.ctx.settings.deal.interest
+                rec = item.get("recommend") or 0
+                if interest.min_recommend > 0 and rec >= interest.min_recommend:
+                    seen = self.ctx.db.seen_item(self.name, ext)
+                    if seen and seen[0] and seen[1]:
+                        price = item.get("price")
+                        products.append(Product(
+                            source=self.name, product_id=seen[0], shop=shop.key, deal_kind=guess_kind(item["name"], price),
+                            name=item["name"], price=int(price or 0), url=seen[1], shipping=item.get("shipping"),
+                            external_id=ext, recommend_count=item.get("recommend"),
+                            extra={"post_url": item["origin_url"], "algumon_url": item["link"], "title": item["title"]},
+                        ))
                 continue
             if fetched >= max_detail:
                 break

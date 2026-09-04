@@ -109,12 +109,12 @@ async def test_collect_multi_shop(settings: Settings, db: Database, fixtures_dir
     assert n.shop == "naver" and n.product_id == "naver:123456"
     assert not any("no=600007" in u for u in calls)
 
-    # 두 번째 실행: 상세 요청 없이, 추천 수 기준(5) 이상인 글만 저장된 링크로 다시 올라옴
+    # 두 번째 실행: 상세 요청 없이, 관심도 게이트(추천≥1/댓글≥3/조회≥500)를 넘는 글만 저장된 링크로 다시 올라옴
     calls.clear()
     again = await collector.collect()
     assert all("view.php" not in u for u in calls)
-    assert {p.external_id for p in again} == {"600001", "600003", "600005"}
-    assert {p.product_id for p in again} == {"coupang:7381234", by_ext["600003"].product_id, "toss:ABC123"}
+    assert {p.external_id for p in again} == {"600001", "600002", "600003", "600005", "600006"}  # 600004 는 추천0·조회100
+    assert {"coupang:7381234", by_ext["600003"].product_id, "toss:ABC123"} <= {p.product_id for p in again}
     assert all(p.url for p in again)
 
 

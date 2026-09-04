@@ -280,6 +280,13 @@ class Database:
             last_price=last["price"] if last else None,
         )
 
+    def last_observed_at(self, product_id: str) -> datetime | None:
+        row = self._one(
+            "SELECT observed_at FROM price_history WHERE product_id = ? ORDER BY observed_at DESC, id DESC LIMIT 1",
+            (product_id,),
+        )
+        return from_iso(row["observed_at"]) if row else None
+
     def product_count(self) -> int:
         row = self._one("SELECT COUNT(*) AS c FROM products")
         return int(row["c"]) if row else 0

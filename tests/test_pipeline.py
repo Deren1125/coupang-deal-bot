@@ -54,6 +54,8 @@ async def test_collect_evaluate_queue_publish(bot: DealBot) -> None:
     results = await bot.run_once()
     assert results[0]["collected"] == 3 and results[0]["deals"] == 1 and results[0]["queued"] == 1
     assert bot.db.price_history_count() == 3
+    await bot.run_once()
+    assert bot.db.price_history_count() == 3  # 6시간 안에는 같은 상품 가격을 다시 기록하지 않음
     assert bot.db.queue_counts() == {"published": 1}
     assert bot.db.posted_within("coupang:1", 7)
     results = await bot.run_once()
