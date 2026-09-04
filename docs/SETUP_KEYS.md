@@ -19,7 +19,7 @@
 
 1. **봇 토큰**: 텔레그램에서 @BotFather → `/newbot` → 이름, 사용자명(`..._bot`) → `123456789:AAF...` 토큰.
 2. **채널**: 새 채널 만들기 → 관리자 → 관리자 추가 → 봇 검색 → **메시지 게시** 권한.
-   - 공개 채널: `TELEGRAM_CHANNEL_ID=@채널아이디`
+   - 공개 채널: `TELEGRAM_CHANNEL_ID=@hot_deal_and_info` (운영 채널: https://t.me/hot_deal_and_info)
    - 비공개 채널: `-100...` 숫자 ID (아래 4번으로 확인)
 3. **관리자 챗**: 내 봇을 검색해 `/start` 전송 (봇은 먼저 말을 못 걸어서 필요).
 4. **ID 확인** (컴퓨터 없이): 텔레그램에서 @userinfobot 에게 아무 메시지나 보내면 내 ID(숫자)를 알려줍니다 → `TELEGRAM_ADMIN_CHAT_ID`.
