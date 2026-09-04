@@ -65,6 +65,7 @@ async def test_manual_link_triggers_push(settings, tmp_path) -> None:  # type: i
 
     settings.collectors = [CollectorConfig(name="fake", type="fake_push", interval_minutes=1)]
     settings.publish.min_interval_seconds = 0
+    settings.publish.dry_run = False
     settings.secrets.ntfy_topic = "topic1"
     bot = DealBot(settings)
     calls: list[httpx.Request] = []

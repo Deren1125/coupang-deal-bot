@@ -539,8 +539,8 @@ class DealBot:
             deal.affiliate_url = await self.links.to_affiliate(deal.product)
             return "ok", None
         except ManualLinkRequired as e:
-            if self.state.dry_run:
-                # 연습 모드에서는 링크 요청으로 귀찮게 하지 않고 원본 링크로 기록만
+            if self.settings.publish.dry_run:
+                # 연습 모드(DEALBOT_DRY_RUN)에서는 링크 요청으로 귀찮게 하지 않고 원본 링크로 기록만
                 deal.affiliate_url = deal.product.url
                 log.info("[DRY-RUN] manual link would be requested for %s — using raw url", e.shop.key)
                 return "ok", None

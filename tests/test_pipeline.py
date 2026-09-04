@@ -121,6 +121,7 @@ async def test_failure_attempts_and_expiry(bot: DealBot, settings: Settings) -> 
 
 
 async def test_manual_link_flow_for_toss(bot: DealBot) -> None:
+    bot.settings.publish.dry_run = False  # 연습 모드에서는 링크 요청을 생략하므로 실제 모드로
     toss = Product(source="fake", product_id="toss:ABC", shop="toss", name="토스 핫도그", price=14890,
                    url="https://toss.im/_m/ABC", recommend_count=9)
     FakeCollector.products = [toss]
@@ -147,6 +148,7 @@ async def test_manual_link_flow_for_toss(bot: DealBot) -> None:
 
 
 async def test_skip_and_manual_link_expiry(bot: DealBot, settings: Settings) -> None:
+    settings.publish.dry_run = False
     toss = Product(source="fake", product_id="toss:X", shop="toss", name="x", price=1000, url="https://toss.im/_m/X", recommend_count=9)
     FakeCollector.products = [toss]
     await bot.run_collector(bot.collectors[0])
@@ -204,3 +206,11 @@ async def test_disabled_shop_products_are_ignored(settings: Settings) -> None:
 
 def test_context_type() -> None:
     assert CollectorContext.__dataclass_fields__.keys() >= {"settings", "http", "db", "coupang", "shops"}
+
+
+async def test_dry_run_skips_manual_link_requests(bot: DealBot) -> None:
+    assert bot.settings.publish.dry_run
+    FakeCollector.products = [Product(source="fake", product_id="toss:D", shop="toss", name="연습", price=5000, url="https://toss.im/_m/D", recommend_count=9)]
+    await bot.run_once()
+    assert bot.db.queue_counts() == {"published": 1}
+    assert bot.db.recent_posts()[0]["affiliate_url"] == "https://toss.im/_m/D"
