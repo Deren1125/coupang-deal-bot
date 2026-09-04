@@ -1,7 +1,7 @@
 services:
   dealbot:
-    image: ghcr.io/deren1125/coupang-deal-bot:latest
-    build: .
+    build: .                 # 서버에서 직접 빌드 (GHCR 이미지를 쓰려면 아래 image 주석 해제)
+    # image: ghcr.io/deren1125/coupang-deal-bot:latest
     container_name: coupang-deal-bot
     restart: unless-stopped
     env_file: .env

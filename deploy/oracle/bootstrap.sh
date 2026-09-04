@@ -4,6 +4,7 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/deren1125/coupang-deal-bot.git}"
+REPO_BRANCH="${REPO_BRANCH:-claude/coupang-hotdeal-bot-l0gr26}"
 APP_DIR="${APP_DIR:-$HOME/coupang-deal-bot}"
 
 echo "==> apt 업데이트 & 기본 패키지"
@@ -34,26 +35,24 @@ fi
 
 if [ ! -d "$APP_DIR/.git" ]; then
   echo "==> 저장소 clone → $APP_DIR"
-  git clone "$REPO_URL" "$APP_DIR"
+  git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
 else
   echo "==> 저장소 이미 존재: $APP_DIR"
 fi
 
 cd "$APP_DIR"
-if [ ! -f .env ]; then
-  cp .env.example .env
-  echo "==> .env 생성됨. 키/토큰을 입력하세요: nano $APP_DIR/.env"
-fi
 
 # 시간대
 sudo timedatectl set-timezone Asia/Seoul || true
 
 cat <<MSG
 
-완료. 다음 단계:
-  1) 로그아웃 후 다시 SSH 접속 (docker 그룹 반영)
-  2) cd $APP_DIR && nano .env
-  3) docker compose pull   (또는 docker compose build)
-  4) docker compose run --rm dealbot check
-  5) docker compose up -d && docker compose logs -f
+설치 완료. 다음 단계는 두 줄이면 끝납니다.
+
+  1) 로그아웃 후 다시 SSH 접속  (docker 그룹 반영에 필요)
+       exit  → 다시 접속
+
+  2) 설정 마법사 실행 (값을 하나씩 물어봅니다. 편집기 쓸 일 없음)
+       cd $APP_DIR && ./deploy/oracle/setup.sh
+
 MSG

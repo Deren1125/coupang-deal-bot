@@ -21,22 +21,34 @@ Oracle Cloud **Always Free** 는 기간 제한 없이 무료인 VM 을 제공합
 
 ## 2. 서버 준비
 
+아이패드에서는 **Termius** 같은 SSH 앱을 설치해 접속합니다 (오라클이 준 개인키 파일을 앱에 가져오기).
+
 ```bash
 ssh ubuntu@<PUBLIC_IP>
-curl -fsSL https://raw.githubusercontent.com/deren1125/coupang-deal-bot/main/deploy/oracle/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/deren1125/coupang-deal-bot/raw/claude/coupang-hotdeal-bot-l0gr26/deploy/oracle/bootstrap.sh | bash
 ```
 
 `bootstrap.sh` 는 Docker 설치 → 저장소 clone (`~/coupang-deal-bot`) → `.env` 템플릿 생성까지 합니다. 끝나면 로그아웃 후 다시 로그인하세요 (docker 그룹 반영).
 
-## 3. 설정 & 실행
+## 3. 설정 & 실행 (편집기 불필요)
+
+로그아웃 후 다시 접속한 뒤:
 
 ```bash
-cd ~/coupang-deal-bot
-nano .env            # 키/토큰 입력 (docs/SETUP_KEYS.md)
-docker compose pull  # GHCR 이미지 받기 (또는 docker compose build 로 직접 빌드)
-docker compose run --rm dealbot check      # 연결 점검
-docker compose up -d
-docker compose logs -f --tail=100
+cd ~/coupang-deal-bot && ./deploy/oracle/setup.sh
+```
+
+값을 하나씩 물어봅니다. 붙여넣고 엔터, 없는 값은 그냥 엔터로 건너뜁니다.
+
+1. 텔레그램 봇 토큰 / 채널 / 내 챗 ID (필수)
+2. ntfy 토픽 (선택)
+3. 쿠팡·링크프라이스·스레드 키 (승인 후에 넣어도 됨 — 나중에 `setup.sh` 를 다시 실행하면 됩니다)
+4. 연습 모드 여부 (기본 y: 채널에 올리지 않고 관리자 챗에만 미리보기)
+
+마지막에 연결 점검과 실행까지 자동으로 합니다. 아이패드 SSH 에서도 붙여넣기만 하면 됩니다.
+
+```bash
+docker compose logs -f --tail=100   # 로그 보기
 ```
 
 `restart: unless-stopped` 라 VM 이 재부팅돼도 자동으로 다시 뜹니다. 가격 이력 DB 는 도커 볼륨 `dealbot-data` 에 저장됩니다.

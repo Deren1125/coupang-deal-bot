@@ -2,7 +2,7 @@
 # 최신 코드/이미지로 갱신 후 재시작
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-git pull --ff-only
+git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD)"
 if docker compose pull 2>/dev/null; then
   echo "==> GHCR 이미지 갱신"
 else
