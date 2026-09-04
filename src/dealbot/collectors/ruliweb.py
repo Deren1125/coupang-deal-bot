@@ -70,12 +70,11 @@ def parse_title(title: str, registry: ShopRegistry) -> dict[str, Any]:
             if shop:
                 break
     price: int | None = None
-    m_price = None
-    for m_price in _PRICE_RE.finditer(text):
-        pass
-    if m_price:
-        price = parse_price(m_price.group(1))
-        name = text[: m_price.start()]
+    matches = list(_PRICE_RE.finditer(text))
+    if matches:
+        last = matches[-1]  # 마지막 "N원" 을 판매가로
+        price = parse_price(last.group(1))
+        name = text[: last.start()]
     else:
         name = text
     name = _TRAILING_RE.sub("", name).strip(" ,/-")
