@@ -20,7 +20,7 @@ log = logging.getLogger("dealbot.cli")
 
 def _settings(args: argparse.Namespace) -> Settings:
     s = load_settings(args.config)
-    setup_logging(s.app.log_level, s.log_dir if not args.no_log_file else None)
+    setup_logging(s.app.log_level, s.log_dir if not args.no_log_file else None, timezone=s.app.timezone)
     return s
 
 
