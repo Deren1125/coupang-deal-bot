@@ -112,6 +112,17 @@ collectors:
       request_delay_seconds: 2
       max_detail_fetch_per_run: 10
 
+  # 루리웹 유저 핫딜 게시판(1020): 일반 회원이 공유하고 추천으로 검증되는 곳. 관심도 게이트 정상 적용.
+  - name: ruliweb_user
+    type: ruliweb
+    enabled: true
+    interval_minutes: 20
+    options:
+      board_id: "1020"
+      shops: []                  # 등록된 모든 쇼핑몰
+      request_delay_seconds: 2
+      max_detail_fetch_per_run: 10
+
   # 알구몬: 뽐뿌·루리웹·클리앙·퀘이사존 등 커뮤니티 핫딜 통합. 페이지 구조 확인 전이라 기본 꺼짐.
   # 켜서 돌린 뒤 /errors 에 "no rows matched ... DOM:" 이 뜨면 그 내용을 알려주세요 → options.selectors 를 맞춥니다.
   - name: algumon
