@@ -27,6 +27,20 @@ from dealbot.utils.urls import canonical_product_url, is_short_affiliate_link
 
 BASE_URL = "https://www.ppomppu.co.kr"
 LIST_URL = BASE_URL + "/zboard/zboard.php"
+MOBILE_BASE_URL = "https://m.ppomppu.co.kr"
+MOBILE_LIST_URL = MOBILE_BASE_URL + "/new/bbs_list.php"
+
+# 뽐뿌는 평범한 크롤러 요청을 403 으로 막는다. 실제 브라우저가 보내는 헤더를 갖춰야 통과한다.
+BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Cache-Control": "max-age=0",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
 
 # "[쿠팡] 상품명 (12,900원/무료)" 형태
 _TITLE_RE = re.compile(r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*(?:\((?P<meta>[^()]*)\))?\s*$")
@@ -165,17 +179,31 @@ def find_shop_urls(html: str, shop: Shop | None) -> list[str]:
 @register("ppomppu")
 class PpomppuCollector(BaseCollector):
     requires_coupang = False
+    _warmed = False
 
     @property
     def registry(self) -> ShopRegistry:
         reg = getattr(self.ctx, "shops", None)
         return reg if reg is not None else self.ctx.settings.shop_registry()
 
-    async def _get(self, url: str, params: dict[str, Any] | None = None) -> str:
+    async def _warm_up(self, base_url: str) -> None:
+        """목록을 읽기 전에 홈을 한 번 방문해 쿠키를 받는다 (봇 차단 회피)."""
+        if self._warmed:
+            return
+        self._warmed = True
+        try:
+            await self.ctx.http.get(base_url + "/", headers=BROWSER_HEADERS, follow_redirects=True, timeout=15)
+        except Exception as e:  # noqa: BLE001 — 실패해도 본 요청은 시도한다
+            self.log.debug("warm-up failed for %s: %s", base_url, e)
+
+    async def _get(self, url: str, params: dict[str, Any] | None = None, *, referer: str | None = None) -> str:
         http_cfg = self.ctx.settings.http
+        headers = {**BROWSER_HEADERS}
+        if referer:
+            headers["Referer"] = referer
 
         async def _do() -> str:
-            resp = await self.ctx.http.get(url, params=params, follow_redirects=True)
+            resp = await self.ctx.http.get(url, params=params, headers=headers, follow_redirects=True)
             resp.raise_for_status()
             return decode_html(resp)
 
@@ -245,11 +273,29 @@ class PpomppuCollector(BaseCollector):
                 or (interest.min_views > 0 and views >= interest.min_views)
             )
 
+        list_url = self.opt("list_url", LIST_URL)
+        base_url = self.opt("base_url", BASE_URL)
+        self._warmed = False
+        await self._warm_up(base_url)
+
         listed: list[dict[str, Any]] = []
         for page in range(1, pages + 1):
             if page > 1:
                 await asyncio.sleep(delay)
-            html = await self._get(LIST_URL, params={"id": board, "page": page})
+            try:
+                html = await self._get(list_url, params={"id": board, "page": page}, referer=base_url + "/")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 403 or not self.opt("mobile_fallback", True):
+                    raise
+                # 데스크톱이 막히면 모바일 주소로 한 번 더 (구조가 달라 셀렉터는 options 로 조정)
+                self.log.warning("ppomppu desktop 403 — 모바일 주소로 재시도합니다")
+                self._warmed = False
+                await self._warm_up(MOBILE_BASE_URL)
+                html = await self._get(
+                    self.opt("mobile_list_url", MOBILE_LIST_URL),
+                    params={"id": board, "page": page},
+                    referer=MOBILE_BASE_URL + "/",
+                )
             items = parse_list_page(
                 html, row_selector=row_sel, title_selector=title_sel, thumb_selector=thumb_sel,
                 rec_selector=rec_sel, views_selector=views_sel, comments_selector=comments_sel,
@@ -294,7 +340,7 @@ class PpomppuCollector(BaseCollector):
                 await asyncio.sleep(delay)
             fetched += 1
             try:
-                detail_html = await self._get(item["post_url"])
+                detail_html = await self._get(item["post_url"], referer=list_url)
             except Exception as e:  # noqa: BLE001
                 self.log.warning("detail fetch failed %s: %s", item["post_url"], e)
                 continue

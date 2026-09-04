@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 
 from dealbot.collectors import CollectorContext, build_collector
 from dealbot.collectors.ppomppu import (
@@ -137,3 +138,43 @@ def test_registry_plugin_path() -> None:
 
     assert {"coupang_goldbox", "coupang_category_best", "ppomppu", "adpick_hotdeal"} <= set(available_types())
     assert resolve_type("dealbot.collectors.ppomppu:PpomppuCollector") is PpomppuCollector
+
+
+async def test_403_falls_back_to_mobile(settings: Settings, db: Database, fixtures_dir: Path) -> None:
+    """데스크톱이 403 이면 모바일 주소로 재시도하고, 브라우저 헤더와 워밍업 요청이 들어간다."""
+    seen: list[tuple[str, str]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append((req.url.host, req.url.path))
+        assert req.headers.get("upgrade-insecure-requests") == "1"
+        assert "ko-KR" in req.headers.get("accept-language", "")
+        if req.url.host == "www.ppomppu.co.kr" and req.url.path == "/zboard/zboard.php":
+            return httpx.Response(403, text="blocked")
+        if req.url.path in ("/", "/new/bbs_list.php", "/zboard/zboard.php"):
+            return httpx.Response(200, content=(fixtures_dir / "ppomppu_list.html").read_bytes(),
+                                  headers={"content-type": "text/html; charset=utf-8"})
+        f = fixtures_dir / f"ppomppu_view_{req.url.params.get('no', '')}.html"
+        if f.exists():
+            return httpx.Response(200, content=f.read_bytes(), headers={"content-type": "text/html; charset=utf-8"})
+        return httpx.Response(404)
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    ctx = CollectorContext(settings=settings, http=http, db=db, coupang=None, shops=settings.shop_registry())
+    cfg = CollectorConfig(name="pp403", type="ppomppu", options={"request_delay_seconds": 0, "max_detail_fetch_per_run": 1})
+    products = await build_collector(cfg, ctx).collect()
+
+    hosts_paths = [f"{h}{p}" for h, p in seen]
+    assert "www.ppomppu.co.kr/" in hosts_paths          # 워밍업
+    assert "m.ppomppu.co.kr/new/bbs_list.php" in hosts_paths  # 모바일 폴백
+    assert products  # 모바일에서 목록을 읽어 상품이 나온다
+
+
+async def test_403_without_fallback_raises(settings: Settings, db: Database) -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html></html>") if req.url.path == "/" else httpx.Response(403, text="no")
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    ctx = CollectorContext(settings=settings, http=http, db=db, coupang=None, shops=settings.shop_registry())
+    cfg = CollectorConfig(name="pp", type="ppomppu", options={"request_delay_seconds": 0, "mobile_fallback": False})
+    with pytest.raises(httpx.HTTPStatusError, match="403"):
+        await build_collector(cfg, ctx).collect()
