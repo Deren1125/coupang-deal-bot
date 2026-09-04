@@ -334,6 +334,25 @@ class DealBot:
         except Exception as e:  # noqa: BLE001
             return None, f"❌ 스크린샷 실패: {e}"
 
+    async def fetch_html(self, url: str) -> tuple[bytes | None, str]:
+        """서버에서 페이지 원문을 받아 그대로 돌려준다 (셀렉터 조정용). 브라우저가 켜져 있으면 렌더링된 DOM 을 준다."""
+        try:
+            if self.browser is not None:
+                async def _dom(page: Any) -> str:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    await page.wait_for_timeout(1500)
+                    return await page.content()
+
+                html = await self.browser.run(_dom)
+                return html.encode("utf-8"), f"렌더링된 DOM ({len(html):,}자)"
+            resp = await self.http.get(url, follow_redirects=True, timeout=30)
+            from dealbot.collectors.ppomppu import decode_html
+
+            html = decode_html(resp)
+            return html.encode("utf-8"), f"HTTP {resp.status_code} ({len(html):,}자)"
+        except Exception as e:  # noqa: BLE001
+            return None, f"❌ 가져오기 실패: {e}"
+
     async def naver_link_test(self, url: str) -> str:
         if self.naver_connect is None:
             return "브라우저 자동화가 꺼져 있습니다 (browser.enabled)."

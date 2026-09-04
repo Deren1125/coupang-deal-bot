@@ -68,6 +68,7 @@ https://toss.im/_m/P4Qr1ope
 | `/test` | 샘플 딜을 관리자 챗에 보내 양식 확인 |
 | `/ppstats` `/hot [N]` `/find 키워드` | 커뮤니티 글 추천·조회·댓글 분포 / 추천 N개 이상 글 목록 / 상품이 어느 소스에 언제 올라왔는지 검색 |
 | `/naverlogin` `/naverlink URL` `/shot URL` | 네이버 브라우저 자동화: QR 로그인 / 링크 생성 테스트 / 스크린샷 |
+| `/html URL` | 페이지 원문을 파일로 받기 (알구몬·뽐뿌 구조가 바뀌었을 때 셀렉터 조정용) |
 | `/queue` `/recent` `/errors` | 대기열 / 최근 발행 / 최근 에러 |
 | `/run [수집기]` `/pause` `/resume` | 즉시 수집 / 일시정지 / 재개 |
 

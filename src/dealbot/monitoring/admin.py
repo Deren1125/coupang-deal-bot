@@ -374,6 +374,8 @@ class BotController(Protocol):
 
     async def screenshot(self, url: str) -> tuple[bytes | None, str]: ...
 
+    async def fetch_html(self, url: str) -> tuple[bytes | None, str]: ...
+
     async def naver_link_test(self, url: str) -> str: ...
 
 
@@ -393,6 +395,7 @@ HELP_TEXT = (
     "/naverlogin — 네이버 QR 로그인 (브라우저 자동화 켰을 때)\n"
     "/naverlink 상품URL — 쇼핑커넥트 링크 자동 생성 테스트\n"
     "/shot URL — 서버 브라우저 스크린샷 (셀렉터 조정용)\n"
+    "/html URL — 페이지 원문(HTML)을 파일로 받기 (알구몬/뽐뿌 구조 확인용)\n"
     "/recent — 최근 발행 목록\n"
     "/errors — 최근 에러\n"
     "/run [수집기이름] — 지금 바로 수집 실행\n"
@@ -509,6 +512,21 @@ def register_admin_handlers(
         data, text = await controller.screenshot(args[0])
         await _send_photo(update, data, text)
 
+    async def cmd_html(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args or not args[0].startswith("http"):
+            await reply(update, "사용법: <code>/html https://www.algumon.com/n/deal</code>")
+            return
+        data, text = await controller.fetch_html(args[0])
+        msg = update.effective_message
+        if msg is None:
+            return
+        if data:
+            name = re.sub(r"[^A-Za-z0-9._-]+", "_", args[0].split("//", 1)[-1])[:60] + ".html"
+            await msg.reply_document(document=data, filename=name, caption=f"{text}\n이 파일을 Claude 에게 올려주면 셀렉터를 맞춥니다.")
+        else:
+            await msg.reply_text(text)
+
     async def cmd_naverlink(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
         if not args or not args[0].startswith("http"):
@@ -558,6 +576,7 @@ def register_admin_handlers(
         ("naverlogin", cmd_naverlogin),
         ("naverlink", cmd_naverlink),
         ("shot", cmd_shot),
+        ("html", cmd_html),
         ("help", cmd_help),
         ("start", cmd_help),
     ):

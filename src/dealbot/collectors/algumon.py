@@ -142,7 +142,9 @@ class AlgumonCollector(BaseCollector):
             summary = dom_summary(html)
             self.log.warning("algumon: no rows matched — page structure: %s", summary)
             self.ctx.db.log_event("ERROR", f"collector:{self.name}", f"no rows matched selectors. DOM: {summary}")
-            return []
+            raise RuntimeError(
+                f"알구몬 목록에서 행을 못 찾음 (셀렉터 조정 필요). /html {url} 로 원문을 받아 Claude 에게 주세요. DOM 요약: {summary[:600]}"
+            )
 
         products: list[Product] = []
         fetched = 0
