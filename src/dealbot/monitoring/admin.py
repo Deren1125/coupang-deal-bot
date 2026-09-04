@@ -11,7 +11,15 @@ from typing import Any, Protocol
 from telegram import Bot, Update
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    ApplicationHandlerStop,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    TypeHandler,
+    filters,
+)
 
 from dealbot import __version__
 from dealbot.config import MonitoringConfig, Settings
@@ -29,6 +37,16 @@ from dealbot.utils.timeutil import fmt_local, humanize_delta, utcnow
 
 log = logging.getLogger(__name__)
 _QUEUE_REF_RE = re.compile(r"#(\d+)")
+STALE_COMMAND_MAX_AGE = timedelta(minutes=15)  # 봇이 꺼져 있던 동안 쌓인 명령 중 이보다 오래된 것은 무시
+
+
+def is_stale_message(sent_at: datetime | None, now: datetime | None = None, max_age: timedelta = STALE_COMMAND_MAX_AGE) -> bool:
+    if sent_at is None:
+        return False
+    now = now or utcnow()
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=now.tzinfo)
+    return now - sent_at > max_age
 
 
 class AdminNotifier:
@@ -76,7 +94,8 @@ class AdminNotifier:
                 chat_id=self.chat_id,
                 text=text[:4096],
                 parse_mode=ParseMode.HTML,
-                disable_notification=silent,
+                # silent 는 "일상 알림" 표시일 뿐, 실제 무음 여부는 monitoring.quiet_notices 가 결정
+                disable_notification=silent and self.cfg.quiet_notices,
                 link_preview_options=None,
             )
             return True
@@ -364,6 +383,32 @@ class StatusReporter:
     def summary_text(self, summary: PeriodSummary) -> str:
         return self.renderer.render("daily_summary.j2", s=summary, tz=self.settings.app.timezone)
 
+    def heartbeat_text(self, hours: float) -> str:
+        """N시간마다 보내는 짧은 생존 신고."""
+        now = utcnow()
+        s = self.db.summary(now - timedelta(hours=hours), now)
+        counts = self.db.queue_counts()
+        mode = " · DRY-RUN" if self.state.dry_run else ""
+        paused = " · ⏸ 일시정지" if self.state.paused else ""
+        span = f"{hours:g}시간"
+        lines = [
+            f"🫀 <b>정상 가동 중</b> · 가동 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
+            f"최근 {span}: 수집 {s.runs}회{f' (실패 {s.run_errors})' if s.run_errors else ''} · 글 {s.collected}건 · 특가 {s.deals_found}건 · 발행 {s.published}건",
+            f"대기열 {counts.get('pending', 0)} 대기 · {counts.get('awaiting_link', 0)} 링크대기",
+        ]
+        nxt = [
+            f"{st.name} {humanize_delta(st.next_run_at - now) if st.next_run_at and st.next_run_at > now else '곧'}"
+            for st in self.state.collectors.values()
+            if st.enabled and st.available
+        ]
+        if nxt:
+            lines.append("다음 수집: " + " · ".join(nxt))
+        if s.errors:
+            lines.append(f"🚨 에러 {s.errors}건 — /errors")
+        if s.deals_found == 0 and s.published == 0:
+            lines.append("특가가 없었던 건 정상입니다. 기준을 넘는 글이 없으면 조용합니다.")
+        return "\n".join(lines)
+
 
 class BotController(Protocol):
     """관리자 명령이 조작하는 인터페이스 (app.DealBot 이 구현)."""
@@ -447,6 +492,13 @@ def register_admin_handlers(
     async def reply(update: Update, text: str) -> None:
         if update.effective_message:
             await update.effective_message.reply_text(text[:4096], parse_mode=ParseMode.HTML)
+
+    async def drop_stale(update: object, _: ContextTypes.DEFAULT_TYPE) -> None:
+        # 봇이 꺼져 있던 동안 쌓인 오래된 명령은 실행하지 않는다 (재배포 직후 옛 /run, /post 가 다시 도는 것 방지)
+        msg = getattr(update, "effective_message", None)
+        if msg is not None and is_stale_message(getattr(msg, "date", None)):
+            log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), (getattr(msg, "text", "") or "")[:40])
+            raise ApplicationHandlerStop
 
     async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.status_text())
@@ -633,5 +685,6 @@ def register_admin_handlers(
         ("start", cmd_help),
     ):
         app.add_handler(CommandHandler(cmd, fn, filters=only_admin))
+    app.add_handler(TypeHandler(Update, drop_stale), group=-1)
     app.add_handler(MessageHandler(only_admin & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(CommandHandler(["start", "status", "help"], cmd_unknown_chat, filters=~only_admin))

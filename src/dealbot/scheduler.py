@@ -87,6 +87,21 @@ async def daily_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
         await _sleep_or_stop(stop, 60)
 
 
+async def heartbeat_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """monitoring.heartbeat_hours 마다 '정상 가동 중' 상태를 관리자 챗으로. 조용한 시간에도 살아 있음을 알린다."""
+    hours = bot.settings.monitoring.heartbeat_hours
+    if hours <= 0:
+        return
+    while not stop.is_set():
+        await _sleep_or_stop(stop, hours * 3600)
+        if stop.is_set():
+            break
+        try:
+            await bot.send_heartbeat()
+        except Exception as e:  # noqa: BLE001
+            log.warning("heartbeat notice failed: %s", e)
+
+
 async def maintenance_loop(bot: DealBot, stop: asyncio.Event) -> None:
     while not stop.is_set():
         await _sleep_or_stop(stop, 6 * 3600)
@@ -143,6 +158,7 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(publisher_loop(bot, stop), name="publisher_loop"),
         asyncio.create_task(daily_summary_loop(bot, stop), name="daily_summary_loop"),
         asyncio.create_task(maintenance_loop(bot, stop), name="maintenance_loop"),
+        asyncio.create_task(heartbeat_loop(bot, stop), name="heartbeat_loop"),
     ]
     try:
         await stop.wait()

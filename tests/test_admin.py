@@ -116,3 +116,66 @@ async def test_push_test_sends_ntfy(bot: DealBot) -> None:
 
     bot.push.http = httpx.AsyncClient(transport=httpx.MockTransport(failing))
     assert (await bot.push_test()).startswith("❌")
+
+
+def test_heartbeat_text(bot: DealBot) -> None:
+    text = bot.reporter.heartbeat_text(3)
+    assert text.startswith("🫀 <b>정상 가동 중</b>") and "DRY-RUN" in text
+    assert "최근 3시간: 수집 0회 · 글 0건 · 특가 0건 · 발행 0건" in text
+    assert "다음 수집: fake" in text and "특가가 없었던 건 정상" in text
+
+
+async def test_send_heartbeat_uses_notifier(bot: DealBot) -> None:
+    bot.settings.monitoring.heartbeat_hours = 2
+    text = await bot.send_heartbeat()
+    assert "최근 2시간" in text and bot.sent == [text]  # type: ignore[attr-defined]
+
+
+async def test_quiet_notices_controls_silent_flag(settings: Settings) -> None:
+    from dealbot.monitoring.admin import AdminNotifier
+    from dealbot.publisher.templates import TemplateRenderer
+
+    calls: list[dict] = []  # type: ignore[type-arg]
+
+    class FakeBot:
+        async def send_message(self, **kw):  # type: ignore[no-untyped-def]
+            calls.append(kw)
+
+    renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone)
+    n = AdminNotifier(FakeBot(), 42, settings.monitoring, renderer, settings.app.timezone)  # type: ignore[arg-type]
+    assert settings.monitoring.quiet_notices is False
+    await n.send("a", silent=True)
+    assert calls[-1]["disable_notification"] is False  # 기본: 일상 알림도 소리와 함께
+    settings.monitoring.quiet_notices = True
+    await n.send("b", silent=True)
+    await n.send("c")
+    assert calls[-2]["disable_notification"] is True and calls[-1]["disable_notification"] is False
+
+
+def test_stale_message_guard() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from dealbot.monitoring.admin import is_stale_message
+
+    now = datetime(2026, 9, 4, 12, 0, tzinfo=UTC)
+    assert not is_stale_message(now - timedelta(minutes=5), now)
+    assert is_stale_message(now - timedelta(minutes=16), now)
+    assert not is_stale_message(None, now)
+    assert is_stale_message(datetime(2026, 9, 4, 11, 0), now)  # naive → UTC 로 간주
+
+
+def test_linkprice_shops_follow_provider(settings: Settings) -> None:
+    settings.collectors = []
+    b = DealBot(settings)
+    try:
+        assert b.registry.get("ssg").enabled is False and "linkprice 미설정" in b.links.describe(b.registry.get("ssg"))  # type: ignore[union-attr, arg-type]
+        assert b.registry.get("oliveyoung").enabled is False and b.registry.get("coupang").enabled  # type: ignore[union-attr]
+        assert [r["key"] for r in b.reporter._shop_rows() if r["enabled"]] == ["coupang", "toss", "naver"]
+    finally:
+        b.db.close()
+    settings.secrets.linkprice_affiliate_id = "A100"
+    b2 = DealBot(settings)
+    try:
+        assert b2.registry.get("ssg").enabled is True and b2.links.describe(b2.registry.get("ssg")) == "자동 변환(linkprice)"  # type: ignore[union-attr, arg-type]
+    finally:
+        b2.db.close()

@@ -21,6 +21,8 @@ def test_load_repo_config(repo_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_
     assert {sh.key for sh in s.shops} >= {"coupang", "toss", "naver"}
     assert s.deal.community_min_recommend == 5
     assert s.deal.accept_coupons_and_events is False  # 이벤트/쿠폰(가격 없는 글)은 올리지 않기로 함
+    assert s.deal.market.min_below_market_pct == 20 and s.deal.market.strict  # 쿠팡 최저가보다 20% 이상 싸야 특가
+    assert s.monitoring.heartbeat_hours == 3 and s.monitoring.quiet_notices is False
     assert s.deal.min_discount_rate == 50
     assert s.deal.min_below_average_pct == 15
     assert s.coupang.max_calls_per_hour == 10 and s.deal.market.enabled and not s.browser.enabled

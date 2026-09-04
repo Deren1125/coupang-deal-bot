@@ -122,6 +122,15 @@ class DealEvaluator:
                     sample_count=stats.count, score=round(below_market_pct, 1),
                     market_price=quote.price, market_source=quote.source, below_market_pct=below_market_pct,
                 )
+            if mcfg.strict:
+                # 대조 결과가 있으면 기준 미만은 무조건 탈락 (보조 규칙으로 안 넘어감)
+                reasons.append("above_market_price" if below_market_pct <= 0 else f"below_{quote.source}_price<{mcfg.min_below_market_pct:g}%")
+                return DealVerdict(
+                    is_deal=False, reasons=reasons, discount_rate=discount,
+                    avg_price=round(stats.avg, 0) if stats.avg else None, below_avg_pct=below_avg_pct,
+                    sample_count=stats.count, market_price=quote.price, market_source=quote.source,
+                    below_market_pct=below_market_pct,
+                )
             if mcfg.veto_if_not_cheaper and below_market_pct <= 0:
                 reasons.append("above_market_price")
                 return DealVerdict(

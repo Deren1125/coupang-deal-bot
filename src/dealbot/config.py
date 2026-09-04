@@ -65,6 +65,7 @@ class ShopConfig(BaseModel):
     enabled: bool | None = None
     manual_hint: str | None = None
     manual_fallback: bool | None = None
+    requires_provider: bool | None = None  # provider(링크프라이스 등)가 설정돼 있을 때만 켜짐
 
     @field_validator("link_mode")
     @classmethod
@@ -85,8 +86,9 @@ class MarketCheckConfig(BaseModel):
     """(d) 시중가 대조: 다른 몰의 딜을 쿠팡 검색 API 로 찾은 같은 상품 가격과 비교."""
 
     enabled: bool = True
-    min_below_market_pct: float = 10  # 쿠팡가보다 N% 이상 싸면 특가
-    veto_if_not_cheaper: bool = True  # 쿠팡가보다 싸지 않으면 (a)/(c) 로 잡혀도 탈락
+    min_below_market_pct: float = 20  # 쿠팡가보다 N% 이상 싸면 특가
+    strict: bool = True  # 대조 결과가 있으면 N% 미만은 무조건 탈락 (false: 0~N% 사이는 (b)/(c) 보조 규칙으로 판정)
+    veto_if_not_cheaper: bool = True  # (strict 가 아닐 때) 쿠팡가보다 싸지 않으면 (a)/(c) 로 잡혀도 탈락
     require_for_discount_rule: bool = True  # 대조가 가능한 환경이면 (a) 표시 할인율만으로는 통과 못 함
     max_checks_per_hour: int = 3  # 쿠팡 검색 API 호출 예산 (전체 예산 안에서)
     cache_hours: int = 24
@@ -238,6 +240,8 @@ class MonitoringConfig(BaseModel):
     notify_on_manual_link: bool = True
     error_alert_cooldown_minutes: int = 30
     daily_summary_time: str = "21:00"
+    quiet_notices: bool = False  # true: 시작/미리보기/발행 알림을 무음으로 (false: 모든 알림이 소리·진동과 함께 옴)
+    heartbeat_hours: float = 0  # N시간마다 "정상 가동 중" 짧은 상태를 관리자 챗으로 (0 = 끔)
 
     @field_validator("daily_summary_time")
     @classmethod
@@ -349,7 +353,7 @@ class Settings(BaseModel):
         }
         for o in self.shops:
             base = shops.get(o.key) or Shop(key=o.key, name=o.name or o.key)
-            for f in ("name", "aliases", "domains", "link_mode", "provider", "disclosure", "enabled", "manual_hint", "manual_fallback"):
+            for f in ("name", "aliases", "domains", "link_mode", "provider", "disclosure", "enabled", "manual_hint", "manual_fallback", "requires_provider"):
                 v = getattr(o, f)
                 if v is not None:
                     setattr(base, f, v)

@@ -142,7 +142,7 @@ class LinkRouter:
     def describe(self, shop: Shop) -> str:
         """상태 표시용: 이 쇼핑몰의 링크가 어떻게 처리되는지."""
         if not shop.enabled:
-            return "꺼짐"
+            return f"꺼짐 ({shop.disabled_reason})" if shop.disabled_reason else "꺼짐"
         if shop.link_mode == "api":
             if self.provider_for(shop):
                 return f"자동 변환({shop.provider})" + (", 실패 시 수동" if shop.manual_fallback else "")

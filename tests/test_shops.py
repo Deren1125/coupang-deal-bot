@@ -54,3 +54,29 @@ def test_config_override(tmp_path: Path) -> None:
     assert reg.by_alias("마이몰").key == "mymall"  # type: ignore[union-attr]
     assert len(reg.all()) == len(DEFAULT_SHOPS) + 1
     assert ShopConfig(key="x", link_mode="raw").link_mode == "raw"
+
+
+def test_default_enabled_shops_and_provider_gating() -> None:
+    reg = ShopRegistry()
+    assert {s.key for s in reg.enabled()} == {"coupang", "toss", "naver", "11st", "gmarket", "auction", "ssg", "lotteon", "aliexpress", "ohouse"}
+    for key in ("oliveyoung", "kurly", "musinsa", "temu", "daiso"):
+        assert reg.get(key).enabled is False  # type: ignore[union-attr]
+    # 링크프라이스 변환기가 없으면 링크프라이스 몰은 자동으로 꺼진다
+    off = reg.apply_providers({"coupang"})
+    assert sorted(off) == ["11st", "aliexpress", "auction", "gmarket", "lotteon", "ohouse", "ssg"]
+    assert {s.key for s in reg.enabled()} == {"coupang", "toss", "naver"}
+    assert "linkprice 미설정" in (reg.get("ssg").disabled_reason or "")  # type: ignore[union-attr]
+    # 변환기가 있으면 그대로 켜진 채 남는다
+    reg2 = ShopRegistry()
+    assert reg2.apply_providers({"coupang", "linkprice"}) == []
+    assert reg2.get("ssg").enabled is True  # type: ignore[union-attr]
+
+
+def test_requires_provider_override_from_config(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from dealbot.config import load_settings
+
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("shops:\n  - {key: ssg, enabled: true, link_mode: raw, requires_provider: false}\n", encoding="utf-8")
+    reg = load_settings(cfg, load_env=False).shop_registry()
+    assert reg.apply_providers(set()) == ["11st", "gmarket", "auction", "lotteon", "aliexpress", "ohouse"]
+    assert reg.get("ssg").enabled is True and reg.get("ssg").link_mode == "raw"  # type: ignore[union-attr]

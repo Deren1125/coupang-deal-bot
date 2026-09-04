@@ -117,6 +117,9 @@ class DealBot:
                 retries=settings.http.max_retries,
                 backoff=settings.http.retry_backoff_seconds,
             )
+        auto_off = self.registry.apply_providers(providers.keys())
+        if auto_off:
+            log.info("shops off until their link provider is configured: %s", ", ".join(auto_off))
         self.links = LinkRouter(self.registry, settings.links, settings.publish, providers=providers)
 
         self.evaluator = DealEvaluator(settings.deal)
@@ -237,7 +240,8 @@ class DealBot:
         except Exception as e:  # noqa: BLE001
             log.warning("get_me failed: %s", e)
         if polling and self.settings.secrets.telegram_admin_chat_id and self.application.updater:
-            await self.application.updater.start_polling(allowed_updates=[Update.MESSAGE], drop_pending_updates=True)
+            # 재배포 중(봇이 잠깐 꺼진 사이)에 보낸 명령도 켜지면 처리한다. 너무 오래된 것은 admin 쪽 가드가 버림
+            await self.application.updater.start_polling(allowed_updates=[Update.MESSAGE], drop_pending_updates=False)
 
     async def stop_telegram(self) -> None:
         if self.application is None:
@@ -831,6 +835,12 @@ class DealBot:
 
     def heartbeat(self) -> None:
         self.db.kv_set("heartbeat", to_iso(utcnow()))
+
+    async def send_heartbeat(self) -> str:
+        """N시간마다 관리자 챗으로 보내는 짧은 '정상 가동 중' 상태."""
+        text = self.reporter.heartbeat_text(self.settings.monitoring.heartbeat_hours or 3)
+        await self.notifier.send(text)
+        return text
 
     def maintenance(self) -> None:
         pruned = self.db.prune(

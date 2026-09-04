@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 
@@ -32,6 +34,8 @@ class Shop:
     enabled: bool = True
     manual_hint: str | None = None  # manual 모드일 때 관리자에게 보여줄 안내
     manual_fallback: bool = False  # api 모드에서 자동 변환이 실패하면 수동(관리자 링크)으로 넘길지
+    requires_provider: bool = False  # provider 가 설정돼 있을 때만 켜짐 (API 로 링크가 자동 발급되는 경우에만 수집)
+    disabled_reason: str | None = None  # 자동으로 꺼졌을 때의 이유 (상태 표시용)
 
     def matches_url(self, url: str) -> bool:
         try:
@@ -78,6 +82,7 @@ DEFAULT_SHOPS: list[Shop] = [
         manual_hint="쇼핑커넥트(connect.naver.com) 에서 상품 URL 로 링크 생성",
         manual_fallback=True,
     ),
+    # ---- 앱에서만 링크를 만들 수 있고(API 없음) 특가 빈도가 낮은 몰: 기본 꺼짐. config.yaml 에서 enabled: true 로 켤 수 있음
     Shop(
         key="oliveyoung",
         name="올리브영",
@@ -86,6 +91,7 @@ DEFAULT_SHOPS: list[Shop] = [
         link_mode="manual",
         disclosure=_d("올리브영 쇼핑 큐레이터"),
         manual_hint="올리브영 앱 → 상품 → 공유 → 큐레이터 링크",
+        enabled=False,
     ),
     Shop(
         key="kurly",
@@ -95,6 +101,7 @@ DEFAULT_SHOPS: list[Shop] = [
         link_mode="manual",
         disclosure=_d("컬리 큐레이터"),
         manual_hint="컬리 앱 → 마이컬리 → 컬리 큐레이터 → 상품 링크 생성",
+        enabled=False,
     ),
     Shop(
         key="musinsa",
@@ -104,16 +111,19 @@ DEFAULT_SHOPS: list[Shop] = [
         link_mode="manual",
         disclosure=_d("무신사 큐레이터"),
         manual_hint="무신사 앱 → 상품 → 공유 → 큐레이터 링크",
+        enabled=False,
     ),
-    Shop(key="11st", name="11번가", aliases=["11번가", "십일번가", "11st"], domains=["11st.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅")),
-    Shop(key="gmarket", name="G마켓", aliases=["지마켓", "g마켓", "gmarket"], domains=["gmarket.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅")),
-    Shop(key="auction", name="옥션", aliases=["옥션", "auction"], domains=["auction.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅")),
-    Shop(key="ssg", name="SSG", aliases=["ssg", "쓱", "이마트몰", "신세계몰"], domains=["ssg.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅")),
-    Shop(key="lotteon", name="롯데온", aliases=["롯데온", "롯데ON", "lotteon"], domains=["lotteon.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅")),
-    Shop(key="aliexpress", name="알리익스프레스", aliases=["알리", "알리익스프레스", "aliexpress", "ali"], domains=["aliexpress.com", "aliexpress.us"], link_mode="api", provider="linkprice", disclosure=_d("알리익스프레스 제휴마케팅")),
-    Shop(key="temu", name="테무", aliases=["테무", "temu"], domains=["temu.com"], link_mode="raw", disclosure=None),
-    Shop(key="daiso", name="다이소몰", aliases=["다이소", "다이소몰"], domains=["daisomall.co.kr"], link_mode="raw"),
-    Shop(key="ohouse", name="오늘의집", aliases=["오늘의집", "오하우스"], domains=["ohou.se"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅")),
+    # ---- 링크프라이스 API 로 링크가 자동 발급되는 몰: LINKPRICE_AFFILIATE_ID 가 있을 때만 켜짐 (requires_provider)
+    Shop(key="11st", name="11번가", aliases=["11번가", "십일번가", "11st"], domains=["11st.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="gmarket", name="G마켓", aliases=["지마켓", "g마켓", "gmarket"], domains=["gmarket.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="auction", name="옥션", aliases=["옥션", "auction"], domains=["auction.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="ssg", name="SSG", aliases=["ssg", "쓱", "이마트몰", "신세계몰"], domains=["ssg.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="lotteon", name="롯데온", aliases=["롯데온", "롯데ON", "lotteon"], domains=["lotteon.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="aliexpress", name="알리익스프레스", aliases=["알리", "알리익스프레스", "aliexpress", "ali"], domains=["aliexpress.com", "aliexpress.us"], link_mode="api", provider="linkprice", disclosure=_d("알리익스프레스 제휴마케팅"), requires_provider=True),
+    Shop(key="ohouse", name="오늘의집", aliases=["오늘의집", "오하우스"], domains=["ohou.se"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    # ---- 수익이 없는 몰: 기본 꺼짐 (정보 공유용으로만 쓰려면 enabled: true)
+    Shop(key="temu", name="테무", aliases=["테무", "temu"], domains=["temu.com"], link_mode="raw", disclosure=None, enabled=False),
+    Shop(key="daiso", name="다이소몰", aliases=["다이소", "다이소몰"], domains=["daisomall.co.kr"], link_mode="raw", enabled=False),
 ]
 
 _URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+")
@@ -121,9 +131,10 @@ _URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+")
 
 class ShopRegistry:
     def __init__(self, shops: list[Shop] | None = None) -> None:
+        # 항상 복사본을 보관한다: apply_providers 등이 DEFAULT_SHOPS(전역)를 바꾸면 안 되므로
         self._shops: dict[str, Shop] = {}
         for s in shops if shops is not None else DEFAULT_SHOPS:
-            self._shops[s.key] = s
+            self._shops[s.key] = dataclasses.replace(s, aliases=list(s.aliases), domains=list(s.domains))
 
     # ------------------------------------------------------------ lookup
     def get(self, key: str) -> Shop | None:
@@ -134,6 +145,19 @@ class ShopRegistry:
 
     def enabled(self) -> list[Shop]:
         return [s for s in self._shops.values() if s.enabled]
+
+    def apply_providers(self, available: Iterable[str]) -> list[str]:
+        """requires_provider 인 몰은 링크 변환기(provider)가 실제로 설정돼 있을 때만 켠다. 꺼진 key 목록을 돌려준다."""
+        avail = set(available)
+        disabled: list[str] = []
+        for s in self._shops.values():
+            if not s.requires_provider or not s.enabled:
+                continue
+            if s.provider not in avail:
+                s.enabled = False
+                s.disabled_reason = f"{s.provider or 'provider'} 미설정 — API 링크 발급이 가능해지면 자동으로 켜짐"
+                disabled.append(s.key)
+        return disabled
 
     def keys(self) -> list[str]:
         return list(self._shops)

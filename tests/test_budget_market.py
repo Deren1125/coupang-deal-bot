@@ -98,10 +98,18 @@ def test_rule_d_and_veto() -> None:
     # 쿠팡이 더 쌈 → veto
     v = ev.evaluate(p, PriceStats(), MarketQuote(price=12000, source="coupang", title="핫도그"), market_available=True)
     assert not v.is_deal and "above_market_price" in v.reasons and v.market_price == 12000
-    # 쿠팡보다 15% 쌈 → (d)
-    v2 = ev.evaluate(Product(source="s", product_id="toss:2", shop="toss", name="핫도그", price=14890, url="u"), PriceStats(),
-                     MarketQuote(price=17900, source="coupang", title="핫도그"), market_available=True)
-    assert v2.is_deal and v2.reasons == ["below_coupang_price>=10%"] and v2.below_market_pct == 16.8 and v2.score == 16.8
+    # 쿠팡보다 16.8% 쌈 → 기준(20%) 미만이라 strict 모드에서는 탈락 (추천 9개가 있어도 보조 규칙으로 안 넘어감)
+    p2 = Product(source="s", product_id="toss:2", shop="toss", name="핫도그", price=14890, url="u", recommend_count=9)
+    v2 = ev.evaluate(p2, PriceStats(), MarketQuote(price=17900, source="coupang", title="핫도그"), market_available=True)
+    assert not v2.is_deal and v2.reasons == ["below_coupang_price<20%"] and v2.below_market_pct == 16.8 and v2.market_price == 17900
+    # 쿠팡보다 22.3% 쌈 → (d) 통과
+    v2b = ev.evaluate(Product(source="s", product_id="toss:3", shop="toss", name="핫도그", price=13900, url="u"), PriceStats(),
+                      MarketQuote(price=17900, source="coupang", title="핫도그"), market_available=True)
+    assert v2b.is_deal and v2b.reasons == ["below_coupang_price>=20%"] and v2b.below_market_pct == 22.3 and v2b.score == 22.3
+    # strict 를 끄면 0~20% 사이는 보조 규칙 (c) 로 판정
+    loose = DealEvaluator(DealConfig(interest=InterestConfig(enabled=False), community_min_recommend=5, market=MarketCheckConfig(strict=False)))
+    v2c = loose.evaluate(p2, PriceStats(), MarketQuote(price=17900, source="coupang", title="핫도그"), market_available=True)
+    assert v2c.is_deal and "market_diff=16.8%" in v2c.reasons and "recommend>=5" in v2c.reasons
     # 표시 할인율만 있고 대조 가능 환경에서 확인 안 됨 → 탈락
     v3 = ev.evaluate(Product(source="s", product_id="x:1", shop="11st", name="n", price=5000, url="u", discount_rate=60), PriceStats(), None, market_available=True)
     assert not v3.is_deal and v3.reasons == ["discount_unconfirmed"]

@@ -41,19 +41,23 @@ http:
 # ----------------------------------------------------------------------------
 # 쇼핑몰별 링크 처리. 기본값(src/dealbot/shops.py)을 key 단위로 덮어씁니다.
 #   link_mode: api    = 자동 변환 (provider: coupang | linkprice)
-#              manual = 내가 앱/사이트에서 만든 링크를 텔레그램으로 넘겨줘야 발행 (토스, 네이버, 올리브영, 컬리, 무신사)
+#              manual = 내가 앱/사이트에서 만든 링크를 텔레그램으로 넘겨줘야 발행 (토스, 네이버)
 #              raw    = 원본 링크 그대로 발행 (수익 없음, 정보 공유용)
 #              skip   = 발행 안 함
-# 기본 등록: coupang, toss, naver, oliveyoung, kurly, musinsa, 11st, gmarket, auction, ssg, lotteon,
-#            aliexpress, temu, daiso, ohouse
+#
+# 기본 상태 (2026-09 결정: 수수료가 작거나 특가가 드문 몰은 조사에서 제외, 단 API 로 링크가 자동 발급되면 포함):
+#   켜짐        coupang(API, 승인 전엔 반자동) · toss(반자동) · naver(반자동)
+#   자동        11st, gmarket, auction, ssg, lotteon, aliexpress, ohouse — 링크프라이스 API 로 자동 발급되므로
+#               LINKPRICE_AFFILIATE_ID 가 있을 때만 자동으로 켜짐 (requires_provider)
+#   꺼짐        oliveyoung, kurly, musinsa (앱에서만 링크 생성, 특가 드묾) · temu, daiso (수익 없음)
 # ----------------------------------------------------------------------------
 shops:
   - { key: coupang, enabled: true }   # API 키 없으면(최종 승인 전) 파트너스 사이트에서 만든 링크를 요청(반자동), 키가 생기면 자동
   - { key: toss, enabled: true }
   - { key: naver, enabled: true }
   # 브라우저 자동화를 켰다면:  - { key: naver, link_mode: api, provider: naver_connect, manual_fallback: true }
-  # 예) 네이버는 링크 만들기 귀찮으니 원본 링크로만: - { key: naver, link_mode: raw }
-  # 예) 테무는 아예 제외:                            - { key: temu, enabled: false }
+  # 예) 올리브영을 다시 켜기(반자동):                  - { key: oliveyoung, enabled: true }
+  # 예) 링크프라이스 없이도 SSG 를 원본 링크로 올리기:  - { key: ssg, enabled: true, link_mode: raw, requires_provider: false }
 
 # ----------------------------------------------------------------------------
 # 수집기(플러그인). type 은 내장 수집기 이름이거나 "패키지.모듈:클래스" 경로.
@@ -176,8 +180,9 @@ deal:
   # (d) 시중가 대조 = 기본 규칙: 다른 몰의 딜을 쿠팡 검색으로 찾은 같은 상품 가격과 비교 (쿠팡 API 키 필요)
   market:
     enabled: true
-    min_below_market_pct: 10     # 쿠팡가보다 N% 이상 싸면 특가
-    veto_if_not_cheaper: true    # 쿠팡가보다 싸지 않으면 (a)/(c) 로 잡혀도 탈락
+    min_below_market_pct: 20     # 쿠팡 검색 최저가보다 최소 20% 이상 싸야 특가
+    strict: true                 # 대조 결과가 있으면 20% 미만은 무조건 탈락 (보조 규칙으로 안 넘어감)
+    veto_if_not_cheaper: true    # (strict 가 아닐 때) 쿠팡가보다 싸지 않으면 (a)/(c) 로 잡혀도 탈락
     require_for_discount_rule: true  # 대조가 가능한 환경이면 (a) 표시 할인율만으로는 통과 못 함
     max_checks_per_hour: 3       # 쿠팡 검색 API 호출 (전체 예산 10회 안에서)
     cache_hours: 24
@@ -246,3 +251,5 @@ monitoring:
   notify_on_manual_link: true    # 토스/네이버 등 수동 링크가 필요할 때 알림
   error_alert_cooldown_minutes: 30
   daily_summary_time: "21:00"
+  quiet_notices: false           # false: 시작/미리보기/발행 알림도 소리·진동과 함께 (true 면 무음)
+  heartbeat_hours: 3             # 3시간마다 "정상 가동 중" 짧은 상태 보고 (0 = 끔). 특가가 없어도 살아 있음을 알림

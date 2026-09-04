@@ -66,7 +66,9 @@ async def test_manual_raw_skip_modes(http: httpx.AsyncClient) -> None:
     assert ei.value.shop.key == "toss"
     # 관리자가 넣어준 링크가 있으면 manual 이어도 그대로
     assert await r.to_affiliate(_product("toss", "https://toss.im/_m/abc", "https://toss.im/_m/MINE")) == "https://toss.im/_m/MINE"
-    assert await r.to_affiliate(_product("temu", "https://temu.com/x")) == "https://temu.com/x"
+    # raw 모드: 테무는 기본 꺼짐이라 명시적으로 켠 레지스트리로 확인
+    raw_reg = ShopRegistry([Shop(key="temu", name="테무", domains=["temu.com"], link_mode="raw")])
+    assert await LinkRouter(raw_reg, LinksConfig(), PublishConfig()).to_affiliate(_product("temu", "https://temu.com/x")) == "https://temu.com/x"
     reg = ShopRegistry([Shop(key="dead", name="d", link_mode="skip")])
     r_skip = LinkRouter(reg, LinksConfig(), PublishConfig())
     with pytest.raises(ShopSkipped):
