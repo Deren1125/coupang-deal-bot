@@ -527,6 +527,8 @@ class DealBot:
             log.info("collector '%s' skipped: %s", name, e)
         except Exception as e:  # noqa: BLE001
             msg = f"{type(e).__name__}: {e}"
+            # 긴 트레이스백보다 한 줄 요약을 먼저 — 폰/웹 로그에서 원인을 바로 볼 수 있게
+            log.error("collector '%s' FAILED: %s", name, msg)
             result.update(status="error", error=msg)
             self.db.finish_run(run_id, status="error", error=msg)
             self.db.log_event("ERROR", f"collector:{name}", msg + "\n" + traceback.format_exc()[-1500:])
