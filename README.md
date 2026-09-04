@@ -131,7 +131,7 @@ collectors:
 
 - Docker: `docker compose up -d --build`
 - 오라클 클라우드 무료 티어(추천): [docs/DEPLOY_ORACLE.md](docs/DEPLOY_ORACLE.md)
-- Railway: [docs/DEPLOY_RAILWAY.md](docs/DEPLOY_RAILWAY.md)
+- Railway: [docs/DEPLOY_RAILWAY.md](docs/DEPLOY_RAILWAY.md) — 빌드 없이 `ghcr.io/deren1125/coupang-deal-bot:latest` 이미지를 바로 쓰는 방법 포함
 - 키 발급: [docs/SETUP_KEYS.md](docs/SETUP_KEYS.md)
 
 ## 개발
