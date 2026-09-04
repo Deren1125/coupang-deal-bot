@@ -168,7 +168,14 @@ class Database:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         if str(self.path) != ":memory:":
-            self.path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise RuntimeError(
+                    f"데이터 폴더에 쓸 수 없습니다: {self.path.parent} ({e}). "
+                    "볼륨 권한 문제일 수 있습니다. DEALBOT_DATA_DIR 을 쓰기 가능한 경로로 바꾸거나 "
+                    "컨테이너를 root 로 실행하세요."
+                ) from e
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row

@@ -45,12 +45,16 @@ def setup_logging(
     root.addHandler(stream)
 
     if log_dir is not None:
-        log_dir.mkdir(parents=True, exist_ok=True)
-        fh = logging.handlers.RotatingFileHandler(
-            log_dir / filename, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
-        )
-        fh.setFormatter(fmt)
-        root.addHandler(fh)
+        # 파일 로그는 있으면 좋은 것일 뿐 — 쓰기 권한이 없어도 봇은 계속 돌아야 한다
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            fh = logging.handlers.RotatingFileHandler(
+                log_dir / filename, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
+            )
+            fh.setFormatter(fmt)
+            root.addHandler(fh)
+        except OSError as e:
+            root.warning("파일 로그를 쓸 수 없어 화면 로그만 사용합니다 (%s): %s", log_dir, e)
 
     # 시끄러운 라이브러리 로그 억제
     for noisy in ("httpx", "httpcore", "telegram", "apscheduler"):

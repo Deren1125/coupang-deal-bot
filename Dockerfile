@@ -33,10 +33,12 @@ COPY templates ./templates
 COPY config.yaml ./config.yaml
 RUN pip install --no-deps .
 
-RUN useradd --create-home --uid 1000 dealbot \
-    && mkdir -p /data && chown -R dealbot:dealbot /data /app \
+# 주의: USER 를 일반 사용자로 바꾸지 마세요.
+# Railway 등에서 영구 볼륨을 /data 에 root 소유로 마운트하기 때문에, 비root 로 실행하면
+# 볼륨에 DB·로그를 쓰지 못해 PermissionError 로 컨테이너가 죽습니다.
+# 이 컨테이너는 외부 포트를 열지 않고 단일 앱만 실행합니다.
+RUN mkdir -p /data \
     && ( [ -d /ms-playwright ] && chmod -R a+rX /ms-playwright || true )
-USER dealbot
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=5m --timeout=20s --start-period=1m --retries=3 \
