@@ -104,7 +104,16 @@ class InterestConfig(BaseModel):
     always_pass_sources: list[str] = Field(default_factory=lambda: ["manual", "adpick"])
 
 
+class EnrichConfig(BaseModel):
+    """상품 페이지(OG/JSON-LD)에서 이미지·가격·별점·리뷰 수를 읽어 빈 칸을 채운다."""
+
+    enabled: bool = True
+    shops: list[str] = Field(default_factory=lambda: ["toss", "naver", "oliveyoung", "kurly", "musinsa"])
+    max_per_run: int = 10
+
+
 class DealConfig(BaseModel):
+    enrich: EnrichConfig = Field(default_factory=EnrichConfig)
     interest: InterestConfig = Field(default_factory=InterestConfig)
     market: MarketCheckConfig = Field(default_factory=MarketCheckConfig)
     min_discount_rate: float = 50

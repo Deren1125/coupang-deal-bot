@@ -9,6 +9,7 @@
     product.original_price / product.category / product.is_rocket / product.is_free_shipping / product.shipping
     product.deal_kind     hotdeal | coupon | event
     product.recommend_count  커뮤니티 추천 수 (있을 때)
+    product.rating / product.review_count   상품 페이지 별점 / 리뷰 수 (읽어온 경우)
     shop.name / shop.key / shop.disclosure   쇼핑몰 표시명 / 키 / 하단 고지 문구
     discount_rate         표시 할인율 %, 없으면 None
     avg_price / below_avg_pct   최근 N일 평균가 / 평균가 대비 저렴한 비율 %
@@ -36,6 +37,9 @@
 {% endif %}
 {% if product.shipping %}
 배송: {{ product.shipping }}
+{% endif %}
+{% if product.rating or product.review_count %}
+{% if product.rating %}별점 {{ product.rating }}{% endif %}{% if product.rating and product.review_count %} · {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}건{% endif +%}
 {% endif %}
 {{ link }}
 {% if shop.disclosure %}

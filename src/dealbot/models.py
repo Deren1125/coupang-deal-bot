@@ -34,6 +34,8 @@ class Product:
     view_count: int | None = None
     comment_count: int | None = None
     rank: int | None = None  # API 목록(골드박스/베스트) 순위
+    rating: float | None = None  # 상품 페이지 별점 (보강 시)
+    review_count: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def effective_discount_rate(self) -> float | None:

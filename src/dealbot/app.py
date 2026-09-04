@@ -23,6 +23,7 @@ from dealbot.collectors import (
 )
 from dealbot.config import Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient
+from dealbot.enrich import PageEnricher
 from dealbot.links import (
     CoupangDeeplinkProvider,
     LinkConversionError,
@@ -110,6 +111,7 @@ class DealBot:
         self.links = LinkRouter(self.registry, settings.links, settings.publish, providers=providers)
 
         self.evaluator = DealEvaluator(settings.deal)
+        self.enricher = PageEnricher(self.http, timeout=settings.http.timeout_seconds)
         self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone)
         self.rate_limiter = RateLimiter(self.db, settings.publish)
 
@@ -268,6 +270,8 @@ class DealBot:
             image_url=post.image_url,
             affiliate_url=post.url,
         )
+        if self.settings.deal.enrich.enabled and (not product.image_url or not product.has_price or product.rating is None):
+            await self._enrich(product)
         if product.has_price:
             stats = self.db.price_stats(product.product_id, self.settings.deal.history_days, now)
             verdict = self.evaluator.evaluate(product, stats)
@@ -438,9 +442,13 @@ class DealBot:
             products = await collector.collect()
             now = utcnow()
             deals = queued = 0
+            enriched = 0
             for p in products:
                 if not self._shop_allowed(p):
                     continue
+                if self._should_enrich(p) and enriched < cfg.deal.enrich.max_per_run:
+                    enriched += 1
+                    await self._enrich(p)
                 stats = self.db.price_stats(p.product_id, cfg.deal.history_days, now)
                 verdict = self.evaluator.evaluate(p, stats)
                 if p.has_price and self._should_record(p.product_id, now):
@@ -476,6 +484,23 @@ class DealBot:
         finally:
             status.running = False
         return result
+
+    def _should_enrich(self, p: Product) -> bool:
+        ec = self.settings.deal.enrich
+        if not ec.enabled or p.shop not in ec.shops:
+            return False
+        if self.db.posted_within(p.product_id, self.settings.publish.dedup_days):
+            return False
+        return not p.image_url or p.rating is None or not p.has_price
+
+    async def _enrich(self, p: Product) -> list[str]:
+        meta = await self.enricher.fetch(p.url)
+        if meta is None:
+            return []
+        filled = PageEnricher.apply(p, meta)
+        if filled:
+            log.info("enriched %s from page: %s", p.name[:40], ", ".join(filled))
+        return filled
 
     def _should_record(self, product_id: str, now: Any) -> bool:
         gap = self.settings.deal.observation_min_gap_hours

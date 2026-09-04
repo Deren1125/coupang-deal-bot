@@ -100,6 +100,18 @@ collectors:
       rec_selector: "td.baseList-rec"
       views_selector: "td.baseList-views"
 
+  # 루리웹 업체 예판 핫딜 게시판(600004): 제휴 마케터들이 토스 딜을 올리는 곳. 카톡 핫딜방보다 하루쯤 빠름.
+  # 추천/조회가 거의 없어 관심도 게이트는 always_pass_sources 로 통과시키고 시중가 대조로만 판정.
+  - name: ruliweb_biz
+    type: ruliweb
+    enabled: true
+    interval_minutes: 30
+    options:
+      board_id: "600004"
+      shops: ["toss"]            # 이 게시판에서는 토스 딜만
+      request_delay_seconds: 2
+      max_detail_fetch_per_run: 10
+
   # 알구몬: 뽐뿌·루리웹·클리앙·퀘이사존 등 커뮤니티 핫딜 통합. 페이지 구조 확인 전이라 기본 꺼짐.
   # 켜서 돌린 뒤 /errors 에 "no rows matched ... DOM:" 이 뜨면 그 내용을 알려주세요 → options.selectors 를 맞춥니다.
   - name: algumon
@@ -126,6 +138,11 @@ collectors:
 # 특가 판정: (a)(b)(c)(d) 중 하나만 만족하면 특가. 단 (d) 대조 결과 쿠팡보다 비싸면 탈락(veto).
 # ----------------------------------------------------------------------------
 deal:
+  # 상품 페이지(OG/JSON-LD)에서 이미지·가격·별점·리뷰 수를 읽어 빈 칸 채우기 (토스 쉐어링크 페이지 등)
+  enrich:
+    enabled: true
+    shops: [toss, naver, oliveyoung, kurly, musinsa]
+    max_per_run: 10
   # 0) 관심도 게이트: 전 상품을 대조할 수 없으니, 사람들이 관심 있어 보이는 딜만 판정 대상으로.
   #    아래 중 하나라도 넘으면 통과 (값이 없는 신호는 무시). manual/adpick 소스는 항상 통과.
   interest:
@@ -134,6 +151,7 @@ deal:
     min_comments: 3            # 커뮤니티 댓글
     min_views: 500             # 커뮤니티 조회수
     max_rank: 30               # 골드박스/카테고리 베스트 순위
+    always_pass_sources: [manual, adpick, ruliweb_biz]   # 게이트 없이 통과시킬 수집기 이름
   # (d) 시중가 대조 = 기본 규칙: 다른 몰의 딜을 쿠팡 검색으로 찾은 같은 상품 가격과 비교 (쿠팡 API 키 필요)
   market:
     enabled: true
