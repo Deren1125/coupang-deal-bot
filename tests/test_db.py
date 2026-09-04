@@ -145,3 +145,9 @@ def test_market_quotes_and_community_stats(db: Database) -> None:
     assert stats["ppomppu"]["posts"] == 3
     assert stats["ppomppu"]["rec_ge"] == {1: 3, 3: 3, 5: 2, 10: 1, 20: 0}
     assert db.summary(now - timedelta(hours=1)).community["ppomppu"]["posts"] == 3  # type: ignore[index]
+    hot = db.hot_items(now - timedelta(hours=1), min_recommend=5)
+    assert [h["external_id"] for h in hot] == ["3", "2"]
+    assert db.find_items("b")[0]["external_id"] == "2" and db.find_items("zzz") == []
+    db.touch_seen("ppomppu", "1", recommend=None, views=600, comments=4, now=now)
+    st = db.community_stats(now - timedelta(hours=1))["ppomppu"]
+    assert st["views_ge_500"] == 1 and st["comments_ge_3"] == 1

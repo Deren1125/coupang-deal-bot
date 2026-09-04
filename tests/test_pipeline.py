@@ -25,6 +25,7 @@ class FakeCollector(BaseCollector):
 
 
 def _p(pid: str, price: int, **kw) -> Product:  # type: ignore[no-untyped-def]
+    kw.setdefault("rank", 1)
     return Product(
         source="fake", product_id=f"coupang:{pid}", shop="coupang", name=f"상품 {pid}", price=price,
         url=f"https://www.coupang.com/vp/products/{pid}",
@@ -179,7 +180,7 @@ async def test_submit_manual_post(bot: DealBot) -> None:
 
 
 async def test_dry_run_without_coupang_uses_raw_url(bot: DealBot) -> None:
-    p = Product(source="fake", product_id="coupang:77", shop="coupang", name="뽐뿌 상품", price=5000, url="https://www.coupang.com/vp/products/77", discount_rate=50)
+    p = Product(source="fake", product_id="coupang:77", shop="coupang", name="뽐뿌 상품", price=5000, url="https://www.coupang.com/vp/products/77", discount_rate=50, recommend_count=2)
     FakeCollector.products = [p]
     await bot.run_once()
     assert bot.db.recent_posts()[0]["affiliate_url"] == "https://www.coupang.com/vp/products/77"

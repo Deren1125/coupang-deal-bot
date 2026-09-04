@@ -310,8 +310,37 @@ class StatusReporter:
                 lines.append("(데이터 없음)")
             for src, st in stats.items():
                 ge = st["rec_ge"]
-                lines.append(f"• {src}: 글 {st['posts']}개 — 추천≥1 {ge[1]} · ≥3 {ge[3]} · ≥5 {ge[5]} · ≥10 {ge[10]} · ≥20 {ge[20]}")
-        lines.append(f"\n현재 임계값 community_min_recommend = {self.settings.deal.community_min_recommend}")
+                lines.append(
+                    f"• {src}: 글 {st['posts']}개 — 추천≥1 {ge[1]} · ≥3 {ge[3]} · ≥5 {ge[5]} · ≥10 {ge[10]} · ≥20 {ge[20]}"
+                    f" · 조회≥500 {st.get('views_ge_500', 0)} · 댓글≥3 {st.get('comments_ge_3', 0)}"
+                )
+        ic = self.settings.deal.interest
+        lines.append(
+            f"\n관심도 게이트: 추천≥{ic.min_recommend} 또는 댓글≥{ic.min_comments} 또는 조회≥{ic.min_views} 또는 순위≤{ic.max_rank}"
+            f"\n(c) community_min_recommend = {self.settings.deal.community_min_recommend}"
+        )
+        return "\n".join(lines)
+
+    def hot_text(self, min_recommend: int = 5, hours: int = 24) -> str:
+        tz = self.settings.app.timezone
+        items = self.db.hot_items(utcnow() - timedelta(hours=hours), min_recommend=min_recommend)
+        lines = [f"🔥 <b>최근 {hours}시간 추천 {min_recommend}개 이상 글</b> ({len(items)}건)"]
+        for it in items:
+            when = fmt_local(datetime.fromisoformat(it["first_seen_at"]), tz)
+            lines.append(f"• [{it['source']}] {when} 추천 {it['recommend']} · 조회 {it['views'] or '-'} · 댓글 {it['comments'] or '-'} — {html.escape(truncate(it['title'] or '', 60))}")
+        if not items:
+            lines.append("(없음 — 수집이 아직 안 돌았거나 기준 미달)")
+        return "\n".join(lines)
+
+    def find_text(self, keyword: str) -> str:
+        tz = self.settings.app.timezone
+        items = self.db.find_items(keyword)
+        lines = [f"🔎 <b>'{html.escape(keyword)}' 검색</b> ({len(items)}건)"]
+        for it in items:
+            when = fmt_local(datetime.fromisoformat(it["first_seen_at"]), tz, "%m/%d %H:%M")
+            lines.append(f"• [{it['source']}] 처음 본 시각 {when} · 추천 {it['recommend'] if it['recommend'] is not None else '-'} — {html.escape(truncate(it['title'] or '', 60))}")
+        if not items:
+            lines.append("(수집된 글 중 없음)")
         return "\n".join(lines)
 
     def summary_text(self, summary: PeriodSummary) -> str:
@@ -358,7 +387,9 @@ HELP_TEXT = (
     "/post — 직접 딜 올리기. 예)\n"
     "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
     "/test — 샘플 딜을 이 챗에 보내 양식 확인\n"
-    "/ppstats — 커뮤니티 글 추천 수 분포 (필터 기준 조정용)\n"
+    "/ppstats — 커뮤니티 글 추천·조회·댓글 분포 (필터 기준 조정용)\n"
+    "/hot [추천수] — 최근 24시간 추천 N개 이상 글 목록 (기본 5)\n"
+    "/find 키워드 — 수집된 글 제목 검색 (어느 소스에 언제 올라왔나)\n"
     "/naverlogin — 네이버 QR 로그인 (브라우저 자동화 켰을 때)\n"
     "/naverlink 상품URL — 쇼핑커넥트 링크 자동 생성 테스트\n"
     "/shot URL — 서버 브라우저 스크린샷 (셀렉터 조정용)\n"
@@ -438,6 +469,18 @@ def register_admin_handlers(
     async def cmd_ppstats(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.community_stats_text())
 
+    async def cmd_hot(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        n = int(args[0]) if args and args[0].isdigit() else 5
+        await reply(update, reporter.hot_text(min_recommend=n))
+
+    async def cmd_find(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        kw = " ".join(ctx.args or []).strip()
+        if not kw:
+            await reply(update, "사용법: <code>/find 펩시제로</code>")
+            return
+        await reply(update, reporter.find_text(kw))
+
     async def _send_photo(update: Update, data: bytes | None, caption: str) -> None:
         msg = update.effective_message
         if msg is None:
@@ -510,6 +553,8 @@ def register_admin_handlers(
         ("post", cmd_post),
         ("test", cmd_test),
         ("ppstats", cmd_ppstats),
+        ("hot", cmd_hot),
+        ("find", cmd_find),
         ("naverlogin", cmd_naverlogin),
         ("naverlink", cmd_naverlink),
         ("shot", cmd_shot),

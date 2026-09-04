@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from dealbot.config import DealConfig, MarketCheckConfig
+from dealbot.config import DealConfig, InterestConfig, MarketCheckConfig
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.models import PriceStats, Product
 from dealbot.pricing.evaluator import DealEvaluator
@@ -91,7 +91,7 @@ async def test_market_reference_lookup_and_budget() -> None:
 
 
 def test_rule_d_and_veto() -> None:
-    ev = DealEvaluator(DealConfig(min_discount_rate=50, community_min_recommend=5))
+    ev = DealEvaluator(DealConfig(interest=InterestConfig(enabled=False), min_discount_rate=50, community_min_recommend=5))
     p = Product(source="s", product_id="toss:1", shop="toss", name="핫도그", price=14890, url="u", recommend_count=9)
     # 대조 없이: (c) 로 통과
     assert ev.evaluate(p, PriceStats()).is_deal

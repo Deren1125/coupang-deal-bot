@@ -37,7 +37,8 @@ def test_parse_list_page(fixtures_dir: Path) -> None:
     assert [i["external_id"] for i in items] == [str(n) for n in range(600001, 600008)]
     first = items[0]
     assert first["shop_tag"] == "쿠팡" and first["price"] == 29900
-    assert first["recommend"] == 10 and first["views"] == 5000
+    assert first["recommend"] == 10 and first["views"] == 5000 and first["comments"] == 12
+    assert items[1]["comments"] is None
     assert first["thumb"] == "https://cdn2.ppomppu.co.kr/zboard/data3/2026/0903/m_thumb_600001.jpg"
     assert first["post_url"].startswith("https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu")
 
@@ -95,7 +96,7 @@ async def test_collect_multi_shop(settings: Settings, db: Database, fixtures_dir
     assert set(by_ext) == {"600001", "600002", "600003", "600004", "600005", "600006"}  # 듣보잡몰은 skip
 
     c = by_ext["600001"]
-    assert c.shop == "coupang" and c.product_id == "coupang:7381234" and c.price == 29900 and c.recommend_count == 10
+    assert c.shop == "coupang" and c.product_id == "coupang:7381234" and c.price == 29900 and c.recommend_count == 10 and c.comment_count == 12
     assert c.url == "https://www.coupang.com/vp/products/7381234?itemId=11&vendorItemId=22" and c.affiliate_url is None
     assert by_ext["600004"].product_id == "coupang:999"  # 타인 단축링크 → 원본 상품으로
     g = by_ext["600002"]

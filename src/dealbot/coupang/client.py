@@ -253,5 +253,6 @@ def parse_api_product(raw: dict[str, Any], source: str) -> Product | None:
         is_rocket=raw.get("isRocket"),
         is_free_shipping=raw.get("isFreeShipping"),
         affiliate_url=str(url),
+        rank=_to_int(raw.get("rank")),
         extra={k: v for k, v in raw.items() if k in ("rank", "keyword")},
     )

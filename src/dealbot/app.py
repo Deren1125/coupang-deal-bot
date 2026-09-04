@@ -464,10 +464,9 @@ class DealBot:
             return False
         if self.db.posted_within(p.product_id, self.settings.publish.dedup_days):
             return False
-        candidate = verdict.is_deal or (
-            p.effective_discount_rate() is not None and p.effective_discount_rate() >= self.settings.deal.min_discount_rate  # type: ignore[operator]
-        )
-        return bool(candidate)
+        if "low_interest" in verdict.reasons or any(r.startswith("excluded") for r in verdict.reasons):
+            return False
+        return True  # 관심도 게이트를 통과한 다른 몰의 딜은 (d) 대조가 기본
 
     async def _market_quote(self, p: Product) -> MarketQuote | None:
         assert self.market is not None

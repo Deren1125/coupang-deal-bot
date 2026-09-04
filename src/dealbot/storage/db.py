@@ -180,7 +180,7 @@ class Database:
 
     def _migrate(self) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}
-        for col, typ in (("url", "TEXT"), ("title", "TEXT"), ("recommend", "INTEGER"), ("views", "INTEGER"), ("updated_at", "TEXT")):
+        for col, typ in (("url", "TEXT"), ("title", "TEXT"), ("recommend", "INTEGER"), ("views", "INTEGER"), ("updated_at", "TEXT"), ("comments", "INTEGER")):
             if col not in cols:
                 self._conn.execute(f"ALTER TABLE source_items ADD COLUMN {col} {typ}")
 
@@ -484,39 +484,74 @@ class Database:
         title: str | None = None,
         recommend: int | None = None,
         views: int | None = None,
+        comments: int | None = None,
     ) -> None:
         now = now or utcnow()
         with self._lock:
             self._conn.execute(
                 """
-                INSERT OR IGNORE INTO source_items (source, external_id, product_id, first_seen_at, url, title, recommend, views, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO source_items (source, external_id, product_id, first_seen_at, url, title, recommend, views, comments, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (source, external_id, product_id, to_iso(now), url, title, recommend, views, to_iso(now)),
+                (source, external_id, product_id, to_iso(now), url, title, recommend, views, comments, to_iso(now)),
             )
 
-    def touch_seen(self, source: str, external_id: str, *, recommend: int | None, views: int | None, now: datetime | None = None) -> None:
-        """이미 본 글의 추천/조회수를 최신값으로 갱신 (통계용)."""
+    def touch_seen(
+        self,
+        source: str,
+        external_id: str,
+        *,
+        recommend: int | None,
+        views: int | None,
+        comments: int | None = None,
+        now: datetime | None = None,
+    ) -> None:
+        """이미 본 글의 추천/조회/댓글 수를 최신값으로 갱신 (통계용)."""
         now = now or utcnow()
         with self._lock:
             self._conn.execute(
-                "UPDATE source_items SET recommend = COALESCE(?, recommend), views = COALESCE(?, views), updated_at = ? WHERE source = ? AND external_id = ?",
-                (recommend, views, to_iso(now), source, external_id),
+                "UPDATE source_items SET recommend = COALESCE(?, recommend), views = COALESCE(?, views), comments = COALESCE(?, comments), updated_at = ? WHERE source = ? AND external_id = ?",
+                (recommend, views, comments, to_iso(now), source, external_id),
             )
+
+    def hot_items(self, since: datetime, *, min_recommend: int = 5, limit: int = 30) -> list[dict[str, Any]]:
+        rows = self._q(
+            """
+            SELECT source, external_id, product_id, title, url, recommend, views, comments, first_seen_at
+            FROM source_items WHERE first_seen_at >= ? AND recommend IS NOT NULL AND recommend >= ?
+            ORDER BY recommend DESC, first_seen_at DESC LIMIT ?
+            """,
+            (to_iso(since), min_recommend, limit),
+        )
+        return [dict(r) for r in rows]
+
+    def find_items(self, keyword: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._q(
+            """
+            SELECT source, external_id, product_id, title, url, recommend, views, comments, first_seen_at
+            FROM source_items WHERE title LIKE ? ORDER BY first_seen_at DESC LIMIT ?
+            """,
+            (f"%{keyword}%", limit),
+        )
+        return [dict(r) for r in rows]
 
     def community_stats(self, since: datetime, thresholds: tuple[int, ...] = (1, 3, 5, 10, 20)) -> dict[str, dict[str, Any]]:
         """소스별: 기간 내 처음 본 글 수와 추천 N개 이상 글 수 (규칙 (c) 임계값이 필터 구실을 하는지 보기 위함)."""
         rows = self._q(
-            "SELECT source, recommend FROM source_items WHERE first_seen_at >= ? AND recommend IS NOT NULL",
+            "SELECT source, recommend, views, comments FROM source_items WHERE first_seen_at >= ? AND recommend IS NOT NULL",
             (to_iso(since),),
         )
         out: dict[str, dict[str, Any]] = {}
         for r in rows:
-            d = out.setdefault(r["source"], {"posts": 0, "rec_ge": {t: 0 for t in thresholds}})
+            d = out.setdefault(r["source"], {"posts": 0, "rec_ge": {t: 0 for t in thresholds}, "views_ge_500": 0, "comments_ge_3": 0})
             d["posts"] += 1
             for t in thresholds:
                 if int(r["recommend"]) >= t:
                     d["rec_ge"][t] += 1
+            if r["views"] is not None and int(r["views"]) >= 500:
+                d["views_ge_500"] += 1
+            if r["comments"] is not None and int(r["comments"]) >= 3:
+                d["comments_ge_3"] += 1
         return out
 
     def seen_item(self, source: str, external_id: str) -> tuple[str | None, str | None] | None:

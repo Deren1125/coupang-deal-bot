@@ -92,7 +92,20 @@ class MarketCheckConfig(BaseModel):
     min_token_match: float = 0.6  # 상품명 토큰 일치 비율
 
 
+class InterestConfig(BaseModel):
+    """관심도 게이트: 모든 상품을 대조할 수 없으니 '사람들이 관심 있어 보이는' 딜만 판정 대상으로.
+    아래 신호 중 하나라도 넘으면 통과. 값이 없는 신호는 무시."""
+
+    enabled: bool = True
+    min_recommend: int = 1  # 커뮤니티 추천
+    min_comments: int = 3  # 커뮤니티 댓글
+    min_views: int = 500  # 커뮤니티 조회수
+    max_rank: int = 30  # API 목록(골드박스/카테고리 베스트) 순위
+    always_pass_sources: list[str] = Field(default_factory=lambda: ["manual", "adpick"])
+
+
 class DealConfig(BaseModel):
+    interest: InterestConfig = Field(default_factory=InterestConfig)
     market: MarketCheckConfig = Field(default_factory=MarketCheckConfig)
     min_discount_rate: float = 50
     history_days: int = 30

@@ -126,7 +126,15 @@ collectors:
 # 특가 판정: (a)(b)(c)(d) 중 하나만 만족하면 특가. 단 (d) 대조 결과 쿠팡보다 비싸면 탈락(veto).
 # ----------------------------------------------------------------------------
 deal:
-  # (d) 시중가 대조: 다른 몰의 딜을 쿠팡 검색으로 찾은 같은 상품 가격과 비교 (쿠팡 API 키 필요)
+  # 0) 관심도 게이트: 전 상품을 대조할 수 없으니, 사람들이 관심 있어 보이는 딜만 판정 대상으로.
+  #    아래 중 하나라도 넘으면 통과 (값이 없는 신호는 무시). manual/adpick 소스는 항상 통과.
+  interest:
+    enabled: true
+    min_recommend: 1           # 커뮤니티 추천
+    min_comments: 3            # 커뮤니티 댓글
+    min_views: 500             # 커뮤니티 조회수
+    max_rank: 30               # 골드박스/카테고리 베스트 순위
+  # (d) 시중가 대조 = 기본 규칙: 다른 몰의 딜을 쿠팡 검색으로 찾은 같은 상품 가격과 비교 (쿠팡 API 키 필요)
   market:
     enabled: true
     min_below_market_pct: 10     # 쿠팡가보다 N% 이상 싸면 특가
@@ -135,7 +143,7 @@ deal:
     max_checks_per_hour: 3       # 쿠팡 검색 API 호출 (전체 예산 10회 안에서)
     cache_hours: 24
     min_token_match: 0.6         # 상품명 토큰 일치 비율 (수량 토큰은 반드시 일치)
-  min_discount_rate: 50          # (a) 표시 할인율 N% 이상 — 쿠팡 표시 할인율은 부풀려진 경우가 많아 50 으로
+  min_discount_rate: 50          # (a) 표시 할인율 N% 이상 — 서브 신호. 쿠팡 표시 할인율은 부풀려진 경우가 많아 50 으로
   history_days: 30               # (b) 최근 N일 평균가 기준
   min_below_average_pct: 15      # (b) 평균가 대비 N% 이상 저렴
   min_history_samples: 3         # (b) 평균가 계산에 필요한 최소 관측 횟수

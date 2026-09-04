@@ -96,6 +96,7 @@ def parse_list_page(
     thumb_selector: str,
     rec_selector: str = "td.baseList-rec",
     views_selector: str = "td.baseList-views",
+    comments_selector: str = "span.baseList-c",
 ) -> list[dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
     items: list[dict[str, Any]] = []
@@ -120,6 +121,7 @@ def parse_list_page(
                 thumb = src if src.startswith("http") else ("https:" + src if src.startswith("//") else urljoin(BASE_URL, src))
         rec_el = row.select_one(rec_selector) if rec_selector else None
         views_el = row.select_one(views_selector) if views_selector else None
+        comments_el = row.select_one(comments_selector) if comments_selector else None
         items.append(
             {
                 "external_id": str(no),
@@ -128,6 +130,7 @@ def parse_list_page(
                 "thumb": thumb,
                 "recommend": _first_int(rec_el.get_text(" ", strip=True) if rec_el else None),
                 "views": _first_int(views_el.get_text(" ", strip=True) if views_el else None),
+                "comments": _first_int(comments_el.get_text(" ", strip=True) if comments_el else None),
                 **parse_title(title),
             }
         )
@@ -213,6 +216,7 @@ class PpomppuCollector(BaseCollector):
             external_id=item["external_id"],
             recommend_count=item.get("recommend"),
             view_count=item.get("views"),
+            comment_count=item.get("comments"),
             extra={"post_url": item["post_url"], "shop_tag": item.get("shop_tag"), "title": item["title"]},
         )
 
@@ -226,6 +230,7 @@ class PpomppuCollector(BaseCollector):
         thumb_sel = self.opt("thumb_selector", "img")
         rec_sel = self.opt("rec_selector", "td.baseList-rec")
         views_sel = self.opt("views_selector", "td.baseList-views")
+        comments_sel = self.opt("comments_selector", "span.baseList-c")
         only_shops = {s.lower() for s in self.opt("shops", [])}  # 비우면 등록된 모든 쇼핑몰
         unknown_policy = self.opt("unknown_shop", "skip")  # skip | raw
         reyield_min_rec = int(self.opt("reyield_min_recommend", self.ctx.settings.deal.community_min_recommend))
@@ -238,7 +243,7 @@ class PpomppuCollector(BaseCollector):
             html = await self._get(LIST_URL, params={"id": board, "page": page})
             items = parse_list_page(
                 html, row_selector=row_sel, title_selector=title_sel, thumb_selector=thumb_sel,
-                rec_selector=rec_sel, views_selector=views_sel,
+                rec_selector=rec_sel, views_selector=views_sel, comments_selector=comments_sel,
             )
             if not items:
                 self.log.warning("ppomppu list page %d: no rows matched '%s' — site layout may have changed", page, row_sel)
@@ -251,9 +256,9 @@ class PpomppuCollector(BaseCollector):
             shop = registry.by_alias(tag) if tag else None
             if shop is None and unknown_policy != "raw":
                 if not self.ctx.db.is_seen(self.name, item["external_id"]):
-                    self.ctx.db.mark_seen(self.name, item["external_id"], None, title=item["title"], recommend=item.get("recommend"), views=item.get("views"))
+                    self.ctx.db.mark_seen(self.name, item["external_id"], None, title=item["title"], recommend=item.get("recommend"), views=item.get("views"), comments=item.get("comments"))
                 else:
-                    self.ctx.db.touch_seen(self.name, item["external_id"], recommend=item.get("recommend"), views=item.get("views"))
+                    self.ctx.db.touch_seen(self.name, item["external_id"], recommend=item.get("recommend"), views=item.get("views"), comments=item.get("comments"))
                 continue
             if shop is not None and (not shop.enabled or shop.link_mode == "skip"):
                 continue
@@ -265,7 +270,7 @@ class PpomppuCollector(BaseCollector):
             ext = item["external_id"]
             if self.ctx.db.is_seen(self.name, ext):
                 # 이미 본 글: 추천/조회수 갱신(통계용). 추천 수가 올라왔으면 저장된 링크로 다시 판정 대상에
-                self.ctx.db.touch_seen(self.name, ext, recommend=item.get("recommend"), views=item.get("views"))
+                self.ctx.db.touch_seen(self.name, ext, recommend=item.get("recommend"), views=item.get("views"), comments=item.get("comments"))
                 rec = item.get("recommend") or 0
                 if reyield_min_rec > 0 and rec >= reyield_min_rec:
                     seen = self.ctx.db.seen_item(self.name, ext)
@@ -294,7 +299,7 @@ class PpomppuCollector(BaseCollector):
             product = self._build_product(item, shop, deal_url)
             self.ctx.db.mark_seen(
                 self.name, ext, product.product_id, url=deal_url,
-                title=item["title"], recommend=item.get("recommend"), views=item.get("views"),
+                title=item["title"], recommend=item.get("recommend"), views=item.get("views"), comments=item.get("comments"),
             )
             products.append(product)
 

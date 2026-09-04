@@ -32,6 +32,8 @@ class Product:
     external_id: str | None = None  # 외부 소스의 글 번호 등
     recommend_count: int | None = None  # 커뮤니티 추천 수
     view_count: int | None = None
+    comment_count: int | None = None
+    rank: int | None = None  # API 목록(골드박스/베스트) 순위
     extra: dict[str, Any] = field(default_factory=dict)
 
     def effective_discount_rate(self) -> float | None:
