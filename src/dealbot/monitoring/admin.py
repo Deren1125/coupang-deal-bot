@@ -65,7 +65,10 @@ class AdminNotifier:
 
     async def send(self, text: str, *, silent: bool = False) -> bool:
         if not self.enabled:
-            log.debug("[admin notice suppressed — no admin chat] %s", text.replace("\n", " | ")[:200])
+            log.warning(
+                "관리자 알림을 보낼 수 없어 건너뜁니다 (봇 토큰/관리자 챗 ID 확인 필요): %s",
+                text.replace("\n", " | ")[:150],
+            )
             return False
         assert self.bot is not None
         try:
@@ -81,13 +84,14 @@ class AdminNotifier:
             log.error("admin notify failed: %s", e)
             return False
 
-    async def notify_startup(self, status_text: str, check_lines: list[str] | None = None) -> None:
+    async def notify_startup(self, status_text: str, check_lines: list[str] | None = None) -> bool:
         text = f"🟢 <b>DealBot v{__version__} 시작</b>\n"
         if check_lines:
             text += "\n<b>자기 점검</b>\n" + "\n".join(html.escape(line) for line in check_lines) + "\n"
         text += f"\n{status_text}"
-        await self.send(text, silent=True)
+        sent = await self.send(text, silent=True)
         await self._push("startup", "DealBot 시작", "\n".join(check_lines or [])[:500] or "봇이 시작되었습니다.")
+        return sent
 
     async def notify_published(self, deal: Deal, result: PublishResult) -> None:
         if not self.cfg.notify_on_publish:

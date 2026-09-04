@@ -426,6 +426,16 @@ class DealBot:
                     out.append((None, "채널: TELEGRAM_CHANNEL_ID 미설정 (dry-run)"))
             except Exception as e:  # noqa: BLE001
                 out.append((False, f"텔레그램: {e}"))
+
+            # 관리자 챗: 여기로 상태·링크요청이 갑니다. 안 되면 봇이 조용해지므로 명확히 알린다.
+            if self.settings.secrets.telegram_admin_chat_id is None:
+                out.append((False, "관리자 챗: TELEGRAM_ADMIN_CHAT_ID 미설정 — 알림을 받을 수 없습니다"))
+            else:
+                try:
+                    chat = await self.bot.get_chat(self.notifier.chat_id)
+                    out.append((True, f"관리자 챗 연결 ({chat.full_name or chat.username or chat.id})"))
+                except Exception as e:  # noqa: BLE001
+                    out.append((False, f"관리자 챗 전송 불가: {e} — 봇에게 /start 를 먼저 보내세요"))
         else:
             out.append((None, "텔레그램: 토큰 미설정 (오프라인)"))
 

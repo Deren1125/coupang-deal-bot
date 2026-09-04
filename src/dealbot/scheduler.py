@@ -119,7 +119,17 @@ async def run_forever(bot: DealBot) -> None:
         lines = [("✅ " if ok else "⚠️ " if ok is None else "❌ ") + text for ok, text in checks]
         for line in lines:
             log.info("self-check: %s", line)
-        await bot.notifier.notify_startup(bot.reporter.status_text(), lines)
+        if not bot.notifier.enabled:
+            log.warning(
+                "관리자 알림을 보낼 수 없습니다 — TELEGRAM_BOT_TOKEN=%s, TELEGRAM_ADMIN_CHAT_ID=%s. "
+                "두 값을 모두 설정하고 봇에게 /start 를 보낸 뒤 재배포하세요.",
+                "설정됨" if bot.settings.secrets.has_telegram else "없음",
+                bot.settings.secrets.telegram_admin_chat_id or "없음",
+            )
+        else:
+            sent = await bot.notifier.notify_startup(bot.reporter.status_text(), lines)
+            if sent is False:
+                log.warning("시작 알림 전송 실패 — 봇에게 /start 를 먼저 보냈는지, 챗 ID 가 맞는지 확인하세요")
     except Exception as e:  # noqa: BLE001
         log.warning("startup notice failed: %s", e)
 
