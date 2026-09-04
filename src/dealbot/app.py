@@ -127,8 +127,17 @@ class DealBot:
         self.application: Application | None = None  # type: ignore[type-arg]
         self.bot: Bot | None = None
         if settings.secrets.has_telegram:
-            self.application = Application.builder().token(settings.secrets.telegram_bot_token or "").build()
-            self.bot = self.application.bot
+            try:
+                self.application = Application.builder().token(settings.secrets.telegram_bot_token or "").build()
+                self.bot = self.application.bot
+            except Exception as e:  # noqa: BLE001 — 토큰 형식 오류로 봇 전체가 죽지 않도록
+                log.error(
+                    "TELEGRAM_BOT_TOKEN 이 올바르지 않습니다 (%s). BotFather 가 준 '숫자:문자' 형식 전체를 넣었는지 확인하세요. "
+                    "오프라인 모드로 계속합니다.",
+                    e,
+                )
+                self.application = None
+                self.bot = None
         else:
             log.warning("TELEGRAM_BOT_TOKEN not set — running offline (dry-run publish, no admin notices)")
         if not settings.secrets.has_channel and not settings.publish.dry_run:
@@ -205,8 +214,22 @@ class DealBot:
     async def start_telegram(self, *, polling: bool = True) -> None:
         if self.application is None:
             return
-        await self.application.initialize()
-        await self.application.start()
+        try:
+            await self.application.initialize()
+            await self.application.start()
+        except Exception as e:  # noqa: BLE001 — 토큰 오류 등으로 봇 전체가 죽지 않도록
+            log.error(
+                "텔레그램 연결 실패 (%s). TELEGRAM_BOT_TOKEN 이 BotFather 가 준 '숫자:문자' 전체인지 확인하세요. "
+                "오프라인 모드로 계속합니다 (채널 발행·관리자 알림 없음).",
+                e,
+            )
+            self.application = None
+            self.bot = None
+            self.publisher.bot = None
+            self.publisher.dry_run = True
+            self.notifier.bot = None
+            self.state.dry_run = True
+            return
         try:
             me = await self.application.bot.get_me()
             self.notifier.bot_username = me.username

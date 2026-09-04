@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -361,14 +362,23 @@ def _env_int(name: str) -> int | None:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return None
-    return int(raw.strip())
+    value = raw.strip().strip("'\"")
+    try:
+        return int(value)
+    except ValueError:
+        # 숫자가 아니면 죽지 말고 경고만 — 어떤 값이 잘못됐는지 로그로 알린다
+        logging.getLogger(__name__).error(
+            "환경변수 %s 는 숫자여야 합니다 (@userinfobot 이 알려준 숫자). 지금 값: %r — 무시합니다", name, raw
+        )
+        return None
 
 
 def _env_str(name: str) -> str | None:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
         return None
-    return raw.strip()
+    # 따옴표째 붙여넣는 실수가 잦아서 벗겨 준다
+    return raw.strip().strip("'\"") or None
 
 
 def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env: bool = True) -> Settings:
