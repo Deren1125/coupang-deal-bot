@@ -83,6 +83,7 @@ async def daily_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
         except Exception as e:  # noqa: BLE001
             log.exception("daily summary failed")
             bot.db.log_event("ERROR", "summary", f"{type(e).__name__}: {e}")
+            bot.state.set_error(f"[summary] {e}")
         await _sleep_or_stop(stop, 60)
 
 
@@ -96,6 +97,7 @@ async def maintenance_loop(bot: DealBot, stop: asyncio.Event) -> None:
         except Exception as e:  # noqa: BLE001
             log.exception("maintenance failed")
             bot.db.log_event("ERROR", "maintenance", f"{type(e).__name__}: {e}")
+            bot.state.set_error(f"[maintenance] {e}")
 
 
 def _install_signal_handlers(stop: asyncio.Event) -> None:

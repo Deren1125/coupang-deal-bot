@@ -8,7 +8,7 @@ import pytest
 
 from dealbot.cli import sample_deal
 from dealbot.config import CopyConfig, CopyTarget, Settings
-from dealbot.models import Deal, DealVerdict, Product
+from dealbot.models import Deal, DealVerdict, Product, PublishResult
 from dealbot.publisher.copyblocks import CopyBlockBuilder
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.publisher.threads import (
@@ -208,7 +208,11 @@ async def test_pipeline_sends_threads_and_copy(settings: Settings) -> None:
         posted.append({"path": req.url.path, **dict(req.url.params)})
         return httpx.Response(200, json={"id": "C1" if req.url.path.endswith("/threads") else "P1"})
 
+    async def fake_publish(deal):  # type: ignore[no-untyped-def]
+        return PublishResult(ok=True, message_id=1)  # 스레드/복붙 문구는 채널에 실제 발행됐을 때만 따라간다
+
     bot.notifier.send = fake_send  # type: ignore[method-assign]
+    bot.publisher.publish = fake_publish  # type: ignore[method-assign]
     bot.threads.client = _client(handler)
     bot.threads.dry_run = False
     bot.db.kv_set(KV_TOKEN, "T")

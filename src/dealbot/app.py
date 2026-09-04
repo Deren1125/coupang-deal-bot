@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import traceback
 from datetime import timedelta
@@ -358,6 +359,31 @@ class DealBot:
             self.publisher.channel_id, self.publisher.dry_run = original
         return "✅ 샘플 발행 완료 (위 메시지)" if result.ok else f"❌ 실패: {result.error}"
 
+    async def push_test(self) -> str:
+        """휴대폰 푸시(ntfy/Pushover) 연결 확인용 테스트 알림."""
+        pcfg = self.settings.monitoring.push
+        events = ", ".join(pcfg.events) or "(없음)"
+        if not self.push.enabled:
+            return (
+                "📵 휴대폰 푸시가 설정되어 있지 않습니다.\n"
+                "Railway Variables 에 <code>NTFY_TOPIC</code> (ntfy 앱에서 구독한 토픽 이름) 또는 "
+                "<code>PUSHOVER_USER_KEY</code> + <code>PUSHOVER_APP_TOKEN</code> 을 넣고 다시 배포하세요."
+            )
+        ok = await self.push.send(
+            "DealBot 푸시 테스트",
+            "이 알림이 보이면 휴대폰 푸시 연결이 정상입니다.",
+            click_url=self.notifier.telegram_link,
+            tags=["white_check_mark"],
+        )
+        if not ok:
+            return f"❌ {self.push.provider} 전송 실패 — 서버 로그(또는 /errors)를 확인하세요."
+        where = f"ntfy 토픽 <code>{html.escape(self.settings.secrets.ntfy_topic or '')}</code> ({html.escape(pcfg.ntfy_url)})" if self.push.provider == "ntfy" else "Pushover"
+        return (
+            f"📲 {where} 로 테스트 푸시를 보냈습니다.\n"
+            "폰에 안 뜨면: ntfy 앱에서 구독한 토픽 이름이 NTFY_TOPIC 과 글자까지 같은지, 앱 알림 권한이 켜져 있는지 확인하세요.\n"
+            f"평소 푸시가 오는 경우: <code>{html.escape(events)}</code> (config.yaml 의 monitoring.push.events)"
+        )
+
     async def naver_login(self) -> tuple[bytes | None, str]:
         if self.naver_connect is None:
             return None, "브라우저 자동화가 꺼져 있습니다. config.yaml 의 browser.enabled: true 로 켜고 재시작하세요."
@@ -691,8 +717,12 @@ class DealBot:
             self.db.update_queue_item(item.id, status="published", deal=deal)
             self.db.log_event("INFO", "publish", f"{pid} {deal.product.name[:60]} {deal.product.price}")
             log.info("published [%s/%s] %s (%s)", deal.product.source, deal.product.shop, deal.product.name[:50], "dry-run" if result.dry_run else result.message_id)
-            await self.notifier.notify_published(deal, result)
-            await self._publish_side_channels(deal)
+            if result.dry_run:
+                # 연습 모드: 채널에 올라갔을 글 전체를 관리자 챗으로 보여준다. 스레드/복붙 문구는 실제 발행 때만
+                await self.notifier.notify_published(deal, result, preview=self.publisher.render(deal))
+            else:
+                await self.notifier.notify_published(deal, result)
+                await self._publish_side_channels(deal)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True

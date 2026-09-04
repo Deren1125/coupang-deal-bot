@@ -189,7 +189,8 @@ deal:
   observation_min_gap_hours: 6   # 같은 상품 가격은 6시간에 1번만 기록 (재판정 때 같은 값이 쌓이는 것 방지)
   community_min_recommend: 5     # (c) 가격이 적힌 딜: 커뮤니티 추천 N 이상
   coupon_min_recommend: 20       # 가격 없는 쿠폰/이벤트/공지: 노이즈가 많아 기준을 높게
-  accept_coupons_and_events: true  # 가격 없는 쿠폰/이벤트 글도 (c) 로 판정해 발행
+  accept_coupons_and_events: false # 가격 없는 쿠폰/이벤트/공지 글은 올리지 않음 (true 로 바꾸면 추천 수(coupon_min_recommend)로 판정해 발행)
+                                   # 가격이 적힌 딜은 제목에 '이벤트/증정' 이 있어도 가격 기준으로 그대로 판정
   min_price: 1000
   exclude_keywords: []           # 예: ["리퍼", "중고", "품절"]
 

@@ -65,6 +65,12 @@ def test_coupons_and_events_only_by_recommend() -> None:
     assert v.is_deal and v.reasons == ["recommend>=3"]
     ev2 = DealEvaluator(DealConfig(interest=NO_GATE, accept_coupons_and_events=False))
     assert ev2.evaluate(coupon, PriceStats()).reasons == ["no_price"]
+    assert ev2.evaluate(_p(0, deal_kind="event", name="라방 랜덤 5원", recommend_count=50), PriceStats()).reasons == ["no_price"]
+    # 가격이 적힌 딜은 제목에 '이벤트/증정' 이 있어 event 로 분류됐어도 가격 기준으로 판정한다
+    priced_event = _p(9900, deal_kind="event", name="1+1 증정 이벤트", discount_rate=60)
+    v = ev2.evaluate(priced_event, PriceStats())
+    assert v.is_deal and "no_price" not in v.reasons and v.discount_rate == 60
+    assert not ev2.evaluate(_p(9900, deal_kind="event", name="증정 이벤트", discount_rate=10), PriceStats()).is_deal
 
 
 def test_thresholds_configurable() -> None:

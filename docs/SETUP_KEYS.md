@@ -33,6 +33,7 @@
 
 - **ntfy (무료)**: App Store/Play 에서 `ntfy` 설치 → 앱에서 "구독" → 토픽 이름을 남이 못 맞출 긴 문자열로 (예: `dealbot-7f3a9c2e`) → `.env` 의 `NTFY_TOPIC` 에 같은 이름. 끝.
   기본 서버 ntfy.sh 는 무료이며, 알림을 누르면 봇 챗이 열립니다.
+  연결 확인은 관리자 챗에서 `/pushtest`. 푸시는 기본 설정(`monitoring.push.events: [manual_link]`)에서 **내 링크가 필요할 때만** 오고, DRY-RUN 중에는 링크 요청 자체를 하지 않으므로 아무 푸시도 오지 않는 것이 정상입니다. 시작/에러/일일 요약도 받으려면 `startup`, `error`, `daily_summary` 를 추가하세요.
 - **Pushover (유료, 1회 결제)**: pushover.net 가입 → User Key, Application 생성 → Token → `PUSHOVER_USER_KEY`, `PUSHOVER_APP_TOKEN`.
 - 어떤 이벤트를 푸시로 받을지는 `config.yaml` 의 `monitoring.push.events` (기본: 링크 필요만).
 

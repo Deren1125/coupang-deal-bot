@@ -93,12 +93,24 @@ class AdminNotifier:
         await self._push("startup", "DealBot 시작", "\n".join(check_lines or [])[:500] or "봇이 시작되었습니다.")
         return sent
 
-    async def notify_published(self, deal: Deal, result: PublishResult) -> None:
+    async def notify_published(self, deal: Deal, result: PublishResult, preview: str | None = None) -> None:
+        """발행 알림. DRY-RUN 이면 채널에 올라갔을 글 전체(preview)를 그대로 보여준다."""
         if not self.cfg.notify_on_publish:
             return
         p = deal.product
-        tag = "DRY-RUN " if result.dry_run else ""
         reasons = ", ".join(deal.verdict.reasons) or "-"
+        meta = f"[{html.escape(p.source)}/{html.escape(p.shop)}] · 점수 {deal.verdict.score:g} · {html.escape(reasons)}"
+        if result.dry_run and preview:
+            photo = " · 🖼 사진 포함" if p.image_url else ""
+            text = (
+                f"🧪 <b>DRY-RUN 미리보기</b> — 실제 모드였다면 채널에 이렇게 올라갔을 글\n"
+                f"{meta}{photo}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{preview}"
+            )
+            await self.send(text, silent=True)
+            return
+        tag = "DRY-RUN " if result.dry_run else ""
         price = f"{p.price:,}원" if p.has_price else "가격 없음"
         text = (
             f"✅ <b>{tag}발행</b> [{html.escape(p.shop)}/{html.escape(p.source)}]\n"
@@ -221,7 +233,9 @@ class StatusReporter:
     def status_context(self) -> dict[str, Any]:
         now = utcnow()
         tz = self.settings.app.timezone
-        last_err = self.db.last_error()
+        # 이번 실행(프로세스) 중에 난 에러만. 재시작 전 기록은 /errors 로 본다
+        last_err = self.state.last_error
+        last_err_at = self.state.last_error_at
         return {
             "version": __version__,
             "uptime": humanize_delta(now - self.state.started_at),
@@ -246,8 +260,8 @@ class StatusReporter:
                 if self.budget is not None and self.settings.secrets.has_coupang
                 else None
             ),
-            "last_error": truncate(last_err["message"].splitlines()[0], 300) if last_err else None,
-            "last_error_at": fmt_local(datetime.fromisoformat(last_err["ts"]), tz) if last_err else None,
+            "last_error": truncate(last_err.splitlines()[0], 300) if last_err else None,
+            "last_error_at": fmt_local(last_err_at, tz) if last_err_at else None,
             "tz": tz,
         }
 
@@ -372,6 +386,8 @@ class BotController(Protocol):
 
     async def test_post(self) -> str: ...
 
+    async def push_test(self) -> str: ...
+
     async def naver_login(self) -> tuple[bytes | None, str]: ...
 
     async def naver_login_wait(self) -> str: ...
@@ -399,6 +415,7 @@ HELP_TEXT = (
     "/post — 직접 딜 올리기. 예)\n"
     "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
     "/test — 샘플 딜을 이 챗에 보내 양식 확인\n"
+    "/pushtest — 휴대폰 푸시(ntfy/Pushover) 연결 확인\n"
     "/threadsauth — 스레드 연결 (최초 1회)\n"
     "/threadscode 코드 — 스레드 인증 코드 입력\n"
     "/copy [번호] — 카카오·블로그 복붙 문구 다시 받기 (번호 없으면 최근 발행)\n"
@@ -481,6 +498,9 @@ def register_admin_handlers(
 
     async def cmd_test(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.test_post())
+
+    async def cmd_pushtest(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, await controller.push_test())
 
     async def cmd_threadsauth(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.threads_auth_url())
@@ -598,6 +618,7 @@ def register_admin_handlers(
         ("skip", cmd_skip),
         ("post", cmd_post),
         ("test", cmd_test),
+        ("pushtest", cmd_pushtest),
         ("threadsauth", cmd_threadsauth),
         ("threadscode", cmd_threadscode),
         ("copy", cmd_copy),

@@ -85,18 +85,22 @@ class DealEvaluator:
         if signal != "always":
             reasons.append(f"interest:{signal}")
 
-        # 가격이 없는 글(쿠폰/이벤트): 추천 수로만 판정
+        # 가격이 없는 글(쿠폰/이벤트/공지) 또는 제목이 쿠폰/이벤트로 보이는 글
         if product.deal_kind in ("coupon", "event") or not product.has_price:
-            if not cfg.accept_coupons_and_events:
+            if cfg.accept_coupons_and_events:
+                # 추천 수로만 판정
+                if self._rule_c(product):
+                    return DealVerdict(
+                        is_deal=True,
+                        reasons=reasons + [f"recommend>={self.min_recommend_for(product)}"],
+                        sample_count=stats.count,
+                        score=float(min(product.recommend_count or 0, 100)),
+                    )
+                return DealVerdict(is_deal=False, reasons=reasons + ["no_price_low_recommend"], sample_count=stats.count)
+            if not product.has_price:
+                # 이벤트/쿠폰 발행 끔: 가격이 없어 싼지 판단할 수 없는 글은 제외
                 return DealVerdict(is_deal=False, reasons=reasons + ["no_price"], sample_count=stats.count)
-            if self._rule_c(product):
-                return DealVerdict(
-                    is_deal=True,
-                    reasons=reasons + [f"recommend>={self.min_recommend_for(product)}"],
-                    sample_count=stats.count,
-                    score=float(min(product.recommend_count or 0, 100)),
-                )
-            return DealVerdict(is_deal=False, reasons=reasons + ["no_price_low_recommend"], sample_count=stats.count)
+            # 가격이 적힌 딜은 제목에 '이벤트/증정' 이 있어도 아래 가격 기준으로 판정
 
         if product.price < cfg.min_price:
             return DealVerdict(is_deal=False, reasons=reasons + ["below_min_price"], sample_count=stats.count)
