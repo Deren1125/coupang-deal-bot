@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from dealbot.config import DealConfig
+from dealbot.config import DealConfig, SourceRule
 from dealbot.models import DealVerdict, PriceStats, Product
 from dealbot.pricing.market import MarketQuote
 
@@ -19,6 +19,19 @@ from dealbot.pricing.market import MarketQuote
 class DealEvaluator:
     def __init__(self, cfg: DealConfig) -> None:
         self.cfg = cfg
+
+    def _rule(self, product: Product) -> SourceRule:
+        return self.cfg.per_source.get(product.source, SourceRule())
+
+    def min_recommend_for(self, product: Product) -> int:
+        """이 딜에 적용할 (c) 추천 수 기준.
+        가격이 없는 글(쿠폰/이벤트)은 별도의 높은 기준 — 추천이 몰리는 '공짜 이벤트'를 걸러내기 위함."""
+        rule = self._rule(product)
+        if product.deal_kind in ("coupon", "event") or not product.has_price:
+            override = rule.coupon_min_recommend
+            return self.cfg.coupon_min_recommend if override is None else override
+        override = rule.community_min_recommend
+        return self.cfg.community_min_recommend if override is None else override
 
     def _excluded(self, product: Product) -> str | None:
         lowered = f"{product.name} {product.headline or ''}".lower()
@@ -28,23 +41,24 @@ class DealEvaluator:
         return None
 
     def _rule_c(self, product: Product) -> bool:
-        return (
-            self.cfg.community_min_recommend > 0
-            and product.recommend_count is not None
-            and product.recommend_count >= self.cfg.community_min_recommend
-        )
+        threshold = self.min_recommend_for(product)
+        return threshold > 0 and product.recommend_count is not None and product.recommend_count >= threshold
 
     def interest_signal(self, product: Product) -> str | None:
         """관심도 게이트를 통과시킨 신호 이름. 통과 못 하면 None."""
         ic = self.cfg.interest
         if not ic.enabled or product.source in ic.always_pass_sources:
             return "always"
-        if product.recommend_count is not None and ic.min_recommend > 0 and product.recommend_count >= ic.min_recommend:
-            return f"recommend>={ic.min_recommend}"
-        if product.comment_count is not None and ic.min_comments > 0 and product.comment_count >= ic.min_comments:
-            return f"comments>={ic.min_comments}"
-        if product.view_count is not None and ic.min_views > 0 and product.view_count >= ic.min_views:
-            return f"views>={ic.min_views}"
+        rule = self._rule(product)
+        min_rec = ic.min_recommend if rule.interest_min_recommend is None else rule.interest_min_recommend
+        min_com = ic.min_comments if rule.interest_min_comments is None else rule.interest_min_comments
+        min_views = ic.min_views if rule.interest_min_views is None else rule.interest_min_views
+        if product.recommend_count is not None and min_rec > 0 and product.recommend_count >= min_rec:
+            return f"recommend>={min_rec}"
+        if product.comment_count is not None and min_com > 0 and product.comment_count >= min_com:
+            return f"comments>={min_com}"
+        if product.view_count is not None and min_views > 0 and product.view_count >= min_views:
+            return f"views>={min_views}"
         if product.rank is not None and ic.max_rank > 0 and product.rank <= ic.max_rank:
             return f"rank<={ic.max_rank}"
         return None
@@ -78,7 +92,7 @@ class DealEvaluator:
             if self._rule_c(product):
                 return DealVerdict(
                     is_deal=True,
-                    reasons=reasons + [f"recommend>={cfg.community_min_recommend}"],
+                    reasons=reasons + [f"recommend>={self.min_recommend_for(product)}"],
                     sample_count=stats.count,
                     score=float(min(product.recommend_count or 0, 100)),
                 )
@@ -121,7 +135,7 @@ class DealEvaluator:
 
         rule_c = self._rule_c(product)
         if rule_c:
-            reasons.append(f"recommend>={cfg.community_min_recommend}")
+            reasons.append(f"recommend>={self.min_recommend_for(product)}")
 
         rule_a = discount is not None and discount >= cfg.min_discount_rate
         if rule_a and market_available and mcfg.require_for_discount_rule:

@@ -265,12 +265,17 @@ class PpomppuCollector(BaseCollector):
         interest = self.ctx.settings.deal.interest
         registry = self.registry
 
+        rule = self.ctx.settings.deal.per_source.get(self.name)
+        min_rec = interest.min_recommend if rule is None or rule.interest_min_recommend is None else rule.interest_min_recommend
+        min_com = interest.min_comments if rule is None or rule.interest_min_comments is None else rule.interest_min_comments
+        min_views = interest.min_views if rule is None or rule.interest_min_views is None else rule.interest_min_views
+
         def passes_gate(it: dict[str, Any]) -> bool:
             rec, com, views = it.get("recommend") or 0, it.get("comments") or 0, it.get("views") or 0
             return (
-                (interest.min_recommend > 0 and rec >= interest.min_recommend)
-                or (interest.min_comments > 0 and com >= interest.min_comments)
-                or (interest.min_views > 0 and views >= interest.min_views)
+                (min_rec > 0 and rec >= min_rec)
+                or (min_com > 0 and com >= min_com)
+                or (min_views > 0 and views >= min_views)
             )
 
         list_url = self.opt("list_url", LIST_URL)

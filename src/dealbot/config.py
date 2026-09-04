@@ -113,8 +113,20 @@ class EnrichConfig(BaseModel):
     max_per_run: int = 10
 
 
+class SourceRule(BaseModel):
+    """수집원별 기준 재정의. 사이트마다 추천 수의 의미가 달라서 필요하다.
+    (예: 루리웹 핫딜 게시판은 추천이 후하고, 뽐뿌는 짜다)"""
+
+    community_min_recommend: int | None = None
+    coupon_min_recommend: int | None = None
+    interest_min_recommend: int | None = None
+    interest_min_comments: int | None = None
+    interest_min_views: int | None = None
+
+
 class DealConfig(BaseModel):
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
+    per_source: dict[str, SourceRule] = Field(default_factory=dict)
     interest: InterestConfig = Field(default_factory=InterestConfig)
     market: MarketCheckConfig = Field(default_factory=MarketCheckConfig)
     min_discount_rate: float = 50
@@ -126,6 +138,9 @@ class DealConfig(BaseModel):
     exclude_keywords: list[str] = Field(default_factory=list)
     # (c) 커뮤니티 추천 수가 이 값 이상이면 가격 조건과 무관하게 특가로 인정 (0 이면 비활성)
     community_min_recommend: int = 5
+    # 가격이 없는 글(쿠폰/이벤트/공지)은 노이즈가 많아 기준을 따로 높게 둔다.
+    # 커뮤니티에서 추천이 몰리는 글은 대개 '공짜 이벤트'라 상품 특가와 성격이 다르다.
+    coupon_min_recommend: int = 20
     # 쿠폰/이벤트(가격 없음) 글을 다룰지. 다루면 규칙 (c) 로만 판정
     accept_coupons_and_events: bool = True
 

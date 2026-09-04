@@ -57,7 +57,7 @@ def test_rule_c_community_recommend() -> None:
 
 
 def test_coupons_and_events_only_by_recommend() -> None:
-    ev = DealEvaluator(DealConfig(interest=NO_GATE, community_min_recommend=3))
+    ev = DealEvaluator(DealConfig(interest=NO_GATE, community_min_recommend=3, coupon_min_recommend=3))
     coupon = _p(0, deal_kind="coupon", name="토스 25% 쿠폰", recommend_count=2)
     assert ev.evaluate(coupon, PriceStats()).reasons == ["no_price_low_recommend"]
     coupon.recommend_count = 3
@@ -84,3 +84,35 @@ def test_both_rules_score_is_max() -> None:
     ev = DealEvaluator(DealConfig(interest=NO_GATE))
     v = ev.evaluate(_p(5000, discount_rate=51), PriceStats(count=5, avg=10000))
     assert v.is_deal and len(v.reasons) == 2 and v.score == 50.0
+
+
+def test_priced_deals_and_events_have_separate_bars() -> None:
+    """가격이 적힌 딜은 낮은 기준, 가격 없는 이벤트/공지는 높은 기준."""
+    from dealbot.config import SourceRule
+
+    cfg = DealConfig(
+        community_min_recommend=5,
+        coupon_min_recommend=20,
+        per_source={"ruliweb_user": SourceRule(coupon_min_recommend=30), "quiet": SourceRule(community_min_recommend=0)},
+    )
+    ev = DealEvaluator(cfg)
+
+    def priced(source: str, rec: int) -> Product:
+        return Product(source=source, product_id="x:1", shop="coupang", name="오뚜기 소스 2개", price=3480, url="u", recommend_count=rec)
+
+    def event(source: str, rec: int) -> Product:
+        return Product(source=source, product_id="x:2", shop="naver", name="라방 랜덤 5원", price=0, url="u",
+                       deal_kind="event", recommend_count=rec)
+
+    # 가격 있는 딜: 추천 5 면 통과 (진짜 특가를 놓치지 않도록)
+    assert ev.evaluate(priced("ruliweb_user", 8), PriceStats()).is_deal
+    assert ev.evaluate(priced("ppomppu", 6), PriceStats()).is_deal
+    # 가격 없는 이벤트: 같은 추천 수여도 탈락
+    assert not ev.evaluate(event("ppomppu", 8), PriceStats()).is_deal
+    assert ev.evaluate(event("ppomppu", 25), PriceStats()).is_deal
+    # 루리웹 이벤트는 30 이상이어야
+    assert not ev.evaluate(event("ruliweb_user", 25), PriceStats()).is_deal
+    assert ev.evaluate(event("ruliweb_user", 37), PriceStats()).is_deal
+    assert ev.min_recommend_for(event("ruliweb_user", 1)) == 30
+    assert ev.min_recommend_for(priced("ruliweb_user", 1)) == 5
+    assert not ev.evaluate(priced("quiet", 99), PriceStats()).is_deal
