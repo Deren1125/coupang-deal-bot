@@ -15,21 +15,23 @@ Railway 는 브라우저만으로 배포·설정·로그 확인이 다 되므로
 
 1. https://railway.app 가입 (GitHub 로그인 권장).
 2. **New Project → Deploy from GitHub repo** → `deren1125/coupang-deal-bot` 선택 → 브랜치 선택.
-3. 서비스가 만들어지면 **Variables** 탭에서 아래를 추가:
+3. **Settings → Source → Branch** 를 `claude/coupang-hotdeal-bot-l0gr26` 로 바꿉니다 (기본은 main 이라 코드가 없습니다).
+4. 서비스가 만들어지면 **Variables** 탭에서 아래를 추가:
    ```
-   COUPANG_ACCESS_KEY=...
-   COUPANG_SECRET_KEY=...
-   COUPANG_SUB_ID=          (선택)
-   TELEGRAM_BOT_TOKEN=...
-   TELEGRAM_CHANNEL_ID=...
-   TELEGRAM_ADMIN_CHAT_ID=...
+   TELEGRAM_BOT_TOKEN=123456789:AAF...
+   TELEGRAM_CHANNEL_ID=@hot_deal_and_info
+   TELEGRAM_ADMIN_CHAT_ID=123456789
+   NTFY_TOPIC=내토픽이름
    TZ=Asia/Seoul
    DEALBOT_DATA_DIR=/data
+   DEALBOT_DRY_RUN=true
    ```
-4. **Volume 추가 (중요)**: 서비스 → Settings → Volumes → **Add Volume** → Mount path `/data`.
+   승인 후 추가할 것: `COUPANG_ACCESS_KEY`, `COUPANG_SECRET_KEY`, `LINKPRICE_AFFILIATE_ID`, `THREADS_APP_ID`, `THREADS_APP_SECRET`.
+   네이버 브라우저 자동화를 켤 때만 `WITH_BROWSER=1` 도 추가(이미지에 크로미움 포함).
+5. **Volume 추가 (중요)**: 서비스 → Settings → Volumes → **Add Volume** → Mount path `/data`.
    볼륨이 없으면 재배포 때마다 SQLite 가격 이력이 사라집니다.
-5. Deploy. 로그 탭에서 `DealBot started` 가 보이면 정상. 관리자 챗에 시작 알림이 옵니다.
-6. 설정(`config.yaml`)이나 템플릿을 바꾸면 git push → 자동 재배포.
+6. Deploy. 로그 탭에서 `DealBot started` 가 보이면 정상. 관리자 챗에 시작 알림이 옵니다.
+7. 설정(`config.yaml`)이나 템플릿을 바꾸면 git push → 자동 재배포.
 
 ## 확인
 

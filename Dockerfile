@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim AS base
 
-# WITH_BROWSER=1 이면 네이버 쇼핑커넥트 브라우저 자동화용 크로미움을 포함 (이미지 +~500MB)
-ARG WITH_BROWSER=1
+# WITH_BROWSER=1 이면 네이버 쇼핑커넥트 브라우저 자동화용 크로미움을 포함 (이미지 +~500MB, 빌드 몇 분 추가).
+# 기본은 0 — 네이버 자동화를 쓸 때만 Railway Variables 에 WITH_BROWSER=1 을 넣고 재배포하세요.
+ARG WITH_BROWSER=0
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
