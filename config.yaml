@@ -48,7 +48,7 @@ http:
 #            aliexpress, temu, daiso, ohouse
 # ----------------------------------------------------------------------------
 shops:
-  - { key: coupang, enabled: true }
+  - { key: coupang, enabled: true }   # API 키 없으면(최종 승인 전) 파트너스 사이트에서 만든 링크를 요청(반자동), 키가 생기면 자동
   - { key: toss, enabled: true }
   - { key: naver, enabled: true }
   # 브라우저 자동화를 켰다면:  - { key: naver, link_mode: api, provider: naver_connect, manual_fallback: true }

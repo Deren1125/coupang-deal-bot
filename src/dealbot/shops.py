@@ -55,6 +55,8 @@ DEFAULT_SHOPS: list[Shop] = [
         link_mode="api",
         provider="coupang",
         disclosure=_d("쿠팡 파트너스"),
+        manual_hint="파트너스 사이트(partners.coupang.com) → 링크 생성 → 상품 URL 붙여넣기 → 단축 URL 복사",
+        manual_fallback=True,  # API 키가 없거나(최종 승인 전) 변환 실패 시 관리자에게 링크 요청
     ),
     Shop(
         key="toss",
