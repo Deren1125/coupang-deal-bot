@@ -201,6 +201,20 @@ publish:
   templates_dir: templates
   template: deal_post.j2
 
+# 스레드 자동 발행 (THREADS_APP_ID/SECRET 필요, /threadsauth 로 최초 1회 연결)
+threads:
+  enabled: true
+  template: deal_threads.j2
+  send_photo: true
+  refresh_before_days: 7
+
+# API 가 없어 복붙해야 하는 곳: 발행 성공 시 관리자 챗으로 완성된 문구를 보냄
+copy:
+  enabled: true
+  targets:
+    - { key: kakao, name: 카카오 오픈채팅, template: deal_kakao.j2, enabled: true }
+    - { key: blog, name: 네이버 블로그, template: deal_blog.j2, enabled: true }
+
 links:
   always_deeplink: false
   resolve_short_links: true

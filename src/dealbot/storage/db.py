@@ -429,6 +429,10 @@ class Database:
                 (status, error, to_iso(now), 1 if increment_attempts else 0, item_id),
             )
 
+    def last_published_item(self) -> QueueItem | None:
+        row = self._one("SELECT * FROM deal_queue WHERE status = 'published' ORDER BY updated_at DESC, id DESC LIMIT 1")
+        return self._row_to_queue_item(row) if row else None
+
     def get_queue_item(self, item_id: int) -> QueueItem | None:
         row = self._one("SELECT * FROM deal_queue WHERE id = ?", (item_id,))
         return self._row_to_queue_item(row) if row else None

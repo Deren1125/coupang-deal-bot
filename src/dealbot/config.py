@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from dealbot.shops import DEFAULT_SHOPS, LINK_MODES, Shop, ShopRegistry
 
@@ -146,6 +146,36 @@ class PublishConfig(BaseModel):
     template: str = "deal_post.j2"
 
 
+class ThreadsConfig(BaseModel):
+    """스레드 자동 발행. 인증은 /threadsauth 로 한 번만."""
+
+    enabled: bool = True
+    template: str = "deal_threads.j2"
+    send_photo: bool = True
+    refresh_before_days: int = 7
+
+
+class CopyTarget(BaseModel):
+    """API 가 없어 복붙해야 하는 곳 (카카오 오픈채팅, 네이버 블로그)."""
+
+    key: str
+    name: str
+    template: str
+    enabled: bool = True
+
+
+class CopyConfig(BaseModel):
+    """발행 후 관리자 챗으로 '복사해서 붙여넣을 문구'를 보낸다."""
+
+    enabled: bool = True
+    targets: list[CopyTarget] = Field(
+        default_factory=lambda: [
+            CopyTarget(key="kakao", name="카카오 오픈채팅", template="deal_kakao.j2"),
+            CopyTarget(key="blog", name="네이버 블로그", template="deal_blog.j2"),
+        ]
+    )
+
+
 class LinksConfig(BaseModel):
     always_deeplink: bool = False
     resolve_short_links: bool = True
@@ -213,10 +243,17 @@ class Secrets(BaseModel):
     telegram_bot_token: str | None = None
     telegram_channel_id: str | None = None
     telegram_admin_chat_id: int | None = None
+    threads_app_id: str | None = None
+    threads_app_secret: str | None = None
+    threads_redirect_uri: str = "https://localhost/callback"
     ntfy_topic: str | None = None
     ntfy_token: str | None = None
     pushover_user_key: str | None = None
     pushover_app_token: str | None = None
+
+    @property
+    def has_threads_app(self) -> bool:
+        return bool(self.threads_app_id and self.threads_app_secret)
 
     @property
     def has_ntfy(self) -> bool:
@@ -252,6 +289,8 @@ class Secrets(BaseModel):
 
 
 class Settings(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     app: AppConfig = Field(default_factory=AppConfig)
     http: HttpConfig = Field(default_factory=HttpConfig)
     coupang: CoupangConfig = Field(default_factory=CoupangConfig)
@@ -260,6 +299,9 @@ class Settings(BaseModel):
     shops: list[ShopConfig] = Field(default_factory=list)
     deal: DealConfig = Field(default_factory=DealConfig)
     publish: PublishConfig = Field(default_factory=PublishConfig)
+    threads: ThreadsConfig = Field(default_factory=ThreadsConfig)
+    # yaml 키는 copy 지만 BaseModel.copy 와 겹쳐 속성명은 copy_cfg
+    copy_cfg: CopyConfig = Field(default_factory=CopyConfig, alias="copy")
     links: LinksConfig = Field(default_factory=LinksConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     secrets: Secrets = Field(default_factory=Secrets)
@@ -351,6 +393,9 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         telegram_bot_token=_env_str("TELEGRAM_BOT_TOKEN"),
         telegram_channel_id=_env_str("TELEGRAM_CHANNEL_ID"),
         telegram_admin_chat_id=_env_int("TELEGRAM_ADMIN_CHAT_ID"),
+        threads_app_id=_env_str("THREADS_APP_ID"),
+        threads_app_secret=_env_str("THREADS_APP_SECRET"),
+        threads_redirect_uri=_env_str("THREADS_REDIRECT_URI") or "https://localhost/callback",
         ntfy_topic=_env_str("NTFY_TOPIC"),
         ntfy_token=_env_str("NTFY_TOKEN"),
         pushover_user_key=_env_str("PUSHOVER_USER_KEY"),

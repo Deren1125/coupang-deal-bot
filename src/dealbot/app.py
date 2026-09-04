@@ -39,9 +39,17 @@ from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
+from dealbot.publisher.copyblocks import CopyBlockBuilder
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
+from dealbot.publisher.threads import (
+    ThreadsClient,
+    ThreadsError,
+    ThreadsPublisher,
+    ThreadsToken,
+    authorize_url,
+)
 from dealbot.shops import ShopRegistry
 from dealbot.storage.db import Database, QueueItem
 from dealbot.utils.timeutil import to_iso, utcnow
@@ -137,6 +145,25 @@ class DealBot:
             dry_run=self.state.dry_run,
         )
         self.push = PushNotifier(settings.monitoring.push, settings.secrets, self.http)
+        # ---- 스레드 자동 발행 + 복붙 문구
+        self.threads = ThreadsPublisher(
+            ThreadsClient(
+                self.http,
+                app_id=settings.secrets.threads_app_id,
+                app_secret=settings.secrets.threads_app_secret,
+                max_retries=settings.http.max_retries,
+                retry_backoff=settings.http.retry_backoff_seconds,
+            ),
+            self.db,
+            self.renderer,
+            registry=self.registry,
+            template=settings.threads.template,
+            enabled=settings.threads.enabled,
+            dry_run=self.state.dry_run,
+            refresh_before_days=settings.threads.refresh_before_days,
+        )
+        self.copy_blocks = CopyBlockBuilder(settings.copy_cfg, self.renderer, self.registry)
+
         self.notifier = AdminNotifier(
             self.bot,
             settings.secrets.telegram_admin_chat_id,
@@ -403,6 +430,21 @@ class DealBot:
             out.append((None, "텔레그램: 토큰 미설정 (오프라인)"))
 
         out.append((True, f"휴대폰 푸시: {self.push.provider}") if self.push.enabled else (None, "휴대폰 푸시: 미설정 (텔레그램 알림만)"))
+        if not self.settings.threads.enabled:
+            out.append((None, "스레드: 꺼짐"))
+        elif not self.settings.secrets.has_threads_app:
+            out.append((None, "스레드: 앱 ID/시크릿 미설정"))
+        elif self.threads.stored_token() is None:
+            out.append((None, "스레드: 인증 필요 (/threadsauth)"))
+        else:
+            try:
+                stored = self.threads.stored_token() or ThreadsToken("", "")
+                me = await self.threads.client.me(stored.access_token)
+                out.append((True, f"스레드 @{me.get('username')}"))
+            except Exception as e:  # noqa: BLE001
+                out.append((False, f"스레드: {e}"))
+        if self.copy_blocks.enabled:
+            out.append((True, "복붙 문구: " + ", ".join(t.name for t in self.settings.copy_cfg.targets if t.enabled)))
         if self.market is not None:
             out.append((True, f"시중가 대조: 쿠팡 검색 (시간당 {self.settings.deal.market.max_checks_per_hour}회)"))
         else:
@@ -615,9 +657,74 @@ class DealBot:
             self.db.log_event("INFO", "publish", f"{pid} {deal.product.name[:60]} {deal.product.price}")
             log.info("published [%s/%s] %s (%s)", deal.product.source, deal.product.shop, deal.product.name[:50], "dry-run" if result.dry_run else result.message_id)
             await self.notifier.notify_published(deal, result)
+            await self._publish_side_channels(deal)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True
+
+    async def _publish_side_channels(self, deal: Deal) -> None:
+        """텔레그램 채널 발행 후: 스레드 자동 게시 + 복붙 문구를 관리자 챗으로."""
+        if self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run):
+            result = await self.threads.publish(deal)
+            if result.ok:
+                self.db.log_event("INFO", "threads", f"{deal.product.product_id} {'dry-run' if result.dry_run else result.message_id}")
+                log.info("threads posted: %s", deal.product.name[:40])
+            else:
+                self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
+                log.warning("threads post failed: %s", result.error)
+                await self.notifier.send(f"⚠️ <b>스레드 발행 실패</b>\n<code>{result.error}</code>")
+        for block in self.copy_blocks.build(deal):
+            await self.notifier.send(block.as_telegram_html(), silent=True)
+
+    async def threads_auth_url(self) -> str:
+        if not self.settings.secrets.has_threads_app:
+            return "THREADS_APP_ID / THREADS_APP_SECRET 이 설정되어 있지 않습니다."
+        token = self.threads.stored_token()
+        if token is not None:
+            try:
+                me = await self.threads.client.me(token.access_token)
+                return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 /threadscode 로 새 code 를 넣으세요)"
+            except ThreadsError:
+                pass
+        url = authorize_url(self.settings.secrets.threads_app_id or "", self.settings.secrets.threads_redirect_uri)
+        return (
+            "1) 아래 링크를 열어 스레드 계정으로 승인하세요.\n"
+            f"{url}\n\n"
+            "2) 승인 후 이동한 주소창에서 <code>code=</code> 뒤의 값을 복사해\n"
+            "<code>/threadscode 붙여넣기</code> 로 보내주세요.\n"
+            "(주소가 열리지 않아도 됩니다. 주소창의 code 값만 필요합니다.)"
+        )
+
+    async def threads_submit_code(self, code: str) -> str:
+        if not self.settings.secrets.has_threads_app:
+            return "THREADS_APP_ID / THREADS_APP_SECRET 이 필요합니다."
+        try:
+            token = await self.threads.client.exchange_code(code, self.settings.secrets.threads_redirect_uri)
+            self.threads.save_token(token)
+            me = await self.threads.client.me(token.access_token)
+            expires = token.expires_at.date().isoformat() if token.expires_at else "-"
+            self.db.log_event("INFO", "threads", f"authorized as {me.get('username')}")
+            return f"✅ 스레드 연결 완료: @{me.get('username')} (토큰 만료 {expires}, 자동 갱신됨)"
+        except ThreadsError as e:
+            return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
+
+    async def send_copy_blocks(self, queue_id: int | None = None) -> str:
+        """최근 발행 딜(또는 대기열 번호)의 복붙 문구를 다시 보낸다."""
+        deal: Deal | None = None
+        if queue_id is not None:
+            item = self.db.get_queue_item(queue_id)
+            deal = item.deal if item else None
+        else:
+            item = self.db.last_published_item()
+            deal = item.deal if item else None
+        if deal is None:
+            return "복사할 딜을 찾지 못했습니다. /queue 에서 번호를 확인해 <code>/copy 번호</code> 로 보내주세요."
+        blocks = self.copy_blocks.build(deal)
+        if not blocks:
+            return "복붙 대상이 설정되어 있지 않습니다 (config.yaml 의 copy.targets)."
+        for block in blocks:
+            await self.notifier.send(block.as_telegram_html(), silent=True)
+        return f"📋 {', '.join(b.name for b in blocks)} 문구를 보냈습니다."
 
     async def _handle_publish_failure(self, item: QueueItem, error: str, deal: Deal | None = None) -> None:
         attempts = item.attempts + 1

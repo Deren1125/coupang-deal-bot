@@ -376,6 +376,12 @@ class BotController(Protocol):
 
     async def fetch_html(self, url: str) -> tuple[bytes | None, str]: ...
 
+    async def threads_auth_url(self) -> str: ...
+
+    async def threads_submit_code(self, code: str) -> str: ...
+
+    async def send_copy_blocks(self, queue_id: int | None = None) -> str: ...
+
     async def naver_link_test(self, url: str) -> str: ...
 
 
@@ -389,6 +395,9 @@ HELP_TEXT = (
     "/post — 직접 딜 올리기. 예)\n"
     "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
     "/test — 샘플 딜을 이 챗에 보내 양식 확인\n"
+    "/threadsauth — 스레드 연결 (최초 1회)\n"
+    "/threadscode 코드 — 스레드 인증 코드 입력\n"
+    "/copy [번호] — 카카오·블로그 복붙 문구 다시 받기 (번호 없으면 최근 발행)\n"
     "/ppstats — 커뮤니티 글 추천·조회·댓글 분포 (필터 기준 조정용)\n"
     "/hot [추천수] — 최근 24시간 추천 N개 이상 글 목록 (기본 5)\n"
     "/find 키워드 — 수집된 글 제목 검색 (어느 소스에 언제 올라왔나)\n"
@@ -468,6 +477,21 @@ def register_admin_handlers(
 
     async def cmd_test(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.test_post())
+
+    async def cmd_threadsauth(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, await controller.threads_auth_url())
+
+    async def cmd_threadscode(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args:
+            await reply(update, "사용법: <code>/threadscode 코드값</code>")
+            return
+        await reply(update, await controller.threads_submit_code(args[0]))
+
+    async def cmd_copy(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        qid = int(args[0].lstrip("#")) if args and args[0].lstrip("#").isdigit() else None
+        await reply(update, await controller.send_copy_blocks(qid))
 
     async def cmd_ppstats(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.community_stats_text())
@@ -570,6 +594,9 @@ def register_admin_handlers(
         ("skip", cmd_skip),
         ("post", cmd_post),
         ("test", cmd_test),
+        ("threadsauth", cmd_threadsauth),
+        ("threadscode", cmd_threadscode),
+        ("copy", cmd_copy),
         ("ppstats", cmd_ppstats),
         ("hot", cmd_hot),
         ("find", cmd_find),

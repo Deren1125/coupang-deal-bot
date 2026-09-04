@@ -1,0 +1,34 @@
+{#
+  네이버 블로그 복붙용 — 제목과 본문. 첫 줄이 제목, 그 뒤가 본문입니다.
+  블로그는 글자 수 제한이 없으니 설명을 조금 더 붙입니다.
+#}
+[{{ shop.name }}] {{ product.name }}{% if product.has_price %} {{ product.price | won }}{% endif +%}
+
+{% if product.headline %}
+{{ product.headline }}
+
+{% endif %}
+{{ product.name }}
+{% if product.has_price %}
+판매가 {{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %} · {{ discount_rate | pct }} 할인{% endif +%}
+{% endif %}
+{% if market_price and below_market_pct and below_market_pct > 0 %}
+쿠팡 최저가 {{ market_price | won }} 대비 {{ below_market_pct | pct }} 저렴합니다.
+{% endif %}
+{% if avg_price and below_avg_pct and below_avg_pct > 0 %}
+최근 30일 평균가 {{ avg_price | won }} 대비 {{ below_avg_pct | pct }} 저렴합니다.
+{% endif %}
+{% if product.rating or product.review_count %}
+{% if product.rating %}별점 {{ product.rating }}점{% endif %}{% if product.rating and product.review_count %}, {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}건{% endif %}입니다.
+{% endif %}
+{% if product.shipping %}
+배송: {{ product.shipping }}
+{% endif %}
+
+구매 링크: {{ link }}
+
+가격과 할인은 쇼핑몰 정책에 따라 변경되거나 조기 종료될 수 있습니다.
+{% if shop.disclosure %}
+
+{{ shop.disclosure }}
+{% endif %}
