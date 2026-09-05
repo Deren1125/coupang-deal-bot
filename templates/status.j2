@@ -20,7 +20,11 @@
 {% elif not c.available %}
 • {{ c.label | default(c.name) }} — 쓸 수 없음 ({{ c.unavailable_reason }})
 {% else %}
+{% if c.last_status == '-' %}
+• <b>{{ c.label | default(c.name) }}</b>{% if c.running %} 🔄 확인 중{% endif %} — 아직 확인 전, 다음 확인 {{ c.next_in }}{% if c.next_in != '곧' %} 뒤{% endif +%}
+{% else %}
 • <b>{{ c.label | default(c.name) }}</b>{% if c.running %} 🔄 확인 중{% endif %} — {% if c.last_status == 'ok' %}정상{% elif c.last_status == 'error' %}실패{% else %}{{ c.last_status }}{% endif %}, {{ c.last_run_ago }} 확인 (글 {{ c.collected }}개 봄 → 기준 넘은 특가 {{ c.deals }}건 → 새로 대기열 {{ c.queued }}건), 다음 확인 {{ c.next_in }}{% if c.next_in != '곧' %} 뒤{% endif +%}
+{% endif %}
 {% if c.error %}
    ↳ <code>{{ c.error }}</code>
 {% endif %}
