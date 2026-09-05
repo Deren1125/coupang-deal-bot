@@ -121,7 +121,7 @@ async def test_push_test_sends_ntfy(bot: DealBot) -> None:
 
 def test_heartbeat_text(bot: DealBot) -> None:
     text = bot.reporter.heartbeat_text(30)
-    assert text.startswith("🫀 <b>봇이 잘 돌고 있어요</b>") and "연습 모드" in text
+    assert text.startswith("🐥 <b>봇이 잘 돌고 있어요</b>") and "연습 모드" in text
     assert "지난 30분 동안 게시판을 0번 확인해서 글 0개를 봤어요." in text
     assert "새로 잡은 특가: 0건" in text and "미리보기로 보낸 글: 0건" in text and "지금 기다리는 글: 없음" in text
     assert "다음 확인: fake" in text and "특가가 없으면 조용한 게 정상이에요" in text

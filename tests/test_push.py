@@ -79,7 +79,7 @@ async def test_manual_link_triggers_push(settings, tmp_path) -> None:  # type: i
         assert bot.db.queue_counts() == {"awaiting_link": 1}
         assert len(calls) == 1
         body = json.loads(calls[0].content)
-        assert body["topic"] == "topic1" and "링크 필요 #" in body["title"] and "[토스쇼핑]" in body["title"]
+        assert body["topic"] == "topic1" and "링크가 필요해요 #" in body["title"] and "[토스쇼핑]" in body["title"]
         assert body["click"] == "https://t.me/mydealbot" and "https://toss.im/_m/1" in body["message"]
         checks = await bot.self_check()
         assert any("휴대폰 푸시: ntfy" in t for _, t in checks)

@@ -98,7 +98,7 @@ async def test_pause_and_run_request(bot: DealBot) -> None:
     bot.resume()
     assert await bot.process_queue_once()
     assert bot.db.queue_counts() == {"published": 1}
-    assert "fake" in bot.request_run(None) and "알 수 없는" in bot.request_run("nope")
+    assert "fake" in bot.request_run(None) and "그런 게시판은 없어요" in bot.request_run("nope")
 
 
 async def test_failure_attempts_and_expiry(bot: DealBot, settings: Settings) -> None:
@@ -141,7 +141,7 @@ async def test_manual_link_flow_for_toss(bot: DealBot) -> None:
 
     assert "http" in await bot.attach_link(item.id, "not a url")
     msg = await bot.attach_link(item.id, "https://toss.im/_m/MYLINK")
-    assert "저장" in msg and bot.db.queue_counts() == {"pending": 1}
+    assert "붙였어요" in msg and bot.db.queue_counts() == {"pending": 1}
     assert await bot.process_queue_once()
     assert bot.db.queue_counts() == {"published": 1}
     assert bot.db.recent_posts()[0]["affiliate_url"] == "https://toss.im/_m/MYLINK"
@@ -155,7 +155,7 @@ async def test_skip_and_manual_link_expiry(bot: DealBot, settings: Settings) -> 
     await bot.process_queue_once()
     item = bot.db.awaiting_items()[0]
     assert "건너" in bot.skip_item(item.id) and bot.db.queue_counts() == {"skipped": 1}
-    assert "없습니다" in bot.skip_item(9999)
+    assert "없어요" in bot.skip_item(9999)
 
     settings.publish.manual_link_ttl_hours = 0
     stale = Deal(product=Product(source="f", product_id="toss:Y", shop="toss", name="y", price=1000, url="https://toss.im/_m/Y"), verdict=DealVerdict(is_deal=True))
@@ -169,7 +169,7 @@ async def test_skip_and_manual_link_expiry(bot: DealBot, settings: Settings) -> 
 async def test_submit_manual_post(bot: DealBot) -> None:
     text = "/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종, 80g, 8개입, 2세트\n가격: 14,890원\nhttps://toss.im/_m/P4Qr1ope"
     msg = await bot.submit_manual(text)
-    assert "대기열" in msg and bot.db.queue_counts() == {"pending": 1}
+    assert "맨 앞에 넣었어요" in msg and bot.db.queue_counts() == {"pending": 1}
     assert await bot.process_queue_once()
     post = bot.db.recent_posts()[0]
     assert post["product_id"] == "toss:P4Qr1ope" and post["affiliate_url"] == "https://toss.im/_m/P4Qr1ope" and post["price"] == 14890

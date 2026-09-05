@@ -102,7 +102,7 @@ async def test_submit_manual_enriches(settings: Settings) -> None:
 
         bot.enricher = PageEnricher(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
         msg = await bot.submit_manual("/post\n상품: 한입 삼겹살 500g 3팩\n가격: 9,990원\nhttps://toss.im/_m/x3ayNq1B")
-        assert "대기열" in msg
+        assert "맨 앞에 넣었어요" in msg
         item = bot.db.next_pending()
         assert item is not None and item.deal.product.image_url == "https://img/t.jpg" and item.deal.product.rating == 4.7
         text = bot.publisher.render(item.deal)

@@ -68,6 +68,26 @@ _REASON_RULES: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+_KIND_LABELS = {
+    "publish": "채널에 올리기",
+    "publisher": "발행 작업",
+    "summary": "일일 요약",
+    "maintenance": "정리 작업",
+    "threads": "스레드 게시",
+    "control": "관리자 조작",
+    "lifecycle": "시작/종료",
+}
+
+
+def describe_kind(kind: str, labels: dict[str, str] | None = None) -> str:
+    """에러 종류 코드 → 사람 말 ("collector:ppomppu" → "뽐뿌 핫딜 확인 중")."""
+    if kind.startswith("collector:"):
+        name = kind.split(":", 1)[1]
+        label = (labels or {}).get(name) or COLLECTOR_LABELS.get(name, name)
+        return f"{label} 확인 중"
+    return _KIND_LABELS.get(kind, kind)
+
+
 def humanize_reason(code: str) -> str:
     for rx, fmt in _REASON_RULES:
         m = rx.match(code)
@@ -228,10 +248,12 @@ class AdminNotifier:
         if not self.cfg.notify_on_failure:
             return
         p = deal.product
-        head = "❌ <b>발행 실패 (포기)</b>" if final else "⚠️ <b>발행 실패 (재시도 예정)</b>"
-        await self.send(f"{head} [{html.escape(p.shop)}]\n{html.escape(truncate(p.name, 80))}\n<code>{html.escape(error[:500])}</code>")
+        head = "❌ <b>채널에 올리지 못했어요</b> (여러 번 실패해서 포기)" if final else "⚠️ <b>채널에 올리지 못했어요</b> (잠시 뒤 다시 시도할게요)"
+        await self.send(
+            f"{head} [{html.escape(self.shop_label(p.shop))}]\n{html.escape(truncate(p.name, 80))}\n이유: <code>{html.escape(error[:500])}</code>"
+        )
         if final:
-            await self._push("publish_failed", f"발행 실패 [{p.shop}]", f"{truncate(p.name, 60)}\n{error[:200]}")
+            await self._push("publish_failed", f"채널에 올리지 못함 [{self.shop_label(p.shop)}]", f"{truncate(p.name, 60)}\n{error[:200]}")
 
     async def notify_manual_link(self, item: QueueItem, shop: Shop) -> None:
         """자동 변환이 안 되는 쇼핑몰: 관리자에게 링크 생성을 요청."""
@@ -241,18 +263,18 @@ class AdminNotifier:
         price = f" — {p.price:,}원" if p.has_price else ""
         hint = shop.manual_hint or "앱/사이트에서 내 제휴 링크를 만들어 보내주세요"
         text = (
-            f"🔗 <b>링크 필요 #{item.id}</b> [{html.escape(shop.name)}]\n"
+            f"🔗 <b>내 링크가 필요해요 #{item.id}</b> [{html.escape(shop.name)}]\n"
             f"{html.escape(truncate(p.name, 80))}{price}\n"
-            f"원본: {html.escape(p.url)}\n"
+            f"원본 주소: {html.escape(p.url)}\n"
             + (f"글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
             + f"\n👉 {html.escape(hint)}\n"
-            f"만든 링크를 <b>이 메시지에 답장</b>하거나  <code>/link {item.id} https://...</code>\n"
-            f"건너뛰기: <code>/skip {item.id}</code>"
+            f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라가요. 또는 <code>/link {item.id} https://...</code>\n"
+            f"안 올리려면 <code>/skip {item.id}</code>"
         )
         await self.send(text)
         await self._push(
             "manual_link",
-            f"링크 필요 #{item.id} [{shop.name}]",
+            f"내 링크가 필요해요 #{item.id} [{shop.name}]",
             f"{truncate(p.name, 70)}{price}\n{p.url}\n\n{hint}",
             priority="high",
             tags=["link"],
@@ -268,8 +290,12 @@ class AdminNotifier:
             log.debug("error alert for %s suppressed (cooldown)", kind)
             return
         self._last_alert[kind] = now
-        await self.send(f"🚨 <b>에러</b> <code>{html.escape(kind)}</code>\n<code>{html.escape(message[:1500])}</code>")
-        await self._push("error", f"에러 {kind}", message[:300], tags=["warning"])
+        where = describe_kind(kind, self.labels)
+        await self.send(
+            f"🚨 <b>에러가 났어요</b> — {html.escape(where)}\n<code>{html.escape(message[:1500])}</code>\n"
+            f"(같은 종류는 {self.cfg.error_alert_cooldown_minutes}분에 한 번만 알려요. 봇은 계속 돌아요)"
+        )
+        await self._push("error", f"에러: {where}", message[:300], tags=["warning"])
 
     async def notify_daily_summary(self, text: str) -> None:
         await self.send(text)
@@ -382,97 +408,111 @@ class StatusReporter:
     def status_text(self) -> str:
         return self.renderer.render("status.j2", **self.status_context())
 
+    def _shop_name(self, key: str) -> str:
+        shop = self.registry.get(key)
+        return shop.name if shop else key
+
     def _item_line(self, it: QueueItem) -> str:
         p = it.deal.product
-        price = f" — {p.price:,}원" if p.has_price else ""
-        return f"• #{it.id} [{html.escape(p.shop)}] {html.escape(truncate(p.name, 50))}{price} (점수 {it.score:g}, 시도 {it.attempts})"
+        price = f" · {p.price:,}원" if p.has_price else ""
+        tries = f" · 실패 {it.attempts}번" if it.attempts else ""
+        return f"• #{it.id} {html.escape(self._shop_name(p.shop))} · {html.escape(truncate(p.name, 50))}{price} · 점수 {it.score:g}{tries}"
 
     def queue_text(self, limit: int = 10) -> str:
         items = self.db.pending_items(limit)
         counts = self.db.queue_counts()
         lines = [
-            f"🗂 <b>대기열</b> pending {counts.get('pending', 0)} · 링크대기 {counts.get('awaiting_link', 0)} · failed {counts.get('failed', 0)} · expired {counts.get('expired', 0)}"
+            "🗂 <b>올릴 차례를 기다리는 글</b>",
+            f"차례 대기 {counts.get('pending', 0)}건 · 내 링크 대기 {counts.get('awaiting_link', 0)}건 · 실패 {counts.get('failed', 0)}건 · 시간 지나 버림 {counts.get('expired', 0)}건",
         ]
         lines += [self._item_line(it) for it in items]
         if not items:
-            lines.append("(대기 중인 특가 없음)")
+            lines.append("(지금 기다리는 글 없음 — 특가가 잡히면 여기 쌓였다가 순서대로 올라가요)")
+        else:
+            lines.append("\n점수가 높은 글부터 올라가요. 빼려면 <code>/skip 번호</code>")
         return "\n".join(lines)
 
     def pending_text(self, limit: int = 15) -> str:
         items = self.db.awaiting_items(limit)
-        lines = ["🔗 <b>내 링크가 필요한 항목</b>"]
+        lines = ["🔗 <b>내가 링크를 만들어 줘야 하는 글</b>"]
         for it in items:
             p = it.deal.product
             lines.append(self._item_line(it))
-            lines.append(f"   원본: {html.escape(p.url)}")
+            lines.append(f"   원본 주소: {html.escape(p.url)}")
         if not items:
-            lines.append("(없음)")
+            lines.append("(없음 — 토스·네이버처럼 링크를 직접 만들어야 하는 글이 생기면 여기 뜹니다)")
         else:
-            lines.append("\n답장 또는 <code>/link 번호 링크</code> · 건너뛰기 <code>/skip 번호</code>")
+            lines.append("\n링크를 만들었으면 그 요청 메시지에 답장하거나 <code>/link 번호 링크</code> · 안 올리려면 <code>/skip 번호</code>")
         return "\n".join(lines)
 
     def recent_text(self, limit: int = 10) -> str:
         posts = self.db.recent_posts(limit)
         tz = self.settings.app.timezone
-        lines = ["📤 <b>최근 발행</b>"]
+        lines = ["📤 <b>최근에 올린 글</b>" + (" (연습 모드라 미리보기만 보낸 것)" if self.state.dry_run else "")]
         for r in posts:
             when = fmt_local(datetime.fromisoformat(r["posted_at"]), tz)
-            lines.append(f"• {when} [{r['source']}] {html.escape(truncate(r.get('name') or r['product_id'], 50))} — {r['price']:,}원")
+            lines.append(f"• {when} · {html.escape(self.collector_label(r['source']))} · {html.escape(truncate(r.get('name') or r['product_id'], 50))} · {r['price']:,}원")
         if not posts:
-            lines.append("(없음)")
+            lines.append("(아직 없음)")
         return "\n".join(lines)
 
     def errors_text(self, limit: int = 8) -> str:
         events = self.db.recent_events(limit, level="ERROR")
         tz = self.settings.app.timezone
-        lines = ["🚨 <b>최근 에러</b>"]
+        lines = ["🚨 <b>최근 에러</b> (재시작 전 것도 포함)"]
         for e in events:
             when = fmt_local(datetime.fromisoformat(e["ts"]), tz)
-            lines.append(f"• {when} <code>{html.escape(e['kind'])}</code> {html.escape(truncate(e['message'].splitlines()[0], 160))}")
+            lines.append(f"• {when} · {html.escape(describe_kind(e['kind'], self.labels))}\n   <code>{html.escape(truncate(e['message'].splitlines()[0], 160))}</code>")
         if not events:
-            lines.append("(없음)")
+            lines.append("(없음 — 깨끗해요)")
         return "\n".join(lines)
 
     def community_stats_text(self) -> str:
-        lines = ["📈 <b>커뮤니티 글 통계</b> (추천 수 분포 → (c) 임계값 조정용)"]
+        lines = ["📈 <b>게시판별 글 통계</b> — 글이 추천을 얼마나 받는지 보고, 기준이 너무 높거나 낮은지 판단하는 용도"]
         for label, hours in (("최근 24시간", 24), ("최근 7일", 24 * 7)):
             stats = self.db.community_stats(utcnow() - timedelta(hours=hours))
             lines.append(f"\n<b>{label}</b>")
             if not stats:
-                lines.append("(데이터 없음)")
+                lines.append("(아직 데이터 없음)")
             for src, st in stats.items():
                 ge = st["rec_ge"]
                 lines.append(
-                    f"• {src}: 글 {st['posts']}개 — 추천≥1 {ge[1]} · ≥3 {ge[3]} · ≥5 {ge[5]} · ≥10 {ge[10]} · ≥20 {ge[20]}"
-                    f" · 조회≥500 {st.get('views_ge_500', 0)} · 댓글≥3 {st.get('comments_ge_3', 0)}"
+                    f"• {html.escape(self.collector_label(src))}: 글 {st['posts']}개 중 추천 1개↑ {ge[1]} · 3개↑ {ge[3]} · 5개↑ {ge[5]} · 10개↑ {ge[10]} · 20개↑ {ge[20]}"
+                    f" · 조회 500↑ {st.get('views_ge_500', 0)} · 댓글 3개↑ {st.get('comments_ge_3', 0)}"
                 )
         ic = self.settings.deal.interest
         lines.append(
-            f"\n관심도 게이트: 추천≥{ic.min_recommend} 또는 댓글≥{ic.min_comments} 또는 조회≥{ic.min_views} 또는 순위≤{ic.max_rank}"
-            f"\n(c) community_min_recommend = {self.settings.deal.community_min_recommend}"
+            f"\n지금 기준: 추천 {ic.min_recommend}개 이상, 댓글 {ic.min_comments}개 이상, 조회 {ic.min_views} 이상, 순위 {ic.max_rank}위 안 중 하나면 판정 대상이 되고,"
+            f" 가격이 적힌 글은 커뮤니티 추천 {self.settings.deal.community_min_recommend}개 이상이면 특가로 봐요 (쿠팡 최저가 비교가 켜지면 그쪽이 우선)"
         )
         return "\n".join(lines)
 
     def hot_text(self, min_recommend: int = 5, hours: int = 24) -> str:
         tz = self.settings.app.timezone
         items = self.db.hot_items(utcnow() - timedelta(hours=hours), min_recommend=min_recommend)
-        lines = [f"🔥 <b>최근 {hours}시간 추천 {min_recommend}개 이상 글</b> ({len(items)}건)"]
+        lines = [f"🔥 <b>최근 {hours}시간에 추천 {min_recommend}개 이상 받은 글</b> ({len(items)}건)"]
         for it in items:
             when = fmt_local(datetime.fromisoformat(it["first_seen_at"]), tz)
-            lines.append(f"• [{it['source']}] {when} 추천 {it['recommend']} · 조회 {it['views'] or '-'} · 댓글 {it['comments'] or '-'} — {html.escape(truncate(it['title'] or '', 60))}")
+            lines.append(
+                f"• {html.escape(self.collector_label(it['source']))} · {when} · 추천 {it['recommend']} · 조회 {it['views'] or '-'} · 댓글 {it['comments'] or '-'}\n"
+                f"   {html.escape(truncate(it['title'] or '', 60))}"
+            )
         if not items:
-            lines.append("(없음 — 수집이 아직 안 돌았거나 기준 미달)")
+            lines.append("(없음 — 아직 게시판을 안 봤거나, 그만큼 추천받은 글이 없어요. 숫자를 낮춰 보세요: /hot 2)")
         return "\n".join(lines)
 
     def find_text(self, keyword: str) -> str:
         tz = self.settings.app.timezone
         items = self.db.find_items(keyword)
-        lines = [f"🔎 <b>'{html.escape(keyword)}' 검색</b> ({len(items)}건)"]
+        lines = [f"🔎 <b>'{html.escape(keyword)}' 가 들어간 글</b> ({len(items)}건)"]
         for it in items:
             when = fmt_local(datetime.fromisoformat(it["first_seen_at"]), tz, "%m/%d %H:%M")
-            lines.append(f"• [{it['source']}] 처음 본 시각 {when} · 추천 {it['recommend'] if it['recommend'] is not None else '-'} — {html.escape(truncate(it['title'] or '', 60))}")
+            lines.append(
+                f"• {html.escape(self.collector_label(it['source']))} · 처음 본 시각 {when} · 추천 {it['recommend'] if it['recommend'] is not None else '-'}\n"
+                f"   {html.escape(truncate(it['title'] or '', 60))}"
+            )
         if not items:
-            lines.append("(수집된 글 중 없음)")
+            lines.append("(수집한 글 중에는 없어요)")
         return "\n".join(lines)
 
     def summary_text(self, summary: PeriodSummary) -> str:
@@ -499,7 +539,7 @@ class StatusReporter:
             waiting = "없음"
         posted_label = "미리보기로 보낸 글" if self.state.dry_run else "채널에 올린 글"
         lines = [
-            f"🫀 <b>봇이 잘 돌고 있어요</b> · 켜진 지 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
+            f"🐥 <b>봇이 잘 돌고 있어요</b> · 켜진 지 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
             f"지난 {span} 동안 게시판을 {s.runs}번 확인해서{fails} 글 {s.collected}개를 봤어요.",
             f"새로 잡은 특가: {s.queued}건{dup_note}",
             f"{posted_label}: {s.published}건",
@@ -560,31 +600,30 @@ class BotController(Protocol):
 
 
 HELP_TEXT = (
-    "🤖 <b>DealBot 명령어</b>\n"
-    "/status — 현재 상태\n"
-    "/queue — 발행 대기열\n"
-    "/pending — 내가 링크를 만들어 줘야 하는 항목\n"
-    "/link 번호 링크 — 만든 제휴 링크 붙이기 (또는 요청 메시지에 답장)\n"
-    "/skip 번호 — 항목 건너뛰기\n"
-    "/post — 직접 딜 올리기. 예)\n"
-    "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
-    "/test — 샘플 딜을 이 챗에 보내 양식 확인\n"
-    "/pushtest — 휴대폰 푸시(ntfy/Pushover) 연결 확인\n"
-    "/threadsauth — 스레드 연결 (최초 1회)\n"
-    "/threadscode 코드 — 스레드 인증 코드 입력\n"
-    "/copy [번호] — 카카오·블로그 복붙 문구 다시 받기 (번호 없으면 최근 발행)\n"
-    "/ppstats — 커뮤니티 글 추천·조회·댓글 분포 (필터 기준 조정용)\n"
-    "/hot [추천수] — 최근 24시간 추천 N개 이상 글 목록 (기본 5)\n"
-    "/find 키워드 — 수집된 글 제목 검색 (어느 소스에 언제 올라왔나)\n"
-    "/naverlogin — 네이버 QR 로그인 (브라우저 자동화 켰을 때)\n"
-    "/naverlink 상품URL — 쇼핑커넥트 링크 자동 생성 테스트\n"
-    "/shot URL — 서버 브라우저 스크린샷 (셀렉터 조정용)\n"
-    "/html URL — 페이지 원문(HTML)을 파일로 받기 (알구몬/뽐뿌 구조 확인용)\n"
-    "/recent — 최근 발행 목록\n"
+    "🤖 <b>명령어 안내</b>\n"
+    "\n<b>보기</b>\n"
+    "/status — 지금 상태 한눈에 (게시판 확인, 올린 글 수, 기다리는 글, 쇼핑몰별 링크)\n"
+    "/queue — 올릴 차례를 기다리는 글\n"
+    "/pending — 내가 링크를 만들어 줘야 하는 글\n"
+    "/recent — 최근에 올린 글\n"
+    "/hot 5 — 최근 24시간에 추천 5개 이상 받은 글 (숫자는 바꿔도 됨)\n"
+    "/find 키워드 — 수집한 글 제목에서 찾기 (어느 게시판에 언제 올라왔는지)\n"
     "/errors — 최근 에러\n"
-    "/run [수집기이름] — 지금 바로 수집 실행\n"
-    "/pause · /resume — 일시정지/재개\n"
-    "/help — 도움말"
+    "/ppstats — 게시판별 추천 수 분포 (기준을 조정할 때 참고)\n"
+    "\n<b>조작</b>\n"
+    "/run — 지금 바로 게시판 확인 (<code>/run ppomppu</code> 처럼 하나만도 가능)\n"
+    "/pause — 잠시 멈춤 (게시판 확인과 올리기 모두) · /resume — 다시 시작\n"
+    "/link 번호 링크 — 내가 만든 제휴 링크 붙이기 (링크 요청 메시지에 답장해도 됨)\n"
+    "/skip 번호 — 그 글은 안 올리고 건너뛰기\n"
+    "/post — 내가 직접 딜 올리기. 예)\n"
+    "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
+    "/copy 번호 — 카카오·블로그에 붙여넣을 문구 다시 받기 (번호 없으면 마지막에 올린 글)\n"
+    "\n<b>확인·연결</b>\n"
+    "/test — 채널에 올라갈 글 양식을 이 챗에서 미리 보기\n"
+    "/pushtest — 휴대폰 푸시(ntfy) 연결 확인\n"
+    "/threadsauth — 스레드 연결 (최초 1회) · /threadscode 코드 — 스레드 인증 코드 입력\n"
+    "/naverlogin /naverlink /shot /html — 브라우저 자동화용 (지금은 안 씀)\n"
+    "/help — 이 안내"
 )
 
 
@@ -626,11 +665,11 @@ def register_admin_handlers(
 
     async def cmd_pause(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         controller.pause()
-        await reply(update, "⏸ 일시정지됨. /resume 으로 재개")
+        await reply(update, "⏸ 잠시 멈췄어요. 게시판 확인과 채널에 올리기를 모두 멈춥니다. /resume 으로 다시 시작")
 
     async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         controller.resume()
-        await reply(update, "▶️ 재개됨")
+        await reply(update, "▶️ 다시 시작했어요")
 
     async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         name = ctx.args[0] if ctx.args else None
@@ -639,14 +678,14 @@ def register_admin_handlers(
     async def cmd_link(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
         if len(args) < 2 or not args[0].lstrip("#").isdigit():
-            await reply(update, "사용법: <code>/link 번호 https://...</code>")
+            await reply(update, "이렇게 보내주세요: <code>/link 12 https://...</code> (번호는 링크 요청 메시지의 #번호)")
             return
         await reply(update, await controller.attach_link(int(args[0].lstrip("#")), args[1]))
 
     async def cmd_skip(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
         if not args or not args[0].lstrip("#").isdigit():
-            await reply(update, "사용법: <code>/skip 번호</code>")
+            await reply(update, "이렇게 보내주세요: <code>/skip 12</code> (번호는 /queue 나 링크 요청 메시지의 #번호)")
             return
         await reply(update, controller.skip_item(int(args[0].lstrip("#"))))
 
@@ -669,7 +708,7 @@ def register_admin_handlers(
     async def cmd_threadscode(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
         if not args:
-            await reply(update, "사용법: <code>/threadscode 코드값</code>")
+            await reply(update, "이렇게 보내주세요: <code>/threadscode 코드값</code>")
             return
         await reply(update, await controller.threads_submit_code(args[0]))
 
@@ -689,7 +728,7 @@ def register_admin_handlers(
     async def cmd_find(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         kw = " ".join(ctx.args or []).strip()
         if not kw:
-            await reply(update, "사용법: <code>/find 펩시제로</code>")
+            await reply(update, "이렇게 보내주세요: <code>/find 펩시제로</code>")
             return
         await reply(update, reporter.find_text(kw))
 
@@ -758,7 +797,7 @@ def register_admin_handlers(
         if urls:
             await reply(update, await controller.submit_manual(msg.text))
             return
-        await reply(update, "링크가 포함된 메시지나 명령어를 보내주세요. /help")
+        await reply(update, "무엇을 할지 모르겠어요. 링크 요청 메시지에 답장으로 링크를 보내거나, /help 로 명령어를 확인하세요.")
 
     async def cmd_unknown_chat(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_chat and update.effective_message:
