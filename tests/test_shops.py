@@ -58,12 +58,13 @@ def test_config_override(tmp_path: Path) -> None:
 
 def test_default_enabled_shops_and_provider_gating() -> None:
     reg = ShopRegistry()
-    assert {s.key for s in reg.enabled()} == {"coupang", "toss", "naver", "11st", "gmarket", "auction", "ssg", "lotteon", "aliexpress", "ohouse"}
+    LP = {"11st", "gmarket", "auction", "ssg", "lotteon", "aliexpress", "ohouse", "cjthemarket", "hmall", "lotteimall", "gsshop", "iherb"}
+    assert {s.key for s in reg.enabled()} == {"coupang", "toss", "naver"} | LP
     for key in ("oliveyoung", "kurly", "musinsa", "temu", "daiso"):
         assert reg.get(key).enabled is False  # type: ignore[union-attr]
     # 링크프라이스 변환기가 없으면 링크프라이스 몰은 자동으로 꺼진다
     off = reg.apply_providers({"coupang"})
-    assert sorted(off) == ["11st", "aliexpress", "auction", "gmarket", "lotteon", "ohouse", "ssg"]
+    assert set(off) == LP
     assert {s.key for s in reg.enabled()} == {"coupang", "toss", "naver"}
     assert reg.get("ssg").disabled_reason == "링크프라이스 ID 필요"  # type: ignore[union-attr]
     # 변환기가 있으면 그대로 켜진 채 남는다
@@ -78,5 +79,19 @@ def test_requires_provider_override_from_config(tmp_path) -> None:  # type: igno
     cfg = tmp_path / "c.yaml"
     cfg.write_text("shops:\n  - {key: ssg, enabled: true, link_mode: raw, requires_provider: false}\n", encoding="utf-8")
     reg = load_settings(cfg, load_env=False).shop_registry()
-    assert reg.apply_providers(set()) == ["11st", "gmarket", "auction", "lotteon", "aliexpress", "ohouse"]
+    assert reg.apply_providers(set()) == ["11st", "gmarket", "auction", "lotteon", "aliexpress", "ohouse", "cjthemarket", "hmall", "lotteimall", "gsshop", "iherb"]
     assert reg.get("ssg").enabled is True and reg.get("ssg").link_mode == "raw"  # type: ignore[union-attr]
+
+
+def test_new_linkprice_shop_aliases_and_domains() -> None:
+    reg = ShopRegistry()
+    assert reg.by_alias("[CJ더마켓]").key == "cjthemarket"  # type: ignore[union-attr]
+    assert reg.by_alias("현대Hmall").key == "hmall"  # type: ignore[union-attr]
+    assert reg.by_alias("[롯데홈쇼핑]").key == "lotteimall"  # type: ignore[union-attr]
+    assert reg.by_alias("GS샵").key == "gsshop"  # type: ignore[union-attr]
+    assert reg.by_alias("아이허브").key == "iherb"  # type: ignore[union-attr]
+    assert reg.by_url("https://www.cjthemarket.com/pc/prod/prodDetail?prdCd=1").key == "cjthemarket"  # type: ignore[union-attr]
+    assert reg.by_url("https://kr.iherb.com/pr/x/123").key == "iherb"  # type: ignore[union-attr]
+    # 기존 태그가 새 별칭에 잘못 잡히지 않는지
+    assert reg.by_alias("[롯데온]").key == "lotteon"  # type: ignore[union-attr]
+    assert reg.by_alias("[신세계몰]").key == "ssg"  # type: ignore[union-attr]

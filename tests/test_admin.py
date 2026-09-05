@@ -211,7 +211,7 @@ def test_linkprice_shops_follow_provider(settings: Settings) -> None:
         assert b.registry.get("oliveyoung").enabled is False and b.registry.get("coupang").enabled  # type: ignore[union-attr]
         assert [r["key"] for r in b.reporter._shop_rows() if r["enabled"]] == ["coupang", "toss", "naver"]
         status = b.reporter.status_text()
-        assert "꺼짐 — 링크프라이스 ID 필요: 11번가, G마켓, 옥션, SSG, 롯데온, 알리익스프레스, 오늘의집" in status
+        assert "꺼짐 — 링크프라이스 ID 필요: 11번가, G마켓, 옥션, SSG, 롯데온, 알리익스프레스, 오늘의집, CJ더마켓, 현대Hmall, 롯데홈쇼핑, GS SHOP, 아이허브" in status
         assert "제외한 몰: 올리브영, 컬리, 무신사, 테무, 다이소몰" in status
     finally:
         b.db.close()

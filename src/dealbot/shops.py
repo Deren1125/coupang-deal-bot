@@ -121,6 +121,12 @@ DEFAULT_SHOPS: list[Shop] = [
     Shop(key="lotteon", name="롯데온", aliases=["롯데온", "롯데ON", "lotteon"], domains=["lotteon.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
     Shop(key="aliexpress", name="알리익스프레스", aliases=["알리", "알리익스프레스", "aliexpress", "ali"], domains=["aliexpress.com", "aliexpress.us"], link_mode="api", provider="linkprice", disclosure=_d("알리익스프레스 제휴마케팅"), requires_provider=True),
     Shop(key="ohouse", name="오늘의집", aliases=["오늘의집", "오하우스"], domains=["ohou.se"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    # 2026-09 링크프라이스 승인 몰 중 생필품·식품·살림에 맞는 곳 (홈쇼핑은 식품·생활용품 특가가 커뮤니티에 자주 올라옴)
+    Shop(key="cjthemarket", name="CJ더마켓", aliases=["cj더마켓", "cj 더마켓", "더마켓", "cjthemarket"], domains=["cjthemarket.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="hmall", name="현대Hmall", aliases=["현대hmall", "hmall", "현대홈쇼핑", "현대h몰", "h몰"], domains=["hmall.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="lotteimall", name="롯데홈쇼핑", aliases=["롯데홈쇼핑", "롯데아이몰", "lotteimall"], domains=["lotteimall.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="gsshop", name="GS SHOP", aliases=["gs샵", "gsshop", "gs shop", "지에스샵", "gs홈쇼핑"], domains=["gsshop.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="iherb", name="아이허브", aliases=["아이허브", "iherb"], domains=["iherb.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
     # ---- 수익이 없는 몰: 기본 꺼짐 (정보 공유용으로만 쓰려면 enabled: true)
     Shop(key="temu", name="테무", aliases=["테무", "temu"], domains=["temu.com"], link_mode="raw", disclosure=None, enabled=False),
     Shop(key="daiso", name="다이소몰", aliases=["다이소", "다이소몰"], domains=["daisomall.co.kr"], link_mode="raw", enabled=False),

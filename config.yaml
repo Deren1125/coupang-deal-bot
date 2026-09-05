@@ -47,8 +47,9 @@ http:
 #
 # 기본 상태 (2026-09 결정: 수수료가 작거나 특가가 드문 몰은 조사에서 제외, 단 API 로 링크가 자동 발급되면 포함):
 #   켜짐        coupang(API, 승인 전엔 반자동) · toss(반자동) · naver(반자동)
-#   자동        11st, gmarket, auction, ssg, lotteon, aliexpress, ohouse — 링크프라이스 API 로 자동 발급되므로
-#               LINKPRICE_AFFILIATE_ID 가 있을 때만 자동으로 켜짐 (requires_provider)
+#   자동        11st, gmarket, auction, ssg, lotteon, aliexpress, ohouse, cjthemarket, hmall, lotteimall, gsshop, iherb
+#               — 링크프라이스 API 로 자동 발급되므로 LINKPRICE_AFFILIATE_ID 가 있을 때만 자동으로 켜짐 (requires_provider).
+#               링크프라이스에서 승인된 머천트의 링크만 실제로 변환됨
 #   꺼짐(제외)  oliveyoung, kurly, musinsa (앱에서만 링크 생성 = API 없음, 의류·뷰티는 생필품 채널과 결이 다름) · temu, daiso (수익 없음)
 #   미등록 몰   allow_raw_links: false 라 아예 건너뜀
 # ----------------------------------------------------------------------------
