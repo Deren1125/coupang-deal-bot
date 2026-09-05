@@ -90,7 +90,7 @@ collectors:
   - name: ppomppu
     type: ppomppu
     enabled: true
-    interval_minutes: 20
+    interval_minutes: 5
     options:
       board_id: ppomppu          # 핫딜 게시판. 해외핫딜은 ppomppu4
       pages: 1
@@ -110,7 +110,7 @@ collectors:
   - name: ruliweb_biz
     type: ruliweb
     enabled: true
-    interval_minutes: 30
+    interval_minutes: 5
     options:
       board_id: "600004"
       shops: ["toss"]            # 이 게시판에서는 토스 딜만
@@ -121,7 +121,7 @@ collectors:
   - name: ruliweb_user
     type: ruliweb
     enabled: true
-    interval_minutes: 20
+    interval_minutes: 5
     options:
       board_id: "1020"
       shops: []                  # 등록된 모든 쇼핑몰
@@ -206,9 +206,9 @@ deal:
 publish:
   enabled: true
   dry_run: false
-  max_per_hour: 6
-  max_per_day: 40
-  min_interval_seconds: 180
+  max_per_hour: 12               # 시간당 최대 발행 (딜이 몰리는 시간대 병목 방지)
+  max_per_day: 80
+  min_interval_seconds: 60       # 발행 간 최소 간격
   dedup_days: 7
   queue_ttl_hours: 6             # 자동 발행 대기 항목 유효 시간
   manual_link_ttl_hours: 12      # 내 링크 입력을 기다리는 항목 유효 시간
