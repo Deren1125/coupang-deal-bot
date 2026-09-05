@@ -42,7 +42,7 @@
 • 제외한 몰: {{ shops_off_excluded | join(', ') }}
 {% endif %}
 
-📤 <b>채널에 올린 글</b> 최근 1시간 {{ rate.posts_hour }}건 (최대 {{ rate.max_hour }}) · 오늘 {{ rate.posts_day }}건 (최대 {{ rate.max_day }}){% if rate.last_post_at %} · 마지막 {{ rate.last_post_at | local }}{% endif +%}
+📤 <b>{% if dry_run %}미리보기로 보낸 글{% else %}채널에 올린 글{% endif %}</b> 최근 1시간 {{ rate.posts_hour }}건 (최대 {{ rate.max_hour }}) · 오늘 {{ rate.posts_day }}건 (최대 {{ rate.max_day }}){% if rate.last_post_at %} · 마지막 {{ rate.last_post_at | local }}{% endif +%}
 🗂 <b>기다리는 글</b> 발행 차례 {{ queue.get('pending', 0) }}건 · 내 링크 기다림 {{ queue.get('awaiting_link', 0) }}건 · 실패 {{ queue.get('failed', 0) }}건 · 시간 지나 버림 {{ queue.get('expired', 0) }}건
 🗄 지금까지 본 상품 {{ products }}개 · 가격 기록 {{ price_points }}건 · DB {{ db_mb }}MB
 {% if api_budget is defined and api_budget %}
