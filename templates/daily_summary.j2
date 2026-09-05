@@ -1,11 +1,11 @@
 {# 일일 요약. 변수: s (PeriodSummary: since, until, runs, run_errors, collected, deals_found, published,
    publish_failed, expired, skipped, errors, pending, awaiting, top_posts[]), tz #}
-📊 <b>일일 요약</b> ({{ s.since | local('%m/%d %H:%M') }} ~ {{ s.until | local('%m/%d %H:%M') }})
+📊 <b>오늘 하루 정리</b> ({{ s.since | local('%m/%d %H:%M') }} ~ {{ s.until | local('%m/%d %H:%M') }})
 
-📥 수집 실행 {{ s.runs }}회{% if s.run_errors %} (실패 {{ s.run_errors }}){% endif %} · 상품 {{ s.collected }}건 관측
-🎯 특가 감지 {{ s.deals_found }}건
-📤 발행 <b>{{ s.published }}</b>건 · 실패 {{ s.publish_failed }} · 만료 {{ s.expired }} · 스킵 {{ s.skipped }}
-🗂 현재 대기 {{ s.pending }}건{% if s.awaiting %} · 🔗 내 링크 필요 {{ s.awaiting }}건 (/pending){% endif +%}
+📥 게시판을 {{ s.runs }}번 확인해서{% if s.run_errors %} (확인 실패 {{ s.run_errors }}번){% endif %} 글 {{ s.collected }}개를 봤어요
+🎯 기준을 넘은 특가 {{ s.deals_found }}건, 그중 새로 잡은 것 {{ s.queued | default(0) }}건
+📤 채널에 올린 글 <b>{{ s.published }}</b>건 · 실패 {{ s.publish_failed }}건 · 시간 지나 버림 {{ s.expired }}건 · 겹쳐서 건너뜀 {{ s.skipped }}건
+🗂 지금 기다리는 글 {{ s.pending }}건{% if s.awaiting %} · 🔗 내 링크 기다리는 글 {{ s.awaiting }}건 (/pending){% endif +%}
 {% if s.errors %}
 🚨 에러 {{ s.errors }}건 — /errors 로 확인
 {% else %}
@@ -13,14 +13,14 @@
 {% endif %}
 {% if s.community %}
 
-<b>커뮤니티 글 통계</b> (추천 수 임계값이 필터 구실을 하는지 보세요)
+<b>게시판별 글 통계</b> (추천 수 기준이 잘 거르고 있는지 보는 용도)
 {% for src, st in s.community.items() %}
 • {{ src }}: 글 {{ st.posts }}개 — 추천≥1 {{ st.rec_ge[1] }} · ≥3 {{ st.rec_ge[3] }} · ≥5 {{ st.rec_ge[5] }} · ≥10 {{ st.rec_ge[10] }} · ≥20 {{ st.rec_ge[20] }}
 {% endfor %}
 {% endif %}
 {% if s.top_posts %}
 
-<b>최근 발행</b>
+<b>오늘 올린 글</b>
 {% for p in s.top_posts %}
 • {{ p.posted_at | local('%H:%M') }} {{ (p.name or p.product_id)[:40] }} — {{ p.price | won }}
 {% endfor %}

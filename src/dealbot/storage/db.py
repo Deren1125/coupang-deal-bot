@@ -153,6 +153,7 @@ class PeriodSummary:
     run_errors: int = 0
     collected: int = 0
     deals_found: int = 0
+    queued: int = 0  # 새로 대기열에 들어간 딜 (deals_found 는 재확인마다 다시 세므로 더 큼)
     published: int = 0
     publish_failed: int = 0
     expired: int = 0
@@ -710,7 +711,8 @@ class Database:
         row = self._one(
             """
             SELECT COUNT(*) AS runs, SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS errs,
-                   COALESCE(SUM(collected),0) AS collected, COALESCE(SUM(deals),0) AS deals
+                   COALESCE(SUM(collected),0) AS collected, COALESCE(SUM(deals),0) AS deals,
+                   COALESCE(SUM(queued),0) AS queued
             FROM collector_runs WHERE started_at >= ? AND started_at <= ?
             """,
             (s, u),
@@ -720,6 +722,7 @@ class Database:
             out.run_errors = int(row["errs"] or 0)
             out.collected = int(row["collected"] or 0)
             out.deals_found = int(row["deals"] or 0)
+            out.queued = int(row["queued"] or 0)
 
         row = self._one("SELECT COUNT(*) AS c FROM posts WHERE posted_at >= ? AND posted_at <= ?", (s, u))
         out.published = int(row["c"]) if row else 0

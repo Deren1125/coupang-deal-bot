@@ -78,7 +78,7 @@ async def test_rate_limit_leaves_items_pending(bot: DealBot) -> None:
     await bot.run_once()
     counts = bot.db.queue_counts()
     assert counts["published"] == 2 and counts["pending"] == 2
-    assert "쇼핑몰 링크 처리" in bot.reporter.status_text()
+    assert "쇼핑몰별 링크 처리" in bot.reporter.status_text()
 
 
 async def test_collector_error_is_recorded(bot: DealBot) -> None:

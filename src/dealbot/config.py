@@ -40,6 +40,7 @@ class HttpConfig(BaseModel):
 class CollectorConfig(BaseModel):
     name: str
     type: str
+    label: str | None = None  # 관리자 챗에 보여줄 이름 (없으면 내장 표시명 → name)
     enabled: bool = True
     interval_minutes: int = 60
     options: dict[str, Any] = Field(default_factory=dict)

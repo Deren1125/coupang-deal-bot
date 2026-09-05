@@ -90,8 +90,8 @@ async def test_linkprice_provider(http: httpx.AsyncClient) -> None:
     r = _router(http, providers={"linkprice": prov})
     link = await r.to_affiliate(_product("11st", "https://www.11st.co.kr/products/1"))
     assert link.startswith("https://click.linkprice.com/click.php")
-    assert r.describe(ShopRegistry().get("11st")) == "자동 변환(linkprice)"  # type: ignore[arg-type]
-    assert r.describe(ShopRegistry().get("toss")) == "수동 링크(관리자 입력)"  # type: ignore[arg-type]
+    assert r.describe(ShopRegistry().get("11st")) == "자동 (링크프라이스)"  # type: ignore[arg-type]
+    assert r.describe(ShopRegistry().get("toss")) == "내 링크 요청 (앱에서 만들어 답장)"  # type: ignore[arg-type]
 
 
 async def test_coupang_without_api_asks_manual(http: httpx.AsyncClient) -> None:
@@ -99,4 +99,4 @@ async def test_coupang_without_api_asks_manual(http: httpx.AsyncClient) -> None:
     with pytest.raises(ManualLinkRequired) as ei:
         await r.to_affiliate(_product("coupang", "https://www.coupang.com/vp/products/1"))
     assert ei.value.shop.key == "coupang"
-    assert r.describe(ShopRegistry().get("coupang")) == "수동 링크(자동 변환기 없음)"  # type: ignore[arg-type]
+    assert r.describe(ShopRegistry().get("coupang")) == "내 링크 요청 (자동 변환기 없음)"  # type: ignore[arg-type]

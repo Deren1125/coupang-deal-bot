@@ -189,6 +189,8 @@ class DealBot:
             self.renderer,
             settings.app.timezone,
             push=self.push,
+            registry=self.registry,
+            labels={c.name: c.label for c in settings.collectors if c.label},
         )
         self.reporter = StatusReporter(
             settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget

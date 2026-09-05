@@ -40,6 +40,46 @@ _QUEUE_REF_RE = re.compile(r"#(\d+)")
 STALE_COMMAND_MAX_AGE = timedelta(minutes=15)  # 봇이 꺼져 있던 동안 쌓인 명령 중 이보다 오래된 것은 무시
 
 
+# 수집기(출처) 코드명 → 관리자 챗 표시명. config.yaml 의 collectors[].label 이 있으면 그쪽이 우선
+COLLECTOR_LABELS = {
+    "ppomppu": "뽐뿌",
+    "ruliweb_user": "루리웹 유저 핫딜",
+    "ruliweb_biz": "루리웹 업체 핫딜",
+    "goldbox": "쿠팡 골드박스",
+    "category_best": "쿠팡 카테고리 베스트",
+    "algumon": "알구몬",
+    "adpick": "애드픽",
+    "manual": "내가 직접 올림",
+}
+
+_REASON_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^interest:recommend>=(\d+)$"), "관심도 통과(추천 {0}개 이상)"),
+    (re.compile(r"^interest:comments>=(\d+)$"), "관심도 통과(댓글 {0}개 이상)"),
+    (re.compile(r"^interest:views>=(\d+)$"), "관심도 통과(조회 {0}회 이상)"),
+    (re.compile(r"^interest:rank<=(\d+)$"), "관심도 통과(순위 {0}위 안)"),
+    (re.compile(r"^below_coupang_price>=([\d.]+)%$"), "쿠팡 최저가보다 {0}% 이상 쌈"),
+    (re.compile(r"^below_(\w+)_price>=([\d.]+)%$"), "{0} 최저가보다 {1}% 이상 쌈"),
+    (re.compile(r"^below_(\d+)d_avg>=([\d.]+)%$"), "최근 {0}일 평균가보다 {1}% 이상 쌈"),
+    (re.compile(r"^recommend>=(\d+)$"), "커뮤니티 추천 {0}개 이상"),
+    (re.compile(r"^discount_rate>=([\d.]+)%$"), "표시 할인율 {0}% 이상"),
+    (re.compile(r"^market_diff=([-\d.]+)%$"), "쿠팡보다 {0}% 쌈(기준 미만)"),
+    (re.compile(r"^manual$"), "내가 직접 올림"),
+    (re.compile(r"^discount_unconfirmed$"), "할인율만 있고 쿠팡 대조로 확인 안 됨"),
+]
+
+
+def humanize_reason(code: str) -> str:
+    for rx, fmt in _REASON_RULES:
+        m = rx.match(code)
+        if m:
+            return fmt.format(*m.groups())
+    return code
+
+
+def humanize_reasons(reasons: list[str]) -> str:
+    return " · ".join(humanize_reason(r) for r in reasons) or "-"
+
+
 def heartbeat_due(last_activity: datetime, now: datetime, minutes: int) -> bool:
     """관리자 챗이 minutes 동안 조용했으면 True (특가/링크/에러 알림이 있었으면 그것으로 생존 신고를 대신한다)."""
     return minutes > 0 and now - last_activity >= timedelta(minutes=minutes)
@@ -88,6 +128,8 @@ class AdminNotifier:
         renderer: TemplateRenderer,
         tz: str,
         push: PushNotifier | None = None,
+        registry: ShopRegistry | None = None,
+        labels: dict[str, str] | None = None,
     ) -> None:
         self.bot = bot
         self.chat_id = normalize_chat_id(admin_chat_id)
@@ -95,6 +137,8 @@ class AdminNotifier:
         self.renderer = renderer
         self.tz = tz
         self.push = push
+        self.registry = registry
+        self.labels = labels or {}
         self.bot_username: str | None = None
         self.last_sent_at: datetime | None = None  # 마지막으로 관리자 챗에 무언가 보낸 시각 (하트비트 판단용)
         self._last_alert: dict[str, datetime] = {}
@@ -135,10 +179,17 @@ class AdminNotifier:
             log.error("admin notify failed: %s", e)
             return False
 
+    def source_label(self, source: str) -> str:
+        return self.labels.get(source) or COLLECTOR_LABELS.get(source, source)
+
+    def shop_label(self, key: str) -> str:
+        shop = self.registry.get(key) if self.registry else None
+        return shop.name if shop else key
+
     async def notify_startup(self, status_text: str, check_lines: list[str] | None = None) -> bool:
-        text = f"🟢 <b>DealBot v{__version__} 시작</b>\n"
+        text = f"🟢 <b>봇이 켜졌어요</b> (v{__version__})\n"
         if check_lines:
-            text += "\n<b>자기 점검</b>\n" + "\n".join(html.escape(line) for line in check_lines) + "\n"
+            text += "\n<b>자기 점검</b> — ✅ 정상 · ⚠️ 아직 설정 안 함(선택) · ❌ 문제\n" + "\n".join(html.escape(line) for line in check_lines) + "\n"
         text += f"\n{status_text}"
         sent = await self.send(text, silent=True)
         await self._push("startup", "DealBot 시작", "\n".join(check_lines or [])[:500] or "봇이 시작되었습니다.")
@@ -149,24 +200,25 @@ class AdminNotifier:
         if not self.cfg.notify_on_publish:
             return
         p = deal.product
-        reasons = ", ".join(deal.verdict.reasons) or "-"
-        meta = f"[{html.escape(p.source)}/{html.escape(p.shop)}] · 점수 {deal.verdict.score:g} · {html.escape(reasons)}"
+        where = f"어디서: {html.escape(self.source_label(p.source))} → {html.escape(self.shop_label(p.shop))}"
+        why = f"고른 이유: {html.escape(humanize_reasons(deal.verdict.reasons))} · 점수 {deal.verdict.score:g}"
         if result.dry_run and preview:
-            photo = " · 🖼 사진 포함" if p.image_url else ""
+            photo = " · 🖼 사진 있음" if p.image_url else ""
             text = (
-                f"🧪 <b>DRY-RUN 미리보기</b> — 실제 모드였다면 채널에 이렇게 올라갔을 글\n"
-                f"{meta}{photo}\n"
+                f"🧪 <b>미리보기</b> — 연습 모드라 채널에는 안 올렸어요\n"
+                f"{where}{photo}\n"
+                f"{why}\n"
                 f"━━━━━━━━━━━━━━\n"
                 f"{preview}"
             )
             await self.send(text, silent=True)
             return
-        tag = "DRY-RUN " if result.dry_run else ""
+        head = "🧪 <b>연습 발행</b>" if result.dry_run else "✅ <b>채널에 올렸어요</b>"
         price = f"{p.price:,}원" if p.has_price else "가격 없음"
         text = (
-            f"✅ <b>{tag}발행</b> [{html.escape(p.shop)}/{html.escape(p.source)}]\n"
-            f"{html.escape(truncate(p.name, 80))}\n"
-            f"{price} · 점수 {deal.verdict.score:g} · {html.escape(reasons)}"
+            f"{head}\n"
+            f"{html.escape(truncate(p.name, 80))} · {price}\n"
+            f"{where}\n{why}"
         )
         if deal.affiliate_url:
             text += f"\n{html.escape(deal.affiliate_url)}"
@@ -247,6 +299,10 @@ class StatusReporter:
         self.registry = registry or settings.shop_registry()
         self.links = links
         self.budget = budget
+        self.labels = {c.name: c.label or COLLECTOR_LABELS.get(c.name, c.name) for c in settings.collectors}
+
+    def collector_label(self, name: str) -> str:
+        return self.labels.get(name) or COLLECTOR_LABELS.get(name, name)
 
     def _collector_rows(self, now: datetime) -> list[dict[str, Any]]:
         tz = self.settings.app.timezone
@@ -256,6 +312,7 @@ class StatusReporter:
             rows.append(
                 {
                     "name": st.name,
+                    "label": self.collector_label(st.name),
                     "type": st.type,
                     "enabled": st.enabled,
                     "available": st.available,
@@ -429,22 +486,36 @@ class StatusReporter:
         mode = " · DRY-RUN" if self.state.dry_run else ""
         paused = " · ⏸ 일시정지" if self.state.paused else ""
         span = f"{minutes // 60}시간" if minutes % 60 == 0 else f"{minutes}분"
+        mode = " · 🧪 연습 모드" if self.state.dry_run else ""
+        paused = " · ⏸ 일시정지 중" if self.state.paused else ""
+        dup = max(s.deals_found - s.queued, 0)
+        dup_note = f" (기준은 넘었지만 이미 올린 것과 겹친 {dup}건은 건너뜀)" if dup else ""
+        fails = f" (확인 실패 {s.run_errors}번)" if s.run_errors else ""
+        pending = counts.get("pending", 0)
+        awaiting = counts.get("awaiting_link", 0)
+        if pending or awaiting:
+            waiting = f"{pending}건 발행 차례 기다리는 중" + (f" · {awaiting}건 내 링크 기다리는 중 (/pending)" if awaiting else "")
+        else:
+            waiting = "없음"
+        posted_label = "미리보기로 보낸 글" if self.state.dry_run else "채널에 올린 글"
         lines = [
-            f"🫀 <b>정상 가동 중</b> · 가동 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
-            f"최근 {span}: 수집 {s.runs}회{f' (실패 {s.run_errors})' if s.run_errors else ''} · 글 {s.collected}건 · 특가 {s.deals_found}건 · 발행 {s.published}건",
-            f"대기열 {counts.get('pending', 0)} 대기 · {counts.get('awaiting_link', 0)} 링크대기",
+            f"🫀 <b>봇이 잘 돌고 있어요</b> · 켜진 지 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
+            f"지난 {span} 동안 게시판을 {s.runs}번 확인해서{fails} 글 {s.collected}개를 봤어요.",
+            f"새로 잡은 특가: {s.queued}건{dup_note}",
+            f"{posted_label}: {s.published}건",
+            f"지금 기다리는 글: {waiting}",
         ]
         nxt = [
-            f"{st.name} {humanize_delta(st.next_run_at - now) if st.next_run_at and st.next_run_at > now else '곧'}"
+            f"{self.collector_label(st.name)} {humanize_delta(st.next_run_at - now) + ' 뒤' if st.next_run_at and st.next_run_at > now else '곧'}"
             for st in self.state.collectors.values()
             if st.enabled and st.available
         ]
         if nxt:
-            lines.append("다음 수집: " + " · ".join(nxt))
+            lines.append("다음 확인: " + " · ".join(nxt))
         if s.errors:
-            lines.append(f"🚨 에러 {s.errors}건 — /errors")
-        if s.deals_found == 0 and s.published == 0:
-            lines.append("특가가 없었던 건 정상입니다. 기준을 넘는 글이 없으면 조용합니다.")
+            lines.append(f"🚨 에러 {s.errors}건 — /errors 로 확인")
+        if s.queued == 0 and s.published == 0:
+            lines.append(f"특가가 없으면 조용한 게 정상이에요. {span} 동안 아무 소식이 없을 때만 이 메시지를 보내요.")
         return "\n".join(lines)
 
 

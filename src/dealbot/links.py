@@ -122,6 +122,9 @@ class LinkPriceProvider:
 
 
 # ------------------------------------------------------------------- router
+PROVIDER_LABELS = {"coupang": "쿠팡 API", "linkprice": "링크프라이스", "naver_connect": "네이버 브라우저"}
+
+
 class LinkRouter:
     def __init__(
         self,
@@ -145,15 +148,16 @@ class LinkRouter:
             return f"꺼짐 ({shop.disabled_reason})" if shop.disabled_reason else "꺼짐"
         if shop.link_mode == "api":
             if self.provider_for(shop):
-                return f"자동 변환({shop.provider})" + (", 실패 시 수동" if shop.manual_fallback else "")
+                label = PROVIDER_LABELS.get(shop.provider or "", shop.provider)
+                return f"자동 ({label})" + (", 안 되면 내 링크 요청" if shop.manual_fallback else "")
             if shop.manual_fallback:
-                return "수동 링크(자동 변환기 없음)"
-            return "원본 링크(제휴 키 없음)" if self._publish.allow_raw_links else "발행 불가(제휴 키 없음)"
+                return "내 링크 요청 (자동 변환기 없음)"
+            return "원본 링크 그대로 (제휴 키 없음)" if self._publish.allow_raw_links else "올리지 않음 (제휴 키 없음)"
         if shop.link_mode == "manual":
-            return "수동 링크(관리자 입력)"
+            return "내 링크 요청 (앱에서 만들어 답장)"
         if shop.link_mode == "raw":
-            return "원본 링크"
-        return "발행 안 함"
+            return "원본 링크 그대로"
+        return "올리지 않음"
 
     async def to_affiliate(self, product: Product) -> str:
         shop = self.registry.get(product.shop)

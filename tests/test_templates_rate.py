@@ -68,13 +68,13 @@ def test_status_and_summary_templates_render(repo_root: Path, db: Database) -> N
         "tz": "Asia/Seoul",
     }
     text = r.render("status.j2", **ctx)
-    assert "DRY-RUN" in text and "쿠팡 API 키 미설정" in text and "b — 꺼짐" in text and "no key" in text
+    assert "연습 모드" in text and "쿠팡 API 키 없음" in text and "b — 꺼짐" in text and "no key" in text
     assert "• 쿠팡: 자동 변환(coupang)" in text and "테무" not in text
     assert "boom &lt;x&gt;" in text
 
     s = db.summary(utcnow() - timedelta(days=1))
     out = r.render("daily_summary.j2", s=s, tz="Asia/Seoul")
-    assert "일일 요약" in out and "에러 없음" in out
+    assert "오늘 하루 정리" in out and "에러 없음" in out
 
 
 def test_rate_limiter(db: Database) -> None:

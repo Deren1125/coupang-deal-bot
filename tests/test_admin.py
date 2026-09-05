@@ -56,8 +56,9 @@ async def test_dry_run_sends_full_preview_and_skips_side_channels(bot: DealBot) 
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
     assert len(sent) == 1, sent  # 미리보기 1건만 — 카카오/블로그 복붙 문구는 실제 발행 때만
     text = sent[0]
-    assert text.startswith("🧪 <b>DRY-RUN 미리보기</b>")
-    assert "[fake/coupang]" in text and "🖼 사진 포함" in text
+    assert text.startswith("🧪 <b>미리보기</b> — 연습 모드라 채널에는 안 올렸어요")
+    assert "어디서: fake → 쿠팡 · 🖼 사진 있음" in text
+    assert "고른 이유: 관심도 통과(순위 30위 안) · 표시 할인율 50% 이상 · 점수" in text
     assert bot.publisher.render(bot.db.last_published_item().deal) in text  # 채널 글 전체가 그대로 들어감
     assert "에어프라이어 1" in text and "39,900원" in text and "link.coupang.com" in text
 
@@ -71,7 +72,7 @@ async def test_real_publish_sends_summary_and_copy_blocks(bot: DealBot) -> None:
     await bot.run_collector(bot.collectors[0])
     assert await bot.process_queue_once()
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
-    assert sent[0].startswith("✅ <b>발행</b>") and "DRY-RUN" not in sent[0]
+    assert sent[0].startswith("✅ <b>채널에 올렸어요</b>") and "연습" not in sent[0]
     names = [s.splitlines()[0] for s in sent[1:]]
     assert names == ["📋 <b>카카오 오픈채팅</b> 복사용", "📋 <b>네이버 블로그</b> 복사용"]
 
@@ -84,7 +85,7 @@ def test_status_last_error_is_in_memory_only(bot: DealBot) -> None:
     bot.state.set_error("[ppomppu] boom\nstack...")
     ctx = bot.reporter.status_context()
     assert ctx["last_error"] == "[ppomppu] boom" and ctx["last_error_at"]
-    assert "❗ 마지막 에러" in bot.reporter.status_text()
+    assert "❗ 이번 실행 중 마지막 에러" in bot.reporter.status_text()
     # 이력은 /errors 로 계속 볼 수 있음
     assert "403 Forbidden" in bot.reporter.errors_text()
 
@@ -120,16 +121,17 @@ async def test_push_test_sends_ntfy(bot: DealBot) -> None:
 
 def test_heartbeat_text(bot: DealBot) -> None:
     text = bot.reporter.heartbeat_text(30)
-    assert text.startswith("🫀 <b>정상 가동 중</b>") and "DRY-RUN" in text
-    assert "최근 30분: 수집 0회 · 글 0건 · 특가 0건 · 발행 0건" in text
-    assert "다음 수집: fake" in text and "특가가 없었던 건 정상" in text
-    assert "최근 2시간" in bot.reporter.heartbeat_text(120)
+    assert text.startswith("🫀 <b>봇이 잘 돌고 있어요</b>") and "연습 모드" in text
+    assert "지난 30분 동안 게시판을 0번 확인해서 글 0개를 봤어요." in text
+    assert "새로 잡은 특가: 0건" in text and "미리보기로 보낸 글: 0건" in text and "지금 기다리는 글: 없음" in text
+    assert "다음 확인: fake" in text and "특가가 없으면 조용한 게 정상이에요" in text
+    assert "지난 2시간 동안" in bot.reporter.heartbeat_text(120)
 
 
 async def test_send_heartbeat_uses_notifier(bot: DealBot) -> None:
     bot.settings.monitoring.heartbeat_minutes = 45
     text = await bot.send_heartbeat()
-    assert "최근 45분" in text and bot.sent == [text]  # type: ignore[attr-defined]
+    assert "지난 45분 동안" in text and bot.sent == [text]  # type: ignore[attr-defined]
 
 
 def test_heartbeat_only_when_quiet() -> None:
@@ -208,6 +210,8 @@ def test_linkprice_shops_follow_provider(settings: Settings) -> None:
     b = DealBot(settings)
     try:
         assert b.registry.get("ssg").enabled is False and b.links.describe(b.registry.get("ssg")) == "꺼짐 (링크프라이스 ID 필요)"  # type: ignore[union-attr, arg-type]
+        assert b.links.describe(b.registry.get("coupang")) == "내 링크 요청 (자동 변환기 없음)"  # type: ignore[arg-type]
+        assert b.links.describe(b.registry.get("toss")) == "내 링크 요청 (앱에서 만들어 답장)"  # type: ignore[arg-type]
         assert b.registry.get("oliveyoung").enabled is False and b.registry.get("coupang").enabled  # type: ignore[union-attr]
         assert [r["key"] for r in b.reporter._shop_rows() if r["enabled"]] == ["coupang", "toss", "naver"]
         status = b.reporter.status_text()
@@ -218,6 +222,28 @@ def test_linkprice_shops_follow_provider(settings: Settings) -> None:
     settings.secrets.linkprice_affiliate_id = "A100"
     b2 = DealBot(settings)
     try:
-        assert b2.registry.get("ssg").enabled is True and b2.links.describe(b2.registry.get("ssg")) == "자동 변환(linkprice)"  # type: ignore[union-attr, arg-type]
+        assert b2.registry.get("ssg").enabled is True and b2.links.describe(b2.registry.get("ssg")) == "자동 (링크프라이스)"  # type: ignore[union-attr, arg-type]
     finally:
         b2.db.close()
+
+
+def test_humanize_reasons_and_labels(bot: DealBot) -> None:
+    from dealbot.monitoring.admin import humanize_reasons
+
+    assert humanize_reasons(["interest:recommend>=1", "below_coupang_price>=20%", "recommend>=5"]) == (
+        "관심도 통과(추천 1개 이상) · 쿠팡 최저가보다 20% 이상 쌈 · 커뮤니티 추천 5개 이상"
+    )
+    assert humanize_reasons(["below_30d_avg>=15%", "discount_rate>=50%", "manual", "weird"]) == (
+        "최근 30일 평균가보다 15% 이상 쌈 · 표시 할인율 50% 이상 · 내가 직접 올림 · weird"
+    )
+    assert humanize_reasons([]) == "-"
+    assert bot.notifier.source_label("ppomppu") == "뽐뿌" and bot.notifier.shop_label("toss") == "토스쇼핑"
+
+
+def test_heartbeat_counts_new_deals_not_reseen(bot: DealBot) -> None:
+    run_id = bot.db.start_run("fake")
+    bot.db.finish_run(run_id, status="ok", collected=46, deals=6, queued=1)
+    text = bot.reporter.heartbeat_text(30)
+    assert "글 46개를 봤어요" in text and "새로 잡은 특가: 1건 (기준은 넘었지만 이미 올린 것과 겹친 5건은 건너뜀)" in text
+    s = bot.db.summary(bot.state.started_at)
+    assert s.deals_found == 6 and s.queued == 1

@@ -67,6 +67,7 @@ shops:
 # ----------------------------------------------------------------------------
 collectors:
   - name: goldbox
+    label: 쿠팡 골드박스
     type: coupang_goldbox
     enabled: true
     interval_minutes: 120
@@ -75,6 +76,8 @@ collectors:
       image_size: "512x512"
 
   - name: category_best
+
+    label: 쿠팡 카테고리 베스트
     type: coupang_category_best
     enabled: true
     interval_minutes: 240
@@ -89,6 +92,7 @@ collectors:
 
   # 뽐뿌 핫딜 게시판: 쿠팡/토스/네이버/11번가/G마켓/알리... 등록된 모든 쇼핑몰의 글을 수집
   - name: ppomppu
+    label: 뽐뿌 핫딜
     type: ppomppu
     enabled: true
     interval_minutes: 5
@@ -109,6 +113,7 @@ collectors:
   # 루리웹 업체 예판 핫딜 게시판(600004): 제휴 마케터들이 토스 딜을 올리는 곳. 카톡 핫딜방보다 하루쯤 빠름.
   # 추천/조회가 거의 없어 관심도 게이트는 always_pass_sources 로 통과시키고 시중가 대조로만 판정.
   - name: ruliweb_biz
+    label: 루리웹 업체 핫딜
     type: ruliweb
     enabled: true
     interval_minutes: 5
@@ -120,6 +125,7 @@ collectors:
 
   # 루리웹 유저 핫딜 게시판(1020): 일반 회원이 공유하고 추천으로 검증되는 곳. 관심도 게이트 정상 적용.
   - name: ruliweb_user
+    label: 루리웹 유저 핫딜
     type: ruliweb
     enabled: true
     interval_minutes: 5
@@ -132,6 +138,7 @@ collectors:
   # 알구몬: 뽐뿌·루리웹·클리앙·퀘이사존 등 커뮤니티 핫딜 통합. 페이지 구조 확인 전이라 기본 꺼짐.
   # 켜서 돌린 뒤 /errors 에 "no rows matched ... DOM:" 이 뜨면 그 내용을 알려주세요 → options.selectors 를 맞춥니다.
   - name: algumon
+    label: 알구몬
     type: algumon
     enabled: false
     interval_minutes: 15
@@ -146,6 +153,7 @@ collectors:
 
   # 애드픽 쇼핑메이트 핫딜 API (ADPICK_AFFID 필요). 제휴 링크가 포함된 여러 쇼핑몰 핫딜 목록.
   - name: adpick
+    label: 애드픽
     type: adpick_hotdeal
     enabled: false
     interval_minutes: 30
