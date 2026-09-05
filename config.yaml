@@ -49,7 +49,8 @@ http:
 #   켜짐        coupang(API, 승인 전엔 반자동) · toss(반자동) · naver(반자동)
 #   자동        11st, gmarket, auction, ssg, lotteon, aliexpress, ohouse — 링크프라이스 API 로 자동 발급되므로
 #               LINKPRICE_AFFILIATE_ID 가 있을 때만 자동으로 켜짐 (requires_provider)
-#   꺼짐        oliveyoung, kurly, musinsa (앱에서만 링크 생성, 특가 드묾) · temu, daiso (수익 없음)
+#   꺼짐(제외)  oliveyoung, kurly, musinsa (앱에서만 링크 생성 = API 없음, 의류·뷰티는 생필품 채널과 결이 다름) · temu, daiso (수익 없음)
+#   미등록 몰   allow_raw_links: false 라 아예 건너뜀
 # ----------------------------------------------------------------------------
 shops:
   - { key: coupang, enabled: true }   # API 키 없으면(최종 승인 전) 파트너스 사이트에서 만든 링크를 요청(반자동), 키가 생기면 자동
@@ -214,7 +215,7 @@ publish:
   max_publish_attempts: 3
   publisher_tick_seconds: 20
   send_photo: true
-  allow_raw_links: true          # 제휴 변환 수단이 없는 쇼핑몰은 원본 링크로 발행 (false 면 건너뜀)
+  allow_raw_links: false         # 제휴 링크를 못 만드는 쇼핑몰(미등록 몰 포함)은 건너뜀. true 면 수익 없는 원본 링크로라도 발행
   templates_dir: templates
   template: deal_post.j2
 
@@ -252,4 +253,4 @@ monitoring:
   error_alert_cooldown_minutes: 30
   daily_summary_time: "21:00"
   quiet_notices: false           # false: 시작/미리보기/발행 알림도 소리·진동과 함께 (true 면 무음)
-  heartbeat_hours: 3             # 3시간마다 "정상 가동 중" 짧은 상태 보고 (0 = 끔). 특가가 없어도 살아 있음을 알림
+  heartbeat_minutes: 30          # 관리자 챗이 30분 동안 조용하면 "정상 가동 중" 짧은 보고 (0 = 끔). 특가 알림이 있으면 그걸로 대신함

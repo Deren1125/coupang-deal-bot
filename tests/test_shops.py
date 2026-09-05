@@ -65,7 +65,7 @@ def test_default_enabled_shops_and_provider_gating() -> None:
     off = reg.apply_providers({"coupang"})
     assert sorted(off) == ["11st", "aliexpress", "auction", "gmarket", "lotteon", "ohouse", "ssg"]
     assert {s.key for s in reg.enabled()} == {"coupang", "toss", "naver"}
-    assert "linkprice 미설정" in (reg.get("ssg").disabled_reason or "")  # type: ignore[union-attr]
+    assert reg.get("ssg").disabled_reason == "링크프라이스 ID 필요"  # type: ignore[union-attr]
     # 변환기가 있으면 그대로 켜진 채 남는다
     reg2 = ShopRegistry()
     assert reg2.apply_providers({"coupang", "linkprice"}) == []

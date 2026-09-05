@@ -119,16 +119,55 @@ async def test_push_test_sends_ntfy(bot: DealBot) -> None:
 
 
 def test_heartbeat_text(bot: DealBot) -> None:
-    text = bot.reporter.heartbeat_text(3)
+    text = bot.reporter.heartbeat_text(30)
     assert text.startswith("🫀 <b>정상 가동 중</b>") and "DRY-RUN" in text
-    assert "최근 3시간: 수집 0회 · 글 0건 · 특가 0건 · 발행 0건" in text
+    assert "최근 30분: 수집 0회 · 글 0건 · 특가 0건 · 발행 0건" in text
     assert "다음 수집: fake" in text and "특가가 없었던 건 정상" in text
+    assert "최근 2시간" in bot.reporter.heartbeat_text(120)
 
 
 async def test_send_heartbeat_uses_notifier(bot: DealBot) -> None:
-    bot.settings.monitoring.heartbeat_hours = 2
+    bot.settings.monitoring.heartbeat_minutes = 45
     text = await bot.send_heartbeat()
-    assert "최근 2시간" in text and bot.sent == [text]  # type: ignore[attr-defined]
+    assert "최근 45분" in text and bot.sent == [text]  # type: ignore[attr-defined]
+
+
+def test_heartbeat_only_when_quiet() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from dealbot.monitoring.admin import heartbeat_due
+
+    now = datetime(2026, 9, 5, 9, 0, tzinfo=UTC)
+    assert not heartbeat_due(now - timedelta(minutes=10), now, 30)  # 10분 전에 특가 알림이 있었음 → 아직
+    assert heartbeat_due(now - timedelta(minutes=30), now, 30)
+    assert not heartbeat_due(now - timedelta(hours=5), now, 0)  # 0 = 끔
+
+
+async def test_send_updates_last_sent_at(settings: Settings) -> None:
+    from dealbot.monitoring.admin import AdminNotifier
+    from dealbot.publisher.templates import TemplateRenderer
+
+    class FakeBot:
+        async def send_message(self, **kw):  # type: ignore[no-untyped-def]
+            return None
+
+    renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone)
+    n = AdminNotifier(FakeBot(), 42, settings.monitoring, renderer, settings.app.timezone)  # type: ignore[arg-type]
+    assert n.last_sent_at is None
+    assert await n.send("hi")
+    assert n.last_sent_at is not None
+
+
+def test_bot_commands_are_valid_telegram_names() -> None:
+    import re
+
+    from dealbot.monitoring.admin import BOT_COMMANDS, HELP_TEXT
+
+    assert len(BOT_COMMANDS) <= 100 and len({c for c, _ in BOT_COMMANDS}) == len(BOT_COMMANDS)
+    for cmd, desc in BOT_COMMANDS:
+        assert re.fullmatch(r"[a-z0-9_]{1,32}", cmd), cmd  # 텔레그램 규칙: 영문 소문자·숫자·밑줄
+        assert 1 <= len(desc) <= 256
+        assert f"/{cmd}" in HELP_TEXT, cmd
 
 
 async def test_quiet_notices_controls_silent_flag(settings: Settings) -> None:
@@ -168,9 +207,12 @@ def test_linkprice_shops_follow_provider(settings: Settings) -> None:
     settings.collectors = []
     b = DealBot(settings)
     try:
-        assert b.registry.get("ssg").enabled is False and "linkprice 미설정" in b.links.describe(b.registry.get("ssg"))  # type: ignore[union-attr, arg-type]
+        assert b.registry.get("ssg").enabled is False and b.links.describe(b.registry.get("ssg")) == "꺼짐 (링크프라이스 ID 필요)"  # type: ignore[union-attr, arg-type]
         assert b.registry.get("oliveyoung").enabled is False and b.registry.get("coupang").enabled  # type: ignore[union-attr]
         assert [r["key"] for r in b.reporter._shop_rows() if r["enabled"]] == ["coupang", "toss", "naver"]
+        status = b.reporter.status_text()
+        assert "꺼짐 — 링크프라이스 ID 필요: 11번가, G마켓, 옥션, SSG, 롯데온, 알리익스프레스, 오늘의집" in status
+        assert "제외한 몰: 올리브영, 컬리, 무신사, 테무, 다이소몰" in status
     finally:
         b.db.close()
     settings.secrets.linkprice_affiliate_id = "A100"

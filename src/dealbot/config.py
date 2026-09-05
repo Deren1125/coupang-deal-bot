@@ -241,7 +241,7 @@ class MonitoringConfig(BaseModel):
     error_alert_cooldown_minutes: int = 30
     daily_summary_time: str = "21:00"
     quiet_notices: bool = False  # true: 시작/미리보기/발행 알림을 무음으로 (false: 모든 알림이 소리·진동과 함께 옴)
-    heartbeat_hours: float = 0  # N시간마다 "정상 가동 중" 짧은 상태를 관리자 챗으로 (0 = 끔)
+    heartbeat_minutes: int = 0  # 관리자 챗이 N분 동안 조용하면 "정상 가동 중" 짧은 상태를 보냄 (0 = 끔). 특가 알림이 있으면 그걸로 대신함
 
     @field_validator("daily_summary_time")
     @classmethod

@@ -9,6 +9,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from dealbot.app import DealBot
+from dealbot.monitoring.admin import heartbeat_due
 from dealbot.utils.timeutil import local_now, next_daily_time, utcnow
 
 log = logging.getLogger(__name__)
@@ -88,16 +89,19 @@ async def daily_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
 
 
 async def heartbeat_loop(bot: DealBot, stop: asyncio.Event) -> None:
-    """monitoring.heartbeat_hours 마다 '정상 가동 중' 상태를 관리자 챗으로. 조용한 시간에도 살아 있음을 알린다."""
-    hours = bot.settings.monitoring.heartbeat_hours
-    if hours <= 0:
+    """관리자 챗이 monitoring.heartbeat_minutes 동안 조용하면 '정상 가동 중' 상태를 보낸다.
+    특가 미리보기/발행/링크 요청 같은 알림이 그 사이에 있었으면 그것이 생존 신고를 대신한다."""
+    minutes = bot.settings.monitoring.heartbeat_minutes
+    if minutes <= 0 or not bot.notifier.enabled:
         return
     while not stop.is_set():
-        await _sleep_or_stop(stop, hours * 3600)
+        await _sleep_or_stop(stop, 60)
         if stop.is_set():
             break
         try:
-            await bot.send_heartbeat()
+            last = bot.notifier.last_sent_at or bot.state.started_at
+            if heartbeat_due(last, utcnow(), minutes):
+                await bot.send_heartbeat()
         except Exception as e:  # noqa: BLE001
             log.warning("heartbeat notice failed: %s", e)
 

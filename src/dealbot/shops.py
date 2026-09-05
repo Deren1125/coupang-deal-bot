@@ -155,7 +155,7 @@ class ShopRegistry:
                 continue
             if s.provider not in avail:
                 s.enabled = False
-                s.disabled_reason = f"{s.provider or 'provider'} 미설정 — API 링크 발급이 가능해지면 자동으로 켜짐"
+                s.disabled_reason = "링크프라이스 ID 필요" if s.provider == "linkprice" else f"{s.provider or 'provider'} 미설정"
                 disabled.append(s.key)
         return disabled
 

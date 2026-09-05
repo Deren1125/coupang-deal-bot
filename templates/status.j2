@@ -31,6 +31,12 @@
 {% for s in shops if s.enabled %}
 • {{ s.name }}: {{ s.mode }}
 {% endfor %}
+{% for reason, names in (shops_off_pending | default({})).items() %}
+• 꺼짐 — {{ reason }}: {{ names | join(', ') }} (ID 를 넣으면 자동으로 켜짐)
+{% endfor %}
+{% if shops_off_excluded | default([]) %}
+• 제외한 몰: {{ shops_off_excluded | join(', ') }}
+{% endif %}
 
 📤 <b>발행</b> 최근 1시간 {{ rate.posts_hour }}/{{ rate.max_hour }} · 24시간 {{ rate.posts_day }}/{{ rate.max_day }}{% if rate.last_post_at %} · 마지막 {{ rate.last_post_at | local }}{% endif +%}
 🗂 대기열 {{ queue.get('pending', 0) }} 대기 · {{ queue.get('awaiting_link', 0) }} 링크대기 · {{ queue.get('failed', 0) }} 실패 · {{ queue.get('expired', 0) }} 만료

@@ -12,7 +12,7 @@ from datetime import timedelta
 from typing import Any
 
 import httpx
-from telegram import Bot, Update
+from telegram import Bot, BotCommand, Update
 from telegram.ext import Application
 
 from dealbot import __version__
@@ -35,7 +35,12 @@ from dealbot.links import (
 )
 from dealbot.manual import parse_manual_post
 from dealbot.models import Deal, DealVerdict, Product
-from dealbot.monitoring.admin import AdminNotifier, StatusReporter, register_admin_handlers
+from dealbot.monitoring.admin import (
+    BOT_COMMANDS,
+    AdminNotifier,
+    StatusReporter,
+    register_admin_handlers,
+)
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.pricing.evaluator import DealEvaluator
@@ -239,6 +244,11 @@ class DealBot:
             self.notifier.bot_username = me.username
         except Exception as e:  # noqa: BLE001
             log.warning("get_me failed: %s", e)
+        try:
+            # 텔레그램 입력창의 "/" 메뉴에 명령과 설명을 등록 (외우지 않아도 골라 쓸 수 있게)
+            await self.application.bot.set_my_commands([BotCommand(c, d) for c, d in BOT_COMMANDS])
+        except Exception as e:  # noqa: BLE001
+            log.warning("set_my_commands failed: %s", e)
         if polling and self.settings.secrets.telegram_admin_chat_id and self.application.updater:
             # 재배포 중(봇이 잠깐 꺼진 사이)에 보낸 명령도 켜지면 처리한다. 너무 오래된 것은 admin 쪽 가드가 버림
             await self.application.updater.start_polling(allowed_updates=[Update.MESSAGE], drop_pending_updates=False)
@@ -837,8 +847,8 @@ class DealBot:
         self.db.kv_set("heartbeat", to_iso(utcnow()))
 
     async def send_heartbeat(self) -> str:
-        """N시간마다 관리자 챗으로 보내는 짧은 '정상 가동 중' 상태."""
-        text = self.reporter.heartbeat_text(self.settings.monitoring.heartbeat_hours or 3)
+        """관리자 챗이 조용할 때 보내는 짧은 '정상 가동 중' 상태."""
+        text = self.reporter.heartbeat_text(self.settings.monitoring.heartbeat_minutes or 30)
         await self.notifier.send(text)
         return text
 

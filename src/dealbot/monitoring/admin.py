@@ -40,6 +40,36 @@ _QUEUE_REF_RE = re.compile(r"#(\d+)")
 STALE_COMMAND_MAX_AGE = timedelta(minutes=15)  # 봇이 꺼져 있던 동안 쌓인 명령 중 이보다 오래된 것은 무시
 
 
+def heartbeat_due(last_activity: datetime, now: datetime, minutes: int) -> bool:
+    """관리자 챗이 minutes 동안 조용했으면 True (특가/링크/에러 알림이 있었으면 그것으로 생존 신고를 대신한다)."""
+    return minutes > 0 and now - last_activity >= timedelta(minutes=minutes)
+
+
+# 텔레그램 "/" 메뉴에 등록할 명령 (이름은 영문 소문자·숫자·밑줄만 가능 — 텔레그램 규칙)
+BOT_COMMANDS: list[tuple[str, str]] = [
+    ("status", "지금 상태 (수집기·발행·대기열)"),
+    ("queue", "발행 대기열"),
+    ("pending", "내 링크가 필요한 항목"),
+    ("recent", "최근 발행 목록"),
+    ("hot", "최근 24시간 추천 많은 글 (/hot 5)"),
+    ("find", "수집된 글 검색 (/find 키워드)"),
+    ("errors", "최근 에러"),
+    ("run", "지금 바로 수집 (/run 수집기이름)"),
+    ("pause", "발행 일시정지"),
+    ("resume", "발행 재개"),
+    ("post", "직접 딜 올리기"),
+    ("link", "만든 제휴 링크 붙이기 (/link 번호 링크)"),
+    ("skip", "항목 건너뛰기 (/skip 번호)"),
+    ("copy", "카카오·블로그 복붙 문구 (/copy 번호)"),
+    ("test", "샘플 발행 양식 보기"),
+    ("pushtest", "휴대폰 푸시(ntfy) 연결 확인"),
+    ("ppstats", "커뮤니티 글 추천 분포"),
+    ("threadsauth", "스레드 연결 (최초 1회)"),
+    ("threadscode", "스레드 인증 코드 입력"),
+    ("help", "도움말"),
+]
+
+
 def is_stale_message(sent_at: datetime | None, now: datetime | None = None, max_age: timedelta = STALE_COMMAND_MAX_AGE) -> bool:
     if sent_at is None:
         return False
@@ -66,6 +96,7 @@ class AdminNotifier:
         self.tz = tz
         self.push = push
         self.bot_username: str | None = None
+        self.last_sent_at: datetime | None = None  # 마지막으로 관리자 챗에 무언가 보낸 시각 (하트비트 판단용)
         self._last_alert: dict[str, datetime] = {}
 
     @property
@@ -98,6 +129,7 @@ class AdminNotifier:
                 disable_notification=silent and self.cfg.quiet_notices,
                 link_preview_options=None,
             )
+            self.last_sent_at = utcnow()
             return True
         except TelegramError as e:
             log.error("admin notify failed: %s", e)
@@ -246,7 +278,7 @@ class StatusReporter:
         rows = []
         for s in self.registry.all():
             mode = self.links.describe(s) if self.links else s.link_mode
-            rows.append({"key": s.key, "name": s.name, "enabled": s.enabled, "mode": mode})
+            rows.append({"key": s.key, "name": s.name, "enabled": s.enabled, "mode": mode, "reason": s.disabled_reason})
         return rows
 
     def status_context(self) -> dict[str, Any]:
@@ -265,6 +297,12 @@ class StatusReporter:
             "has_channel": self.settings.secrets.has_channel,
             "collectors": self._collector_rows(now),
             "shops": self._shop_rows(),
+            # 꺼진 몰도 이유와 함께 보여준다: 제외한 몰 / 링크 변환기(ID)만 넣으면 자동으로 켜질 몰
+            "shops_off_excluded": [s.name for s in self.registry.all() if not s.enabled and not s.disabled_reason],
+            "shops_off_pending": {
+                reason: [s.name for s in self.registry.all() if not s.enabled and s.disabled_reason == reason]
+                for reason in dict.fromkeys(s.disabled_reason for s in self.registry.all() if not s.enabled and s.disabled_reason)
+            },
             "rate": self.rate.snapshot(now),
             "queue": self.db.queue_counts(),
             "products": self.db.product_count(),
@@ -383,14 +421,14 @@ class StatusReporter:
     def summary_text(self, summary: PeriodSummary) -> str:
         return self.renderer.render("daily_summary.j2", s=summary, tz=self.settings.app.timezone)
 
-    def heartbeat_text(self, hours: float) -> str:
-        """N시간마다 보내는 짧은 생존 신고."""
+    def heartbeat_text(self, minutes: int) -> str:
+        """조용할 때 보내는 짧은 생존 신고 (최근 N분 동안 한 일)."""
         now = utcnow()
-        s = self.db.summary(now - timedelta(hours=hours), now)
+        s = self.db.summary(now - timedelta(minutes=minutes), now)
         counts = self.db.queue_counts()
         mode = " · DRY-RUN" if self.state.dry_run else ""
         paused = " · ⏸ 일시정지" if self.state.paused else ""
-        span = f"{hours:g}시간"
+        span = f"{minutes // 60}시간" if minutes % 60 == 0 else f"{minutes}분"
         lines = [
             f"🫀 <b>정상 가동 중</b> · 가동 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
             f"최근 {span}: 수집 {s.runs}회{f' (실패 {s.run_errors})' if s.run_errors else ''} · 글 {s.collected}건 · 특가 {s.deals_found}건 · 발행 {s.published}건",
