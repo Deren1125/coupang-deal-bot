@@ -52,6 +52,31 @@ class TelegramPublisher:
         shop = self.registry.get(deal.product.shop)
         return self.renderer.render_deal(deal, link, shop=shop, template=self.template)
 
+    SOLD_OUT_BANNER = "⛔ <b>품절 또는 종료된 딜입니다</b>\n\n"
+
+    async def mark_sold_out(self, channel_id: str | int, message_id: int, original_text: str) -> bool:
+        """이미 올린 채널 글 맨 위에 품절 표시를 붙인다. 사진 글이면 캡션을, 아니면 본문을 고친다."""
+        if self.bot is None:
+            return False
+        text = self.SOLD_OUT_BANNER + original_text
+        try:
+            await self.bot.edit_message_text(chat_id=channel_id, message_id=message_id, text=text[:MESSAGE_LIMIT], parse_mode=ParseMode.HTML)
+            return True
+        except BadRequest as e:
+            if "no text" not in str(e).lower() and "caption" not in str(e).lower():
+                log.warning("mark_sold_out edit_message_text failed: %s", e)
+                if "not modified" in str(e).lower():
+                    return True
+        except TelegramError as e:
+            log.warning("mark_sold_out failed: %s", e)
+            return False
+        try:
+            await self.bot.edit_message_caption(chat_id=channel_id, message_id=message_id, caption=text[:CAPTION_LIMIT], parse_mode=ParseMode.HTML)
+            return True
+        except TelegramError as e:
+            log.warning("mark_sold_out edit_message_caption failed: %s", e)
+            return False
+
     async def publish(self, deal: Deal) -> PublishResult:
         text = self.render(deal)
         if self.dry_run:

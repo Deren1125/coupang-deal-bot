@@ -57,8 +57,9 @@ from dealbot.publisher.threads import (
     authorize_url,
 )
 from dealbot.shops import ShopRegistry
+from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
-from dealbot.utils.timeutil import to_iso, utcnow
+from dealbot.utils.timeutil import from_iso, to_iso, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -561,6 +562,9 @@ class DealBot:
             deals = queued = 0
             enriched = 0
             for p in products:
+                if cfg.deal.sold_out.enabled and looks_sold_out(str(p.extra.get("title") or p.name), cfg.deal.sold_out.words or None):
+                    await self._on_sold_out(p, via="게시판에 품절/종료 표시")
+                    continue
                 if not self._shop_allowed(p):
                     continue
                 if self._should_enrich(p) and enriched < cfg.deal.enrich.max_per_run:
@@ -603,6 +607,66 @@ class DealBot:
         finally:
             status.running = False
         return result
+
+    def _can_check_page(self, p: Product) -> bool:
+        ec = self.settings.deal.enrich
+        return ec.enabled and p.shop in ec.shops
+
+    async def _page_sold_out(self, p: Product) -> bool:
+        """상품 페이지의 재고 표시로 품절이 확인되면 True. 모르면 False."""
+        if not self._can_check_page(p):
+            return False
+        try:
+            return (await self.enricher.check_available(p.url)) is False
+        except Exception as e:  # noqa: BLE001
+            log.info("availability check failed for %s: %s", p.url, e)
+            return False
+
+    async def _on_sold_out(self, product: Product, via: str) -> dict[str, Any]:
+        """품절 확인 → 기다리는 글 내리기 + 링크 요청 메시지 고치기 + 채널 글에 품절 표시."""
+        so = self.settings.deal.sold_out
+        pid = product.product_id
+        out: dict[str, Any] = {"cancelled": [], "marked": False}
+        for item in self.db.items_for_product(pid, ("pending", "awaiting_link")):
+            self.db.update_queue_item(item.id, status="expired", error=f"sold out ({via})")
+            out["cancelled"].append(item.id)
+            if item.status == "awaiting_link":
+                notice = self.db.kv_get(f"link_notice:{item.id}")
+                await self.notifier.notify_sold_out_cancel(item, via, int(notice) if notice else None)
+            log.info("sold out (%s): queue #%d dropped — %s", via, item.id, product.name[:40])
+        post = self.db.latest_post(pid)
+        if (
+            post
+            and post.get("message_id")
+            and post.get("channel_id")
+            and not post.get("dry_run")
+            and self.db.kv_get(f"soldout_marked:{pid}") is None
+        ):
+            posted_at = from_iso(post["posted_at"])
+            if posted_at and utcnow() - posted_at <= timedelta(hours=so.mark_published_hours):
+                published = self.db.items_for_product(pid, ("published",))
+                if published:
+                    text = self.publisher.render(published[0].deal)
+                    if await self.publisher.mark_sold_out(post["channel_id"], int(post["message_id"]), text):
+                        self.db.kv_set(f"soldout_marked:{pid}", to_iso(utcnow()))
+                        out["marked"] = True
+                        await self.notifier.send(f"⛔ 채널 글에 품절 표시를 붙였습니다: {product.name[:60]} ({via})", silent=True)
+        if out["cancelled"] or out["marked"]:
+            self.db.log_event("INFO", "soldout", f"{pid} via={via} cancelled={out['cancelled']} marked={out['marked']}")
+        return out
+
+    async def recheck_awaiting(self) -> int:
+        """내 링크를 기다리는 글의 상품 페이지를 다시 읽어 품절이면 내린다. 내린 개수를 돌려준다."""
+        so = self.settings.deal.sold_out
+        if not so.enabled:
+            return 0
+        dropped = 0
+        for item in self.db.awaiting_items(50):
+            p = item.deal.product
+            if await self._page_sold_out(p):
+                await self._on_sold_out(p, via="상품 페이지에 재고 없음")
+                dropped += 1
+        return dropped
 
     def _should_enrich(self, p: Product) -> bool:
         ec = self.settings.deal.enrich
@@ -706,12 +770,21 @@ class DealBot:
             self.db.update_queue_item(item.id, status="skipped", error="already posted")
             return True
 
+        so = self.settings.deal.sold_out
         state, err = await self._ensure_link(item)
         if state == "manual":
+            if so.enabled and so.check_page_before_link_request and await self._page_sold_out(deal.product):
+                # 링크를 만들어 달라고 하기 전에 품절이면 조용히 내린다 (헛수고 방지)
+                self.db.update_queue_item(item.id, status="skipped", error="sold out (page, before link request)")
+                self.db.log_event("INFO", "soldout", f"{pid} skipped before link request")
+                log.info("queue #%d sold out before link request — skipped", item.id)
+                return True
             shop = self.registry.get(err or "")
             self.db.update_queue_item(item.id, status="awaiting_link", error="manual link required", deal=deal)
             if shop is not None:
-                await self.notifier.notify_manual_link(item, shop)
+                notice_id = await self.notifier.notify_manual_link(item, shop)
+                if notice_id:
+                    self.db.kv_set(f"link_notice:{item.id}", str(notice_id))
             log.info("queue #%d awaiting manual link (%s)", item.id, err)
             return True
         if state == "skip":
@@ -719,6 +792,12 @@ class DealBot:
             return True
         if state == "fail":
             await self._handle_publish_failure(item, err or "link conversion failed")
+            return True
+
+        if so.enabled and so.check_page_before_publish and await self._page_sold_out(deal.product):
+            self.db.update_queue_item(item.id, status="skipped", error="sold out (page, before publish)")
+            self.db.log_event("INFO", "soldout", f"{pid} skipped before publish")
+            log.info("queue #%d sold out before publish — skipped", item.id)
             return True
 
         result = await self.publisher.publish(deal)

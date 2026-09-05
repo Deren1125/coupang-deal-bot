@@ -106,6 +106,23 @@ async def heartbeat_loop(bot: DealBot, stop: asyncio.Event) -> None:
             log.warning("heartbeat notice failed: %s", e)
 
 
+async def soldout_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """내 링크를 기다리는 글의 상품 페이지를 N분마다 다시 읽어 품절이면 내린다."""
+    so = bot.settings.deal.sold_out
+    if not so.enabled or so.recheck_awaiting_minutes <= 0:
+        return
+    while not stop.is_set():
+        await _sleep_or_stop(stop, so.recheck_awaiting_minutes * 60)
+        if stop.is_set():
+            break
+        try:
+            n = await bot.recheck_awaiting()
+            if n:
+                log.info("sold-out recheck dropped %d awaiting item(s)", n)
+        except Exception as e:  # noqa: BLE001
+            log.warning("sold-out recheck failed: %s", e)
+
+
 async def maintenance_loop(bot: DealBot, stop: asyncio.Event) -> None:
     while not stop.is_set():
         await _sleep_or_stop(stop, 6 * 3600)
@@ -163,6 +180,7 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(daily_summary_loop(bot, stop), name="daily_summary_loop"),
         asyncio.create_task(maintenance_loop(bot, stop), name="maintenance_loop"),
         asyncio.create_task(heartbeat_loop(bot, stop), name="heartbeat_loop"),
+        asyncio.create_task(soldout_loop(bot, stop), name="soldout_loop"),
     ]
     try:
         await stop.wait()

@@ -445,6 +445,22 @@ class Database:
         row = self._one("SELECT * FROM deal_queue WHERE id = ?", (item_id,))
         return self._row_to_queue_item(row) if row else None
 
+    def items_for_product(self, product_id: str, statuses: tuple[str, ...]) -> list[QueueItem]:
+        marks = ",".join("?" for _ in statuses)
+        rows = self._q(
+            f"SELECT * FROM deal_queue WHERE product_id = ? AND status IN ({marks}) ORDER BY id DESC",
+            (product_id, *statuses),
+        )
+        return [self._row_to_queue_item(r) for r in rows]
+
+    def latest_post(self, product_id: str) -> dict[str, Any] | None:
+        row = self._one(
+            "SELECT id, product_id, source, channel_id, message_id, dry_run, posted_at FROM posts "
+            "WHERE product_id = ? ORDER BY posted_at DESC LIMIT 1",
+            (product_id,),
+        )
+        return dict(row) if row else None
+
     def awaiting_items(self, limit: int = 20) -> list[QueueItem]:
         rows = self._q(
             "SELECT * FROM deal_queue WHERE status = 'awaiting_link' ORDER BY created_at ASC LIMIT ?", (limit,)

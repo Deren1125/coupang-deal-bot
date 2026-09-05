@@ -177,15 +177,19 @@ class AdminNotifier:
         await self.push.send(title, message, click_url=self.telegram_link, priority=priority, tags=tags)
 
     async def send(self, text: str, *, silent: bool = False) -> bool:
+        return (await self.send_with_id(text, silent=silent)) is not None
+
+    async def send_with_id(self, text: str, *, silent: bool = False) -> int | None:
+        """보내고 텔레그램 message_id 를 돌려준다 (나중에 고치거나 지우려고)."""
         if not self.enabled:
             log.warning(
                 "관리자 알림을 보낼 수 없어 건너뜁니다 (봇 토큰/관리자 챗 ID 확인 필요): %s",
                 text.replace("\n", " | ")[:150],
             )
-            return False
+            return None
         assert self.bot is not None
         try:
-            await self.bot.send_message(
+            msg = await self.bot.send_message(
                 chat_id=self.chat_id,
                 text=text[:4096],
                 parse_mode=ParseMode.HTML,
@@ -194,9 +198,21 @@ class AdminNotifier:
                 link_preview_options=None,
             )
             self.last_sent_at = utcnow()
-            return True
+            return int(getattr(msg, "message_id", 0) or 0)  # id 를 모르면 0 (성공은 성공)
         except TelegramError as e:
             log.error("admin notify failed: %s", e)
+            return None
+
+    async def edit(self, message_id: int, text: str) -> bool:
+        """내가 보낸 관리자 챗 메시지를 고친다 (예: 품절된 링크 요청)."""
+        if not self.enabled:
+            return False
+        assert self.bot is not None
+        try:
+            await self.bot.edit_message_text(chat_id=self.chat_id, message_id=message_id, text=text[:4096], parse_mode=ParseMode.HTML)
+            return True
+        except TelegramError as e:
+            log.warning("admin edit failed (message %s): %s", message_id, e)
             return False
 
     def source_label(self, source: str) -> str:
@@ -255,10 +271,10 @@ class AdminNotifier:
         if final:
             await self._push("publish_failed", f"채널에 올리지 못함 [{self.shop_label(p.shop)}]", f"{truncate(p.name, 60)}\n{error[:200]}")
 
-    async def notify_manual_link(self, item: QueueItem, shop: Shop) -> None:
-        """자동 변환이 안 되는 쇼핑몰: 관리자에게 링크 생성을 요청."""
+    async def notify_manual_link(self, item: QueueItem, shop: Shop) -> int | None:
+        """자동 변환이 안 되는 쇼핑몰: 관리자에게 링크 생성을 요청. 보낸 메시지 id 를 돌려준다."""
         if not self.cfg.notify_on_manual_link:
-            return
+            return None
         p = item.deal.product
         price = f" — {p.price:,}원" if p.has_price else ""
         hint = shop.manual_hint or "앱/사이트에서 내 제휴 링크를 만들어 보내주세요"
@@ -271,7 +287,7 @@ class AdminNotifier:
             f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
             f"안 올리려면 <code>/skip {item.id}</code>"
         )
-        await self.send(text)
+        message_id = await self.send_with_id(text)
         await self._push(
             "manual_link",
             f"내 링크가 필요합니다 #{item.id} [{shop.name}]",
@@ -279,6 +295,19 @@ class AdminNotifier:
             priority="high",
             tags=["link"],
         )
+        return message_id
+
+    async def notify_sold_out_cancel(self, item: QueueItem, via: str, notice_message_id: int | None) -> None:
+        """내 링크를 기다리던 글이 품절됨: 보냈던 링크 요청 메시지를 고쳐서 헛수고를 막는다."""
+        p = item.deal.product
+        text = (
+            f"⛔ <b>품절되어 취소했습니다 #{item.id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
+            f"{html.escape(truncate(p.name, 80))}\n"
+            f"확인 경로: {html.escape(via)}. 링크를 만들 필요가 없습니다."
+        )
+        if notice_message_id and await self.edit(notice_message_id, text):
+            return
+        await self.send(text, silent=True)
 
     async def notify_error(self, kind: str, message: str) -> None:
         if not self.cfg.notify_on_error:

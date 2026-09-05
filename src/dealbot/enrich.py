@@ -31,6 +31,18 @@ class PageMeta:
     rating: float | None = None
     review_count: int | None = None
     final_url: str | None = None
+    available: bool | None = None  # 재고 표시. True 있음 / False 품절 / None 모름
+
+
+def _availability(value: object) -> bool | None:
+    v = str(value or "").strip().lower()
+    if not v:
+        return None
+    if any(k in v for k in ("outofstock", "out of stock", "soldout", "sold out", "oos", "discontinued", "품절")):
+        return False
+    if any(k in v for k in ("instock", "in stock", "instoreonly", "onlineonly", "preorder", "limitedavailability", "backorder")):
+        return True
+    return None
 
 
 def _meta(soup: BeautifulSoup, *names: str) -> str | None:
@@ -67,6 +79,7 @@ def parse_page_meta(html: str) -> PageMeta:
     orig_txt = _meta(soup, "product:original_price:amount", "product:regular_price:amount")
     if orig_txt:
         meta.original_price = parse_price(orig_txt)
+    meta.available = _availability(_meta(soup, "product:availability", "og:availability"))
 
     for script in soup.find_all("script", attrs={"type": re.compile("ld\\+json", re.I)}):
         try:
@@ -89,6 +102,8 @@ def parse_page_meta(html: str) -> PageMeta:
                     meta.price = parse_price(str(offers.get("price") or offers.get("lowPrice") or ""))
                 if meta.original_price is None and offers.get("highPrice"):
                     meta.original_price = parse_price(str(offers.get("highPrice")))
+                if meta.available is None:
+                    meta.available = _availability(offers.get("availability"))
             agg = p.get("aggregateRating")
             if isinstance(agg, dict):
                 try:
@@ -131,6 +146,11 @@ class PageEnricher:
         except httpx.HTTPError as e:
             log.info("enrich failed for %s: %s", url, e)
             return None
+
+    async def check_available(self, url: str) -> bool | None:
+        """상품 페이지의 재고 표시만 읽는다. 페이지를 못 읽거나 표시가 없으면 None(모름)."""
+        meta = await self.fetch(url)
+        return None if meta is None else meta.available
 
     @staticmethod
     def apply(product: Product, meta: PageMeta) -> list[str]:

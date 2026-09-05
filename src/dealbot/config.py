@@ -116,6 +116,19 @@ class EnrichConfig(BaseModel):
     max_per_run: int = 10
 
 
+class SoldOutConfig(BaseModel):
+    """품절/종료된 딜 정리.
+    - 게시판을 다시 읽을 때 제목에 품절 표시가 붙은 글 → 기다리는 글에서 내리고, 링크 요청 메시지를 고치고, 채널 글에 품절 표시
+    - 토스/네이버처럼 상품 페이지를 읽을 수 있는 몰 → 링크 요청 전·발행 전에 재고 확인, 링크를 기다리는 동안 N분마다 재확인"""
+
+    enabled: bool = True
+    words: list[str] = Field(default_factory=list)  # 비우면 내장 목록(품절/매진/완판/재고소진/판매종료 + 종료/마감)
+    check_page_before_link_request: bool = True
+    check_page_before_publish: bool = True
+    recheck_awaiting_minutes: int = 5
+    mark_published_hours: int = 24  # 올린 지 N시간 안의 채널 글만 품절 표시를 붙임
+
+
 class SourceRule(BaseModel):
     """수집원별 기준 재정의. 사이트마다 추천 수의 의미가 달라서 필요하다.
     (예: 루리웹 핫딜 게시판은 추천이 후하고, 뽐뿌는 짜다)"""
@@ -129,6 +142,7 @@ class SourceRule(BaseModel):
 
 class DealConfig(BaseModel):
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
+    sold_out: SoldOutConfig = Field(default_factory=SoldOutConfig)
     per_source: dict[str, SourceRule] = Field(default_factory=dict)
     interest: InterestConfig = Field(default_factory=InterestConfig)
     market: MarketCheckConfig = Field(default_factory=MarketCheckConfig)

@@ -173,6 +173,17 @@ deal:
     ruliweb_biz:
       community_min_recommend: 0     # 업체 게시판은 추천이 안 붙음 → 시중가 대조로만 판정
       coupon_min_recommend: 0
+  # 품절/종료된 딜 정리
+  #  - 게시판을 다시 읽을 때 제목에 품절·종료·마감·매진 표시가 붙은 글 → 기다리는 글에서 내리고, 보냈던 링크 요청 메시지를
+  #    "품절되어 취소했습니다" 로 고치고, 올린 지 mark_published_hours 안의 채널 글에는 맨 위에 "⛔ 품절" 표시
+  #  - 상품 페이지를 읽을 수 있는 몰(enrich.shops: 토스·네이버 등)은 링크 요청 전·발행 전에 재고를 확인하고,
+  #    링크를 기다리는 동안 recheck_awaiting_minutes 마다 다시 확인
+  sold_out:
+    enabled: true
+    check_page_before_link_request: true
+    check_page_before_publish: true
+    recheck_awaiting_minutes: 5
+    mark_published_hours: 24
   # 상품 페이지(OG/JSON-LD)에서 이미지·가격·별점·리뷰 수를 읽어 빈 칸 채우기 (토스 쉐어링크 페이지 등)
   enrich:
     enabled: true
