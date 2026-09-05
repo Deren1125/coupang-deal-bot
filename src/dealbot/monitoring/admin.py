@@ -207,7 +207,7 @@ class AdminNotifier:
         return shop.name if shop else key
 
     async def notify_startup(self, status_text: str, check_lines: list[str] | None = None) -> bool:
-        text = f"🟢 <b>봇이 켜졌어요</b> (v{__version__})\n"
+        text = f"🟢 <b>봇이 켜졌습니다</b> (v{__version__})\n"
         if check_lines:
             text += "\n<b>자기 점검</b> — ✅ 정상 · ⚠️ 아직 설정 안 함(선택) · ❌ 문제\n" + "\n".join(html.escape(line) for line in check_lines) + "\n"
         text += f"\n{status_text}"
@@ -225,7 +225,7 @@ class AdminNotifier:
         if result.dry_run and preview:
             photo = " · 🖼 사진 있음" if p.image_url else ""
             text = (
-                f"🧪 <b>미리보기</b> — 연습 모드라 채널에는 안 올렸어요\n"
+                f"🧪 <b>미리보기</b> — 연습 모드라 채널에는 올리지 않았습니다\n"
                 f"{where}{photo}\n"
                 f"{why}\n"
                 f"━━━━━━━━━━━━━━\n"
@@ -233,7 +233,7 @@ class AdminNotifier:
             )
             await self.send(text, silent=True)
             return
-        head = "🧪 <b>연습 발행</b>" if result.dry_run else "✅ <b>채널에 올렸어요</b>"
+        head = "🧪 <b>연습 발행</b>" if result.dry_run else "✅ <b>채널에 올렸습니다</b>"
         price = f"{p.price:,}원" if p.has_price else "가격 없음"
         text = (
             f"{head}\n"
@@ -248,7 +248,7 @@ class AdminNotifier:
         if not self.cfg.notify_on_failure:
             return
         p = deal.product
-        head = "❌ <b>채널에 올리지 못했어요</b> (여러 번 실패해서 포기)" if final else "⚠️ <b>채널에 올리지 못했어요</b> (잠시 뒤 다시 시도할게요)"
+        head = "❌ <b>채널에 올리지 못했습니다</b> (여러 번 실패해서 포기)" if final else "⚠️ <b>채널에 올리지 못했습니다</b> (잠시 뒤 다시 시도합니다)"
         await self.send(
             f"{head} [{html.escape(self.shop_label(p.shop))}]\n{html.escape(truncate(p.name, 80))}\n이유: <code>{html.escape(error[:500])}</code>"
         )
@@ -263,18 +263,18 @@ class AdminNotifier:
         price = f" — {p.price:,}원" if p.has_price else ""
         hint = shop.manual_hint or "앱/사이트에서 내 제휴 링크를 만들어 보내주세요"
         text = (
-            f"🔗 <b>내 링크가 필요해요 #{item.id}</b> [{html.escape(shop.name)}]\n"
+            f"🔗 <b>내 링크가 필요합니다 #{item.id}</b> [{html.escape(shop.name)}]\n"
             f"{html.escape(truncate(p.name, 80))}{price}\n"
             f"원본 주소: {html.escape(p.url)}\n"
             + (f"글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
             + f"\n👉 {html.escape(hint)}\n"
-            f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라가요. 또는 <code>/link {item.id} https://...</code>\n"
+            f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
             f"안 올리려면 <code>/skip {item.id}</code>"
         )
         await self.send(text)
         await self._push(
             "manual_link",
-            f"내 링크가 필요해요 #{item.id} [{shop.name}]",
+            f"내 링크가 필요합니다 #{item.id} [{shop.name}]",
             f"{truncate(p.name, 70)}{price}\n{p.url}\n\n{hint}",
             priority="high",
             tags=["link"],
@@ -292,8 +292,8 @@ class AdminNotifier:
         self._last_alert[kind] = now
         where = describe_kind(kind, self.labels)
         await self.send(
-            f"🚨 <b>에러가 났어요</b> — {html.escape(where)}\n<code>{html.escape(message[:1500])}</code>\n"
-            f"(같은 종류는 {self.cfg.error_alert_cooldown_minutes}분에 한 번만 알려요. 봇은 계속 돌아요)"
+            f"🚨 <b>에러가 났습니다</b> — {html.escape(where)}\n<code>{html.escape(message[:1500])}</code>\n"
+            f"(같은 종류는 {self.cfg.error_alert_cooldown_minutes}분에 한 번만 알립니다. 봇은 계속 돌아갑니다)"
         )
         await self._push("error", f"에러: {where}", message[:300], tags=["warning"])
 
@@ -427,9 +427,9 @@ class StatusReporter:
         ]
         lines += [self._item_line(it) for it in items]
         if not items:
-            lines.append("(지금 기다리는 글 없음 — 특가가 잡히면 여기 쌓였다가 순서대로 올라가요)")
+            lines.append("(지금 기다리는 글 없음 — 특가가 잡히면 여기 쌓였다가 순서대로 올라갑니다)")
         else:
-            lines.append("\n점수가 높은 글부터 올라가요. 빼려면 <code>/skip 번호</code>")
+            lines.append("\n점수가 높은 글부터 올라갑니다. 빼려면 <code>/skip 번호</code>")
         return "\n".join(lines)
 
     def pending_text(self, limit: int = 15) -> str:
@@ -464,7 +464,7 @@ class StatusReporter:
             when = fmt_local(datetime.fromisoformat(e["ts"]), tz)
             lines.append(f"• {when} · {html.escape(describe_kind(e['kind'], self.labels))}\n   <code>{html.escape(truncate(e['message'].splitlines()[0], 160))}</code>")
         if not events:
-            lines.append("(없음 — 깨끗해요)")
+            lines.append("(없음 — 깨끗합니다)")
         return "\n".join(lines)
 
     def community_stats_text(self) -> str:
@@ -483,7 +483,7 @@ class StatusReporter:
         ic = self.settings.deal.interest
         lines.append(
             f"\n지금 기준: 추천 {ic.min_recommend}개 이상, 댓글 {ic.min_comments}개 이상, 조회 {ic.min_views} 이상, 순위 {ic.max_rank}위 안 중 하나면 판정 대상이 되고,"
-            f" 가격이 적힌 글은 커뮤니티 추천 {self.settings.deal.community_min_recommend}개 이상이면 특가로 봐요 (쿠팡 최저가 비교가 켜지면 그쪽이 우선)"
+            f" 가격이 적힌 글은 커뮤니티 추천 {self.settings.deal.community_min_recommend}개 이상이면 특가로 봅니다 (쿠팡 최저가 비교가 켜지면 그쪽이 우선)"
         )
         return "\n".join(lines)
 
@@ -498,7 +498,7 @@ class StatusReporter:
                 f"   {html.escape(truncate(it['title'] or '', 60))}"
             )
         if not items:
-            lines.append("(없음 — 아직 게시판을 안 봤거나, 그만큼 추천받은 글이 없어요. 숫자를 낮춰 보세요: /hot 2)")
+            lines.append("(없음 — 아직 게시판을 안 봤거나, 그만큼 추천받은 글이 없습니다. 숫자를 낮춰 보세요: /hot 2)")
         return "\n".join(lines)
 
     def find_text(self, keyword: str) -> str:
@@ -512,7 +512,7 @@ class StatusReporter:
                 f"   {html.escape(truncate(it['title'] or '', 60))}"
             )
         if not items:
-            lines.append("(수집한 글 중에는 없어요)")
+            lines.append("(수집한 글 중에는 없습니다)")
         return "\n".join(lines)
 
     def summary_text(self, summary: PeriodSummary) -> str:
@@ -539,8 +539,8 @@ class StatusReporter:
             waiting = "없음"
         posted_label = "미리보기로 보낸 글" if self.state.dry_run else "채널에 올린 글"
         lines = [
-            f"🐥 <b>봇이 잘 돌고 있어요</b> · 켜진 지 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
-            f"지난 {span} 동안 게시판을 {s.runs}번 확인해서{fails} 글 {s.collected}개를 봤어요.",
+            f"🐥 <b>봇이 잘 돌고 있습니다</b> · 켜진 지 {humanize_delta(now - self.state.started_at)}{mode}{paused}",
+            f"지난 {span} 동안 게시판을 {s.runs}번 확인해서{fails} 글 {s.collected}개를 봤습니다.",
             f"새로 잡은 특가: {s.queued}건{dup_note}",
             f"{posted_label}: {s.published}건",
             f"지금 기다리는 글: {waiting}",
@@ -555,7 +555,7 @@ class StatusReporter:
         if s.errors:
             lines.append(f"🚨 에러 {s.errors}건 — /errors 로 확인")
         if s.queued == 0 and s.published == 0:
-            lines.append(f"특가가 없으면 조용한 게 정상이에요. {span} 동안 아무 소식이 없을 때만 이 메시지를 보내요.")
+            lines.append(f"특가가 없으면 조용한 것이 정상입니다. {span} 동안 아무 소식이 없을 때만 이 메시지를 보냅니다.")
         return "\n".join(lines)
 
 
@@ -665,11 +665,11 @@ def register_admin_handlers(
 
     async def cmd_pause(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         controller.pause()
-        await reply(update, "⏸ 잠시 멈췄어요. 게시판 확인과 채널에 올리기를 모두 멈춥니다. /resume 으로 다시 시작")
+        await reply(update, "⏸ 잠시 멈췄습니다. 게시판 확인과 채널에 올리기를 모두 멈춥니다. /resume 으로 다시 시작")
 
     async def cmd_resume(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         controller.resume()
-        await reply(update, "▶️ 다시 시작했어요")
+        await reply(update, "▶️ 다시 시작했습니다")
 
     async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         name = ctx.args[0] if ctx.args else None
@@ -797,7 +797,7 @@ def register_admin_handlers(
         if urls:
             await reply(update, await controller.submit_manual(msg.text))
             return
-        await reply(update, "무엇을 할지 모르겠어요. 링크 요청 메시지에 답장으로 링크를 보내거나, /help 로 명령어를 확인하세요.")
+        await reply(update, "무엇을 할지 모르겠습니다. 링크 요청 메시지에 답장으로 링크를 보내거나, /help 로 명령어를 확인하세요.")
 
     async def cmd_unknown_chat(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_chat and update.effective_message:

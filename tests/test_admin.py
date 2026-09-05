@@ -56,7 +56,7 @@ async def test_dry_run_sends_full_preview_and_skips_side_channels(bot: DealBot) 
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
     assert len(sent) == 1, sent  # 미리보기 1건만 — 카카오/블로그 복붙 문구는 실제 발행 때만
     text = sent[0]
-    assert text.startswith("🧪 <b>미리보기</b> — 연습 모드라 채널에는 안 올렸어요")
+    assert text.startswith("🧪 <b>미리보기</b> — 연습 모드라 채널에는 올리지 않았습니다")
     assert "어디서: fake → 쿠팡 · 🖼 사진 있음" in text
     assert "고른 이유: 관심도 통과(순위 30위 안) · 표시 할인율 50% 이상 · 점수" in text
     assert bot.publisher.render(bot.db.last_published_item().deal) in text  # 채널 글 전체가 그대로 들어감
@@ -72,7 +72,7 @@ async def test_real_publish_sends_summary_and_copy_blocks(bot: DealBot) -> None:
     await bot.run_collector(bot.collectors[0])
     assert await bot.process_queue_once()
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
-    assert sent[0].startswith("✅ <b>채널에 올렸어요</b>") and "연습" not in sent[0]
+    assert sent[0].startswith("✅ <b>채널에 올렸습니다</b>") and "연습" not in sent[0]
     names = [s.splitlines()[0] for s in sent[1:]]
     assert names == ["📋 <b>카카오 오픈채팅</b> 복사용", "📋 <b>네이버 블로그</b> 복사용"]
 
@@ -121,10 +121,10 @@ async def test_push_test_sends_ntfy(bot: DealBot) -> None:
 
 def test_heartbeat_text(bot: DealBot) -> None:
     text = bot.reporter.heartbeat_text(30)
-    assert text.startswith("🐥 <b>봇이 잘 돌고 있어요</b>") and "연습 모드" in text
-    assert "지난 30분 동안 게시판을 0번 확인해서 글 0개를 봤어요." in text
+    assert text.startswith("🐥 <b>봇이 잘 돌고 있습니다</b>") and "연습 모드" in text
+    assert "지난 30분 동안 게시판을 0번 확인해서 글 0개를 봤습니다." in text
     assert "새로 잡은 특가: 0건" in text and "미리보기로 보낸 글: 0건" in text and "지금 기다리는 글: 없음" in text
-    assert "다음 확인: fake" in text and "특가가 없으면 조용한 게 정상이에요" in text
+    assert "다음 확인: fake" in text and "특가가 없으면 조용한 것이 정상입니다" in text
     assert "지난 2시간 동안" in bot.reporter.heartbeat_text(120)
 
 
@@ -244,6 +244,6 @@ def test_heartbeat_counts_new_deals_not_reseen(bot: DealBot) -> None:
     run_id = bot.db.start_run("fake")
     bot.db.finish_run(run_id, status="ok", collected=46, deals=6, queued=1)
     text = bot.reporter.heartbeat_text(30)
-    assert "글 46개를 봤어요" in text and "새로 잡은 특가: 1건 (기준은 넘었지만 이미 올린 것과 겹친 5건은 건너뜀)" in text
+    assert "글 46개를 봤습니다" in text and "새로 잡은 특가: 1건 (기준은 넘었지만 이미 올린 것과 겹친 5건은 건너뜀)" in text
     s = bot.db.summary(bot.state.started_at)
     assert s.deals_found == 6 and s.queued == 1

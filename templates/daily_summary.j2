@@ -2,7 +2,7 @@
    publish_failed, expired, skipped, errors, pending, awaiting, top_posts[]), tz #}
 📊 <b>오늘 하루 정리</b> ({{ s.since | local('%m/%d %H:%M') }} ~ {{ s.until | local('%m/%d %H:%M') }})
 
-📥 게시판을 {{ s.runs }}번 확인해서{% if s.run_errors %} (확인 실패 {{ s.run_errors }}번){% endif %} 글 {{ s.collected }}개를 봤어요
+📥 게시판을 {{ s.runs }}번 확인해서{% if s.run_errors %} (확인 실패 {{ s.run_errors }}번){% endif %} 글 {{ s.collected }}개를 봤습니다
 🎯 기준을 넘은 특가 {{ s.deals_found }}건, 그중 새로 잡은 것 {{ s.queued | default(0) }}건
 📤 채널에 올린 글 <b>{{ s.published }}</b>건 · 실패 {{ s.publish_failed }}건 · 시간 지나 버림 {{ s.expired }}건 · 겹쳐서 건너뜀 {{ s.skipped }}건
 🗂 지금 기다리는 글 {{ s.pending }}건{% if s.awaiting %} · 🔗 내 링크 기다리는 글 {{ s.awaiting }}건 (/pending){% endif +%}

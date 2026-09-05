@@ -299,23 +299,23 @@ class DealBot:
     async def attach_link(self, queue_id: int, url: str) -> str:
         item = self.db.get_queue_item(queue_id)
         if item is None:
-            return f"#{queue_id} 번 글이 없어요. /queue 나 /pending 에서 번호를 확인해 주세요."
+            return f"#{queue_id} 번 글이 없습니다. /queue 나 /pending 에서 번호를 확인해 주세요."
         if item.status not in ("awaiting_link", "pending", "failed"):
-            return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없어요."
+            return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없습니다."
         if not url.startswith("http"):
-            return "링크는 http:// 또는 https:// 로 시작해야 해요."
+            return "링크는 http:// 또는 https:// 로 시작해야 합니다."
         self.db.set_queue_link(queue_id, url.strip())
         self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
-        return f"🔗 #{queue_id} 번에 링크를 붙였어요. 올릴 차례가 되는 대로 채널에 올라가요."
+        return f"🔗 #{queue_id} 번에 링크를 붙였습니다. 올릴 차례가 되는 대로 채널에 올라갑니다."
 
     def skip_item(self, queue_id: int) -> str:
         item = self.db.get_queue_item(queue_id)
         if item is None:
-            return f"#{queue_id} 번 글이 없어요."
+            return f"#{queue_id} 번 글이 없습니다."
         if item.status in ("published",):
-            return f"#{queue_id} 번은 이미 채널에 올라갔어요."
+            return f"#{queue_id} 번은 이미 채널에 올라갔습니다."
         self.db.update_queue_item(queue_id, status="skipped", error="skipped by admin")
-        return f"⏭ #{queue_id} 번은 건너뛰었어요. 올리지 않아요."
+        return f"⏭ #{queue_id} 번은 건너뛰었습니다. 올리지 않습니다."
 
     async def submit_manual(self, text: str) -> str:
         """관리자가 직접 보낸 딜을 대기열 맨 앞에 넣는다 (링크는 관리자가 만든 제휴 링크로 간주)."""
@@ -352,12 +352,12 @@ class DealBot:
         if self.db.posted_within(product.product_id, self.settings.publish.dedup_days, now):
             return f"⚠️ 최근 {self.settings.publish.dedup_days}일 안에 이미 올린 상품이에요: {product.name[:40]}"
         if not self.db.enqueue(deal, score=1000.0, now=now):
-            return "⚠️ 이미 기다리는 글에 들어 있는 상품이에요."
+            return "⚠️ 이미 기다리는 글에 들어 있는 상품입니다."
         shop_name = shop.name if shop else post.shop_key
         return (
-            f"📝 맨 앞에 넣었어요 [{shop_name}] {product.name[:50]}"
+            f"📝 맨 앞에 넣었습니다 [{shop_name}] {product.name[:50]}"
             + (f" — {product.price:,}원" if product.has_price else "")
-            + "\n올릴 수 있는 차례가 되는 대로 바로 채널에 올라가요."
+            + "\n올릴 수 있는 차례가 되는 대로 바로 채널에 올라갑니다."
         )
 
     async def test_post(self) -> str:
@@ -365,7 +365,7 @@ class DealBot:
         from dealbot.cli import sample_deal
 
         if self.bot is None or not self.notifier.enabled:
-            return "텔레그램 봇 토큰과 관리자 챗 ID 가 있어야 해요."
+            return "텔레그램 봇 토큰과 관리자 챗 ID 가 있어야 합니다."
         original = (self.publisher.channel_id, self.publisher.dry_run)
         try:
             self.publisher.channel_id = self.notifier.chat_id
@@ -373,7 +373,7 @@ class DealBot:
             result = await self.publisher.publish(sample_deal())
         finally:
             self.publisher.channel_id, self.publisher.dry_run = original
-        return "✅ 위 메시지가 채널에 올라갈 글 양식이에요." if result.ok else f"❌ 보내지 못했어요: {result.error}"
+        return "✅ 위 메시지가 채널에 올라갈 글 양식입니다." if result.ok else f"❌ 보내지 못했습니다: {result.error}"
 
     async def push_test(self) -> str:
         """휴대폰 푸시(ntfy/Pushover) 연결 확인용 테스트 알림."""

@@ -5,12 +5,12 @@
    rate (posts_hour, posts_day, max_hour, max_day, last_post_at), queue{pending,awaiting_link,failed,...},
    products, price_points, db_mb, last_error, last_error_at #}
 🤖 <b>DealBot v{{ version }}</b> · 켜진 지 {{ uptime }}
-{% if paused %}⏸ <b>일시정지 중</b> (/resume 으로 재개){% else %}▶️ 돌아가는 중{% endif %}{% if dry_run %} · 🧪 연습 모드 (채널에는 안 올리고 미리보기만 보내요){% endif %}{% if not publish_enabled %} · 발행 꺼짐{% endif +%}
+{% if paused %}⏸ <b>일시정지 중</b> (/resume 으로 재개){% else %}▶️ 돌아가는 중{% endif %}{% if dry_run %} · 🧪 연습 모드 (채널에는 안 올리고 미리보기만 보냅니다){% endif %}{% if not publish_enabled %} · 발행 꺼짐{% endif +%}
 {% if not has_coupang %}
-⚠️ 쿠팡 API 키 없음 → 쿠팡 골드박스 수집과 쿠팡 최저가 비교는 꺼져 있어요
+⚠️ 쿠팡 API 키 없음 → 쿠팡 골드박스 수집과 쿠팡 최저가 비교는 꺼져 있습니다
 {% endif %}
 {% if not has_channel %}
-⚠️ 텔레그램 채널이 설정되지 않았어요
+⚠️ 텔레그램 채널이 설정되지 않았습니다
 {% endif %}
 
 📥 <b>게시판 확인</b>
@@ -36,7 +36,7 @@
 • {{ s.name }}: {{ s.mode }}
 {% endfor %}
 {% for reason, names in (shops_off_pending | default({})).items() %}
-• 꺼짐 — {{ reason }}: {{ names | join(', ') }} (ID 를 넣으면 자동으로 켜져요)
+• 꺼짐 — {{ reason }}: {{ names | join(', ') }} (ID 를 넣으면 자동으로 켜집니다)
 {% endfor %}
 {% if shops_off_excluded | default([]) %}
 • 제외한 몰: {{ shops_off_excluded | join(', ') }}
