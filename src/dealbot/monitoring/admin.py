@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from telegram import Bot, Update
 from telegram.constants import ParseMode
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import (
     Application,
     ApplicationHandlerStop,
@@ -37,6 +37,46 @@ from dealbot.utils.timeutil import fmt_local, humanize_delta, utcnow
 
 log = logging.getLogger(__name__)
 _QUEUE_REF_RE = re.compile(r"#(\d+)")
+_TAG_RE = re.compile(r"<[^>]+>")
+
+TELEGRAM_TEXT_LIMIT = 4096
+# 한도보다 넉넉히 작게 잘라야 태그가 중간에 끊기지 않는다
+SAFE_CHUNK = 3500
+
+
+def split_message(text: str, limit: int = SAFE_CHUNK) -> list[str]:
+    """텔레그램 길이 제한에 맞춰 줄 단위로 나눈다.
+
+    글자 수로 그냥 자르면 <b> 같은 태그나 &amp; 중간이 끊겨 텔레그램이 메시지를 통째로 거부한다
+    (그러면 답이 아예 안 온다). 그래서 항상 줄 경계에서 나눈다.
+    """
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for raw in text.split("\n"):
+        line = raw
+        while len(line) > limit:  # 한 줄 자체가 너무 길면 그 줄만 어쩔 수 없이 자른다
+            if current:
+                chunks.append("\n".join(current))
+                current, size = [], 0
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if size + len(line) + 1 > limit and current:
+            chunks.append("\n".join(current))
+            current, size = [], 0
+        current.append(line)
+        size += len(line) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return [c for c in chunks if c.strip()] or [text[:limit]]
+
+
+def strip_html(text: str) -> str:
+    """HTML 서식이 깨져 전송이 거부될 때 쓰는 평문 변환."""
+    plain = _TAG_RE.sub("", text)
+    return plain.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&#x27;", "'").replace("&amp;", "&")
 STALE_COMMAND_MAX_AGE = timedelta(minutes=15)  # 봇이 꺼져 있던 동안 쌓인 명령 중 이보다 오래된 것은 무시
 
 
@@ -188,20 +228,32 @@ class AdminNotifier:
             )
             return None
         assert self.bot is not None
-        try:
-            msg = await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=text[:4096],
-                parse_mode=ParseMode.HTML,
-                # silent 는 "일상 알림" 표시일 뿐, 실제 무음 여부는 monitoring.quiet_notices 가 결정
-                disable_notification=silent and self.cfg.quiet_notices,
-                link_preview_options=None,
-            )
+        # silent 는 "일상 알림" 표시일 뿐, 실제 무음 여부는 monitoring.quiet_notices 가 결정
+        quiet = silent and self.cfg.quiet_notices
+        first_id: int | None = None
+        for chunk in split_message(text):
+            try:
+                msg = await self.bot.send_message(
+                    chat_id=self.chat_id, text=chunk, parse_mode=ParseMode.HTML,
+                    disable_notification=quiet, link_preview_options=None,
+                )
+            except BadRequest as e:
+                log.warning("admin notify: HTML 거부됨 (%s) — 평문으로 다시 보냅니다", e)
+                try:
+                    msg = await self.bot.send_message(
+                        chat_id=self.chat_id, text=strip_html(chunk)[:TELEGRAM_TEXT_LIMIT],
+                        disable_notification=quiet, link_preview_options=None,
+                    )
+                except TelegramError as e2:
+                    log.error("admin notify failed: %s", e2)
+                    return first_id
+            except TelegramError as e:
+                log.error("admin notify failed: %s", e)
+                return first_id
             self.last_sent_at = utcnow()
-            return int(getattr(msg, "message_id", 0) or 0)  # id 를 모르면 0 (성공은 성공)
-        except TelegramError as e:
-            log.error("admin notify failed: %s", e)
-            return None
+            if first_id is None:
+                first_id = int(getattr(msg, "message_id", 0) or 0)  # id 를 모르면 0 (성공은 성공)
+        return first_id
 
     async def edit(self, message_id: int, text: str) -> bool:
         """내가 보낸 관리자 챗 메시지를 고친다 (예: 품절된 링크 요청)."""
@@ -677,8 +729,15 @@ def register_admin_handlers(
     only_admin = filters.Chat(chat_id=chat_id) if isinstance(chat_id, int) else filters.Chat(username=str(chat_id).lstrip("@"))
 
     async def reply(update: Update, text: str) -> None:
-        if update.effective_message:
-            await update.effective_message.reply_text(text[:4096], parse_mode=ParseMode.HTML)
+        msg = update.effective_message
+        if msg is None:
+            return
+        for chunk in split_message(text):
+            try:
+                await msg.reply_text(chunk, parse_mode=ParseMode.HTML)
+            except BadRequest as e:
+                log.warning("답장 HTML 거부됨 (%s) — 평문으로 다시 보냅니다", e)
+                await msg.reply_text(strip_html(chunk)[:TELEGRAM_TEXT_LIMIT])
 
     async def drop_stale(update: object, _: ContextTypes.DEFAULT_TYPE) -> None:
         # 봇이 꺼져 있던 동안 쌓인 오래된 명령은 실행하지 않는다 (재배포 직후 옛 /run, /post 가 다시 도는 것 방지)
@@ -872,6 +931,23 @@ def register_admin_handlers(
         ("start", cmd_help),
     ):
         app.add_handler(CommandHandler(cmd, fn, filters=only_admin))
+    async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """명령 처리 중 예외가 나면 조용히 묻지 말고 관리자에게 알린다."""
+        err = ctx.error
+        log.error("명령 처리 실패: %s: %s", type(err).__name__, err, exc_info=err)
+        message = getattr(update, "effective_message", None)
+        if message is None:
+            return
+        try:
+            await message.reply_text(
+                "⚠️ 명령을 처리하다 문제가 생겼습니다. 잠시 뒤 다시 시도해 보세요.\n"
+                f"<code>{html.escape(f'{type(err).__name__}: {err}')[:400]}</code>",
+                parse_mode=ParseMode.HTML,
+            )
+        except TelegramError as e:
+            log.error("오류 알림 전송도 실패: %s", e)
+
+    app.add_error_handler(on_error)
     app.add_handler(TypeHandler(Update, drop_stale), group=-1)
     app.add_handler(MessageHandler(only_admin & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(CommandHandler(["start", "status", "help"], cmd_unknown_chat, filters=~only_admin))

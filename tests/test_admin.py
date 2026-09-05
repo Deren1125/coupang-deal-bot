@@ -247,3 +247,72 @@ def test_heartbeat_counts_new_deals_not_reseen(bot: DealBot) -> None:
     assert "글 46개를 봤습니다" in text and "새로 잡은 특가: 1건 (기준은 넘었지만 이미 올린 것과 겹친 5건은 건너뜀)" in text
     s = bot.db.summary(bot.state.started_at)
     assert s.deals_found == 6 and s.queued == 1
+
+
+def test_split_message_never_cuts_a_line_or_tag() -> None:
+    from dealbot.monitoring.admin import SAFE_CHUNK, split_message
+
+    assert split_message("짧은 글") == ["짧은 글"]
+    body = "\n".join(f"<b>줄 {i} 제목입니다</b>\n뽐뿌 · 추천 {i}\n원문: https://example.com/{i}\n" for i in range(200))
+    chunks = split_message(body)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert len(c) <= SAFE_CHUNK
+        assert c.count("<b>") == c.count("</b>")  # 태그가 중간에 끊기지 않음
+    assert "".join(chunks).replace("\n", "") == body.replace("\n", "")
+    # 한 줄이 한도보다 길면 그 줄만 잘린다
+    long_line = "가" * (SAFE_CHUNK * 2)
+    assert all(len(c) <= SAFE_CHUNK for c in split_message(long_line))
+
+
+def test_strip_html_for_fallback() -> None:
+    from dealbot.monitoring.admin import strip_html
+
+    assert strip_html("<b>제목</b>\n<code>a &amp; b</code>") == "제목\na & b"
+
+
+def test_hot_text_over_limit_is_split(bot: DealBot) -> None:
+    from datetime import timedelta
+
+    from dealbot.monitoring.admin import TELEGRAM_TEXT_LIMIT, split_message
+    from dealbot.utils.timeutil import utcnow
+
+    now = utcnow()
+    for i in range(30):
+        bot.db.mark_seen(
+            "ppomppu", f"e{i}", f"toss:{i}", now - timedelta(minutes=i),
+            url=f"https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no=6{i:05d}",
+            title=f"[토스쇼핑] 애슐리 크리스피 핫도그 4종 80g 8개입 2세트 {i} 14,890원 무료배송",
+            recommend=10 + i, views=1200 + i, comments=7,
+        )
+    text = bot.reporter.hot_text(min_recommend=5)
+    assert len(text) > TELEGRAM_TEXT_LIMIT  # 실제로 한도를 넘는 길이
+    assert "원문: https://www.ppomppu.co.kr" in text
+    chunks = split_message(text)
+    assert len(chunks) > 1 and all(len(c) <= TELEGRAM_TEXT_LIMIT for c in chunks)
+    assert all(c.count("<b>") == c.count("</b>") for c in chunks)
+
+
+def test_error_handler_is_registered(settings: Settings) -> None:
+    from dealbot.monitoring.admin import register_admin_handlers
+
+    class FakeApp:
+        def __init__(self) -> None:
+            self.handlers: list[object] = []
+            self.error_handlers: list[object] = []
+
+        def add_handler(self, handler: object, group: int = 0) -> None:
+            self.handlers.append(handler)
+
+        def add_error_handler(self, handler: object) -> None:
+            self.error_handlers.append(handler)
+
+    settings.collectors = []
+    b = DealBot(settings)
+    try:
+        app = FakeApp()
+        register_admin_handlers(app, admin_chat_id=42, reporter=b.reporter, controller=b)  # type: ignore[arg-type]
+        assert len(app.error_handlers) == 1  # 예외가 조용히 묻히지 않도록
+        assert len(app.handlers) > 20
+    finally:
+        b.db.close()
