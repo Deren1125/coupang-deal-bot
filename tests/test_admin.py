@@ -316,3 +316,97 @@ def test_error_handler_is_registered(settings: Settings) -> None:
         assert len(app.handlers) > 20
     finally:
         b.db.close()
+
+
+async def test_send_chunks_paces_and_returns_first(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from dealbot.monitoring import admin as admin_mod
+
+    slept: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        slept.append(sec)
+
+    monkeypatch.setattr(admin_mod.asyncio, "sleep", fake_sleep)
+    calls: list[dict] = []  # type: ignore[type-arg]
+
+    async def send(**kw):  # type: ignore[no-untyped-def]
+        calls.append(kw)
+        return type("M", (), {"message_id": 100 + len(calls)})()
+
+    body = "\n".join(f"<b>줄 {i}</b>" for i in range(600))
+    first = await admin_mod.send_chunks(send, body, disable_notification=True)
+    assert len(calls) > 1 and first.message_id == 101
+    assert slept and all(s == admin_mod.SEND_GAP_SECONDS for s in slept)  # 사이마다 간격
+    assert all(c["parse_mode"] and c["disable_notification"] for c in calls)
+
+
+async def test_send_one_waits_when_telegram_asks(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from telegram.error import RetryAfter
+
+    from dealbot.monitoring import admin as admin_mod
+
+    waited: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        waited.append(sec)
+
+    monkeypatch.setattr(admin_mod.asyncio, "sleep", fake_sleep)
+    tries = {"n": 0}
+
+    async def send(**kw):  # type: ignore[no-untyped-def]
+        tries["n"] += 1
+        if tries["n"] == 1:
+            raise RetryAfter(7)
+        return "sent"
+
+    assert await admin_mod.send_one(send, "안녕") == "sent"
+    assert tries["n"] == 2 and waited == [8.0]
+
+
+async def test_send_one_falls_back_to_plain_text(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from telegram.error import BadRequest
+
+    from dealbot.monitoring import admin as admin_mod
+
+    seen: list[dict] = []  # type: ignore[type-arg]
+
+    async def send(**kw):  # type: ignore[no-untyped-def]
+        seen.append(kw)
+        if "parse_mode" in kw:
+            raise BadRequest("Can't parse entities: unclosed start tag")
+        return "plain"
+
+    assert await admin_mod.send_one(send, "<b>제목</b> a &amp; b") == "plain"
+    assert seen[-1]["text"] == "제목 a & b" and "parse_mode" not in seen[-1]
+
+
+async def test_send_one_retries_on_flood_then_gives_up(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from telegram.error import BadRequest
+
+    from dealbot.monitoring import admin as admin_mod
+
+    waited: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        waited.append(sec)
+
+    monkeypatch.setattr(admin_mod.asyncio, "sleep", fake_sleep)
+    tries = {"n": 0}
+
+    async def always_flood(**kw):  # type: ignore[no-untyped-def]
+        tries["n"] += 1
+        raise BadRequest("Peer_flood")
+
+    assert await admin_mod.send_one(always_flood, "x") is admin_mod.SEND_FAILED
+    assert tries["n"] == admin_mod.FLOOD_RETRIES and waited == [5, 10, 15]
+
+
+def test_stale_guard_is_five_minutes() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from dealbot.monitoring.admin import STALE_COMMAND_MAX_AGE, is_stale_message
+
+    assert STALE_COMMAND_MAX_AGE == timedelta(minutes=5)
+    now = datetime(2026, 9, 5, 17, 0, tzinfo=UTC)
+    assert not is_stale_message(now - timedelta(minutes=4), now)
+    assert is_stale_message(now - timedelta(minutes=6), now)  # 배포 중 반복해 보낸 옛 명령은 무시

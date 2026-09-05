@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import html
 import logging
 import re
@@ -10,7 +12,7 @@ from typing import Any, Protocol
 
 from telegram import Bot, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, TelegramError
+from telegram.error import BadRequest, RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     ApplicationHandlerStop,
@@ -42,6 +44,10 @@ _TAG_RE = re.compile(r"<[^>]+>")
 TELEGRAM_TEXT_LIMIT = 4096
 # 한도보다 넉넉히 작게 잘라야 태그가 중간에 끊기지 않는다
 SAFE_CHUNK = 3500
+# 연속으로 보낼 때 최소 간격. 너무 빨리 보내면 텔레그램이 Peer_flood 로 잠시 막는다
+SEND_GAP_SECONDS = 0.4
+FLOOD_RETRIES = 3
+SEND_FAILED = object()  # 전송 자체가 실패했음을 뜻하는 표시 (텔레그램이 None 을 돌려주는 경우와 구분)
 
 
 def split_message(text: str, limit: int = SAFE_CHUNK) -> list[str]:
@@ -73,11 +79,45 @@ def split_message(text: str, limit: int = SAFE_CHUNK) -> list[str]:
     return [c for c in chunks if c.strip()] or [text[:limit]]
 
 
+async def send_one(send: Any, text: str, **kwargs: Any) -> Any:
+    """한 조각 전송. 텔레그램이 기다리라고 하면 기다렸다 다시, 서식을 거부하면 평문으로."""
+    for attempt in range(FLOOD_RETRIES):
+        try:
+            return await send(text=text, parse_mode=ParseMode.HTML, **kwargs)
+        except RetryAfter as e:
+            wait = min(float(getattr(e, "retry_after", 5)) + 1, 60)
+            log.warning("텔레그램이 %.0f초 기다리라고 합니다 — 기다렸다 다시 보냅니다", wait)
+            await asyncio.sleep(wait)
+        except BadRequest as e:
+            if "flood" in str(e).lower():
+                wait = 5 * (attempt + 1)
+                log.warning("텔레그램 전송 제한 (%s) — %d초 뒤 다시 보냅니다", e, wait)
+                await asyncio.sleep(wait)
+                continue
+            log.warning("HTML 서식이 거부됨 (%s) — 평문으로 보냅니다", e)
+            return await send(text=strip_html(text)[:TELEGRAM_TEXT_LIMIT], **kwargs)
+    log.error("전송 제한이 풀리지 않아 이 메시지는 보내지 못했습니다: %s", text[:80])
+    return SEND_FAILED
+
+
+async def send_chunks(send: Any, text: str, *, gap: float = SEND_GAP_SECONDS, **kwargs: Any) -> Any:
+    """긴 글을 줄 단위로 나눠, 사이에 간격을 두고 보낸다. 첫 메시지를 돌려준다."""
+    first = SEND_FAILED
+    for i, chunk in enumerate(split_message(text)):
+        if i:
+            await asyncio.sleep(gap)
+        msg = await send_one(send, chunk, **kwargs)
+        if first is SEND_FAILED:
+            first = msg
+    return first
+
+
 def strip_html(text: str) -> str:
     """HTML 서식이 깨져 전송이 거부될 때 쓰는 평문 변환."""
     plain = _TAG_RE.sub("", text)
     return plain.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&#x27;", "'").replace("&amp;", "&")
-STALE_COMMAND_MAX_AGE = timedelta(minutes=15)  # 봇이 꺼져 있던 동안 쌓인 명령 중 이보다 오래된 것은 무시
+STALE_COMMAND_MAX_AGE = timedelta(minutes=5)  # 봇이 꺼져 있던 동안 쌓인 명령 중 이보다 오래된 것은 무시
+# (배포 중 답이 없어 같은 명령을 여러 번 보내는 일이 잦다. 오래된 것까지 한꺼번에 처리하면 flood 에 걸린다)
 
 
 # 수집기(출처) 코드명 → 관리자 챗 표시명. config.yaml 의 collectors[].label 이 있으면 그쪽이 우선
@@ -230,30 +270,16 @@ class AdminNotifier:
         assert self.bot is not None
         # silent 는 "일상 알림" 표시일 뿐, 실제 무음 여부는 monitoring.quiet_notices 가 결정
         quiet = silent and self.cfg.quiet_notices
-        first_id: int | None = None
-        for chunk in split_message(text):
-            try:
-                msg = await self.bot.send_message(
-                    chat_id=self.chat_id, text=chunk, parse_mode=ParseMode.HTML,
-                    disable_notification=quiet, link_preview_options=None,
-                )
-            except BadRequest as e:
-                log.warning("admin notify: HTML 거부됨 (%s) — 평문으로 다시 보냅니다", e)
-                try:
-                    msg = await self.bot.send_message(
-                        chat_id=self.chat_id, text=strip_html(chunk)[:TELEGRAM_TEXT_LIMIT],
-                        disable_notification=quiet, link_preview_options=None,
-                    )
-                except TelegramError as e2:
-                    log.error("admin notify failed: %s", e2)
-                    return first_id
-            except TelegramError as e:
-                log.error("admin notify failed: %s", e)
-                return first_id
-            self.last_sent_at = utcnow()
-            if first_id is None:
-                first_id = int(getattr(msg, "message_id", 0) or 0)  # id 를 모르면 0 (성공은 성공)
-        return first_id
+        send = functools.partial(self.bot.send_message, chat_id=self.chat_id, link_preview_options=None)
+        try:
+            msg = await send_chunks(send, text, disable_notification=quiet)
+        except TelegramError as e:
+            log.error("admin notify failed: %s", e)
+            return None
+        if msg is SEND_FAILED:
+            return None
+        self.last_sent_at = utcnow()
+        return int(getattr(msg, "message_id", 0) or 0)  # id 를 모르면 0 (성공은 성공)
 
     async def edit(self, message_id: int, text: str) -> bool:
         """내가 보낸 관리자 챗 메시지를 고친다 (예: 품절된 링크 요청)."""
@@ -730,14 +756,8 @@ def register_admin_handlers(
 
     async def reply(update: Update, text: str) -> None:
         msg = update.effective_message
-        if msg is None:
-            return
-        for chunk in split_message(text):
-            try:
-                await msg.reply_text(chunk, parse_mode=ParseMode.HTML)
-            except BadRequest as e:
-                log.warning("답장 HTML 거부됨 (%s) — 평문으로 다시 보냅니다", e)
-                await msg.reply_text(strip_html(chunk)[:TELEGRAM_TEXT_LIMIT])
+        if msg is not None:
+            await send_chunks(msg.reply_text, text)
 
     async def drop_stale(update: object, _: ContextTypes.DEFAULT_TYPE) -> None:
         # 봇이 꺼져 있던 동안 쌓인 오래된 명령은 실행하지 않는다 (재배포 직후 옛 /run, /post 가 다시 도는 것 방지)
@@ -938,12 +958,20 @@ def register_admin_handlers(
         message = getattr(update, "effective_message", None)
         if message is None:
             return
-        try:
-            await message.reply_text(
-                "⚠️ 명령을 처리하다 문제가 생겼습니다. 잠시 뒤 다시 시도해 보세요.\n"
-                f"<code>{html.escape(f'{type(err).__name__}: {err}')[:400]}</code>",
-                parse_mode=ParseMode.HTML,
+        detail = f"{type(err).__name__}: {err}"
+        if "flood" in detail.lower():
+            text = (
+                "⏳ <b>텔레그램이 잠시 전송을 막았습니다</b>\n"
+                "짧은 시간에 메시지를 너무 많이 보내서 생기는 일시적인 제한입니다. "
+                "보통 몇 분 뒤 저절로 풀리니 조금 기다렸다 다시 보내주세요."
             )
+        else:
+            text = (
+                "⚠️ 명령을 처리하다 문제가 생겼습니다. 잠시 뒤 다시 시도해 보세요.\n"
+                f"<code>{html.escape(detail)[:400]}</code>"
+            )
+        try:
+            await message.reply_text(text, parse_mode=ParseMode.HTML)
         except TelegramError as e:
             log.error("오류 알림 전송도 실패: %s", e)
 
