@@ -111,17 +111,17 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("queue", "발행 대기열"),
     ("pending", "내 링크가 필요한 항목"),
     ("recent", "최근 발행 목록"),
-    ("hot", "최근 24시간 추천 많은 글 (/hot 5)"),
+    ("hot", "추천 많이 받은 게시판 글과 원문 링크 (/hot 5)"),
     ("find", "수집된 글 검색 (/find 키워드)"),
     ("errors", "최근 에러"),
     ("run", "지금 바로 수집 (/run 수집기이름)"),
     ("pause", "발행 일시정지"),
     ("resume", "발행 재개"),
     ("post", "직접 딜 올리기"),
-    ("link", "만든 제휴 링크 붙이기 (/link 번호 링크)"),
-    ("skip", "항목 건너뛰기 (/skip 번호)"),
-    ("copy", "카카오·블로그 복붙 문구 (/copy 번호)"),
-    ("test", "샘플 발행 양식 보기"),
+    ("link", "링크 요청에 답: 만든 제휴 링크 붙이기 (/link 번호 링크)"),
+    ("skip", "그 글은 올리지 않기 (/skip 번호)"),
+    ("copy", "올린 글의 카카오·블로그 복붙 문구 (/copy 번호)"),
+    ("test", "채널에 올라갈 글 양식 미리 보기 (샘플)"),
     ("pushtest", "휴대폰 푸시(ntfy) 연결 확인"),
     ("ppstats", "커뮤니티 글 추천 분포"),
     ("threadsauth", "스레드 연결 (최초 1회)"),
@@ -519,30 +519,37 @@ class StatusReporter:
     def hot_text(self, min_recommend: int = 5, hours: int = 24) -> str:
         tz = self.settings.app.timezone
         items = self.db.hot_items(utcnow() - timedelta(hours=hours), min_recommend=min_recommend)
-        lines = [f"🔥 <b>최근 {hours}시간에 추천 {min_recommend}개 이상 받은 글</b> ({len(items)}건)"]
+        lines = [f"🔥 <b>최근 {hours}시간에 추천 {min_recommend}개 이상 받은 글</b> ({len(items)}건)\n"]
         for it in items:
             when = fmt_local(datetime.fromisoformat(it["first_seen_at"]), tz)
-            lines.append(
-                f"• {html.escape(self.collector_label(it['source']))} · {when} · 추천 {it['recommend']} · 조회 {it['views'] or '-'} · 댓글 {it['comments'] or '-'}\n"
-                f"   {html.escape(truncate(it['title'] or '', 60))}"
+            block = (
+                f"<b>{html.escape(truncate(it['title'] or '', 70))}</b>\n"
+                f"{html.escape(self.collector_label(it['source']))} · {when} · 추천 {it['recommend']} · 조회 {it['views'] or '-'} · 댓글 {it['comments'] or '-'}"
             )
+            if it.get("url"):
+                block += f"\n원문: {html.escape(str(it['url']))}"
+            lines.append(block + "\n")
         if not items:
             lines.append("(없음 — 아직 게시판을 안 봤거나, 그만큼 추천받은 글이 없습니다. 숫자를 낮춰 보세요: /hot 2)")
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip()
 
     def find_text(self, keyword: str) -> str:
         tz = self.settings.app.timezone
         items = self.db.find_items(keyword)
-        lines = [f"🔎 <b>'{html.escape(keyword)}' 가 들어간 글</b> ({len(items)}건)"]
+        lines = [f"🔎 <b>'{html.escape(keyword)}' 가 들어간 글</b> ({len(items)}건)\n"]
         for it in items:
             when = fmt_local(datetime.fromisoformat(it["first_seen_at"]), tz, "%m/%d %H:%M")
-            lines.append(
-                f"• {html.escape(self.collector_label(it['source']))} · 처음 본 시각 {when} · 추천 {it['recommend'] if it['recommend'] is not None else '-'}\n"
-                f"   {html.escape(truncate(it['title'] or '', 60))}"
+            rec = it["recommend"] if it["recommend"] is not None else "-"
+            block = (
+                f"<b>{html.escape(truncate(it['title'] or '', 70))}</b>\n"
+                f"{html.escape(self.collector_label(it['source']))} · 처음 본 시각 {when} · 추천 {rec}"
             )
+            if it.get("url"):
+                block += f"\n원문: {html.escape(str(it['url']))}"
+            lines.append(block + "\n")
         if not items:
             lines.append("(수집한 글 중에는 없습니다)")
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip()
 
     def summary_text(self, summary: PeriodSummary) -> str:
         return self.renderer.render("daily_summary.j2", s=summary, tz=self.settings.app.timezone)
@@ -630,28 +637,31 @@ class BotController(Protocol):
 
 HELP_TEXT = (
     "🤖 <b>명령어 안내</b>\n"
-    "\n<b>보기</b>\n"
-    "/status — 지금 상태 한눈에 (게시판 확인, 올린 글 수, 기다리는 글, 쇼핑몰별 링크)\n"
-    "/queue — 올릴 차례를 기다리는 글\n"
-    "/pending — 내가 링크를 만들어 줘야 하는 글\n"
-    "/recent — 최근에 올린 글\n"
-    "/hot 5 — 최근 24시간에 추천 5개 이상 받은 글 (숫자는 바꿔도 됨)\n"
-    "/find 키워드 — 수집한 글 제목에서 찾기 (어느 게시판에 언제 올라왔는지)\n"
-    "/errors — 최근 에러\n"
-    "/ppstats — 게시판별 추천 수 분포 (기준을 조정할 때 참고)\n"
-    "\n<b>조작</b>\n"
-    "/run — 지금 바로 게시판 확인 (<code>/run ppomppu</code> 처럼 하나만도 가능)\n"
-    "/pause — 잠시 멈춤 (게시판 확인과 올리기 모두) · /resume — 다시 시작\n"
-    "/link 번호 링크 — 내가 만든 제휴 링크 붙이기 (링크 요청 메시지에 답장해도 됨)\n"
-    "/skip 번호 — 그 글은 안 올리고 건너뛰기\n"
-    "/post — 내가 직접 딜 올리기. 예)\n"
-    "<code>/post\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n상품: 애슐리 크리스피 핫도그 4종\n가격: 14,890원\nhttps://toss.im/_m/xxxx</code>\n"
-    "/copy 번호 — 카카오·블로그에 붙여넣을 문구 다시 받기 (번호 없으면 마지막에 올린 글)\n"
+    "\n<b>상태 보기</b>\n"
+    "/status — 지금 상태 한눈에. 게시판 확인 현황, 올린 글 수, 기다리는 글, 쇼핑몰별 링크 처리 방식.\n"
+    "/queue — 올릴 차례를 기다리는 글. 글마다 #번호가 붙어 있고, /skip 에 이 번호를 씁니다.\n"
+    "/pending — 내가 링크를 만들어 줘야 하는 글. 토스·네이버처럼 자동 링크가 안 되는 몰의 딜이 여기 쌓입니다.\n"
+    "/recent — 최근에 올린 글.\n"
+    "/hot 5 — 최근 24시간에 추천 5개 이상 받은 게시판 글과 원문 링크. 숫자를 바꾸면 기준이 바뀝니다 (/hot 2).\n"
+    "/find 키워드 — 수집한 글 제목에서 찾기. 어느 게시판에 언제 올라왔는지와 원문 링크.\n"
+    "/errors — 최근 에러.\n"
+    "/ppstats — 게시판별 추천 수 분포. 판정 기준이 너무 높거나 낮은지 볼 때.\n"
+    "\n<b>글 올리기·다루기</b>\n"
+    "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다.\n"
+    "/skip 번호 — 그 글은 올리지 않고 건너뜁니다. 품절이거나 별로일 때. 번호는 링크 요청 메시지나 /queue 에 있습니다.\n"
+    "/post — 내가 찾은 딜을 직접 올립니다. 아래처럼 보내면 맨 앞 차례로 채널에 올라갑니다 (연습 모드에서는 미리보기만).\n"
+    "<code>/post\n[머리글, 없으면 생략]\n상품: 상품명\n가격: 14,890원\nhttps://내가-만든-제휴-링크</code>\n"
+    "/copy 번호 — 올린 글의 카카오 오픈채팅용·네이버 블로그용 복붙 문구를 다시 받습니다. 번호 없으면 마지막 글. 실제 모드에서는 올릴 때마다 자동으로 옵니다.\n"
+    "/run — 지금 바로 게시판을 확인합니다. /run ppomppu 처럼 하나만도 됩니다.\n"
+    "/pause — 잠시 멈춤 (게시판 확인과 올리기 모두). /resume — 다시 시작.\n"
     "\n<b>확인·연결</b>\n"
-    "/test — 채널에 올라갈 글 양식을 이 챗에서 미리 보기\n"
-    "/pushtest — 휴대폰 푸시(ntfy) 연결 확인\n"
-    "/threadsauth — 스레드 연결 (최초 1회) · /threadscode 코드 — 스레드 인증 코드 입력\n"
-    "/naverlogin /naverlink /shot /html — 브라우저 자동화용 (지금은 안 씀)\n"
+    "/test — 샘플 딜로 채널에 올라갈 글 양식을 이 챗에 보여줍니다. 양식을 바꿨을 때 확인용이고 채널에는 안 올라갑니다.\n"
+    "/pushtest — 휴대폰 푸시(ntfy) 연결 확인.\n"
+    "/threadsauth — 스레드 자동 게시 연결. Meta 앱 ID·시크릿을 변수에 넣은 뒤 1회. /threadscode 코드 — 그때 받은 인증 코드 입력.\n"
+    "/naverlogin — 네이버 쇼핑커넥트 링크를 봇이 대신 만들도록 서버 브라우저에 QR 로그인. 블로그 글쓰기가 아니라 링크 생성 자동화이고, 브라우저 자동화를 켰을 때만 됩니다.\n"
+    "/naverlink 상품URL — 위 자동화로 링크 하나 만들어 보기.\n"
+    "/shot URL — 서버 브라우저로 그 페이지 화면을 찍어 보냅니다. 봇이 게시판을 잘못 읽는 것 같을 때 확인용.\n"
+    "/html URL — 그 페이지 원문을 파일로 받습니다. 게시판 구조가 바뀌어 봇이 못 읽을 때 저에게 보내주는 용도.\n"
     "/help — 이 안내"
 )
 
