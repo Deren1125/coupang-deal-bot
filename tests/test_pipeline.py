@@ -214,3 +214,32 @@ async def test_dry_run_skips_manual_link_requests(bot: DealBot) -> None:
     await bot.run_once()
     assert bot.db.queue_counts() == {"published": 1}
     assert bot.db.recent_posts()[0]["affiliate_url"] == "https://toss.im/_m/D"
+
+
+async def test_dry_run_previews_do_not_block_real_publishing(bot: DealBot) -> None:
+    """연습 모드에서 미리보기로 본 딜이, 실제 모드로 바꾼 뒤 발행에서 빠지면 안 된다."""
+    assert bot.state.dry_run
+    FakeCollector.products = [_p("77", 7000, discount_rate=60)]
+    await bot.run_once()
+    assert bot.db.queue_counts() == {"published": 1}  # 연습 발행(미리보기)
+    assert bot.db.latest_post("coupang:77")["dry_run"] == 1
+
+    # 연습 모드에서는 같은 딜을 다시 잡지 않는다 (미리보기 도배 방지)
+    results = await bot.run_once()
+    assert results[0]["deals"] == 1 and results[0]["queued"] == 0
+
+    # 실제 모드로 전환하면 연습 기록은 무시하고 진짜로 올린다
+    # (테스트 환경엔 텔레그램 봇이 없어 publisher 가 항상 연습으로 기록하므로 실제 발행만 흉내낸다)
+    async def real_publish(deal):  # type: ignore[no-untyped-def]
+        return PublishResult(ok=True, message_id=1, dry_run=False)
+
+    bot.publisher.publish = real_publish  # type: ignore[method-assign]
+    bot.state.dry_run = False
+    bot.settings.publish.dry_run = False
+    results = await bot.run_once()
+    assert results[0]["queued"] == 1, "연습 때 본 딜이라고 진짜 발행에서 빠지면 안 됨"
+    assert bot.db.count_posts_since(utcnow() - timedelta(hours=1)) == 2
+
+    # 실제로 올린 뒤에는 다시 중복으로 걸러진다
+    results = await bot.run_once()
+    assert results[0]["queued"] == 0

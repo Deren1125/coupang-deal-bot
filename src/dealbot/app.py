@@ -350,7 +350,7 @@ class DealBot:
         verdict.reasons = ["manual"] + [r for r in verdict.reasons if r != "manual"]
         verdict.score = 1000.0
         deal = Deal(product=product, verdict=verdict, affiliate_url=post.url, detected_at=now)
-        if self.db.posted_within(product.product_id, self.settings.publish.dedup_days, now):
+        if self._posted_recently(product.product_id, now):
             return f"⚠️ 최근 {self.settings.publish.dedup_days}일 안에 이미 올린 상품이에요: {product.name[:40]}"
         if not self.db.enqueue(deal, score=1000.0, now=now):
             return "⚠️ 이미 기다리는 글에 들어 있는 상품입니다."
@@ -580,7 +580,7 @@ class DealBot:
                 if not verdict.is_deal:
                     continue
                 deals += 1
-                if self.db.posted_within(p.product_id, cfg.publish.dedup_days, now):
+                if self._posted_recently(p.product_id, now):
                     log.debug("deal %s already posted within %dd — skip", p.product_id, cfg.publish.dedup_days)
                     continue
                 deal = Deal(product=p, verdict=verdict, detected_at=now)
@@ -668,11 +668,21 @@ class DealBot:
                 dropped += 1
         return dropped
 
+    def _posted_recently(self, product_id: str, now: Any | None = None) -> bool:
+        """최근 dedup_days 안에 올린 상품인가.
+
+        연습 모드에서는 미리보기 기록까지 세어 같은 글을 반복해서 보여주지 않는다.
+        실제 모드에서는 미리보기 기록을 무시한다 (연습 때 본 딜이 진짜 발행에서 빠지면 안 되므로).
+        """
+        return self.db.posted_within(
+            product_id, self.settings.publish.dedup_days, now, include_dry_run=self.state.dry_run
+        )
+
     def _should_enrich(self, p: Product) -> bool:
         ec = self.settings.deal.enrich
         if not ec.enabled or p.shop not in ec.shops:
             return False
-        if self.db.posted_within(p.product_id, self.settings.publish.dedup_days):
+        if self._posted_recently(p.product_id):
             return False
         return not p.image_url or p.rating is None or not p.has_price
 
@@ -696,7 +706,7 @@ class DealBot:
         """시중가 대조는 쿠팡 검색 예산을 쓰므로 '후보'에만: 다른 몰 + 가격 있음 + (판정 통과 또는 표시 할인율 후보)."""
         if self.market is None or p.shop == "coupang" or not p.has_price:
             return False
-        if self.db.posted_within(p.product_id, self.settings.publish.dedup_days):
+        if self._posted_recently(p.product_id):
             return False
         if "low_interest" in verdict.reasons or any(r.startswith("excluded") for r in verdict.reasons):
             return False
@@ -766,7 +776,7 @@ class DealBot:
 
         deal = item.deal
         pid = deal.product.product_id
-        if self.db.posted_within(pid, cfg.dedup_days, now):
+        if self._posted_recently(pid, now):
             self.db.update_queue_item(item.id, status="skipped", error="already posted")
             return True
 

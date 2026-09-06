@@ -304,15 +304,18 @@ class Database:
         return int(row["c"]) if row else 0
 
     # -------------------------------------------------------------- posts
-    def last_posted_at(self, product_id: str) -> datetime | None:
+    def last_posted_at(self, product_id: str, *, include_dry_run: bool = True) -> datetime | None:
+        # 연습 모드에서 만든 미리보기도 posts 에 남는다. 실제 발행 때는 그 기록 때문에
+        # "이미 올렸다" 고 판단해 진짜 발행을 건너뛰면 안 되므로 걸러낼 수 있게 한다.
+        where = "" if include_dry_run else " AND dry_run = 0"
         row = self._one(
-            "SELECT posted_at FROM posts WHERE product_id = ? ORDER BY posted_at DESC LIMIT 1",
+            f"SELECT posted_at FROM posts WHERE product_id = ?{where} ORDER BY posted_at DESC LIMIT 1",
             (product_id,),
         )
         return from_iso(row["posted_at"]) if row else None
 
-    def posted_within(self, product_id: str, days: int, now: datetime | None = None) -> bool:
-        last = self.last_posted_at(product_id)
+    def posted_within(self, product_id: str, days: int, now: datetime | None = None, *, include_dry_run: bool = True) -> bool:
+        last = self.last_posted_at(product_id, include_dry_run=include_dry_run)
         if last is None:
             return False
         now = now or utcnow()

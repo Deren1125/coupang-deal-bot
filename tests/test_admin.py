@@ -244,7 +244,7 @@ def test_heartbeat_counts_new_deals_not_reseen(bot: DealBot) -> None:
     run_id = bot.db.start_run("fake")
     bot.db.finish_run(run_id, status="ok", collected=46, deals=6, queued=1)
     text = bot.reporter.heartbeat_text(30)
-    assert "글 46개를 봤습니다" in text and "새로 잡은 특가: 1건 (기준은 넘었지만 이미 올린 것과 겹친 5건은 건너뜀)" in text
+    assert "글 46개를 봤습니다" in text and "새로 잡은 특가: 1건 (이미 올린 글이라 그냥 지나친 판정 5번" in text
     s = bot.db.summary(bot.state.started_at)
     assert s.deals_found == 6 and s.queued == 1
 

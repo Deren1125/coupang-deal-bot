@@ -643,7 +643,8 @@ class StatusReporter:
         mode = " · 🧪 연습 모드" if self.state.dry_run else ""
         paused = " · ⏸ 일시정지 중" if self.state.paused else ""
         dup = max(s.deals_found - s.queued, 0)
-        dup_note = f" (기준은 넘었지만 이미 올린 것과 겹친 {dup}건은 건너뜀)" if dup else ""
+        # 같은 글을 5분마다 다시 확인하므로 이 숫자는 글 개수가 아니라 '판정 횟수' 다
+        dup_note = f" (이미 올린 글이라 그냥 지나친 판정 {dup}번 — 같은 글을 5분마다 다시 보기 때문에 글 수보다 큽니다)" if dup else ""
         fails = f" (확인 실패 {s.run_errors}번)" if s.run_errors else ""
         pending = counts.get("pending", 0)
         awaiting = counts.get("awaiting_link", 0)
