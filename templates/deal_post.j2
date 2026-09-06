@@ -15,6 +15,7 @@
     avg_price / below_avg_pct   최근 N일 평균가 / 평균가 대비 저렴한 비율 %
     market_price / market_source / below_market_pct   시중가(쿠팡 검색) / 출처 / 시중가 대비 저렴한 비율 %
     link                  발행할 링크 (내 제휴 링크 또는 원본)
+    channels.telegram_url / kakao_openchat_url / threads_url   내 채널 주소 (config.yaml channels, 비어 있으면 "")
   필터: won (12,900원), pct (35%), local (시간 → 한국시간 문자열)
 
   ⚠️ HTML 특수문자는 자동 이스케이프됩니다. <b> <i> <s> <code> <a href> 만 사용 가능.
@@ -42,6 +43,10 @@
 {% if product.rating %}별점 {{ product.rating }}{% endif %}{% if product.rating and product.review_count %} · {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}건{% endif +%}
 {% endif %}
 {{ link }}
+{% if channels.kakao_openchat_url %}
+
+💬 카톡 오픈채팅: {{ channels.kakao_openchat_url }}
+{% endif %}
 {% if shop.disclosure %}
 
 {{ shop.disclosure }}

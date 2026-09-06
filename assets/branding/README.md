@@ -8,5 +8,8 @@
 | `openchat_cover_square.png` | 같은 디자인 정사각형 (썸네일·SNS) | 1080×1080 |
 | `openchat_cover_wide.png` | 같은 디자인 가로형 (블로그·스레드 등) | 1200×960 |
 | `openchat_profile.png` | 오픈프로필·채널 프로필 사진 | 1080×1080 |
+| `openchat_qr.png` | 오픈채팅 입장 QR 카드 (블로그·인스타용) | 826×1026 |
+
+오픈채팅 주소: https://open.kakao.com/o/pHi1MkMi (`config.yaml` → `channels.kakao_openchat_url`)
 
 마스코트 원본 그림은 저장소에 포함하지 않았습니다.

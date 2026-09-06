@@ -215,6 +215,17 @@ class LinksConfig(BaseModel):
     resolve_short_links: bool = True
 
 
+class ChannelsConfig(BaseModel):
+    """내 채널 주소. 비워 두면 템플릿에서 해당 줄이 빠진다."""
+
+    telegram_url: str = ""  # 예: https://t.me/oneul_hotdeal
+    kakao_openchat_url: str = ""  # 예: https://open.kakao.com/o/xxxx
+    threads_url: str = ""  # 예: https://www.threads.net/@oneul_hot_deal
+
+    def as_dict(self) -> dict[str, str]:
+        return {"telegram_url": self.telegram_url, "kakao_openchat_url": self.kakao_openchat_url, "threads_url": self.threads_url}
+
+
 class PushConfig(BaseModel):
     """휴대폰 푸시 (텔레그램과 별개). provider: auto | ntfy | pushover | none"""
 
@@ -339,6 +350,7 @@ class Settings(BaseModel):
     # yaml 키는 copy 지만 BaseModel.copy 와 겹쳐 속성명은 copy_cfg
     copy_cfg: CopyConfig = Field(default_factory=CopyConfig, alias="copy")
     links: LinksConfig = Field(default_factory=LinksConfig)
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     secrets: Secrets = Field(default_factory=Secrets)
 

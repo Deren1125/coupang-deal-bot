@@ -21,9 +21,11 @@ def _pct(value: float | int | None, digits: int = 0) -> str:
 
 
 class TemplateRenderer:
-    def __init__(self, templates_dir: Path, tz: str = "Asia/Seoul") -> None:
+    def __init__(self, templates_dir: Path, tz: str = "Asia/Seoul", channels: dict[str, str] | None = None) -> None:
         self.templates_dir = Path(templates_dir)
         self.tz = ZoneInfo(tz)
+        # 템플릿에서 channels.telegram_url 처럼 씀. 없는 키는 빈 문자열
+        self.channels = {"telegram_url": "", "kakao_openchat_url": "", "threads_url": "", **(channels or {})}
         # 텔레그램(HTML 서식)용: 특수문자 이스케이프
         self.env = self._build_env(autoescape=True)
         # 카카오·스레드·블로그(평문)용: 이스케이프하면 &lt; 같은 문자가 그대로 복사되므로 끔
@@ -55,6 +57,7 @@ class TemplateRenderer:
         env = self.env if autoescape else self.env_plain
         template = env.get_template(name)
         ctx.setdefault("now", datetime.now(self.tz))
+        ctx.setdefault("channels", self.channels)
         return template.render(**ctx).strip()
 
     def render_deal(

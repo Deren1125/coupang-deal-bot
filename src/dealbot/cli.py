@@ -159,7 +159,7 @@ def cmd_render(args: argparse.Namespace) -> int:
     from dealbot.publisher.templates import TemplateRenderer
 
     s = _settings(args)
-    r = TemplateRenderer(s.templates_dir, s.app.timezone)
+    r = TemplateRenderer(s.templates_dir, s.app.timezone, s.channels.as_dict())
     shop = s.shop_registry().get("coupang")
     print(r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", shop=shop, template=s.publish.template))
     return 0

@@ -130,7 +130,7 @@ class DealBot:
 
         self.evaluator = DealEvaluator(settings.deal)
         self.enricher = PageEnricher(self.http, timeout=settings.http.timeout_seconds)
-        self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone)
+        self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone, settings.channels.as_dict())
         self.rate_limiter = RateLimiter(self.db, settings.publish)
 
         # ---- 텔레그램

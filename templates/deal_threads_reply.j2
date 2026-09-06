@@ -11,4 +11,10 @@
 {% endif %}
 {{ link }}
 
+{% if channels.telegram_url %}
+핫딜은 금방 품절돼요. 실시간 전체 딜 👉 {{ channels.telegram_url }}
+{% elif channels.kakao_openchat_url %}
+핫딜은 금방 품절돼요. 실시간 전체 딜 👉 {{ channels.kakao_openchat_url }}
+{% else %}
 핫딜은 금방 품절돼요. 실시간 전체 딜은 프로필 링크 👆
+{% endif %}

@@ -24,6 +24,10 @@
 {% endif %}
 
 👉 {{ link }}
+{% if channels.telegram_url %}
+
+📲 실시간 전체 딜(텔레그램): {{ channels.telegram_url }}
+{% endif %}
 {% if shop.disclosure %}
 
 ✱ {{ shop.disclosure }}

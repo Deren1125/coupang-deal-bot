@@ -258,6 +258,12 @@ links:
   always_deeplink: false
   resolve_short_links: true
 
+# 내 채널 주소. 글 하단에 서로 연결하는 줄을 넣는다 (비우면 그 줄은 빠짐)
+channels:
+  telegram_url: ""                                   # 텔레그램 채널 공개 링크 (예: https://t.me/oneul_hotdeal)
+  kakao_openchat_url: "https://open.kakao.com/o/pHi1MkMi"
+  threads_url: ""                                    # 스레드 프로필 (예: https://www.threads.net/@oneul_hot_deal)
+
 # ----------------------------------------------------------------------------
 # 모니터링 (관리자 개인 챗)
 # ----------------------------------------------------------------------------
