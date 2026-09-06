@@ -161,7 +161,7 @@ async def test_publisher_posts_hook_then_reply(db: Database, repo_root: Path) ->
         seen.append({"path": req.url.path, **dict(req.url.params)})
         if req.url.path.endswith("/threads"):
             return httpx.Response(200, json={"id": f"C{len(seen)}"})
-        return httpx.Response(200, json={"id": "P100" if len(seen) <= 2 else "P200"})
+        return httpx.Response(200, json={"id": "100" if len(seen) <= 2 else "200"})
 
     pub = _publisher(db, repo_root, handler)
     db.kv_set(KV_TOKEN, "T")
@@ -171,7 +171,7 @@ async def test_publisher_posts_hook_then_reply(db: Database, repo_root: Path) ->
     containers = [c for c in seen if c["path"].endswith("/threads")]
     assert len(containers) == 2
     assert "reply_to_id" not in containers[0] and "링크는 댓글에" in containers[0]["text"]
-    assert containers[1]["reply_to_id"] == "P100" and "https://link.coupang.com" in containers[1]["text"]
+    assert containers[1]["reply_to_id"] == "100" and "https://link.coupang.com" in containers[1]["text"]
 
     # 답글 실패는 훅이 올라갔으니 실패로 치지 않되 error 로 알린다
     calls = {"n": 0}
