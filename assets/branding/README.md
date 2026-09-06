@@ -4,7 +4,8 @@
 
 | 파일 | 용도 | 크기 |
 |---|---|---|
-| `openchat_cover_square.png` | 카카오 오픈채팅방 커버 (확정안) | 1080×1080 |
+| `openchat_cover_3x4.png` | 카카오 오픈채팅(커뮤니티) 커버 확정안. 세로 3:4 규격 | 1080×1440 |
+| `openchat_cover_square.png` | 같은 디자인 정사각형 (썸네일·SNS) | 1080×1080 |
 | `openchat_cover_wide.png` | 같은 디자인 가로형 (블로그·스레드 등) | 1200×960 |
 | `openchat_profile.png` | 오픈프로필·채널 프로필 사진 | 1080×1080 |
 
