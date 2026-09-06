@@ -1,0 +1,14 @@
+{#
+  스레드 답글 — 첫 글(훅) 아래에 달리는 글. 수수료 고지 + 상품 + 가격 + 링크 + 품절 경고. 500자 제한, 순수 텍스트.
+#}
+{% if shop.disclosure %}
+{{ shop.disclosure }}
+
+{% endif %}
+📌 {{ product.name }}
+{% if product.has_price %}
+{{ product.price | won }}{% if product.original_price and product.original_price > product.price %} (정가 {{ product.original_price | won }}){% endif %}{% if product.shipping %} · 배송 {{ product.shipping }}{% endif +%}
+{% endif %}
+{{ link }}
+
+핫딜은 금방 품절돼요. 실시간 전체 딜은 프로필 링크 👆

@@ -141,12 +141,56 @@ async def test_publisher_publish_and_dry_run(db: Database, repo_root: Path) -> N
 
 def test_threads_template_within_limit(repo_root: Path) -> None:
     r = TemplateRenderer(repo_root / "templates")
-    text = r.render_deal(sample_deal(), "https://link.coupang.com/a/x", shop=ShopRegistry().get("coupang"), template="deal_threads.j2")
-    assert len(text) <= 500
-    assert "<b>" not in text and "<s>" not in text  # 스레드는 평문
-    assert "29,900원" in text and "https://link.coupang.com/a/x" in text
-    assert "&" not in text.replace("&", "&", 1) or "&amp;" not in text
-    assert text.endswith("이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.")
+    shop = ShopRegistry().get("coupang")
+    hook = r.render_deal(sample_deal(), "https://link.coupang.com/a/x", shop=shop, template="deal_threads.j2")
+    reply = r.render_deal(sample_deal(), "https://link.coupang.com/a/x", shop=shop, template="deal_threads_reply.j2")
+    assert len(hook) <= 500 and len(reply) <= 500
+    assert "<b>" not in hook and "<b>" not in reply  # 스레드는 평문
+    # 첫 글(훅): 가격 비교와 "링크는 댓글에", 링크와 고지는 없음
+    assert "49,900원 > 29,900원" in hook and "링크는 댓글에" in hook
+    assert "https://" not in hook and "수수료" not in hook
+    # 답글: 고지 + 상품 + 가격 + 링크
+    assert reply.startswith("이 포스팅은 쿠팡 파트너스 활동의 일환으로")
+    assert "29,900원" in reply and "https://link.coupang.com/a/x" in reply and "품절" in reply
+
+
+async def test_publisher_posts_hook_then_reply(db: Database, repo_root: Path) -> None:
+    seen: list[dict[str, str]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append({"path": req.url.path, **dict(req.url.params)})
+        if req.url.path.endswith("/threads"):
+            return httpx.Response(200, json={"id": f"C{len(seen)}"})
+        return httpx.Response(200, json={"id": "P100" if len(seen) <= 2 else "P200"})
+
+    pub = _publisher(db, repo_root, handler)
+    db.kv_set(KV_TOKEN, "T")
+    db.kv_set(KV_USER_ID, "999")
+    result = await pub.publish(sample_deal())
+    assert result.ok and result.message_id == 100 and result.error is None
+    containers = [c for c in seen if c["path"].endswith("/threads")]
+    assert len(containers) == 2
+    assert "reply_to_id" not in containers[0] and "링크는 댓글에" in containers[0]["text"]
+    assert containers[1]["reply_to_id"] == "P100" and "https://link.coupang.com" in containers[1]["text"]
+
+    # 답글 실패는 훅이 올라갔으니 실패로 치지 않되 error 로 알린다
+    calls = {"n": 0}
+
+    def flaky(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if "reply_to_id" in req.url.params:
+            return httpx.Response(400, json={"error": {"message": "reply blocked"}})
+        return httpx.Response(200, json={"id": "X"})
+
+    pub2 = _publisher(db, repo_root, flaky)
+    r2 = await pub2.publish(sample_deal())
+    assert r2.ok and r2.error and "reply blocked" in r2.error
+
+    # reply_template 을 비우면 한 글만
+    pub3 = _publisher(db, repo_root, handler, reply_template=None)
+    seen.clear()
+    assert (await pub3.publish(sample_deal())).ok
+    assert len([c for c in seen if c["path"].endswith("/threads")]) == 1
 
 
 def test_copy_blocks(repo_root: Path) -> None:

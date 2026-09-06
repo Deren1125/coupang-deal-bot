@@ -157,14 +157,16 @@ class ThreadsClient:
         )
 
     # ------------------------------------------------------------ 게시
-    async def post(self, token: ThreadsToken, text: str, image_url: str | None = None) -> str:
-        """컨테이너 생성 → 게시. 게시된 글 id 반환."""
+    async def post(self, token: ThreadsToken, text: str, image_url: str | None = None, *, reply_to_id: str | None = None) -> str:
+        """컨테이너 생성 → 게시. 게시된 글 id 반환. reply_to_id 를 주면 그 글의 답글로 올린다."""
         params: dict[str, Any] = {"text": text[:TEXT_LIMIT], "access_token": token.access_token}
         if image_url:
             params["media_type"] = "IMAGE"
             params["image_url"] = image_url
         else:
             params["media_type"] = "TEXT"
+        if reply_to_id:
+            params["reply_to_id"] = reply_to_id
         created = await self._request("POST", f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/threads", params=params)
         creation_id = created.get("id")
         if not creation_id:
@@ -191,6 +193,7 @@ class ThreadsPublisher:
         *,
         registry: ShopRegistry | None = None,
         template: str = "deal_threads.j2",
+        reply_template: str | None = "deal_threads_reply.j2",
         enabled: bool = True,
         dry_run: bool = False,
         refresh_before_days: int = 7,
@@ -198,6 +201,9 @@ class ThreadsPublisher:
         self.client = client
         self.db = db
         self.renderer = renderer
+        # 잘 되는 핫딜 계정들은 첫 글을 짧은 훅으로 쓰고, 링크와 수수료 고지는 답글에 단다.
+        # 링크가 든 글은 노출이 줄기도 해서 이 구조가 유리하다. reply_template 을 비우면 한 글로 올린다.
+        self.reply_template = reply_template
         self.registry = registry or ShopRegistry()
         self.template = template
         self.enabled = enabled
@@ -241,18 +247,34 @@ class ThreadsPublisher:
         shop = self.registry.get(deal.product.shop)
         return self.renderer.render_deal(deal, link, shop=shop, template=self.template, autoescape=False)[:TEXT_LIMIT]
 
+    def render_reply(self, deal: Deal) -> str | None:
+        if not self.reply_template:
+            return None
+        link = deal.affiliate_url or deal.product.url
+        shop = self.registry.get(deal.product.shop)
+        return self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)
+
     async def publish(self, deal: Deal) -> PublishResult:
         if not self.enabled:
             return PublishResult(ok=False, error="threads disabled")
         text = self.render(deal)
+        reply = self.render_reply(deal)
         if self.dry_run:
-            log.info("[DRY-RUN] would post to threads:\n%s", text)
+            log.info("[DRY-RUN] would post to threads:\n%s\n--- reply ---\n%s", text, reply or "(없음)")
             return PublishResult(ok=True, dry_run=True)
         token = await self.ensure_fresh()
         if token is None:
             return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
         try:
             post_id = await self.client.post(token, text, deal.product.image_url)
-            return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None)
         except ThreadsError as e:
             return PublishResult(ok=False, error=str(e))
+        if reply:
+            try:
+                await self.client.post(token, reply, reply_to_id=post_id)
+            except ThreadsError as e:
+                # 훅은 올라갔으니 실패로 치지 않되, 링크가 빠진 글이 되므로 알린다
+                log.warning("threads reply (link) failed for %s: %s", post_id, e)
+                return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None,
+                                     error=f"답글(링크) 게시 실패: {e}")
+        return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None)

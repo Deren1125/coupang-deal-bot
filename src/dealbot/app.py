@@ -177,6 +177,7 @@ class DealBot:
             self.renderer,
             registry=self.registry,
             template=settings.threads.template,
+            reply_template=settings.threads.reply_template,
             enabled=settings.threads.enabled,
             dry_run=self.state.dry_run,
             refresh_before_days=settings.threads.refresh_before_days,

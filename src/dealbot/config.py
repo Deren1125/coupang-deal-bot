@@ -183,7 +183,8 @@ class ThreadsConfig(BaseModel):
     """스레드 자동 발행. 인증은 /threadsauth 로 한 번만."""
 
     enabled: bool = True
-    template: str = "deal_threads.j2"
+    template: str = "deal_threads.j2"  # 첫 글(훅): 짧게, 링크 없이
+    reply_template: str | None = "deal_threads_reply.j2"  # 답글: 링크 + 수수료 고지. 비우면 한 글로
     send_photo: bool = True
     refresh_before_days: int = 7
 

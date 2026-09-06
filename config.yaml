@@ -242,7 +242,8 @@ publish:
 # 스레드 자동 발행 (THREADS_APP_ID/SECRET 필요, /threadsauth 로 최초 1회 연결)
 threads:
   enabled: true
-  template: deal_threads.j2
+  template: deal_threads.j2               # 첫 글(훅): 짧게, 링크 없이 — 잘 되는 핫딜 계정 형식
+  reply_template: deal_threads_reply.j2   # 답글: 링크 + 수수료 고지 (비우면 한 글로 올림)
   send_photo: true
   refresh_before_days: 7
 
