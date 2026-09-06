@@ -260,7 +260,7 @@ links:
 
 # 내 채널 주소. 글 하단에 서로 연결하는 줄을 넣는다 (비우면 그 줄은 빠짐)
 channels:
-  telegram_url: ""                                   # 텔레그램 채널 공개 링크 (예: https://t.me/oneul_hotdeal)
+  telegram_url: "https://t.me/hot_deal_and_info"
   kakao_openchat_url: "https://open.kakao.com/o/pHi1MkMi"
   threads_url: ""                                    # 스레드 프로필 (예: https://www.threads.net/@oneul_hot_deal)
 
