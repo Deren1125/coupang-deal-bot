@@ -262,7 +262,7 @@ links:
 channels:
   telegram_url: "https://t.me/hot_deal_and_info"
   kakao_openchat_url: "https://open.kakao.com/o/pHi1MkMi"
-  threads_url: ""                                    # 스레드 프로필 (예: https://www.threads.net/@oneul_hot_deal)
+  threads_url: "https://www.threads.net/@oneul_hot_deal"
 
 # ----------------------------------------------------------------------------
 # 모니터링 (관리자 개인 챗)
