@@ -98,3 +98,19 @@ def test_status_reports_data_persistence(bot: DealBot) -> None:
     assert ctx["db_since"] and len(ctx["db_since"]) == 10
     text = bot.reporter.status_text()
     assert "기록 시작" in text and "볼륨이 연결되지" not in text
+
+
+def test_db_created_at_uses_oldest_record(tmp_path: Path) -> None:
+    from datetime import timedelta
+
+    from dealbot.storage.db import Database
+    from dealbot.utils.timeutil import utcnow
+
+    d = Database(tmp_path / "old.db")
+    old = utcnow() - timedelta(days=40)
+    d.record_observation(Product(source="s", product_id="coupang:1", shop="coupang", name="예전 상품", price=1000, url="u"), now=old)
+    d._conn.execute("DELETE FROM kv WHERE key = 'db_created_at'")  # 예전 버전 DB 를 흉내
+    d.close()
+    d2 = Database(tmp_path / "old.db")
+    assert d2.kv_get("db_created_at", "")[:10] == old.isoformat()[:10]
+    d2.close()

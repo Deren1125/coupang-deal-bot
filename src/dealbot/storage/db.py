@@ -186,7 +186,9 @@ class Database:
         self._conn.executescript(SCHEMA)
         self._migrate()
         if self.kv_get("db_created_at") is None:
-            self.kv_set("db_created_at", to_iso(utcnow()))
+            # 기존 DB 를 새 버전으로 처음 열 때는 가장 오래된 기록 시각을 쓴다 (기록이 언제부터 쌓였는지 보여주기 위함)
+            row = self._conn.execute("SELECT MIN(first_seen_at) AS t FROM products").fetchone()
+            self.kv_set("db_created_at", (row["t"] if row and row["t"] else None) or to_iso(utcnow()))
 
     def _migrate(self) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}
