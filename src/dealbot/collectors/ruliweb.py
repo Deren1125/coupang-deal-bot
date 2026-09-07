@@ -78,6 +78,8 @@ def parse_title(title: str, registry: ShopRegistry) -> dict[str, Any]:
     else:
         name = text
     name = _TRAILING_RE.sub("", name).strip(" ,/-")
+    # "상품명 (14,150원/무료)" 처럼 가격을 잘라내면 여는 괄호만 남는다 → 짝 없는 여는 괄호 제거
+    name = re.sub(r"[\s(\[{]+$", "", name).strip(" ,/-")
     # 단위 뒤 붙어 있는 콤마를 공백으로 보기 좋게
     name = re.sub(r",(?=\S)", ", ", name)
     return {"shop": shop, "name": name or text, "price": price, "tags": tags}

@@ -22,6 +22,10 @@ def test_parse_title_variants() -> None:
     assert t2["shop"].key == "toss" and t2["price"] == 15830 and t2["name"] == "쟌슨빌 더진한 부대찌개 500g 3개"
     t3 = parse_title("[쿠팡] 푸드센터 소갈비살 200g 5팩 (29,500원/무료)", reg)
     assert t3["shop"].key == "coupang" and t3["price"] == 29500 and t3["name"].startswith("푸드센터 소갈비살")
+    t5 = parse_title("[롯데온] 칠성사이다 제로 355ml 24캔 (14,150원/무료)", reg)
+    assert t5["name"] == "칠성사이다 제로 355ml 24캔" and t5["price"] == 14150 and t5["shop"].key == "lotteon"
+    t6 = parse_title("[G마켓] 나랑드사이다 제로 345ml 24입 [10,370원 / 무료배송]", reg)
+    assert t6["name"] == "나랑드사이다 제로 345ml 24입" and t6["price"] == 10370
     t4 = parse_title("제목만", reg)
     assert t4["shop"] is None and t4["price"] is None
 

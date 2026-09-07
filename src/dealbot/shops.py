@@ -79,7 +79,7 @@ DEFAULT_SHOPS: list[Shop] = [
         link_mode="manual",
         provider="naver_connect",  # browser.enabled + link_mode: api 로 바꾸면 브라우저 자동화 시도
         disclosure=_d("네이버 쇼핑커넥트"),
-        manual_hint="쇼핑커넥트(connect.naver.com) 에서 상품 URL 로 링크 생성",
+        manual_hint="네이버 쇼핑커넥트(네이버에서 '쇼핑커넥트' 검색 → 가입·승인 후) 에서 상품 URL 로 링크 생성",
         manual_fallback=True,
     ),
     # ---- 앱에서만 링크를 만들 수 있고(API 없음) 특가 빈도가 낮은 몰: 기본 꺼짐. config.yaml 에서 enabled: true 로 켤 수 있음
