@@ -235,6 +235,8 @@ publish:
   max_publish_attempts: 3
   publisher_tick_seconds: 20
   send_photo: true
+  quiet_hours: "00:00-07:00"     # 이 시간대(한국시간)에는 채널 글을 무음으로 올림 (구독자 알림 없음). 비우면 항상 알림
+  max_awaiting_links: 6          # 내 링크 요청이 이 개수 이상 쌓이면 새 요청은 건너뜀 (관리자 챗 폭주 방지). 0 = 제한 없음
   allow_raw_links: false         # 제휴 링크를 못 만드는 쇼핑몰(미등록 몰 포함)은 건너뜀. true 면 수익 없는 원본 링크로라도 발행
   templates_dir: templates
   template: deal_post.j2

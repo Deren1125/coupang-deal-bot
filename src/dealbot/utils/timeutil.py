@@ -33,6 +33,24 @@ def fmt_local(dt: datetime | None, tz: str, fmt: str = "%m-%d %H:%M") -> str:
     return dt.astimezone(ZoneInfo(tz)).strftime(fmt)
 
 
+def in_time_window(now_local: datetime, spec: str | None) -> bool:
+    """spec = "HH:MM-HH:MM" (로컬 시각). 자정을 넘는 구간("23:00-07:00")도 됨. 비어 있으면 False."""
+    if not spec:
+        return False
+    try:
+        start_s, end_s = spec.replace(" ", "").split("-")
+        sh, sm = (int(x) for x in start_s.split(":"))
+        eh, em = (int(x) for x in end_s.split(":"))
+    except ValueError as e:
+        raise ValueError(f"시간 구간 형식이 잘못됐습니다: {spec!r} (예: 00:00-07:00)") from e
+    start, end, cur = sh * 60 + sm, eh * 60 + em, now_local.hour * 60 + now_local.minute
+    if start == end:
+        return False
+    if start < end:
+        return start <= cur < end
+    return cur >= start or cur < end
+
+
 def humanize_delta(delta: timedelta) -> str:
     secs = int(abs(delta.total_seconds()))
     if secs < 60:

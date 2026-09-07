@@ -174,6 +174,10 @@ class PublishConfig(BaseModel):
     max_publish_attempts: int = 3
     publisher_tick_seconds: int = 20
     send_photo: bool = True
+    # 이 시간대(현지 시각)에는 채널 글을 무음으로 올린다 (구독자 알림 없이). 예: "00:00-07:00". 비우면 항상 알림
+    quiet_hours: str | None = None
+    # 내 링크를 기다리는 글이 이 개수 이상 쌓이면, 새 링크 요청은 보내지 않고 건너뛴다 (관리자 챗 폭주 방지). 0 = 제한 없음
+    max_awaiting_links: int = 6
     allow_raw_links: bool = True  # 제휴 변환이 불가능한 쇼핑몰은 원본 링크로라도 발행
     templates_dir: Path = Path("templates")
     template: str = "deal_post.j2"

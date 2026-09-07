@@ -185,6 +185,8 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
         self._migrate()
+        if self.kv_get("db_created_at") is None:
+            self.kv_set("db_created_at", to_iso(utcnow()))
 
     def _migrate(self) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}

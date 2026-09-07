@@ -64,7 +64,7 @@ async def test_dry_run_sends_full_preview_and_skips_side_channels(bot: DealBot) 
 
 
 async def test_real_publish_sends_summary_and_copy_blocks(bot: DealBot) -> None:
-    async def fake_publish(deal):  # type: ignore[no-untyped-def]
+    async def fake_publish(deal, **_kw):  # type: ignore[no-untyped-def]
         return PublishResult(ok=True, message_id=7)
 
     bot.publisher.publish = fake_publish  # type: ignore[method-assign]

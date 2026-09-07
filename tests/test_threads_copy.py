@@ -252,7 +252,7 @@ async def test_pipeline_sends_threads_and_copy(settings: Settings) -> None:
         posted.append({"path": req.url.path, **dict(req.url.params)})
         return httpx.Response(200, json={"id": "C1" if req.url.path.endswith("/threads") else "P1"})
 
-    async def fake_publish(deal):  # type: ignore[no-untyped-def]
+    async def fake_publish(deal, **_kw):  # type: ignore[no-untyped-def]
         return PublishResult(ok=True, message_id=1)  # 스레드/복붙 문구는 채널에 실제 발행됐을 때만 따라간다
 
     bot.notifier.send = fake_send  # type: ignore[method-assign]

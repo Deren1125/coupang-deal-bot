@@ -77,7 +77,8 @@ class TelegramPublisher:
             log.warning("mark_sold_out edit_message_caption failed: %s", e)
             return False
 
-    async def publish(self, deal: Deal) -> PublishResult:
+    async def publish(self, deal: Deal, *, silent: bool = False) -> PublishResult:
+        """silent=True 면 구독자에게 알림 없이 올린다 (야간 무음 시간대)."""
         text = self.render(deal)
         if self.dry_run:
             log.info("[DRY-RUN] would publish to %s:\n%s", self.channel_id, text)
@@ -89,7 +90,7 @@ class TelegramPublisher:
             if self.send_photo and image and len(text) <= CAPTION_LIMIT:
                 try:
                     msg = await self.bot.send_photo(
-                        chat_id=self.channel_id, photo=image, caption=text, parse_mode=ParseMode.HTML
+                        chat_id=self.channel_id, photo=image, caption=text, parse_mode=ParseMode.HTML, disable_notification=silent
                     )
                     return PublishResult(ok=True, message_id=msg.message_id)
                 except BadRequest as e:
@@ -102,6 +103,7 @@ class TelegramPublisher:
                 text=text[:MESSAGE_LIMIT],
                 parse_mode=ParseMode.HTML,
                 link_preview_options=preview,
+                disable_notification=silent,
             )
             return PublishResult(ok=True, message_id=msg.message_id)
         except RetryAfter as e:

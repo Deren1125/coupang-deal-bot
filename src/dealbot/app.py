@@ -59,7 +59,7 @@ from dealbot.publisher.threads import (
 from dealbot.shops import ShopRegistry
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
-from dealbot.utils.timeutil import from_iso, to_iso, utcnow
+from dealbot.utils.timeutil import from_iso, in_time_window, local_now, to_iso, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -791,6 +791,13 @@ class DealBot:
                 log.info("queue #%d sold out before link request — skipped", item.id)
                 return True
             shop = self.registry.get(err or "")
+            cap = cfg.max_awaiting_links
+            if cap and self.db.queue_counts().get("awaiting_link", 0) >= cap:
+                # 링크 요청이 이미 여러 건 쌓여 있으면 더 보내지 않는다 (관리자 챗 폭주 방지). 딜은 어차피 곧 지난다
+                self.db.update_queue_item(item.id, status="skipped", error=f"manual link backlog full ({cap})")
+                self.db.log_event("INFO", "queue", f"{pid} skipped: {cap} manual link requests already waiting")
+                log.info("queue #%d skipped — %d manual link requests already waiting", item.id, cap)
+                return True
             self.db.update_queue_item(item.id, status="awaiting_link", error="manual link required", deal=deal)
             if shop is not None:
                 notice_id = await self.notifier.notify_manual_link(item, shop)
@@ -811,7 +818,8 @@ class DealBot:
             log.info("queue #%d sold out before publish — skipped", item.id)
             return True
 
-        result = await self.publisher.publish(deal)
+        silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
+        result = await self.publisher.publish(deal, silent=silent)
         if result.ok:
             self.db.record_post(
                 deal,

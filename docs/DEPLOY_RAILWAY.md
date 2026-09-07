@@ -66,6 +66,16 @@ Railway 빌더가 이미지를 못 만드는 경우가 있습니다(빌드가 �
 6. Deploy. 로그 탭에서 `DealBot started` 가 보이면 정상. 관리자 챗에 시작 알림이 옵니다.
 7. 설정(`config.yaml`)이나 템플릿을 바꾸면 git push → 자동 재배포.
 
+## 연습 모드 끄고 실제 발행 시작하기
+
+1. 관리자 챗에서 `/status` 를 보내 아래를 확인합니다.
+   - "⚠️ 데이터 볼륨이 연결되지 않았습니다" 가 **없어야** 합니다. 있으면 Settings → Volumes 에서 `/data` 볼륨을 먼저 붙이세요 (없으면 재배포 때마다 기록·스레드 연결이 사라집니다).
+   - 쇼핑몰별 링크 처리에서 자동/내 링크 요청 구분을 확인합니다.
+2. Railway → Variables → `DEALBOT_DRY_RUN` 을 `false` 로 바꾸고 **Redeploy**.
+3. "🟢 봇이 켜졌습니다" 뒤 `/status` 에서 "🧪 연습 모드" 표시가 사라졌는지 봅니다.
+4. 첫 글이 올라가면 채널에서 링크·사진·고지 문구를 직접 눌러 확인합니다.
+5. `config.yaml` 의 `publish.quiet_hours`(야간 무음), `max_awaiting_links`(링크 요청 상한), `max_per_hour/day` 로 속도를 조절합니다.
+
 ## 확인
 
 - Railway 로그: `Deployments → View logs`

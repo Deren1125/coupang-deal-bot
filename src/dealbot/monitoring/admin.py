@@ -6,8 +6,10 @@ import asyncio
 import functools
 import html
 import logging
+import os
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol
 
 from telegram import Bot, Update
@@ -35,7 +37,7 @@ from dealbot.publisher.templates import TemplateRenderer
 from dealbot.shops import Shop, ShopRegistry, find_urls
 from dealbot.storage.db import Database, PeriodSummary, QueueItem
 from dealbot.utils.text import truncate
-from dealbot.utils.timeutil import fmt_local, humanize_delta, utcnow
+from dealbot.utils.timeutil import fmt_local, from_iso, humanize_delta, utcnow
 
 log = logging.getLogger(__name__)
 _QUEUE_REF_RE = re.compile(r"#(\d+)")
@@ -477,8 +479,14 @@ class StatusReporter:
         # 이번 실행(프로세스) 중에 난 에러만. 재시작 전 기록은 /errors 로 본다
         last_err = self.state.last_error
         last_err_at = self.state.last_error_at
+        data_dir = Path(self.settings.data_dir)
+        # 컨테이너에서는 /data 가 볼륨으로 마운트돼 있어야 재배포 후에도 기록이 남는다. 로컬 실행은 해당 없음
+        data_persistent = not str(data_dir).startswith("/data") or os.path.ismount(data_dir)
+        created = from_iso(self.db.kv_get("db_created_at"))
         return {
             "version": __version__,
+            "data_persistent": data_persistent,
+            "db_since": fmt_local(created, tz, "%Y-%m-%d") if created else None,
             "uptime": humanize_delta(now - self.state.started_at),
             "paused": self.state.paused,
             "dry_run": self.state.dry_run,

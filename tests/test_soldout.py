@@ -129,7 +129,7 @@ async def test_recheck_awaiting_drops_sold_out_page(bot: DealBot) -> None:
 async def test_published_post_gets_sold_out_banner(bot: DealBot) -> None:
     marked: list[tuple[str | int, int, str]] = []
 
-    async def fake_publish(deal):  # type: ignore[no-untyped-def]
+    async def fake_publish(deal, **_kw):  # type: ignore[no-untyped-def]
         return PublishResult(ok=True, message_id=5)
 
     async def fake_mark(channel_id, message_id, text):  # type: ignore[no-untyped-def]

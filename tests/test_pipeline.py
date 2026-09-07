@@ -105,7 +105,7 @@ async def test_failure_attempts_and_expiry(bot: DealBot, settings: Settings) -> 
     FakeCollector.products = [_p("1", 5000, discount_rate=50)]
     await bot.run_collector(bot.collectors[0])
 
-    async def failing_publish(deal):  # type: ignore[no-untyped-def]
+    async def failing_publish(deal, **_kw):  # type: ignore[no-untyped-def]
         return PublishResult(ok=False, error="telegram down")
 
     bot.publisher.publish = failing_publish  # type: ignore[method-assign]
@@ -230,7 +230,7 @@ async def test_dry_run_previews_do_not_block_real_publishing(bot: DealBot) -> No
 
     # 실제 모드로 전환하면 연습 기록은 무시하고 진짜로 올린다
     # (테스트 환경엔 텔레그램 봇이 없어 publisher 가 항상 연습으로 기록하므로 실제 발행만 흉내낸다)
-    async def real_publish(deal):  # type: ignore[no-untyped-def]
+    async def real_publish(deal, **_kw):  # type: ignore[no-untyped-def]
         return PublishResult(ok=True, message_id=1, dry_run=False)
 
     bot.publisher.publish = real_publish  # type: ignore[method-assign]
