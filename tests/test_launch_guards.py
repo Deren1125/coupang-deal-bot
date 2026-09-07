@@ -114,3 +114,48 @@ def test_db_created_at_uses_oldest_record(tmp_path: Path) -> None:
     d2 = Database(tmp_path / "old.db")
     assert d2.kv_get("db_created_at", "")[:10] == old.isoformat()[:10]
     d2.close()
+
+
+class _FailingLinkPrice:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def convert(self, url: str) -> str:
+        self.calls += 1
+        from dealbot.links import LinkConversionError
+
+        raise LinkConversionError("linkprice api error: {'result': 'E', 'msg': 'merchant not approved'}")
+
+
+async def test_linkprice_failure_puts_shop_on_cooldown(bot: DealBot) -> None:
+    sent: list[str] = []
+
+    async def capture(text: str, *, silent: bool = False) -> bool:
+        sent.append(text)
+        return True
+
+    bot.notifier.send = capture  # type: ignore[method-assign]
+    bot.state.dry_run = False  # 테스트 환경은 텔레그램이 없어 연습 모드로 뜨므로 실제 모드로 강제
+    prov = _FailingLinkPrice()
+    bot.links.providers["linkprice"] = prov
+    lotteon = bot.registry.get("lotteon")
+    assert lotteon is not None
+    lotteon.enabled, lotteon.disabled_reason = True, None
+    FakeCollector.products = [
+        Product(source="fake", product_id=f"lotteon:{i}", shop="lotteon", name=f"롯데온 상품 {i}", price=20000 + i, url=f"https://www.lotteon.com/p/product/LO{i}", recommend_count=9)
+        for i in range(3)
+    ]
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"pending": 3}
+    for _ in range(3):
+        assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"skipped": 3}
+    assert prov.calls == 1, "한 번 실패하면 같은 몰은 API 를 다시 부르지 않고 건너뛴다"
+    assert len(sent) == 1 and "롯데온" in sent[0] and "건너뜁니다" in sent[0]
+    assert bot.db.kv_get("provider_cooldown:linkprice:lotteon")
+
+    # 냉각 시간이 지나면 다시 시도한다
+    bot.db.kv_set("provider_cooldown:linkprice:lotteon", "2000-01-01T00:00:00+00:00")
+    FakeCollector.products = [Product(source="fake", product_id="lotteon:9", shop="lotteon", name="롯데온 상품 9", price=1000, url="https://www.lotteon.com/p/product/LO9", recommend_count=9)]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once() and prov.calls == 2

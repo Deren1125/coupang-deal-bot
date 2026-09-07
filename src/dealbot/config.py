@@ -217,6 +217,8 @@ class CopyConfig(BaseModel):
 class LinksConfig(BaseModel):
     always_deeplink: bool = False
     resolve_short_links: bool = True
+    # 링크프라이스 링크 생성이 실패한 몰(대개 아직 승인 안 된 머천트)은 이 시간 동안 건너뛴다. 0 = 매번 시도
+    provider_error_cooldown_hours: float = 6
 
 
 class ChannelsConfig(BaseModel):

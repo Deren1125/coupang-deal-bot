@@ -127,6 +127,12 @@ DEFAULT_SHOPS: list[Shop] = [
     Shop(key="lotteimall", name="롯데홈쇼핑", aliases=["롯데홈쇼핑", "롯데아이몰", "lotteimall"], domains=["lotteimall.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
     Shop(key="gsshop", name="GS SHOP", aliases=["gs샵", "gsshop", "gs shop", "지에스샵", "gs홈쇼핑"], domains=["gsshop.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
     Shop(key="iherb", name="아이허브", aliases=["아이허브", "iherb"], domains=["iherb.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    # 2026-09 링크프라이스 추가 승인 몰
+    Shop(key="nsmall", name="NS홈쇼핑", aliases=["ns홈쇼핑", "nsmall", "ns샵", "엔에스홈쇼핑", "ns shop"], domains=["nsmall.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="shinsegaelive", name="신세계라이브쇼핑", aliases=["신세계라이브쇼핑", "신세계라이브", "신세계tv쇼핑", "신세계티비쇼핑", "shinsegaetvshopping"], domains=["shinsegaetvshopping.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="lfmall", name="LF몰", aliases=["lf몰", "lfmall", "엘에프몰"], domains=["lfmall.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="hfashionmall", name="H패션몰", aliases=["h패션몰", "hfashionmall", "에이치패션몰", "한섬"], domains=["hfashionmall.com"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
+    Shop(key="adidas", name="아디다스", aliases=["아디다스", "adidas", "아디다스코리아"], domains=["adidas.co.kr"], link_mode="api", provider="linkprice", disclosure=_d("링크프라이스 제휴마케팅"), requires_provider=True),
     # ---- 수익이 없는 몰: 기본 꺼짐 (정보 공유용으로만 쓰려면 enabled: true)
     Shop(key="temu", name="테무", aliases=["테무", "temu"], domains=["temu.com"], link_mode="raw", disclosure=None, enabled=False),
     Shop(key="daiso", name="다이소몰", aliases=["다이소", "다이소몰"], domains=["daisomall.co.kr"], link_mode="raw", enabled=False),

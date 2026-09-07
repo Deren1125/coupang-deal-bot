@@ -58,7 +58,7 @@ def test_config_override(tmp_path: Path) -> None:
 
 def test_default_enabled_shops_and_provider_gating() -> None:
     reg = ShopRegistry()
-    LP = {"11st", "gmarket", "auction", "ssg", "lotteon", "aliexpress", "ohouse", "cjthemarket", "hmall", "lotteimall", "gsshop", "iherb"}
+    LP = {"11st", "gmarket", "auction", "ssg", "lotteon", "aliexpress", "ohouse", "cjthemarket", "hmall", "lotteimall", "gsshop", "iherb", "nsmall", "shinsegaelive", "lfmall", "hfashionmall", "adidas"}
     assert {s.key for s in reg.enabled()} == {"coupang", "toss", "naver"} | LP
     for key in ("oliveyoung", "kurly", "musinsa", "temu", "daiso"):
         assert reg.get(key).enabled is False  # type: ignore[union-attr]
@@ -79,7 +79,7 @@ def test_requires_provider_override_from_config(tmp_path) -> None:  # type: igno
     cfg = tmp_path / "c.yaml"
     cfg.write_text("shops:\n  - {key: ssg, enabled: true, link_mode: raw, requires_provider: false}\n", encoding="utf-8")
     reg = load_settings(cfg, load_env=False).shop_registry()
-    assert reg.apply_providers(set()) == ["11st", "gmarket", "auction", "lotteon", "aliexpress", "ohouse", "cjthemarket", "hmall", "lotteimall", "gsshop", "iherb"]
+    assert reg.apply_providers(set()) == ["11st", "gmarket", "auction", "lotteon", "aliexpress", "ohouse", "cjthemarket", "hmall", "lotteimall", "gsshop", "iherb", "nsmall", "shinsegaelive", "lfmall", "hfashionmall", "adidas"]
     assert reg.get("ssg").enabled is True and reg.get("ssg").link_mode == "raw"  # type: ignore[union-attr]
 
 
@@ -92,6 +92,9 @@ def test_new_linkprice_shop_aliases_and_domains() -> None:
     assert reg.by_alias("아이허브").key == "iherb"  # type: ignore[union-attr]
     assert reg.by_url("https://www.cjthemarket.com/pc/prod/prodDetail?prdCd=1").key == "cjthemarket"  # type: ignore[union-attr]
     assert reg.by_url("https://kr.iherb.com/pr/x/123").key == "iherb"  # type: ignore[union-attr]
+    assert reg.by_alias("NS홈쇼핑").key == "nsmall" and reg.by_alias("LF몰").key == "lfmall"  # type: ignore[union-attr]
+    assert reg.by_url("https://www.shinsegaetvshopping.com/item/123").key == "shinsegaelive"  # type: ignore[union-attr]
+    assert reg.by_url("https://www.adidas.co.kr/samba-og/B75806.html").key == "adidas"  # type: ignore[union-attr]
     # 기존 태그가 새 별칭에 잘못 잡히지 않는지
     assert reg.by_alias("[롯데온]").key == "lotteon"  # type: ignore[union-attr]
     assert reg.by_alias("[신세계몰]").key == "ssg"  # type: ignore[union-attr]

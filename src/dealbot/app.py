@@ -59,7 +59,8 @@ from dealbot.publisher.threads import (
 from dealbot.shops import ShopRegistry
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
-from dealbot.utils.timeutil import from_iso, in_time_window, local_now, to_iso, utcnow
+from dealbot.utils.text import truncate
+from dealbot.utils.timeutil import fmt_local, from_iso, in_time_window, local_now, to_iso, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -729,6 +730,13 @@ class DealBot:
         if deal.affiliate_url:
             # 관리자가 /link 로 붙였거나 직접 올린 딜: 그대로 사용
             return "ok", None
+        shop = self.registry.get(deal.product.shop)
+        # 링크프라이스 몰: 링크 생성이 실패하면(대개 승인 전 머천트) 한동안 그 몰을 건너뛴다
+        cooldown_key = f"provider_cooldown:{shop.provider}:{shop.key}" if shop and shop.provider == "linkprice" and shop.link_mode == "api" else None
+        if cooldown_key:
+            until = from_iso(self.db.kv_get(cooldown_key))
+            if until and until > utcnow():
+                return "skip", f"{shop.name}: 링크 생성 실패로 {fmt_local(until, self.settings.app.timezone)} 까지 건너뜀"
         try:
             deal.affiliate_url = await self.links.to_affiliate(deal.product)
             return "ok", None
@@ -746,6 +754,18 @@ class DealBot:
                 deal.affiliate_url = deal.product.url
                 log.warning("[DRY-RUN] link conversion unavailable (%s) — using raw url", e)
                 return "ok", None
+            hours = self.settings.links.provider_error_cooldown_hours
+            if cooldown_key and shop is not None and hours > 0 and self.links.provider_for(shop):
+                until = utcnow() + timedelta(hours=hours)
+                self.db.kv_set(cooldown_key, to_iso(until))
+                self.db.log_event("WARNING", "links", f"{shop.key}: {e} → {hours:g}h cooldown")
+                log.warning("linkprice link failed for %s (%s) — skipping this shop for %gh", shop.key, e, hours)
+                await self.notifier.send(
+                    f"⚠️ <b>{html.escape(shop.name)}</b> 링크를 만들지 못했습니다. {hours:g}시간 동안 이 몰의 딜은 건너뜁니다.\n"
+                    "링크프라이스에서 이 머천트가 승인됐는지 확인해 주세요. 승인되면 다음 딜부터 자동으로 다시 시도합니다.\n"
+                    f"<code>{html.escape(truncate(str(e), 200))}</code>"
+                )
+                return "skip", f"linkprice link failed: {e}"
             return "fail", str(e)
         except Exception as e:  # noqa: BLE001
             return "fail", f"{type(e).__name__}: {e}"
