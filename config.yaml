@@ -260,7 +260,7 @@ copy:
 links:
   always_deeplink: false
   resolve_short_links: true
-  provider_error_cooldown_hours: 6   # 링크프라이스 링크 생성 실패한 몰(승인 전 머천트 등)은 이 시간 동안 건너뜀. 0 = 매번 시도
+  provider_error_cooldown_hours: 12  # 링크프라이스 링크 생성 실패한 몰(승인 전 머천트 등)은 이 시간 동안 건너뜀 (알림도 그때 1번). 0 = 매번 시도
 
 # 내 채널 주소. 글 하단에 서로 연결하는 줄을 넣는다 (비우면 그 줄은 빠짐)
 channels:
@@ -279,6 +279,7 @@ monitoring:
     ntfy_url: https://ntfy.sh
   notify_on_publish: true
   notify_on_failure: true
+  notify_failure_attempts: false  # 재시도 중 실패(⚠️)는 조용히, 최종 포기(❌)만 알림
   notify_on_error: true
   notify_on_manual_link: true    # 토스/네이버 등 수동 링크가 필요할 때 알림
   error_alert_cooldown_minutes: 30

@@ -341,7 +341,7 @@ class AdminNotifier:
         await self.send(text, silent=True)
 
     async def notify_publish_failed(self, deal: Deal, error: str, *, final: bool) -> None:
-        if not self.cfg.notify_on_failure:
+        if not self.cfg.notify_on_failure or (not final and not self.cfg.notify_failure_attempts):
             return
         p = deal.product
         head = "❌ <b>채널에 올리지 못했습니다</b> (여러 번 실패해서 포기)" if final else "⚠️ <b>채널에 올리지 못했습니다</b> (잠시 뒤 다시 시도합니다)"

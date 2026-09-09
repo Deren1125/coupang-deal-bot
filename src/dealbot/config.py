@@ -269,6 +269,8 @@ class MonitoringConfig(BaseModel):
     push: PushConfig = Field(default_factory=PushConfig)
     notify_on_publish: bool = True
     notify_on_failure: bool = True
+    # 재시도 중인 실패(1·2번째)도 알릴지. False 면 최종 포기(❌)만 알림
+    notify_failure_attempts: bool = False
     notify_on_error: bool = True
     notify_on_manual_link: bool = True
     error_alert_cooldown_minutes: int = 30
