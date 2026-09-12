@@ -255,6 +255,9 @@ class InfoPostsConfig(BaseModel):
     # auto: 요약이 만들어지면 바로 올리고, 요약을 못 만들거나 본문 위치가 불확실하면 관리자 확인(/ok) 후 올림
     # always: 정보 글은 항상 관리자 확인 후 올림 / never: 확인 없이 정리한 원문을 그대로 올림 (비추천)
     review: Literal["auto", "always", "never"] = "auto"
+    # 이벤트성 글(브랜드 세일 등)은 혜택이 이만큼은 돼야 올린다. 둘 중 하나만 넘으면 통과, 0 이면 그 기준은 안 봄
+    min_discount_rate: int = 40  # %
+    min_discount_amount: int = 5000  # 원 (할인·적립·캐시백 금액. 결제 조건 금액이 아님)
     summarizer: InfoSummarizerConfig = Field(default_factory=InfoSummarizerConfig)
 
 

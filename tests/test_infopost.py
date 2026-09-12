@@ -12,7 +12,7 @@ from dealbot.config import CollectorConfig, Settings
 from dealbot.infopost import PostBody, extract_post_body
 from dealbot.models import Product, PublishResult
 from dealbot.monitoring.admin import AdminNotifier
-from dealbot.summarize import Summary
+from dealbot.summarize import InfoSummarizer, Summary
 
 HTML = """
 <html><body>
@@ -121,7 +121,7 @@ async def test_board_post_becomes_info_post(bot: DealBot) -> None:
     published: list[dict] = []
 
     async def fake_fetch(url: str) -> PostBody:
-        return PostBody(text="12,000원 이상 결제 시 4,800원 할인", images=["https://img.example.com/e.jpg"], links=["https://event.payco.com/1"])
+        return PostBody(text="12,000원 이상 결제 시 6,000원 할인", images=["https://img.example.com/e.jpg"], links=["https://event.payco.com/1"])
 
     async def fake_image(url: str, *, referer: str) -> bytes:
         return b"\x89PNG" + b"0" * 2000
@@ -132,7 +132,7 @@ async def test_board_post_becomes_info_post(bot: DealBot) -> None:
 
     async def fake_summarize(*, title: str, source: str, text: str, links=None) -> Summary:  # type: ignore[no-untyped-def]
         assert title == "페이코 이벤트 1" and "12,000원" in text and links == ["https://event.payco.com/1"]
-        return Summary(text="12,000원 이상 결제하면 4,800원 할인\n· 기간: 9월 12일~14일")
+        return Summary(text="12,000원 이상 결제하면 6,000원 할인\n· 기간: 9월 12일~14일", discount_rate=0, discount_amount=6000)
 
     bot.info.fetch = fake_fetch  # type: ignore[method-assign]
     bot.info.download_image = fake_image  # type: ignore[method-assign]
@@ -151,7 +151,7 @@ async def test_board_post_becomes_info_post(bot: DealBot) -> None:
     assert bot.db.queue_counts() == {"published": 1}
     assert len(published) == 1
     text = published[0]["text"]
-    assert "📢 <b>페이코 이벤트 1</b>" in text and "· 기간: 9월 12일~14일" in text and "결제 시 4,800원 할인" not in text  # 요약본으로 대체
+    assert "📢 <b>페이코 이벤트 1</b>" in text and "· 기간: 9월 12일~14일" in text and "결제 시 6,000원 할인" not in text  # 요약본으로 대체
     assert "https://event.payco.com/1" in text and "원문: https://bbs.ruliweb.com/market/board/1020/read/1" in text
     assert "카톡 오픈채팅" in text and published[0]["photo"] and published[0]["photo"].startswith(b"\x89PNG")
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
@@ -268,7 +268,7 @@ def _reviews(bot: DealBot) -> list:
 async def test_info_post_waits_for_approval_when_summary_unavailable(bot: DealBot, admin_calls: dict[str, list]) -> None:
     """요약기가 없으면(키 없음) 원문을 난사하지 않고 관리자에게 먼저 보여 준다. 답장으로 고쳐 쓴 글이 그대로 올라간다."""
     published: list[dict] = []
-    _wire(bot, body=PostBody(text="원문 줄 1\n원문 줄 2", images=["https://img.example.com/e.jpg"], links=[]), published=published)
+    _wire(bot, body=PostBody(text="원문 줄 1 최대 50% 할인\n원문 줄 2", images=["https://img.example.com/e.jpg"], links=[]), published=published)
     assert not bot.summarizer.configured  # 테스트 환경에는 ANTHROPIC_API_KEY 가 없다
     FakeCollector.products = [_event(11)]
     await bot.run_collector(bot.collectors[0])
@@ -310,7 +310,7 @@ async def test_review_always_then_plain_ok_publishes_summary(bot: DealBot, admin
     _wire(bot, body=PostBody(text="원문", images=[], links=["https://event.payco.com/1"]), published=published)
 
     async def fake_summarize(**kw) -> Summary:  # type: ignore[no-untyped-def]
-        return Summary(text="요약 본문\n· 조건: 1만원 이상")
+        return Summary(text="요약 본문\n· 조건: 1만원 이상", discount_rate=50, discount_amount=0)
 
     bot.summarizer.summarize = fake_summarize  # type: ignore[method-assign]
     bot.settings.info_posts.review = "always"
@@ -344,7 +344,7 @@ async def test_summarizer_skip_unconfident_body_and_unreadable_post(bot: DealBot
     _wire(bot, body=PostBody(text="추정 본문", images=[], links=[], confident=False), published=published)
 
     async def ok(**kw) -> Summary:  # type: ignore[no-untyped-def]
-        return Summary(text="요약된 추정 본문 내용")
+        return Summary(text="요약된 추정 본문 내용", discount_rate=0, discount_amount=10000)
 
     bot.summarizer.summarize = ok  # type: ignore[method-assign]
     FakeCollector.products = [_event(14)]
@@ -364,3 +364,56 @@ async def test_summarizer_skip_unconfident_body_and_unreadable_post(bot: DealBot
     now = datetime.now(UTC)
     assert bot.db.expire_queue(now - timedelta(days=1), now, awaiting_older_than=now + timedelta(hours=1)) == 1
     assert bot.db.queue_counts() == {"skipped": 2, "expired": 1}
+
+
+async def test_small_benefit_info_posts_are_skipped(bot: DealBot, admin_calls: dict[str, list]) -> None:
+    """이벤트성 글은 할인율 40% 이상 또는 할인 금액 5,000원 이상일 때만 올린다 (난사 방지)."""
+    published: list[dict] = []
+    _wire(bot, body=PostBody(text="12,000원 이상 결제 시 4,800원 할인", images=[], links=[]), published=published)
+    answers: list[Summary] = []
+
+    async def fake_summarize(**kw) -> Summary:  # type: ignore[no-untyped-def]
+        return answers.pop(0)
+
+    bot.summarizer.summarize = fake_summarize  # type: ignore[method-assign]
+
+    # 요약기가 읽은 혜택이 둘 다 기준 미만 → 조용히 건너뜀 (확인 요청도 없음)
+    answers.append(Summary(text="1만원 이상 결제하면 4,800원 할인", discount_rate=20, discount_amount=4800))
+    FakeCollector.products = [_event(21)]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"skipped": 1} and not published
+    assert not [s for s in admin_calls["send"] if s.startswith("📝")]
+    item = bot.db.get_queue_item(1)
+    assert item is not None and "benefit below threshold" in (item.last_error or "") and "4,800원" in item.last_error
+
+    # 요약기가 혜택을 안 알려 주면 본문 숫자로 본다: "4,800원 할인" 은 미달, 조건 금액 12,000원은 혜택으로 치지 않는다
+    answers.append(Summary(text="1만원 이상 결제하면 4,800원 할인"))
+    FakeCollector.products = [_event(22)]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"skipped": 2}
+
+    # 할인율 60% → 통과해서 올라간다
+    answers.append(Summary(text="라코스테 최대 60% 세일\n· 기간: 9/11~9/14", discount_rate=60, discount_amount=0))
+    FakeCollector.products = [_event(23)]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"skipped": 2, "published": 1} and "60% 세일" in published[0]["text"]
+
+    # 요약기 없이(확인 모드) 도 같은 기준: 58원 적립 글은 확인 요청조차 안 보낸다
+    bot.summarizer.summarize = InfoSummarizer(None).summarize  # type: ignore[method-assign]
+    _wire(bot, body=PostBody(text="클릭적립 합계 58원\n라이브 예고 적립 3원", images=[], links=[]), published=published)
+    FakeCollector.products = [_event(24)]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"skipped": 3, "published": 1}
+    assert not [s for s in admin_calls["send"] if s.startswith("📝")]
+
+    # 기준을 끄면(0) 다 통과
+    bot.settings.info_posts.min_discount_rate = 0
+    bot.settings.info_posts.min_discount_amount = 0
+    FakeCollector.products = [_event(25)]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"skipped": 3, "published": 1, "awaiting_approval": 1}

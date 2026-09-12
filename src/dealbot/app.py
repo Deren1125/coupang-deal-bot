@@ -62,7 +62,7 @@ from dealbot.publisher.threads import (
 from dealbot.shops import ShopRegistry
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
-from dealbot.summarize import InfoSummarizer, Summary
+from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
 from dealbot.utils.text import truncate
 from dealbot.utils.timeutil import fmt_local, from_iso, in_time_window, local_now, to_iso, utcnow
 
@@ -643,6 +643,12 @@ class DealBot:
                 self.db.log_event("INFO", "info_skip", f"{pid} 요약기가 올릴 내용이 아니라고 판단: {p.name[:60]}")
                 log.info("info post #%d skipped — summarizer says not worth posting", item.id)
                 return True
+            ok, detail = self._info_discount_ok(p.name, body, summary)
+            if not ok:
+                self.db.update_queue_item(item.id, status="skipped", error=f"benefit below threshold ({detail})")
+                self.db.log_event("INFO", "info_skip", f"{pid} 혜택이 기준 미만이라 건너뜀 ({detail}): {p.name[:60]}")
+                log.info("info post #%d skipped — benefit below threshold (%s)", item.id, detail)
+                return True
             if summary.text:
                 body.text = summary.text
             reason = self._info_review_reason(cfg.review, body, summary)
@@ -688,6 +694,20 @@ class DealBot:
             except Exception as e:  # noqa: BLE001
                 log.warning("kakao info copy failed: %s", e)
         return True
+
+    def _info_discount_ok(self, title: str, body: PostBody, summary: Summary) -> tuple[bool, str]:
+        """이벤트성 글은 할인율 또는 할인 금액이 기준 이상일 때만 올린다. 요약기가 읽은 값을 쓰고, 없으면 본문 숫자로 대략 본다."""
+        cfg = self.settings.info_posts
+        if cfg.min_discount_rate <= 0 and cfg.min_discount_amount <= 0:
+            return True, "기준 없음"
+        rate, amount = summary.discount_rate, summary.discount_amount
+        how = "요약기"
+        if rate is None and amount is None:
+            rate, amount = estimate_discount(f"{title}\n{body.raw or body.text}")
+            how = "본문 숫자"
+        ok = bool((rate or 0) >= cfg.min_discount_rate > 0 or (amount or 0) >= cfg.min_discount_amount > 0)
+        detail = f"{how}: 할인율 {rate if rate is not None else '?'}% · 할인액 {f'{amount:,}원' if amount is not None else '?'}"
+        return ok, detail
 
     @staticmethod
     def _info_review_reason(review: str, body: PostBody, summary: Summary) -> str | None:

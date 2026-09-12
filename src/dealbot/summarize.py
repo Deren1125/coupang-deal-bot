@@ -30,9 +30,20 @@ SYSTEM_PROMPT = """당신은 한국 핫딜·혜택 정보 텔레그램 채널 '�
 - URL 은 쓰지 않습니다 (링크는 봇이 따로 붙입니다). 제목을 다시 쓰지 않습니다. 인용 부호·마크다운·코드 블록 없이 평문만.
 - 전체 {max_chars}자 이내.
 - 정리할 내용이 거의 없으면 첫 줄만 씁니다.
-- 광고·스팸이거나 혜택·상품 정보가 아니라서 채널에 올릴 가치가 없으면 정확히 SKIP 이라고만 답합니다."""
+- 광고·스팸이거나 혜택·상품 정보가 아니라서 채널에 올릴 가치가 없으면 정확히 SKIP 이라고만 답합니다.
+
+답의 맨 위에는 안내문보다 먼저 아래 두 줄을 씁니다 (숫자만, 없으면 0). 그 다음 빈 줄, 그 아래에 안내문:
+할인율: 이 글의 혜택 중 가장 큰 할인율(%). 정가 대비 할인율, 무료 증정은 100
+할인액: 이 글의 혜택 중 가장 큰 할인·적립·캐시백 금액(원). "1만원 이상 결제" 같은 조건 금액이 아니라 실제로 받는 금액"""
 
 _FENCE = re.compile(r"^```[a-zA-Z]*\s*$")
+_RATE_LINE = re.compile(r"^\s*할인율\s*[:：]\s*([\d.]+)\s*%?\s*$", re.M)
+_AMOUNT_LINE = re.compile(r"^\s*할인액\s*[:：]\s*([\d,]+)\s*원?\s*$", re.M)
+# 요약기가 없을 때 본문 숫자로 대략 보는 용도: "최대 60%", "60% 할인/세일", "4,800원 할인", "6만원 적립"
+_BENEFIT = r"(?:할인|세일|적립|캐시백|쿠폰|페이백|환급|증정|지급|off)"
+_RATE_LEAD = re.compile(r"(?:최대|최고|전\s*품목|전\s*상품|up\s*to)\s*(\d{1,3})\s*%", re.I)
+_RATE_TRAIL = re.compile(r"(\d{1,3})\s*%\s*[^\n\d%]{0,4}?" + _BENEFIT, re.I)
+_AMOUNT = re.compile(r"(\d[\d,]*)\s*(만|천)?\s*원\s*(?:상당)?[^\n\d원]{0,8}?" + _BENEFIT)
 _URL_IN_LINE = re.compile(r"https?://\S+")
 _BULLET = re.compile(r"^\s*(?:[-*•▪◦]|\d+[.)])\s+")
 
@@ -42,6 +53,44 @@ class Summary:
     text: str | None = None  # 만들어진 본문 (없으면 None)
     skip: bool = False  # 요약기가 "올릴 가치 없음"이라고 판단
     error: str | None = None  # 못 만든 이유 (관리자에게 보여 줄 짧은 설명)
+    discount_rate: int | None = None  # 글에서 가장 큰 할인율(%). 요약기가 읽어 준 값, 모르면 None
+    discount_amount: int | None = None  # 글에서 가장 큰 할인·적립 금액(원)
+
+
+def split_benefit_header(answer: str) -> tuple[int | None, int | None, str]:
+    """모델 답 맨 위의 '할인율: N' '할인액: N' 줄을 떼어 낸다."""
+    rate = amount = None
+    m = _RATE_LINE.search(answer)
+    if m:
+        try:
+            rate = int(float(m.group(1)))
+        except ValueError:
+            rate = None
+        answer = answer[: m.start()] + answer[m.end() :]
+    m = _AMOUNT_LINE.search(answer)
+    if m:
+        try:
+            amount = int(m.group(1).replace(",", ""))
+        except ValueError:
+            amount = None
+        answer = answer[: m.start()] + answer[m.end() :]
+    return rate, amount, answer.strip()
+
+
+def estimate_discount(text: str) -> tuple[int | None, int | None]:
+    """요약기 없이 본문·제목 숫자로 가장 큰 할인율(%)과 할인 금액(원)을 대략 읽는다. 없으면 None."""
+    rates = [int(m.group(1)) for m in _RATE_LEAD.finditer(text)] + [int(m.group(1)) for m in _RATE_TRAIL.finditer(text)]
+    rates = [r for r in rates if 0 < r <= 100]
+    amounts: list[int] = []
+    for m in _AMOUNT.finditer(text):
+        try:
+            n = int(m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        unit = m.group(2)
+        n *= 10000 if unit == "만" else 1000 if unit == "천" else 1
+        amounts.append(n)
+    return (max(rates) if rates else None), (max(amounts) if amounts else None)
 
 
 def clean_summary(raw: str, *, title: str = "", max_chars: int = 500) -> str:
@@ -157,15 +206,16 @@ class InfoSummarizer:
         if getattr(response, "stop_reason", None) == "max_tokens":
             self.last_error = "답이 길어서 잘림"
             return Summary(error=self.last_error)
+        rate, amount, answer = split_benefit_header(answer)
         if answer.strip("` .\n").upper() == SKIP_TOKEN:
-            return Summary(skip=True)
+            return Summary(skip=True, discount_rate=rate, discount_amount=amount)
         cleaned = clean_summary(answer, title=title, max_chars=self.max_chars)
         if len(cleaned) < 15 or any(w in cleaned for w in ("죄송", "요약할 수 없", "정리할 수 없", "제공되지 않")):
             self.last_error = "쓸 만한 요약이 안 나옴"
             log.info("summarizer: unusable answer for %r: %r", title[:40], answer[:120])
             return Summary(error=self.last_error)
         self.last_error = None
-        return Summary(text=cleaned)
+        return Summary(text=cleaned, discount_rate=rate, discount_amount=amount)
 
     def describe(self) -> dict[str, Any]:
         return {"configured": self.configured, "model": self.model, "disabled_reason": self.disabled_reason, "last_error": self.last_error}

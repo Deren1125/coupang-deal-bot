@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import anthropic
 import httpx
 
-from dealbot.summarize import InfoSummarizer, clean_summary
+from dealbot.summarize import InfoSummarizer, clean_summary, estimate_discount
 
 
 class FakeMessages:
@@ -74,3 +74,22 @@ async def test_summarize_errors() -> None:
     assert (await s.summarize(title="t", source="s", text="본문 " * 10)).error == r.error and len(fm.calls) == 1  # 다시 부르지 않음
     off = InfoSummarizer(None)
     assert not off.configured and "ANTHROPIC_API_KEY" in ((await off.summarize(title="t", source="s", text="본문 " * 10)).error or "")
+
+
+async def test_summarize_reads_benefit_header() -> None:
+    s, _ = _summarizer("할인율: 60\n할인액: 269,400원\n\n라코스테 최대 60% 세일\n- 기간: 9/11~9/14")
+    r = await s.summarize(title="[LF몰] 라코스테 최대 60%세일", source="뽐뿌", text="본문 " * 20)
+    assert r.discount_rate == 60 and r.discount_amount == 269400
+    assert r.text == "라코스테 최대 60% 세일\n· 기간: 9/11~9/14"
+    s, _ = _summarizer("할인율: 0\n할인액: 0\n\nSKIP")
+    r = await s.summarize(title="t", source="s", text="본문 " * 10)
+    assert r.skip and r.discount_rate == 0
+
+
+def test_estimate_discount_from_text() -> None:
+    assert estimate_discount("12,000원 이상 결제 시 4,800원 할인") == (None, 4800)  # 조건 금액은 혜택이 아님
+    assert estimate_discount("[LF몰] 라코스테 최대 60%세일 추천상품들") == (60, None)
+    assert estimate_discount("전 품목 30% 할인 + 최대 6만원 적립") == (30, 60000)
+    assert estimate_discount("5천원 쿠폰 지급, 100% 정품") == (None, 5000)
+    assert estimate_discount("클릭적립 합계 58원\n라이브 예고 적립 3원") == (None, 58)
+    assert estimate_discount("9월 12일 새 매장 오픈 안내") == (None, None)
