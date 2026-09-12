@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 
 from dealbot.collectors import CollectorContext, build_collector
 from dealbot.collectors.ruliweb import DEFAULT_SELECTORS, parse_list, parse_title
@@ -81,6 +82,7 @@ def test_parse_page_meta_og_and_jsonld() -> None:
     assert m2.price == 14890 and m2.rating == 4.5 and m2.review_count == 1234
 
 
+@pytest.mark.real_fetch
 async def test_enricher_fills_blanks_only() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html><head><meta property='og:title' content='페이지 제목'><meta property='og:image' content='https://img/p.jpg'><meta property='product:price:amount' content='9990'></head><body>평점 4.7 리뷰 12건</body></html>")
@@ -95,6 +97,7 @@ async def test_enricher_fills_blanks_only() -> None:
     assert p.name == "한입 삼겹살" and p.price == 9990 and p.rating == 4.7 and p.review_count == 12
 
 
+@pytest.mark.real_fetch
 async def test_submit_manual_enriches(settings: Settings) -> None:
     from dealbot.app import DealBot
 

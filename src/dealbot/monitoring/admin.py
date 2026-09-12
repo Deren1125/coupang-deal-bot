@@ -205,7 +205,7 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("post", "직접 딜 올리기"),
     ("link", "링크 요청에 답: 만든 제휴 링크 붙이기 (/link 번호 링크)"),
     ("skip", "그 글은 올리지 않기 (/skip 번호)"),
-    ("ok", "정보 글 확인: 이대로 올리기 (/ok 번호)"),
+    ("ok", "확인 요청에 답: 정품 확인·정보 글 그대로 올리기 (/ok 번호)"),
     ("copy", "올린 글의 카카오·블로그 복붙 문구 (/copy 번호)"),
     ("blog", "오늘의 핫딜 블로그 글 만들기 (하루치 정리)"),
     ("test", "채널에 올라갈 글 양식 미리 보기 (샘플)"),
@@ -368,7 +368,7 @@ class AdminNotifier:
         if final:
             await self._push("publish_failed", f"채널에 올리지 못함 [{self.shop_label(p.shop)}]", f"{truncate(p.name, 60)}\n{error[:200]}")
 
-    async def notify_manual_link(self, item: QueueItem, shop: Shop) -> int | None:
+    async def notify_manual_link(self, item: QueueItem, shop: Shop, *, auth_note: str | None = None) -> int | None:
         """자동 변환이 안 되는 쇼핑몰: 관리자에게 링크 생성을 요청. 보낸 메시지 id 를 돌려준다."""
         if not self.cfg.notify_on_manual_link:
             return None
@@ -380,6 +380,7 @@ class AdminNotifier:
             f"{html.escape(truncate(p.name, 80))}{price}\n"
             f"원본 주소: {html.escape(p.url)}\n"
             + (f"글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
+            + (f"{html.escape(auth_note)}\n" if auth_note else "")
             + f"\n👉 {html.escape(hint)}\n"
             f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
             f"안 올리려면 <code>/skip {item.id}</code>"
@@ -392,6 +393,22 @@ class AdminNotifier:
             priority="high",
             tags=["link"],
         )
+        return message_id
+
+    async def notify_deal_review(self, item: QueueItem, shop_name: str, reason: str) -> int | None:
+        """오픈마켓 딜의 공식 판매처가 확인되지 않음: 관리자가 보고 /ok 하면 링크를 만들어 올린다."""
+        p = item.deal.product
+        price = f" · {p.price:,}원" if p.has_price else ""
+        text = (
+            f"🔎 <b>정품 확인 필요 #{item.id}</b> [{html.escape(shop_name)}]\n"
+            f"{html.escape(truncate(p.name, 80))}{price}\n"
+            f"이유: {html.escape(reason)}\n"
+            f"상품 페이지: {html.escape(p.url)}\n"
+            + (f"게시글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
+            + f"\n👉 공식 판매처가 맞으면 <code>/ok {item.id}</code> → 링크를 만들어 채널에 올립니다 · 아니면 <code>/skip {item.id}</code>"
+        )
+        message_id = await self.send_with_id(text)
+        await self._push("info_review", f"정품 확인 필요 #{item.id} [{shop_name}]", f"{truncate(p.name, 70)}\n{reason}", tags=["mag"])
         return message_id
 
     async def notify_info_review(self, item: QueueItem, preview: str, *, reason: str, image_count: int = 0) -> int | None:
@@ -604,11 +621,11 @@ class StatusReporter:
         reviews = self.db.awaiting_items(limit, statuses=("awaiting_approval",))
         if reviews:
             lines.append("")
-            lines.append(f"{REVIEW_MARK} <b>내가 확인해 줘야 하는 정보 글</b> ({len(reviews)}건)")
+            lines.append(f"{REVIEW_MARK} <b>내가 확인해 줘야 하는 글</b> ({len(reviews)}건)")
             for it in reviews:
                 why = (it.last_error or "").removeprefix("needs approval: ")
                 lines.append(f"• #{it.id} {html.escape(truncate(it.deal.product.name, 50))}" + (f" · {html.escape(why)}" if why else ""))
-            lines.append("<code>/ok 번호</code> 이대로 올리기 · <code>/skip 번호</code> 안 올리기 · 확인 요청 메시지에 답장으로 글을 쓰면 그 내용으로 올라갑니다")
+            lines.append("<code>/ok 번호</code> 올리기 (정품 확인이면 링크를 만들어 올림) · <code>/skip 번호</code> 안 올리기 · 정보 글은 확인 요청 메시지에 답장으로 본문을 고쳐 쓸 수 있습니다")
         return "\n".join(lines)
 
     def recent_text(self, limit: int = 10) -> str:
@@ -793,7 +810,7 @@ HELP_TEXT = (
     "\n<b>글 올리기·다루기</b>\n"
     "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다.\n"
     "/skip 번호 — 그 글은 올리지 않고 건너뜁니다. 품절이거나 별로일 때. 번호는 링크 요청 메시지나 /queue 에 있습니다.\n"
-    "/ok 번호 — 봇이 '정보 글 확인 #번호' 를 보내면(요약을 못 만들었거나 본문 위치가 불확실할 때) 그 글을 그대로 올립니다. 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
+    "/ok 번호 — 봇이 '정품 확인 필요 #번호'(오픈마켓인데 공식 판매처 표시가 없음) 나 '정보 글 확인 #번호' 를 보내면, 확인했다는 뜻으로 보냅니다. 정품 확인이면 링크를 만들어 올리고, 정보 글이면 그대로 올립니다. 정보 글은 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
     "/post — 내가 찾은 딜을 직접 올립니다. 아래처럼 보내면 맨 앞 차례로 채널에 올라갑니다 (연습 모드에서는 미리보기만).\n"
     "<code>/post\n[머리글, 없으면 생략]\n상품: 상품명\n가격: 14,890원\nhttps://내가-만든-제휴-링크</code>\n"
     "/copy 번호 — 올린 글의 카카오 오픈채팅용·네이버 블로그용 복붙 문구를 다시 받습니다. 번호 없으면 마지막 글. 실제 모드에서는 올릴 때마다 자동으로 옵니다.\n"

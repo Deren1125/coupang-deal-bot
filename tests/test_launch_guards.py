@@ -136,6 +136,7 @@ async def test_linkprice_failure_puts_shop_on_cooldown(bot: DealBot) -> None:
 
     bot.notifier.send = capture  # type: ignore[method-assign]
     bot.state.dry_run = False  # 테스트 환경은 텔레그램이 없어 연습 모드로 뜨므로 실제 모드로 강제
+    bot.settings.deal.authenticity.enabled = False  # 링크 변환만 보는 테스트 (정품 확인은 test_authenticity)
     prov = _FailingLinkPrice()
     bot.links.providers["linkprice"] = prov
     lotteon = bot.registry.get("lotteon")

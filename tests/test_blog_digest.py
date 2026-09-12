@@ -1,4 +1,4 @@
-"""하루치 발행 딜 → 블로그 글 한 편 (복붙용), 매일 밤 관리자 챗으로."""
+"""하루치 발행 딜 → 블로그 글 한 편 (Deren 양식, 복붙용), 매일 밤 관리자 챗으로."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import pytest
 from dealbot.app import DealBot
 from dealbot.config import Settings
 from dealbot.models import Deal, DealVerdict, Product
-from dealbot.publisher.digest import split_sections
+from dealbot.publisher.digest import particle, split_sections
 from dealbot.utils.timeutil import utcnow
 
 
-def _published(bot: DealBot, product: Product, *, link: str | None, when: datetime, **verdict) -> None:  # type: ignore[no-untyped-def]
-    deal = Deal(product=product, verdict=DealVerdict(is_deal=True, reasons=["test"], score=10, **verdict), affiliate_url=link, detected_at=when)
-    assert bot.db.enqueue(deal, score=10, now=when)
+def _published(bot: DealBot, product: Product, *, link: str | None, when: datetime, score: float = 10, **verdict) -> None:  # type: ignore[no-untyped-def]
+    deal = Deal(product=product, verdict=DealVerdict(is_deal=True, reasons=["test"], score=score, **verdict), affiliate_url=link, detected_at=when)
+    assert bot.db.enqueue(deal, score=score, now=when)
     item = bot.db.items_for_product(product.product_id, ("pending",))[0]
     bot.db.update_queue_item(item.id, status="published", deal=deal, now=when)
     bot.db.record_post(deal, channel_id="-100", message_id=1, dry_run=False, now=when)
@@ -38,23 +38,29 @@ def bot(settings: Settings) -> DealBot:
     b.db.close()
 
 
-async def test_blog_digest_collects_the_day(bot: DealBot) -> None:
+def test_particles() -> None:
+    assert particle("텀블러", "이", "가") == "가" and particle("화장지", "이", "가") == "가"
+    assert particle("스탠리 텀블러 1.18L", "이", "가") == "이" and particle("갤럭시 S26", "을", "를") == "을"
+    assert particle("스탠리 퀜처", "이", "가") == "가" and particle("에어팟", "이", "가") == "이"
+
+
+async def test_blog_digest_follows_deren_format(bot: DealBot) -> None:
     now = utcnow()
     _published(
         bot,
         Product(source="ppomppu", product_id="coupang:1", shop="coupang", name="스탠리 텀블러 1.18L", price=29900, original_price=49900,
                 url="https://www.coupang.com/vp/products/1", review_count=1200, rating=4.8, shipping="무료"),
-        link="https://link.coupang.com/a/abc", when=now - timedelta(hours=5), discount_rate=40.0, market_price=45000, below_market_pct=33.5,
+        link="https://link.coupang.com/a/abc", when=now - timedelta(hours=5), score=80, discount_rate=40.0, market_price=45000, below_market_pct=33.5,
     )
     _published(bot, Product(source="ruliweb_user", product_id="toss:2", shop="toss", name="토스 화장지 30롤", price=12900, url="https://toss.im/_m/ABC"),
-               link="https://toss.im/share/xyz", when=now - timedelta(hours=2))
+               link="https://toss.im/share/xyz", when=now - timedelta(hours=2), score=30)
     info = Product(
         source="ppomppu", product_id="info:ppomppu:3", shop="lfmall", name="라코스테 최대 60% 세일", price=0, deal_kind="info",
         url="https://www.ppomppu.co.kr/zboard/view.php?no=3",
         extra={"post_url": "https://www.ppomppu.co.kr/zboard/view.php?no=3", "info_body": "라코스테 최대 60% 세일\n· 기간: 9/11~9/14",
                "info_links": ["https://www.lfmall.co.kr/app/event/105798"]},
     )
-    _published(bot, info, link=None, when=now - timedelta(hours=1))
+    _published(bot, info, link=None, when=now - timedelta(hours=1), score=20)
     # 기준 시각(어제 이 시각) 이전 것은 안 들어간다
     _published(bot, Product(source="ppomppu", product_id="coupang:9", shop="coupang", name="옛날 딜", price=1000, url="https://www.coupang.com/vp/products/9"),
                link="https://link.coupang.com/a/old", when=now - timedelta(hours=30))
@@ -63,21 +69,31 @@ async def test_blog_digest_collects_the_day(bot: DealBot) -> None:
     assert msg.startswith("📝") and "3건" in msg
     assert bot.db.kv_get("blog_digest_last_at") is None  # 미리 보기는 기준 시각을 안 옮긴다
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
-    assert sent[0].startswith("📝 <b>미리 보기") and "첫 줄이 제목" in sent[0]
-    body = [s for s in sent if "<pre>" in s and "네이버 블로그" in s]
+    head = sent[0]
+    assert head.startswith("📝 <b>미리 보기") and "제목 후보" in head and "\n1. " in head and "\n2. " in head and "\n3. " in head
+    assert "9월" in head and "스탠리 텀블러 1.18L" in head and ("이라구요??" in head or "팝니다!" in head)
+    body = [s for s in sent if "<pre>" in s and "네이버 블로그 본문" in s]
     assert len(body) == 1, sent
     text = body[0]
-    assert "오늘의 핫딜 3건 정리 — 스탠리 텀블러 1.18L" in text
-    assert "■ 1. 스탠리 텀블러 1.18L — 29,900원" in text and "40% 할인" in text and "(정가 49,900원)" in text
-    assert "쿠팡 최저가 45,000원보다 34% 저렴" in text and "별점 4.8점, 리뷰 1,200건" in text and "배송: 무료" in text
-    assert "👉 구매 링크: https://link.coupang.com/a/abc" in text
-    assert "■ 2. 토스 화장지 30롤 — 12,900원" in text and "https://toss.im/share/xyz" in text
-    assert "■ 오늘의 이벤트·혜택" in text and "▶ 라코스테 최대 60% 세일" in text and "· 기간: 9/11~9/14" in text
-    assert "👉 https://www.lfmall.co.kr/app/event/105798" in text
+    # 도입부·채널 초대 블록(고정)
+    assert "안녕하세요?\n\nDeren의 아카이브를 운영하고 있는 Deren입니다.\n\n본문 들어가기 전에 하나만 말씀드리면," in text
+    assert "텔레그램 오늘의 핫딜이랑 카카오 오픈톡방에 블로그보다 먼저 올리고 있어요!!" in text
+    assert "- 텔레그램 · 오늘의 핫딜\nhttps://t.me/hot_deal_and_info\n\n- 카카오톡 · 오늘의 핫딜 오픈채팅\nhttps://open.kakao.com/o/pHi1MkMi" in text
+    # 딜 단락: 점수 높은 순, 어미 규칙
+    assert "1. 스탠리 텀블러 1.18L\n\n쿠팡에서 스탠리 텀블러 1.18L이 29,900원입니다!\n정가 49,900원에서 40% 내려온 가격이에요!" in text
+    assert "쿠팡 최저가 45,000원보다도 34% 싼 가격이구요!" in text
+    assert "별점 4.8점에 리뷰가 1,200건이라,\n검증은 충분히 된 제품이에요!\n배송은 무료예요!\n\nhttps://link.coupang.com/a/abc\n" in text
+    assert "2. 토스 화장지 30롤\n\n토스쇼핑에서 토스 화장지 30롤이 12,900원입니다!" in text
+    assert text.index("1. 스탠리") < text.index("2. 토스")
+    # 이벤트 단락: 요약본을 글머리 없이
+    assert "오늘은 세일 소식도 있었습니다!\n\n라코스테 최대 60% 세일\n\n라코스테 최대 60% 세일\n기간: 9/11~9/14\n\nhttps://www.lfmall.co.kr/app/event/105798" in text
     assert "옛날 딜" not in text
-    assert "쿠팡 파트너스 활동의 일환" in text and "토스쇼핑 쉐어링크 활동의 일환" in text
-    assert "링크프라이스" not in text  # 정보 글(LF몰 원문 링크)은 제휴 링크가 아니라 고지 문구를 안 붙인다
-    assert "https://t.me/hot_deal_and_info" in text and "open.kakao.com" in text
+    # 주의(느낌표 없이) → 마무리 → 대가성·고지 → 면책 → 서명
+    assert "다만 몇 가지는 알고 가셔야 합니다.\n\n핫딜은 재고가 빠지면 가격이 원래대로 돌아가고,\n카드 즉시할인은" in text
+    assert "본문의 구매 링크는 제 제휴 링크로" in text
+    assert "이 포스팅은 쿠팡 파트너스 활동의 일환" in text and "토스쇼핑 쉐어링크 활동의 일환" in text and "링크프라이스" not in text
+    assert text.rstrip().endswith("- 카카오톡 · 오늘의 핫딜 오픈채팅\nhttps://open.kakao.com/o/pHi1MkMi\n\n\n궁금한 점은 댓글로 남겨주세요!</pre>")
+    assert "※" not in text and "■" not in text and "👉" not in text
     tags = [s for s in sent if "블로그 태그" in s]
     assert tags and "핫딜, 오늘의핫딜" in tags[0] and "쿠팡핫딜" in tags[0] and "토스쇼핑핫딜" in tags[0]
 
@@ -85,6 +101,18 @@ async def test_blog_digest_collects_the_day(bot: DealBot) -> None:
     assert (await bot.blog_digest()).startswith("📝 블로그 글 문구를 보냈습니다")
     assert bot.db.kv_get("blog_digest_last_at")
     assert "만들 글이 없습니다" in await bot.blog_digest()
+
+
+async def test_blog_digest_picks_best_deals_only(bot: DealBot) -> None:
+    now = utcnow()
+    for i, score in enumerate((5, 50, 20), 1):
+        _published(bot, Product(source="ppomppu", product_id=f"coupang:{i}", shop="coupang", name=f"상품 {i}호", price=10000 * i, url=f"https://www.coupang.com/vp/products/{i}"),
+                   link=f"https://link.coupang.com/a/{i}", when=now - timedelta(hours=i), score=score)
+    bot.settings.blog_digest.max_items = 2
+    msg = await bot.blog_digest(preview=True)
+    assert "3건 중 점수 높은 2건" in msg or "2건" in msg
+    text = [s for s in bot.sent if "<pre>" in s and "네이버 블로그 본문" in s][0]  # type: ignore[attr-defined]
+    assert "1. 상품 2호" in text and "2. 상품 3호" in text and "상품 1호" not in text
 
 
 async def test_blog_digest_skips_dry_run_posts_in_real_mode(bot: DealBot) -> None:
@@ -102,9 +130,8 @@ async def test_blog_digest_skips_dry_run_posts_in_real_mode(bot: DealBot) -> Non
 
 
 def test_split_sections_keeps_paragraphs_together() -> None:
-    text = "제목\n\n소개\n\n" + "\n\n".join(f"■ {i}. 상품 {i}\n· 줄\n👉 링크" for i in range(1, 60))
+    text = "안녕하세요?\n\n소개\n\n" + "\n\n".join(f"{i}. 상품 {i}\n\n쿠팡에서 상품 {i}이 1,000원입니다!\n\nhttps://x/{i}" for i in range(1, 60))
     chunks = split_sections(text, limit=400)
     assert len(chunks) > 1 and all(len(c) <= 400 for c in chunks)
-    assert chunks[0].startswith("제목") and all(c.startswith("■") for c in chunks[1:])
-    assert "".join(chunks).count("■") == 59
+    assert chunks[0].startswith("안녕하세요?") and "\n\n".join(chunks).count("쿠팡에서 상품") == 59
     assert split_sections("짧은 글", limit=400) == ["짧은 글"]

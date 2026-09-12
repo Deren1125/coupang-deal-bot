@@ -116,6 +116,27 @@ class EnrichConfig(BaseModel):
     max_per_run: int = 10
 
 
+class AuthenticityConfig(BaseModel):
+    """정품·공식 판매처 확인. 오픈마켓 딜은 공식 표시가 있어야 자동으로 올리고, 병행수입 표시가 있으면 올리지 않는다."""
+
+    enabled: bool = True
+    # 제목·게시글·상품 페이지 어디에든 이 낱말이 보이면 올리지 않음
+    reject_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "병행수입", "병행 수입", "병행", "구매대행", "해외구매대행", "리퍼", "리퍼비시", "리퍼상품", "리퍼제품", "리퍼폰",
+            "중고", "중고품", "중고상품", "벌크", "벌크포장", "전시상품", "전시품", "반품상품", "박스훼손", "짝퉁", "이미테이션",
+            "레플리카", "스크래치",
+        ]
+    )
+    # 누구나 팔 수 있는 몰: 제목·게시글·판매자명에 공식 표시가 있어야 자동으로 올림
+    open_markets: list[str] = Field(default_factory=lambda: ["gmarket", "auction", "11st", "lotteon", "ssg", "aliexpress", "temu", "ohouse", "naver", "toss"])
+    official_markers: list[str] = Field(
+        default_factory=lambda: ["공식", "브랜드관", "브랜드 스토어", "브랜드스토어", "본사", "직영", "official store", "official"]
+    )
+    # 오픈마켓인데 공식 표시를 못 찾았을 때: review = 관리자 확인(/ok) 후 올림 / skip = 올리지 않음 / allow = 그냥 올림
+    unverified_action: Literal["review", "skip", "allow"] = "review"
+
+
 class QualityConfig(BaseModel):
     """후기가 거의 없는 상품은 특가로 올려도 잘 안 팔린다. 상품 페이지에서 후기 수를 읽었을 때만 적용 (못 읽으면 통과)."""
 
@@ -151,6 +172,7 @@ class SourceRule(BaseModel):
 class DealConfig(BaseModel):
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)
+    authenticity: AuthenticityConfig = Field(default_factory=AuthenticityConfig)
     # 원본 주소가 쇼핑몰이 아니라 게시판 글이면(본문에서 상품 링크를 못 찾은 이벤트 글 등) 링크 요청 없이 건너뜀
     require_shop_url: bool = True
     sold_out: SoldOutConfig = Field(default_factory=SoldOutConfig)
@@ -180,6 +202,9 @@ class PublishConfig(BaseModel):
     max_per_day: int = 40
     min_interval_seconds: int = 180
     dedup_days: int = 7
+    # 이름이 거의 같은 상품(다른 게시판·주소 변형)을 같은 딜로 보는 기준 (0~1). 전보다 dedupe_cheaper_pct% 이상 싸졌으면 새 딜로 인정
+    dedupe_similarity: float = 0.8
+    dedupe_cheaper_pct: float = 10
     queue_ttl_hours: int = 6
     manual_link_ttl_hours: int = 12  # 내 링크 입력을 기다리는 항목의 유효 시간
     max_publish_attempts: int = 3
@@ -267,9 +292,11 @@ class BlogDigestConfig(BaseModel):
     enabled: bool = True
     time: str = "21:30"  # 매일 이 시각(app.timezone)에 보냄
     template: str = "blog_daily.j2"
-    max_items: int = 30  # 글 하나에 넣는 최대 딜 수
+    max_items: int = 10  # 글 하나에 넣는 최대 딜 수 (점수 높은 순)
     min_items: int = 1  # 이보다 적으면 안 보냄
     include_info: bool = True  # 정보 글(이벤트)도 넣음
+    blog_name: str = "Deren의 아카이브"  # 도입부 "OO를 운영하고 있는 OO입니다"
+    author: str = "Deren"
 
     @field_validator("time")
     @classmethod
@@ -286,9 +313,17 @@ class ChannelsConfig(BaseModel):
     telegram_url: str = ""  # 예: https://t.me/oneul_hotdeal
     kakao_openchat_url: str = ""  # 예: https://open.kakao.com/o/xxxx
     threads_url: str = ""  # 예: https://www.threads.net/@oneul_hot_deal
+    telegram_name: str = "오늘의 핫딜"  # 블로그 글 채널 안내에 쓰는 이름
+    kakao_openchat_name: str = "오늘의 핫딜 오픈채팅"
 
     def as_dict(self) -> dict[str, str]:
-        return {"telegram_url": self.telegram_url, "kakao_openchat_url": self.kakao_openchat_url, "threads_url": self.threads_url}
+        return {
+            "telegram_url": self.telegram_url,
+            "kakao_openchat_url": self.kakao_openchat_url,
+            "threads_url": self.threads_url,
+            "telegram_name": self.telegram_name,
+            "kakao_openchat_name": self.kakao_openchat_name,
+        }
 
 
 class PushConfig(BaseModel):

@@ -13,7 +13,7 @@ TG = "https://t.me/oneul_hotdeal"
 
 def test_channels_default_empty() -> None:
     c = ChannelsConfig()
-    assert c.as_dict() == {"telegram_url": "", "kakao_openchat_url": "", "threads_url": ""}
+    assert c.as_dict() == {"telegram_url": "", "kakao_openchat_url": "", "threads_url": "", "telegram_name": "오늘의 핫딜", "kakao_openchat_name": "오늘의 핫딜 오픈채팅"}
 
 
 def test_post_footer_only_when_kakao_set(repo_root: Path) -> None:

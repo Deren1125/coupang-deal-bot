@@ -39,6 +39,7 @@ where = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["real_fetch: 페이지 읽기 차단(conftest)을 끄고 가짜 HTTP 로 실제 fetch 코드를 돌리는 테스트"]
 
 [tool.ruff]
 line-length = 100

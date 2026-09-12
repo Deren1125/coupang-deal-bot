@@ -18,6 +18,7 @@ from telegram import Bot, BotCommand, Update
 from telegram.ext import Application
 
 from dealbot import __version__
+from dealbot.authenticity import AuthResult, check_authenticity
 from dealbot.collectors import (
     BaseCollector,
     CollectorContext,
@@ -26,6 +27,7 @@ from dealbot.collectors import (
 )
 from dealbot.config import Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient
+from dealbot.dedupe import find_duplicate
 from dealbot.enrich import PageEnricher
 from dealbot.infopost import InfoPostBuilder, PostBody
 from dealbot.links import (
@@ -327,7 +329,7 @@ class DealBot:
         if item is None:
             return f"#{queue_id} 번 글이 없습니다. /queue 나 /pending 에서 번호를 확인해 주세요."
         if item.status == "awaiting_approval":
-            return f"#{queue_id} 번은 정보 글이라 링크가 아니라 확인이 필요합니다: <code>/ok {queue_id}</code> 또는 <code>/skip {queue_id}</code>"
+            return f"#{queue_id} 번은 확인을 기다리는 글이라 링크가 아니라 답이 필요합니다: <code>/ok {queue_id}</code> 또는 <code>/skip {queue_id}</code>"
         if item.status not in ("awaiting_link", "pending", "failed"):
             return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없습니다."
         if not url.startswith("http"):
@@ -351,13 +353,20 @@ class DealBot:
         if item is None:
             return f"#{queue_id} 번 글이 없습니다."
         if item.status != "awaiting_approval":
-            return f"#{queue_id} 번은 확인을 기다리는 정보 글이 아닙니다 (지금 '{item.status}' 상태)."
+            return f"#{queue_id} 번은 확인을 기다리는 글이 아닙니다 (지금 '{item.status}' 상태)."
         deal = item.deal
-        draft = dict(deal.product.extra.get("info_draft") or {})
+        p = deal.product
+        if p.deal_kind != "info" and "info_draft" not in p.extra:
+            # 정품 확인 요청에 대한 답: 링크 변환과 발행을 이어서 한다
+            p.extra["auth_approved"] = True
+            self.db.update_queue_item(queue_id, status="pending", error=None, deal=deal, reset_created=True)
+            self.db.log_event("INFO", "authenticity", f"#{queue_id} 관리자가 정품으로 확인: {p.name[:50]}")
+            return f"✅ #{queue_id} 번을 정품으로 확인했습니다. 링크를 만들어 채널에 올립니다."
+        draft = dict(p.extra.get("info_draft") or {})
         edited = bool(text and text.strip())
         if edited:
             draft["text"] = str(text).strip()
-        deal.product.extra["info_draft"] = draft
+        p.extra["info_draft"] = draft
         self.db.update_queue_item(queue_id, status="pending", error=None, deal=deal, reset_created=True)
         self.db.log_event("INFO", "info_review", f"#{queue_id} 관리자 확인" + (" (본문 고쳐 씀)" if edited else ""))
         return f"✅ #{queue_id} 번을 올릴 차례에 넣었습니다. 곧 채널에 올라갑니다." + (" 보내주신 글로 바꿨습니다." if edited else "")
@@ -617,6 +626,11 @@ class DealBot:
         info = replace(p, product_id=f"info:{p.source}:{key}", deal_kind="info", url=str(post_url), affiliate_url=None)
         if self._posted_recently(info.product_id, now):
             return False
+        dup = self._duplicate_of_recent(info, now)
+        if dup:
+            log.info("info post %s skipped as duplicate: %s", p.name[:40], dup)
+            self.db.log_event("INFO", "dedupe", f"{info.product_id} {p.name[:50]} — {dup}")
+            return False
         verdict = DealVerdict(is_deal=True, reasons=["info_post", f"recommend>={cfg.min_recommend}"], score=float(min(rec, 100)))
         return self.db.enqueue(Deal(product=info, verdict=verdict, detected_at=now), score=verdict.score, now=now)
 
@@ -726,9 +740,70 @@ class DealBot:
             return "본문 위치를 확실히 찾지 못해 추정으로 정리함"
         return None
 
+    def _review_backlog_full(self) -> int | None:
+        """관리자 손을 기다리는 글(링크·확인)이 이미 상한만큼 쌓여 있으면 그 상한, 아니면 None."""
+        cap = self.settings.publish.max_awaiting_links
+        if not cap:
+            return None
+        counts = self.db.queue_counts()
+        return cap if counts.get("awaiting_link", 0) + counts.get("awaiting_approval", 0) >= cap else None
+
+    async def _authenticity(self, item: QueueItem, deal: Deal) -> AuthResult:
+        """정품·공식 판매처 판정. 한 번 판정한 결과는 대기열 항목에 남겨 다시 읽지 않는다."""
+        p = deal.product
+        cached = p.extra.get("auth")
+        if isinstance(cached, dict) and cached.get("status"):
+            return AuthResult(str(cached["status"]), str(cached.get("reason") or ""), cached.get("seller"))
+        cfg = self.settings.deal.authenticity
+        if not cfg.enabled or p.source == "manual":
+            result = AuthResult("ok", "확인 안 함 (직접 올린 글)" if p.source == "manual" else "정품 확인 끔")
+        else:
+            post_text = ""
+            post_url = p.extra.get("post_url")
+            if post_url:
+                body = await self.info.fetch(str(post_url))
+                post_text = (body.raw or body.text) if body else ""
+            page_text, seller = "", None
+            if p.shop in cfg.open_markets:
+                try:
+                    meta = await self.enricher.fetch(p.url)
+                except Exception as e:  # noqa: BLE001
+                    log.info("authenticity page fetch failed for %s: %s", p.url, e)
+                    meta = None
+                if meta is not None:
+                    page_text, seller = meta.text, meta.seller
+            result = check_authenticity(cfg, p, post_text=post_text, page_text=page_text, seller=seller)
+        p.extra["auth"] = result.as_dict()
+        self.db.update_queue_item(item.id, status=item.status, error=item.last_error, deal=deal)
+        return result
+
+    async def _request_deal_review(self, item: QueueItem, deal: Deal, auth: AuthResult) -> bool:
+        """오픈마켓 딜인데 공식 판매처가 확인되지 않음: 관리자가 /ok 로 확인해 주면 그때 링크를 만들어 올린다."""
+        p = deal.product
+        cap = self._review_backlog_full()
+        if cap:
+            self.db.update_queue_item(item.id, status="skipped", error=f"review backlog full ({cap})")
+            self.db.log_event("INFO", "queue", f"{p.product_id} skipped: {cap} items already waiting for me")
+            log.info("queue #%d skipped — %d items already waiting for admin", item.id, cap)
+            return True
+        self.db.update_queue_item(item.id, status="awaiting_approval", error=f"needs approval: 정품 확인 — {auth.reason}", deal=deal)
+        shop = self.registry.get(p.shop)
+        notice_id = await self.notifier.notify_deal_review(item, shop.name if shop else p.shop, auth.reason)
+        if notice_id:
+            self.db.kv_set(f"review_notice:{item.id}", str(notice_id))
+        self.db.log_event("INFO", "authenticity", f"{p.product_id} 정품 확인 대기: {auth.reason} — {p.name[:50]}")
+        log.info("queue #%d awaiting authenticity approval (%s)", item.id, auth.reason)
+        await self.refresh_pending_notice()
+        return True
+
     async def _request_info_review(self, item: QueueItem, deal: Deal, body: PostBody, reason: str) -> bool:
         """정보 글을 바로 올리지 않고 관리자 확인(/ok)을 받는다. 정리한 본문은 대기열 항목에 같이 저장해 둔다."""
         p = deal.product
+        cap = self._review_backlog_full()
+        if cap:
+            self.db.update_queue_item(item.id, status="skipped", error=f"review backlog full ({cap})")
+            self.db.log_event("INFO", "queue", f"{p.product_id} skipped: {cap} items already waiting for me")
+            return True
         p.extra["info_draft"] = {"text": body.text, "images": body.images, "links": body.links}
         self.db.update_queue_item(item.id, status="awaiting_approval", error=f"needs approval: {reason}", deal=deal)
         preview = self.info.render(self.settings.info_posts.template, deal, body, autoescape=True)
@@ -805,6 +880,11 @@ class DealBot:
                 deals += 1
                 if self._posted_recently(p.product_id, now):
                     log.debug("deal %s already posted within %dd — skip", p.product_id, cfg.publish.dedup_days)
+                    continue
+                dup = self._duplicate_of_recent(p, now)
+                if dup:
+                    log.info("deal %s skipped as duplicate: %s", p.name[:40], dup)
+                    self.db.log_event("INFO", "dedupe", f"{p.product_id} {p.name[:50]} — {dup}")
                     continue
                 deal = Deal(product=p, verdict=verdict, detected_at=now)
                 if self.db.enqueue(deal, score=verdict.score, now=now):
@@ -901,6 +981,22 @@ class DealBot:
         return self.db.posted_within(
             product_id, self.settings.publish.dedup_days, now, include_dry_run=self.state.dry_run
         )
+
+    def _duplicate_of_recent(self, p: Product, now: Any) -> str | None:
+        """이름이 거의 같은 상품이 대기 중이거나 최근에 올라갔으면 그 설명, 아니면 None. 확실히 싸진 딜은 새 딜로 본다."""
+        cfg = self.settings.publish
+        if cfg.dedupe_similarity <= 0:
+            return None
+        waiting = [c for c in self.db.open_queue_names() if c["product_id"] != p.product_id]
+        dup = find_duplicate(p.name, p.price, waiting, threshold=cfg.dedupe_similarity, allow_cheaper=False)
+        if dup:
+            return f"대기 중인 #{dup['queue_id']} 와 같은 상품 (유사도 {dup['similarity']})"
+        recent = [c for c in self.db.recent_post_names(cfg.dedup_days, now, include_dry_run=self.state.dry_run) if c["product_id"] != p.product_id]
+        dup = find_duplicate(p.name, p.price, recent, threshold=cfg.dedupe_similarity, cheaper_pct=cfg.dedupe_cheaper_pct)
+        if dup:
+            when = fmt_local(from_iso(dup.get("posted_at")), self.settings.app.timezone)
+            return f"{when} 에 올린 '{truncate(str(dup['name']), 30)}' 와 같은 상품 (유사도 {dup['similarity']})"
+        return None
 
     def _should_enrich(self, p: Product) -> bool:
         ec = self.settings.deal.enrich
@@ -1029,6 +1125,27 @@ class DealBot:
         if deal.product.deal_kind == "info":
             return await self._publish_info(item, deal)
 
+        # 정품·공식 판매처 확인: 병행수입 등 표시는 버리고, 오픈마켓인데 확인이 안 되면 관리자에게 묻는다
+        auth = await self._authenticity(item, deal)
+        auth_shop = self.registry.get(deal.product.shop)
+        if auth.status == "reject":
+            self.db.update_queue_item(item.id, status="skipped", error=f"not genuine: {auth.reason}")
+            self.db.log_event("INFO", "authenticity", f"{pid} 정품이 아닐 수 있어 건너뜀 ({auth.reason}): {deal.product.name[:50]}")
+            log.info("queue #%d skipped — authenticity: %s", item.id, auth.reason)
+            return True
+        if (
+            auth.status == "unknown"
+            and not deal.product.extra.get("auth_approved")
+            and not (auth_shop is not None and auth_shop.link_mode == "manual")  # 링크를 직접 만드는 몰은 그 요청에서 같이 확인
+        ):
+            action = self.settings.deal.authenticity.unverified_action
+            if action == "skip":
+                self.db.update_queue_item(item.id, status="skipped", error=f"unverified seller: {auth.reason}")
+                self.db.log_event("INFO", "authenticity", f"{pid} 공식 판매처 확인 안 돼 건너뜀: {deal.product.name[:50]}")
+                return True
+            if action == "review":
+                return await self._request_deal_review(item, deal, auth)
+
         so = self.settings.deal.sold_out
         state, err = await self._ensure_link(item)
         if state == "manual":
@@ -1048,7 +1165,8 @@ class DealBot:
                 return True
             self.db.update_queue_item(item.id, status="awaiting_link", error="manual link required", deal=deal)
             if shop is not None:
-                notice_id = await self.notifier.notify_manual_link(item, shop)
+                auth_note = None if auth.status == "ok" else f"⚠️ 정품 확인: {auth.reason}. 링크를 만들기 전에 판매자가 공식 판매처인지 확인해 주세요."
+                notice_id = await self.notifier.notify_manual_link(item, shop, auth_note=auth_note)
                 if notice_id:
                     self.db.kv_set(f"link_notice:{item.id}", str(notice_id))
             log.info("queue #%d awaiting manual link (%s)", item.id, err)
@@ -1144,26 +1262,27 @@ class DealBot:
         last = from_iso(self.db.kv_get("blog_digest_last_at"))
         start = max(last or (now - timedelta(hours=24)), now - timedelta(hours=48))
         items = self.db.published_items_between(start, now, include_dry_run=self.state.dry_run)
-        if cfg.max_items > 0:
-            items = items[: cfg.max_items]
         span = f"{fmt_local(start, tz)} ~ {fmt_local(now, tz)}"
         if len(items) < max(cfg.min_items, 1):
             return f"📝 블로그 정리: 그동안({span}) 채널에 올라간 딜이 없어 만들 글이 없습니다."
-        blocks = self.digest.build(items, when=local_now(tz))
-        if not blocks:
+        digest = self.digest.build(items, when=local_now(tz))
+        if not digest.blocks:
             return f"📝 블로그 정리: 글에 넣을 딜이 없습니다 ({span})."
+        picked = min(len(items), cfg.max_items) if cfg.max_items > 0 else len(items)
+        titles = "\n".join(f"{i}. {html.escape(t)}" for i, t in enumerate(digest.titles, 1))
         head = (
-            f"📝 <b>{'미리 보기 — ' if preview else ''}오늘의 핫딜 블로그 글</b> ({len(items)}건, {html.escape(span)})\n"
-            "아래 회색 상자를 길게 눌러 복사한 뒤 블로그 글쓰기에 붙여넣으세요. 첫 줄이 제목입니다. "
-            "사진은 각 딜 링크의 상품 이미지를 한두 장 넣으면 됩니다. 태그는 마지막 상자에 있습니다."
+            f"📝 <b>{'미리 보기 — ' if preview else ''}오늘의 핫딜 블로그 글</b> ({html.escape(span)} 사이 {len(items)}건 중 점수 높은 {picked}건)\n"
+            f"제목 후보 (하나 골라 제목 칸에):\n{titles}\n\n"
+            "본문은 아래 회색 상자를 길게 눌러 복사한 뒤 블로그 글쓰기에 붙여넣으세요. "
+            "채널 안내·면책·서명까지 다 들어 있어 사진만 넣으면 됩니다. 태그는 마지막 상자에 있습니다."
         )
         await self.notifier.send(head, silent=True)
-        for block in blocks:
+        for block in digest.blocks:
             await self.notifier.send(block.as_telegram_html(), silent=True)
         if not preview:
             self.db.kv_set("blog_digest_last_at", to_iso(now))
             self.db.log_event("INFO", "blog_digest", f"{len(items)} deals ({span})")
-        return f"📝 블로그 글 문구를 보냈습니다 ({len(items)}건, {span})."
+        return f"📝 블로그 글 문구를 보냈습니다 ({span} 사이 {len(items)}건 중 {picked}건)."
 
     async def send_copy_blocks(self, queue_id: int | None = None) -> str:
         """최근 발행 딜(또는 대기열 번호)의 복붙 문구를 다시 보낸다."""

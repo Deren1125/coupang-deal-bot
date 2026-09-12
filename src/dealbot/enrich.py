@@ -32,6 +32,8 @@ class PageMeta:
     review_count: int | None = None
     final_url: str | None = None
     available: bool | None = None  # 재고 표시. True 있음 / False 품절 / None 모름
+    seller: str | None = None  # JSON-LD offers.seller.name (정품 확인용)
+    text: str = ""  # 페이지에 보이는 글 (앞부분만, 정품 확인용)
 
 
 def _availability(value: object) -> bool | None:
@@ -104,6 +106,10 @@ def parse_page_meta(html: str) -> PageMeta:
                     meta.original_price = parse_price(str(offers.get("highPrice")))
                 if meta.available is None:
                     meta.available = _availability(offers.get("availability"))
+            if meta.seller is None and isinstance(offers, dict):
+                sel = offers.get("seller")
+                if isinstance(sel, dict) and sel.get("name"):
+                    meta.seller = str(sel["name"]).strip()
             agg = p.get("aggregateRating")
             if isinstance(agg, dict):
                 try:
@@ -118,6 +124,7 @@ def parse_page_meta(html: str) -> PageMeta:
 
     # 본문 텍스트에서 별점/리뷰 보조 추출 (JSON-LD 가 없을 때)
     text = soup.get_text(" ", strip=True)[:20000]
+    meta.text = text
     if meta.rating is None:
         m = re.search(r"(?:별점|평점)\s*[:：]?\s*(\d(?:\.\d)?)", text)
         if m:

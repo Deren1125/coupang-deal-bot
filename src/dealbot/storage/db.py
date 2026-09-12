@@ -455,6 +455,33 @@ class Database:
                 (status, error, to_iso(now), 1 if increment_attempts else 0, item_id),
             )
 
+    def recent_post_names(self, days: int, now: datetime | None = None, *, include_dry_run: bool = True) -> list[dict[str, Any]]:
+        """최근 며칠 안에 올린 글의 상품명·가격 (이름이 비슷한 중복을 거르는 용도)."""
+        now = now or utcnow()
+        where = "" if include_dry_run else " AND p.dry_run = 0"
+        rows = self._q(
+            f"""
+            SELECT p.product_id, p.price, p.posted_at, pr.name
+            FROM posts p LEFT JOIN products pr ON pr.product_id = p.product_id
+            WHERE p.posted_at >= ?{where}
+            ORDER BY p.posted_at DESC LIMIT 500
+            """,
+            (to_iso(now - timedelta(days=days)),),
+        )
+        return [dict(r) for r in rows if r["name"]]
+
+    def open_queue_names(self) -> list[dict[str, Any]]:
+        """아직 처리 중인(대기·링크 대기·확인 대기) 글의 상품명·가격."""
+        rows = self._q("SELECT id, product_id, payload, status FROM deal_queue WHERE status IN ('pending', 'awaiting_link', 'awaiting_approval')")
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            try:
+                prod = json.loads(r["payload"]).get("product") or {}
+            except (ValueError, TypeError):
+                continue
+            out.append({"queue_id": int(r["id"]), "product_id": r["product_id"], "name": prod.get("name") or "", "price": prod.get("price") or 0, "status": r["status"]})
+        return out
+
     def published_items_between(self, start: datetime, end: datetime, *, include_dry_run: bool = False) -> list[QueueItem]:
         """그 기간에 채널에 올라간 딜 (대기열 payload 로 상품·링크까지). 기본은 실제 발행만."""
         sql = "SELECT q.* FROM deal_queue q WHERE q.status = 'published' AND q.updated_at >= ? AND q.updated_at < ?"

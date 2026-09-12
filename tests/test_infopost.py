@@ -278,7 +278,7 @@ async def test_info_post_waits_for_approval_when_summary_unavailable(bot: DealBo
     assert len(notice) == 1 and "정보 글 확인 #" in notice[0] and "ANTHROPIC_API_KEY" in notice[0]
     assert "원문 줄 1" in notice[0] and "/ok" in notice[0] and "사진 1장" in notice[0]
     pinned = admin_calls["edit"][-1][1]
-    assert "내가 확인해 줘야 하는 정보 글" in pinned and "(1건)" in pinned and "페이코 이벤트 11" in pinned
+    assert "내가 확인해 줘야 하는 글" in pinned and "(1건)" in pinned and "페이코 이벤트 11" in pinned
     item = _reviews(bot)[0]
     assert bot.db.kv_get(f"review_notice:{item.id}") == str(100 + len(admin_calls["send"]))
 
@@ -302,7 +302,7 @@ async def test_info_post_waits_for_approval_when_summary_unavailable(bot: DealBo
     assert "· 기간: 9/12~9/14" in text and "원문 줄 1" not in text and "📢 <b>페이코 이벤트 11</b>" in text and published[0]["photo"]
     await bot.refresh_pending_notice()
     assert "확인해 줘야" not in admin_calls["edit"][-1][1]
-    assert "확인을 기다리는 정보 글이 아닙니다" in bot.approve_item(item.id)  # 이미 올라간 글
+    assert "확인을 기다리는 글이 아닙니다" in bot.approve_item(item.id)  # 이미 올라간 글
 
 
 async def test_review_always_then_plain_ok_publishes_summary(bot: DealBot, admin_calls: dict[str, list]) -> None:
