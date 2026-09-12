@@ -135,6 +135,7 @@ COLLECTOR_LABELS = {
 }
 
 _REASON_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^few_reviews<(\d+)$"), "후기 {0}개 미만이라 제외"),
     (re.compile(r"^interest:recommend>=(\d+)$"), "관심도 통과(추천 {0}개 이상)"),
     (re.compile(r"^interest:comments>=(\d+)$"), "관심도 통과(댓글 {0}개 이상)"),
     (re.compile(r"^interest:views>=(\d+)$"), "관심도 통과(조회 {0}회 이상)"),

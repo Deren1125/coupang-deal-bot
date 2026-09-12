@@ -116,6 +116,14 @@ class EnrichConfig(BaseModel):
     max_per_run: int = 10
 
 
+class QualityConfig(BaseModel):
+    """후기가 거의 없는 상품은 특가로 올려도 잘 안 팔린다. 상품 페이지에서 후기 수를 읽었을 때만 적용 (못 읽으면 통과)."""
+
+    enabled: bool = True
+    min_review_count: int = 10
+    shops: list[str] = Field(default_factory=list)  # 비우면 전체 쇼핑몰
+
+
 class SoldOutConfig(BaseModel):
     """품절/종료된 딜 정리.
     - 게시판을 다시 읽을 때 제목에 품절 표시가 붙은 글 → 기다리는 글에서 내리고, 링크 요청 메시지를 고치고, 채널 글에 품절 표시
@@ -142,6 +150,9 @@ class SourceRule(BaseModel):
 
 class DealConfig(BaseModel):
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
+    quality: QualityConfig = Field(default_factory=QualityConfig)
+    # 원본 주소가 쇼핑몰이 아니라 게시판 글이면(본문에서 상품 링크를 못 찾은 이벤트 글 등) 링크 요청 없이 건너뜀
+    require_shop_url: bool = True
     sold_out: SoldOutConfig = Field(default_factory=SoldOutConfig)
     per_source: dict[str, SourceRule] = Field(default_factory=dict)
     interest: InterestConfig = Field(default_factory=InterestConfig)

@@ -159,3 +159,22 @@ async def test_linkprice_failure_puts_shop_on_cooldown(bot: DealBot) -> None:
     FakeCollector.products = [Product(source="fake", product_id="lotteon:9", shop="lotteon", name="롯데온 상품 9", price=1000, url="https://www.lotteon.com/p/product/LO9", recommend_count=9)]
     await bot.run_collector(bot.collectors[0])
     assert await bot.process_queue_once() and prov.calls == 2
+
+
+async def test_board_only_urls_are_not_queued(bot: DealBot) -> None:
+    FakeCollector.products = [
+        Product(source="fake", product_id="toss:board", shop="toss", name="토스 이벤트 글", price=4800, url="https://bbs.ruliweb.com/market/board/1020/read/107150", recommend_count=9),
+        Product(source="fake", product_id="toss:real", shop="toss", name="토스 상품", price=12900, url="https://toss.im/_m/ABC", recommend_count=9),
+        Product(source="fake", product_id="coupang:short", shop="coupang", name="쿠팡 상품", price=9900, url="https://coupa.ng/cfXyz", recommend_count=9),
+    ]
+    await bot.run_collector(bot.collectors[0])
+    queued = {it.deal.product.product_id for it in bot.db.pending_items()} if hasattr(bot.db, "pending_items") else None
+    counts = bot.db.queue_counts()
+    assert counts.get("pending") == 2, counts
+    if queued is not None:
+        assert "toss:board" not in queued
+    # 끄면 예전처럼 들어간다
+    bot.settings.deal.require_shop_url = False
+    FakeCollector.products = [Product(source="fake", product_id="toss:board2", shop="toss", name="토스 이벤트 글 2", price=4800, url="https://bbs.ruliweb.com/market/board/1020/read/1", recommend_count=9)]
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts().get("pending") == 3

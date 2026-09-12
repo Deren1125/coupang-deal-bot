@@ -85,6 +85,15 @@ class DealEvaluator:
         if signal != "always":
             reasons.append(f"interest:{signal}")
 
+        q = cfg.quality
+        if (
+            q.enabled
+            and product.review_count is not None
+            and product.review_count < q.min_review_count
+            and (not q.shops or product.shop in q.shops)
+        ):
+            return DealVerdict(is_deal=False, reasons=reasons + [f"few_reviews<{q.min_review_count}"], sample_count=stats.count)
+
         # 가격이 없는 글(쿠폰/이벤트/공지) 또는 제목이 쿠폰/이벤트로 보이는 글
         if product.deal_kind in ("coupon", "event") or not product.has_price:
             if cfg.accept_coupons_and_events:

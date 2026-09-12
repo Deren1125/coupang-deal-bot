@@ -122,3 +122,16 @@ def test_priced_deals_and_events_have_separate_bars() -> None:
     assert ev.min_recommend_for(event("ruliweb_user", 1)) == 30
     assert ev.min_recommend_for(priced("ruliweb_user", 1)) == 5
     assert not ev.evaluate(priced("quiet", 99), PriceStats()).is_deal
+
+
+def test_quality_gate_by_review_count() -> None:
+    from dealbot.config import QualityConfig
+
+    ev = DealEvaluator(DealConfig(interest=NO_GATE))
+    assert ev.evaluate(_p(7000, discount_rate=60, review_count=3), PriceStats()).reasons[-1] == "few_reviews<10"
+    assert ev.evaluate(_p(7000, discount_rate=60, review_count=10), PriceStats()).is_deal
+    assert ev.evaluate(_p(7000, discount_rate=60), PriceStats()).is_deal  # 후기 수를 모르면 통과
+    only_naver = DealEvaluator(DealConfig(interest=NO_GATE, quality=QualityConfig(min_review_count=10, shops=["naver"])))
+    assert only_naver.evaluate(_p(7000, discount_rate=60, review_count=3), PriceStats()).is_deal  # 쿠팡은 대상 아님
+    off = DealEvaluator(DealConfig(interest=NO_GATE, quality=QualityConfig(enabled=False)))
+    assert off.evaluate(_p(7000, discount_rate=60, review_count=0), PriceStats()).is_deal

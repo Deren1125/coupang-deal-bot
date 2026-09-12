@@ -190,6 +190,12 @@ deal:
     enabled: true
     shops: [toss, naver, oliveyoung, kurly, musinsa]
     max_per_run: 10
+  # 후기 수 기준: 상품 페이지에서 후기 수를 읽었는데 이보다 적으면 제외 (후기 수를 못 읽은 상품은 통과)
+  quality:
+    enabled: true
+    min_review_count: 10
+    shops: []                  # 비우면 전체 쇼핑몰
+  require_shop_url: true       # 원본 주소가 쇼핑몰이 아니라 게시판 글이면(링크 못 찾은 이벤트 글 등) 링크 요청 없이 건너뜀
   # 0) 관심도 게이트: 전 상품을 대조할 수 없으니, 사람들이 관심 있어 보이는 딜만 판정 대상으로.
   #    아래 중 하나라도 넘으면 통과 (값이 없는 신호는 무시). manual/adpick 소스는 항상 통과.
   interest:

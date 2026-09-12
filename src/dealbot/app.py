@@ -549,6 +549,15 @@ class DealBot:
             return self.settings.publish.allow_raw_links
         return shop.enabled and shop.link_mode != "skip"
 
+    def _has_shop_url(self, product: Product) -> bool:
+        """원본 주소가 그 쇼핑몰 주소인지. 게시판 글 주소만 남은 딜(이벤트 글 등)은 제휴 링크를 만들 수 없다."""
+        if not self.settings.deal.require_shop_url or product.affiliate_url:
+            return True
+        shop = self.registry.get(product.shop)
+        if shop is None or shop.link_mode == "raw":
+            return True
+        return shop.matches_url(product.url)
+
     async def run_collector(self, collector: BaseCollector) -> dict[str, Any]:
         """수집기 1회 실행: 수집 → 가격 이력 저장 → 판정 → 대기열 등록."""
         name = collector.name
@@ -568,6 +577,9 @@ class DealBot:
                     await self._on_sold_out(p, via="게시판에 품절/종료 표시")
                     continue
                 if not self._shop_allowed(p):
+                    continue
+                if not self._has_shop_url(p):
+                    log.info("skip %s — source url is not a %s page: %s", p.name[:40], p.shop, p.url)
                     continue
                 if self._should_enrich(p) and enriched < cfg.deal.enrich.max_per_run:
                     enriched += 1
