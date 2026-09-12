@@ -455,6 +455,16 @@ class Database:
                 (status, error, to_iso(now), 1 if increment_attempts else 0, item_id),
             )
 
+    def published_items_between(self, start: datetime, end: datetime, *, include_dry_run: bool = False) -> list[QueueItem]:
+        """그 기간에 채널에 올라간 딜 (대기열 payload 로 상품·링크까지). 기본은 실제 발행만."""
+        sql = "SELECT q.* FROM deal_queue q WHERE q.status = 'published' AND q.updated_at >= ? AND q.updated_at < ?"
+        params: list[Any] = [to_iso(start), to_iso(end)]
+        if not include_dry_run:
+            sql += " AND EXISTS (SELECT 1 FROM posts p WHERE p.product_id = q.product_id AND p.dry_run = 0 AND p.posted_at >= ? AND p.posted_at < ?)"
+            params += [to_iso(start), to_iso(end)]
+        sql += " ORDER BY q.updated_at ASC"
+        return [self._row_to_queue_item(r) for r in self._q(sql, tuple(params))]
+
     def last_published_item(self) -> QueueItem | None:
         row = self._one("SELECT * FROM deal_queue WHERE status = 'published' ORDER BY updated_at DESC, id DESC LIMIT 1")
         return self._row_to_queue_item(row) if row else None

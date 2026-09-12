@@ -49,6 +49,7 @@ from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
+from dealbot.publisher.digest import BlogDigestBuilder
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
@@ -205,6 +206,7 @@ class DealBot:
             refresh_before_days=settings.threads.refresh_before_days,
         )
         self.copy_blocks = CopyBlockBuilder(settings.copy_cfg, self.renderer, self.registry)
+        self.digest = BlogDigestBuilder(settings.blog_digest, self.renderer, self.registry)
 
         self.notifier = AdminNotifier(
             self.bot,
@@ -670,6 +672,8 @@ class DealBot:
             dry_run=result.dry_run,
             now=utcnow(),
         )
+        p.extra["info_body"] = body.text  # 밤에 블로그 정리 글에 다시 쓰려고 남겨 둔다
+        p.extra["info_links"] = list(body.links)
         self.db.update_queue_item(item.id, status="published", deal=deal)
         self.db.log_event("INFO", "publish", f"{pid} [info] {p.name[:60]}")
         log.info("published info post [%s] %s (%s)", p.source, p.name[:50], "dry-run" if result.dry_run else result.message_id)
@@ -1131,6 +1135,35 @@ class DealBot:
             return f"✅ 스레드 연결 완료: @{me.get('username')} (토큰 만료 {expires}, 자동 갱신됨)"
         except ThreadsError as e:
             return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
+
+    async def blog_digest(self, *, preview: bool = False) -> str:
+        """하루치 발행 딜을 블로그 글 한 편(복붙용)으로 만들어 관리자 챗에 보낸다. preview 면 기준 시각을 옮기지 않는다."""
+        cfg = self.settings.blog_digest
+        tz = self.settings.app.timezone
+        now = utcnow()
+        last = from_iso(self.db.kv_get("blog_digest_last_at"))
+        start = max(last or (now - timedelta(hours=24)), now - timedelta(hours=48))
+        items = self.db.published_items_between(start, now, include_dry_run=self.state.dry_run)
+        if cfg.max_items > 0:
+            items = items[: cfg.max_items]
+        span = f"{fmt_local(start, tz)} ~ {fmt_local(now, tz)}"
+        if len(items) < max(cfg.min_items, 1):
+            return f"📝 블로그 정리: 그동안({span}) 채널에 올라간 딜이 없어 만들 글이 없습니다."
+        blocks = self.digest.build(items, when=local_now(tz))
+        if not blocks:
+            return f"📝 블로그 정리: 글에 넣을 딜이 없습니다 ({span})."
+        head = (
+            f"📝 <b>{'미리 보기 — ' if preview else ''}오늘의 핫딜 블로그 글</b> ({len(items)}건, {html.escape(span)})\n"
+            "아래 회색 상자를 길게 눌러 복사한 뒤 블로그 글쓰기에 붙여넣으세요. 첫 줄이 제목입니다. "
+            "사진은 각 딜 링크의 상품 이미지를 한두 장 넣으면 됩니다. 태그는 마지막 상자에 있습니다."
+        )
+        await self.notifier.send(head, silent=True)
+        for block in blocks:
+            await self.notifier.send(block.as_telegram_html(), silent=True)
+        if not preview:
+            self.db.kv_set("blog_digest_last_at", to_iso(now))
+            self.db.log_event("INFO", "blog_digest", f"{len(items)} deals ({span})")
+        return f"📝 블로그 글 문구를 보냈습니다 ({len(items)}건, {span})."
 
     async def send_copy_blocks(self, queue_id: int | None = None) -> str:
         """최근 발행 딜(또는 대기열 번호)의 복붙 문구를 다시 보낸다."""

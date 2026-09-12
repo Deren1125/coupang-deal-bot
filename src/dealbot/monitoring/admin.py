@@ -207,6 +207,7 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("skip", "그 글은 올리지 않기 (/skip 번호)"),
     ("ok", "정보 글 확인: 이대로 올리기 (/ok 번호)"),
     ("copy", "올린 글의 카카오·블로그 복붙 문구 (/copy 번호)"),
+    ("blog", "오늘의 핫딜 블로그 글 만들기 (하루치 정리)"),
     ("test", "채널에 올라갈 글 양식 미리 보기 (샘플)"),
     ("pushtest", "휴대폰 푸시(ntfy) 연결 확인"),
     ("ppstats", "커뮤니티 글 추천 분포"),
@@ -755,6 +756,8 @@ class BotController(Protocol):
 
     async def submit_manual(self, text: str) -> str: ...
 
+    async def blog_digest(self, *, preview: bool = False) -> str: ...
+
     async def test_post(self) -> str: ...
 
     async def push_test(self) -> str: ...
@@ -794,6 +797,7 @@ HELP_TEXT = (
     "/post — 내가 찾은 딜을 직접 올립니다. 아래처럼 보내면 맨 앞 차례로 채널에 올라갑니다 (연습 모드에서는 미리보기만).\n"
     "<code>/post\n[머리글, 없으면 생략]\n상품: 상품명\n가격: 14,890원\nhttps://내가-만든-제휴-링크</code>\n"
     "/copy 번호 — 올린 글의 카카오 오픈채팅용·네이버 블로그용 복붙 문구를 다시 받습니다. 번호 없으면 마지막 글. 실제 모드에서는 올릴 때마다 자동으로 옵니다.\n"
+    "/blog — 지금까지 모인 오늘의 딜로 블로그 글(복붙용)을 미리 만들어 보냅니다. 매일 밤 21:30 에는 하루치가 자동으로 옵니다.\n"
     "/run — 지금 바로 게시판을 확인합니다. /run ppomppu 처럼 하나만도 됩니다.\n"
     "/pause — 잠시 멈춤 (게시판 확인과 올리기 모두). /resume — 다시 시작.\n"
     "\n<b>확인·연결</b>\n"
@@ -909,6 +913,9 @@ def register_admin_handlers(
         qid = int(args[0].lstrip("#")) if args and args[0].lstrip("#").isdigit() else None
         await reply(update, await controller.send_copy_blocks(qid))
 
+    async def cmd_blog(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, await controller.blog_digest(preview=True))
+
     async def cmd_ppstats(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.community_stats_text())
 
@@ -1021,6 +1028,7 @@ def register_admin_handlers(
         ("threadsauth", cmd_threadsauth),
         ("threadscode", cmd_threadscode),
         ("copy", cmd_copy),
+        ("blog", cmd_blog),
         ("ppstats", cmd_ppstats),
         ("hot", cmd_hot),
         ("find", cmd_find),

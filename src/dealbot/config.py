@@ -261,6 +261,25 @@ class InfoPostsConfig(BaseModel):
     summarizer: InfoSummarizerConfig = Field(default_factory=InfoSummarizerConfig)
 
 
+class BlogDigestConfig(BaseModel):
+    """하루치 발행 딜을 모아 밤에 블로그 글 한 편(복붙용)으로 관리자 챗에 보낸다. /blog 로 바로 만들어 볼 수도 있다."""
+
+    enabled: bool = True
+    time: str = "21:30"  # 매일 이 시각(app.timezone)에 보냄
+    template: str = "blog_daily.j2"
+    max_items: int = 30  # 글 하나에 넣는 최대 딜 수
+    min_items: int = 1  # 이보다 적으면 안 보냄
+    include_info: bool = True  # 정보 글(이벤트)도 넣음
+
+    @field_validator("time")
+    @classmethod
+    def _hhmm(cls, v: str) -> str:
+        hh, mm = v.split(":")
+        if not (0 <= int(hh) < 24 and 0 <= int(mm) < 60):
+            raise ValueError("blog_digest.time must be HH:MM")
+        return v
+
+
 class ChannelsConfig(BaseModel):
     """내 채널 주소. 비워 두면 템플릿에서 해당 줄이 빠진다."""
 
@@ -405,6 +424,7 @@ class Settings(BaseModel):
     links: LinksConfig = Field(default_factory=LinksConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     info_posts: InfoPostsConfig = Field(default_factory=InfoPostsConfig)
+    blog_digest: BlogDigestConfig = Field(default_factory=BlogDigestConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     secrets: Secrets = Field(default_factory=Secrets)
 

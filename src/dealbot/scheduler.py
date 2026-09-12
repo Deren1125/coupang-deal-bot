@@ -6,6 +6,7 @@ import asyncio
 import logging
 import signal
 from datetime import timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from dealbot.app import DealBot
@@ -63,29 +64,42 @@ async def publisher_loop(bot: DealBot, stop: asyncio.Event) -> None:
         await _sleep_or_stop(stop, tick)
 
 
-async def daily_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
+async def _daily_job_loop(bot: DealBot, stop: asyncio.Event, *, hhmm: str, marker_key: str, label: str, job: Any) -> None:
+    """매일 hhmm(app.timezone)에 job 을 한 번 실행한다. 같은 날 두 번 돌지 않도록 날짜 표식을 남긴다."""
     tz = bot.settings.app.timezone
-    hhmm = bot.settings.monitoring.daily_summary_time
     while not stop.is_set():
         now_local = local_now(tz)
         target = next_daily_time(now_local, hhmm)
         wait = (target - now_local).total_seconds()
-        log.info("next daily summary at %s (%s)", target.strftime("%Y-%m-%d %H:%M"), tz)
+        log.info("next %s at %s (%s)", label, target.strftime("%Y-%m-%d %H:%M"), tz)
         await _sleep_or_stop(stop, wait)
         if stop.is_set():
             break
-        # 같은 날 두 번 보내지 않도록 가드
         marker = target.strftime("%Y-%m-%d")
-        if bot.db.kv_get("daily_summary_marker") == marker:
+        if bot.db.kv_get(marker_key) == marker:
             continue
         try:
-            await bot.daily_summary()
-            bot.db.kv_set("daily_summary_marker", marker)
+            await job()
+            bot.db.kv_set(marker_key, marker)
         except Exception as e:  # noqa: BLE001
-            log.exception("daily summary failed")
-            bot.db.log_event("ERROR", "summary", f"{type(e).__name__}: {e}")
-            bot.state.set_error(f"[summary] {e}")
+            log.exception("%s failed", label)
+            bot.db.log_event("ERROR", label, f"{type(e).__name__}: {e}")
+            bot.state.set_error(f"[{label}] {e}")
         await _sleep_or_stop(stop, 60)
+
+
+async def daily_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    await _daily_job_loop(
+        bot, stop, hhmm=bot.settings.monitoring.daily_summary_time, marker_key="daily_summary_marker", label="summary", job=bot.daily_summary
+    )
+
+
+async def blog_digest_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """매일 밤 하루치 딜을 블로그 글로 묶어 관리자 챗에 보낸다."""
+    cfg = bot.settings.blog_digest
+    if not cfg.enabled:
+        return
+    await _daily_job_loop(bot, stop, hhmm=cfg.time, marker_key="blog_digest_marker", label="blog_digest", job=bot.blog_digest)
 
 
 async def heartbeat_loop(bot: DealBot, stop: asyncio.Event) -> None:
@@ -178,6 +192,7 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(collector_loop(bot, stop), name="collector_loop"),
         asyncio.create_task(publisher_loop(bot, stop), name="publisher_loop"),
         asyncio.create_task(daily_summary_loop(bot, stop), name="daily_summary_loop"),
+        asyncio.create_task(blog_digest_loop(bot, stop), name="blog_digest_loop"),
         asyncio.create_task(maintenance_loop(bot, stop), name="maintenance_loop"),
         asyncio.create_task(heartbeat_loop(bot, stop), name="heartbeat_loop"),
         asyncio.create_task(soldout_loop(bot, stop), name="soldout_loop"),

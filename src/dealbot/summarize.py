@@ -33,8 +33,8 @@ SYSTEM_PROMPT = """당신은 한국 핫딜·혜택 정보 텔레그램 채널 '�
 - 광고·스팸이거나 혜택·상품 정보가 아니라서 채널에 올릴 가치가 없으면 정확히 SKIP 이라고만 답합니다.
 
 답의 맨 위에는 안내문보다 먼저 아래 두 줄을 씁니다 (숫자만, 없으면 0). 그 다음 빈 줄, 그 아래에 안내문:
-할인율: 이 글의 혜택 중 가장 큰 할인율(%). 정가 대비 할인율, 무료 증정은 100
-할인액: 이 글의 혜택 중 가장 큰 할인·적립·캐시백 금액(원). "1만원 이상 결제" 같은 조건 금액이 아니라 실제로 받는 금액"""
+할인율: 이 글의 혜택 중 가장 큰 할인율(%). 정가 대비 할인율. 무료 증정은 받는 것의 가치가 5,000원 이상일 때만 100, 아니면 0
+할인액: 이 글의 혜택 중 가장 큰 할인·적립·캐시백·증정 가치(원). "1만원 이상 결제" 같은 조건 금액이 아니라 실제로 받는 금액"""
 
 _FENCE = re.compile(r"^```[a-zA-Z]*\s*$")
 _RATE_LINE = re.compile(r"^\s*할인율\s*[:：]\s*([\d.]+)\s*%?\s*$", re.M)
@@ -43,7 +43,9 @@ _AMOUNT_LINE = re.compile(r"^\s*할인액\s*[:：]\s*([\d,]+)\s*원?\s*$", re.M)
 _BENEFIT = r"(?:할인|세일|적립|캐시백|쿠폰|페이백|환급|증정|지급|off)"
 _RATE_LEAD = re.compile(r"(?:최대|최고|전\s*품목|전\s*상품|up\s*to)\s*(\d{1,3})\s*%", re.I)
 _RATE_TRAIL = re.compile(r"(\d{1,3})\s*%\s*[^\n\d%]{0,4}?" + _BENEFIT, re.I)
-_AMOUNT = re.compile(r"(\d[\d,]*)\s*(만|천)?\s*원\s*(?:상당)?[^\n\d원]{0,8}?" + _BENEFIT)
+_AMOUNT = re.compile(r"(\d[\d,]*)\s*(만|천)?\s*원\s*(?:을|를|이|가|의)?\s*(?:상당\s*)?" + _BENEFIT)
+# "적립 58원", "캐시백 5,000원" 처럼 혜택 말이 앞에 오는 꼴 (판매가와 안 헷갈리는 적립성 낱말만)
+_AMOUNT_AFTER = re.compile(r"(?:적립|캐시백|페이백|환급)\s*(?:합계|금액|최대)?\s*(\d[\d,]*)\s*(만|천)?\s*원")
 _URL_IN_LINE = re.compile(r"https?://\S+")
 _BULLET = re.compile(r"^\s*(?:[-*•▪◦]|\d+[.)])\s+")
 
@@ -82,14 +84,15 @@ def estimate_discount(text: str) -> tuple[int | None, int | None]:
     rates = [int(m.group(1)) for m in _RATE_LEAD.finditer(text)] + [int(m.group(1)) for m in _RATE_TRAIL.finditer(text)]
     rates = [r for r in rates if 0 < r <= 100]
     amounts: list[int] = []
-    for m in _AMOUNT.finditer(text):
-        try:
-            n = int(m.group(1).replace(",", ""))
-        except ValueError:
-            continue
-        unit = m.group(2)
-        n *= 10000 if unit == "만" else 1000 if unit == "천" else 1
-        amounts.append(n)
+    for pattern in (_AMOUNT, _AMOUNT_AFTER):
+        for m in pattern.finditer(text):
+            try:
+                n = int(m.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            unit = m.group(2)
+            n *= 10000 if unit == "만" else 1000 if unit == "천" else 1
+            amounts.append(n)
     return (max(rates) if rates else None), (max(amounts) if amounts else None)
 
 

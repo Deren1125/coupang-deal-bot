@@ -45,6 +45,9 @@ BROWSER_HEADERS = {
 # "[쿠팡] 상품명 (12,900원/무료)" 형태
 _TITLE_RE = re.compile(r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*(?:\((?P<meta>[^()]*)\))?\s*$")
 _COUPON_WORDS = ("쿠폰", "할인코드", "적립", "캐시백")
+_DATE_META = re.compile(r"^\s*~?\s*\d{1,2}\s*/\s*\d{1,2}")  # "(~9/13)", "(9/12~9/14)" 같은 기간 표기
+_NAME_PRICE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{3,})\s*원")
+_NOT_A_PRICE_WORDS = ("쿠폰", "할인", "적립", "캐시백", "페이백", "증정", "환급")
 _EVENT_WORDS = ("이벤트", "응모", "추첨", "무료체험", "증정")
 _SKIP_HOSTS = ("ppomppu.co.kr",)
 
@@ -55,13 +58,32 @@ def parse_title(title: str) -> dict[str, Any]:
     if not m:
         return {"shop_tag": None, "name": title.strip(), "price": None, "shipping": None}
     meta = (m.group("meta") or "").strip()
+    name = m.group("name").strip()
+    shop_tag = m.group("shop").strip()
+    if meta and (meta.startswith("~") or _DATE_META.match(meta)):
+        # "(~9/13)" 은 기간이지 가격이 아니다 — 이름에 남기고 가격은 이름에서 찾는다
+        return {"shop_tag": shop_tag, "name": f"{name} ({meta})", "price": _price_in_name(name), "shipping": None}
     price_text, _, shipping = meta.partition("/")
-    return {
-        "shop_tag": m.group("shop").strip(),
-        "name": m.group("name").strip(),
-        "price": parse_price(price_text) if price_text else None,
-        "shipping": shipping.strip() or None,
-    }
+    price = parse_price(price_text) if price_text else None
+    if price is not None and price < 100:  # 가격일 리 없는 숫자 (날짜·개수 등)
+        price = None
+    if price is None:
+        price = _price_in_name(name)
+    return {"shop_tag": shop_tag, "name": name, "price": price, "shipping": shipping.strip() or None}
+
+
+def _price_in_name(name: str) -> int | None:
+    """괄호에 가격이 없을 때 "9,900원 샴푸" 처럼 이름 앞쪽에 적힌 가격. 쿠폰·할인 금액과 헷갈리는 이름이면 안 쓴다."""
+    if any(w in name for w in _NOT_A_PRICE_WORDS):
+        return None
+    m = _NAME_PRICE.search(name)
+    if not m:
+        return None
+    try:
+        value = int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    return value if value >= 100 else None
 
 
 def guess_kind(name: str, price: int | None) -> str:

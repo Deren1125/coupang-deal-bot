@@ -290,6 +290,15 @@ info_posts:
     raw_chars: 4000            # 요약기에 넘기는 원문 최대 길이
     timeout_seconds: 60
 
+# 하루치 발행 딜을 모아 밤에 블로그 글 한 편(복붙용)으로 관리자 챗에 보냄. /blog 로 지금까지 모인 것을 미리 만들어 볼 수 있음
+blog_digest:
+  enabled: true
+  time: "21:30"
+  template: blog_daily.j2
+  max_items: 30                # 글 하나에 넣는 최대 딜 수
+  min_items: 1                 # 이보다 적으면 안 보냄
+  include_info: true           # 정보 글(이벤트)도 넣음
+
 # 내 채널 주소. 글 하단에 서로 연결하는 줄을 넣는다 (비우면 그 줄은 빠짐)
 channels:
   telegram_url: "https://t.me/hot_deal_and_info"

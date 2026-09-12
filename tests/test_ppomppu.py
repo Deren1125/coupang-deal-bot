@@ -18,6 +18,13 @@ from dealbot.shops import ShopRegistry
 from dealbot.storage.db import Database
 
 
+def test_parse_title_date_range_is_not_a_price() -> None:
+    t = parse_title("[토스] 9,900원 샴푸 + 선크림 900원, 같이 담으면 무료배송 (~9/13)")
+    assert t["price"] == 9900 and t["shipping"] is None and t["name"].endswith("(~9/13)")  # 예전엔 9원/배송 '13' 으로 읽었다
+    assert parse_title("[네이버] 5,000원 할인 쿠폰 (9/12~9/14)")["price"] is None  # 할인 금액은 가격이 아니다
+    assert parse_title("[쿠팡] 세제 3개 (3/무료)")["price"] is None  # 개수처럼 가격일 리 없는 수
+
+
 def test_parse_title() -> None:
     t = parse_title("[쿠팡] 스탠리 텀블러 1.18L (29,900원/무료)")
     assert t == {"shop_tag": "쿠팡", "name": "스탠리 텀블러 1.18L", "price": 29900, "shipping": "무료"}

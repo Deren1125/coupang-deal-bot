@@ -90,6 +90,7 @@ def test_estimate_discount_from_text() -> None:
     assert estimate_discount("12,000원 이상 결제 시 4,800원 할인") == (None, 4800)  # 조건 금액은 혜택이 아님
     assert estimate_discount("[LF몰] 라코스테 최대 60%세일 추천상품들") == (60, None)
     assert estimate_discount("전 품목 30% 할인 + 최대 6만원 적립") == (30, 60000)
+    assert estimate_discount("더미식 교자 (20,900원/무료) 쿠폰 적용가") == (None, None)  # 판매가는 혜택 금액이 아니다
     assert estimate_discount("5천원 쿠폰 지급, 100% 정품") == (None, 5000)
     assert estimate_discount("클릭적립 합계 58원\n라이브 예고 적립 3원") == (None, 58)
     assert estimate_discount("9월 12일 새 매장 오픈 안내") == (None, None)
