@@ -135,3 +135,23 @@ def test_split_sections_keeps_paragraphs_together() -> None:
     assert len(chunks) > 1 and all(len(c) <= 400 for c in chunks)
     assert chunks[0].startswith("안녕하세요?") and "\n\n".join(chunks).count("쿠팡에서 상품") == 59
     assert split_sections("짧은 글", limit=400) == ["짧은 글"]
+
+
+async def test_blog_digest_drops_bodyless_infos_and_always_discloses_coupang(bot: DealBot) -> None:
+    now = utcnow()
+    _published(bot, Product(source="ruliweb_user", product_id="toss:2", shop="toss", name="토스 화장지 30롤", price=12900, url="https://toss.im/_m/ABC"),
+               link="https://toss.im/share/xyz", when=now - timedelta(hours=2))
+    # 옛 방식으로 올라간 정보 글: 정리된 본문이 없다 → 블로그에 넣지 않는다
+    old = Product(source="ruliweb_user", product_id="info:ruliweb_user:9", shop="naver", name="일일적립, 클릭 58원 (17)", price=0, deal_kind="info",
+                  url="https://bbs.ruliweb.com/market/board/1020/read/9", extra={"post_url": "https://bbs.ruliweb.com/market/board/1020/read/9"})
+    _published(bot, old, link=None, when=now - timedelta(hours=1))
+    for i in range(4):  # 정리된 이벤트는 max_info_items 개까지만
+        p = Product(source="ppomppu", product_id=f"info:ppomppu:{i}", shop="lfmall", name=f"세일 {i}", price=0, deal_kind="info",
+                    url=f"https://www.ppomppu.co.kr/zboard/view.php?no={i}", extra={"post_url": f"https://x/{i}", "info_body": f"세일 {i} 요약\n· 기간: 9/1{i}"})
+        _published(bot, p, link=None, when=now - timedelta(minutes=30 - i), score=10 + i)
+    await bot.blog_digest(preview=True)
+    text = [s for s in bot.sent if "<pre>" in s and "네이버 블로그 본문" in s][0]  # type: ignore[attr-defined]
+    assert "일일적립" not in text and "read/9" not in text
+    assert text.count("요약\n기간:") == 3 and "세일 0" not in text  # 점수 낮은 하나가 빠진다
+    assert "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다." in text  # 쿠팡 딜이 없어도 항상
+    assert "토스쇼핑 쉐어링크 활동의 일환" in text

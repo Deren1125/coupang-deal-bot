@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -63,3 +64,30 @@ def canonical_product_url(url: str) -> str | None:
 
 def url_fingerprint(url: str) -> str:
     return "url:" + hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
+
+
+def unwrap_redirect(href: str) -> str:
+    """게시판이 외부 링크를 자기 서버로 감싼 경우 원래 주소를 꺼낸다.
+
+    뽐뿌: https://s.ppomppu.co.kr?idno=...&target=<base64 주소>
+    루리웹: https://web.ruliweb.com/link.php?ol=<url-encoded 주소>&bbs=...
+    """
+    try:
+        u = urlparse(href)
+    except ValueError:
+        return href
+    host = u.netloc.lower()
+    qs = parse_qs(u.query)
+    if host.endswith("ppomppu.co.kr"):
+        target = (qs.get("target") or [""])[0]
+        if target:
+            try:
+                decoded = base64.b64decode(target + "=" * (-len(target) % 4)).decode("utf-8", "ignore").strip()
+            except (ValueError, UnicodeDecodeError):
+                return href
+            return decoded if decoded.startswith("http") else href
+    if host.endswith("ruliweb.com") and "link.php" in u.path:
+        ol = (qs.get("ol") or [""])[0]
+        if ol.startswith("http"):
+            return ol
+    return href

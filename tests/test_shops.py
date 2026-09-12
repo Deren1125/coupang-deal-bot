@@ -98,3 +98,10 @@ def test_new_linkprice_shop_aliases_and_domains() -> None:
     # 기존 태그가 새 별칭에 잘못 잡히지 않는지
     assert reg.by_alias("[롯데온]").key == "lotteon"  # type: ignore[union-attr]
     assert reg.by_alias("[신세계몰]").key == "ssg"  # type: ignore[union-attr]
+
+
+def test_toss_shopping_domain_and_key() -> None:
+    reg = ShopRegistry()
+    toss = reg.get("toss")
+    assert toss is not None and toss.matches_url("https://toss.shopping/t/40594131") and toss.matches_url("https://toss.im/_m/ABC")
+    assert ShopRegistry.product_key("toss", "https://toss.shopping/t/40594131") == "toss:40594131"

@@ -24,6 +24,7 @@ from dealbot.models import Product
 from dealbot.shops import Shop, ShopRegistry
 from dealbot.utils.retry import retry_async
 from dealbot.utils.text import parse_price
+from dealbot.utils.urls import unwrap_redirect
 
 BASE_URL = "https://bbs.ruliweb.com"
 DEFAULT_BOARD = "600004"
@@ -37,10 +38,15 @@ DEFAULT_SELECTORS = {
     "time": "td.time",
     "writer": "td.writer",
     "content": "div.view_content, article, div.board_main_view",
+    "subject": "span.subject_text, .subject_inner_text, h4.subject",  # 상세 페이지의 전체 제목 (목록은 잘려 있음)
+    "source": "div.source_url a",  # 상세 페이지의 '출처' 상자 (쇼핑몰 링크)
 }
 _TAG_RE = re.compile(r"^\s*\[([^\]]+)\]\s*")
 _PRICE_RE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{4,})\s*원")
 _TRAILING_RE = re.compile(r"[,\s/]*(첫\s*구매\s*추가\s*할인|무료배송|무배|무료)\s*$")
+# "12000원 결제시", "4800원 할인" 처럼 뒤에 이런 말이 오면 판매가가 아니라 조건·혜택 금액
+_NOT_PRICE_AFTER = re.compile(r"^\s*(?:할인|적립|캐시백|쿠폰|페이백|환급|결제|이상|미만|초과|추가)")
+_COMMENT_COUNT_RE = re.compile(r"\s*\[\d+\]\s*$")  # h4.subject 끝의 댓글 수 "[29]"
 
 
 def parse_title(title: str, registry: ShopRegistry) -> dict[str, Any]:
@@ -60,29 +66,52 @@ def parse_title(title: str, registry: ShopRegistry) -> dict[str, Any]:
         if shop:
             break
     if shop is None:
-        # 태그 없이 "토스쇼핑상품명..." 처럼 시작하는 경우
+        # 태그 없이 "토스쇼핑상품명..." 처럼 시작하는 경우. 짧은 별칭("네이버", "토스")은 다른 말의 앞부분("네이버페이로")이면 안 됨
         for s in registry.all():
             for alias in sorted(s.aliases, key=len, reverse=True):
-                if text.lower().startswith(alias.lower()):
-                    shop = s
-                    text = text[len(alias):].lstrip(" ,:-")
-                    break
+                low = text.lower()
+                if not low.startswith(alias.lower()):
+                    continue
+                nxt = low[len(alias) : len(alias) + 1]
+                if len(alias) <= 3 and re.match(r"[가-힣a-z0-9]", nxt):
+                    continue
+                shop = s
+                text = text[len(alias):].lstrip(" ,:-")
+                break
             if shop:
                 break
     price: int | None = None
-    matches = list(_PRICE_RE.finditer(text))
-    if matches:
-        last = matches[-1]  # 마지막 "N원" 을 판매가로
-        price = parse_price(last.group(1))
-        name = text[: last.start()]
-    else:
-        name = text
+    name = text
+    for m2 in reversed(list(_PRICE_RE.finditer(text))):  # 뒤에서부터, 조건·혜택 금액이 아닌 마지막 "N원" 을 판매가로
+        if _NOT_PRICE_AFTER.match(text[m2.end() :]):
+            continue
+        price = parse_price(m2.group(1))
+        name = text[: m2.start()]
+        break
     name = _TRAILING_RE.sub("", name).strip(" ,/-")
-    # "상품명 (14,150원/무료)" 처럼 가격을 잘라내면 여는 괄호만 남는다 → 짝 없는 여는 괄호 제거
+    # 목록에서 잘린 제목 "… (14,220..." / 짝 없는 여는 괄호 제거
+    name = re.sub(r"(?:\.\.\.|…)\s*$", "", name)
+    if name.count("(") > name.count(")"):
+        name = name[: name.rfind("(")]
     name = re.sub(r"[\s(\[{]+$", "", name).strip(" ,/-")
     # 단위 뒤 붙어 있는 콤마를 공백으로 보기 좋게
     name = re.sub(r",(?=\S)", ", ", name)
     return {"shop": shop, "name": name or text, "price": price, "tags": tags}
+
+
+def parse_detail(html: str, selectors: dict[str, str]) -> dict[str, Any]:
+    """상세 페이지에서 전체 제목과 '출처' 상자의 쇼핑몰 링크(리다이렉트는 풀어서)를 읽는다."""
+    soup = BeautifulSoup(html, "html.parser")
+    title: str | None = None
+    subj = _first(soup, selectors.get("subject", ""))
+    if subj is not None:
+        title = _COMMENT_COUNT_RE.sub("", subj.get_text(" ", strip=True)).strip() or None
+    sources: list[str] = []
+    for a in soup.select(selectors.get("source", "")):
+        href = unwrap_redirect(str(a.get("href") or "").strip())
+        if href.startswith("http") and href not in sources:
+            sources.append(href)
+    return {"title": title, "source_urls": sources}
 
 
 def _int(text: str | None) -> int | None:
@@ -175,11 +204,13 @@ class RuliwebCollector(BaseCollector):
                 f"루리웹 목록에서 행을 못 찾음 (셀렉터 조정 필요). /html {url} 로 원문을 받아 Claude 에게 주세요. DOM 요약: {summary[:600]}"
             )
 
+        info_ok = self.ctx.settings.info_posts.enabled
         products: list[Product] = []
         fetched = 0
         for item in items:
             shop = item["shop"]
-            if shop is None and unknown_policy != "raw":
+            if shop is None and unknown_policy != "raw" and not (info_ok and item["price"] is None):
+                # 모르는 몰의 가격 글은 건너뜀. 가격 없는 이벤트 글은 정보 글 후보로 남긴다 (예: [던킨도너츠] 네이버페이 할인)
                 continue
             if shop is not None and (not shop.enabled or shop.link_mode == "skip"):
                 continue
@@ -206,7 +237,16 @@ class RuliwebCollector(BaseCollector):
             deal_url: str | None = None
             try:
                 detail_html = await self._get(item["post_url"])
-                urls = find_shop_urls(detail_html, None if shop.key == "unknown" else shop)
+                detail = parse_detail(detail_html, selectors)
+                if detail["title"] and detail["title"] != item["title"]:
+                    # 목록 제목은 잘려 있을 수 있다 → 상세의 전체 제목으로 이름·가격·몰을 다시 읽는다
+                    parsed = parse_title(detail["title"], registry)
+                    item.update(title=detail["title"], name=parsed["name"], price=parsed["price"])
+                    if parsed["shop"] is not None and shop.key == "unknown":
+                        shop = parsed["shop"]
+                known = None if shop.key == "unknown" else shop
+                sources = [u for u in detail["source_urls"] if known is None or known.matches_url(u)]
+                urls = sources or find_shop_urls(detail_html, known)
                 deal_url = urls[0] if urls else None
             except Exception as e:  # noqa: BLE001
                 self.log.warning("detail fetch failed %s: %s", item["post_url"], e)

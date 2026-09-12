@@ -88,7 +88,7 @@ class FakeCollector(BaseCollector):
         return list(FakeCollector.products)
 
 
-def _event(i: int, *, rec: int = 9, url: str | None = None, price: int = 4800) -> Product:
+def _event(i: int, *, rec: int = 9, url: str | None = None, price: int = 0) -> Product:
     post = f"https://bbs.ruliweb.com/market/board/1020/read/{i}"
     return Product(
         source="fake", product_id=f"naver:board{i}", shop="naver", name=f"페이코 이벤트 {i}", price=price,
@@ -417,3 +417,10 @@ async def test_small_benefit_info_posts_are_skipped(bot: DealBot, admin_calls: d
     await bot.run_collector(bot.collectors[0])
     assert await bot.process_queue_once()
     assert bot.db.queue_counts() == {"skipped": 3, "published": 1, "awaiting_approval": 1}
+
+
+async def test_priced_deal_with_only_a_board_url_is_not_an_info_post(bot: DealBot) -> None:
+    """가격은 있는데 쇼핑몰 링크를 못 찾은 글은 정보 글로 올리지 않는다 (링크 없는 핫딜은 쓸모가 없다)."""
+    FakeCollector.products = [_event(31, price=12900)]
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {}

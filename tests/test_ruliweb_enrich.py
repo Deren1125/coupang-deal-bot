@@ -116,3 +116,62 @@ async def test_submit_manual_enriches(settings: Settings) -> None:
         assert "별점 4.7 · 리뷰 12건" in text and "가격: 9,990원" in text
     finally:
         await bot.close()
+
+
+def test_parse_title_does_not_mangle_names_or_take_conditions_as_prices() -> None:
+    reg = ShopRegistry()
+    t = parse_title("[던킨도너츠] 네이버페이로 12000원 결제시 4800원 할인 외 (9/...", reg)
+    assert t["shop"] is None and t["price"] is None  # "네이버"가 "네이버페이로"의 앞부분이라고 몰로 잡지 않고, 조건·혜택 금액은 가격이 아니다
+    assert t["name"] == "네이버페이로 12000원 결제시 4800원 할인 외"
+    t = parse_title("[음식] [롯데온] 농심 빵부장 솔티꽈베기빵8개+소금빵8개+굿즈증정 (14,220...", reg)
+    assert t["shop"] is not None and t["shop"].key == "lotteon" and t["price"] is None
+    assert t["name"] == "농심 빵부장 솔티꽈베기빵8개+소금빵8개+굿즈증정"  # 잘린 괄호는 뗀다
+    assert parse_title("[네이버] 네이버페이 5000원 적립 이벤트", reg)["price"] is None
+    t = parse_title("[생활용품] [토스] 올챌린지 천연펄프 화장지 30롤, 2팩 (12,900원/무료)", reg)
+    assert t["shop"].key == "toss" and t["price"] == 12900 and t["name"] == "올챌린지 천연펄프 화장지 30롤, 2팩"
+
+
+_LIST = """<table class="board_list_table"><tbody>
+<tr class="table_body"><td class="id">1</td><td class="subject"><div class="relative"><a class="deco" href="/market/board/1020/read/107141">[생활용품] [토스] 올챌린지 천연펄프 화장지 30롤, 2팩 (12,9...</a></div></td><td class="recomd">17</td><td class="hit">3000</td><td class="time">10:00</td><td class="writer">a</td></tr>
+<tr class="table_body"><td class="id">2</td><td class="subject"><a class="deco" href="/market/board/1020/read/107142">[음식] [롯데온] 농심 빵부장 솔티꽈베기빵8개+소금빵8개+굿즈증정 (14,220...</a></td><td class="recomd">29</td><td class="hit">5000</td><td class="time">10:00</td><td class="writer">b</td></tr>
+<tr class="table_body"><td class="id">3</td><td class="subject"><a class="deco" href="/market/board/1020/read/107150">[던킨도너츠] 네이버페이로 12000원 결제시 4800원 할인 외 (9/...</a></td><td class="recomd">12</td><td class="hit">800</td><td class="time">10:00</td><td class="writer">c</td></tr>
+</tbody></table>"""
+_DETAIL = {
+    "107141": """<html><body><h4 class="subject"><span class="subject_text">[생활용품] [토스] 올챌린지 천연펄프 화장지 30롤, 2팩 (12,900원/무료)</span> [9]</h4>
+<div class="source_url box_line_with_shadow"><span class="text_bar">출처 : </span><a href="https://toss.shopping/t/40594131">https://toss.shopping/t/40594131</a></div>
+<div class="view_content"><p>화장지 사는데 엄청 저렴하길래 들고 왔습니다.</p><img src="https://i1.ruliweb.com/img/a.webp"></div></body></html>""",
+    "107142": """<html><body><span class="subject_text">[음식] [롯데온] 농심 빵부장 솔티꽈베기빵8개+소금빵8개+굿즈증정 (14,220원/무료)</span>
+<div class="source_url"><span class="text_bar">출처 : </span><a href="https://web.ruliweb.com/link.php?ol=https%3A%2F%2Fwww.lotteon.com%2Fp%2Fproduct%2FLO2767238184&amp;bbs=1020">https://www.lotteon.com/p/product/LO2767238184</a></div>
+<div class="view_content"><p>1봉당 880원 꼴 나옵니다</p></div></body></html>""",
+    "107150": """<html><body><span class="subject_text">[던킨도너츠] 네이버페이로 12000원 결제시 4800원 할인 외 (9/12~9/14)</span>
+<div class="source_url"><a href="https://www.dunkindonuts.co.kr/event/view?id=5443">https://www.dunkindonuts.co.kr/event/view?id=5443</a></div>
+<div class="view_content"><p>행사 매장은 링크 상단에서 확인할 수 있습니다.</p></div></body></html>""",
+}
+
+
+async def test_collect_reads_full_title_and_source_box(settings: Settings, db: Database) -> None:
+    """목록 제목은 잘려 있고 쇼핑몰 링크는 '출처' 상자에 있다 — 상세에서 전체 제목·가격·링크를 다시 읽는다."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/market/board/1020":
+            return httpx.Response(200, text=_LIST, headers={"content-type": "text/html; charset=utf-8"})
+        body = _DETAIL.get(req.url.path.rsplit("/", 1)[-1])
+        return httpx.Response(200, text=body, headers={"content-type": "text/html; charset=utf-8"}) if body else httpx.Response(404)
+
+    reg = settings.shop_registry()
+    lotteon = reg.get("lotteon")
+    assert lotteon is not None
+    lotteon.enabled, lotteon.disabled_reason = True, None
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    ctx = CollectorContext(settings=settings, http=http, db=db, coupang=None, shops=reg)
+    cfg = CollectorConfig(name="ruliweb_user", type="ruliweb", options={"board_id": "1020", "request_delay_seconds": 0})
+    products = {p.external_id: p for p in await build_collector(cfg, ctx).collect()}
+    toss = products["107141"]
+    assert toss.shop == "toss" and toss.price == 12900 and toss.url == "https://toss.shopping/t/40594131" and toss.product_id == "toss:40594131"
+    assert toss.name == "올챌린지 천연펄프 화장지 30롤, 2팩" and toss.extra["title"].endswith("(12,900원/무료)")
+    lo = products["107142"]
+    assert lo.shop == "lotteon" and lo.price == 14220 and lo.url == "https://www.lotteon.com/p/product/LO2767238184"  # 리다이렉트를 풀어 몰 주소로
+    assert lo.name == "농심 빵부장 솔티꽈베기빵8개+소금빵8개+굿즈증정"
+    ev = products["107150"]  # 모르는 몰의 가격 없는 이벤트 글은 정보 글 후보로 남긴다
+    assert ev.shop == "unknown" and ev.price == 0 and ev.url == "https://www.dunkindonuts.co.kr/event/view?id=5443"
+    assert ev.name == "네이버페이로 12000원 결제시 4800원 할인 외 (9/12~9/14)" and ev.extra["post_url"].endswith("/read/107150")  # 기간은 남긴다

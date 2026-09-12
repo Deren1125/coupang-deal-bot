@@ -23,7 +23,7 @@ from dealbot.models import Product
 from dealbot.shops import Shop, ShopRegistry, find_urls
 from dealbot.utils.retry import retry_async
 from dealbot.utils.text import parse_price
-from dealbot.utils.urls import canonical_product_url, is_short_affiliate_link
+from dealbot.utils.urls import canonical_product_url, is_short_affiliate_link, unwrap_redirect
 
 BASE_URL = "https://www.ppomppu.co.kr"
 LIST_URL = BASE_URL + "/zboard/zboard.php"
@@ -179,10 +179,10 @@ def find_shop_urls(html: str, shop: Shop | None) -> list[str]:
     soup = BeautifulSoup(html, "html.parser")
     candidates: list[str] = []
     for a in soup.find_all("a", href=True):
-        href = a["href"].strip()
+        href = unwrap_redirect(a["href"].strip())
         if href.startswith("http"):
             candidates.append(href)
-    candidates.extend(find_urls(html))
+    candidates.extend(unwrap_redirect(u) for u in find_urls(html))
 
     def external(u: str) -> bool:
         host = urlparse(u).netloc.lower()

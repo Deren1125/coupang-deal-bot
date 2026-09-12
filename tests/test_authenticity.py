@@ -38,6 +38,18 @@ def test_open_market_needs_official_marker() -> None:
     assert check_authenticity(AuthenticityConfig(enabled=False), _p("[병행수입] 뭐든", shop="gmarket")).status == "ok"
 
 
+def test_review_counts_stand_in_for_seller_checks() -> None:
+    # 오픈마켓이라도 후기가 많이 쌓인 상품은 통과
+    r = check_authenticity(CFG, _p("나이키 운동화", shop="gmarket", review_count=250))
+    assert r.status == "ok" and "후기 250건" in r.reason
+    assert check_authenticity(CFG, _p("나이키 운동화", shop="gmarket", review_count=20)).status == "unknown"
+    # 쿠팡은 판매자를 못 가리니 후기 양으로: 적으면 안 올리고, 모르면 통과
+    r = check_authenticity(CFG, _p("무선 이어폰", shop="coupang", review_count=5))
+    assert r.status == "reject" and "후기 5건뿐" in r.reason
+    assert check_authenticity(CFG, _p("무선 이어폰", shop="coupang", review_count=500)).status == "ok"
+    assert check_authenticity(CFG, _p("무선 이어폰", shop="coupang")).status == "ok"
+
+
 @register("fake_auth")
 class FakeCollector(BaseCollector):
     products: list[Product] = []

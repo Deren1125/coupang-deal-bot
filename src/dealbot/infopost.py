@@ -6,12 +6,11 @@
 
 from __future__ import annotations
 
-import base64
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -19,6 +18,7 @@ from bs4 import BeautifulSoup, Tag
 from dealbot.collectors.ppomppu import BROWSER_HEADERS, decode_html
 from dealbot.models import Deal
 from dealbot.publisher.templates import TemplateRenderer
+from dealbot.utils.urls import unwrap_redirect
 
 log = logging.getLogger(__name__)
 
@@ -57,24 +57,6 @@ class PostBody:
     @property
     def empty(self) -> bool:
         return not self.text and not self.images
-
-
-def unwrap_redirect(href: str) -> str:
-    """게시판이 외부 링크를 자기 서버로 감싼 경우(뽐뿌 s.ppomppu.co.kr?target=base64) 원래 주소를 꺼낸다."""
-    try:
-        u = urlparse(href)
-    except ValueError:
-        return href
-    if not u.netloc.lower().endswith("ppomppu.co.kr"):
-        return href
-    target = (parse_qs(u.query).get("target") or [""])[0]
-    if not target:
-        return href
-    try:
-        decoded = base64.b64decode(target + "=" * (-len(target) % 4)).decode("utf-8", "ignore").strip()
-    except (ValueError, UnicodeDecodeError):
-        return href
-    return decoded if decoded.startswith("http") else href
 
 
 def _clean_lines(raw: str) -> list[str]:

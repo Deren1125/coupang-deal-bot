@@ -135,6 +135,10 @@ class AuthenticityConfig(BaseModel):
     )
     # 오픈마켓인데 공식 표시를 못 찾았을 때: review = 관리자 확인(/ok) 후 올림 / skip = 올리지 않음 / allow = 그냥 올림
     unverified_action: Literal["review", "skip", "allow"] = "review"
+    # 후기가 이만큼 쌓인 상품은 공식 표시가 없어도 통과 (오래 팔린 정상 판매처로 봄). 0 이면 안 씀
+    trusted_reviews: int = 100
+    # 쿠팡은 판매자를 봇이 못 가리므로 후기 양으로: 후기 수를 알았는데 이보다 적으면 올리지 않음 (0 이면 안 씀, 모르면 통과)
+    coupang_min_reviews: int = 30
 
 
 class QualityConfig(BaseModel):
@@ -294,9 +298,14 @@ class BlogDigestConfig(BaseModel):
     template: str = "blog_daily.j2"
     max_items: int = 10  # 글 하나에 넣는 최대 딜 수 (점수 높은 순)
     min_items: int = 1  # 이보다 적으면 안 보냄
-    include_info: bool = True  # 정보 글(이벤트)도 넣음
+    include_info: bool = True  # 정보 글(이벤트)도 넣음 (정리된 본문이 있는 것만)
+    max_info_items: int = 3
     blog_name: str = "Deren의 아카이브"  # 도입부 "OO를 운영하고 있는 OO입니다"
     author: str = "Deren"
+    # 글마다 반드시 넣는 고지 문구 (쿠팡 파트너스 규정: 쿠팡 딜이 없는 날도 넣는다)
+    always_disclosures: list[str] = Field(
+        default_factory=lambda: ["이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."]
+    )
 
     @field_validator("time")
     @classmethod

@@ -66,7 +66,7 @@ DEFAULT_SHOPS: list[Shop] = [
         key="toss",
         name="토스쇼핑",
         aliases=["토스", "토스쇼핑", "toss"],
-        domains=["toss.im"],
+        domains=["toss.im", "toss.shopping"],
         link_mode="manual",
         disclosure=_d("토스쇼핑 쉐어링크"),
         manual_hint="토스 앱 → 상품 페이지 → 공유 → '쉐어링크 공유하기' 로 만든 링크",
@@ -205,7 +205,7 @@ class ShopRegistry:
             if pid:
                 return f"coupang:{pid}"
         elif shop_key == "toss":
-            m = re.search(r"/_m/([A-Za-z0-9_-]+)", path)
+            m = re.search(r"/(?:_m|t)/([A-Za-z0-9_-]+)", path)  # toss.im/_m/ID, toss.shopping/t/ID
             if m:
                 return f"toss:{m.group(1)}"
         elif shop_key == "naver":

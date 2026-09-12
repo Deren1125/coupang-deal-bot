@@ -197,6 +197,8 @@ deal:
   authenticity:
     enabled: true
     unverified_action: review
+    trusted_reviews: 100         # 후기가 이만큼 쌓인 상품은 공식 표시가 없어도 통과 (0 = 안 씀)
+    coupang_min_reviews: 30      # 쿠팡은 판매자를 못 가리므로 후기 양으로: 후기 수를 알았는데 이보다 적으면 안 올림 (모르면 통과, 0 = 안 씀)
     open_markets: [gmarket, auction, 11st, lotteon, ssg, aliexpress, temu, ohouse, naver, toss]
     official_markers: [공식, 브랜드관, 브랜드 스토어, 브랜드스토어, 본사, 직영, official store, official]
     reject_keywords: [병행수입, 병행 수입, 병행, 구매대행, 해외구매대행, 리퍼, 리퍼비시, 리퍼상품, 리퍼제품, 리퍼폰, 중고, 중고품, 중고상품, 벌크, 벌크포장, 전시상품, 전시품, 반품상품, 박스훼손, 짝퉁, 이미테이션, 레플리카, 스크래치]
@@ -311,9 +313,12 @@ blog_digest:
   template: blog_daily.j2
   max_items: 10                # 글 하나에 넣는 최대 딜 수 (점수 높은 순)
   min_items: 1                 # 이보다 적으면 안 보냄
-  include_info: true           # 정보 글(이벤트)도 넣음
+  include_info: true           # 정보 글(이벤트)도 넣음 (정리된 본문이 있는 것만)
+  max_info_items: 3
   blog_name: "Deren의 아카이브" # 도입부 "OO를 운영하고 있는 OO입니다"
   author: "Deren"
+  always_disclosures:          # 글마다 반드시 넣는 고지 문구 (쿠팡 딜이 없는 날도)
+    - "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
 
 # 내 채널 주소. 글 하단에 서로 연결하는 줄을 넣는다 (비우면 그 줄은 빠짐)
 channels:

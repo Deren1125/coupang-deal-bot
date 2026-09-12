@@ -772,6 +772,7 @@ class DealBot:
                     meta = None
                 if meta is not None:
                     page_text, seller = meta.text, meta.seller
+                    PageEnricher.apply(p, meta)  # 후기 수 등 빈 칸을 채워 두면 후기 양 기준에도 쓰인다
             result = check_authenticity(cfg, p, post_text=post_text, page_text=page_text, seller=seller)
         p.extra["auth"] = result.as_dict()
         self.db.update_queue_item(item.id, status=item.status, error=item.last_error, deal=deal)
@@ -854,8 +855,10 @@ class DealBot:
                 if not self._shop_allowed(p):
                     continue
                 if not self._has_shop_url(p):
-                    # 상품 링크가 없는 게시판 글(이벤트·공지) → 제휴 링크 대신 정보 글 후보
-                    if self._queue_info_post(p, now):
+                    # 상품 링크가 없는 게시판 글: 가격 없는 이벤트·공지만 정보 글 후보. 가격이 있는데 링크를 못 찾은 글은 올릴 수 없다
+                    if p.has_price:
+                        log.info("skip %s — has a price but only a board URL (no %s link found): %s", p.name[:40], p.shop, p.url)
+                    elif self._queue_info_post(p, now):
                         queued += 1
                     else:
                         log.info("skip %s — source url is not a %s page: %s", p.name[:40], p.shop, p.url)

@@ -65,10 +65,15 @@ def check_authenticity(
     if hit:
         where = "상품 페이지" if not _find(own, [hit], whole_word=True) else "제목·게시글"
         return AuthResult("reject", f"'{hit}' 표시 ({where})", seller)
+    reviews = product.review_count
+    if product.shop == "coupang" and cfg.coupang_min_reviews > 0 and reviews is not None and reviews < cfg.coupang_min_reviews:
+        return AuthResult("reject", f"후기 {reviews}건뿐 (쿠팡은 후기 {cfg.coupang_min_reviews}건 이상만)", seller)
     if product.shop not in cfg.open_markets:
         return AuthResult("ok", "공식 몰·직영 몰", seller)
     marker = _find(own, cfg.official_markers)
     if marker:
         return AuthResult("ok", f"공식 판매처 표시 '{marker}'", seller)
+    if cfg.trusted_reviews > 0 and reviews is not None and reviews >= cfg.trusted_reviews:
+        return AuthResult("ok", f"후기 {reviews:,}건 (오래 팔린 판매처)", seller)
     tail = f" (판매자: {seller})" if seller else ""
     return AuthResult("unknown", f"오픈마켓인데 공식 판매처 표시를 찾지 못함{tail}", seller)

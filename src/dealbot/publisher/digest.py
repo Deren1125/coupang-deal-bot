@@ -151,10 +151,13 @@ class BlogDigestBuilder:
             ranked = ranked[: self.cfg.max_items]
         deals_all = [self._ctx(it) for it in ranked]
         hot = [d for d in deals_all if d["kind"] != "info"]
-        infos = [d for d in deals_all if d["kind"] == "info"] if self.cfg.include_info else []
+        # 이벤트는 정리된 본문이 있는 것만 (본문 없이 제목·게시판 주소만 있는 옛 글은 뺀다), 몇 개까지만
+        infos = [d for d in deals_all if d["kind"] == "info" and d["body_lines"]] if self.cfg.include_info else []
+        if self.cfg.max_info_items > 0:
+            infos = infos[: self.cfg.max_info_items]
         if not hot and not infos:
             return Digest()
-        disclosures = list(dict.fromkeys(d["disclosure"] for d in hot if d["disclosure"]))
+        disclosures = list(dict.fromkeys([*self.cfg.always_disclosures, *(d["disclosure"] for d in hot if d["disclosure"])]))
         date_label = f"{when.month}월 {when.day}일"
         weekday = WEEKDAYS[when.weekday()]
         text = self.renderer.render(
