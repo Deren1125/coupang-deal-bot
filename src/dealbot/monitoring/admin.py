@@ -41,6 +41,7 @@ from dealbot.utils.timeutil import fmt_local, from_iso, humanize_delta, utcnow
 
 log = logging.getLogger(__name__)
 _QUEUE_REF_RE = re.compile(r"#(\d+)")
+REVIEW_MARK = "📝"  # 정보 글 확인 요청 메시지의 첫 글자 (답장 판별용)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 TELEGRAM_TEXT_LIMIT = 4096
@@ -204,6 +205,7 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("post", "직접 딜 올리기"),
     ("link", "링크 요청에 답: 만든 제휴 링크 붙이기 (/link 번호 링크)"),
     ("skip", "그 글은 올리지 않기 (/skip 번호)"),
+    ("ok", "정보 글 확인: 이대로 올리기 (/ok 번호)"),
     ("copy", "올린 글의 카카오·블로그 복붙 문구 (/copy 번호)"),
     ("test", "채널에 올라갈 글 양식 미리 보기 (샘플)"),
     ("pushtest", "휴대폰 푸시(ntfy) 연결 확인"),
@@ -391,6 +393,22 @@ class AdminNotifier:
         )
         return message_id
 
+    async def notify_info_review(self, item: QueueItem, preview: str, *, reason: str, image_count: int = 0) -> int | None:
+        """정보 글을 자동으로 올리지 않고 관리자에게 먼저 보여 준다 (요약을 못 만들었거나 확인 설정일 때)."""
+        photo = f" · 🖼 사진 {image_count}장 (첫 장을 같이 올림)" if image_count else ""
+        text = (
+            f"{REVIEW_MARK} <b>정보 글 확인 #{item.id}</b> — 이대로 올릴까요?\n"
+            f"이유: {html.escape(reason)}{photo}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"{preview}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"👉 <code>/ok {item.id}</code> 이대로 올리기 · <code>/skip {item.id}</code> 안 올리기\n"
+            f"글을 고치려면 <b>이 메시지에 답장</b>으로 본문을 새로 써 보내세요. 제목·원문 주소는 봇이 붙입니다."
+        )
+        message_id = await self.send_with_id(text)
+        await self._push("info_review", f"정보 글 확인 #{item.id}", f"{truncate(item.deal.product.name, 70)}\n{reason}", tags=["memo"])
+        return message_id
+
     async def notify_sold_out_cancel(self, item: QueueItem, via: str, notice_message_id: int | None) -> None:
         """내 링크를 기다리던 글이 품절됨: 보냈던 링크 요청 메시지를 고쳐서 헛수고를 막는다."""
         p = item.deal.product
@@ -487,6 +505,15 @@ class StatusReporter:
             rows.append({"key": s.key, "name": s.name, "enabled": s.enabled, "mode": mode, "reason": s.disabled_reason})
         return rows
 
+    def _info_summary_text(self) -> str:
+        cfg = self.settings.info_posts
+        if not cfg.enabled:
+            return "끔"
+        sm = cfg.summarizer
+        how = f"요약 자동 ({sm.model})" if sm.enabled and self.settings.secrets.has_anthropic else "요약 꺼짐 (ANTHROPIC_API_KEY 없음 → 확인 요청으로 옴)"
+        mode = {"auto": "요약되면 바로 올림", "always": "항상 확인 후 올림", "never": "확인 없이 올림"}.get(cfg.review, cfg.review)
+        return f"{how} · {mode}"
+
     def status_context(self) -> dict[str, Any]:
         now = utcnow()
         tz = self.settings.app.timezone
@@ -500,6 +527,7 @@ class StatusReporter:
         return {
             "version": __version__,
             "data_persistent": data_persistent,
+            "info_summary": self._info_summary_text(),
             "db_since": fmt_local(created, tz, "%Y-%m-%d") if created else None,
             "uptime": humanize_delta(now - self.state.started_at),
             "paused": self.state.paused,
@@ -552,7 +580,7 @@ class StatusReporter:
         counts = self.db.queue_counts()
         lines = [
             "🗂 <b>올릴 차례를 기다리는 글</b>",
-            f"차례 대기 {counts.get('pending', 0)}건 · 내 링크 대기 {counts.get('awaiting_link', 0)}건 · 실패 {counts.get('failed', 0)}건 · 시간 지나 버림 {counts.get('expired', 0)}건",
+            f"차례 대기 {counts.get('pending', 0)}건 · 내 링크 대기 {counts.get('awaiting_link', 0)}건 · 확인 대기 {counts.get('awaiting_approval', 0)}건 · 실패 {counts.get('failed', 0)}건 · 시간 지나 버림 {counts.get('expired', 0)}건",
         ]
         lines += [self._item_line(it) for it in items]
         if not items:
@@ -572,6 +600,14 @@ class StatusReporter:
             lines.append("(없음 — 토스·네이버처럼 링크를 직접 만들어야 하는 글이 생기면 여기 뜹니다)")
         else:
             lines.append("\n링크를 만들었으면 그 요청 메시지에 답장하거나 <code>/link 번호 링크</code> · 안 올리려면 <code>/skip 번호</code>")
+        reviews = self.db.awaiting_items(limit, statuses=("awaiting_approval",))
+        if reviews:
+            lines.append("")
+            lines.append(f"{REVIEW_MARK} <b>내가 확인해 줘야 하는 정보 글</b> ({len(reviews)}건)")
+            for it in reviews:
+                why = (it.last_error or "").removeprefix("needs approval: ")
+                lines.append(f"• #{it.id} {html.escape(truncate(it.deal.product.name, 50))}" + (f" · {html.escape(why)}" if why else ""))
+            lines.append("<code>/ok 번호</code> 이대로 올리기 · <code>/skip 번호</code> 안 올리기 · 확인 요청 메시지에 답장으로 글을 쓰면 그 내용으로 올라갑니다")
         return "\n".join(lines)
 
     def recent_text(self, limit: int = 10) -> str:
@@ -713,6 +749,8 @@ class BotController(Protocol):
 
     def skip_item(self, queue_id: int) -> str: ...
 
+    def approve_item(self, queue_id: int, text: str | None = None) -> str: ...
+
     async def refresh_pending_notice(self) -> None: ...
 
     async def submit_manual(self, text: str) -> str: ...
@@ -752,6 +790,7 @@ HELP_TEXT = (
     "\n<b>글 올리기·다루기</b>\n"
     "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다.\n"
     "/skip 번호 — 그 글은 올리지 않고 건너뜁니다. 품절이거나 별로일 때. 번호는 링크 요청 메시지나 /queue 에 있습니다.\n"
+    "/ok 번호 — 봇이 '정보 글 확인 #번호' 를 보내면(요약을 못 만들었거나 본문 위치가 불확실할 때) 그 글을 그대로 올립니다. 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
     "/post — 내가 찾은 딜을 직접 올립니다. 아래처럼 보내면 맨 앞 차례로 채널에 올라갑니다 (연습 모드에서는 미리보기만).\n"
     "<code>/post\n[머리글, 없으면 생략]\n상품: 상품명\n가격: 14,890원\nhttps://내가-만든-제휴-링크</code>\n"
     "/copy 번호 — 올린 글의 카카오 오픈채팅용·네이버 블로그용 복붙 문구를 다시 받습니다. 번호 없으면 마지막 글. 실제 모드에서는 올릴 때마다 자동으로 옵니다.\n"
@@ -832,6 +871,14 @@ def register_admin_handlers(
             await reply(update, "이렇게 보내주세요: <code>/skip 12</code> (번호는 /queue 나 링크 요청 메시지의 #번호)")
             return
         await reply(update, controller.skip_item(int(args[0].lstrip("#"))))
+        await controller.refresh_pending_notice()
+
+    async def cmd_ok(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args or not args[0].lstrip("#").isdigit():
+            await reply(update, "이렇게 보내주세요: <code>/ok 12</code> (번호는 '정보 글 확인 #번호' 메시지의 번호)")
+            return
+        await reply(update, controller.approve_item(int(args[0].lstrip("#"))))
         await controller.refresh_pending_notice()
 
     async def cmd_post(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -934,9 +981,14 @@ def register_admin_handlers(
             return
         urls = find_urls(msg.text)
         replied = msg.reply_to_message
-        if replied is not None and replied.text and urls:
+        if replied is not None and replied.text:
             m = _QUEUE_REF_RE.search(replied.text)
-            if m:
+            if m and replied.text.startswith(REVIEW_MARK):
+                # 정보 글 확인 요청에 답장: 답장 내용을 본문으로 삼아 올린다
+                await reply(update, controller.approve_item(int(m.group(1)), msg.text))
+                await controller.refresh_pending_notice()
+                return
+            if m and urls:
                 await reply(update, await controller.attach_link(int(m.group(1)), urls[0]))
                 await controller.refresh_pending_notice()
                 return
@@ -962,6 +1014,7 @@ def register_admin_handlers(
         ("run", cmd_run),
         ("link", cmd_link),
         ("skip", cmd_skip),
+        ("ok", cmd_ok),
         ("post", cmd_post),
         ("test", cmd_test),
         ("pushtest", cmd_pushtest),

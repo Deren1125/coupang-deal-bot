@@ -62,6 +62,7 @@ from dealbot.publisher.threads import (
 from dealbot.shops import ShopRegistry
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
+from dealbot.summarize import InfoSummarizer, Summary
 from dealbot.utils.text import truncate
 from dealbot.utils.timeutil import fmt_local, from_iso, in_time_window, local_now, to_iso, utcnow
 
@@ -135,7 +136,22 @@ class DealBot:
         self.evaluator = DealEvaluator(settings.deal)
         self.enricher = PageEnricher(self.http, timeout=settings.http.timeout_seconds)
         self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone, settings.channels.as_dict())
-        self.info = InfoPostBuilder(self.http, self.renderer, max_chars=settings.info_posts.max_chars, timeout=settings.http.timeout_seconds)
+        self.info = InfoPostBuilder(
+            self.http,
+            self.renderer,
+            max_chars=settings.info_posts.max_chars,
+            raw_chars=settings.info_posts.summarizer.raw_chars,
+            timeout=settings.http.timeout_seconds,
+        )
+        sm = settings.info_posts.summarizer
+        self.summarizer = InfoSummarizer(
+            settings.secrets.anthropic_api_key if sm.enabled else None,
+            model=sm.model,
+            max_chars=settings.info_posts.max_chars,
+            timeout=sm.timeout_seconds,
+        )
+        if settings.info_posts.enabled and not self.summarizer.configured:
+            log.warning("ANTHROPIC_API_KEY not set — info posts will wait for admin approval (/ok) instead of being summarized")
         self._pending_notice_ready = False
         self.rate_limiter = RateLimiter(self.db, settings.publish)
 
@@ -308,6 +324,8 @@ class DealBot:
         item = self.db.get_queue_item(queue_id)
         if item is None:
             return f"#{queue_id} 번 글이 없습니다. /queue 나 /pending 에서 번호를 확인해 주세요."
+        if item.status == "awaiting_approval":
+            return f"#{queue_id} 번은 정보 글이라 링크가 아니라 확인이 필요합니다: <code>/ok {queue_id}</code> 또는 <code>/skip {queue_id}</code>"
         if item.status not in ("awaiting_link", "pending", "failed"):
             return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없습니다."
         if not url.startswith("http"):
@@ -324,6 +342,23 @@ class DealBot:
             return f"#{queue_id} 번은 이미 채널에 올라갔습니다."
         self.db.update_queue_item(queue_id, status="skipped", error="skipped by admin")
         return f"⏭ #{queue_id} 번은 건너뛰었습니다. 올리지 않습니다."
+
+    def approve_item(self, queue_id: int, text: str | None = None) -> str:
+        """정보 글 확인 요청에 대한 답: 그대로(또는 관리자가 고쳐 쓴 본문으로) 올릴 차례에 넣는다."""
+        item = self.db.get_queue_item(queue_id)
+        if item is None:
+            return f"#{queue_id} 번 글이 없습니다."
+        if item.status != "awaiting_approval":
+            return f"#{queue_id} 번은 확인을 기다리는 정보 글이 아닙니다 (지금 '{item.status}' 상태)."
+        deal = item.deal
+        draft = dict(deal.product.extra.get("info_draft") or {})
+        edited = bool(text and text.strip())
+        if edited:
+            draft["text"] = str(text).strip()
+        deal.product.extra["info_draft"] = draft
+        self.db.update_queue_item(queue_id, status="pending", error=None, deal=deal, reset_created=True)
+        self.db.log_event("INFO", "info_review", f"#{queue_id} 관리자 확인" + (" (본문 고쳐 씀)" if edited else ""))
+        return f"✅ #{queue_id} 번을 올릴 차례에 넣었습니다. 곧 채널에 올라갑니다." + (" 보내주신 글로 바꿨습니다." if edited else "")
 
     async def submit_manual(self, text: str) -> str:
         """관리자가 직접 보낸 딜을 대기열 맨 앞에 넣는다 (링크는 관리자가 만든 제휴 링크로 간주)."""
@@ -589,7 +624,30 @@ class DealBot:
         p = deal.product
         pid = p.product_id
         post_url = str(p.extra.get("post_url") or p.url)
-        body = await self.info.fetch(post_url) or PostBody()
+        draft = p.extra.get("info_draft")
+        if isinstance(draft, dict):
+            # 관리자가 확인(/ok)해 준 글: 다시 읽거나 요약하지 않고 그대로 올린다
+            body = PostBody(text=str(draft.get("text") or ""), images=list(draft.get("images") or []), links=list(draft.get("links") or []))
+        else:
+            body = await self.info.fetch(post_url)
+            if body is None or body.empty:
+                self.db.update_queue_item(item.id, status="skipped", error="post body not readable")
+                self.db.log_event("INFO", "info_skip", f"{pid} 본문을 읽지 못해 건너뜀: {post_url}")
+                log.info("info post #%d skipped — could not read body (%s)", item.id, post_url)
+                return True
+            summary = await self.summarizer.summarize(
+                title=p.name, source=str(p.extra.get("source_label") or p.source), text=body.raw or body.text, links=body.links
+            )
+            if summary.skip:
+                self.db.update_queue_item(item.id, status="skipped", error="summarizer: not worth posting")
+                self.db.log_event("INFO", "info_skip", f"{pid} 요약기가 올릴 내용이 아니라고 판단: {p.name[:60]}")
+                log.info("info post #%d skipped — summarizer says not worth posting", item.id)
+                return True
+            if summary.text:
+                body.text = summary.text
+            reason = self._info_review_reason(cfg.review, body, summary)
+            if reason:
+                return await self._request_info_review(item, deal, body, reason)
         text = self.info.render(cfg.template, deal, body, autoescape=True)
         photo: bytes | None = None
         if cfg.send_photo and body.images and not self.publisher.dry_run:
@@ -629,6 +687,33 @@ class DealBot:
                 await self.notifier.send(block.as_telegram_html(), silent=True)
             except Exception as e:  # noqa: BLE001
                 log.warning("kakao info copy failed: %s", e)
+        return True
+
+    @staticmethod
+    def _info_review_reason(review: str, body: PostBody, summary: Summary) -> str | None:
+        """정보 글을 바로 올리지 않고 관리자 확인을 받아야 하면 그 이유, 아니면 None."""
+        if review == "never":
+            return None
+        if review == "always":
+            return "설정이 '항상 확인' (info_posts.review: always)"
+        if not summary.text:
+            return summary.error or "요약을 만들지 못함"
+        if not body.confident:
+            return "본문 위치를 확실히 찾지 못해 추정으로 정리함"
+        return None
+
+    async def _request_info_review(self, item: QueueItem, deal: Deal, body: PostBody, reason: str) -> bool:
+        """정보 글을 바로 올리지 않고 관리자 확인(/ok)을 받는다. 정리한 본문은 대기열 항목에 같이 저장해 둔다."""
+        p = deal.product
+        p.extra["info_draft"] = {"text": body.text, "images": body.images, "links": body.links}
+        self.db.update_queue_item(item.id, status="awaiting_approval", error=f"needs approval: {reason}", deal=deal)
+        preview = self.info.render(self.settings.info_posts.template, deal, body, autoescape=True)
+        notice_id = await self.notifier.notify_info_review(item, preview, reason=reason, image_count=len(body.images))
+        if notice_id:
+            self.db.kv_set(f"review_notice:{item.id}", str(notice_id))
+        self.db.log_event("INFO", "info_review", f"{p.product_id} 확인 대기: {reason}")
+        log.info("info post #%d awaiting admin approval (%s)", item.id, reason)
+        await self.refresh_pending_notice()
         return True
 
     async def refresh_pending_notice(self) -> None:

@@ -10,7 +10,7 @@ import dataclasses
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -232,6 +232,15 @@ class LinksConfig(BaseModel):
     provider_error_cooldown_hours: float = 6
 
 
+class InfoSummarizerConfig(BaseModel):
+    """정보 글 본문을 Claude API 로 채널 양식에 맞게 짧게 다시 쓴다. ANTHROPIC_API_KEY 가 있어야 돈다."""
+
+    enabled: bool = True
+    model: str = "claude-opus-5"
+    raw_chars: int = 4000  # 요약기에 넘기는 원문 최대 길이
+    timeout_seconds: float = 60
+
+
 class InfoPostsConfig(BaseModel):
     """정보 글: 상품 링크가 없는 게시판 글(이벤트·공지)을 본문·사진만 정리해 올린다. 수익 링크 없음."""
 
@@ -243,6 +252,10 @@ class InfoPostsConfig(BaseModel):
     template: str = "info_post.j2"  # 텔레그램
     kakao_template: str = "info_kakao.j2"  # 관리자 챗으로 보내는 복붙 문구
     threads_template: str = "info_threads.j2"
+    # auto: 요약이 만들어지면 바로 올리고, 요약을 못 만들거나 본문 위치가 불확실하면 관리자 확인(/ok) 후 올림
+    # always: 정보 글은 항상 관리자 확인 후 올림 / never: 확인 없이 정리한 원문을 그대로 올림 (비추천)
+    review: Literal["auto", "always", "never"] = "auto"
+    summarizer: InfoSummarizerConfig = Field(default_factory=InfoSummarizerConfig)
 
 
 class ChannelsConfig(BaseModel):
@@ -260,7 +273,7 @@ class PushConfig(BaseModel):
     """휴대폰 푸시 (텔레그램과 별개). provider: auto | ntfy | pushover | none"""
 
     provider: str = "auto"
-    events: list[str] = Field(default_factory=lambda: ["manual_link"])  # manual_link | publish_failed | error | daily_summary | startup
+    events: list[str] = Field(default_factory=lambda: ["manual_link", "info_review"])  # manual_link | info_review | publish_failed | error | daily_summary | startup
     ntfy_url: str = "https://ntfy.sh"
 
 
@@ -329,6 +342,11 @@ class Secrets(BaseModel):
     ntfy_token: str | None = None
     pushover_user_key: str | None = None
     pushover_app_token: str | None = None
+    anthropic_api_key: str | None = None  # 정보 글 요약 (Claude API)
+
+    @property
+    def has_anthropic(self) -> bool:
+        return bool(self.anthropic_api_key)
 
     @property
     def has_threads_app(self) -> bool:
@@ -490,6 +508,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         ntfy_token=_env_str("NTFY_TOKEN"),
         pushover_user_key=_env_str("PUSHOVER_USER_KEY"),
         pushover_app_token=_env_str("PUSHOVER_APP_TOKEN"),
+        anthropic_api_key=_env_str("ANTHROPIC_API_KEY"),
     )
 
     settings = Settings(

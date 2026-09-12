@@ -69,8 +69,9 @@ CREATE TABLE IF NOT EXISTS deal_queue (
     updated_at     TEXT NOT NULL
 );
 DROP INDEX IF EXISTS idx_queue_pending_product;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_open_product
-    ON deal_queue(product_id) WHERE status IN ('pending', 'awaiting_link');
+DROP INDEX IF EXISTS idx_queue_open_product;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_open_product_v2
+    ON deal_queue(product_id) WHERE status IN ('pending', 'awaiting_link', 'awaiting_approval');
 CREATE INDEX IF NOT EXISTS idx_queue_status ON deal_queue(status, score DESC, created_at);
 
 CREATE TABLE IF NOT EXISTS source_items (
@@ -380,7 +381,7 @@ class Database:
 
     # -------------------------------------------------------------- queue
     def enqueue(self, deal: Deal, *, score: float, now: datetime | None = None) -> bool:
-        """대기열에 추가. 이미 열려 있으면(pending/awaiting_link) False."""
+        """대기열에 추가. 이미 열려 있으면(pending/awaiting_link/awaiting_approval) False."""
         now = now or utcnow()
         ts = to_iso(now)
         payload = json.dumps(deal.to_dict(), ensure_ascii=False)
@@ -432,7 +433,9 @@ class Database:
         increment_attempts: bool = False,
         deal: Deal | None = None,
         now: datetime | None = None,
+        reset_created: bool = False,
     ) -> None:
+        """reset_created: 관리자가 링크를 붙이거나 승인해서 다시 pending 이 될 때 유효 시간을 새로 센다."""
         now = now or utcnow()
         with self._tx() as c:
             if deal is not None:
@@ -440,6 +443,8 @@ class Database:
                     "UPDATE deal_queue SET payload = ? WHERE id = ?",
                     (json.dumps(deal.to_dict(), ensure_ascii=False), item_id),
                 )
+            if reset_created:
+                c.execute("UPDATE deal_queue SET created_at = ? WHERE id = ?", (to_iso(now), item_id))
             c.execute(
                 """
                 UPDATE deal_queue
@@ -474,9 +479,11 @@ class Database:
         )
         return dict(row) if row else None
 
-    def awaiting_items(self, limit: int = 20) -> list[QueueItem]:
+    def awaiting_items(self, limit: int = 20, *, statuses: tuple[str, ...] = ("awaiting_link",)) -> list[QueueItem]:
+        """관리자 손을 기다리는 항목: 기본은 내 링크 대기, statuses=("awaiting_approval",) 이면 정보 글 확인 대기."""
+        marks = ",".join("?" * len(statuses))
         rows = self._q(
-            "SELECT * FROM deal_queue WHERE status = 'awaiting_link' ORDER BY created_at ASC LIMIT ?", (limit,)
+            f"SELECT * FROM deal_queue WHERE status IN ({marks}) ORDER BY created_at ASC LIMIT ?", (*statuses, limit)
         )
         return [self._row_to_queue_item(r) for r in rows]
 
@@ -486,7 +493,7 @@ class Database:
         if item is None:
             return None
         item.deal.affiliate_url = url
-        self.update_queue_item(item_id, status="pending", error=None, deal=item.deal, now=now)
+        self.update_queue_item(item_id, status="pending", error=None, deal=item.deal, now=now, reset_created=True)
         return self.get_queue_item(item_id)
 
     def expire_queue(
@@ -505,7 +512,8 @@ class Database:
             n = cur.rowcount
             if awaiting_older_than is not None:
                 cur2 = self._conn.execute(
-                    "UPDATE deal_queue SET status = 'expired', updated_at = ? WHERE status = 'awaiting_link' AND created_at < ?",
+                    "UPDATE deal_queue SET status = 'expired', updated_at = ? "
+                    "WHERE status IN ('awaiting_link', 'awaiting_approval') AND created_at < ?",
                     (to_iso(now), to_iso(awaiting_older_than)),
                 )
                 n += cur2.rowcount

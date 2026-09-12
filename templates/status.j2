@@ -43,7 +43,10 @@
 {% endif %}
 
 📤 <b>{% if dry_run %}미리보기로 보낸 글{% else %}채널에 올린 글{% endif %}</b> 최근 1시간 {{ rate.posts_hour }}건 (최대 {{ rate.max_hour }}) · 오늘 {{ rate.posts_day }}건 (최대 {{ rate.max_day }}){% if rate.last_post_at %} · 마지막 {{ rate.last_post_at | local }}{% endif +%}
-🗂 <b>기다리는 글</b> 발행 차례 {{ queue.get('pending', 0) }}건 · 내 링크 기다림 {{ queue.get('awaiting_link', 0) }}건 · 실패 {{ queue.get('failed', 0) }}건 · 시간 지나 버림 {{ queue.get('expired', 0) }}건
+🗂 <b>기다리는 글</b> 발행 차례 {{ queue.get('pending', 0) }}건 · 내 링크 기다림 {{ queue.get('awaiting_link', 0) }}건 · 확인 기다림 {{ queue.get('awaiting_approval', 0) }}건 · 실패 {{ queue.get('failed', 0) }}건 · 시간 지나 버림 {{ queue.get('expired', 0) }}건
+{% if info_summary is defined and info_summary %}
+📝 <b>정보 글</b> {{ info_summary }}
+{% endif %}
 🗄 지금까지 본 상품 {{ products }}개 · 가격 기록 {{ price_points }}건 · DB {{ db_mb }}MB{% if db_since is defined and db_since %} · 기록 시작 {{ db_since }}{% endif +%}
 {% if data_persistent is defined and not data_persistent %}
 ⚠️ 데이터 볼륨이 연결되지 않았습니다 → 재배포하면 기록·연결 정보가 사라집니다 (Railway → Settings → Volumes → /data)

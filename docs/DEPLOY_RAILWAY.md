@@ -59,7 +59,7 @@ Railway 빌더가 이미지를 못 만드는 경우가 있습니다(빌드가 �
    DEALBOT_DATA_DIR=/data
    DEALBOT_DRY_RUN=true
    ```
-   승인 후 추가할 것: `COUPANG_ACCESS_KEY`, `COUPANG_SECRET_KEY`, `LINKPRICE_AFFILIATE_ID`, `THREADS_APP_ID`, `THREADS_APP_SECRET`.
+   승인 후 추가할 것: `COUPANG_ACCESS_KEY`, `COUPANG_SECRET_KEY`, `LINKPRICE_AFFILIATE_ID`, `THREADS_APP_ID`, `THREADS_APP_SECRET`, `ANTHROPIC_API_KEY`(정보 글 요약).
    네이버 브라우저 자동화를 켤 때만 `WITH_BROWSER=1` 도 추가(이미지에 크로미움 포함).
 5. **Volume 추가 (중요)**: 서비스 → Settings → Volumes → **Add Volume** → Mount path `/data`.
    볼륨이 없으면 재배포 때마다 SQLite 가격 이력이 사라집니다.
