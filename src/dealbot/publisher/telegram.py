@@ -80,17 +80,29 @@ class TelegramPublisher:
     async def publish(self, deal: Deal, *, silent: bool = False) -> PublishResult:
         """silent=True 면 구독자에게 알림 없이 올린다 (야간 무음 시간대)."""
         text = self.render(deal)
+        image = deal.product.image_url
+        return await self.publish_raw(text, photo=image if self.send_photo else None, preview_url=image, silent=silent)
+
+    async def publish_raw(
+        self,
+        text: str,
+        *,
+        photo: bytes | str | None = None,
+        preview_url: str | None = None,
+        silent: bool = False,
+    ) -> PublishResult:
+        """완성된 HTML 본문을 채널에 올린다. photo 는 URL 또는 봇이 받아 둔 사진 바이트."""
         if self.dry_run:
             log.info("[DRY-RUN] would publish to %s:\n%s", self.channel_id, text)
             return PublishResult(ok=True, dry_run=True)
 
         assert self.bot is not None and self.channel_id is not None
-        image = deal.product.image_url
+        image = preview_url
         try:
-            if self.send_photo and image and len(text) <= CAPTION_LIMIT:
+            if photo and len(text) <= CAPTION_LIMIT:
                 try:
                     msg = await self.bot.send_photo(
-                        chat_id=self.channel_id, photo=image, caption=text, parse_mode=ParseMode.HTML, disable_notification=silent
+                        chat_id=self.channel_id, photo=photo, caption=text, parse_mode=ParseMode.HTML, disable_notification=silent
                     )
                     return PublishResult(ok=True, message_id=msg.message_id)
                 except BadRequest as e:

@@ -254,6 +254,23 @@ class ThreadsPublisher:
         shop = self.registry.get(deal.product.shop)
         return self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)
 
+    async def publish_text(self, text: str, image_url: str | None = None) -> PublishResult:
+        """완성된 평문 한 글(답글 없음). 정보 글 등에 씀."""
+        if not self.enabled:
+            return PublishResult(ok=False, error="threads disabled")
+        text = text[:TEXT_LIMIT]
+        if self.dry_run:
+            log.info("[DRY-RUN] would post to threads:\n%s", text)
+            return PublishResult(ok=True, dry_run=True)
+        token = await self.ensure_fresh()
+        if token is None:
+            return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
+        try:
+            post_id = await self.client.post(token, text, image_url)
+        except ThreadsError as e:
+            return PublishResult(ok=False, error=str(e))
+        return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None)
+
     async def publish(self, deal: Deal) -> PublishResult:
         if not self.enabled:
             return PublishResult(ok=False, error="threads disabled")

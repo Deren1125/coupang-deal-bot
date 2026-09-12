@@ -353,8 +353,14 @@ class Database:
                 ),
             )
 
-    def count_posts_since(self, since: datetime) -> int:
-        row = self._one("SELECT COUNT(*) AS c FROM posts WHERE posted_at >= ?", (to_iso(since),))
+    def count_posts_since(self, since: datetime, *, product_prefix: str | None = None) -> int:
+        if product_prefix:
+            row = self._one(
+                "SELECT COUNT(*) AS c FROM posts WHERE posted_at >= ? AND product_id LIKE ? AND dry_run = 0",
+                (to_iso(since), product_prefix.replace("%", "") + "%"),
+            )
+        else:
+            row = self._one("SELECT COUNT(*) AS c FROM posts WHERE posted_at >= ?", (to_iso(since),))
         return int(row["c"]) if row else 0
 
     def last_post_time(self) -> datetime | None:

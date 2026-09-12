@@ -268,6 +268,17 @@ links:
   resolve_short_links: true
   provider_error_cooldown_hours: 12  # 링크프라이스 링크 생성 실패한 몰(승인 전 머천트 등)은 이 시간 동안 건너뜀 (알림도 그때 1번). 0 = 매번 시도
 
+# 정보 글: 상품 링크가 없는 게시판 글(이벤트·결제 할인 공지 등)을 본문·사진만 정리해 올림. 수익 링크는 없음
+info_posts:
+  enabled: true
+  min_recommend: 5             # 커뮤니티 추천 수가 이 값 이상인 글만
+  max_per_day: 10
+  max_chars: 500               # 본문 정리 길이
+  send_photo: true             # 원문에 사진이 있으면 봇이 받아서 같이 올림
+  template: info_post.j2       # 텔레그램 양식
+  kakao_template: info_kakao.j2
+  threads_template: info_threads.j2
+
 # 내 채널 주소. 글 하단에 서로 연결하는 줄을 넣는다 (비우면 그 줄은 빠짐)
 channels:
   telegram_url: "https://t.me/hot_deal_and_info"

@@ -162,6 +162,7 @@ async def test_linkprice_failure_puts_shop_on_cooldown(bot: DealBot) -> None:
 
 
 async def test_board_only_urls_are_not_queued(bot: DealBot) -> None:
+    bot.settings.info_posts.enabled = False  # 정보 글 기능은 별도 테스트
     FakeCollector.products = [
         Product(source="fake", product_id="toss:board", shop="toss", name="토스 이벤트 글", price=4800, url="https://bbs.ruliweb.com/market/board/1020/read/107150", recommend_count=9),
         Product(source="fake", product_id="toss:real", shop="toss", name="토스 상품", price=12900, url="https://toss.im/_m/ABC", recommend_count=9),

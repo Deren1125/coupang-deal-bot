@@ -1,0 +1,20 @@
+{#
+  정보 글 — 카카오톡 오픈채팅 복붙용 (평문). 사진은 원문에서 저장해 같이 올리면 됩니다.
+#}
+📢 {{ product.name }}
+{% if product.has_price %}
+💰 {{ product.price | won }}
+{% endif %}
+{% if body %}
+
+{{ body }}
+{% endif %}
+{% if links %}
+
+🔗 {{ links[0] }}
+{% endif %}
+
+원문: {{ source_url }}
+{% if channels.telegram_url %}
+📲 실시간 전체 딜(텔레그램): {{ channels.telegram_url }}
+{% endif %}

@@ -136,6 +136,7 @@ COLLECTOR_LABELS = {
 
 _REASON_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^few_reviews<(\d+)$"), "후기 {0}개 미만이라 제외"),
+    (re.compile(r"^info_post$"), "정보 글(상품 링크 없는 게시판 글)"),
     (re.compile(r"^interest:recommend>=(\d+)$"), "관심도 통과(추천 {0}개 이상)"),
     (re.compile(r"^interest:comments>=(\d+)$"), "관심도 통과(댓글 {0}개 이상)"),
     (re.compile(r"^interest:views>=(\d+)$"), "관심도 통과(조회 {0}회 이상)"),
@@ -294,6 +295,18 @@ class AdminNotifier:
             return True
         except TelegramError as e:
             log.warning("admin edit failed (message %s): %s", message_id, e)
+            return False
+
+    async def pin(self, message_id: int) -> bool:
+        """관리자 챗 맨 위에 고정한다 (예: 내 링크 기다리는 글 목록)."""
+        if not self.enabled:
+            return False
+        assert self.bot is not None
+        try:
+            await self.bot.pin_chat_message(chat_id=self.chat_id, message_id=message_id, disable_notification=True)
+            return True
+        except TelegramError as e:
+            log.warning("admin pin failed (message %s): %s", message_id, e)
             return False
 
     def source_label(self, source: str) -> str:
@@ -550,7 +563,7 @@ class StatusReporter:
 
     def pending_text(self, limit: int = 15) -> str:
         items = self.db.awaiting_items(limit)
-        lines = ["🔗 <b>내가 링크를 만들어 줘야 하는 글</b>"]
+        lines = [f"🔗 <b>내가 링크를 만들어 줘야 하는 글</b> ({len(items)}건)" if items else "🔗 <b>내가 링크를 만들어 줘야 하는 글</b>: 지금은 없습니다"]
         for it in items:
             p = it.deal.product
             lines.append(self._item_line(it))
@@ -700,6 +713,8 @@ class BotController(Protocol):
 
     def skip_item(self, queue_id: int) -> str: ...
 
+    async def refresh_pending_notice(self) -> None: ...
+
     async def submit_manual(self, text: str) -> str: ...
 
     async def test_post(self) -> str: ...
@@ -809,6 +824,7 @@ def register_admin_handlers(
             await reply(update, "이렇게 보내주세요: <code>/link 12 https://...</code> (번호는 링크 요청 메시지의 #번호)")
             return
         await reply(update, await controller.attach_link(int(args[0].lstrip("#")), args[1]))
+        await controller.refresh_pending_notice()
 
     async def cmd_skip(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
@@ -816,6 +832,7 @@ def register_admin_handlers(
             await reply(update, "이렇게 보내주세요: <code>/skip 12</code> (번호는 /queue 나 링크 요청 메시지의 #번호)")
             return
         await reply(update, controller.skip_item(int(args[0].lstrip("#"))))
+        await controller.refresh_pending_notice()
 
     async def cmd_post(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         text = update.effective_message.text if update.effective_message else ""
@@ -921,6 +938,7 @@ def register_admin_handlers(
             m = _QUEUE_REF_RE.search(replied.text)
             if m:
                 await reply(update, await controller.attach_link(int(m.group(1)), urls[0]))
+                await controller.refresh_pending_notice()
                 return
         if urls:
             await reply(update, await controller.submit_manual(msg.text))

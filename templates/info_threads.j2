@@ -1,0 +1,16 @@
+{#
+  정보 글 — 스레드용 (500자 제한, 평문). 짧게: 제목 + 핵심 본문 + 원문.
+#}
+📢 {{ product.name }}
+{% if product.has_price %}
+{{ product.price | won }}
+{% endif %}
+{% if body %}
+
+{{ body[:260] }}{% if body | length > 260 %}…{% endif +%}
+{% endif %}
+
+원문 👉 {{ source_url }}
+{% if channels.telegram_url %}
+실시간 전체 딜은 {{ channels.telegram_url }}
+{% endif %}

@@ -1,0 +1,22 @@
+{#
+  정보 글 (텔레그램, HTML). 상품 링크가 없는 이벤트·공지 글을 본문만 정리해 올린다. 수익 링크 없음.
+  변수: product (name, price, has_price, shop, source), body (정리된 본문, 비어 있을 수 있음),
+        images (사진 URL 목록), links (본문 외부 링크), source_url (원문 글 주소), channels
+#}
+📢 <b>{{ product.name }}</b>
+{% if product.has_price %}
+💰 {{ product.price | won }}
+{% endif %}
+{% if body %}
+
+{{ body }}
+{% endif %}
+{% if links %}
+
+🔗 {{ links[0] }}
+{% endif %}
+
+원문: {{ source_url }}
+{% if channels.kakao_openchat_url %}
+💬 카톡 오픈채팅: {{ channels.kakao_openchat_url }}
+{% endif %}

@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import logging
 import traceback
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -25,6 +27,7 @@ from dealbot.collectors import (
 from dealbot.config import Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient
 from dealbot.enrich import PageEnricher
+from dealbot.infopost import InfoPostBuilder, PostBody
 from dealbot.links import (
     CoupangDeeplinkProvider,
     LinkConversionError,
@@ -45,7 +48,7 @@ from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
-from dealbot.publisher.copyblocks import CopyBlockBuilder
+from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
@@ -132,6 +135,8 @@ class DealBot:
         self.evaluator = DealEvaluator(settings.deal)
         self.enricher = PageEnricher(self.http, timeout=settings.http.timeout_seconds)
         self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone, settings.channels.as_dict())
+        self.info = InfoPostBuilder(self.http, self.renderer, max_chars=settings.info_posts.max_chars, timeout=settings.http.timeout_seconds)
+        self._pending_notice_ready = False
         self.rate_limiter = RateLimiter(self.db, settings.publish)
 
         # ---- 텔레그램
@@ -558,6 +563,92 @@ class DealBot:
             return True
         return shop.matches_url(product.url)
 
+    def _queue_info_post(self, p: Product, now: Any) -> bool:
+        """정보 글 후보를 대기열에 넣는다: 게시판 글이고 추천이 충분하며 오늘 상한을 안 넘겼을 때."""
+        cfg = self.settings.info_posts
+        post_url = p.extra.get("post_url")
+        if not cfg.enabled or not post_url:
+            return False
+        rec = p.recommend_count or 0
+        if rec < cfg.min_recommend:
+            return False
+        day_start = local_now(self.settings.app.timezone).replace(hour=0, minute=0, second=0, microsecond=0)
+        if cfg.max_per_day > 0 and self.db.count_posts_since(day_start, product_prefix="info:") >= cfg.max_per_day:
+            log.info("info post daily cap reached — skip %s", p.name[:40])
+            return False
+        key = p.external_id or ShopRegistry.product_key(p.shop, p.url).split(":", 1)[-1]
+        info = replace(p, product_id=f"info:{p.source}:{key}", deal_kind="info", url=str(post_url), affiliate_url=None)
+        if self._posted_recently(info.product_id, now):
+            return False
+        verdict = DealVerdict(is_deal=True, reasons=["info_post", f"recommend>={cfg.min_recommend}"], score=float(min(rec, 100)))
+        return self.db.enqueue(Deal(product=info, verdict=verdict, detected_at=now), score=verdict.score, now=now)
+
+    async def _publish_info(self, item: QueueItem, deal: Deal) -> bool:
+        """정보 글 발행: 게시판 글을 다시 읽어 본문·사진을 정리해 채널에 올린다. 링크 변환 없음."""
+        cfg = self.settings.info_posts
+        p = deal.product
+        pid = p.product_id
+        post_url = str(p.extra.get("post_url") or p.url)
+        body = await self.info.fetch(post_url) or PostBody()
+        text = self.info.render(cfg.template, deal, body, autoescape=True)
+        photo: bytes | None = None
+        if cfg.send_photo and body.images and not self.publisher.dry_run:
+            photo = await self.info.download_image(body.images[0], referer=post_url)
+        silent = in_time_window(local_now(self.settings.app.timezone), self.settings.publish.quiet_hours)
+        result = await self.publisher.publish_raw(text, photo=photo, silent=silent)
+        if not result.ok:
+            await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
+            return True
+        self.db.record_post(
+            deal,
+            channel_id=str(self.publisher.channel_id) if self.publisher.channel_id is not None else None,
+            message_id=result.message_id,
+            dry_run=result.dry_run,
+            now=utcnow(),
+        )
+        self.db.update_queue_item(item.id, status="published", deal=deal)
+        self.db.log_event("INFO", "publish", f"{pid} [info] {p.name[:60]}")
+        log.info("published info post [%s] %s (%s)", p.source, p.name[:50], "dry-run" if result.dry_run else result.message_id)
+        if result.dry_run:
+            await self.notifier.notify_published(deal, result, preview=text)
+            return True
+        await self.notifier.notify_published(deal, result)
+        # 스레드: 별도 양식으로 한 글
+        if self.settings.threads.enabled and self.threads.configured:
+            try:
+                tr = await self.threads.publish_text(self.info.render(cfg.threads_template, deal, body, autoescape=False), body.images[0] if body.images else None)
+                if not tr.ok:
+                    log.warning("threads info post failed: %s", tr.error)
+            except Exception as e:  # noqa: BLE001
+                log.warning("threads info post error: %s", e)
+        # 카톡: 복붙 문구
+        if self.copy_blocks.enabled:
+            try:
+                kakao = self.info.render(cfg.kakao_template, deal, body, autoescape=False)
+                block = CopyBlock(key="kakao", name="카카오 오픈채팅", text=kakao)
+                await self.notifier.send(block.as_telegram_html(), silent=True)
+            except Exception as e:  # noqa: BLE001
+                log.warning("kakao info copy failed: %s", e)
+        return True
+
+    async def refresh_pending_notice(self) -> None:
+        """관리자 챗 맨 위에 고정해 두는 '내 링크 기다리는 글' 목록을 최신으로 고친다."""
+        if not self.notifier.enabled:
+            return
+        text = "📌 " + self.reporter.pending_text()
+        digest = hashlib.sha1(text.encode()).hexdigest()
+        if self.db.kv_get("pending_notice_hash") == digest and self.db.kv_get("pending_notice_id"):
+            return
+        mid = self.db.kv_get("pending_notice_id")
+        if mid and await self.notifier.edit(int(mid), text):
+            self.db.kv_set("pending_notice_hash", digest)
+            return
+        new_id = await self.notifier.send_with_id(text, silent=True)
+        if new_id:
+            self.db.kv_set("pending_notice_id", str(new_id))
+            self.db.kv_set("pending_notice_hash", digest)
+            await self.notifier.pin(new_id)
+
     async def run_collector(self, collector: BaseCollector) -> dict[str, Any]:
         """수집기 1회 실행: 수집 → 가격 이력 저장 → 판정 → 대기열 등록."""
         name = collector.name
@@ -579,11 +670,20 @@ class DealBot:
                 if not self._shop_allowed(p):
                     continue
                 if not self._has_shop_url(p):
-                    log.info("skip %s — source url is not a %s page: %s", p.name[:40], p.shop, p.url)
+                    # 상품 링크가 없는 게시판 글(이벤트·공지) → 제휴 링크 대신 정보 글 후보
+                    if self._queue_info_post(p, now):
+                        queued += 1
+                    else:
+                        log.info("skip %s — source url is not a %s page: %s", p.name[:40], p.shop, p.url)
                     continue
                 if self._should_enrich(p) and enriched < cfg.deal.enrich.max_per_run:
                     enriched += 1
                     await self._enrich(p)
+                if not p.has_price and not cfg.deal.accept_coupons_and_events:
+                    # 가격 없는 글(쿠폰·이벤트)은 특가 판정을 못 하니 정보 글로만
+                    if self._queue_info_post(p, now):
+                        queued += 1
+                    continue
                 stats = self.db.price_stats(p.product_id, cfg.deal.history_days, now)
                 verdict = self.evaluator.evaluate(p, stats)
                 if p.has_price and self._should_record(p.product_id, now):
@@ -645,6 +745,7 @@ class DealBot:
             self.db.update_queue_item(item.id, status="expired", error=f"sold out ({via})")
             out["cancelled"].append(item.id)
             if item.status == "awaiting_link":
+                await self.refresh_pending_notice()
                 notice = self.db.kv_get(f"link_notice:{item.id}")
                 await self.notifier.notify_sold_out_cancel(item, via, int(notice) if notice else None)
             log.info("sold out (%s): queue #%d dropped — %s", via, item.id, product.name[:40])
@@ -782,7 +883,7 @@ class DealBot:
         except Exception as e:  # noqa: BLE001
             return "fail", f"{type(e).__name__}: {e}"
 
-    def _expire_queue(self, now: Any) -> None:
+    def _expire_queue(self, now: Any) -> int:
         cfg = self.settings.publish
         expired = self.db.expire_queue(
             now - timedelta(hours=cfg.queue_ttl_hours),
@@ -791,12 +892,16 @@ class DealBot:
         )
         if expired:
             log.info("expired %d stale queue items", expired)
+        return expired
 
     async def process_queue_once(self) -> bool:
         """대기열에서 1건 발행 시도. 무언가 처리했으면 True."""
         cfg = self.settings.publish
         now = utcnow()
-        self._expire_queue(now)
+        expired = self._expire_queue(now)
+        if expired or not self._pending_notice_ready:
+            self._pending_notice_ready = True
+            await self.refresh_pending_notice()
 
         if self.state.paused or not cfg.enabled:
             return False
@@ -812,6 +917,8 @@ class DealBot:
         if self._posted_recently(pid, now):
             self.db.update_queue_item(item.id, status="skipped", error="already posted")
             return True
+        if deal.product.deal_kind == "info":
+            return await self._publish_info(item, deal)
 
         so = self.settings.deal.sold_out
         state, err = await self._ensure_link(item)
@@ -836,6 +943,7 @@ class DealBot:
                 if notice_id:
                     self.db.kv_set(f"link_notice:{item.id}", str(notice_id))
             log.info("queue #%d awaiting manual link (%s)", item.id, err)
+            await self.refresh_pending_notice()
             return True
         if state == "skip":
             self.db.update_queue_item(item.id, status="skipped", error=err)

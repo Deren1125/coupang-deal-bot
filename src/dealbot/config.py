@@ -232,6 +232,19 @@ class LinksConfig(BaseModel):
     provider_error_cooldown_hours: float = 6
 
 
+class InfoPostsConfig(BaseModel):
+    """정보 글: 상품 링크가 없는 게시판 글(이벤트·공지)을 본문·사진만 정리해 올린다. 수익 링크 없음."""
+
+    enabled: bool = True
+    min_recommend: int = 5  # 커뮤니티 추천 수가 이 값 이상인 글만
+    max_per_day: int = 10
+    max_chars: int = 500  # 본문 정리 길이
+    send_photo: bool = True  # 원문 사진이 있으면 봇이 받아서 같이 올림
+    template: str = "info_post.j2"  # 텔레그램
+    kakao_template: str = "info_kakao.j2"  # 관리자 챗으로 보내는 복붙 문구
+    threads_template: str = "info_threads.j2"
+
+
 class ChannelsConfig(BaseModel):
     """내 채널 주소. 비워 두면 템플릿에서 해당 줄이 빠진다."""
 
@@ -370,6 +383,7 @@ class Settings(BaseModel):
     copy_cfg: CopyConfig = Field(default_factory=CopyConfig, alias="copy")
     links: LinksConfig = Field(default_factory=LinksConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    info_posts: InfoPostsConfig = Field(default_factory=InfoPostsConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     secrets: Secrets = Field(default_factory=Secrets)
 
