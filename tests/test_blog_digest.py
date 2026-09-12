@@ -149,7 +149,14 @@ async def test_blog_digest_drops_bodyless_infos_and_always_discloses_coupang(bot
         p = Product(source="ppomppu", product_id=f"info:ppomppu:{i}", shop="lfmall", name=f"세일 {i}", price=0, deal_kind="info",
                     url=f"https://www.ppomppu.co.kr/zboard/view.php?no={i}", extra={"post_url": f"https://x/{i}", "info_body": f"세일 {i} 요약\n· 기간: 9/1{i}"})
         _published(bot, p, link=None, when=now - timedelta(minutes=30 - i), score=10 + i)
+    waiting = Product(source="ppomppu", product_id="naver:77", shop="naver", name="네이버 화장지", price=9900, url="https://smartstore.naver.com/x/products/77")
+    deal = Deal(product=waiting, verdict=DealVerdict(is_deal=True, reasons=["t"], score=5), detected_at=now)
+    assert bot.db.enqueue(deal, score=5, now=now)
+    bot.db.update_queue_item(bot.db.items_for_product("naver:77", ("pending",))[0].id, status="awaiting_link", error="manual link required", deal=deal)
     await bot.blog_digest(preview=True)
+    head = bot.sent[0]  # type: ignore[attr-defined]
+    assert "핫딜 1 · 정리된 이벤트 4" in head and "본문 없는 옛 정보 글 1건은 뺐습니다" in head
+    assert "내 링크를 기다리는 글 1건은 링크를 붙이면 다음 정리에 들어갑니다" in head
     text = [s for s in bot.sent if "<pre>" in s and "네이버 블로그 본문" in s][0]  # type: ignore[attr-defined]
     assert "일일적립" not in text and "read/9" not in text
     assert text.count("요약\n기간:") == 3 and "세일 0" not in text  # 점수 낮은 하나가 빠진다

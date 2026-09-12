@@ -1271,10 +1271,31 @@ class DealBot:
         digest = self.digest.build(items, when=local_now(tz))
         if not digest.blocks:
             return f"📝 블로그 정리: 글에 넣을 딜이 없습니다 ({span})."
-        picked = min(len(items), cfg.max_items) if cfg.max_items > 0 else len(items)
+        # 왜 이만큼인지 같이 알려 준다: 채널에 실제로 올라간 글만 들어가고, 링크·확인을 기다리는 글은 처리해야 다음 정리에 들어간다
+        hot = [it for it in items if it.deal.product.deal_kind != "info"]
+        infos_ok = [
+            it for it in items
+            if it.deal.product.deal_kind == "info"
+            and (it.deal.product.extra.get("info_body") or (it.deal.product.extra.get("info_draft") or {}).get("text"))
+        ]
+        infos_dropped = len(items) - len(hot) - len(infos_ok)
+        picked = len(hot) + min(len(infos_ok), cfg.max_info_items if cfg.max_info_items > 0 else len(infos_ok))
+        if cfg.max_items > 0:
+            picked = min(picked, cfg.max_items)
+        counts = self.db.queue_counts()
+        why = [f"채널에 실제로 올라간 딜 {len(items)}건 (핫딜 {len(hot)} · 정리된 이벤트 {len(infos_ok)}) 중 점수 높은 {picked}건"]
+        if infos_dropped:
+            why.append(f"본문 없는 옛 정보 글 {infos_dropped}건은 뺐습니다")
+        if counts.get("awaiting_link", 0):
+            why.append(f"내 링크를 기다리는 글 {counts['awaiting_link']}건은 링크를 붙이면 다음 정리에 들어갑니다")
+        if counts.get("awaiting_approval", 0):
+            why.append(f"확인을 기다리는 글 {counts['awaiting_approval']}건은 /ok 하면 다음 정리에 들어갑니다")
+        if picked < 3:
+            why.append("아직 적으니 21:30 정리에는 더 모일 수 있습니다")
         titles = "\n".join(f"{i}. {html.escape(t)}" for i, t in enumerate(digest.titles, 1))
         head = (
-            f"📝 <b>{'미리 보기 — ' if preview else ''}오늘의 핫딜 블로그 글</b> ({html.escape(span)} 사이 {len(items)}건 중 점수 높은 {picked}건)\n"
+            f"📝 <b>{'미리 보기 — ' if preview else ''}오늘의 핫딜 블로그 글</b> ({html.escape(span)})\n"
+            f"어떤 글이 들어갔나: {html.escape(' · '.join(why))}\n\n"
             f"제목 후보 (하나 골라 제목 칸에):\n{titles}\n\n"
             "본문은 아래 회색 상자를 길게 눌러 복사한 뒤 블로그 글쓰기에 붙여넣으세요. "
             "채널 안내·면책·서명까지 다 들어 있어 사진만 넣으면 됩니다. 태그는 마지막 상자에 있습니다."
