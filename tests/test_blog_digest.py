@@ -76,6 +76,7 @@ async def test_blog_digest_collects_the_day(bot: DealBot) -> None:
     assert "👉 https://www.lfmall.co.kr/app/event/105798" in text
     assert "옛날 딜" not in text
     assert "쿠팡 파트너스 활동의 일환" in text and "토스쇼핑 쉐어링크 활동의 일환" in text
+    assert "링크프라이스" not in text  # 정보 글(LF몰 원문 링크)은 제휴 링크가 아니라 고지 문구를 안 붙인다
     assert "https://t.me/hot_deal_and_info" in text and "open.kakao.com" in text
     tags = [s for s in sent if "블로그 태그" in s]
     assert tags and "핫딜, 오늘의핫딜" in tags[0] and "쿠팡핫딜" in tags[0] and "토스쇼핑핫딜" in tags[0]

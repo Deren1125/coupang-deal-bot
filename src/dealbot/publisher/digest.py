@@ -95,7 +95,8 @@ class BlogDigestBuilder:
             reverse=True,
         )[:3]
         headline = " · ".join(_short(d["name"], 18) for d in (top or hot or infos)[:2])
-        disclosures = list(dict.fromkeys(d["disclosure"] for d in deals if d["disclosure"]))
+        # 고지 문구는 제휴 링크가 붙는 딜의 쇼핑몰만 (정보 글의 원문 링크는 제휴 링크가 아니다)
+        disclosures = list(dict.fromkeys(d["disclosure"] for d in hot if d["disclosure"]))
         date_label = f"{when.month}월 {when.day}일"
         text = self.renderer.render(
             self.cfg.template,
