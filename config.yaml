@@ -338,7 +338,7 @@ monitoring:
     provider: auto             # auto | ntfy | pushover | none
     events: [manual_link, info_review]  # manual_link | info_review | publish_failed | error | daily_summary | startup
     ntfy_url: https://ntfy.sh
-  notify_on_publish: true
+  notify_on_publish: false           # 채널에 올릴 때마다 오던 '✅ 채널에 올렸습니다' 알림 끔 (카톡 복붙 문구는 그대로 옴)
   notify_on_failure: true
   notify_failure_attempts: false  # 재시도 중 실패(⚠️)는 조용히, 최종 포기(❌)만 알림
   notify_on_error: true
@@ -346,4 +346,4 @@ monitoring:
   error_alert_cooldown_minutes: 30
   daily_summary_time: "21:00"
   quiet_notices: false           # false: 시작/미리보기/발행 알림도 소리·진동과 함께 (true 면 무음)
-  heartbeat_minutes: 30          # 관리자 챗이 30분 동안 조용하면 "정상 가동 중" 짧은 보고 (0 = 끔). 특가 알림이 있으면 그걸로 대신함
+  heartbeat_minutes: 0             # 0 = '정상 가동 중' 생존 보고 끔 (에러·요청만 받음). N 이면 관리자 챗이 N분 조용할 때 보고

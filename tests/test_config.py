@@ -22,7 +22,7 @@ def test_load_repo_config(repo_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_
     assert s.deal.community_min_recommend == 5
     assert s.deal.accept_coupons_and_events is False  # 이벤트/쿠폰(가격 없는 글)은 올리지 않기로 함
     assert s.deal.market.min_below_market_pct == 20 and s.deal.market.strict  # 쿠팡 최저가보다 20% 이상 싸야 특가
-    assert s.monitoring.heartbeat_minutes == 30 and s.monitoring.quiet_notices is False
+    assert s.monitoring.heartbeat_minutes == 0 and s.monitoring.notify_on_publish is False  # 관리자 챗은 에러·요청 위주로 조용히
     assert s.publish.allow_raw_links is False  # 제휴 링크를 못 만드는 몰은 건너뜀
     assert s.deal.min_discount_rate == 50
     assert s.deal.min_below_average_pct == 15

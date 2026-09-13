@@ -119,6 +119,7 @@ def bot(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> DealBot:
 
 async def test_board_post_becomes_info_post(bot: DealBot) -> None:
     published: list[dict] = []
+    bot.settings.monitoring.notify_on_publish = True  # 기본 설정은 꺼져 있음 — 알림 내용을 보는 테스트
 
     async def fake_fetch(url: str) -> PostBody:
         return PostBody(text="12,000원 이상 결제 시 6,000원 할인", images=["https://img.example.com/e.jpg"], links=["https://event.payco.com/1"])

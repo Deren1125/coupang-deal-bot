@@ -329,8 +329,8 @@ class AdminNotifier:
         return sent
 
     async def notify_published(self, deal: Deal, result: PublishResult, preview: str | None = None) -> None:
-        """발행 알림. DRY-RUN 이면 채널에 올라갔을 글 전체(preview)를 그대로 보여준다."""
-        if not self.cfg.notify_on_publish:
+        """발행 알림. DRY-RUN 이면 채널에 올라갔을 글 전체(preview)를 그대로 보여준다 (연습 모드 미리보기는 설정과 무관하게 항상)."""
+        if not self.cfg.notify_on_publish and not (result.dry_run and preview):
             return
         p = deal.product
         where = f"어디서: {html.escape(self.source_label(p.source))} → {html.escape(self.shop_label(p.shop))}"

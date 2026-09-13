@@ -67,6 +67,7 @@ async def test_real_publish_sends_summary_and_copy_blocks(bot: DealBot) -> None:
     async def fake_publish(deal, **_kw):  # type: ignore[no-untyped-def]
         return PublishResult(ok=True, message_id=7)
 
+    bot.settings.monitoring.notify_on_publish = True  # 기본 설정은 꺼져 있음 — 알림 내용을 보는 테스트
     bot.publisher.publish = fake_publish  # type: ignore[method-assign]
     FakeCollector.products = [_product("2")]
     await bot.run_collector(bot.collectors[0])
