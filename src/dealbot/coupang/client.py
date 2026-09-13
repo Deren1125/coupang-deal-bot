@@ -49,11 +49,16 @@ class DeeplinkResult:
 
 
 class ApiBudget:
-    """슬라이딩 1시간 창의 호출 예산. reserve 에 적힌 종류(예: deeplink)는 예약 몫까지 쓸 수 있다."""
+    """슬라이딩 1시간 창의 호출 예산.
 
-    def __init__(self, max_per_hour: int = 10, reserve: dict[str, int] | None = None) -> None:
+    reserve 에 적힌 종류(예: deeplink)는 예약 몫까지 쓸 수 있고, caps 에 적힌 종류는 그 수를 넘지 못한다
+    (딥링크가 시간당 예산을 다 써서 골드박스·시중가 조회가 막히지 않도록).
+    """
+
+    def __init__(self, max_per_hour: int = 10, reserve: dict[str, int] | None = None, caps: dict[str, int] | None = None) -> None:
         self.max_per_hour = max(0, max_per_hour)
         self.reserve = dict(reserve or {})
+        self.caps = {k: v for k, v in (caps or {}).items() if v and v > 0}
         self._calls: deque[tuple[float, str]] = deque()
 
     def _prune(self, now: float) -> None:
@@ -65,14 +70,19 @@ class ApiBudget:
         return len(self._calls)
 
     def available(self, kind: str = "general", now: float | None = None) -> bool:
-        """일반 호출은 (최대 - 예약 합계)까지, 예약된 종류는 (최대 - 다른 종류의 예약 합계)까지."""
+        """예약된 종류는 자기 예약 몫을 먼저 쓰고 그다음 공용 몫을 쓴다. 일반 호출은 공용 몫(최대 - 예약 합계)만 쓴다."""
         if self.max_per_hour <= 0:
             return True
         used = self.used(now)
+        by_kind = self.usage()
+        if kind in self.caps and by_kind.get(kind, 0) >= self.caps[kind]:
+            return False
         reserved_total = sum(self.reserve.values())
+        # 공용 몫에서 빠져나간 호출 = 일반 호출 + 예약 종류가 자기 몫을 넘겨 쓴 만큼
+        pool_used = used - sum(min(by_kind.get(k, 0), r) for k, r in self.reserve.items())
         if kind in self.reserve:
-            return used < self.max_per_hour - (reserved_total - self.reserve[kind])
-        return used < self.max_per_hour - reserved_total
+            return used < self.max_per_hour
+        return pool_used < self.max_per_hour - reserved_total
 
     def record(self, kind: str = "general", now: float | None = None) -> None:
         self._calls.append((now if now is not None else time.monotonic(), kind))

@@ -26,7 +26,7 @@ from dealbot.collectors import (
     build_collector,
 )
 from dealbot.config import Settings
-from dealbot.coupang.client import ApiBudget, CoupangClient
+from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dedupe import find_duplicate
 from dealbot.enrich import PageEnricher
 from dealbot.infopost import InfoPostBuilder, PostBody
@@ -88,7 +88,9 @@ class DealBot:
         providers: dict[str, Any] = {}
         self.coupang: CoupangClient | None = None
         self.budget = ApiBudget(
-            settings.coupang.max_calls_per_hour, reserve={"deeplink": settings.coupang.deeplink_reserve}
+            settings.coupang.max_calls_per_hour,
+            reserve={"deeplink": settings.coupang.deeplink_reserve},
+            caps={"deeplink": settings.coupang.deeplink_max_per_hour},
         )
         self.market: CoupangMarketReference | None = None
         if settings.secrets.has_coupang:
@@ -896,6 +898,11 @@ class DealBot:
             result.update(collected=len(products), deals=deals, queued=queued)
             self.db.finish_run(run_id, status="ok", collected=len(products), deals=deals, queued=queued)
             log.info("collector '%s' done: collected=%d deals=%d queued=%d", name, len(products), deals, queued)
+        except CoupangRateLimited as e:
+            # 시간당 호출 예산이 찬 것은 고장이 아니다: 조용히 건너뛰고 다음 시간에 다시
+            result.update(status="skipped", error=str(e))
+            self.db.finish_run(run_id, status="skipped", error=str(e))
+            log.info("collector '%s' skipped: %s", name, e)
         except CollectorUnavailable as e:
             result.update(status="skipped", error=str(e))
             self.db.finish_run(run_id, status="skipped", error=str(e))
@@ -1088,8 +1095,15 @@ class DealBot:
                 )
                 return "skip", f"linkprice link failed: {e}"
             return "fail", str(e)
+        except CoupangRateLimited as e:
+            return "wait", str(e)  # 예산이 풀리면 그대로 다시 시도 (실패로 세지 않음)
         except Exception as e:  # noqa: BLE001
             return "fail", f"{type(e).__name__}: {e}"
+
+    def _needs_deeplink(self, item: QueueItem) -> bool:
+        """쿠팡 딥링크 API 호출이 필요한 글인가 (쿠팡 딜인데 아직 제휴 링크가 없음)."""
+        p = item.deal.product
+        return p.deal_kind != "info" and p.shop == "coupang" and not item.deal.affiliate_url and p.source != "manual"
 
     def _expire_queue(self, now: Any) -> int:
         cfg = self.settings.publish
@@ -1119,6 +1133,12 @@ class DealBot:
         item = self.db.next_pending()
         if item is None:
             return False
+        if self._needs_deeplink(item) and not self.budget.available("deeplink"):
+            # 쿠팡 딥링크 예산이 이번 시간에 다 찼다: 쿠팡 딜은 기다리게 두고 다른 몰의 글을 먼저 올린다
+            item = next((c for c in self.db.pending_items(50) if not self._needs_deeplink(c)), None)
+            if item is None:
+                log.debug("coupang deeplink budget exhausted — queue waits for the next hour")
+                return False
 
         deal = item.deal
         pid = deal.product.product_id
@@ -1178,6 +1198,9 @@ class DealBot:
         if state == "skip":
             self.db.update_queue_item(item.id, status="skipped", error=err)
             return True
+        if state == "wait":
+            log.info("queue #%d waits — %s", item.id, err)
+            return False
         if state == "fail":
             await self._handle_publish_failure(item, err or "link conversion failed")
             return True

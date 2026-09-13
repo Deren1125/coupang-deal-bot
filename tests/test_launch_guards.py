@@ -180,3 +180,57 @@ async def test_board_only_urls_are_not_queued(bot: DealBot) -> None:
     FakeCollector.products = [Product(source="fake", product_id="toss:board2", shop="toss", name="토스 이벤트 글 2", price=4800, url="https://bbs.ruliweb.com/market/board/1020/read/1", recommend_count=9)]
     await bot.run_collector(bot.collectors[0])
     assert bot.db.queue_counts().get("pending") == 3
+
+
+async def test_coupang_deals_wait_when_deeplink_budget_is_out(bot: DealBot) -> None:
+    """딥링크 예산이 찬 시간에는 쿠팡 딜을 실패로 세지 않고 기다리게 두고, 다른 몰의 글을 먼저 올린다."""
+    from dealbot.coupang.client import ApiBudget, CoupangRateLimited
+
+    bot.settings.deal.authenticity.enabled = False
+    bot.budget = ApiBudget(10, reserve={"deeplink": 3}, caps={"deeplink": 2})
+    for _ in range(2):
+        bot.budget.record("deeplink")
+    assert not bot.budget.available("deeplink")
+    calls: list[str] = []
+
+    class _Deeplink:
+        async def convert(self, url: str) -> str:
+            calls.append(url)
+            raise CoupangRateLimited("budget")
+
+    bot.links.providers["coupang"] = _Deeplink()  # type: ignore[assignment]
+    for key in ("coupang", "daiso"):
+        shop = bot.registry.get(key)
+        assert shop is not None
+        shop.enabled, shop.disabled_reason = True, None
+    FakeCollector.products = [
+        Product(source="fake", product_id="coupang:1", shop="coupang", name="쿠팡 상품", price=10000, url="https://www.coupang.com/vp/products/1", recommend_count=9, discount_rate=50),
+        Product(source="fake", product_id="daiso:2", shop="daiso", name="다이소 상품", price=3000, url="https://www.daisomall.co.kr/p/2", recommend_count=9, discount_rate=50),
+    ]
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"pending": 2}
+    assert await bot.process_queue_once()  # 쿠팡은 건너뛰고 다이소를 올린다
+    counts = bot.db.queue_counts()
+    assert counts == {"pending": 1, "published": 1} and bot.db.next_pending().product_id == "coupang:1"  # type: ignore[union-attr]
+    assert calls == [], "예산이 없으면 딥링크 API 를 부르지 않는다"
+    assert await bot.process_queue_once() is False  # 남은 건 쿠팡뿐 → 예산이 풀릴 때까지 대기 (실패 아님)
+    assert bot.db.next_pending().attempts == 0  # type: ignore[union-attr]
+
+
+async def test_coupang_rate_limit_in_collector_is_not_an_error(bot: DealBot) -> None:
+    from dealbot.coupang.client import CoupangRateLimited
+
+    class _Limited(BaseCollector):
+        name = "fake"
+
+        async def collect(self) -> list[Product]:
+            raise CoupangRateLimited("coupang api hourly budget exhausted (kind=goldbox)")
+
+    errors: list[str] = []
+
+    async def capture_error(kind: str, message: str) -> None:
+        errors.append(message)
+
+    bot.notifier.notify_error = capture_error  # type: ignore[method-assign]
+    result = await bot.run_collector(_Limited("fake", {}, bot.collectors[0].ctx))
+    assert result["status"] == "skipped" and errors == [] and bot.state.last_error is None

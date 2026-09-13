@@ -16,6 +16,7 @@ app:
 coupang:
   max_calls_per_hour: 10
   deeplink_reserve: 3          # 발행용 딥링크 호출을 위해 항상 남겨 둘 몫
+  deeplink_max_per_hour: 7     # 딥링크는 시간당 이만큼까지만 (골드박스·시중가 조회 몫을 남김). 넘치는 쿠팡 딜은 다음 시간에 올라감
 
 # 네이버 쇼핑커넥트 브라우저 자동화 (선택). 켜면 /naverlogin 으로 QR 로그인 후 네이버 딜 링크를 자동 생성 시도,
 # 실패하면 수동(관리자 링크) 으로 넘어감. 아래 shops 에서 naver 를 link_mode: api 로 바꿔야 동작.

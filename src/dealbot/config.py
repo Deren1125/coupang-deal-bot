@@ -81,6 +81,7 @@ class CoupangConfig(BaseModel):
 
     max_calls_per_hour: int = 10
     deeplink_reserve: int = 3  # 발행용 딥링크 호출을 위해 남겨 둘 몫
+    deeplink_max_per_hour: int = 7  # 딥링크가 시간당 예산을 다 쓰지 못하게 (골드박스·시중가 조회 몫을 남김). 넘치는 쿠팡 딜은 기다림
 
 
 class MarketCheckConfig(BaseModel):

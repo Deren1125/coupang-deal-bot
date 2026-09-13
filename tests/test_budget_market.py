@@ -116,3 +116,15 @@ def test_rule_d_and_veto() -> None:
     # 대조 불가 환경이면 표시 할인율 50% 로 통과
     v4 = ev.evaluate(Product(source="s", product_id="x:1", shop="11st", name="n", price=5000, url="u", discount_rate=60), PriceStats())
     assert v4.is_deal and v4.reasons == ["discount_rate>=50%"]
+
+
+def test_budget_caps_a_kind_so_it_cannot_starve_the_rest() -> None:
+    b = ApiBudget(10, reserve={"deeplink": 3}, caps={"deeplink": 7})
+    for _ in range(7):
+        assert b.available("deeplink")
+        b.record("deeplink")
+    assert not b.available("deeplink")  # 딥링크는 7회까지
+    assert b.available("goldbox") and b.available("search")  # 나머지 3회는 다른 호출 몫
+    for _ in range(3):
+        b.record("goldbox")
+    assert not b.available("goldbox") and not b.available("deeplink")
