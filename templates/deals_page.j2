@@ -1,0 +1,56 @@
+{#
+  봇의 공개 도메인 "/" — 최근 채널 딜 목록 (인스타 프로필 링크용). 변수: title, items[] (id, name, price, original_price,
+  discount_rate, shop, rocket, free_shipping), hours, disclosures[], channels{telegram_url, kakao_openchat_url, ...}
+#}
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{ title }}</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; background: #f6f6f4; color: #111; }
+  header { padding: 20px 16px 8px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 13px; margin: 0; }
+  main { padding: 8px 16px 24px; max-width: 640px; margin: 0 auto; }
+  .deal { background: #fff; border-radius: 14px; padding: 14px 16px; margin: 10px 0; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .name { font-size: 16px; font-weight: 600; margin: 0 0 6px; line-height: 1.35; }
+  .price { font-size: 20px; font-weight: 700; color: #e8442b; }
+  .orig { color: #888; text-decoration: line-through; font-size: 14px; margin-left: 6px; }
+  .rate { color: #e8442b; font-weight: 700; font-size: 14px; margin-left: 6px; }
+  .meta { color: #666; font-size: 13px; margin: 4px 0 10px; }
+  .btn { display: block; text-align: center; background: #111; color: #fff; text-decoration: none; padding: 12px; border-radius: 10px; font-weight: 600; }
+  .empty { color: #666; padding: 32px 0; text-align: center; }
+  footer { color: #777; font-size: 12px; line-height: 1.6; padding: 12px 16px 32px; max-width: 640px; margin: 0 auto; }
+  footer a { color: #444; }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{ title }}</h1>
+  <p class="sub">최근 {{ hours }}시간 안에 올라온 딜입니다. 핫딜은 금방 품절돼요.</p>
+</header>
+<main>
+{% for it in items %}
+  <article class="deal">
+    <p class="name">{{ it.name }}</p>
+    {% if it.price %}
+    <div><span class="price">{{ "{:,}".format(it.price) }}원</span>{% if it.original_price %}<span class="orig">{{ "{:,}".format(it.original_price) }}원</span>{% endif %}{% if it.discount_rate %}<span class="rate">{{ it.discount_rate | round | int }}%↓</span>{% endif %}</div>
+    {% endif %}
+    <p class="meta">{{ it.shop }}{% if it.rocket %} · 로켓배송{% elif it.free_shipping %} · 무료배송{% endif %}</p>
+    <a class="btn" href="/d/{{ it.id }}" rel="nofollow">구매하러 가기</a>
+  </article>
+{% else %}
+  <p class="empty">지금은 올라온 딜이 없어요. 잠시 뒤 다시 봐 주세요.</p>
+{% endfor %}
+</main>
+<footer>
+  {% if channels.telegram_url %}<p>실시간 전체 딜: <a href="{{ channels.telegram_url }}">텔레그램 {{ channels.telegram_name or "채널" }}</a>{% if channels.kakao_openchat_url %} · <a href="{{ channels.kakao_openchat_url }}">카카오 오픈채팅</a>{% endif %}</p>{% endif %}
+  {% for d in disclosures %}<p>{{ d }}</p>{% endfor %}
+  <p>가격과 재고는 올라온 시점 기준이며, 판매처 사정으로 바뀔 수 있습니다.</p>
+</footer>
+</body>
+</html>

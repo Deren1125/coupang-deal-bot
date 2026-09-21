@@ -155,7 +155,7 @@ class FoodRuleConfig(BaseModel):
     # 상품명에 이 말이 있으면 식품
     keywords: list[str] = Field(
         default_factory=lambda: [
-            "즙", "과자", "라면", "커피", "원두", "음료", "우유", "두유", "잡곡", "현미", "고기", "닭가슴살", "닭", "돼지", "삼겹", "소고기", "한우",
+            "즙", "과자", "라면", "커피", "원두", "음료", "우유", "두유", "잡곡", "현미", "쌀", "고기", "닭가슴살", "닭", "돼지", "삼겹", "소고기", "한우",
             "김치", "만두", "빵", "떡", "과일", "사과", "귤", "포도", "견과", "아몬드", "호두", "참치", "스팸", "햄", "소시지", "계란", "달걀",
             "생수", "탄산", "콜라", "사이다", "주스", "요거트", "치즈", "버터", "초콜릿", "초코", "사탕", "젤리", "미역", "국물", "곰탕", "삼계탕",
             "찌개", "카레", "소스", "간장", "고추장", "된장", "식용유", "올리브유", "시리얼", "그래놀라", "프로틴", "단백질", "비타민", "홍삼",
@@ -273,6 +273,35 @@ class ThreadsConfig(BaseModel):
     reply_template: str | None = "deal_threads_reply.j2"  # 답글: 링크 + 수수료 고지. 비우면 한 글로
     send_photo: bool = True
     refresh_before_days: int = 7
+
+
+class InstagramConfig(BaseModel):
+    """인스타그램 자동 게시 (Instagram API with Instagram Login). 인증은 /instaauth 로 한 번만.
+    사진 없는 글은 못 올리므로 봇이 만든 카드 이미지를 올린다. 본문 링크는 눌리지 않아 프로필 링크(핫딜 페이지)로 유도."""
+
+    enabled: bool = True
+    template: str = "deal_instagram.j2"
+    refresh_before_days: int = 7
+    info_posts: bool = False  # 정보 글(이벤트류)도 올릴지. 기본은 상품 딜만
+
+
+class CardConfig(BaseModel):
+    """딜 카드 이미지(1080×1350 JPEG). 인스타그램은 항상, 스레드는 상품 사진이 없거나 거절될 때 쓴다."""
+
+    enabled: bool = True
+    font_path: str | None = None  # 비우면 서버 글꼴(나눔고딕 등)을 찾음
+    footer: str = "오늘의 핫딜"
+    footer_note: str = "구매 링크는 프로필 링크에서"
+    keep_days: int = 7  # 만든 카드 파일 보관 기간
+
+
+class WebConfig(BaseModel):
+    """봇의 작은 웹 서버(공개 도메인). OAuth 콜백·카드 이미지·핫딜 페이지."""
+
+    public_page: bool = True  # "/" 에 최근 채널 딜 목록(구매 링크 포함) 페이지를 연다 — 인스타 프로필 링크용
+    site_title: str = "오늘의 핫딜"
+    page_hours: int = 48  # 페이지에 보여줄 기간
+    page_max_items: int = 30
 
 
 class CopyTarget(BaseModel):
@@ -449,6 +478,9 @@ class Secrets(BaseModel):
     threads_app_id: str | None = None
     threads_app_secret: str | None = None
     threads_redirect_uri: str = "https://localhost/callback"
+    instagram_app_id: str | None = None
+    instagram_app_secret: str | None = None
+    instagram_redirect_uri: str = "https://localhost/instagram/callback"
     public_domain: str | None = None  # Railway 가 넣어 주는 RAILWAY_PUBLIC_DOMAIN (예: xxx.up.railway.app)
     web_port: int = 8080  # PORT — 스레드 OAuth 콜백·/health 를 받는 작은 HTTP 서버
     ntfy_topic: str | None = None
@@ -464,6 +496,24 @@ class Secrets(BaseModel):
     @property
     def has_threads_app(self) -> bool:
         return bool(self.threads_app_id and self.threads_app_secret)
+
+    @property
+    def has_instagram_app(self) -> bool:
+        return bool(self.instagram_app_id and self.instagram_app_secret)
+
+    @property
+    def instagram_callback_path(self) -> str:
+        return urlsplit(self.instagram_redirect_uri).path or "/instagram/callback"
+
+    @property
+    def instagram_callback_served(self) -> bool:
+        host = (urlsplit(self.instagram_redirect_uri).hostname or "").lower()
+        return bool(host) and host == (self.public_domain or "").lower()
+
+    @property
+    def public_base_url(self) -> str | None:
+        """공개 도메인이 있으면 https://도메인 (카드 이미지·핫딜 페이지 주소의 앞부분)."""
+        return f"https://{self.public_domain.strip().strip('/')}" if self.public_domain else None
 
     @property
     def threads_callback_path(self) -> str:
@@ -521,6 +571,9 @@ class Settings(BaseModel):
     deal: DealConfig = Field(default_factory=DealConfig)
     publish: PublishConfig = Field(default_factory=PublishConfig)
     threads: ThreadsConfig = Field(default_factory=ThreadsConfig)
+    instagram: InstagramConfig = Field(default_factory=InstagramConfig)
+    card: CardConfig = Field(default_factory=CardConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
     # yaml 키는 copy 지만 BaseModel.copy 와 겹쳐 속성명은 copy_cfg
     copy_cfg: CopyConfig = Field(default_factory=CopyConfig, alias="copy")
     links: LinksConfig = Field(default_factory=LinksConfig)
@@ -596,11 +649,11 @@ def _env_int(name: str) -> int | None:
         return None
 
 
-def _default_threads_redirect(public_domain: str | None) -> str:
+def _default_threads_redirect(public_domain: str | None, path: str = "/threads/callback") -> str:
     """메타는 localhost 리디렉션을 받지 않으므로, 공개 도메인이 있으면 봇이 직접 받는 주소를 기본값으로 쓴다."""
     if public_domain:
-        return f"https://{public_domain.strip().strip('/')}/threads/callback"
-    return "https://localhost/callback"
+        return f"https://{public_domain.strip().strip('/')}{path}"
+    return "https://localhost/callback" if path == "/threads/callback" else f"https://localhost{path}"
 
 
 def _env_str(name: str) -> str | None:
@@ -636,6 +689,10 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         threads_app_id=_env_str("THREADS_APP_ID"),
         threads_app_secret=_env_str("THREADS_APP_SECRET"),
         threads_redirect_uri=_env_str("THREADS_REDIRECT_URI") or _default_threads_redirect(_env_str("RAILWAY_PUBLIC_DOMAIN")),
+        instagram_app_id=_env_str("INSTAGRAM_APP_ID"),
+        instagram_app_secret=_env_str("INSTAGRAM_APP_SECRET"),
+        instagram_redirect_uri=_env_str("INSTAGRAM_REDIRECT_URI")
+        or _default_threads_redirect(_env_str("RAILWAY_PUBLIC_DOMAIN"), "/instagram/callback"),
         public_domain=_env_str("RAILWAY_PUBLIC_DOMAIN"),
         web_port=_env_int("PORT") or 8080,
         ntfy_topic=_env_str("NTFY_TOPIC"),

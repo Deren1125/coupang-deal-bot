@@ -49,6 +49,15 @@
    ↳ 최근 실패: <code>{{ threads.last_fail }}</code>
 {% endif %}
 {% endif %}
+{% if instagram is defined %}
+📸 <b>인스타그램 자동 게시</b> {% if instagram.state == 'ok' %}✅ 연결됨{% if instagram.username %} @{{ instagram.username }}{% endif %}{% if instagram.expires %} · 토큰 {{ instagram.expires }}까지, 자동 갱신{% endif %}{% if instagram.no_domain %} · ⚠️ 공개 도메인 없음 (카드 이미지를 못 올림){% endif %}{% elif instagram.state == 'unlinked' %}❌ 미연결 → /instaauth{% elif instagram.state == 'noapp' %}꺼짐 (INSTAGRAM_APP_ID / SECRET 없음){% else %}꺼짐 (config instagram.enabled){% endif +%}
+{% if instagram.last_fail %}
+   ↳ 최근 실패: <code>{{ instagram.last_fail }}</code>
+{% endif %}
+{% endif %}
+{% if site_url is defined and site_url %}
+🔗 핫딜 페이지 {{ site_url }} (인스타 프로필 링크에 넣으세요 · /d/번호 는 그 딜의 구매 링크로 바로 감)
+{% endif %}
 🗂 <b>기다리는 글</b> 발행 차례 {{ queue.get('pending', 0) }}건 · 내 링크 기다림 {{ queue.get('awaiting_link', 0) }}건 · 확인 기다림 {{ queue.get('awaiting_approval', 0) }}건 · 실패 {{ queue.get('failed', 0) }}건 · 시간 지나 버림 {{ queue.get('expired', 0) }}건
 {% if info_summary is defined and info_summary %}
 📝 <b>정보 글</b> {{ info_summary }}

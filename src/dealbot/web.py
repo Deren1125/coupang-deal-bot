@@ -14,13 +14,16 @@ import asyncio
 import html
 import logging
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 log = logging.getLogger(__name__)
 
-Handler = Callable[[dict[str, str]], Awaitable[tuple[int, str]]]
+Handler = Callable[[dict[str, str]], Awaitable[tuple[int, str] | tuple[int, bytes, str]]]
+Response = tuple[int, str] | tuple[int, bytes, str]  # (status, html/text) 또는 (status, bytes, content-type)
+_STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
-_STATUS_TEXT = {200: "OK", 400: "Bad Request", 404: "Not Found", 405: "Method Not Allowed", 500: "Internal Server Error"}
+_STATUS_TEXT = {200: "OK", 302: "Found", 400: "Bad Request", 404: "Not Found", 405: "Method Not Allowed", 500: "Internal Server Error"}
 _MAX_HEADER_BYTES = 16 * 1024
 _READ_TIMEOUT = 10.0
 
@@ -44,10 +47,18 @@ class WebServer:
         self.port = port
         self.host = host
         self.routes: dict[str, Handler] = {}
+        self.prefixes: dict[str, Handler] = {}  # "/d/" 처럼 앞부분만 맞는 경로 → 핸들러 (쿼리에 "path" 로 나머지를 넘김)
+        self.static: dict[str, Path] = {}  # URL 앞부분 → 폴더 (카드 이미지 등)
         self._server: asyncio.AbstractServer | None = None
 
     def route(self, path: str, handler: Handler) -> None:
         self.routes[path] = handler
+
+    def route_prefix(self, prefix: str, handler: Handler) -> None:
+        self.prefixes[prefix] = handler
+
+    def serve_static(self, prefix: str, directory: Path) -> None:
+        self.static[prefix.rstrip("/") + "/"] = Path(directory)
 
     @property
     def running(self) -> bool:
@@ -88,40 +99,73 @@ class WebServer:
             if len(parts) < 2:
                 raise ValueError("bad request line")
             method, target = parts[0].upper(), parts[1]
-            status, body = await self.dispatch(method, target)
+            result = await self.dispatch(method, target)
+            status, body = result[0], result[1]
+            ctype = result[2] if len(result) == 3 else None
         except Exception as e:  # noqa: BLE001 — 서버는 어떤 요청에도 죽지 않는다
             log.debug("web request rejected: %s", e)
+            ctype = None
         try:
-            await self._respond(writer, status, body)
+            await self._respond(writer, status, body, ctype)
         except Exception:  # noqa: BLE001
             pass
 
-    async def dispatch(self, method: str, target: str) -> tuple[int, str]:
+    async def dispatch(self, method: str, target: str) -> Response:
         """테스트에서도 바로 부를 수 있게 분리."""
         split = urlsplit(target)
         path = split.path or "/"
-        if path in ("/", "/health", "/healthz"):
+        if path in ("/health", "/healthz"):
             return 200, "ok"
-        handler = self.routes.get(path)
-        if handler is None:
-            return 404, page("없는 주소", "이 주소는 쓰지 않습니다.")
         if method not in ("GET", "HEAD"):
             return 405, page("허용되지 않는 방식", "GET 만 받습니다.")
+        for prefix, directory in self.static.items():
+            if path.startswith(prefix):
+                return self._static(directory, path[len(prefix):])
         query = {k: v for k, v in parse_qsl(split.query, keep_blank_values=True)}
+        handler = self.routes.get(path)
+        if handler is None:
+            for prefix, h in self.prefixes.items():
+                if path.startswith(prefix):
+                    handler = h
+                    query["path"] = path[len(prefix):]
+                    break
+        if handler is None:
+            if path == "/":
+                return 200, "ok"
+            return 404, page("없는 주소", "이 주소는 쓰지 않습니다.")
         try:
             return await handler(query)
         except Exception as e:  # noqa: BLE001
             log.exception("web handler %s failed: %s", path, e)
             return 500, page("오류", html.escape(str(e)))
 
-    async def _respond(self, writer: asyncio.StreamWriter, status: int, body: str) -> None:
-        raw = body.encode("utf-8")
-        ctype = "text/html; charset=utf-8" if raw.startswith(b"<") else "text/plain; charset=utf-8"
+    @staticmethod
+    def _static(directory: Path, name: str) -> Response:
+        """폴더 안의 파일 하나만. 하위 경로·숨김 파일·이미지 아닌 확장자는 거절."""
+        if not name or "/" in name or name.startswith(".") or Path(name).suffix.lower() not in _STATIC_TYPES:
+            return 404, page("없는 파일", "이 주소는 쓰지 않습니다.")
+        path = directory / name
+        if not path.is_file():
+            return 404, page("없는 파일", "파일이 없습니다.")
+        return 200, path.read_bytes(), _STATIC_TYPES[path.suffix.lower()]
+
+    async def _respond(self, writer: asyncio.StreamWriter, status: int, body: str | bytes, ctype: str | None = None) -> None:
+        if isinstance(body, bytes):
+            raw = body
+            ctype = ctype or "application/octet-stream"
+        else:
+            raw = body.encode("utf-8")
+            ctype = ctype or ("text/html; charset=utf-8" if raw.startswith(b"<") else "text/plain; charset=utf-8")
+        cache = "public, max-age=86400" if ctype.startswith("image/") else "no-store"
+        extra = ""
+        if status in (301, 302, 303, 307) and isinstance(body, str) and body.startswith("http"):
+            extra = f"Location: {body}\r\n"  # 리디렉션: body 에 목적지 주소
         head = (
             f"HTTP/1.1 {status} {_STATUS_TEXT.get(status, 'OK')}\r\n"
             f"Content-Type: {ctype}\r\n"
             f"Content-Length: {len(raw)}\r\n"
-            "Cache-Control: no-store\r\n"
+            f"Cache-Control: {cache}\r\n"
+            f"{extra}"
             "Connection: close\r\n\r\n"
         ).encode("ascii")
         writer.write(head + raw)

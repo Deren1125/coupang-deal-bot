@@ -7,3 +7,4 @@ beautifulsoup4>=4.12
 python-dotenv>=1.0
 tzdata>=2024.1
 anthropic>=1.5,<2
+Pillow>=10

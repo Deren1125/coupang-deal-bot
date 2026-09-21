@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import logging
@@ -40,6 +41,7 @@ from dealbot.links import (
     ShopSkipped,
 )
 from dealbot.manual import parse_manual_post
+from dealbot.media.card import CardStyle, DealCard
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import (
     BOT_COMMANDS,
@@ -53,6 +55,7 @@ from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
 from dealbot.publisher.digest import BlogDigestBuilder
+from dealbot.publisher.instagram import InstagramClient, InstagramError, InstagramPublisher
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
@@ -76,6 +79,9 @@ log = logging.getLogger(__name__)
 
 KV_OAUTH_STATE = "threads_oauth_state"
 KV_OAUTH_STATE_AT = "threads_oauth_state_at"
+KV_IG_OAUTH_STATE = "instagram_oauth_state"
+KV_IG_OAUTH_STATE_AT = "instagram_oauth_state_at"
+IG_KV_USERNAME = "instagram_username"
 
 
 class DealBot:
@@ -216,6 +222,33 @@ class DealBot:
             dry_run=self.state.dry_run,
             refresh_before_days=settings.threads.refresh_before_days,
         )
+        # ---- 인스타그램 자동 발행 (사진은 카드 이미지)
+        self.instagram = InstagramPublisher(
+            InstagramClient(
+                self.http,
+                app_id=settings.secrets.instagram_app_id,
+                app_secret=settings.secrets.instagram_app_secret,
+                max_retries=settings.http.max_retries,
+                retry_backoff=settings.http.retry_backoff_seconds,
+            ),
+            self.db,
+            self.renderer,
+            registry=self.registry,
+            template=settings.instagram.template,
+            enabled=settings.instagram.enabled,
+            dry_run=self.state.dry_run,
+            refresh_before_days=settings.instagram.refresh_before_days,
+        )
+        self.card: DealCard | None = None
+        if settings.card.enabled:
+            try:
+                self.card = DealCard(
+                    settings.data_dir / "media",
+                    font_path=settings.card.font_path,
+                    style=CardStyle(footer=settings.card.footer, footer_note=settings.card.footer_note),
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("deal card disabled: %s", e)
         self.copy_blocks = CopyBlockBuilder(settings.copy_cfg, self.renderer, self.registry)
         self.digest = BlogDigestBuilder(settings.blog_digest, self.renderer, self.registry)
 
@@ -237,6 +270,13 @@ class DealBot:
         self.web.route("/threads/callback", self._threads_callback)
         if settings.secrets.threads_callback_path != "/threads/callback":
             self.web.route(settings.secrets.threads_callback_path, self._threads_callback)
+        self.web.route("/instagram/callback", self._instagram_callback)
+        if settings.secrets.instagram_callback_path != "/instagram/callback":
+            self.web.route(settings.secrets.instagram_callback_path, self._instagram_callback)
+        self.web.serve_static("/media/", settings.data_dir / "media")  # 카드 이미지 (메타가 여기서 받아 감)
+        if settings.web.public_page:
+            self.web.route("/", self._deals_page)  # 인스타 프로필 링크용 핫딜 목록
+            self.web.route_prefix("/d/", self._deal_redirect)  # /d/번호 → 구매 링크
 
         # ---- 수집기
         ctx = CollectorContext(settings=settings, http=self.http, db=self.db, coupang=self.coupang, shops=self.registry)
@@ -648,6 +688,16 @@ class DealBot:
                 out.append((True, f"스레드 @{me.get('username')}"))
             except Exception as e:  # noqa: BLE001
                 out.append((False, f"스레드: {e}"))
+        if not self.settings.instagram.enabled:
+            out.append((None, "인스타그램: 꺼짐"))
+        elif not self.settings.secrets.has_instagram_app:
+            out.append((None, "인스타그램: 앱 ID/시크릿 미설정"))
+        elif self.instagram.stored_token() is None:
+            out.append((None, "인스타그램: 인증 필요 (/instaauth)"))
+        elif not self.settings.secrets.public_base_url:
+            out.append((False, "인스타그램: 공개 도메인이 없어 카드 이미지를 못 올림 (Railway → Networking → Generate Domain)"))
+        else:
+            out.append((True, f"인스타그램 @{self.db.kv_get(IG_KV_USERNAME) or '?'} (카드 이미지 {self.settings.secrets.public_base_url}/media/…)"))
         if self.copy_blocks.enabled:
             out.append((True, "복붙 문구: " + ", ".join(t.name for t in self.settings.copy_cfg.targets if t.enabled)))
         if self.market is not None:
@@ -1245,6 +1295,9 @@ class DealBot:
             self.db.log_event("INFO", "authenticity", f"{pid} 정품이 아닐 수 있어 건너뜀 ({auth.reason}): {deal.product.name[:50]}")
             log.info("queue #%d skipped — authenticity: %s", item.id, auth.reason)
             return True
+        if auth.status == "unknown" and self.evaluator.is_food(deal.product):
+            # 식품은 '정품' 개념이 없으니 공식 판매처 확인이 안 돼도 통과 (병행수입 같은 거부 낱말은 위에서 이미 걸렀다)
+            auth = replace(auth, status="ok", reason="식품 (판매처 확인 생략)")
         if (
             auth.status == "unknown"
             and not deal.product.extra.get("auth_approved")
@@ -1324,10 +1377,52 @@ class DealBot:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True
 
+    async def _fetch_image(self, url: str | None) -> bytes | None:
+        """상품 사진 원본을 받아 온다 (카드에 얹을 용도). 실패하면 None."""
+        if not url:
+            return None
+        try:
+            resp = await self.http.get(url, follow_redirects=True, timeout=15, headers={"Referer": url})
+            ctype = resp.headers.get("content-type", "")
+            if resp.status_code != 200 or not ctype.startswith("image/") or len(resp.content) > 10_000_000:
+                return None
+            return resp.content
+        except Exception as e:  # noqa: BLE001
+            log.debug("image fetch failed %s: %s", url, e)
+            return None
+
+    async def make_card(self, deal: Deal) -> str | None:
+        """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None."""
+        if self.card is None:
+            return None
+        base = self.settings.secrets.public_base_url
+        if not base:
+            log.debug("no public domain — card image cannot be served")
+            return None
+        photo = await self._fetch_image(deal.product.image_url)
+        shop = self.registry.get(deal.product.shop)
+        try:
+            path = await asyncio.to_thread(self.card.save, deal, photo, shop_name=shop.name if shop else None)
+        except Exception as e:  # noqa: BLE001
+            log.warning("card render failed: %s", e)
+            return None
+        try:
+            self.card.prune(self.settings.card.keep_days)
+        except Exception:  # noqa: BLE001
+            pass
+        return f"{base}/media/{path.name}"
+
     async def _publish_side_channels(self, deal: Deal) -> None:
-        """텔레그램 채널 발행 후: 스레드 자동 게시 + 복붙 문구를 관리자 챗으로."""
-        if self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run):
-            result = await self.threads.publish(deal)
+        """텔레그램 채널 발행 후: 카드 이미지 → 스레드·인스타그램 자동 게시 + 복붙 문구를 관리자 챗으로."""
+        want_ig = (
+            self.settings.instagram.enabled
+            and (self.instagram.configured or self.instagram.dry_run)
+            and (deal.product.deal_kind != "info" or self.settings.instagram.info_posts)
+        )
+        want_threads = self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run)
+        card_url = await self.make_card(deal) if (want_ig or want_threads) else None
+        if want_threads:
+            result = await self.threads.publish(deal, fallback_image_url=card_url)
             if result.ok:
                 self.db.log_event("INFO", "threads", f"{deal.product.product_id} {'dry-run' if result.dry_run else result.message_id}")
                 log.info("threads posted: %s", deal.product.name[:40])
@@ -1339,6 +1434,15 @@ class DealBot:
                 self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
                 log.warning("threads post failed: %s", result.error)
                 await self.notifier.send(f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>")
+        if want_ig:
+            ig = await self.instagram.publish(deal, card_url)
+            if ig.ok:
+                self.db.log_event("INFO", "instagram", f"{deal.product.product_id} {'dry-run' if ig.dry_run else ig.message_id}")
+                log.info("instagram posted: %s", deal.product.name[:40])
+            else:
+                self.db.log_event("WARNING", "instagram", f"{deal.product.product_id}: {ig.error}")
+                log.warning("instagram post failed: %s", ig.error)
+                await self.notifier.send(f"⚠️ <b>인스타그램 발행 실패</b>\n<code>{html.escape(ig.error or '')}</code>")
         for block in self.copy_blocks.build(deal):
             await self.notifier.send(block.as_telegram_html(), silent=True)
 
@@ -1426,6 +1530,187 @@ class DealBot:
             await self.notifier.send(text)
         except Exception as e:  # noqa: BLE001
             log.warning("notify failed: %s", e)
+
+    # ----------------------------------------------------------- instagram
+    async def instagram_auth_url(self) -> str:
+        sec = self.settings.secrets
+        if not sec.has_instagram_app:
+            return "INSTAGRAM_APP_ID / INSTAGRAM_APP_SECRET 이 설정되어 있지 않습니다. (메타 앱 → 인스타그램 → 비즈니스 로그인 설정의 '인스타그램 앱 ID/시크릿')"
+        token = self.instagram.stored_token()
+        if token is not None:
+            try:
+                me = await self.instagram.client.me(token.access_token)
+                return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 아래처럼 /instaauth 링크를 다시 승인하세요)"
+            except InstagramError:
+                pass
+        from dealbot.publisher.instagram import authorize_url as ig_authorize_url
+
+        app_id = sec.instagram_app_id or ""
+        redirect = sec.instagram_redirect_uri
+        state = pysecrets.token_urlsafe(12)
+        self.db.kv_set(KV_IG_OAUTH_STATE, state)
+        self.db.kv_set(KV_IG_OAUTH_STATE_AT, to_iso(utcnow()))
+        url = ig_authorize_url(app_id, redirect, state=state)
+        register = (
+            f"1) 메타 앱에 이 주소가 등록돼 있어야 합니다: <code>{redirect}</code>\n"
+            "   developers.facebook.com → 앱 → 인스타그램 → API 설정(Instagram 로그인) → 3. 비즈니스 로그인 설정 → <b>OAuth 리디렉션 URI</b>. "
+            "입력 후 제안을 눌러 확정하고 저장. 메타는 localhost 를 받지 않습니다.\n"
+        )
+        check = (
+            f"\n확인: 이 링크의 client_id <code>{app_id}</code> 는 같은 화면의 <b>인스타그램 앱 ID</b>와 같아야 합니다 "
+            "(앱 설정 → 기본 설정 맨 위의 '앱 ID'와는 다른 번호). 인스타 계정은 프로페셔널(크리에이터/비즈니스)이어야 하고, "
+            "앱이 개발 모드면 앱 역할 → Instagram 테스터에 내 계정을 넣고 인스타 앱 → 설정 → 웹사이트 권한 → 앱 및 웹사이트 → 테스터 초대에서 수락해야 합니다."
+        )
+        if sec.instagram_callback_served:
+            return (
+                "<b>인스타그램 연결 (자동)</b>\n"
+                + register
+                + "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요.\n"
+                f"{url}\n"
+                "승인하면 봇이 바로 연결하고 결과를 이 챗에 보냅니다.\n"
+                + check
+            )
+        return (
+            "<b>인스타그램 연결 (수동)</b>\n"
+            + register
+            + "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요.\n"
+            f"{url}\n"
+            "3) 이동한 주소창에서 <code>code=</code> 뒤의 값을 복사해 <code>/instacode 붙여넣기</code> 로 보내주세요.\n"
+            + check
+        )
+
+    def _ig_oauth_state_valid(self, state: str | None) -> bool:
+        expected = self.db.kv_get(KV_IG_OAUTH_STATE)
+        if not state or not expected or state != expected:
+            return False
+        issued = from_iso(self.db.kv_get(KV_IG_OAUTH_STATE_AT))
+        return issued is not None and utcnow() - issued <= timedelta(hours=1)
+
+    async def _instagram_callback(self, query: dict[str, str]) -> tuple[int, str]:
+        err = query.get("error") or query.get("error_reason")
+        if err:
+            desc = query.get("error_description") or err
+            await self._notify_quiet(f"❌ 인스타그램 승인이 거부되었습니다: {html.escape(desc)}")
+            return 400, page("인스타그램 연결 실패", html.escape(desc))
+        code = query.get("code")
+        if not code:
+            return 400, page("인스타그램 연결", "code 가 없습니다. 텔레그램에서 /instaauth 링크를 다시 열어 주세요.")
+        if not self._ig_oauth_state_valid(query.get("state")):
+            return 400, page(
+                "인스타그램 연결 실패",
+                "요청 확인값(state)이 맞지 않거나 오래되었습니다. 텔레그램에서 /instaauth 로 새 링크를 받아 다시 시도해 주세요.",
+            )
+        self.db.kv_set(KV_IG_OAUTH_STATE, "")
+        msg = await self.instagram_submit_code(code)
+        await self._notify_quiet(msg)
+        ok = msg.startswith("✅")
+        return 200 if ok else 400, page(
+            "인스타그램 연결 완료" if ok else "인스타그램 연결 실패",
+            html.escape(msg) + "<br>이 창을 닫고 텔레그램 관리자 챗을 확인하세요.",
+        )
+
+    async def instagram_submit_code(self, code: str) -> str:
+        if not self.settings.secrets.has_instagram_app:
+            return "INSTAGRAM_APP_ID / INSTAGRAM_APP_SECRET 이 필요합니다."
+        try:
+            token = await self.instagram.client.exchange_code(code, self.settings.secrets.instagram_redirect_uri)
+            me = await self.instagram.client.me(token.access_token)
+            username = str(me.get("username") or "")
+            self.instagram.save_token(token, username)
+            expires = token.expires_at.date().isoformat() if token.expires_at else "-"
+            self.db.log_event("INFO", "instagram", f"authorized as {username}")
+            return f"✅ 인스타그램 연결 완료: @{username} (토큰 만료 {expires}, 자동 갱신됨)"
+        except InstagramError as e:
+            return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /instaauth 로 다시 받아 주세요."
+
+    async def instagram_test(self, queue_id: int | None = None) -> str:
+        """인스타그램에 실제로 올려 본다. 번호 없으면 샘플 딜, 있으면 채널에 올렸던 그 글."""
+        from dealbot.cli import sample_deal
+
+        if not self.settings.instagram.enabled:
+            return "인스타그램 자동 게시가 꺼져 있습니다 (config instagram.enabled)."
+        if self.instagram.stored_token() is None:
+            return "인스타그램이 연결되어 있지 않습니다. /instaauth 먼저 해 주세요."
+        if queue_id is None:
+            deal, label = sample_deal(), "샘플 딜"
+        else:
+            item = self.db.get_queue_item(queue_id)
+            if item is None:
+                return f"#{queue_id} 글이 없습니다."
+            if item.status != "published":
+                return f"#{queue_id} 는 채널에 올라간 글이 아닙니다 (상태 {item.status})."
+            deal, label = item.deal, f"#{queue_id} {item.deal.product.name[:30]}"
+        caption = self.instagram.render(deal)
+        card_url = await self.make_card(deal)
+        preview = f"📸 <b>인스타그램에는 이렇게 올라갑니다 ({html.escape(label)})</b>\n<pre>{html.escape(caption)}</pre>"
+        preview += f"\n사진(카드): {card_url}" if card_url else "\n⚠️ 카드 이미지를 만들 수 없습니다 (공개 도메인이 없거나 card.enabled 가 꺼짐) — 인스타는 사진이 필수라 올릴 수 없습니다."
+        if self.instagram.dry_run:
+            return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
+        result = await self.instagram.publish(deal, card_url)
+        if not result.ok:
+            return preview + f"\n\n❌ 올리지 못했습니다: <code>{html.escape(result.error or '')}</code>"
+        link = None
+        token = self.instagram.stored_token()
+        if token is not None and result.message_id is not None:
+            try:
+                link = await self.instagram.client.permalink(token, str(result.message_id))
+            except InstagramError as e:
+                log.warning("instagram permalink lookup failed: %s", e)
+        lines = [preview, "", "✅ 인스타그램에 올렸습니다" + (f": {link}" if link else "")]
+        if queue_id is None:
+            lines.append("샘플 글이니 확인한 뒤 인스타그램 앱에서 지워 주세요.")
+        return "\n".join(lines)
+
+    # ----------------------------------------------------------- 핫딜 페이지 (인스타 프로필 링크용)
+    async def _deals_page(self, query: dict[str, str]) -> tuple[int, str]:
+        cfg = self.settings.web
+        now = utcnow()
+        # 끝 시각을 조금 뒤로: 방금(같은 초에) 올라간 글도 들어가게
+        items = self.db.published_items_between(
+            now - timedelta(hours=cfg.page_hours), now + timedelta(minutes=1), include_dry_run=self.state.dry_run
+        )
+        rows = []
+        disclosures: list[str] = list(self.settings.blog_digest.always_disclosures)
+        for it in sorted(items, key=lambda x: x.score, reverse=True)[: cfg.page_max_items]:
+            p = it.deal.product
+            if p.deal_kind == "info" or not (it.deal.affiliate_url or p.url):
+                continue
+            shop = self.registry.get(p.shop)
+            if shop is not None and shop.disclosure and shop.disclosure not in disclosures:
+                disclosures.append(shop.disclosure)
+            rows.append(
+                {
+                    "id": it.id,
+                    "name": p.name,
+                    "price": p.price if p.has_price else None,
+                    "original_price": p.original_price if p.original_price and p.price and p.original_price > p.price else None,
+                    "discount_rate": p.effective_discount_rate(),
+                    "shop": shop.name if shop else p.shop,
+                    "rocket": bool(p.is_rocket),
+                    "free_shipping": bool(p.is_free_shipping),
+                }
+            )
+        html_text = self.renderer.render(
+            "deals_page.j2",
+            title=cfg.site_title,
+            items=rows,
+            hours=cfg.page_hours,
+            disclosures=disclosures,
+            channels=self.settings.channels.as_dict(),
+        )
+        return 200, html_text
+
+    async def _deal_redirect(self, query: dict[str, str]) -> tuple[int, str]:
+        raw = (query.get("path") or "").strip("/")
+        if not raw.isdigit():
+            return 404, page("없는 딜", "주소가 올바르지 않습니다.")
+        item = self.db.get_queue_item(int(raw))
+        if item is None or item.status != "published":
+            return 404, page("없는 딜", "이 딜은 더 이상 없습니다. 최신 딜은 첫 페이지에서 보세요.")
+        target = item.deal.affiliate_url or item.deal.product.url
+        if not target:
+            return 404, page("없는 딜", "구매 링크가 없습니다.")
+        return 302, target
 
     async def threads_submit_code(self, code: str) -> str:
         if not self.settings.secrets.has_threads_app:

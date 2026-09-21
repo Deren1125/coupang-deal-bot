@@ -281,6 +281,28 @@ threads:
   send_photo: true
   refresh_before_days: 7
 
+# 인스타그램 자동 게시 (Instagram API with Instagram Login — 프로페셔널 계정, 페이스북 페이지 불필요)
+# Railway Variables: INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET → /instaauth 로 1회 연결. 사진은 아래 card 로 만든 카드를 올림
+instagram:
+  enabled: true
+  template: deal_instagram.j2
+  refresh_before_days: 7
+  info_posts: false                       # 정보 글(이벤트류)은 안 올림 (상품 딜만)
+
+# 딜 카드 이미지 (1080×1350). 인스타그램은 항상, 스레드는 상품 사진이 없거나 거절될 때
+card:
+  enabled: true
+  footer: 오늘의 핫딜
+  footer_note: 구매 링크는 프로필 링크에서
+  keep_days: 7
+
+# 봇의 작은 웹 서버 (Railway 공개 도메인). "/" 는 최근 채널 딜 목록 페이지 — 인스타 프로필 링크에 넣는 용도
+web:
+  public_page: true
+  site_title: 오늘의 핫딜
+  page_hours: 48
+  page_max_items: 30
+
 # API 가 없어 복붙해야 하는 곳: 발행 성공 시 관리자 챗으로 완성된 문구를 보냄
 copy:
   enabled: true

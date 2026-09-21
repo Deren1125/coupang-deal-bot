@@ -219,6 +219,9 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("ppstats", "커뮤니티 글 추천 분포"),
     ("threadsauth", "스레드 연결 (최초 1회)"),
     ("threadscode", "스레드 인증 코드 입력"),
+    ("instaauth", "인스타그램 연결 (최초 1회)"),
+    ("instacode", "인스타그램 인증 코드 입력"),
+    ("instatest", "인스타그램에 샘플 글 올려 보기 (번호 주면 그 글)"),
     ("help", "도움말"),
 ]
 
@@ -565,6 +568,35 @@ class StatusReporter:
             "last_fail": last_fail,
         }
 
+    def _instagram_row(self, now: datetime) -> dict[str, Any]:
+        from dealbot.publisher import instagram as ig
+
+        row: dict[str, Any] = {"state": "off", "username": None, "expires": None, "last_fail": None, "no_domain": False}
+        if not self.settings.instagram.enabled:
+            return row
+        if not self.settings.secrets.has_instagram_app:
+            return row | {"state": "noapp"}
+        if not (self.db.kv_get(ig.KV_TOKEN) and self.db.kv_get(ig.KV_USER_ID)):
+            return row | {"state": "unlinked"}
+        tz = self.settings.app.timezone
+        expires = from_iso(self.db.kv_get(ig.KV_TOKEN_EXPIRES))
+        last_fail = None
+        for ev in self.db.recent_events(limit=30, level="WARNING"):
+            if ev.get("kind") != "instagram":
+                continue
+            ts = from_iso(str(ev.get("ts") or ""))
+            if ts is None or now - ts <= timedelta(hours=24):
+                when = fmt_local(ts, tz, "%m-%d %H:%M") if ts else ""
+                last_fail = f"{when} {truncate(str(ev.get('message') or ''), 160)}".strip()
+            break
+        return row | {
+            "state": "ok",
+            "username": self.db.kv_get(ig.KV_USERNAME) or None,
+            "expires": fmt_local(expires, tz, "%m-%d") if expires else None,
+            "last_fail": last_fail,
+            "no_domain": not self.settings.secrets.public_base_url,
+        }
+
     def status_context(self) -> dict[str, Any]:
         now = utcnow()
         tz = self.settings.app.timezone
@@ -596,6 +628,8 @@ class StatusReporter:
             },
             "rate": self.rate.snapshot(now),
             "threads": self._threads_row(now),
+            "instagram": self._instagram_row(now),
+            "site_url": self.settings.secrets.public_base_url if self.settings.web.public_page else None,
             "queue": self.db.queue_counts(),
             "products": self.db.product_count(),
             "price_points": self.db.price_history_count(),
@@ -833,6 +867,12 @@ class BotController(Protocol):
 
     async def threads_submit_code(self, code: str) -> str: ...
 
+    async def instagram_auth_url(self) -> str: ...
+
+    async def instagram_submit_code(self, code: str) -> str: ...
+
+    async def instagram_test(self, queue_id: int | None = None) -> str: ...
+
     async def send_copy_blocks(self, queue_id: int | None = None) -> str: ...
 
     async def naver_link_test(self, url: str) -> str: ...
@@ -864,6 +904,7 @@ HELP_TEXT = (
     "/threadstest — 샘플 딜을 스레드에 실제로 올려 어떻게 보이는지 확인합니다 (본 뒤 스레드 앱에서 삭제). /threadstest 번호 — 채널에 올렸던 그 글을 스레드에 다시 올립니다.\n"
     "/pushtest — 휴대폰 푸시(ntfy) 연결 확인.\n"
     "/threadsauth — 스레드 자동 게시 연결. Threads 앱 ID·시크릿을 변수에 넣은 뒤 1회. Railway 도메인이 있으면 승인만 누르면 끝, 없으면 /threadscode 코드 로 인증 코드 입력.\n"
+    "/instaauth — 인스타그램 자동 게시 연결 (프로페셔널 계정, Instagram 앱 ID·시크릿을 변수에 넣은 뒤 1회). /instacode 코드 — 수동 연결 때 인증 코드 입력. /instatest — 샘플 딜을 인스타에 실제로 올려 카드·본문 확인.\n"
     "/naverlogin — 네이버 쇼핑커넥트 링크를 봇이 대신 만들도록 서버 브라우저에 QR 로그인. 블로그 글쓰기가 아니라 링크 생성 자동화이고, 브라우저 자동화를 켰을 때만 됩니다.\n"
     "/naverlink 상품URL — 위 자동화로 링크 하나 만들어 보기.\n"
     "/shot URL — 서버 브라우저로 그 페이지 화면을 찍어 보냅니다. 봇이 게시판을 잘못 읽는 것 같을 때 확인용.\n"
@@ -954,6 +995,21 @@ def register_admin_handlers(
 
     async def cmd_test(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.test_post())
+
+    async def cmd_instaauth(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, await controller.instagram_auth_url())
+
+    async def cmd_instacode(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args:
+            await reply(update, "이렇게 보내주세요: <code>/instacode 코드값</code>")
+            return
+        await reply(update, await controller.instagram_submit_code(args[0]))
+
+    async def cmd_instatest(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        qid = int(args[0].lstrip("#")) if args and args[0].lstrip("#").isdigit() else None
+        await reply(update, await controller.instagram_test(qid))
 
     async def cmd_threadstest(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
@@ -1109,6 +1165,9 @@ def register_admin_handlers(
         ("pushtest", cmd_pushtest),
         ("threadsauth", cmd_threadsauth),
         ("threadscode", cmd_threadscode),
+        ("instaauth", cmd_instaauth),
+        ("instacode", cmd_instacode),
+        ("instatest", cmd_instatest),
         ("copy", cmd_copy),
         ("blog", cmd_blog),
         ("ppstats", cmd_ppstats),

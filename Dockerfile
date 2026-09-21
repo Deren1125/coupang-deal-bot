@@ -18,6 +18,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# 카드 이미지(인스타그램·스레드)의 한글 글꼴. 나눔고딕(OFL) 한 패키지만 설치하고 apt 캐시는 지운다.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-nanum \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 

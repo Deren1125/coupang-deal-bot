@@ -1,0 +1,35 @@
+{#
+  인스타그램 본문 — 사진(카드)은 따로 올라가고 이 글이 캡션. 링크는 눌리지 않으니 프로필 링크로 유도.
+  2,200자 제한, 순수 텍스트. 변수는 deal_post.j2 와 같고 site_url(핫딜 페이지 주소)이 추가로 온다.
+#}
+{% if tier == "top" %}
+{{ product.name }} 평소 가격의 3분의 1 떴어요
+{% elif tier == "must" %}
+{{ product.name }} 반값 떴어요
+{% elif product.original_price and product.original_price > product.price %}
+{{ product.name }} {{ product.original_price | won }} → {{ product.price | won }}
+{% elif discount_rate %}
+{{ product.name }} {{ discount_rate | pct }} 할인
+{% else %}
+{{ product.name }}
+{% endif %}
+{% if product.has_price %}
+{{ product.price | won }}{% if product.original_price and product.original_price > product.price %} (정가 {{ product.original_price | won }}){% endif %}{% if product.shipping %} · 배송 {{ product.shipping }}{% endif +%}
+{% endif %}
+{% if product.headline %}
+{{ product.headline }}
+{% endif %}
+{% if product.rating %}
+별점 {{ product.rating }}{% if product.review_count %} · 리뷰 {{ "{:,}".format(product.review_count) }}건{% endif +%}
+{% endif %}
+
+구매 링크는 프로필 링크에서 이 상품을 눌러 주세요 (핫딜은 금방 품절돼요)
+{% if channels.telegram_url %}
+실시간 전체 딜: {{ channels.telegram_url }}
+{% endif %}
+{% if shop.disclosure %}
+
+{{ shop.disclosure }}
+{% endif %}
+
+#핫딜 #특가 #오늘의핫딜 #할인정보{% if product.shop == "coupang" %} #쿠팡핫딜{% endif +%}

@@ -185,3 +185,22 @@ async def test_sweep_drops_pending_reviews_but_keeps_info_reviews(bot: DealBot) 
     assert await bot.sweep_unverified_reviews() == 1
     assert bot.db.queue_counts() == {"awaiting_approval": 1, "skipped": 1}
     assert bot.db.get_queue_item(2).status == "awaiting_approval"  # type: ignore[union-attr]
+
+
+@pytest.mark.food_rule
+async def test_food_passes_without_seller_check(bot: DealBot) -> None:
+    """식품은 정품 개념이 없어 공식 판매처 확인이 안 돼도 올린다. 거부 낱말(병행수입)은 여전히 막는다."""
+    assert bot.settings.deal.authenticity.unverified_action == "skip"
+    bot.settings.deal.food.min_below_reference_pct = 0  # 여기서는 식품 가격 기준이 아니라 판매처 확인 예외만 본다
+    FakeCollector.products = [
+        _lotteon(1, "곰곰 소중한 우리쌀 10kg"),
+        _lotteon(2, "[병행수입] 하리보 골드베렌 젤리 1kg"),
+        _lotteon(3, "나이키 에어맥스 운동화"),
+    ]
+    await bot.run_collector(bot.collectors[0])
+    for _ in range(3):
+        assert await bot.process_queue_once()
+    items = {it.product_id: it for it in [bot.db.get_queue_item(i) for i in (1, 2, 3)] if it}
+    assert items["lotteon:1"].status == "published" and items["lotteon:1"].deal.product.extra["auth"]["status"] == "ok"
+    assert items["lotteon:2"].status == "skipped" and "병행수입" in (items["lotteon:2"].last_error or "")
+    assert items["lotteon:3"].status == "skipped" and "unverified seller" in (items["lotteon:3"].last_error or "")

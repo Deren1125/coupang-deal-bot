@@ -363,15 +363,20 @@ class ThreadsPublisher:
         shop = self.registry.get(deal.product.shop)
         return self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)
 
-    async def _post_with_fallback(self, token: ThreadsToken, text: str, image_url: str | None) -> tuple[str, str | None]:
-        """사진이 있으면 사진과 함께, 사진 쪽이 문제면 사진 없이 다시. (글 id, 참고 메모)"""
-        if not image_url:
-            return await self.client.post(token, text), None
-        try:
-            return await self.client.post(token, text, image_url), None
-        except ThreadsMediaError as e:
-            log.warning("threads image rejected (%s) — posting without photo: %s", image_url, e)
-            return await self.client.post(token, text), f"사진 없이 올림: {e}"
+    async def _post_with_fallback(
+        self, token: ThreadsToken, text: str, image_url: str | None, fallback_image_url: str | None = None
+    ) -> tuple[str, str | None]:
+        """상품 사진 → (거절되면) 카드 이미지 → (그것도 안 되면) 글만. (글 id, 참고 메모)"""
+        candidates = [u for u in (image_url, fallback_image_url) if u]
+        note: str | None = None
+        for i, url in enumerate(candidates):
+            try:
+                return await self.client.post(token, text, url), note
+            except ThreadsMediaError as e:
+                nxt = candidates[i + 1] if i + 1 < len(candidates) else None
+                log.warning("threads image rejected (%s) — %s: %s", url, "trying card image" if nxt else "posting without photo", e)
+                note = f"카드 이미지로 올림 (상품 사진 거절: {e})" if nxt else f"사진 없이 올림: {e}"
+        return await self.client.post(token, text), note
 
     async def _reply(self, token: ThreadsToken, text: str, post_id: str) -> None:
         """방금 올린 글이 아직 조회되지 않아 실패하면 조금 쉬었다 다시."""
@@ -404,7 +409,7 @@ class ThreadsPublisher:
             return PublishResult(ok=False, error=str(e))
         return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None, error=note)
 
-    async def publish(self, deal: Deal) -> PublishResult:
+    async def publish(self, deal: Deal, *, fallback_image_url: str | None = None) -> PublishResult:
         if not self.enabled:
             return PublishResult(ok=False, error="threads disabled")
         text = self.render(deal)
@@ -416,7 +421,7 @@ class ThreadsPublisher:
         if token is None:
             return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
         try:
-            post_id, note = await self._post_with_fallback(token, text, deal.product.image_url)
+            post_id, note = await self._post_with_fallback(token, text, deal.product.image_url, fallback_image_url)
         except ThreadsError as e:
             return PublishResult(ok=False, error=str(e))
         message_id = int(post_id) if post_id.isdigit() else None
