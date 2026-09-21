@@ -1298,6 +1298,9 @@ class DealBot:
         if auth.status == "unknown" and self.evaluator.is_food(deal.product):
             # 식품은 '정품' 개념이 없으니 공식 판매처 확인이 안 돼도 통과 (병행수입 같은 거부 낱말은 위에서 이미 걸렀다)
             auth = replace(auth, status="ok", reason="식품 (판매처 확인 생략)")
+            cached = deal.product.extra.get("auth")
+            if isinstance(cached, dict):
+                deal.product.extra["auth"] = {**cached, "status": "ok", "reason": auth.reason}
         if (
             auth.status == "unknown"
             and not deal.product.extra.get("auth_approved")
