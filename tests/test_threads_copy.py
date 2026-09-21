@@ -290,7 +290,7 @@ async def test_threads_auth_commands(settings: Settings) -> None:
         settings.secrets.threads_app_secret = "SECRET"
         url_msg = await bot.threads_auth_url()
         assert "threads.com/oauth/authorize" in url_msg and "/threadscode" in url_msg
-        assert "client_id 는 <code>APPID</code>" in url_msg
+        assert "client_id <code>APPID</code>" in url_msg and "수동" in url_msg
 
         def handler(req: httpx.Request) -> httpx.Response:
             if req.url.path == "/oauth/access_token":

@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import html
 import logging
+import secrets as pysecrets
 import traceback
 from dataclasses import replace
 from datetime import timedelta
@@ -68,8 +69,12 @@ from dealbot.storage.db import Database, QueueItem
 from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
 from dealbot.utils.text import truncate
 from dealbot.utils.timeutil import fmt_local, from_iso, in_time_window, local_now, to_iso, utcnow
+from dealbot.web import WebServer, page
 
 log = logging.getLogger(__name__)
+
+KV_OAUTH_STATE = "threads_oauth_state"
+KV_OAUTH_STATE_AT = "threads_oauth_state_at"
 
 
 class DealBot:
@@ -226,6 +231,11 @@ class DealBot:
         self.reporter = StatusReporter(
             settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget
         )
+        # ---- 작은 웹 서버: 스레드 OAuth 콜백·/health. Railway 공개 도메인을 붙이면 승인만 눌러도 스레드가 연결된다
+        self.web = WebServer(settings.secrets.web_port)
+        self.web.route("/threads/callback", self._threads_callback)
+        if settings.secrets.threads_callback_path != "/threads/callback":
+            self.web.route(settings.secrets.threads_callback_path, self._threads_callback)
 
         # ---- 수집기
         ctx = CollectorContext(settings=settings, http=self.http, db=self.db, coupang=self.coupang, shops=self.registry)
@@ -298,7 +308,15 @@ class DealBot:
         except Exception as e:  # noqa: BLE001
             log.warning("telegram shutdown error: %s", e)
 
+    async def start_web(self) -> None:
+        """포트를 못 열어도 봇은 계속 돈다 (그때는 /threadscode 수동 연결)."""
+        try:
+            await self.web.start()
+        except Exception as e:  # noqa: BLE001
+            log.warning("web server start failed on port %s (스레드 연결은 /threadscode 수동으로): %s", self.web.port, e)
+
     async def close(self) -> None:
+        await self.web.stop()
         await self.stop_telegram()
         if self.browser is not None:
             await self.browser.close()
@@ -1256,24 +1274,83 @@ class DealBot:
         if token is not None:
             try:
                 me = await self.threads.client.me(token.access_token)
-                return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 /threadscode 로 새 code 를 넣으세요)"
+                return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 /threadsauth 링크를 다시 승인하거나 /threadscode 로 새 code 를 넣으세요)"
             except ThreadsError:
                 pass
-        app_id = self.settings.secrets.threads_app_id or ""
-        redirect = self.settings.secrets.threads_redirect_uri
-        url = authorize_url(app_id, redirect)
-        return (
-            "1) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 Safari 주소창에 붙여넣어 여세요. 그냥 누르면 스레드 앱이 열려 승인 화면이 안 뜹니다.\n"
-            f"{url}\n\n"
-            "2) 승인 후 이동한 주소창에서 <code>code=</code> 뒤의 값을 복사해\n"
-            "<code>/threadscode 붙여넣기</code> 로 보내주세요.\n"
-            "(주소가 열리지 않아도 됩니다. 주소창의 code 값만 필요합니다.)\n\n"
-            f"확인: 이 링크의 client_id 는 <code>{app_id}</code> 입니다. "
-            "developers.facebook.com → 앱 → 앱 설정 → 기본 설정 아래쪽의 <b>Threads 앱 ID</b>와 같아야 합니다 "
-            "(같은 페이지 맨 위 '앱 ID'는 메타 앱용이라 다른 번호입니다).\n"
-            "'차단된 URL입니다 / 리디렉션 URI가 화이트리스트에 없습니다' 가 뜨면 ① 이 번호가 Threads 앱 ID가 아니거나 "
-            f"② 사용 사례 → Threads API 설정의 리디렉션 콜백 URL에 <code>{redirect}</code> 가 글자 그대로 없는 경우입니다."
+        sec = self.settings.secrets
+        app_id = sec.threads_app_id or ""
+        redirect = sec.threads_redirect_uri
+        state = pysecrets.token_urlsafe(12)
+        self.db.kv_set(KV_OAUTH_STATE, state)
+        self.db.kv_set(KV_OAUTH_STATE_AT, to_iso(utcnow()))
+        url = authorize_url(app_id, redirect, state=state)
+        register = (
+            f"1) 메타 앱에 이 콜백 주소가 등록돼 있어야 합니다: <code>{redirect}</code>\n"
+            "   developers.facebook.com → 앱 → 사용 사례 → Threads API → 설정 → <b>리디렉션 콜백 URL</b>. "
+            "입력한 뒤 아래에 뜨는 제안을 눌러야 등록되고, <b>설치 제거·삭제 콜백 URL</b>도 같은 주소로 채워야 저장됩니다. "
+            "메타는 localhost 주소를 받지 않습니다.\n"
         )
+        check = (
+            f"\n확인: 이 링크의 client_id <code>{app_id}</code> 는 앱 설정 → 기본 설정 아래쪽의 <b>Threads 앱 ID</b>와 같아야 합니다 "
+            "(같은 페이지 맨 위 '앱 ID'는 메타 앱용이라 다른 번호입니다). "
+            "'차단된 URL / 리디렉션 URI가 화이트리스트에 없습니다' 가 뜨면 ① 이 번호가 Threads 앱 ID가 아니거나 ② 1)의 주소가 글자 그대로 등록되지 않은 경우입니다."
+        )
+        if sec.threads_callback_served:
+            return (
+                "<b>스레드 연결 (자동)</b>\n"
+                + register
+                + "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요. 그냥 누르면 스레드 앱이 열려 승인 화면이 안 뜹니다.\n"
+                f"{url}\n"
+                "승인하면 봇이 바로 연결하고 결과를 이 챗에 보냅니다. 코드를 복사할 필요가 없습니다.\n"
+                + check
+            )
+        return (
+            "<b>스레드 연결 (수동)</b>\n"
+            + register
+            + "   Railway 에서 서비스 도메인을 만들면(Settings → Networking → Generate Domain, 포트 8080) 봇이 콜백을 직접 받아 승인만으로 연결됩니다. docs/SETUP_KEYS.md 7-1 참고.\n"
+            "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요.\n"
+            f"{url}\n"
+            "3) 승인 후 이동한 주소창에서 <code>code=</code> 뒤의 값을 복사해 <code>/threadscode 붙여넣기</code> 로 보내주세요. "
+            "(주소가 열리지 않아도 됩니다. <code>error_code=</code> 가 보이면 오류 페이지라 코드가 아닙니다.)\n"
+            + check
+        )
+
+    def _oauth_state_valid(self, state: str | None) -> bool:
+        expected = self.db.kv_get(KV_OAUTH_STATE)
+        if not state or not expected or state != expected:
+            return False
+        issued = from_iso(self.db.kv_get(KV_OAUTH_STATE_AT))
+        return issued is not None and utcnow() - issued <= timedelta(hours=1)
+
+    async def _threads_callback(self, query: dict[str, str]) -> tuple[int, str]:
+        """스레드 OAuth 리디렉션을 봇이 직접 받는다: 승인 → code 교환 → 결과를 관리자 챗으로."""
+        err = query.get("error") or query.get("error_reason")
+        if err:
+            desc = query.get("error_description") or err
+            await self._notify_quiet(f"❌ 스레드 승인이 거부되었습니다: {html.escape(desc)}")
+            return 400, page("스레드 연결 실패", html.escape(desc))
+        code = query.get("code")
+        if not code:
+            return 400, page("스레드 연결", "code 가 없습니다. 텔레그램에서 /threadsauth 링크를 다시 열어 주세요.")
+        if not self._oauth_state_valid(query.get("state")):
+            return 400, page(
+                "스레드 연결 실패",
+                "요청 확인값(state)이 맞지 않거나 오래되었습니다. 텔레그램에서 /threadsauth 로 새 링크를 받아 다시 시도해 주세요.",
+            )
+        self.db.kv_set(KV_OAUTH_STATE, "")  # 한 번 쓴 state 는 버린다
+        msg = await self.threads_submit_code(code)
+        await self._notify_quiet(msg)
+        ok = msg.startswith("✅")
+        return 200 if ok else 400, page(
+            "스레드 연결 완료" if ok else "스레드 연결 실패",
+            html.escape(msg) + "<br>이 창을 닫고 텔레그램 관리자 챗을 확인하세요.",
+        )
+
+    async def _notify_quiet(self, text: str) -> None:
+        try:
+            await self.notifier.send(text)
+        except Exception as e:  # noqa: BLE001
+            log.warning("notify failed: %s", e)
 
     async def threads_submit_code(self, code: str) -> str:
         if not self.settings.secrets.has_threads_app:

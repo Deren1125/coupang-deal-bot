@@ -169,6 +169,7 @@ async def run_forever(bot: DealBot) -> None:
         await bot.start_telegram(polling=True)
     except Exception as e:  # noqa: BLE001 — 어떤 경우에도 봇 프로세스는 살아 있어야 한다
         log.exception("텔레그램 시작 중 예기치 못한 오류 — 오프라인으로 계속합니다: %s", e)
+    await bot.start_web()  # 스레드 OAuth 콜백·/health (실패해도 계속)
     log.info("DealBot started: %r (tz=%s)", bot, ZoneInfo(bot.settings.app.timezone))
     bot.db.log_event("INFO", "lifecycle", "started")
     try:

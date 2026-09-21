@@ -115,15 +115,20 @@
 2. https://developers.facebook.com → 개발자 등록(무료) → **앱 만들기** → 사용 사례에서 **Threads API** 선택 (권한 `threads_basic`, `threads_content_publish`, `threads_manage_replies` — 링크를 답글로 올리므로 답글 권한까지).
 3. 앱 대시보드 → **앱 설정 → 기본 설정** 페이지를 아래로 내려 **Threads 앱 ID** / **Threads 앱 시크릿** 확인 → Railway Variables 에 `THREADS_APP_ID`, `THREADS_APP_SECRET` (파일이나 챗에 적지 않기).
    - 같은 페이지 맨 위의 **앱 ID / 앱 시크릿**은 메타 앱용이라 번호가 다릅니다. 이걸 넣으면 승인 링크에서 "차단된 URL입니다: 리디렉션 URI가 … 화이트리스트에 없으므로" 오류가 납니다. 사용 사례 → Threads API → 맞춤 설정 → 설정 에서도 같은 Threads 값을 볼 수 있습니다.
-4. 앱의 **Threads API 사용 사례 설정** → 리디렉션 콜백 URL(OAuth Redirect URI)에 `https://localhost/callback` 추가. (다른 주소를 쓰려면 Railway 의 `THREADS_REDIRECT_URI` 도 같은 값으로.)
-5. 앱이 **개발 모드**면 내 스레드 계정을 **앱 역할 → Threads 테스터**로 추가하고, 스레드 앱 → 설정 → 계정 → 웹사이트 권한 → 초대에서 수락. (앱 검수를 통과해 라이브 모드면 이 단계는 필요 없음.)
-6. Redeploy 후 관리자 챗에서 `/threadsauth` → 나온 링크를 열어 승인 → 이동한 주소창(`https://localhost/callback?code=...`)의 `code=` 뒤 값을 `#_` 앞까지 복사 → `/threadscode 값` 전송. 페이지는 "연결할 수 없음"으로 보여도 정상이며 주소창의 코드만 필요합니다.
-7. "연결 완료" 가 뜨면 끝. 토큰(60일)은 봇이 만료 전에 자동 갱신합니다. `/status` 의 스레드 줄이 ✅ 이면 그다음 딜부터 스레드에도 올라갑니다.
+4. **콜백 주소 만들기.** 메타는 리디렉션 주소로 `localhost` 를 받지 않고 https 실제 도메인만 받습니다. Railway 에서 봇에 도메인을 하나 붙이면 봇이 승인 결과를 직접 받아 코드 복사 없이 연결됩니다.
+   - Railway → 봇 서비스 → **Settings → Networking → Public Networking → Generate Domain**. 포트를 물으면 **8080** (봇의 작은 HTTP 서버. `PORT` 변수를 넣었다면 그 값).
+   - 도메인이 생기면 **Redeploy**. 봇은 `RAILWAY_PUBLIC_DOMAIN` 을 읽어 콜백 주소를 `https://<도메인>/threads/callback` 으로 잡습니다. (다른 주소를 쓰려면 `THREADS_REDIRECT_URI` 변수에 넣고, 아래 6번의 수동 방식으로.)
+5. 관리자 챗에서 `/threadsauth` → 메시지 1)에 적힌 콜백 주소를 메타 앱에 등록: 앱 → **사용 사례 → Threads API → 설정** → **리디렉션 콜백 URL**에 그 주소를 넣고 **아래에 뜨는 제안을 눌러 확정** (누르지 않으면 입력된 것처럼 보여도 저장되지 않음) → **설치 제거 콜백 URL, 삭제 콜백 URL**도 같은 주소로 채움 (비어 있으면 저장 버튼이 안 눌림) → 저장.
+6. 앱이 **개발 모드**면 내 스레드 계정을 **앱 역할 → Threads 테스터**로 추가하고, 스레드 앱 → 설정 → 계정 → 웹사이트 권한 → 초대에서 수락. (검수를 통과해 라이브 모드면 필요 없음. 테스터가 아니면 code 교환에서 실패합니다.)
+7. `/threadsauth` 메시지 2)의 링크를 **길게 눌러 복사**해 브라우저 주소창에 붙여넣고 승인. 그냥 누르면 스레드 앱이 링크를 가로채 승인 화면이 안 뜹니다.
+   - 자동(4번 도메인 사용): 승인하면 봇이 바로 연결하고 "✅ 스레드 연결 완료" 를 관리자 챗에 보냅니다. 끝.
+   - 수동(다른 콜백 주소): 이동한 주소창의 `code=` 뒤 값을 `#_` 앞까지 복사해 `/threadscode 값` 전송. `error_code=` 가 보이면 오류 페이지라 코드가 아닙니다.
+8. 토큰(60일)은 봇이 만료 전에 자동 갱신합니다. `/status` 의 스레드 줄이 ✅ 이면 그다음 딜부터 스레드에도 올라갑니다.
 
 막힐 때:
-- `threads.com/oauth/authorize/error.json?error_message=차단된 URL입니다…` 가 뜨면 → `/threadsauth` 메시지 끝에 적힌 client_id 가 **Threads 앱 ID**와 같은지 먼저 확인(다르면 Railway 값 교체 후 Redeploy). 같다면 4번의 리디렉션 콜백 URL 이 `https://localhost/callback` 과 글자 단위로 같은지(https, 끝에 `/` 없음) 확인하고 저장 후 1~2분 뒤 다시 시도.
-- 링크를 누르면 스레드 앱만 열리고 승인 화면이 안 뜨면 → 링크를 길게 눌러 복사해 브라우저 주소창에 직접 붙여넣기.
-- 승인 화면에서 "앱이 개발 모드" 류의 오류 → 5번의 Threads 테스터 초대 수락 여부 확인.
+- `threads.com/oauth/authorize/error.json?error_message=차단된 URL입니다…` → `/threadsauth` 메시지 끝의 client_id 가 **Threads 앱 ID**와 같은지 먼저 확인(다르면 Railway 값 교체 후 Redeploy). 같다면 5번의 리디렉션 콜백 URL 이 메시지 1)의 주소와 글자 단위로 같은지(https, 끝 `/` 없음), 제안을 눌러 확정했는지, 저장됐는지(새로고침 후에도 남아 있는지) 확인. `localhost` 는 등록해도 통하지 않습니다.
+- 승인 뒤 "Invalid redirect_uri" 나 code 교환 실패 → 6번 Threads 테스터 초대를 수락했는지 확인.
+- 링크를 누르면 스레드 앱만 열리고 승인 화면이 안 뜨면 → 링크를 복사해 브라우저 주소창에 직접 붙여넣기.
 
 ## 7-3. 정보 글 (상품 링크 없는 게시판 글)
 

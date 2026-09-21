@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import yaml
 from dotenv import load_dotenv
@@ -448,6 +449,8 @@ class Secrets(BaseModel):
     threads_app_id: str | None = None
     threads_app_secret: str | None = None
     threads_redirect_uri: str = "https://localhost/callback"
+    public_domain: str | None = None  # Railway 가 넣어 주는 RAILWAY_PUBLIC_DOMAIN (예: xxx.up.railway.app)
+    web_port: int = 8080  # PORT — 스레드 OAuth 콜백·/health 를 받는 작은 HTTP 서버
     ntfy_topic: str | None = None
     ntfy_token: str | None = None
     pushover_user_key: str | None = None
@@ -461,6 +464,17 @@ class Secrets(BaseModel):
     @property
     def has_threads_app(self) -> bool:
         return bool(self.threads_app_id and self.threads_app_secret)
+
+    @property
+    def threads_callback_path(self) -> str:
+        """봇이 직접 받는 스레드 OAuth 콜백 경로 (리디렉션 주소의 경로 부분)."""
+        return urlsplit(self.threads_redirect_uri).path or "/threads/callback"
+
+    @property
+    def threads_callback_served(self) -> bool:
+        """리디렉션 주소가 이 봇의 공개 도메인을 가리키면 승인만 눌러도 자동으로 연결된다."""
+        host = (urlsplit(self.threads_redirect_uri).hostname or "").lower()
+        return bool(host) and host == (self.public_domain or "").lower()
 
     @property
     def has_ntfy(self) -> bool:
@@ -582,6 +596,13 @@ def _env_int(name: str) -> int | None:
         return None
 
 
+def _default_threads_redirect(public_domain: str | None) -> str:
+    """메타는 localhost 리디렉션을 받지 않으므로, 공개 도메인이 있으면 봇이 직접 받는 주소를 기본값으로 쓴다."""
+    if public_domain:
+        return f"https://{public_domain.strip().strip('/')}/threads/callback"
+    return "https://localhost/callback"
+
+
 def _env_str(name: str) -> str | None:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
@@ -614,7 +635,9 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         telegram_admin_chat_id=_env_int("TELEGRAM_ADMIN_CHAT_ID"),
         threads_app_id=_env_str("THREADS_APP_ID"),
         threads_app_secret=_env_str("THREADS_APP_SECRET"),
-        threads_redirect_uri=_env_str("THREADS_REDIRECT_URI") or "https://localhost/callback",
+        threads_redirect_uri=_env_str("THREADS_REDIRECT_URI") or _default_threads_redirect(_env_str("RAILWAY_PUBLIC_DOMAIN")),
+        public_domain=_env_str("RAILWAY_PUBLIC_DOMAIN"),
+        web_port=_env_int("PORT") or 8080,
         ntfy_topic=_env_str("NTFY_TOPIC"),
         ntfy_token=_env_str("NTFY_TOKEN"),
         pushover_user_key=_env_str("PUSHOVER_USER_KEY"),

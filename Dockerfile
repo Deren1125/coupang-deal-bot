@@ -36,10 +36,11 @@ RUN pip install --no-deps .
 # 주의: USER 를 일반 사용자로 바꾸지 마세요.
 # Railway 등에서 영구 볼륨을 /data 에 root 소유로 마운트하기 때문에, 비root 로 실행하면
 # 볼륨에 DB·로그를 쓰지 못해 PermissionError 로 컨테이너가 죽습니다.
-# 이 컨테이너는 외부 포트를 열지 않고 단일 앱만 실행합니다.
+# 8080 은 스레드 OAuth 콜백·/health 용 작은 HTTP 서버 (PORT 변수로 변경 가능). 도메인을 안 붙이면 밖에서 접근되지 않습니다.
 RUN mkdir -p /data \
     && ( [ -d /ms-playwright ] && chmod -R a+rX /ms-playwright || true )
 VOLUME ["/data"]
+EXPOSE 8080
 
 HEALTHCHECK --interval=5m --timeout=20s --start-period=1m --retries=3 \
     CMD python -m dealbot healthcheck || exit 1

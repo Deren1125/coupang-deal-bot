@@ -60,6 +60,7 @@ Railway 빌더가 이미지를 못 만드는 경우가 있습니다(빌드가 �
    DEALBOT_DRY_RUN=true
    ```
    승인 후 추가할 것: `COUPANG_ACCESS_KEY`, `COUPANG_SECRET_KEY`, `LINKPRICE_AFFILIATE_ID`, `THREADS_APP_ID`, `THREADS_APP_SECRET`, `ANTHROPIC_API_KEY`(정보 글 요약).
+   스레드를 연결하려면 서비스에 도메인도 하나 붙입니다: Settings → Networking → Public Networking → Generate Domain (포트 8080). 봇이 `RAILWAY_PUBLIC_DOMAIN` 을 읽어 승인 콜백을 직접 받습니다 (SETUP_KEYS.md 7-1).
    네이버 브라우저 자동화를 켤 때만 `WITH_BROWSER=1` 도 추가(이미지에 크로미움 포함).
 5. **Volume 추가 (중요)**: 서비스 → Settings → Volumes → **Add Volume** → Mount path `/data`.
    볼륨이 없으면 재배포 때마다 SQLite 가격 이력이 사라집니다.
