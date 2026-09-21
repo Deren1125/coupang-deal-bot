@@ -197,7 +197,7 @@ deal:
   # 공식 몰(올리브영·컬리·LF몰 등)과 쿠팡은 병행수입 표시만 없으면 통과. 링크를 직접 만드는 몰(토스·네이버)은 링크 요청 메시지에 확인 문구가 붙음.
   authenticity:
     enabled: true
-    unverified_action: review
+    unverified_action: skip        # 오픈마켓인데 공식 판매처 확인이 안 되면: skip = 묻지 않고 제외 / review = 관리자 확인(/ok) 후 올림 / allow = 그냥 올림
     trusted_reviews: 100         # 후기가 이만큼 쌓인 상품은 공식 표시가 없어도 통과 (0 = 안 씀)
     coupang_min_reviews: 30      # 쿠팡은 판매자를 못 가리므로 후기 양으로: 후기 수를 알았는데 이보다 적으면 안 올림 (모르면 통과, 0 = 안 씀)
     open_markets: [gmarket, auction, 11st, lotteon, ssg, aliexpress, temu, ohouse, naver, toss]

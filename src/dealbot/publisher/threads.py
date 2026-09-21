@@ -196,6 +196,12 @@ class ThreadsClient:
             "GET", f"{GRAPH_BASE}/{API_VERSION}/me", params={"fields": "id,username", "access_token": token}
         )
 
+    async def permalink(self, token: ThreadsToken, post_id: str) -> str | None:
+        body = await self._request(
+            "GET", f"{GRAPH_BASE}/{API_VERSION}/{post_id}", params={"fields": "permalink", "access_token": token.access_token}, step="permalink"
+        )
+        return str(body.get("permalink") or "") or None
+
     # ------------------------------------------------------------ 게시
     async def container_status(self, token: ThreadsToken, creation_id: str) -> tuple[str, str | None]:
         body = await self._request(

@@ -8,7 +8,7 @@ from dealbot.app import DealBot
 from dealbot.authenticity import check_authenticity
 from dealbot.collectors import BaseCollector, register
 from dealbot.config import AuthenticityConfig, CollectorConfig, Settings
-from dealbot.models import Product
+from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import AdminNotifier
 
 CFG = AuthenticityConfig()
@@ -101,6 +101,7 @@ def _lotteon(i: int, name: str) -> Product:
 
 
 async def test_open_market_deals_wait_for_my_ok(bot: DealBot) -> None:
+    bot.settings.deal.authenticity.unverified_action = "review"
     calls: dict[str, list] = bot.calls  # type: ignore[attr-defined]
     FakeCollector.products = [_lotteon(1, "나이키 에어맥스 운동화"), _lotteon(2, "[병행수입] 아디다스 삼바"), _lotteon(3, "삼성전자 공식 브랜드관 갤럭시 버즈")]
     await bot.run_collector(bot.collectors[0])
@@ -129,6 +130,7 @@ async def test_open_market_deals_wait_for_my_ok(bot: DealBot) -> None:
 
 
 async def test_manual_link_shop_gets_a_warning_instead(bot: DealBot) -> None:
+    bot.settings.deal.authenticity.unverified_action = "review"
     bot.state.dry_run = False  # 연습 모드는 링크 요청을 생략하므로
     bot.settings.publish.dry_run = False
     calls: dict[str, list] = bot.calls  # type: ignore[attr-defined]
@@ -138,3 +140,48 @@ async def test_manual_link_shop_gets_a_warning_instead(bot: DealBot) -> None:
     assert bot.db.queue_counts() == {"awaiting_link": 1}  # 확인 요청이 아니라 링크 요청 (거기서 같이 확인)
     notice = [s for s in calls["send"] if s.startswith("🔗")][0]
     assert "⚠️ 정품 확인" in notice and "공식 판매처" in notice
+
+
+async def test_default_skip_drops_unverified_without_asking(bot: DealBot) -> None:
+    """기본값(skip): 공식 판매처 확인이 안 되는 오픈마켓 딜은 묻지 않고 제외. 공식 표시가 있으면 그대로 올림.
+    링크를 직접 만드는 몰(토스)은 관리자가 어차피 앱을 여니 링크 요청에 확인 문구만 붙는다."""
+    assert bot.settings.deal.authenticity.unverified_action == "skip"  # config.yaml 기본값
+    bot.state.dry_run = False
+    bot.settings.publish.dry_run = False
+    calls: dict[str, list] = bot.calls  # type: ignore[attr-defined]
+    FakeCollector.products = [
+        _lotteon(1, "나이키 에어맥스 운동화"),
+        _lotteon(3, "삼성전자 공식 브랜드관 갤럭시 버즈"),
+        Product(source="fake", product_id="toss:ABC", shop="toss", name="다이슨 에어랩", price=399000, url="https://toss.im/_m/ABC", recommend_count=9),
+    ]
+    await bot.run_collector(bot.collectors[0])
+    for _ in range(3):
+        assert await bot.process_queue_once()
+    counts = bot.db.queue_counts()
+    assert counts == {"skipped": 1, "published": 1, "awaiting_link": 1}, counts
+    items = {it.product_id: it for it in [bot.db.get_queue_item(i) for i in (1, 2, 3)] if it}
+    assert items["lotteon:1"].status == "skipped" and "unverified seller" in (items["lotteon:1"].last_error or "")
+    assert items["lotteon:3"].status == "published"
+    assert items["toss:ABC"].status == "awaiting_link"
+    assert not [s for s in calls["send"] if s.startswith("🔎")]  # 정품 확인 요청은 없음
+    link_req = [s for s in calls["send"] if s.startswith("🔗")]
+    assert len(link_req) == 1 and "⚠️ 정품 확인" in link_req[0]
+
+
+async def test_sweep_drops_pending_reviews_but_keeps_info_reviews(bot: DealBot) -> None:
+    """review 로 쌓여 있던 정품 확인 요청은 skip 으로 바꾸고 재시작하면 내려가고, 정보 글 확인은 남는다."""
+    bot.settings.deal.authenticity.unverified_action = "review"
+    FakeCollector.products = [_lotteon(1, "나이키 에어맥스 운동화")]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"awaiting_approval": 1}
+    info = Product(source="fake", product_id="ppomppu:info1", shop="unknown", name="네이버페이 5천원 이벤트", price=None, url="https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no=1", deal_kind="info")
+    assert bot.db.enqueue(Deal(product=info, verdict=DealVerdict(is_deal=True, reasons=["info"], score=1.0)), score=1.0)
+    bot.db.update_queue_item(2, status="awaiting_approval", error="info review")
+    assert bot.db.queue_counts() == {"awaiting_approval": 2}
+
+    assert await bot.sweep_unverified_reviews() == 0  # review 설정이면 손대지 않음
+    bot.settings.deal.authenticity.unverified_action = "skip"
+    assert await bot.sweep_unverified_reviews() == 1
+    assert bot.db.queue_counts() == {"awaiting_approval": 1, "skipped": 1}
+    assert bot.db.get_queue_item(2).status == "awaiting_approval"  # type: ignore[union-attr]

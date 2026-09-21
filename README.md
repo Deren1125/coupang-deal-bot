@@ -70,6 +70,7 @@ https://toss.im/_m/P4Qr1ope
 | `/test` | 샘플 딜을 관리자 챗에 보내 양식 확인 |
 | `/pushtest` | 휴대폰 푸시(ntfy/Pushover) 연결 확인 |
 | `/threadsauth` `/threadscode 코드` | 스레드 계정 연결 (최초 1회, 토큰은 자동 갱신) |
+| `/threadstest` `/threadstest 번호` | 스레드에 샘플 글(또는 채널에 올렸던 그 글)을 실제로 올려 양식 확인 |
 | `/copy [번호]` | 카카오·블로그 복붙 문구 다시 받기 |
 | `/ppstats` `/hot [N]` `/find 키워드` | 커뮤니티 글 추천·조회·댓글 분포 / 추천 N개 이상 글 목록 / 상품이 어느 소스에 언제 올라왔는지 검색 |
 | `/naverlogin` `/naverlink URL` `/shot URL` | 네이버 브라우저 자동화: QR 로그인 / 링크 생성 테스트 / 스크린샷 |

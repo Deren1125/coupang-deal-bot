@@ -442,14 +442,68 @@ class DealBot:
 
         if self.bot is None or not self.notifier.enabled:
             return "텔레그램 봇 토큰과 관리자 챗 ID 가 있어야 합니다."
+        deal = sample_deal()
         original = (self.publisher.channel_id, self.publisher.dry_run)
         try:
             self.publisher.channel_id = self.notifier.chat_id
             self.publisher.dry_run = False
-            result = await self.publisher.publish(sample_deal())
+            result = await self.publisher.publish(deal)
         finally:
             self.publisher.channel_id, self.publisher.dry_run = original
-        return "✅ 위 메시지가 채널에 올라갈 글 양식입니다." if result.ok else f"❌ 보내지 못했습니다: {result.error}"
+        if not result.ok:
+            return f"❌ 보내지 못했습니다: {result.error}"
+        text = "✅ 위 메시지가 채널에 올라갈 글 양식입니다."
+        if self.settings.threads.enabled:
+            text += "\n\n" + self._threads_preview(deal, "샘플 딜") + "\n실제로 올려 보려면 /threadstest"
+        return text
+
+    def _threads_preview(self, deal: Deal, label: str) -> str:
+        hook, reply = self.threads.render(deal), self.threads.render_reply(deal)
+        text = f"🧵 <b>스레드에는 이렇게 올라갑니다 ({html.escape(label)})</b>\n<pre>{html.escape(hook)}</pre>"
+        if reply:
+            text += f"\n답글(링크):\n<pre>{html.escape(reply)}</pre>"
+        return text
+
+    async def threads_test(self, queue_id: int | None = None) -> str:
+        """스레드에 실제로 올려 양식을 본다. 번호 없으면 샘플 딜, 번호가 있으면 채널에 올렸던 그 글을 다시."""
+        from dealbot.cli import sample_deal
+
+        if not self.settings.threads.enabled:
+            return "스레드 자동 게시가 꺼져 있습니다 (config threads.enabled)."
+        if self.threads.stored_token() is None:
+            return "스레드가 연결되어 있지 않습니다. /threadsauth 먼저 해 주세요."
+        if queue_id is None:
+            deal, label = sample_deal(), "샘플 딜"
+        else:
+            item = self.db.get_queue_item(queue_id)
+            if item is None:
+                return f"#{queue_id} 글이 없습니다."
+            if item.status != "published":
+                return f"#{queue_id} 는 채널에 올라간 글이 아닙니다 (상태 {item.status})."
+            deal, label = item.deal, f"#{queue_id} {item.deal.product.name[:30]}"
+        preview = self._threads_preview(deal, label)
+        if self.threads.dry_run:
+            return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
+        result = await self.threads.publish(deal)
+        if not result.ok:
+            return preview + f"\n\n❌ 올리지 못했습니다: <code>{html.escape(result.error or '')}</code>"
+        link = await self._threads_permalink(result.message_id)
+        lines = [preview, "", "✅ 스레드에 올렸습니다" + (f": {link}" if link else "")]
+        if result.error:
+            lines.append(f"참고: {html.escape(result.error)}")
+        if queue_id is None:
+            lines.append("샘플 글이니 확인한 뒤 스레드 앱에서 지워 주세요.")
+        return "\n".join(lines)
+
+    async def _threads_permalink(self, message_id: int | None) -> str | None:
+        token = self.threads.stored_token()
+        if token is None or message_id is None:
+            return None
+        try:
+            return await self.threads.client.permalink(token, str(message_id))
+        except ThreadsError as e:
+            log.warning("threads permalink lookup failed: %s", e)
+            return None
 
     async def push_test(self) -> str:
         """휴대폰 푸시(ntfy/Pushover) 연결 확인용 테스트 알림."""
@@ -838,6 +892,21 @@ class DealBot:
         await self.refresh_pending_notice()
         return True
 
+    async def sweep_unverified_reviews(self) -> int:
+        """'확인 안 되면 제외' 설정이면, 이미 정품 확인을 기다리던 딜은 더 묻지 않고 내린다 (정보 글 확인은 그대로)."""
+        if self.settings.deal.authenticity.unverified_action != "skip":
+            return 0
+        n = 0
+        for it in self.db.awaiting_items(limit=200, statuses=("awaiting_approval",)):
+            if it.deal.product.deal_kind == "info":
+                continue
+            self.db.update_queue_item(it.id, status="skipped", error="unverified seller (auto-skip)")
+            n += 1
+        if n:
+            self.db.log_event("INFO", "authenticity", f"정품 확인을 기다리던 딜 {n}건을 설정(unverified_action=skip)에 따라 내림")
+            await self.refresh_pending_notice()
+        return n
+
     async def refresh_pending_notice(self) -> None:
         """관리자 챗 맨 위에 고정해 두는 '내 링크 기다리는 글' 목록을 최신으로 고친다."""
         if not self.notifier.enabled:
@@ -1179,10 +1248,11 @@ class DealBot:
         if (
             auth.status == "unknown"
             and not deal.product.extra.get("auth_approved")
-            and not (auth_shop is not None and auth_shop.link_mode == "manual")  # 링크를 직접 만드는 몰은 그 요청에서 같이 확인
+            # 링크를 직접 만드는 몰(토스·네이버)은 어차피 관리자가 앱을 여니, 따로 묻거나 버리지 않고 링크 요청에 확인 문구를 붙인다
+            and not (auth_shop is not None and auth_shop.link_mode == "manual")
         ):
             action = self.settings.deal.authenticity.unverified_action
-            if action == "skip":
+            if action == "skip":  # 확인 안 되면 묻지 않고 제외
                 self.db.update_queue_item(item.id, status="skipped", error=f"unverified seller: {auth.reason}")
                 self.db.log_event("INFO", "authenticity", f"{pid} 공식 판매처 확인 안 돼 건너뜀: {deal.product.name[:50]}")
                 return True

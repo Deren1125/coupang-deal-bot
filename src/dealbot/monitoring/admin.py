@@ -214,6 +214,7 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("copy", "올린 글의 카카오·블로그 복붙 문구 (/copy 번호)"),
     ("blog", "오늘의 핫딜 블로그 글 만들기 (하루치 정리)"),
     ("test", "채널에 올라갈 글 양식 미리 보기 (샘플)"),
+    ("threadstest", "스레드에 샘플 글 올려 보기 (번호 주면 그 글)"),
     ("pushtest", "휴대폰 푸시(ntfy) 연결 확인"),
     ("ppstats", "커뮤니티 글 추천 분포"),
     ("threadsauth", "스레드 연결 (최초 1회)"),
@@ -816,6 +817,8 @@ class BotController(Protocol):
 
     async def test_post(self) -> str: ...
 
+    async def threads_test(self, queue_id: int | None = None) -> str: ...
+
     async def push_test(self) -> str: ...
 
     async def naver_login(self) -> tuple[bytes | None, str]: ...
@@ -858,6 +861,7 @@ HELP_TEXT = (
     "/pause — 잠시 멈춤 (게시판 확인과 올리기 모두). /resume — 다시 시작.\n"
     "\n<b>확인·연결</b>\n"
     "/test — 샘플 딜로 채널에 올라갈 글 양식을 이 챗에 보여줍니다. 양식을 바꿨을 때 확인용이고 채널에는 안 올라갑니다.\n"
+    "/threadstest — 샘플 딜을 스레드에 실제로 올려 어떻게 보이는지 확인합니다 (본 뒤 스레드 앱에서 삭제). /threadstest 번호 — 채널에 올렸던 그 글을 스레드에 다시 올립니다.\n"
     "/pushtest — 휴대폰 푸시(ntfy) 연결 확인.\n"
     "/threadsauth — 스레드 자동 게시 연결. Threads 앱 ID·시크릿을 변수에 넣은 뒤 1회. Railway 도메인이 있으면 승인만 누르면 끝, 없으면 /threadscode 코드 로 인증 코드 입력.\n"
     "/naverlogin — 네이버 쇼핑커넥트 링크를 봇이 대신 만들도록 서버 브라우저에 QR 로그인. 블로그 글쓰기가 아니라 링크 생성 자동화이고, 브라우저 자동화를 켰을 때만 됩니다.\n"
@@ -950,6 +954,11 @@ def register_admin_handlers(
 
     async def cmd_test(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.test_post())
+
+    async def cmd_threadstest(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        qid = int(args[0].lstrip("#")) if args and args[0].lstrip("#").isdigit() else None
+        await reply(update, await controller.threads_test(qid))
 
     async def cmd_pushtest(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.push_test())
@@ -1096,6 +1105,7 @@ def register_admin_handlers(
         ("ok", cmd_ok),
         ("post", cmd_post),
         ("test", cmd_test),
+        ("threadstest", cmd_threadstest),
         ("pushtest", cmd_pushtest),
         ("threadsauth", cmd_threadsauth),
         ("threadscode", cmd_threadscode),

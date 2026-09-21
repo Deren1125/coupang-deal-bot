@@ -191,6 +191,11 @@ async def run_forever(bot: DealBot) -> None:
     except Exception as e:  # noqa: BLE001
         log.warning("startup notice failed: %s", e)
 
+    try:
+        await bot.sweep_unverified_reviews()  # 설정이 '확인 안 되면 제외' 면 묻고 있던 딜은 내린다
+    except Exception as e:  # noqa: BLE001
+        log.warning("sweep of pending reviews failed: %s", e)
+
     tasks = [
         asyncio.create_task(collector_loop(bot, stop), name="collector_loop"),
         asyncio.create_task(publisher_loop(bot, stop), name="publisher_loop"),

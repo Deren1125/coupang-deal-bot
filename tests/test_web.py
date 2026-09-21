@@ -95,6 +95,32 @@ async def test_threads_callback_connects_without_code_copy(settings: Settings) -
         assert "✅ 연결됨 @hotdeal" in status and "토큰 " in status and "최근 실패" not in status
         bot.db.log_event("WARNING", "threads", "p1: threads api 400 (publish): The requested resource does not exist [code 24]")
         assert "↳ 최근 실패: <code>" in bot.reporter.status_text()
+
+        # /threadstest: 연습 모드면 미리보기만, 실제 모드면 올리고 링크를 돌려준다
+        preview = await bot.threads_test()
+        assert "🧵 <b>스레드에는 이렇게 올라갑니다 (샘플 딜)</b>" in preview and "<pre>" in preview and "연습 모드" in preview
+        assert "답글(링크):" in preview and "link.coupang.com" in preview
+
+        posted: list[str] = []
+
+        def post_handler(req: httpx.Request) -> httpx.Response:
+            if req.url.path.endswith("/threads"):
+                posted.append(dict(req.url.params).get("media_type", ""))
+                return httpx.Response(200, json={"id": "C1"})
+            if req.url.path.endswith("/threads_publish"):
+                return httpx.Response(200, json={"id": "777"})
+            if req.url.path.endswith("/777"):
+                return httpx.Response(200, json={"permalink": "https://www.threads.com/@hotdeal/post/ABC"})
+            return httpx.Response(200, json={"status": "FINISHED"})
+
+        bot.threads.client = ThreadsClient(
+            httpx.AsyncClient(transport=httpx.MockTransport(post_handler)), app_id="APPID", app_secret="SECRET", retry_backoff=0.01
+        )
+        bot.threads.dry_run = False
+        msg = await bot.threads_test()
+        assert "✅ 스레드에 올렸습니다: https://www.threads.com/@hotdeal/post/ABC" in msg and "지워 주세요" in msg
+        assert posted == ["IMAGE", "TEXT"]  # 훅(사진) + 링크 답글
+        assert "글이 없습니다" in await bot.threads_test(999)
     finally:
         await bot.close()
 
