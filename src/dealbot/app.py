@@ -1261,7 +1261,7 @@ class DealBot:
                 pass
         url = authorize_url(self.settings.secrets.threads_app_id or "", self.settings.secrets.threads_redirect_uri)
         return (
-            "1) 아래 링크를 열어 스레드 계정으로 승인하세요.\n"
+            "1) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 Safari 주소창에 붙여넣어 여세요. 그냥 누르면 스레드 앱이 열려 승인 화면이 안 뜹니다.\n"
             f"{url}\n\n"
             "2) 승인 후 이동한 주소창에서 <code>code=</code> 뒤의 값을 복사해\n"
             "<code>/threadscode 붙여넣기</code> 로 보내주세요.\n"
