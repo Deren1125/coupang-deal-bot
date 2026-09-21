@@ -67,9 +67,11 @@ async def test_post_two_step() -> None:
     seen: list[dict[str, str]] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
-        seen.append({"path": req.url.path, **dict(req.url.params)})
+        seen.append({"method": req.method, "path": req.url.path, **dict(req.url.params)})
         if req.url.path.endswith("/threads"):
             return httpx.Response(200, json={"id": "CONTAINER1"})
+        if req.url.path.endswith("/CONTAINER1"):
+            return httpx.Response(200, json={"id": "CONTAINER1", "status": "FINISHED"})
         if req.url.path.endswith("/threads_publish"):
             assert req.url.params["creation_id"] == "CONTAINER1"
             return httpx.Response(200, json={"id": "POST42"})
@@ -78,11 +80,54 @@ async def test_post_two_step() -> None:
     c = _client(handler)
     post_id = await c.post(ThreadsToken("TOKEN", "999"), "안녕", image_url="https://img/x.jpg")
     assert post_id == "POST42"
+    assert [x["path"].rsplit("/", 1)[1] for x in seen] == ["threads", "CONTAINER1", "threads_publish"]
     assert seen[0]["media_type"] == "IMAGE" and seen[0]["image_url"] == "https://img/x.jpg"
     assert seen[0]["text"] == "안녕"
+    assert seen[1]["method"] == "GET" and seen[1]["fields"] == "status,error_message"
 
     await c.post(ThreadsToken("TOKEN", "999"), "텍스트만")
-    assert seen[2]["media_type"] == "TEXT"
+    assert seen[3]["media_type"] == "TEXT"
+
+
+async def test_post_waits_for_container_then_retries_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    """사진 컨테이너는 처리 시간이 필요: IN_PROGRESS → FINISHED 를 기다리고, 게시가 '(#24) 리소스 없음' 이면 잠시 후 다시."""
+    import dealbot.publisher.threads as th
+
+    monkeypatch.setattr(th, "CONTAINER_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(th, "PUBLISH_ATTEMPT_DELAYS", (0.0, 0.01, 0.01))
+    status_calls = {"n": 0}
+    publish_calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/threads"):
+            return httpx.Response(200, json={"id": "C7"})
+        if req.url.path.endswith("/C7"):
+            status_calls["n"] += 1
+            return httpx.Response(200, json={"status": "IN_PROGRESS" if status_calls["n"] < 3 else "FINISHED"})
+        if req.url.path.endswith("/threads_publish"):
+            publish_calls["n"] += 1
+            if publish_calls["n"] == 1:
+                return httpx.Response(
+                    400,
+                    json={"error": {"message": "The requested resource does not exist", "type": "THApiException", "code": 24}},
+                )
+            return httpx.Response(200, json={"id": "P7"})
+        return httpx.Response(404, json={"error": {"message": "nope"}})
+
+    post_id = await _client(handler).post(ThreadsToken("T", "1"), "x", image_url="https://img/y.jpg")
+    assert post_id == "P7" and status_calls["n"] == 3 and publish_calls["n"] == 2
+
+
+async def test_post_error_carries_code() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400, json={"error": {"message": "Media ID is not available", "code": 24, "error_subcode": 4279009}}
+        )
+
+    with pytest.raises(ThreadsError) as ei:
+        await _client(handler).post(ThreadsToken("T", "1"), "x")
+    assert ei.value.code == 24 and ei.value.subcode == 4279009 and ei.value.step == "create_container"
+    assert "[code 24/4279009]" in str(ei.value) and "(create_container)" in str(ei.value)
 
 
 async def test_post_error_surfaces() -> None:
@@ -122,6 +167,45 @@ async def test_publisher_token_storage_and_refresh(db: Database, repo_root: Path
     assert db.kv_get(KV_TOKEN) == "NEW"
 
 
+async def test_publisher_falls_back_to_text_when_image_fails(db: Database, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import dealbot.publisher.threads as th
+
+    monkeypatch.setattr(th, "CONTAINER_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(th, "REPLY_ATTEMPT_DELAYS", (0.0, 0.01))
+    creates: list[dict[str, str]] = []
+    reply_tries = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/threads"):
+            params = dict(req.url.params)
+            creates.append(params)
+            if params.get("reply_to_id"):
+                reply_tries["n"] += 1
+                if reply_tries["n"] == 1:  # 부모 글이 아직 조회 안 됨 → 한 번 더
+                    return httpx.Response(400, json={"error": {"message": "The requested resource does not exist", "code": 24}})
+                return httpx.Response(200, json={"id": "C_REPLY"})
+            return httpx.Response(200, json={"id": "C_IMG" if params.get("media_type") == "IMAGE" else "C_TXT"})
+        if req.url.path.endswith("/C_IMG"):
+            return httpx.Response(200, json={"status": "ERROR", "error_message": "Media download failed"})
+        if req.url.path.endswith("/C_TXT") or req.url.path.endswith("/C_REPLY"):
+            return httpx.Response(200, json={"status": "FINISHED"})
+        if req.url.path.endswith("/threads_publish"):
+            return httpx.Response(200, json={"id": "9"})
+        return httpx.Response(404, json={"error": {"message": "nope"}})
+
+    pub = _publisher(db, repo_root, handler)
+    db.kv_set(KV_TOKEN, "T")
+    db.kv_set(KV_USER_ID, "999")
+    deal = sample_deal()
+    deal.product.image_url = "https://cdn2.ppomppu.co.kr/zboard/data3/m_thumb_1.jpg"
+    result = await pub.publish(deal)
+    assert result.ok and result.message_id == 9
+    assert result.error and result.error.startswith("사진 없이 올림") and "Media download failed" in result.error
+    kinds = [c.get("media_type") for c in creates]
+    assert kinds == ["IMAGE", "TEXT", "TEXT", "TEXT"]  # 사진 → 실패 → 글만 → 답글(1회 실패) → 답글
+    assert creates[-1]["reply_to_id"] == "9" and reply_tries["n"] == 2
+
+
 async def test_publisher_publish_and_dry_run(db: Database, repo_root: Path) -> None:
     pub = _publisher(db, repo_root, dry_run=True)
     result = await pub.publish(sample_deal())
@@ -157,11 +241,16 @@ def test_threads_template_within_limit(repo_root: Path) -> None:
 async def test_publisher_posts_hook_then_reply(db: Database, repo_root: Path) -> None:
     seen: list[dict[str, str]] = []
 
+    published = {"n": 0}
+
     def handler(req: httpx.Request) -> httpx.Response:
         seen.append({"path": req.url.path, **dict(req.url.params)})
         if req.url.path.endswith("/threads"):
             return httpx.Response(200, json={"id": f"C{len(seen)}"})
-        return httpx.Response(200, json={"id": "100" if len(seen) <= 2 else "200"})
+        if req.url.path.endswith("/threads_publish"):
+            published["n"] += 1
+            return httpx.Response(200, json={"id": "100" if published["n"] == 1 else "200"})
+        return httpx.Response(200, json={"status": "FINISHED"})  # 컨테이너 상태 조회
 
     pub = _publisher(db, repo_root, handler)
     db.kv_set(KV_TOKEN, "T")

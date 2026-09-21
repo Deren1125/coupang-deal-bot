@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -36,10 +38,39 @@ TEXT_LIMIT = 500
 KV_TOKEN = "threads_access_token"
 KV_TOKEN_EXPIRES = "threads_token_expires_at"
 KV_USER_ID = "threads_user_id"
+KV_USERNAME = "threads_username"
+
+# 메타는 컨테이너(특히 사진)를 처리할 시간이 필요하다 — 바로 게시하면 "(#24) The requested resource does not exist" /
+# "Media ID is not available" 이 난다. 상태를 물어 FINISHED 가 될 때까지 기다리고, 그래도 안 되면 조금 쉬었다 다시 게시한다.
+CONTAINER_WAIT_SECONDS = 90.0
+CONTAINER_POLL_SECONDS = 3.0
+PUBLISH_ATTEMPT_DELAYS: tuple[float, ...] = (0.0, 5.0, 10.0, 15.0)
+REPLY_ATTEMPT_DELAYS: tuple[float, ...] = (0.0, 5.0, 10.0)
 
 
 class ThreadsError(Exception):
-    pass
+    def __init__(self, message: str, *, code: int | None = None, subcode: int | None = None, step: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.subcode = subcode
+        self.step = step
+
+
+class ThreadsMediaError(ThreadsError):
+    """사진(컨테이너 처리) 쪽 문제. 사진 없이 다시 올려 볼 수 있다."""
+
+
+def _not_ready(e: ThreadsError) -> bool:
+    """컨테이너/글이 아직 준비되지 않았을 때 메타가 주는 오류들."""
+    msg = str(e).lower()
+    return e.code == 24 or e.subcode == 4279009 or "not available" in msg or "does not exist" in msg
+
+
+def _int(v: Any) -> int | None:
+    try:
+        return int(v) if v is not None and str(v).strip() != "" else None
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(slots=True)
@@ -78,7 +109,7 @@ class ThreadsClient:
         self._retries = max_retries
         self._backoff = retry_backoff
 
-    async def _request(self, method: str, url: str, **kwargs: Any) -> dict[str, Any]:
+    async def _request(self, method: str, url: str, *, step: str = "", **kwargs: Any) -> dict[str, Any]:
         async def _do() -> dict[str, Any]:
             resp = await self.http.request(method, url, timeout=30, **kwargs)
             if resp.status_code == 429 or resp.status_code >= 500:
@@ -86,11 +117,20 @@ class ThreadsClient:
             try:
                 body = resp.json()
             except ValueError as e:
-                raise ThreadsError(f"invalid JSON from threads api: {resp.text[:200]}") from e
+                raise ThreadsError(f"invalid JSON from threads api: {resp.text[:200]}", step=step) from e
             if resp.status_code >= 400 or "error" in body:
                 err = body.get("error") or {}
-                msg = err.get("message") if isinstance(err, dict) else str(err)
-                raise ThreadsError(f"threads api {resp.status_code}: {msg or resp.text[:200]}")
+                code = subcode = None
+                if isinstance(err, dict):
+                    msg = err.get("message") or err.get("error_user_msg")
+                    code, subcode = _int(err.get("code")), _int(err.get("error_subcode"))
+                else:
+                    msg = str(err)
+                where = f" ({step})" if step else ""
+                detail = f" [code {code}{'/' + str(subcode) if subcode else ''}]" if code is not None else ""
+                raise ThreadsError(
+                    f"threads api {resp.status_code}{where}: {msg or resp.text[:200]}{detail}", code=code, subcode=subcode, step=step
+                )
             return body
 
         return await retry_async(_do, attempts=self._retries, backoff=self._backoff, label=f"threads {method} {url}")
@@ -157,8 +197,41 @@ class ThreadsClient:
         )
 
     # ------------------------------------------------------------ 게시
+    async def container_status(self, token: ThreadsToken, creation_id: str) -> tuple[str, str | None]:
+        body = await self._request(
+            "GET",
+            f"{GRAPH_BASE}/{API_VERSION}/{creation_id}",
+            params={"fields": "status,error_message", "access_token": token.access_token},
+            step="container_status",
+        )
+        return str(body.get("status") or ""), body.get("error_message")
+
+    async def wait_ready(
+        self, token: ThreadsToken, creation_id: str, *, timeout: float | None = None, interval: float | None = None
+    ) -> None:
+        """컨테이너가 FINISHED 가 될 때까지 기다린다. ERROR/EXPIRED/시간 초과면 ThreadsMediaError."""
+        timeout = CONTAINER_WAIT_SECONDS if timeout is None else timeout
+        interval = CONTAINER_POLL_SECONDS if interval is None else interval
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                status, err = await self.container_status(token, creation_id)
+            except ThreadsError as e:
+                log.warning("threads container status check failed (%s) — publishing anyway", e)
+                return
+            if status in ("", "FINISHED", "PUBLISHED"):  # 상태를 안 주면 바로 시도
+                return
+            if status in ("ERROR", "EXPIRED"):
+                raise ThreadsMediaError(f"컨테이너 처리 실패 ({status}): {err or '사유 없음'}", step="container")
+            if time.monotonic() >= deadline:
+                raise ThreadsMediaError(f"컨테이너 처리 대기 시간 초과 ({timeout:.0f}s, 상태 {status})", step="container")
+            await asyncio.sleep(interval)
+
     async def post(self, token: ThreadsToken, text: str, image_url: str | None = None, *, reply_to_id: str | None = None) -> str:
-        """컨테이너 생성 → 게시. 게시된 글 id 반환. reply_to_id 를 주면 그 글의 답글로 올린다."""
+        """컨테이너 생성 → 처리 대기 → 게시. 게시된 글 id 반환. reply_to_id 를 주면 그 글의 답글로 올린다.
+
+        사진이 문제면(다운로드 실패, 처리 오류, 준비 안 됨) ThreadsMediaError 를 던져 호출자가 사진 없이 다시 올릴 수 있게 한다.
+        """
         params: dict[str, Any] = {"text": text[:TEXT_LIMIT], "access_token": token.access_token}
         if image_url:
             params["media_type"] = "IMAGE"
@@ -167,18 +240,48 @@ class ThreadsClient:
             params["media_type"] = "TEXT"
         if reply_to_id:
             params["reply_to_id"] = reply_to_id
-        created = await self._request("POST", f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/threads", params=params)
+        try:
+            created = await self._request(
+                "POST", f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/threads", params=params, step="create_container"
+            )
+        except ThreadsMediaError:
+            raise
+        except ThreadsError as e:
+            if image_url:
+                raise ThreadsMediaError(str(e), code=e.code, subcode=e.subcode, step=e.step) from e
+            raise
         creation_id = created.get("id")
         if not creation_id:
-            raise ThreadsError(f"컨테이너 생성 실패: {created}")
-        published = await self._request(
-            "POST",
-            f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/threads_publish",
-            params={"creation_id": creation_id, "access_token": token.access_token},
-        )
+            raise ThreadsError(f"컨테이너 생성 실패: {created}", step="create_container")
+        await self.wait_ready(token, str(creation_id))
+
+        published: dict[str, Any] | None = None
+        last: ThreadsError | None = None
+        delays = PUBLISH_ATTEMPT_DELAYS
+        for i, delay in enumerate(delays):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                published = await self._request(
+                    "POST",
+                    f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/threads_publish",
+                    params={"creation_id": creation_id, "access_token": token.access_token},
+                    step="publish",
+                )
+                break
+            except ThreadsError as e:
+                last = e
+                if not _not_ready(e):
+                    raise
+                log.warning("threads publish: not ready yet (%s), attempt %d/%d", e, i + 1, len(delays))
+        if published is None:
+            assert last is not None
+            if image_url:
+                raise ThreadsMediaError(str(last), code=last.code, subcode=last.subcode, step="publish") from last
+            raise last
         post_id = published.get("id")
         if not post_id:
-            raise ThreadsError(f"게시 실패: {published}")
+            raise ThreadsError(f"게시 실패: {published}", step="publish")
         return str(post_id)
 
 
@@ -254,6 +357,30 @@ class ThreadsPublisher:
         shop = self.registry.get(deal.product.shop)
         return self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)
 
+    async def _post_with_fallback(self, token: ThreadsToken, text: str, image_url: str | None) -> tuple[str, str | None]:
+        """사진이 있으면 사진과 함께, 사진 쪽이 문제면 사진 없이 다시. (글 id, 참고 메모)"""
+        if not image_url:
+            return await self.client.post(token, text), None
+        try:
+            return await self.client.post(token, text, image_url), None
+        except ThreadsMediaError as e:
+            log.warning("threads image rejected (%s) — posting without photo: %s", image_url, e)
+            return await self.client.post(token, text), f"사진 없이 올림: {e}"
+
+    async def _reply(self, token: ThreadsToken, text: str, post_id: str) -> None:
+        """방금 올린 글이 아직 조회되지 않아 실패하면 조금 쉬었다 다시."""
+        delays = REPLY_ATTEMPT_DELAYS
+        for i, delay in enumerate(delays):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                await self.client.post(token, text, reply_to_id=post_id)
+                return
+            except ThreadsError as e:
+                if i + 1 >= len(delays) or not _not_ready(e):
+                    raise
+                log.warning("threads reply: parent not ready yet (%s), attempt %d/%d", e, i + 1, len(delays))
+
     async def publish_text(self, text: str, image_url: str | None = None) -> PublishResult:
         """완성된 평문 한 글(답글 없음). 정보 글 등에 씀."""
         if not self.enabled:
@@ -266,10 +393,10 @@ class ThreadsPublisher:
         if token is None:
             return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
         try:
-            post_id = await self.client.post(token, text, image_url)
+            post_id, note = await self._post_with_fallback(token, text, image_url)
         except ThreadsError as e:
             return PublishResult(ok=False, error=str(e))
-        return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None)
+        return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None, error=note)
 
     async def publish(self, deal: Deal) -> PublishResult:
         if not self.enabled:
@@ -283,15 +410,15 @@ class ThreadsPublisher:
         if token is None:
             return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
         try:
-            post_id = await self.client.post(token, text, deal.product.image_url)
+            post_id, note = await self._post_with_fallback(token, text, deal.product.image_url)
         except ThreadsError as e:
             return PublishResult(ok=False, error=str(e))
+        message_id = int(post_id) if post_id.isdigit() else None
         if reply:
             try:
-                await self.client.post(token, reply, reply_to_id=post_id)
+                await self._reply(token, reply, post_id)
             except ThreadsError as e:
                 # 훅은 올라갔으니 실패로 치지 않되, 링크가 빠진 글이 되므로 알린다
                 log.warning("threads reply (link) failed for %s: %s", post_id, e)
-                return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None,
-                                     error=f"답글(링크) 게시 실패: {e}")
-        return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None)
+                return PublishResult(ok=True, message_id=message_id, error=f"답글(링크) 게시 실패: {e}")
+        return PublishResult(ok=True, message_id=message_id, error=note)

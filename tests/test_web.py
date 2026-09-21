@@ -63,6 +63,7 @@ async def test_threads_callback_connects_without_code_copy(settings: Settings) -
 
     bot = DealBot(settings)
     try:
+        assert "🧵 <b>스레드 자동 게시</b> ❌ 미연결 → /threadsauth" in bot.reporter.status_text()
         msg = await bot.threads_auth_url()
         assert "자동" in msg and "<code>https://bot.up.railway.app/threads/callback</code>" in msg
         assert "localhost" in msg  # 메타가 localhost 를 받지 않는다는 안내
@@ -90,6 +91,10 @@ async def test_threads_callback_connects_without_code_copy(settings: Settings) -
         status, _ = await bot.web.dispatch("GET", f"/threads/callback?code=CODE&state={state}")
         assert status == 400
         assert "이미 연결" in await bot.threads_auth_url()
+        status = bot.reporter.status_text()
+        assert "✅ 연결됨 @hotdeal" in status and "토큰 " in status and "최근 실패" not in status
+        bot.db.log_event("WARNING", "threads", "p1: threads api 400 (publish): The requested resource does not exist [code 24]")
+        assert "↳ 최근 실패: <code>" in bot.reporter.status_text()
     finally:
         await bot.close()
 

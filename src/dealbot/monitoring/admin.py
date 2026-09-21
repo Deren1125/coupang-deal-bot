@@ -34,6 +34,7 @@ from dealbot.monitoring.state import BotState
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import normalize_chat_id
 from dealbot.publisher.templates import TemplateRenderer
+from dealbot.publisher.threads import KV_TOKEN, KV_TOKEN_EXPIRES, KV_USER_ID, KV_USERNAME
 from dealbot.shops import Shop, ShopRegistry, find_urls
 from dealbot.storage.db import Database, PeriodSummary, QueueItem
 from dealbot.utils.text import truncate
@@ -536,6 +537,33 @@ class StatusReporter:
         mode = {"auto": "요약되면 바로 올림", "always": "항상 확인 후 올림", "never": "확인 없이 올림"}.get(cfg.review, cfg.review)
         return f"{how} · {mode}"
 
+    def _threads_row(self, now: datetime) -> dict[str, Any]:
+        """/status 의 스레드 줄: 연결 여부·계정·토큰 만료·최근 실패."""
+        tz = self.settings.app.timezone
+        row: dict[str, Any] = {"state": "off", "username": None, "expires": None, "last_fail": None}
+        if not self.settings.threads.enabled:
+            return row
+        if not self.settings.secrets.has_threads_app:
+            return row | {"state": "noapp"}
+        if not (self.db.kv_get(KV_TOKEN) and self.db.kv_get(KV_USER_ID)):
+            return row | {"state": "unlinked"}
+        expires = from_iso(self.db.kv_get(KV_TOKEN_EXPIRES))
+        last_fail = None
+        for ev in self.db.recent_events(limit=30, level="WARNING"):
+            if ev.get("kind") != "threads":
+                continue
+            ts = from_iso(str(ev.get("ts") or ""))
+            if ts is None or now - ts <= timedelta(hours=24):
+                when = fmt_local(ts, tz, "%m-%d %H:%M") if ts else ""
+                last_fail = f"{when} {truncate(str(ev.get('message') or ''), 160)}".strip()
+            break
+        return row | {
+            "state": "ok",
+            "username": self.db.kv_get(KV_USERNAME) or None,
+            "expires": fmt_local(expires, tz, "%m-%d") if expires else None,
+            "last_fail": last_fail,
+        }
+
     def status_context(self) -> dict[str, Any]:
         now = utcnow()
         tz = self.settings.app.timezone
@@ -566,6 +594,7 @@ class StatusReporter:
                 for reason in dict.fromkeys(s.disabled_reason for s in self.registry.all() if not s.enabled and s.disabled_reason)
             },
             "rate": self.rate.snapshot(now),
+            "threads": self._threads_row(now),
             "queue": self.db.queue_counts(),
             "products": self.db.product_count(),
             "price_points": self.db.price_history_count(),

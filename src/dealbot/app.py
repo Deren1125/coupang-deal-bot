@@ -57,6 +57,7 @@ from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.publisher.threads import (
+    KV_USERNAME,
     ThreadsClient,
     ThreadsError,
     ThreadsPublisher,
@@ -1260,10 +1261,14 @@ class DealBot:
             if result.ok:
                 self.db.log_event("INFO", "threads", f"{deal.product.product_id} {'dry-run' if result.dry_run else result.message_id}")
                 log.info("threads posted: %s", deal.product.name[:40])
+                if result.error:  # 올라가긴 했지만 사진이 빠졌거나 링크 답글이 실패한 경우
+                    self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
+                    if result.error.startswith("답글"):
+                        await self.notifier.send(f"⚠️ <b>스레드 글은 올라갔지만 링크 답글이 실패했습니다</b>\n<code>{html.escape(result.error)}</code>")
             else:
                 self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
                 log.warning("threads post failed: %s", result.error)
-                await self.notifier.send(f"⚠️ <b>스레드 발행 실패</b>\n<code>{result.error}</code>")
+                await self.notifier.send(f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>")
         for block in self.copy_blocks.build(deal):
             await self.notifier.send(block.as_telegram_html(), silent=True)
 
@@ -1359,6 +1364,7 @@ class DealBot:
             token = await self.threads.client.exchange_code(code, self.settings.secrets.threads_redirect_uri)
             self.threads.save_token(token)
             me = await self.threads.client.me(token.access_token)
+            self.db.kv_set(KV_USERNAME, str(me.get("username") or ""))
             expires = token.expires_at.date().isoformat() if token.expires_at else "-"
             self.db.log_event("INFO", "threads", f"authorized as {me.get('username')}")
             return f"✅ 스레드 연결 완료: @{me.get('username')} (토큰 만료 {expires}, 자동 갱신됨)"

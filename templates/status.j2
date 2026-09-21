@@ -2,7 +2,7 @@
    collectors[] (name, label, type, enabled, available, unavailable_reason, running, interval_minutes, last_status,
                  last_run_ago, collected, deals, queued, error, next_in),
    shops[] (key, name, enabled, mode), shops_off_pending{이유: [이름]}, shops_off_excluded[이름],
-   rate (posts_hour, posts_day, max_hour, max_day, last_post_at), queue{pending,awaiting_link,failed,...},
+   rate (posts_hour, posts_day, max_hour, max_day, last_post_at), threads{state,username,expires,last_fail}, queue{pending,awaiting_link,failed,...},
    products, price_points, db_mb, last_error, last_error_at #}
 🤖 <b>DealBot v{{ version }}</b> · 켜진 지 {{ uptime }}
 {% if paused %}⏸ <b>일시정지 중</b> (/resume 으로 재개){% else %}▶️ 돌아가는 중{% endif %}{% if dry_run %} · 🧪 연습 모드 (채널에는 안 올리고 미리보기만 보냅니다){% endif %}{% if not publish_enabled %} · 발행 꺼짐{% endif +%}
@@ -43,6 +43,12 @@
 {% endif %}
 
 📤 <b>{% if dry_run %}미리보기로 보낸 글{% else %}채널에 올린 글{% endif %}</b> 최근 1시간 {{ rate.posts_hour }}건 (최대 {{ rate.max_hour }}) · 오늘 {{ rate.posts_day }}건 (최대 {{ rate.max_day }}){% if rate.last_post_at %} · 마지막 {{ rate.last_post_at | local }}{% endif +%}
+{% if threads is defined %}
+🧵 <b>스레드 자동 게시</b> {% if threads.state == 'ok' %}✅ 연결됨{% if threads.username %} @{{ threads.username }}{% endif %}{% if threads.expires %} · 토큰 {{ threads.expires }}까지, 자동 갱신{% endif %}{% elif threads.state == 'unlinked' %}❌ 미연결 → /threadsauth{% elif threads.state == 'noapp' %}꺼짐 (THREADS_APP_ID / SECRET 없음){% else %}꺼짐 (config threads.enabled){% endif +%}
+{% if threads.last_fail %}
+   ↳ 최근 실패: <code>{{ threads.last_fail }}</code>
+{% endif %}
+{% endif %}
 🗂 <b>기다리는 글</b> 발행 차례 {{ queue.get('pending', 0) }}건 · 내 링크 기다림 {{ queue.get('awaiting_link', 0) }}건 · 확인 기다림 {{ queue.get('awaiting_approval', 0) }}건 · 실패 {{ queue.get('failed', 0) }}건 · 시간 지나 버림 {{ queue.get('expired', 0) }}건
 {% if info_summary is defined and info_summary %}
 📝 <b>정보 글</b> {{ info_summary }}
