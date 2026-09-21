@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 GRAPH_BASE = "https://graph.threads.net"
 AUTH_BASE = "https://threads.net/oauth/authorize"
 API_VERSION = "v1.0"
-SCOPES = "threads_basic,threads_content_publish"
+SCOPES = "threads_basic,threads_content_publish,threads_manage_replies"  # 링크는 첫 글의 답글로 올리므로 답글 권한도 필요
 TEXT_LIMIT = 500
 
 KV_TOKEN = "threads_access_token"

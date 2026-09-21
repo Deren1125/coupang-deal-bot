@@ -112,7 +112,7 @@
 ## 7-1. 스레드(Threads) 자동 발행 (선택)
 
 1. 스레드 계정 준비 (인스타그램 계정으로 로그인).
-2. https://developers.facebook.com → 개발자 등록(무료) → **앱 만들기** → 사용 사례에서 **Threads API** 선택 (Threads 콘텐츠 게시 권한 `threads_basic`, `threads_content_publish`).
+2. https://developers.facebook.com → 개발자 등록(무료) → **앱 만들기** → 사용 사례에서 **Threads API** 선택 (권한 `threads_basic`, `threads_content_publish`, `threads_manage_replies` — 링크를 답글로 올리므로 답글 권한까지).
 3. 앱 대시보드 → **앱 설정 → 기본 설정**에서 **앱 ID**와 **앱 시크릿** 확인 → Railway Variables 에 `THREADS_APP_ID`, `THREADS_APP_SECRET` (파일이나 챗에 적지 않기).
 4. 앱의 **Threads API 사용 사례 설정** → 리디렉션 콜백 URL(OAuth Redirect URI)에 `https://localhost/callback` 추가. (다른 주소를 쓰려면 Railway 의 `THREADS_REDIRECT_URI` 도 같은 값으로.)
 5. 앱이 **개발 모드**면 내 스레드 계정을 **앱 역할 → Threads 테스터**로 추가하고, 스레드 앱 → 설정 → 계정 → 웹사이트 권한 → 초대에서 수락. (앱 검수를 통과해 라이브 모드면 이 단계는 필요 없음.)
