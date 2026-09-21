@@ -156,6 +156,7 @@ def parse_list(html: str, selectors: dict[str, str], registry: ShopRegistry) -> 
                 "shop": parsed["shop"],
                 "name": parsed["name"],
                 "price": parsed["price"],
+                "tags": parsed["tags"],
                 "recommend": _int(rec_el.get_text(" ", strip=True)) if rec_el else None,
                 "views": _int(views_el.get_text(" ", strip=True)) if views_el else None,
                 "time": time_el.get_text(" ", strip=True) if time_el else None,
@@ -241,7 +242,7 @@ class RuliwebCollector(BaseCollector):
                 if detail["title"] and detail["title"] != item["title"]:
                     # 목록 제목은 잘려 있을 수 있다 → 상세의 전체 제목으로 이름·가격·몰을 다시 읽는다
                     parsed = parse_title(detail["title"], registry)
-                    item.update(title=detail["title"], name=parsed["name"], price=parsed["price"])
+                    item.update(title=detail["title"], name=parsed["name"], price=parsed["price"], tags=parsed["tags"])
                     if parsed["shop"] is not None and shop.key == "unknown":
                         shop = parsed["shop"]
                 known = None if shop.key == "unknown" else shop
@@ -262,6 +263,8 @@ class RuliwebCollector(BaseCollector):
 
     def _build(self, item: dict[str, Any], shop: Shop, deal_url: str, *, product_id: str | None = None) -> Product:
         price = item.get("price")
+        # 말머리 중 쇼핑몰이 아닌 것("[음식]", "[생활용품]")이 상품 분류
+        category = next((t for t in item.get("tags") or [] if self.registry.by_alias(t) is None), None)
         return Product(
             source=self.name,
             product_id=product_id or ShopRegistry.product_key(shop.key, deal_url),
@@ -270,6 +273,7 @@ class RuliwebCollector(BaseCollector):
             name=item["name"],
             price=int(price or 0),
             url=deal_url,
+            category=category,
             external_id=item["external_id"],
             recommend_count=item.get("recommend"),
             view_count=item.get("views"),

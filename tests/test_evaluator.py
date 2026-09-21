@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from dealbot.config import DealConfig, InterestConfig
 from dealbot.models import PriceStats, Product
 from dealbot.pricing.evaluator import DealEvaluator
@@ -135,3 +137,30 @@ def test_quality_gate_by_review_count() -> None:
     assert only_naver.evaluate(_p(7000, discount_rate=60, review_count=3), PriceStats()).is_deal  # 쿠팡은 대상 아님
     off = DealEvaluator(DealConfig(interest=NO_GATE, quality=QualityConfig(enabled=False)))
     assert off.evaluate(_p(7000, discount_rate=60, review_count=0), PriceStats()).is_deal
+
+
+@pytest.mark.food_rule
+def test_food_needs_half_price_against_reference() -> None:
+    from dealbot.config import DealConfig
+    from dealbot.models import PriceStats
+    from dealbot.pricing.evaluator import DealEvaluator
+    from dealbot.pricing.market import MarketQuote
+
+    cfg = DealConfig()
+    cfg.interest.enabled = False
+    ev = DealEvaluator(cfg)
+    stats = PriceStats()
+    food = Product(source="s", product_id="coupang:1", shop="coupang", name="갈아만든배 340ml 24개", price=12360, url="u", discount_rate=60, recommend_count=50)
+    assert ev.is_food(food)
+    v = ev.evaluate(food, stats)  # 표시 할인율·추천 수만으로는 식품 특가가 아니다
+    assert not v.is_deal and any(r.startswith("food_below_ref") for r in v.reasons)
+    assert ev.evaluate(food, stats, MarketQuote(price=30000, source="coupang", title="t", url=None), market_available=True).is_deal  # 59% 싸면 특가
+    assert not ev.evaluate(food, stats, MarketQuote(price=20000, source="coupang", title="t", url=None), market_available=True).is_deal  # 38% 는 부족
+    shoes = Product(source="s", product_id="coupang:2", shop="coupang", name="휠라 타르가 운동화", price=38810, url="u", discount_rate=60, recommend_count=50)
+    assert not ev.is_food(shoes) and ev.evaluate(shoes, stats).is_deal  # 식품이 아니면 기존 기준
+    by_category = Product(source="s", product_id="coupang:3", shop="coupang", name="프리미엄 선물세트", price=9900, url="u", category="식품>선물세트", discount_rate=60)
+    assert ev.is_food(by_category)
+    by_units = Product(source="s", product_id="coupang:4", shop="coupang", name="제주 삼다수 2L 6개", price=5900, url="u")
+    assert ev.is_food(by_units)  # 음료 묶음 규격
+    shampoo = Product(source="s", product_id="coupang:5", shop="coupang", name="케라시스 샴푸 500ml 2개", price=9900, url="u")
+    assert not ev.is_food(shampoo)  # 규격이 비슷해도 생활용품은 제외

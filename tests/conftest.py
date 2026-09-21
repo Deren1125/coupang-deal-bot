@@ -8,6 +8,7 @@ import pytest
 from dealbot.config import Settings, load_settings
 from dealbot.enrich import PageEnricher
 from dealbot.infopost import InfoPostBuilder
+from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.storage.db import Database
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +43,15 @@ def _no_page_fetch(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(PageEnricher, "fetch", nothing)
     monkeypatch.setattr(InfoPostBuilder, "fetch", nothing)
+
+
+@pytest.fixture(autouse=True)
+def _no_food_rule(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """테스트 상품 이름이 핫도그·소스·삼겹살처럼 식품이 많아, 식품 기준(평소 가격 대비 50%)은 기본으로 끈다.
+    식품 기준을 보는 테스트는 @pytest.mark.food_rule 로 켠다."""
+    if request.node.get_closest_marker("food_rule"):
+        return
+    monkeypatch.setattr(DealEvaluator, "is_food", lambda self, product: False)
 
 
 @pytest.fixture

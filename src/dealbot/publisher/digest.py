@@ -93,6 +93,7 @@ class BlogDigestBuilder:
         shop = self.registry.get(p.shop)
         draft = p.extra.get("info_draft") if isinstance(p.extra.get("info_draft"), dict) else {}
         rate = v.discount_rate if v.discount_rate is not None else p.effective_discount_rate()
+        tier, tier_pct = self.renderer.deal_tier(deal)
         body = str(p.extra.get("info_body") or draft.get("text") or "")
         body_lines = [ln[2:] if ln.startswith("· ") else ln for ln in body.splitlines() if ln.strip()]
         name = " ".join(p.name.split())
@@ -115,6 +116,8 @@ class BlogDigestBuilder:
             "avg_price": v.avg_price,
             "below_avg_pct": v.below_avg_pct,
             "kind": p.deal_kind,
+            "tier": tier,
+            "tier_pct": tier_pct,
             "body_lines": body_lines,
             "source_url": str(p.extra.get("post_url") or p.url),
             "info_links": list(p.extra.get("info_links") or draft.get("links") or []),
@@ -171,6 +174,7 @@ class BlogDigestBuilder:
             infos=infos,
             count=len(hot) + len(infos),
             disclosures=disclosures,
+            extra_channel_lines=list(self.cfg.extra_channel_lines),
         )
         chunks = split_sections(text)
         blocks = [

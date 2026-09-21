@@ -203,6 +203,11 @@ deal:
     open_markets: [gmarket, auction, 11st, lotteon, ssg, aliexpress, temu, ohouse, naver, toss]
     official_markers: [공식, 브랜드관, 브랜드 스토어, 브랜드스토어, 본사, 직영, official store, official]
     reject_keywords: [병행수입, 병행 수입, 병행, 구매대행, 해외구매대행, 리퍼, 리퍼비시, 리퍼상품, 리퍼제품, 리퍼폰, 중고, 중고품, 중고상품, 벌크, 벌크포장, 전시상품, 전시품, 반품상품, 박스훼손, 짝퉁, 이미테이션, 레플리카, 스크래치]
+  # 식품류는 평소 가격(쿠팡 시중가·30일 평균) 대비 50% 이상 쌀 때만 특가 (표시 할인율·추천 수만으로는 안 올림). 그 외 상품은 기존 기준
+  food:
+    enabled: true
+    min_below_reference_pct: 50
+    # categories / keywords 기본값은 코드에 있음 (식품·음료·건강식품 분류, 즙·라면·커피·고기… 낱말). 늘리려면 여기에 적으면 됨
   # 후기 수 기준: 상품 페이지에서 후기 수를 읽었는데 이보다 적으면 제외 (후기 수를 못 읽은 상품은 통과)
   quality:
     enabled: true
@@ -254,6 +259,9 @@ publish:
   # 전에 올린 것보다 dedupe_cheaper_pct% 이상 싸졌으면 새 딜로 인정
   dedupe_similarity: 0.8
   dedupe_cheaper_pct: 10
+  # 글의 강조 단계: 평소 가격(30일 평균·쿠팡 시중가) 대비 50% 이상 싸면 "꼭 담으세요", 70% 이상이면 "역대급". 그 미만은 짧게만
+  emphasis_must_pct: 50
+  emphasis_top_pct: 70
   queue_ttl_hours: 6             # 자동 발행 대기 항목 유효 시간
   manual_link_ttl_hours: 12      # 내 링크 입력을 기다리는 항목 유효 시간
   max_publish_attempts: 3
@@ -318,6 +326,7 @@ blog_digest:
   max_info_items: 3
   blog_name: "Deren의 아카이브" # 도입부 "OO를 운영하고 있는 OO입니다"
   author: "Deren"
+  extra_channel_lines: []      # 채널 안내·서명에 핫딜 방 다음으로 덧붙일 줄. 예) - "- 텔레그램 · Deren의 쌀농사방\nhttps://t.me/Derens_tip"
   always_disclosures:          # 글마다 반드시 넣는 고지 문구 (쿠팡 딜이 없는 날도)
     - "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
 
@@ -344,6 +353,7 @@ monitoring:
   notify_on_error: true
   notify_on_manual_link: true    # 토스/네이버 등 수동 링크가 필요할 때 알림
   error_alert_cooldown_minutes: 30
+  daily_summary: false           # 매일 21:00 하루 요약 끔 (/status 로 언제든 볼 수 있음). 켜려면 true
   daily_summary_time: "21:00"
   quiet_notices: false           # false: 시작/미리보기/발행 알림도 소리·진동과 함께 (true 면 무음)
   heartbeat_minutes: 0             # 0 = '정상 가동 중' 생존 보고 끔 (에러·요청만 받음). N 이면 관리자 챗이 N분 조용할 때 보고

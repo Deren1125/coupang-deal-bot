@@ -42,6 +42,9 @@ from dealbot.utils.timeutil import fmt_local, from_iso, humanize_delta, utcnow
 log = logging.getLogger(__name__)
 _QUEUE_REF_RE = re.compile(r"#(\d+)")
 REVIEW_MARK = "📝"  # 정보 글 확인 요청 메시지의 첫 글자 (답장 판별용)
+# 고정 공지에 한 번에 답할 때 한 줄 형식: "675 https://링크" / "677 ok" / "673 skip"
+_BATCH_LINE_RE = re.compile(r"^\s*#?(\d+)\s*[:：.)]?\s+(https?://\S+|ok|okay|확인|승인|ㅇㅋ|skip|스킵|패스|건너뛰기|x)\s*$", re.I)
+_BATCH_OK = {"ok", "okay", "확인", "승인", "ㅇㅋ"}
 _TAG_RE = re.compile(r"<[^>]+>")
 
 TELEGRAM_TEXT_LIMIT = 4096
@@ -137,6 +140,7 @@ COLLECTOR_LABELS = {
 
 _REASON_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^few_reviews<(\d+)$"), "후기 {0}개 미만이라 제외"),
+    (re.compile(r"^food_below_ref<(\d+)%$"), "식품은 평소 가격 대비 {0}% 이상 싸야 해서 제외"),
     (re.compile(r"^info_post$"), "정보 글(상품 링크 없는 게시판 글)"),
     (re.compile(r"^interest:recommend>=(\d+)$"), "관심도 통과(추천 {0}개 이상)"),
     (re.compile(r"^interest:comments>=(\d+)$"), "관심도 통과(댓글 {0}개 이상)"),
@@ -615,17 +619,23 @@ class StatusReporter:
             lines.append(self._item_line(it))
             lines.append(f"   원본 주소: {html.escape(p.url)}")
         if not items:
-            lines.append("(없음 — 토스·네이버처럼 링크를 직접 만들어야 하는 글이 생기면 여기 뜹니다)")
-        else:
-            lines.append("\n링크를 만들었으면 그 요청 메시지에 답장하거나 <code>/link 번호 링크</code> · 안 올리려면 <code>/skip 번호</code>")
+            lines.append("(없음 — 토스·네이버처럼 링크를 직접 만들어야 하는 글이 생기면 여기 뜁니다)")
         reviews = self.db.awaiting_items(limit, statuses=("awaiting_approval",))
         if reviews:
             lines.append("")
             lines.append(f"{REVIEW_MARK} <b>내가 확인해 줘야 하는 글</b> ({len(reviews)}건)")
             for it in reviews:
+                p = it.deal.product
                 why = (it.last_error or "").removeprefix("needs approval: ")
-                lines.append(f"• #{it.id} {html.escape(truncate(it.deal.product.name, 50))}" + (f" · {html.escape(why)}" if why else ""))
-            lines.append("<code>/ok 번호</code> 올리기 (정품 확인이면 링크를 만들어 올림) · <code>/skip 번호</code> 안 올리기 · 정보 글은 확인 요청 메시지에 답장으로 본문을 고쳐 쓸 수 있습니다")
+                lines.append(f"• #{it.id} {html.escape(truncate(p.name, 50))}" + (f" · {html.escape(why)}" if why else ""))
+                if p.deal_kind != "info":
+                    lines.append(f"   상품 페이지: {html.escape(p.url)}")
+        if items or reviews:
+            lines.append(
+                "\n한 번에 답하기: 이 공지에 답장(또는 그냥 메시지)으로 한 줄에 하나씩 — "
+                "<code>675 https://만든링크</code> · <code>677 ok</code> · <code>673 skip</code>. 여러 줄을 한 번에 보내도 됩니다. "
+                "정보 글 본문을 고쳐 쓰려면 그 확인 요청 메시지에 답장하세요."
+            )
         return "\n".join(lines)
 
     def recent_text(self, limit: int = 10) -> str:
@@ -1004,6 +1014,22 @@ def register_admin_handlers(
         if msg is None or not msg.text:
             return
         urls = find_urls(msg.text)
+        # 고정 공지에 한 번에 답하기: "번호 링크" / "번호 ok" / "번호 skip" 줄들
+        rows = [ln for ln in msg.text.splitlines() if ln.strip()]
+        parsed = [m for m in (_BATCH_LINE_RE.match(ln) for ln in rows) if m]
+        if rows and len(parsed) == len(rows):
+            answers: list[str] = []
+            for m in parsed:
+                qid, action = int(m.group(1)), m.group(2)
+                if action.lower().startswith("http"):
+                    answers.append(await controller.attach_link(qid, action))
+                elif action.lower() in _BATCH_OK:
+                    answers.append(controller.approve_item(qid))
+                else:
+                    answers.append(controller.skip_item(qid))
+            await reply(update, "\n".join(answers))
+            await controller.refresh_pending_notice()
+            return
         replied = msg.reply_to_message
         if replied is not None and replied.text:
             m = _QUEUE_REF_RE.search(replied.text)

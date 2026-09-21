@@ -53,6 +53,20 @@ class TemplateRenderer:
             dt = dt.replace(tzinfo=ZoneInfo("UTC"))
         return dt.astimezone(self.tz).strftime(fmt)
 
+    # 강조 단계 기준: 평소 가격(30일 평균·쿠팡 시중가) 대비 이만큼 싸면 must(꼭 사야) / top(역대급)
+    emphasis: tuple[float, float] = (50.0, 70.0)
+
+    def deal_tier(self, deal: Deal) -> tuple[str, float]:
+        """'normal' | 'must' | 'top' 과 그 근거 비율. 표시 할인율은 부풀려지기 쉬워 안 쓴다."""
+        v = deal.verdict
+        pct = max(v.below_avg_pct or 0.0, v.below_market_pct or 0.0)
+        must, top = self.emphasis
+        if top > 0 and pct >= top:
+            return "top", pct
+        if must > 0 and pct >= must:
+            return "must", pct
+        return "normal", pct
+
     def render(self, name: str, *, autoescape: bool = True, **ctx: Any) -> str:
         env = self.env if autoescape else self.env_plain
         template = env.get_template(name)
@@ -76,12 +90,15 @@ class TemplateRenderer:
             "disclosure": shop.disclosure if shop else None,
             "link_mode": shop.link_mode if shop else "raw",
         }
+        tier, tier_pct = self.deal_tier(deal)
         return self.render(
             template,
             autoescape=autoescape,
             product=p,
             shop=shop_ctx,
             verdict=deal.verdict,
+            tier=tier,
+            tier_pct=tier_pct,
             link=link,
             discount_rate=deal.verdict.discount_rate if deal.verdict.discount_rate is not None else p.effective_discount_rate(),
             avg_price=deal.verdict.avg_price,

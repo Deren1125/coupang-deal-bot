@@ -89,6 +89,8 @@ async def _daily_job_loop(bot: DealBot, stop: asyncio.Event, *, hhmm: str, marke
 
 
 async def daily_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    if not bot.settings.monitoring.daily_summary:
+        return
     await _daily_job_loop(
         bot, stop, hhmm=bot.settings.monitoring.daily_summary_time, marker_key="daily_summary_marker", label="summary", job=bot.daily_summary
     )

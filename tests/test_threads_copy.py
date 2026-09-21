@@ -201,7 +201,7 @@ def test_copy_blocks(repo_root: Path) -> None:
     assert [b.key for b in blocks] == ["kakao", "blog"]
 
     kakao = blocks[0]
-    assert "🔥" in kakao.text and "29,900원" in kakao.text and "<b>" not in kakao.text
+    assert "<구매 링크>" in kakao.text and "29,900원" in kakao.text and "<b>" not in kakao.text
     assert "<pre>" in kakao.as_telegram_html() and "카카오 오픈채팅" in kakao.as_telegram_html()
 
     blog = blocks[1]

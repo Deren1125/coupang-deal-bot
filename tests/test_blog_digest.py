@@ -81,7 +81,7 @@ async def test_blog_digest_follows_deren_format(bot: DealBot) -> None:
     assert "- 텔레그램 · 오늘의 핫딜\nhttps://t.me/hot_deal_and_info\n\n- 카카오톡 · 오늘의 핫딜 오픈채팅\nhttps://open.kakao.com/o/pHi1MkMi" in text
     # 딜 단락: 점수 높은 순, 어미 규칙
     assert "1. 스탠리 텀블러 1.18L\n\n쿠팡에서 스탠리 텀블러 1.18L이 29,900원입니다!\n정가 49,900원에서 40% 내려온 가격이에요!" in text
-    assert "쿠팡 최저가 45,000원보다도 34% 싼 가격이구요!" in text
+    assert "싼 가격이구요" not in text and "평균가" not in text  # 평소 가격 대비 몇 % 같은 말은 안 씀
     assert "별점 4.8점에 리뷰가 1,200건이라,\n검증은 충분히 된 제품이에요!\n배송은 무료예요!\n\nhttps://link.coupang.com/a/abc\n" in text
     assert "2. 토스 화장지 30롤\n\n토스쇼핑에서 토스 화장지 30롤이 12,900원입니다!" in text
     assert text.index("1. 스탠리") < text.index("2. 토스")

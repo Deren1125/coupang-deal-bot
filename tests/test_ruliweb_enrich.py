@@ -113,7 +113,7 @@ async def test_submit_manual_enriches(settings: Settings) -> None:
         item = bot.db.next_pending()
         assert item is not None and item.deal.product.image_url == "https://img/t.jpg" and item.deal.product.rating == 4.7
         text = bot.publisher.render(item.deal)
-        assert "별점 4.7 · 리뷰 12건" in text and "가격: 9,990원" in text
+        assert "별점 4.7 · 리뷰 12건" in text and "\n9,990원\n" in text
     finally:
         await bot.close()
 
@@ -169,9 +169,10 @@ async def test_collect_reads_full_title_and_source_box(settings: Settings, db: D
     toss = products["107141"]
     assert toss.shop == "toss" and toss.price == 12900 and toss.url == "https://toss.shopping/t/40594131" and toss.product_id == "toss:40594131"
     assert toss.name == "올챌린지 천연펄프 화장지 30롤, 2팩" and toss.extra["title"].endswith("(12,900원/무료)")
+    assert toss.category == "생활용품"
     lo = products["107142"]
     assert lo.shop == "lotteon" and lo.price == 14220 and lo.url == "https://www.lotteon.com/p/product/LO2767238184"  # 리다이렉트를 풀어 몰 주소로
-    assert lo.name == "농심 빵부장 솔티꽈베기빵8개+소금빵8개+굿즈증정"
+    assert lo.name == "농심 빵부장 솔티꽈베기빵8개+소금빵8개+굿즈증정" and lo.category == "음식"  # 말머리가 상품 분류 → 식품 기준 적용
     ev = products["107150"]  # 모르는 몰의 가격 없는 이벤트 글은 정보 글 후보로 남긴다
     assert ev.shop == "unknown" and ev.price == 0 and ev.url == "https://www.dunkindonuts.co.kr/event/view?id=5443"
     assert ev.name == "네이버페이로 12000원 결제시 4800원 할인 외 (9/12~9/14)" and ev.extra["post_url"].endswith("/read/107150")  # 기간은 남긴다

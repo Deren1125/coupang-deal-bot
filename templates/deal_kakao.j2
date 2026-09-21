@@ -1,34 +1,37 @@
 {#
-  카카오톡 오픈채팅 복붙용 — 순수 텍스트, 이모지 중심
-  카톡은 서식이 없으므로 줄바꿈과 이모지로만 구성합니다.
+  카카오톡 오픈채팅 복붙용 — 순수 텍스트. 이모지는 최대 2개(강조 1 + 링크 1), 라벨은 꺾쇠만.
+  변수는 deal_post.j2 와 같다 (tier / tier_pct 포함).
 #}
 {% if product.headline %}
 [{{ product.headline }}]
 
 {% endif %}
-🔥 {{ product.name }}
+{% if tier == "top" %}🚨 {% elif tier == "must" %}🔥 {% endif %}{{ product.name }}
 {% if product.has_price %}
-💰 {{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %} 🔻{{ discount_rate | pct }}{% endif +%}
-{% endif %}
-{% if market_price and below_market_pct and below_market_pct > 0 %}
-📉 쿠팡 최저가 {{ market_price | won }} 대비 {{ below_market_pct | pct }} 저렴
-{% endif %}
-{% if avg_price and below_avg_pct and below_avg_pct > 0 %}
-📊 최근 30일 평균가 {{ avg_price | won }} 대비 {{ below_avg_pct | pct }} 저렴
-{% endif %}
-{% if product.rating or product.review_count %}
-⭐ {% if product.rating %}별점 {{ product.rating }}{% endif %}{% if product.rating and product.review_count %} · {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}건{% endif +%}
+{{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %}, {{ discount_rate | pct }} 할인{% endif +%}
 {% endif %}
 {% if product.shipping %}
-🚚 {{ product.shipping }}
+배송 {{ product.shipping }}
+{% endif %}
+{% if tier == "top" %}
+
+역대급 가격입니다. 평소의 3분의 1 수준이라 이 가격은 다시 보기 어려워요. 필요했던 분은 바로 담으세요.
+{% elif tier == "must" %}
+
+평소 가격의 절반입니다. 필요했던 분은 꼭 담으세요.
+{% elif tier_pct >= 15 %}
+
+평소보다 확실히 싸게 나왔어요.
 {% endif %}
 
+<구매 링크>
 👉 {{ link }}
 {% if channels.telegram_url %}
 
-📲 실시간 전체 딜(텔레그램): {{ channels.telegram_url }}
+<실시간 전체 딜은 텔레그램>
+{{ channels.telegram_url }}
 {% endif %}
 {% if shop.disclosure %}
 
-✱ {{ shop.disclosure }}
+{{ shop.disclosure }}
 {% endif %}

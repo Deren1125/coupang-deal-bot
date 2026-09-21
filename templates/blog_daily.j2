@@ -29,6 +29,10 @@
 
 - 카카오톡 · {{ channels.kakao_openchat_name }}
 {{ channels.kakao_openchat_url }}
+{% for line in extra_channel_lines %}
+
+{{ line }}
+{% endfor %}
 
 
 {{ date_label }}({{ weekday }}) 하루 동안 채널에 올라온 특가 중에서 진짜 괜찮았던 것들만 골라서,
@@ -43,11 +47,12 @@
 {% elif d.discount_rate %}
 표시 할인율은 {{ d.discount_rate | pct }}예요!
 {% endif %}
-{% if d.market_price and d.below_market_pct and d.below_market_pct > 0 %}
-쿠팡 최저가 {{ d.market_price | won }}보다도 {{ d.below_market_pct | pct }} 싼 가격이구요!
-{% endif %}
-{% if d.avg_price and d.below_avg_pct and d.below_avg_pct > 0 %}
-최근 30일 평균가 {{ d.avg_price | won }}보다 {{ d.below_avg_pct | pct }} 낮아요!
+{% if d.tier == "top" %}
+평소 가격의 3분의 1 수준이라,
+이 가격은 다시 보기 어려운 수준이에요!
+{% elif d.tier == "must" %}
+평소 가격의 절반이라,
+필요하셨던 분은 이번에 담으시면 됩니다!
 {% endif %}
 {% if d.rating and d.review_count %}
 별점 {{ d.rating }}점에 리뷰가 {{ "{:,}".format(d.review_count) }}건이라,
@@ -114,6 +119,10 @@
 
 - 카카오톡 · {{ channels.kakao_openchat_name }}
 {{ channels.kakao_openchat_url }}
+{% for line in extra_channel_lines %}
+
+{{ line }}
+{% endfor %}
 
 
 궁금한 점은 댓글로 남겨주세요!

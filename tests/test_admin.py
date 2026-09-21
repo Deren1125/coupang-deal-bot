@@ -411,3 +411,14 @@ def test_stale_guard_is_five_minutes() -> None:
     now = datetime(2026, 9, 5, 17, 0, tzinfo=UTC)
     assert not is_stale_message(now - timedelta(minutes=4), now)
     assert is_stale_message(now - timedelta(minutes=6), now)  # 배포 중 반복해 보낸 옛 명령은 무시
+
+
+def test_batch_reply_lines_parse() -> None:
+    from dealbot.monitoring.admin import _BATCH_LINE_RE, _BATCH_OK
+
+    ok = ["675 https://toss.im/share/abc", "#677 ok", "673 skip", "680: 확인", "681) https://smartstore.naver.com/x", "682 ㅇㅋ"]
+    for line in ok:
+        assert _BATCH_LINE_RE.match(line), line
+    assert _BATCH_LINE_RE.match("#677 ok").group(2).lower() in _BATCH_OK
+    for line in ("https://toss.im/share/abc", "675", "그냥 메시지", "675 이거 괜찮네"):
+        assert _BATCH_LINE_RE.match(line) is None, line

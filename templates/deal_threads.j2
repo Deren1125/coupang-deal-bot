@@ -2,9 +2,12 @@
   스레드 첫 글(훅) — 500자 제한, 순수 텍스트. 링크와 수수료 고지는 답글(deal_threads_reply.j2)에.
   잘 되는 핫딜 계정 형식: 한 줄 훅 + 가격 비교 한 줄 + "링크는 댓글에". 변수는 deal_post.j2 와 동일.
 #}
-{% if market_price and below_market_pct and below_market_pct > 0 %}
-{{ product.name }} 쿠팡 최저가보다 {{ below_market_pct | pct }} 싼데?
-쿠팡 {{ market_price | won }} > {{ product.price | won }} ;;
+{% if tier == "top" %}
+{{ product.name }} 평소 가격의 3분의 1 떴다
+{{ product.price | won }} ;;
+{% elif tier == "must" %}
+{{ product.name }} 반값 떴다
+{{ product.price | won }} ;;
 {% elif product.original_price and product.original_price > product.price %}
 {{ product.name }} 이 가격 맞아?
 {{ product.original_price | won }} > {{ product.price | won }} ;;

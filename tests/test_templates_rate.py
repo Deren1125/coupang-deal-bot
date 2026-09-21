@@ -20,10 +20,12 @@ def test_render_deal_post(repo_root: Path) -> None:
     text = r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", shop=ShopRegistry().get("coupang"))
     lines = text.splitlines()
     assert lines[0] == "[샘플 · 오늘의 특가]" and lines[1] == ""
-    assert "상품: [샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L" in text
-    assert "가격: 29,900원 (정가 49,900원) · 40% 할인" in text
-    assert "최근 30일 평균가 42,000원 대비 29% 저렴" in text
-    assert "\nhttps://link.coupang.com/a/sample\n" in text
+    assert "<b>[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L</b>" in text
+    assert "29,900원 (정가 49,900원) · 40% 할인" in text
+    assert "평균가" not in text and "최저가" not in text  # 평소 가격 대비 몇 % 같은 말은 안 씀
+    assert "평소보다 확실히 싸게 나왔어요." in text  # 29% 싼 보통 딜은 짧게만
+    assert "\n👉 https://link.coupang.com/a/sample\n" in text
+    assert sum(text.count(e) for e in ("🚨", "🔥", "👉", "💰", "📊", "💬", "✱")) <= 2
     assert text.endswith("이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.")
     assert len(text) < 1024
 
@@ -37,7 +39,7 @@ def test_render_escapes_html(repo_root: Path) -> None:
     assert "할인" not in text and "평균가" not in text and "포스팅" not in text  # 고지 문구 없는 몰
     coupon = Product(source="s", product_id="coupang:c", shop="coupang", name="10% 쿠폰", price=0, url="u", deal_kind="coupon")
     t2 = r.render_deal(Deal(product=coupon, verdict=DealVerdict(is_deal=True)), "https://l")
-    assert "가격:" not in t2 and "상품: 10% 쿠폰" in t2
+    assert "정가" not in t2 and "<b>10% 쿠폰</b>" in t2
 
 
 def test_status_and_summary_templates_render(repo_root: Path, db: Database) -> None:
@@ -104,3 +106,24 @@ def test_normalize_chat_id() -> None:
     assert normalize_chat_id("42") == 42
     assert normalize_chat_id("@chan") == "@chan"
     assert normalize_chat_id(None) is None
+
+
+def test_emphasis_tiers(repo_root: Path) -> None:
+    from dealbot.shops import ShopRegistry
+
+    r = TemplateRenderer(repo_root / "templates")
+    shop = ShopRegistry().get("coupang")
+
+    def deal(**v):  # type: ignore[no-untyped-def]
+        p = Product(source="s", product_id="coupang:9", shop="coupang", name="갈아만든배 340ml 24개", price=12360, url="u")
+        return Deal(product=p, verdict=DealVerdict(is_deal=True, **v), affiliate_url="https://l")
+
+    must = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop)
+    assert must.startswith("🔥 <b>갈아만든배") and "평소 가격의 절반입니다. 필요했던 분은 꼭 담으세요." in must
+    top = r.render_deal(deal(below_market_pct=72.0, market_price=45000), "https://l", shop=shop)
+    assert top.startswith("🚨 <b>갈아만든배") and "역대급 가격입니다" in top and "72%" not in top
+    plain = r.render_deal(deal(below_avg_pct=6.0, avg_price=13207), "https://l", shop=shop)
+    assert plain.startswith("<b>갈아만든배") and "평소" not in plain  # 6% 는 강조 없이 상품·가격·링크만
+    kakao = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop, template="deal_kakao.j2", autoescape=False)
+    assert kakao.startswith("🔥 갈아만든배") and "<구매 링크>" in kakao and "평균가" not in kakao and "✱" not in kakao
+    assert sum(kakao.count(e) for e in ("🚨", "🔥", "👉", "💰", "📊", "📲", "✱")) <= 2

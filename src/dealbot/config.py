@@ -142,6 +142,42 @@ class AuthenticityConfig(BaseModel):
     coupang_min_reviews: int = 30
 
 
+class FoodRuleConfig(BaseModel):
+    """식품류는 평소 가격(쿠팡 시중가·30일 평균) 대비 이만큼은 싸야 특가로 본다. 그 외 상품은 기존 기준 그대로."""
+
+    enabled: bool = True
+    min_below_reference_pct: float = 50
+    # 상품 분류(쿠팡 API categoryName, 루리웹 말머리)에 이 말이 있으면 식품
+    categories: list[str] = Field(
+        default_factory=lambda: ["식품", "음식", "먹거리", "간식", "음료", "신선", "가공식품", "건강식품", "건강기능식품", "냉동", "축산", "수산", "과일", "채소", "쌀", "베이커리", "카페"]
+    )
+    # 상품명에 이 말이 있으면 식품
+    keywords: list[str] = Field(
+        default_factory=lambda: [
+            "즙", "과자", "라면", "커피", "원두", "음료", "우유", "두유", "잡곡", "현미", "고기", "닭가슴살", "닭", "돼지", "삼겹", "소고기", "한우",
+            "김치", "만두", "빵", "떡", "과일", "사과", "귤", "포도", "견과", "아몬드", "호두", "참치", "스팸", "햄", "소시지", "계란", "달걀",
+            "생수", "탄산", "콜라", "사이다", "주스", "요거트", "치즈", "버터", "초콜릿", "초코", "사탕", "젤리", "미역", "국물", "곰탕", "삼계탕",
+            "찌개", "카레", "소스", "간장", "고추장", "된장", "식용유", "올리브유", "시리얼", "그래놀라", "프로틴", "단백질", "비타민", "홍삼",
+            "오메가", "유산균", "영양제", "육포", "어묵", "핫도그", "피자", "치킨", "밀키트", "식품", "간식", "도시락", "컵밥", "볶음밥", "누룽지",
+            "떡볶이", "라떼", "녹차", "티백", "홍차", "보리차", "꿀", "잼", "시럽", "육수", "다시", "김자반", "조미김", "돌김", "새우", "오징어", "연어",
+            "갈아만든", "식혜", "수정과", "에이드", "탄산수", "생과일", "냉동", "즉석", "레토르트", "국밥", "죽", "면", "파스타", "스파게티",
+        ]
+    )
+    # "340ml 24개", "500g 3팩" 처럼 식품·음료 묶음 규격 (아래 non_food_keywords 가 있으면 제외)
+    unit_patterns: list[str] = Field(
+        default_factory=lambda: [
+            r"\d+(?:\.\d+)?\s*(?:ml|l|리터)\s*[x×*]?\s*\d+\s*(?:개|입|병|캔|팩|봉)",
+            r"\d+(?:\.\d+)?\s*(?:g|kg|그램)\s*[x×*]?\s*\d+\s*(?:개|입|팩|봉|봉지)",
+        ]
+    )
+    non_food_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "샴푸", "린스", "트리트먼트", "세제", "화장지", "물티슈", "로션", "크림", "클렌징", "세정", "섬유유연제", "치약", "바디워시",
+            "핸드워시", "향수", "스킨", "토너", "에센스", "선크림", "마스크팩", "세럼", "샤워", "주방세제", "표백", "락스", "탈취", "방향제",
+        ]
+    )
+
+
 class QualityConfig(BaseModel):
     """후기가 거의 없는 상품은 특가로 올려도 잘 안 팔린다. 상품 페이지에서 후기 수를 읽었을 때만 적용 (못 읽으면 통과)."""
 
@@ -178,6 +214,7 @@ class DealConfig(BaseModel):
     enrich: EnrichConfig = Field(default_factory=EnrichConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)
     authenticity: AuthenticityConfig = Field(default_factory=AuthenticityConfig)
+    food: FoodRuleConfig = Field(default_factory=FoodRuleConfig)
     # 원본 주소가 쇼핑몰이 아니라 게시판 글이면(본문에서 상품 링크를 못 찾은 이벤트 글 등) 링크 요청 없이 건너뜀
     require_shop_url: bool = True
     sold_out: SoldOutConfig = Field(default_factory=SoldOutConfig)
@@ -210,6 +247,9 @@ class PublishConfig(BaseModel):
     # 이름이 거의 같은 상품(다른 게시판·주소 변형)을 같은 딜로 보는 기준 (0~1). 전보다 dedupe_cheaper_pct% 이상 싸졌으면 새 딜로 인정
     dedupe_similarity: float = 0.8
     dedupe_cheaper_pct: float = 10
+    # 글의 강조 단계: 평소 가격(30일 평균·쿠팡 시중가) 대비 must_pct% 이상 싸면 "꼭 담으세요", top_pct% 이상이면 "역대급"
+    emphasis_must_pct: float = 50
+    emphasis_top_pct: float = 70
     queue_ttl_hours: int = 6
     manual_link_ttl_hours: int = 12  # 내 링크 입력을 기다리는 항목의 유효 시간
     max_publish_attempts: int = 3
@@ -303,6 +343,8 @@ class BlogDigestConfig(BaseModel):
     max_info_items: int = 3
     blog_name: str = "Deren의 아카이브"  # 도입부 "OO를 운영하고 있는 OO입니다"
     author: str = "Deren"
+    # 채널 안내·서명에 핫딜 방 다음으로 덧붙일 줄 (예: "- 텔레그램 · Deren의 쌀농사방\nhttps://t.me/Derens_tip"). 비우면 핫딜 방만
+    extra_channel_lines: list[str] = Field(default_factory=list)
     # 글마다 반드시 넣는 고지 문구 (쿠팡 파트너스 규정: 쿠팡 딜이 없는 날도 넣는다)
     always_disclosures: list[str] = Field(
         default_factory=lambda: ["이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."]
@@ -378,6 +420,7 @@ class MonitoringConfig(BaseModel):
     notify_on_error: bool = True
     notify_on_manual_link: bool = True
     error_alert_cooldown_minutes: int = 30
+    daily_summary: bool = True  # 매일 daily_summary_time 에 하루 요약을 보낼지 (/status 로 언제든 볼 수 있음)
     daily_summary_time: str = "21:00"
     quiet_notices: bool = False  # true: 시작/미리보기/발행 알림을 무음으로 (false: 모든 알림이 소리·진동과 함께 옴)
     heartbeat_minutes: int = 0  # 관리자 챗이 N분 동안 조용하면 "정상 가동 중" 짧은 상태를 보냄 (0 = 끔). 특가 알림이 있으면 그걸로 대신함

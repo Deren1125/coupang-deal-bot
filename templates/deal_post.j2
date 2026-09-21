@@ -1,51 +1,41 @@
 {#
-  채널 발행 메시지 템플릿 (텔레그램 HTML 서식)
+  채널 발행 메시지 템플릿 (텔레그램 HTML 서식). 이모지는 글마다 최대 2개 (강조 단계 1개 + 링크 1개).
 
-  사용 가능한 변수:
-    product.headline      머리글 (예: 토스쇼핑 첫 구매 시 3,000원 추가 할인) — 없으면 None
-    product.name          상품명 / 딜 제목
-    product.price         가격(원, 정수). 쿠폰/이벤트는 0
-    product.has_price     가격이 있으면 True
-    product.original_price / product.category / product.is_rocket / product.is_free_shipping / product.shipping
-    product.deal_kind     hotdeal | coupon | event
-    product.recommend_count  커뮤니티 추천 수 (있을 때)
-    product.rating / product.review_count   상품 페이지 별점 / 리뷰 수 (읽어온 경우)
-    shop.name / shop.key / shop.disclosure   쇼핑몰 표시명 / 키 / 하단 고지 문구
-    discount_rate         표시 할인율 %, 없으면 None
-    avg_price / below_avg_pct   최근 N일 평균가 / 평균가 대비 저렴한 비율 %
-    market_price / market_source / below_market_pct   시중가(쿠팡 검색) / 출처 / 시중가 대비 저렴한 비율 %
-    link                  발행할 링크 (내 제휴 링크 또는 원본)
-    channels.telegram_url / kakao_openchat_url / threads_url   내 채널 주소 (config.yaml channels, 비어 있으면 "")
-  필터: won (12,900원), pct (35%), local (시간 → 한국시간 문자열)
-
+  변수: product.*, shop.*, discount_rate, avg_price/below_avg_pct, market_price/below_market_pct, link, channels.*
+        tier: 'top'(평소 가격 대비 70%↑ 쌈) | 'must'(50%↑) | 'normal',  tier_pct: 그 근거 비율(%)
+  필터: won (12,900원), pct (35%), local
   ⚠️ HTML 특수문자는 자동 이스케이프됩니다. <b> <i> <s> <code> <a href> 만 사용 가능.
-  ⚠️ 한 줄을 통째로 차지하는 {% if %} / {% endif %} 줄은 출력에서 사라집니다.
-     내용 줄 "안"에서 조건을 쓸 때는 줄 끝의 endif 를 {% endif +%} 로 써야 줄바꿈이 유지됩니다.
+  ⚠️ 한 줄을 통째로 차지하는 {% if %} / {% endif %} 줄은 출력에서 사라집니다. 줄 "안"의 조건은 {% endif +%} 로 닫아야 줄바꿈이 유지됩니다.
 #}
 {% if product.headline %}
 [{{ product.headline }}]
 
 {% endif %}
-상품: {{ product.name }}
+{% if tier == "top" %}🚨 {% elif tier == "must" %}🔥 {% endif %}<b>{{ product.name }}</b>
 {% if product.has_price %}
-가격: {{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %} · {{ discount_rate | pct }} 할인{% endif +%}
-{% endif %}
-{% if market_price and below_market_pct and below_market_pct > 0 %}
-쿠팡 최저가 {{ market_price | won }} 대비 {{ below_market_pct | pct }} 저렴
-{% endif %}
-{% if avg_price and below_avg_pct and below_avg_pct > 0 %}
-최근 30일 평균가 {{ avg_price | won }} 대비 {{ below_avg_pct | pct }} 저렴
+{{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %} · {{ discount_rate | pct }} 할인{% endif +%}
 {% endif %}
 {% if product.shipping %}
-배송: {{ product.shipping }}
+배송 {{ product.shipping }}
 {% endif %}
 {% if product.rating or product.review_count %}
 {% if product.rating %}별점 {{ product.rating }}{% endif %}{% if product.rating and product.review_count %} · {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}건{% endif +%}
 {% endif %}
-{{ link }}
+{% if tier == "top" %}
+
+역대급 가격입니다. 평소의 3분의 1 수준이라 이 가격은 다시 보기 어려워요. 필요했던 분은 바로 담으세요.
+{% elif tier == "must" %}
+
+평소 가격의 절반입니다. 필요했던 분은 꼭 담으세요.
+{% elif tier_pct >= 15 %}
+
+평소보다 확실히 싸게 나왔어요.
+{% endif %}
+
+👉 {{ link }}
 {% if channels.kakao_openchat_url %}
 
-💬 카톡 오픈채팅: {{ channels.kakao_openchat_url }}
+카톡 오픈채팅: {{ channels.kakao_openchat_url }}
 {% endif %}
 {% if shop.disclosure %}
 

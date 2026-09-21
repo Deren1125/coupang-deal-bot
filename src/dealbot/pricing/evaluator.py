@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dealbot.config import DealConfig, SourceRule
 from dealbot.models import DealVerdict, PriceStats, Product
 from dealbot.pricing.market import MarketQuote
@@ -63,7 +65,40 @@ class DealEvaluator:
             return f"rank<={ic.max_rank}"
         return None
 
+    def is_food(self, product: Product) -> bool:
+        """식품류인가: 상품 분류(쿠팡 categoryName·루리웹 말머리)나 상품명의 낱말로 판단."""
+        fc = self.cfg.food
+        if not fc.enabled:
+            return False
+        text = f"{product.name} {product.headline or ''}".lower()
+        if any(k and k.lower() in text for k in fc.non_food_keywords):
+            return False
+        cat = (product.category or "").lower()
+        if cat and any(c.lower() in cat for c in fc.categories):
+            return True
+        if any(k and k.lower() in text for k in fc.keywords):
+            return True
+        return any(re.search(pat, text, re.I) for pat in fc.unit_patterns)
+
     def evaluate(
+        self,
+        product: Product,
+        stats: PriceStats,
+        quote: MarketQuote | None = None,
+        *,
+        market_available: bool = False,
+    ) -> DealVerdict:
+        verdict = self._evaluate(product, stats, quote, market_available=market_available)
+        fc = self.cfg.food
+        if verdict.is_deal and self.is_food(product):
+            # 식품은 평소 가격 대비 확실히 쌀 때만 (표시 할인율·추천 수만으로는 안 됨)
+            ref = max(verdict.below_avg_pct or 0.0, verdict.below_market_pct or 0.0)
+            if ref < fc.min_below_reference_pct:
+                verdict.is_deal = False
+                verdict.reasons.append(f"food_below_ref<{fc.min_below_reference_pct:g}%")
+        return verdict
+
+    def _evaluate(
         self,
         product: Product,
         stats: PriceStats,

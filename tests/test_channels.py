@@ -21,7 +21,7 @@ def test_post_footer_only_when_kakao_set(repo_root: Path) -> None:
     plain = TemplateRenderer(repo_root / "templates").render_deal(sample_deal(), "https://l", shop=shop)
     assert "카톡 오픈채팅" not in plain
     with_kakao = TemplateRenderer(repo_root / "templates", channels={"kakao_openchat_url": KAKAO}).render_deal(sample_deal(), "https://l", shop=shop)
-    assert f"💬 카톡 오픈채팅: {KAKAO}" in with_kakao
+    assert f"카톡 오픈채팅: {KAKAO}" in with_kakao and "💬" not in with_kakao
     assert with_kakao.index("https://l") < with_kakao.index(KAKAO) < with_kakao.index("쿠팡 파트너스")
 
 
@@ -29,7 +29,7 @@ def test_kakao_copy_points_to_telegram(repo_root: Path) -> None:
     shop = ShopRegistry().get("coupang")
     r = TemplateRenderer(repo_root / "templates", channels={"telegram_url": TG})
     text = r.render_deal(sample_deal(), "https://l", shop=shop, template="deal_kakao.j2", autoescape=False)
-    assert f"📲 실시간 전체 딜(텔레그램): {TG}" in text
+    assert f"<실시간 전체 딜은 텔레그램>\n{TG}" in text and "📲" not in text
     r2 = TemplateRenderer(repo_root / "templates")
     assert "텔레그램" not in r2.render_deal(sample_deal(), "https://l", shop=shop, template="deal_kakao.j2", autoescape=False)
 

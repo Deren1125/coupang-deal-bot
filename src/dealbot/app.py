@@ -141,6 +141,7 @@ class DealBot:
         self.evaluator = DealEvaluator(settings.deal)
         self.enricher = PageEnricher(self.http, timeout=settings.http.timeout_seconds)
         self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone, settings.channels.as_dict())
+        self.renderer.emphasis = (settings.publish.emphasis_must_pct, settings.publish.emphasis_top_pct)
         self.info = InfoPostBuilder(
             self.http,
             self.renderer,
