@@ -113,11 +113,17 @@
 
 1. 스레드 계정 준비 (인스타그램 계정으로 로그인).
 2. https://developers.facebook.com → 개발자 등록(무료) → **앱 만들기** → 사용 사례에서 **Threads API** 선택 (권한 `threads_basic`, `threads_content_publish`, `threads_manage_replies` — 링크를 답글로 올리므로 답글 권한까지).
-3. 앱 대시보드 → **앱 설정 → 기본 설정**에서 **앱 ID**와 **앱 시크릿** 확인 → Railway Variables 에 `THREADS_APP_ID`, `THREADS_APP_SECRET` (파일이나 챗에 적지 않기).
+3. 앱 대시보드 → **앱 설정 → 기본 설정** 페이지를 아래로 내려 **Threads 앱 ID** / **Threads 앱 시크릿** 확인 → Railway Variables 에 `THREADS_APP_ID`, `THREADS_APP_SECRET` (파일이나 챗에 적지 않기).
+   - 같은 페이지 맨 위의 **앱 ID / 앱 시크릿**은 메타 앱용이라 번호가 다릅니다. 이걸 넣으면 승인 링크에서 "차단된 URL입니다: 리디렉션 URI가 … 화이트리스트에 없으므로" 오류가 납니다. 사용 사례 → Threads API → 맞춤 설정 → 설정 에서도 같은 Threads 값을 볼 수 있습니다.
 4. 앱의 **Threads API 사용 사례 설정** → 리디렉션 콜백 URL(OAuth Redirect URI)에 `https://localhost/callback` 추가. (다른 주소를 쓰려면 Railway 의 `THREADS_REDIRECT_URI` 도 같은 값으로.)
 5. 앱이 **개발 모드**면 내 스레드 계정을 **앱 역할 → Threads 테스터**로 추가하고, 스레드 앱 → 설정 → 계정 → 웹사이트 권한 → 초대에서 수락. (앱 검수를 통과해 라이브 모드면 이 단계는 필요 없음.)
 6. Redeploy 후 관리자 챗에서 `/threadsauth` → 나온 링크를 열어 승인 → 이동한 주소창(`https://localhost/callback?code=...`)의 `code=` 뒤 값을 `#_` 앞까지 복사 → `/threadscode 값` 전송. 페이지는 "연결할 수 없음"으로 보여도 정상이며 주소창의 코드만 필요합니다.
 7. "연결 완료" 가 뜨면 끝. 토큰(60일)은 봇이 만료 전에 자동 갱신합니다. `/status` 의 스레드 줄이 ✅ 이면 그다음 딜부터 스레드에도 올라갑니다.
+
+막힐 때:
+- `threads.com/oauth/authorize/error.json?error_message=차단된 URL입니다…` 가 뜨면 → `/threadsauth` 메시지 끝에 적힌 client_id 가 **Threads 앱 ID**와 같은지 먼저 확인(다르면 Railway 값 교체 후 Redeploy). 같다면 4번의 리디렉션 콜백 URL 이 `https://localhost/callback` 과 글자 단위로 같은지(https, 끝에 `/` 없음) 확인하고 저장 후 1~2분 뒤 다시 시도.
+- 링크를 누르면 스레드 앱만 열리고 승인 화면이 안 뜨면 → 링크를 길게 눌러 복사해 브라우저 주소창에 직접 붙여넣기.
+- 승인 화면에서 "앱이 개발 모드" 류의 오류 → 5번의 Threads 테스터 초대 수락 여부 확인.
 
 ## 7-3. 정보 글 (상품 링크 없는 게시판 글)
 

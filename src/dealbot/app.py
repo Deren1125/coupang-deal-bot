@@ -1259,13 +1259,20 @@ class DealBot:
                 return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 /threadscode 로 새 code 를 넣으세요)"
             except ThreadsError:
                 pass
-        url = authorize_url(self.settings.secrets.threads_app_id or "", self.settings.secrets.threads_redirect_uri)
+        app_id = self.settings.secrets.threads_app_id or ""
+        redirect = self.settings.secrets.threads_redirect_uri
+        url = authorize_url(app_id, redirect)
         return (
             "1) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 Safari 주소창에 붙여넣어 여세요. 그냥 누르면 스레드 앱이 열려 승인 화면이 안 뜹니다.\n"
             f"{url}\n\n"
             "2) 승인 후 이동한 주소창에서 <code>code=</code> 뒤의 값을 복사해\n"
             "<code>/threadscode 붙여넣기</code> 로 보내주세요.\n"
-            "(주소가 열리지 않아도 됩니다. 주소창의 code 값만 필요합니다.)"
+            "(주소가 열리지 않아도 됩니다. 주소창의 code 값만 필요합니다.)\n\n"
+            f"확인: 이 링크의 client_id 는 <code>{app_id}</code> 입니다. "
+            "developers.facebook.com → 앱 → 앱 설정 → 기본 설정 아래쪽의 <b>Threads 앱 ID</b>와 같아야 합니다 "
+            "(같은 페이지 맨 위 '앱 ID'는 메타 앱용이라 다른 번호입니다).\n"
+            "'차단된 URL입니다 / 리디렉션 URI가 화이트리스트에 없습니다' 가 뜨면 ① 이 번호가 Threads 앱 ID가 아니거나 "
+            f"② 사용 사례 → Threads API 설정의 리디렉션 콜백 URL에 <code>{redirect}</code> 가 글자 그대로 없는 경우입니다."
         )
 
     async def threads_submit_code(self, code: str) -> str:

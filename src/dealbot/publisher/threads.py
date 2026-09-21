@@ -28,7 +28,7 @@ from dealbot.utils.timeutil import from_iso, to_iso, utcnow
 log = logging.getLogger(__name__)
 
 GRAPH_BASE = "https://graph.threads.net"
-AUTH_BASE = "https://threads.net/oauth/authorize"
+AUTH_BASE = "https://threads.com/oauth/authorize"  # 메타 문서 기준 (threads.net 은 여기로 리디렉션됨)
 API_VERSION = "v1.0"
 SCOPES = "threads_basic,threads_content_publish,threads_manage_replies"  # 링크는 첫 글의 답글로 올리므로 답글 권한도 필요
 TEXT_LIMIT = 500
