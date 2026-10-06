@@ -8,11 +8,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import json
 import logging
+import re
 import secrets as pysecrets
+import time
 import traceback
 from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -72,7 +76,7 @@ from dealbot.shops import ShopRegistry
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
 from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
-from dealbot.utils.text import truncate
+from dealbot.utils.text import clean_name, truncate
 from dealbot.utils.timeutil import fmt_local, from_iso, in_time_window, local_now, to_iso, utcnow
 from dealbot.web import WebServer, page
 
@@ -1377,10 +1381,48 @@ class DealBot:
                 await self.notifier.notify_published(deal, result, preview=self.publisher.render(deal))
             else:
                 await self.notifier.notify_published(deal, result)
+                self.export_published(deal, photo)
                 await self._publish_side_channels(deal)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True
+
+    def export_published(self, deal: Deal, photo: bytes | None = None) -> None:
+        """채널에 실제로 올린 딜을 published_deals.jsonl 에 한 줄씩 남긴다 (블로그 자동 발행·카카오 전송이 읽어 감).
+        사진은 검사를 통과한 JPEG 를 media/export 에 저장해 경로를 같이 적는다."""
+        try:
+            p = deal.product
+            shop = self.registry.get(p.shop)
+            link = deal.affiliate_url or p.url
+            out_dir = self.settings.data_dir / "media" / "export"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            photo_file = ""
+            if photo:
+                photo_file = str(out_dir / f"{re.sub(r'[^A-Za-z0-9_-]+', '_', p.product_id)}_{int(time.time())}.jpg")
+                Path(photo_file).write_bytes(photo)
+            ctx = self.renderer
+            tier, _ = ctx.deal_tier(deal)
+            v = deal.verdict
+            ref_price, ref_label = None, ""
+            if v.market_price and (v.below_market_pct or 0) >= 10:
+                ref_price, ref_label = v.market_price, "쿠팡 최저가"
+            elif v.avg_price and (v.below_avg_pct or 0) >= 10:
+                ref_price, ref_label = int(v.avg_price), "평소 가격"
+            row = {
+                "product_id": p.product_id, "posted_at": utcnow().isoformat(timespec="seconds"),
+                "name": clean_name(p.name), "raw_name": p.name, "headline": p.headline, "price": p.price,
+                "ref_price": ref_price, "ref_label": ref_label,
+                "ref_pct": round((1 - p.price / ref_price) * 100) if ref_price and p.price else None,
+                "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
+                "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
+                "disclosure": shop.disclosure if shop else "", "link": link, "product_url": p.url,
+                "image_url": p.image_url, "photo_file": photo_file,
+                "kakao_text": ctx.render_deal(deal, link, shop=shop, template="deal_kakao.j2", autoescape=False),
+            }
+            with (self.settings.data_dir / "published_deals.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as e:  # noqa: BLE001 — 내보내기 실패가 발행을 막지 않게
+            log.warning("export_published failed: %s", e)
 
     async def _fetch_image(self, url: str | None) -> bytes | None:
         """상품 사진 원본을 받아 온다 (카드에 얹을 용도). 실패하면 None."""

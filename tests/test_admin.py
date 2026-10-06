@@ -76,6 +76,12 @@ async def test_real_publish_sends_summary_and_copy_blocks(bot: DealBot) -> None:
     assert sent[0].startswith("✅ <b>채널에 올렸습니다</b>") and "연습" not in sent[0]
     names = [s.splitlines()[0] for s in sent[1:]]
     assert names == ["📋 <b>카카오 오픈채팅</b> 복사용", "📋 <b>네이버 블로그</b> 복사용"]
+    # 블로그 자동 발행·카카오 전송이 읽어 갈 기록 (실제 발행만)
+    import json
+
+    rows = [json.loads(line) for line in (bot.settings.data_dir / "published_deals.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1 and rows[0]["name"] and rows[0]["price"] and "link.coupang.com" in rows[0]["link"]
+    assert "쿠팡 파트너스" in rows[0]["disclosure"] and rows[0]["kakao_text"].startswith(rows[0]["name"][:4]) is not None
 
 
 def test_status_last_error_is_in_memory_only(bot: DealBot) -> None:

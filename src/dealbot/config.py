@@ -667,6 +667,11 @@ def _env_int(name: str) -> int | None:
         return None
 
 
+def _public_domain() -> str | None:
+    """공개 도메인: PUBLIC_DOMAIN (Lightsail 등 직접 운영) 또는 Railway 가 넣어 주는 RAILWAY_PUBLIC_DOMAIN."""
+    return _env_str("PUBLIC_DOMAIN") or _env_str("RAILWAY_PUBLIC_DOMAIN")
+
+
 def _default_threads_redirect(public_domain: str | None, path: str = "/threads/callback") -> str:
     """메타는 localhost 리디렉션을 받지 않으므로, 공개 도메인이 있으면 봇이 직접 받는 주소를 기본값으로 쓴다."""
     if public_domain:
@@ -706,12 +711,12 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         telegram_admin_chat_id=_env_int("TELEGRAM_ADMIN_CHAT_ID"),
         threads_app_id=_env_str("THREADS_APP_ID"),
         threads_app_secret=_env_str("THREADS_APP_SECRET"),
-        threads_redirect_uri=_env_str("THREADS_REDIRECT_URI") or _default_threads_redirect(_env_str("RAILWAY_PUBLIC_DOMAIN")),
+        threads_redirect_uri=_env_str("THREADS_REDIRECT_URI") or _default_threads_redirect(_public_domain()),
         instagram_app_id=_env_str("INSTAGRAM_APP_ID"),
         instagram_app_secret=_env_str("INSTAGRAM_APP_SECRET"),
         instagram_redirect_uri=_env_str("INSTAGRAM_REDIRECT_URI")
-        or _default_threads_redirect(_env_str("RAILWAY_PUBLIC_DOMAIN"), "/instagram/callback"),
-        public_domain=_env_str("RAILWAY_PUBLIC_DOMAIN"),
+        or _default_threads_redirect(_public_domain(), "/instagram/callback"),
+        public_domain=_public_domain(),
         web_port=_env_int("PORT") or 8080,
         ntfy_topic=_env_str("NTFY_TOPIC"),
         ntfy_token=_env_str("NTFY_TOKEN"),
