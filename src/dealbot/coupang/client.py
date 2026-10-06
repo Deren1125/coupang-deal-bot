@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -249,13 +250,20 @@ def parse_api_product(raw: dict[str, Any], source: str) -> Product | None:
     if original is not None and original <= price:
         original = None
 
+    # 같은 상품번호라도 옵션(용량·개수)마다 vendorItemId 가 다르다. 옵션까지 키에 넣어야
+    # '2L×6' 가격과 '2L×12' 가격이 한 가격 이력에 섞여 작은 묶음이 '절반 값'으로 보이는 일이 없다.
+    m = re.search(r"[?&]vendorItemId=(\d+)", str(url))
+    vid = str(raw.get("vendorItemId") or (m.group(1) if m else "")).strip()
+    item = re.search(r"[?&]itemId=(\d+)", str(url))
+    page = f"https://www.coupang.com/vp/products/{pid}" + (
+        f"?itemId={item.group(1)}&vendorItemId={vid}" if item and vid else "")
     return Product(
         source=source,
-        product_id=f"coupang:{pid}",
+        product_id=f"coupang:{pid}:{vid}" if vid else f"coupang:{pid}",
         shop="coupang",
         name=str(name).strip(),
         price=price,
-        url=f"https://www.coupang.com/vp/products/{pid}",
+        url=page,
         image_url=raw.get("productImage") or None,
         original_price=original,
         discount_rate=discount,

@@ -203,7 +203,8 @@ class ShopRegistry:
         if shop_key == "coupang":
             pid = extract_coupang_id(url)
             if pid:
-                return f"coupang:{pid}"
+                vid = parse_qs(p.query).get("vendorItemId", [None])[0]  # 옵션(용량·개수)까지 구분
+                return f"coupang:{pid}:{vid}" if vid else f"coupang:{pid}"
         elif shop_key == "toss":
             m = re.search(r"/(?:_m|t)/([A-Za-z0-9_-]+)", path)  # toss.im/_m/ID, toss.shopping/t/ID
             if m:

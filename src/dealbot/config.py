@@ -95,7 +95,8 @@ class MarketCheckConfig(BaseModel):
     require_for_discount_rule: bool = True  # 대조가 가능한 환경이면 (a) 표시 할인율만으로는 통과 못 함
     max_checks_per_hour: int = 3  # 쿠팡 검색 API 호출 예산 (전체 예산 안에서)
     cache_hours: int = 24
-    min_token_match: float = 0.6  # 상품명 토큰 일치 비율
+    min_token_match: float = 0.8  # 상품명 토큰 일치 비율
+    require_first_token: bool = True  # 상품명 첫 낱말(대개 브랜드)이 후보 이름에 있어야 같은 상품으로 봄
 
 
 class InterestConfig(BaseModel):
@@ -162,6 +163,10 @@ class FoodRuleConfig(BaseModel):
             "오메가", "유산균", "영양제", "육포", "어묵", "핫도그", "피자", "치킨", "밀키트", "식품", "간식", "도시락", "컵밥", "볶음밥", "누룽지",
             "떡볶이", "라떼", "녹차", "티백", "홍차", "보리차", "꿀", "잼", "시럽", "육수", "다시", "김자반", "조미김", "돌김", "새우", "오징어", "연어",
             "갈아만든", "식혜", "수정과", "에이드", "탄산수", "생과일", "냉동", "즉석", "레토르트", "국밥", "죽", "면", "파스타", "스파게티",
+            # 신선 채소·과일 (매일 값이 오르내려 '평소보다 싸다'가 의미 없는 경우가 많음)
+            "애호박", "호박", "고추", "청양", "오이", "양파", "대파", "쪽파", "마늘", "감자", "고구마", "당근", "배추", "양배추", "상추", "양상추",
+            "깻잎", "시금치", "청경채", "브로콜리", "버섯", "토마토", "방울토마토", "멜론", "수박", "참외", "바나나", "딸기", "블루베리", "키위",
+            "오렌지", "레몬", "자몽", "샤인머스캣", "복숭아", "자두", "로켓프레시", "국산", "국내산",
         ]
     )
     # "340ml 24개", "500g 3팩" 처럼 식품·음료 묶음 규격 (아래 non_food_keywords 가 있으면 제외)
@@ -209,6 +214,8 @@ class SourceRule(BaseModel):
     interest_min_recommend: int | None = None
     interest_min_comments: int | None = None
     interest_min_views: int | None = None
+    discount_alone: bool | None = None  # (a) 표시 할인율 단독 통과 허용 (None 이면 전체 설정)
+    min_discount_rate: float | None = None  # (a) 기준 재정의
 
 
 class DealConfig(BaseModel):
@@ -226,8 +233,17 @@ class DealConfig(BaseModel):
     history_days: int = 30
     min_below_average_pct: float = 15
     min_history_samples: int = 3
+    min_history_days: float = 0  # (b) 가격 이력이 최소 며칠에 걸쳐 쌓였을 때만 (하루치 기록으로 '평소 가격'을 단정하지 않게)
+    near_low_pct: float | None = None  # (b) 최근 최저가 대비 이 % 이내(또는 더 쌈)일 때만 — 이력 최저보다 비싸면 특가 아님
     observation_min_gap_hours: float = 6  # 같은 상품 가격 기록은 이 간격으로만 (재판정 때 중복 기록 방지)
     min_price: int = 1000
+    # (c) 추천 수만으로는 통과 못 하게: 가격 근거(평균 대비 support_below_avg_pct% 이상 또는 표시 할인율 (a))가 같이 있어야 함
+    recommend_needs_support: bool = False
+    support_below_avg_pct: float = 5
+    # 추천이 이만큼 몰리면(커뮤니티 검증) 가격 근거 없이도 인정 (0 이면 끔)
+    community_strong_recommend: int = 0
+    # (a) 표시 할인율만으로 통과 허용 여부 (쇼핑몰 정가는 부풀려진 경우가 많아 끄는 걸 권장)
+    discount_alone: bool = True
     exclude_keywords: list[str] = Field(default_factory=list)
     # (c) 커뮤니티 추천 수가 이 값 이상이면 가격 조건과 무관하게 특가로 인정 (0 이면 비활성)
     community_min_recommend: int = 5

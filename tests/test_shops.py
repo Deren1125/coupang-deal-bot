@@ -105,3 +105,10 @@ def test_toss_shopping_domain_and_key() -> None:
     toss = reg.get("toss")
     assert toss is not None and toss.matches_url("https://toss.shopping/t/40594131") and toss.matches_url("https://toss.im/_m/ABC")
     assert ShopRegistry.product_key("toss", "https://toss.shopping/t/40594131") == "toss:40594131"
+
+
+def test_coupang_key_keeps_option():
+    """옵션(용량·개수)마다 가격이 다르니 vendorItemId 까지 키에 넣어 가격 이력을 섞지 않는다."""
+    pk = ShopRegistry.product_key
+    assert pk("coupang", "https://www.coupang.com/vp/products/1?itemId=5&vendorItemId=7") == "coupang:1:7"
+    assert pk("coupang", "https://www.coupang.com/vp/products/1?itemId=5&vendorItemId=8") == "coupang:1:8"

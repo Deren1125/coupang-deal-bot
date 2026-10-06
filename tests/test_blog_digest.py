@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -71,7 +71,7 @@ async def test_blog_digest_follows_deren_format(bot: DealBot) -> None:
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
     head = sent[0]
     assert head.startswith("📝 <b>미리 보기") and "제목 후보" in head and "\n1. " in head and "\n2. " in head and "\n3. " in head
-    assert "9월" in head and "스탠리 텀블러 1.18L" in head and ("이라구요??" in head or "팝니다!" in head)
+    assert f"{now.astimezone(timezone(timedelta(hours=9))).month}월" in head and "스탠리 텀블러 1.18L" in head and ("이라구요??" in head or "팝니다!" in head)
     body = [s for s in sent if "<pre>" in s and "네이버 블로그 본문" in s]
     assert len(body) == 1, sent
     text = body[0]

@@ -60,6 +60,14 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     s = load_settings(ROOT / "config.yaml", load_env=False)
     s.publish.templates_dir = ROOT / "templates"
     s.publish.dry_run = True
+    # 파이프라인 테스트는 '흐름'을 본다 → 판정 기준은 예전의 느슨한 값으로 (엄격한 기준은 test_strict_deal_rules.py 에서)
+    d = s.deal
+    d.min_price, d.community_min_recommend, d.min_history_samples, d.min_history_days = 1000, 5, 3, 0
+    d.near_low_pct, d.recommend_needs_support, d.discount_alone, d.community_strong_recommend = None, False, True, 0
+    d.exclude_keywords = []
+    for rule in d.per_source.values():
+        rule.discount_alone, rule.min_discount_rate = None, None
+    d.market.min_token_match, d.market.require_first_token = 0.6, False
     return s
 
 

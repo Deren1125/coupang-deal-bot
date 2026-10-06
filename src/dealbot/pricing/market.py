@@ -101,6 +101,9 @@ class CoupangMarketReference:
             ratio = match_ratio(product.name, c.name)
             if ratio < self.cfg.min_token_match:
                 continue
+            first = tokens(product.name)[:1]
+            if self.cfg.require_first_token and first and first[0] not in c.name.lower():
+                continue  # 브랜드(첫 낱말)가 다르면 다른 상품
             if best is None or c.price < best.price:
                 best = MarketQuote(price=c.price, source=self.source, title=c.name, url=c.affiliate_url or c.url)
         return best

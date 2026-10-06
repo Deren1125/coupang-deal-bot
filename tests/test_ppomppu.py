@@ -104,7 +104,7 @@ async def test_collect_multi_shop(settings: Settings, db: Database, fixtures_dir
     assert set(by_ext) == {"600001", "600002", "600003", "600004", "600005", "600006"}  # 듣보잡몰은 skip
 
     c = by_ext["600001"]
-    assert c.shop == "coupang" and c.product_id == "coupang:7381234" and c.price == 29900 and c.recommend_count == 10 and c.comment_count == 12
+    assert c.shop == "coupang" and c.product_id == "coupang:7381234:22" and c.price == 29900 and c.recommend_count == 10 and c.comment_count == 12
     assert c.url == "https://www.coupang.com/vp/products/7381234?itemId=11&vendorItemId=22" and c.affiliate_url is None
     assert by_ext["600004"].product_id == "coupang:999"  # 타인 단축링크 → 원본 상품으로
     g = by_ext["600002"]
@@ -122,7 +122,7 @@ async def test_collect_multi_shop(settings: Settings, db: Database, fixtures_dir
     again = await collector.collect()
     assert all("view.php" not in u for u in calls)
     assert {p.external_id for p in again} == {"600001", "600002", "600003", "600005", "600006"}  # 600004 는 추천0·조회100
-    assert {"coupang:7381234", by_ext["600003"].product_id, "toss:ABC123"} <= {p.product_id for p in again}
+    assert {"coupang:7381234:22", by_ext["600003"].product_id, "toss:ABC123"} <= {p.product_id for p in again}
     assert all(p.url for p in again)
 
 

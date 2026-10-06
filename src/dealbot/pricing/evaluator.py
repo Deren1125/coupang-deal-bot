@@ -151,7 +151,14 @@ class DealEvaluator:
 
         discount = product.effective_discount_rate()
         below_avg_pct: float | None = None
-        if stats.count >= cfg.min_history_samples and stats.avg and stats.avg > 0:
+        span_ok = True
+        if cfg.min_history_days and stats.first_seen_at is not None:
+            from dealbot.utils.timeutil import utcnow
+
+            span_ok = (utcnow() - stats.first_seen_at).total_seconds() >= cfg.min_history_days * 86400
+        elif cfg.min_history_days:
+            span_ok = False
+        if stats.count >= cfg.min_history_samples and stats.avg and stats.avg > 0 and span_ok:
             below_avg_pct = round((1 - product.price / stats.avg) * 100, 1)
 
         # ---- (d) 시중가 대조: 결과가 있으면 이것이 결정한다
@@ -187,6 +194,10 @@ class DealEvaluator:
 
         # ---- 보조 규칙
         rule_b = below_avg_pct is not None and below_avg_pct >= cfg.min_below_average_pct
+        if rule_b and cfg.near_low_pct is not None and stats.min:
+            if product.price > stats.min * (1 + cfg.near_low_pct / 100):
+                rule_b = False  # 평균보다는 싸도 최근 최저가보다 비싸면 '지금이 특가'는 아님
+                reasons.append(f"above_{cfg.history_days}d_low+{cfg.near_low_pct:g}%")
         if rule_b:
             reasons.append(f"below_{cfg.history_days}d_avg>={cfg.min_below_average_pct:g}%")
 
@@ -194,12 +205,25 @@ class DealEvaluator:
         if rule_c:
             reasons.append(f"recommend>={self.min_recommend_for(product)}")
 
-        rule_a = discount is not None and discount >= cfg.min_discount_rate
+        rule = self._rule(product)
+        min_disc = cfg.min_discount_rate if rule.min_discount_rate is None else rule.min_discount_rate
+        discount_alone = cfg.discount_alone if rule.discount_alone is None else rule.discount_alone
+        rule_a = discount is not None and discount >= min_disc
         if rule_a and market_available and mcfg.require_for_discount_rule:
             rule_a = False
             reasons.append("discount_unconfirmed")
         if rule_a:
-            reasons.append(f"discount_rate>={cfg.min_discount_rate:g}%")
+            reasons.append(f"discount_rate>={min_disc:g}%")
+
+        # 추천 수·표시 할인율은 '가격 근거'가 아니다 → 설정에 따라 단독 통과를 막는다
+        strong = cfg.community_strong_recommend > 0 and (product.recommend_count or 0) >= cfg.community_strong_recommend
+        support = rule_a or (below_avg_pct is not None and below_avg_pct >= cfg.support_below_avg_pct)
+        pass_c = rule_c and (strong or not cfg.recommend_needs_support or support)
+        if rule_c and not pass_c:
+            reasons.append("recommend_without_price_support")
+        pass_a = rule_a and (discount_alone or rule_b or pass_c)
+        if rule_a and not pass_a:
+            reasons.append("discount_alone_not_trusted")
 
         score = max(
             below_avg_pct if rule_b and below_avg_pct else 0.0,
@@ -207,7 +231,7 @@ class DealEvaluator:
             (discount or 0.0) * 0.5 if rule_a else 0.0,  # 서브 신호라 절반 가중
         )
         return DealVerdict(
-            is_deal=rule_b or rule_c or rule_a,
+            is_deal=rule_b or pass_c or pass_a,
             reasons=reasons,
             discount_rate=discount,
             avg_price=round(stats.avg, 0) if stats.avg else None,
