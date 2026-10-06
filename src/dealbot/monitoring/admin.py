@@ -18,6 +18,7 @@ from telegram.error import BadRequest, RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     ApplicationHandlerStop,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -196,6 +197,9 @@ def heartbeat_due(last_activity: datetime, now: datetime, minutes: int) -> bool:
 
 
 # 텔레그램 "/" 메뉴에 등록할 명령 (이름은 영문 소문자·숫자·밑줄만 가능 — 텔레그램 규칙)
+BLOG_RELAY_COMMANDS = ("blog", "blognow", "blogmode", "blogpause", "blogresume", "blogposts", "blogpublish",
+                       "blogretry", "blogdrafts", "blogstatus", "bloglogin", "kakao")
+
 BOT_COMMANDS: list[tuple[str, str]] = [
     ("status", "지금 상태 (수집기·발행·대기열)"),
     ("queue", "발행 대기열"),
@@ -212,7 +216,18 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("skip", "그 글은 올리지 않기 (/skip 번호)"),
     ("ok", "확인 요청에 답: 정품 확인·정보 글 그대로 올리기 (/ok 번호)"),
     ("copy", "올린 글의 카카오·블로그 복붙 문구 (/copy 번호)"),
-    ("blog", "오늘의 핫딜 블로그 글 만들기 (하루치 정리)"),
+    ("blog", "블로그(demiyum) 글 미리보기 — 올리지 않음"),
+    ("blognow", "블로그: 지금 모인 딜로 모음글 1편"),
+    ("blogmode", "블로그: 임시저장/자동발행 (/blogmode publish)"),
+    ("blogpause", "블로그 자동 작업 멈춤"),
+    ("blogresume", "블로그 자동 작업 재개"),
+    ("blogposts", "블로그 최근 글 목록"),
+    ("blogpublish", "블로그: 저장된 글 발행 (/blogpublish 번호)"),
+    ("blogretry", "블로그: 실패한 글 다시 올리기 (/blogretry 번호)"),
+    ("blogdrafts", "블로그 임시저장함 정리"),
+    ("blogstatus", "블로그 상태"),
+    ("bloglogin", "블로그 네이버 로그인 확인"),
+    ("kakao", "카카오톡 나에게 보내기 연결 (/kakao test)"),
     ("test", "채널에 올라갈 글 양식 미리 보기 (샘플)"),
     ("threadstest", "스레드에 샘플 글 올려 보기 (번호 주면 그 글)"),
     ("pushtest", "휴대폰 푸시(ntfy) 연결 확인"),
@@ -849,6 +864,8 @@ class BotController(Protocol):
 
     async def blog_digest(self, *, preview: bool = False) -> str: ...
 
+    def relay_to_blog(self, update: dict) -> None: ...
+
     async def test_post(self) -> str: ...
 
     async def threads_test(self, queue_id: int | None = None) -> str: ...
@@ -895,8 +912,15 @@ HELP_TEXT = (
     "/ok 번호 — 봇이 '정품 확인 필요 #번호'(오픈마켓인데 공식 판매처 표시가 없음) 나 '정보 글 확인 #번호' 를 보내면, 확인했다는 뜻으로 보냅니다. 정품 확인이면 링크를 만들어 올리고, 정보 글이면 그대로 올립니다. 정보 글은 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
     "/post — 내가 찾은 딜을 직접 올립니다. 아래처럼 보내면 맨 앞 차례로 채널에 올라갑니다 (연습 모드에서는 미리보기만).\n"
     "<code>/post\n[머리글, 없으면 생략]\n상품: 상품명\n가격: 14,890원\nhttps://내가-만든-제휴-링크</code>\n"
-    "/copy 번호 — 올린 글의 카카오 오픈채팅용·네이버 블로그용 복붙 문구를 다시 받습니다. 번호 없으면 마지막 글. 실제 모드에서는 올릴 때마다 자동으로 옵니다.\n"
-    "/blog — 지금까지 모인 오늘의 딜로 블로그 글(복붙용)을 미리 만들어 보냅니다. 매일 밤 21:30 에는 하루치가 자동으로 옵니다.\n"
+    "/copy 번호 — 올린 글의 카카오 오픈채팅용·네이버 블로그용 복붙 문구를 다시 받습니다. 번호 없으면 마지막 글. (자동 전송은 꺼 둠 — 블로그·카톡은 블로그 자동화가 처리)\n"
+    "\n<b>블로그 (demiyum, 자동 발행)</b>\n"
+    "/blog — 블로그 글 미리보기 (모음글·단일 딜 글, 올리지 않음)\n"
+    "/blognow — 지금 모인 딜로 모음글 1편\n"
+    "/blogmode draft|publish — 임시저장만 / 완전 자동 발행\n"
+    "/blogpause · /blogresume — 블로그 자동 작업 멈춤·재개\n"
+    "/blogposts — 블로그 최근 글 · /blogstatus — 블로그 상태 · /bloglogin — 네이버 로그인 확인\n"
+    "/blogpublish 번호 — 저장된 글 발행 · /blogretry 번호 — 실패한 글 다시 올리기 · /blogdrafts — 임시저장함 정리\n"
+    "/kakao — 카카오톡 나에게 보내기 연결 (/kakao test 로 확인)\n\n"
     "/run — 지금 바로 게시판을 확인합니다. /run ppomppu 처럼 하나만도 됩니다.\n"
     "/pause — 잠시 멈춤 (게시판 확인과 올리기 모두). /resume — 다시 시작.\n"
     "\n<b>확인·연결</b>\n"
@@ -1147,6 +1171,17 @@ def register_admin_handlers(
                 f"이 봇은 개인 관리용입니다. (chat id: {update.effective_chat.id})"
             )
 
+    async def relay(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        # 블로그(demiyum) 명령·버튼은 Blog-Auto 가 처리한다 (봇 하나를 두 프로그램이 같이 읽을 수 없어서 넘겨줌)
+        chat = update.effective_chat
+        if chat is None or not (chat.id == chat_id or (isinstance(chat_id, str) and chat.username == chat_id.lstrip("@"))):
+            return  # 관리자 챗 것만
+        controller.relay_to_blog(update.to_dict())
+
+    for cmd in BLOG_RELAY_COMMANDS:
+        app.add_handler(CommandHandler(cmd, relay, filters=only_admin))
+    app.add_handler(CallbackQueryHandler(relay))
+
     for cmd, fn in (
         ("status", cmd_status),
         ("queue", cmd_queue),
@@ -1169,7 +1204,6 @@ def register_admin_handlers(
         ("instacode", cmd_instacode),
         ("instatest", cmd_instatest),
         ("copy", cmd_copy),
-        ("blog", cmd_blog),
         ("ppstats", cmd_ppstats),
         ("hot", cmd_hot),
         ("find", cmd_find),

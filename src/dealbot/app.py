@@ -10,6 +10,7 @@ import hashlib
 import html
 import json
 import logging
+import os
 import re
 import secrets as pysecrets
 import time
@@ -343,7 +344,7 @@ class DealBot:
             log.warning("set_my_commands failed: %s", e)
         if polling and self.settings.secrets.telegram_admin_chat_id and self.application.updater:
             # 재배포 중(봇이 잠깐 꺼진 사이)에 보낸 명령도 켜지면 처리한다. 너무 오래된 것은 admin 쪽 가드가 버림
-            await self.application.updater.start_polling(allowed_updates=[Update.MESSAGE], drop_pending_updates=False)
+            await self.application.updater.start_polling(allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY], drop_pending_updates=False)
 
     async def stop_telegram(self) -> None:
         if self.application is None:
@@ -1813,6 +1814,16 @@ class DealBot:
             return f"✅ 스레드 연결 완료: @{me.get('username')} (토큰 만료 {expires}, 자동 갱신됨)"
         except ThreadsError as e:
             return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
+
+    def relay_to_blog(self, update: dict) -> None:
+        """블로그(demiyum) 명령·버튼 → Blog-Auto 가 읽는 받은편지함 파일에 한 줄 (Blog-Auto 가 처리하고 이 봇으로 답함)."""
+        try:
+            path = self.settings.data_dir / "blogauto_inbox.jsonl"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(update, ensure_ascii=False, default=str) + "\n")
+            os.chmod(path, 0o600)
+        except OSError as e:
+            log.warning("blog relay failed: %s", e)
 
     async def blog_digest(self, *, preview: bool = False) -> str:
         """하루치 발행 딜을 블로그 글 한 편(복붙용)으로 만들어 관리자 챗에 보낸다. preview 면 기준 시각을 옮기지 않는다."""
