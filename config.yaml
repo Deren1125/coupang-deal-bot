@@ -119,7 +119,7 @@ collectors:
   - name: ruliweb_biz
     label: 루리웹 업체 핫딜
     type: ruliweb
-    enabled: true
+    enabled: false        # AWS(Lightsail) 서버 IP 는 루리웹이 접속을 막음 (2026-10 확인)
     interval_minutes: 5
     options:
       board_id: "600004"
@@ -131,7 +131,7 @@ collectors:
   - name: ruliweb_user
     label: 루리웹 유저 핫딜
     type: ruliweb
-    enabled: true
+    enabled: false        # AWS(Lightsail) 서버 IP 는 루리웹이 접속을 막음 (2026-10 확인)
     interval_minutes: 5
     options:
       board_id: "1020"
