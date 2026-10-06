@@ -48,6 +48,12 @@ read -r -s -p "$KEY 값 붙여넣기 (화면에 안 보임) → Enter: " VALUE
 echo
 VALUE="$(printf '%s' "$VALUE" | tr -d '\r\n' | sed 's/^ *//; s/ *$//')"
 [ -n "$VALUE" ] || { echo "⛔ 값이 비어 있어 바꾸지 않았어요"; exit 1; }
+# 키·토큰·ID 는 영문·숫자·기호뿐 — 한글 자판으로 눌린 글자(ㅋ 등)가 섞이면 저장하지 않음
+case "$KEY" in *KEY*|*TOKEN*|*SECRET*|*_ID)
+  if printf '%s' "$VALUE" | LC_ALL=C grep -q '[^ -~]'; then
+    echo "⛔ 값에 한글 등 영문이 아닌 글자가 섞여 있어 저장하지 않았어요 (한/영 키 확인 후 다시 붙여넣기)"; exit 1
+  fi;;
+esac
 KEY="$KEY" VALUE="$VALUE" python3 - "$ENV_FILE" <<'PY'
 import os, sys
 path, key, value = sys.argv[1], os.environ["KEY"], os.environ["VALUE"]
