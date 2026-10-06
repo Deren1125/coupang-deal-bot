@@ -319,8 +319,9 @@ web:
   page_max_items: 30
 
 # API 가 없어 복붙해야 하는 곳: 발행 성공 시 관리자 챗으로 완성된 문구를 보냄
+# 꺼 둠: 블로그(demiyum)는 Blog-Auto 가 자동 발행하고, 오픈채팅용은 블로그 글마다 카톡 '나에게 보내기'로 감
 copy:
-  enabled: true
+  enabled: false
   targets:
     - { key: kakao, name: 카카오 오픈채팅, template: deal_kakao.j2, enabled: true }
     - { key: blog, name: 네이버 블로그, template: deal_blog.j2, enabled: true }
@@ -353,8 +354,9 @@ info_posts:
     timeout_seconds: 60
 
 # 하루치 발행 딜을 모아 밤에 블로그 글 한 편(복붙용)으로 관리자 챗에 보냄. /blog 로 지금까지 모인 것을 미리 만들어 볼 수 있음
+# 꺼 둠: 블로그는 Blog-Auto 가 딜봇이 올린 딜(published_deals.jsonl)로 자동 발행 (/blog 로 미리보기는 그대로 가능)
 blog_digest:
-  enabled: true
+  enabled: false
   time: "21:30"
   template: blog_daily.j2
   max_items: 10                # 글 하나에 넣는 최대 딜 수 (점수 높은 순)

@@ -68,6 +68,9 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     for rule in d.per_source.values():
         rule.discount_alone, rule.min_discount_rate = None, None
     d.market.min_token_match, d.market.require_first_token = 0.6, False
+    # 운영 설정에서는 꺼 둔 복붙 문구·블로그 정리본도 흐름 테스트에서는 켠다
+    s.copy_cfg.enabled = True
+    s.blog_digest.enabled = True
     return s
 
 
