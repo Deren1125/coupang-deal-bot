@@ -195,7 +195,12 @@ class Database:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}
         for col, typ in (("url", "TEXT"), ("title", "TEXT"), ("recommend", "INTEGER"), ("views", "INTEGER"), ("updated_at", "TEXT"), ("comments", "INTEGER")):
             if col not in cols:
-                self._conn.execute(f"ALTER TABLE source_items ADD COLUMN {col} {typ}")
+                try:
+                    self._conn.execute(f"ALTER TABLE source_items ADD COLUMN {col} {typ}")
+                except sqlite3.OperationalError as e:
+                    # 봇 서비스와 check 명령이 동시에 처음 열면 다른 쪽이 먼저 칸을 만들 수 있음
+                    if "duplicate column" not in str(e).lower():
+                        raise
 
     def close(self) -> None:
         with self._lock:
