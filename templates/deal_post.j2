@@ -1,9 +1,11 @@
 {#
   채널 발행 메시지 템플릿 (텔레그램 HTML 서식). 이모지는 글마다 최대 2개 (강조 단계 1개 + 링크 1개).
+  구조: 상품명 → 가격 → 평소 가격 근거(숫자로 확인된 것만) → 배송·조건 → 한 줄 평 → 구매 링크(글자) → 고지
 
-  변수: product.*, shop.*, discount_rate, avg_price/below_avg_pct, market_price/below_market_pct, link, channels.*
+  변수: product.*, pname(꾸밈 걷어낸 상품명), shop.*, discount_rate, ref_price/ref_label/ref_pct(평소 가격 근거),
+        avg_price/below_avg_pct, market_price/below_market_pct, link, channels.*
         tier: 'top'(평소 가격 대비 70%↑ 쌈) | 'must'(50%↑) | 'normal',  tier_pct: 그 근거 비율(%)
-  필터: won (12,900원), pct (35%), local
+  필터: won (12,900원), pct (35%), local, clean
   ⚠️ HTML 특수문자는 자동 이스케이프됩니다. <b> <i> <s> <code> <a href> 만 사용 가능.
   ⚠️ 한 줄을 통째로 차지하는 {% if %} / {% endif %} 줄은 출력에서 사라집니다. 줄 "안"의 조건은 {% endif +%} 로 닫아야 줄바꿈이 유지됩니다.
 #}
@@ -11,9 +13,15 @@
 [{{ product.headline }}]
 
 {% endif %}
-{% if tier == "top" %}🚨 {% elif tier == "must" %}🔥 {% endif %}<b>{{ product.name }}</b>
+{% if tier == "top" %}🚨 {% elif tier == "must" %}🔥 {% endif %}<b>{{ pname }}</b>
 {% if product.has_price %}
-{{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %} · {{ discount_rate | pct }} 할인{% endif +%}
+
+<b>{{ product.price | won }}</b>{% if ref_price %}  <s>{{ ref_price | won }}</s>{% elif product.original_price %}  <s>{{ product.original_price | won }}</s>{% endif +%}
+{% if ref_price %}
+{{ ref_label }} {{ ref_price | won }}보다 {{ ref_pct }}% 저렴
+{% elif discount_rate %}
+판매처 표시 할인 {{ discount_rate | pct }}
+{% endif %}
 {% endif %}
 {% if product.shipping %}
 배송 {{ product.shipping }}
@@ -23,21 +31,14 @@
 {% endif %}
 {% if tier == "top" %}
 
-역대급 가격입니다. 평소의 3분의 1 수준이라 이 가격은 다시 보기 어려워요. 필요했던 분은 바로 담으세요.
+역대급 가격입니다. 평소의 3분의 1 수준이라 다시 보기 어렵습니다.
 {% elif tier == "must" %}
 
 평소 가격의 절반입니다. 필요했던 분은 꼭 담으세요.
-{% elif tier_pct >= 15 %}
-
-평소보다 확실히 싸게 나왔어요.
 {% endif %}
 
-👉 {{ link }}
-{% if channels.kakao_openchat_url %}
-
-카톡 오픈채팅: {{ channels.kakao_openchat_url }}
-{% endif %}
+👉 <a href="{{ link }}">구매하러 가기</a>
 {% if shop.disclosure %}
 
-{{ shop.disclosure }}
+<i>{{ shop.disclosure }}</i>
 {% endif %}

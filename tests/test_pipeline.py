@@ -176,8 +176,8 @@ async def test_submit_manual_post(bot: DealBot) -> None:
     rendered = bot.publisher.render(Deal.from_dict(bot.db.get_queue_item(1).deal.to_dict()))  # type: ignore[union-attr]
     assert rendered.startswith("[토스쇼핑 첫 구매 시 3,000원 추가 할인]")
     assert "<b>애슐리 크리스피 핫도그 4종, 80g, 8개입, 2세트</b>" in rendered
-    assert "\n14,890원\n" in rendered and "https://toss.im/_m/P4Qr1ope" in rendered
-    assert rendered.endswith("이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.")
+    assert "<b>14,890원</b>" in rendered and "https://toss.im/_m/P4Qr1ope" in rendered
+    assert rendered.endswith("<i>이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>")
     # 중복
     assert "이미" in await bot.submit_manual(text)
     assert "⚠️" in await bot.submit_manual("/post 링크 없음")

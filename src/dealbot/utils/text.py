@@ -41,3 +41,21 @@ def truncate(text: str, limit: int, suffix: str = "…") -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - len(suffix))] + suffix
+
+
+_DECOR = re.compile(r"[★☆♥♡◆◇■□●○※♪♬✔✅🔥🚨⭐]+")
+_HYPE = re.compile(r"(초특가|역대급|핫딜|특가|대박|강추|최저가|단독)(?=[\s:!\]\)]|$)")
+_TAG = re.compile(r"^\s*[\[(【](?:무배|무료배송|무료|타임딜|오늘만|한정|광고|카드|쿠폰)[^\])】]*[\])】]\s*")
+
+
+def clean_name(name: str | None) -> str:
+    """게시판 제목 꾸밈 걷어내기: ★·♥ 같은 기호, '초특가'·'역대급' 같은 홍보 낱말, 앞머리의 [무배]·(타임딜) 태그."""
+    if not name:
+        return ""
+    s = _DECOR.sub(" ", name)
+    for _ in range(3):
+        s = _TAG.sub("", s)
+    s = _HYPE.sub("", s)
+    s = re.sub(r"\s*→\s*", "→", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" -·:,")
+    return s or name.strip()

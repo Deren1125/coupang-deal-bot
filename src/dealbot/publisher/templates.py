@@ -11,7 +11,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 
 from dealbot.models import Deal
 from dealbot.shops import Shop
-from dealbot.utils.text import format_won
+from dealbot.utils.text import clean_name, format_won
 
 
 def _pct(value: float | int | None, digits: int = 0) -> str:
@@ -42,6 +42,7 @@ class TemplateRenderer:
         env.filters["won"] = format_won
         env.filters["pct"] = _pct
         env.filters["local"] = self._local
+        env.filters["clean"] = clean_name
         return env
 
     def _local(self, dt: datetime | str | None, fmt: str = "%m/%d %H:%M") -> str:
@@ -91,6 +92,13 @@ class TemplateRenderer:
             "link_mode": shop.link_mode if shop else "raw",
         }
         tier, tier_pct = self.deal_tier(deal)
+        # 평소 가격 근거 (숫자로 확인된 것만): 쿠팡 시중가 대조가 있으면 그것, 없으면 최근 평균
+        v = deal.verdict
+        ref_price, ref_label = None, ""
+        if v.market_price and (v.below_market_pct or 0) >= 10:  # 10% 미만 차이는 굳이 내세우지 않음
+            ref_price, ref_label = v.market_price, "쿠팡 최저가"
+        elif v.avg_price and (v.below_avg_pct or 0) >= 10:
+            ref_price, ref_label = int(v.avg_price), "평소 가격"
         return self.render(
             template,
             autoescape=autoescape,
@@ -107,4 +115,8 @@ class TemplateRenderer:
             market_source=deal.verdict.market_source,
             below_market_pct=deal.verdict.below_market_pct,
             detected_at=deal.detected_at,
+            pname=clean_name(p.name),
+            ref_price=ref_price,
+            ref_label=ref_label,
+            ref_pct=round((1 - p.price / ref_price) * 100) if ref_price and p.price else None,
         )

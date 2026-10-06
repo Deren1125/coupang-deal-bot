@@ -21,12 +21,12 @@ def test_render_deal_post(repo_root: Path) -> None:
     lines = text.splitlines()
     assert lines[0] == "[샘플 · 오늘의 특가]" and lines[1] == ""
     assert "<b>[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L</b>" in text
-    assert "29,900원 (정가 49,900원) · 40% 할인" in text
+    assert "<b>29,900원</b>  <s>42,000원</s>\n평소 가격 42,000원보다 29% 저렴" in text  # 숫자로 확인된 평소 가격
     assert "평균가" not in text and "최저가" not in text  # 평소 가격 대비 몇 % 같은 말은 안 씀
-    assert "평소보다 확실히 싸게 나왔어요." in text  # 29% 싼 보통 딜은 짧게만
-    assert "\n👉 https://link.coupang.com/a/sample\n" in text
+    assert "평소보다 확실히" not in text  # 숫자 없는 상투 문구는 쓰지 않음
+    assert '\n👉 <a href="https://link.coupang.com/a/sample">구매하러 가기</a>\n' in text  # 긴 주소 대신 글자 링크
     assert sum(text.count(e) for e in ("🚨", "🔥", "👉", "💰", "📊", "💬", "✱")) <= 2
-    assert text.endswith("이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.")
+    assert text.endswith("<i>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>")
     assert len(text) < 1024
 
 
@@ -125,5 +125,13 @@ def test_emphasis_tiers(repo_root: Path) -> None:
     plain = r.render_deal(deal(below_avg_pct=6.0, avg_price=13207), "https://l", shop=shop)
     assert plain.startswith("<b>갈아만든배") and "평소" not in plain  # 6% 는 강조 없이 상품·가격·링크만
     kakao = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop, template="deal_kakao.j2", autoescape=False)
-    assert kakao.startswith("🔥 갈아만든배") and "<구매 링크>" in kakao and "평균가" not in kakao and "✱" not in kakao
+    assert kakao.startswith("🔥 갈아만든배") and "👉 " in kakao and "평균가" not in kakao and "✱" not in kakao
     assert sum(kakao.count(e) for e in ("🚨", "🔥", "👉", "💰", "📊", "📲", "✱")) <= 2
+
+
+def test_clean_name_strips_board_decorations() -> None:
+    from dealbot.utils.text import clean_name
+
+    assert clean_name("초특가★슈페리어→골져스 파셜★UP 더블룸") == "슈페리어→골져스 파셜 UP 더블룸"
+    assert clean_name("[무배] ★역대급★ 스파클 생수 2L 24개") == "스파클 생수 2L 24개"
+    assert clean_name("갈아만든배 340ml 24개") == "갈아만든배 340ml 24개"

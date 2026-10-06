@@ -3,15 +3,15 @@
   2,200자 제한, 순수 텍스트. 변수는 deal_post.j2 와 같고 site_url(핫딜 페이지 주소)이 추가로 온다.
 #}
 {% if tier == "top" %}
-{{ product.name }} 평소 가격의 3분의 1 떴어요
+{{ pname }} 평소 가격의 3분의 1 떴어요
 {% elif tier == "must" %}
-{{ product.name }} 반값 떴어요
+{{ pname }} 반값 떴어요
 {% elif product.original_price and product.original_price > product.price %}
-{{ product.name }} {{ product.original_price | won }} → {{ product.price | won }}
+{{ pname }} {{ product.original_price | won }} → {{ product.price | won }}
 {% elif discount_rate %}
-{{ product.name }} {{ discount_rate | pct }} 할인
+{{ pname }} {{ discount_rate | pct }} 할인
 {% else %}
-{{ product.name }}
+{{ pname }}
 {% endif %}
 {% if product.has_price %}
 {{ product.price | won }}{% if product.original_price and product.original_price > product.price %} (정가 {{ product.original_price | won }}){% endif %}{% if product.shipping %} · 배송 {{ product.shipping }}{% endif +%}
