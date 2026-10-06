@@ -115,7 +115,8 @@ class EnrichConfig(BaseModel):
     """상품 페이지(OG/JSON-LD)에서 이미지·가격·별점·리뷰 수를 읽어 빈 칸을 채운다."""
 
     enabled: bool = True
-    shops: list[str] = Field(default_factory=lambda: ["toss", "naver", "oliveyoung", "kurly", "musinsa"])
+    shops: list[str] = Field(default_factory=lambda: ["toss", "naver", "oliveyoung", "kurly", "musinsa"])  # "*" = 모든 몰
+    exclude_shops: list[str] = Field(default_factory=lambda: ["coupang"])  # 페이지를 못 읽는 몰 (쿠팡은 API 사진을 씀)
     max_per_run: int = 10
 
 
@@ -272,6 +273,7 @@ class PublishConfig(BaseModel):
     max_publish_attempts: int = 3
     publisher_tick_seconds: int = 20
     send_photo: bool = True
+    photo_min_side: int = 300  # 사진의 짧은 변이 이보다 작으면(게시판 목록 썸네일 등) 쓰지 않고 카드/상품 페이지 사진으로
     # 이 시간대(현지 시각)에는 채널 글을 무음으로 올린다 (구독자 알림 없이). 예: "00:00-07:00". 비우면 항상 알림
     quiet_hours: str | None = None
     # 내 링크를 기다리는 글이 이 개수 이상 쌓이면, 새 링크 요청은 보내지 않고 건너뛴다 (관리자 챗 폭주 방지). 0 = 제한 없음

@@ -194,7 +194,8 @@ deal:
   # 상품 페이지(OG/JSON-LD)에서 이미지·가격·별점·리뷰 수를 읽어 빈 칸 채우기 (토스 쉐어링크 페이지 등)
   enrich:
     enabled: true
-    shops: [toss, naver, oliveyoung, kurly, musinsa]
+    shops: ["*"]               # 모든 몰의 상품 페이지에서 대표 사진·후기 수를 읽음 (게시판 썸네일 대신)
+    exclude_shops: [coupang]   # 쿠팡은 페이지를 못 읽음 → 파트너스 API 사진 사용
     max_per_run: 10
   # 정품·공식 판매처 확인 (필수 기준). 병행수입·구매대행·리퍼 같은 표시가 제목·게시글·상품 페이지 어디에든 있으면 올리지 않음.
   # 오픈마켓(open_markets) 딜은 제목·게시글·판매자명에 공식 표시(official_markers)가 있어야 자동으로 올리고,

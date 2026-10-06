@@ -42,6 +42,7 @@ from dealbot.links import (
 )
 from dealbot.manual import parse_manual_post
 from dealbot.media.card import CardStyle, DealCard
+from dealbot.media.imagecheck import clean_image, is_board_thumb
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import (
     BOT_COMMANDS,
@@ -1062,7 +1063,7 @@ class DealBot:
 
     def _can_check_page(self, p: Product) -> bool:
         ec = self.settings.deal.enrich
-        return ec.enabled and p.shop in ec.shops
+        return ec.enabled and p.shop not in ec.exclude_shops and ("*" in ec.shops or p.shop in ec.shops)
 
     async def _page_sold_out(self, p: Product) -> bool:
         """상품 페이지의 재고 표시로 품절이 확인되면 True. 모르면 False."""
@@ -1149,11 +1150,11 @@ class DealBot:
 
     def _should_enrich(self, p: Product) -> bool:
         ec = self.settings.deal.enrich
-        if not ec.enabled or p.shop not in ec.shops:
+        if not ec.enabled or p.shop in ec.exclude_shops or ("*" not in ec.shops and p.shop not in ec.shops):
             return False
         if self._posted_recently(p.product_id):
             return False
-        return not p.image_url or p.rating is None or not p.has_price
+        return not p.image_url or is_board_thumb(p.image_url) or p.rating is None or not p.has_price
 
     async def _enrich(self, p: Product) -> list[str]:
         meta = await self.enricher.fetch(p.url)
@@ -1358,7 +1359,8 @@ class DealBot:
             return True
 
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
-        result = await self.publisher.publish(deal, silent=silent)
+        photo = await self.deal_photo(deal) if self.publisher.send_photo and not self.publisher.dry_run else None
+        result = await self.publisher.publish(deal, silent=silent, photo=photo)
         if result.ok:
             self.db.record_post(
                 deal,
@@ -1393,6 +1395,33 @@ class DealBot:
         except Exception as e:  # noqa: BLE001
             log.debug("image fetch failed %s: %s", url, e)
             return None
+
+    async def deal_photo(self, deal: Deal) -> bytes | None:
+        """채널에 올릴 사진 (검사·변환한 JPEG 바이트). 순서: 상품 사진 → 상품 페이지 대표 사진 → 딜 카드.
+        상품 사진이 못 쓰는 것이면 deal.product.image_url 을 비워, 스레드·인스타도 카드 사진을 쓰게 한다."""
+        cc = self.settings.publish
+        p = deal.product
+        photo = clean_image(await self._fetch_image(p.image_url), min_side=cc.photo_min_side) if p.image_url else None
+        if photo is None and p.url and not is_board_thumb(p.url) and p.shop not in self.settings.deal.enrich.exclude_shops:
+            try:
+                meta = await self.enricher.fetch(p.url)
+            except Exception:  # noqa: BLE001
+                meta = None
+            if meta and meta.image and meta.image != p.image_url:
+                photo = clean_image(await self._fetch_image(meta.image), min_side=cc.photo_min_side)
+                if photo is not None:
+                    p.image_url = meta.image
+        if photo is None:
+            if p.image_url:
+                log.info("product image unusable — using card: %s", p.image_url[:80])
+            p.image_url = None
+            if self.card is not None:
+                shop = self.registry.get(p.shop)
+                try:
+                    photo = await asyncio.to_thread(self.card.render, deal, None, shop_name=shop.name if shop else None)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("card render failed: %s", e)
+        return photo
 
     async def make_card(self, deal: Deal) -> str | None:
         """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None."""

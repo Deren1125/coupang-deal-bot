@@ -163,8 +163,10 @@ class PageEnricher:
     def apply(product: Product, meta: PageMeta) -> list[str]:
         """빈 칸만 채운다. 채운 필드 이름 목록을 돌려준다."""
         filled: list[str] = []
-        if not product.image_url and meta.image:
-            product.image_url = meta.image
+        from dealbot.media.imagecheck import is_board_thumb
+
+        if meta.image and (not product.image_url or is_board_thumb(product.image_url)):
+            product.image_url = meta.image  # 게시판 목록 썸네일보다 상품 페이지 대표 사진을 우선
             filled.append("image_url")
         if (not product.name or product.name == product.url) and meta.title:
             product.name = meta.title

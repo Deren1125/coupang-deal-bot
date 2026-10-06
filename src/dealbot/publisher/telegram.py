@@ -77,9 +77,12 @@ class TelegramPublisher:
             log.warning("mark_sold_out edit_message_caption failed: %s", e)
             return False
 
-    async def publish(self, deal: Deal, *, silent: bool = False) -> PublishResult:
-        """silent=True 면 구독자에게 알림 없이 올린다 (야간 무음 시간대)."""
+    async def publish(self, deal: Deal, *, silent: bool = False, photo: bytes | None = None) -> PublishResult:
+        """silent=True 면 구독자에게 알림 없이 올린다 (야간 무음 시간대).
+        photo: 미리 받아 검사한 사진 바이트 (주소를 텔레그램에 넘기면 게시판 사진처럼 막힌 주소는 깨진다)."""
         text = self.render(deal)
+        if photo is not None:
+            return await self.publish_raw(text, photo=photo if self.send_photo else None, silent=silent)
         image = deal.product.image_url
         return await self.publish_raw(text, photo=image if self.send_photo else None, preview_url=image, silent=silent)
 
