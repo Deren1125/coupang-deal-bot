@@ -59,3 +59,42 @@ def clean_name(name: str | None) -> str:
     s = re.sub(r"\s*→\s*", "→", s)
     s = re.sub(r"\s{2,}", " ", s).strip(" -·:,")
     return s or name.strip()
+
+
+_SIZE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l)(?![a-z])", re.I)
+_COUNT = re.compile(r"(?:x\s*)?(\d{1,4})\s*(개입|개|입|팩|봉|캔|병|롤|매|포|구|정|봉지|박스|ea)(?![가-힣a-z])", re.I)
+_TIMES = re.compile(r"[x×*]\s*(\d{1,4})(?![\d.,]*\s*(?:kg|g|ml|l|cm|mm|m)\b)", re.I)
+
+
+def unit_price(name: str | None, price: int | None) -> str | None:
+    """상품명의 용량·개수로 단가를 계산한다. 예) '왕교자 1.05kg x 2봉' 13,900원 → '100g당 662원'.
+    확실히 읽히는 경우만 (용량 1개 + 개수 최대 2개). 애매하면 None."""
+    if not name or not price:
+        return None
+    text = name.replace("×", "x").replace("*", "x")
+    sizes = _SIZE.findall(text)
+    counts = [int(n) for n, _ in _COUNT.findall(text)]
+    unit_word = (_COUNT.findall(text) or [("", "")])[0][1]
+    if not counts:
+        counts = [int(n) for n in _TIMES.findall(text)]
+        unit_word = "개"
+    if len(counts) > 2 or len(sizes) > 1:
+        return None
+    count = 1
+    for c in counts:
+        count *= c
+    if not 1 <= count <= 1000:
+        return None
+    word = {"개입": "개", "입": "개", "ea": "개"}.get(unit_word.lower(), unit_word or "개")
+    each = f"{word}당 {round(price / count):,}원" if count >= 2 else None
+    per = None
+    if sizes:
+        qty = float(sizes[0][0].replace(",", "."))
+        unit = sizes[0][1].lower()
+        base = "g" if unit in ("g", "kg") else "ml"
+        total = qty * (1000 if unit in ("kg", "l") else 1) * count
+        if total > 100:
+            per = f"100{base}당 {round(price / total * 100):,}원"
+    if each and per:
+        return f"{each} ({per})"
+    return each or per

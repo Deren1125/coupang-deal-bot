@@ -255,6 +255,14 @@ class DealConfig(BaseModel):
     accept_coupons_and_events: bool = True
 
 
+class CommentaryConfig(BaseModel):
+    """딜 한줄평 (서버에 로그인된 Claude Code CLI 사용). 없거나 실패하면 한줄평 없이 올림."""
+
+    enabled: bool = True
+    model: str = "sonnet"
+    timeout_seconds: float = 90
+
+
 class PublishConfig(BaseModel):
     enabled: bool = True
     dry_run: bool = False
@@ -281,6 +289,7 @@ class PublishConfig(BaseModel):
     allow_raw_links: bool = True  # 제휴 변환이 불가능한 쇼핑몰은 원본 링크로라도 발행
     templates_dir: Path = Path("templates")
     template: str = "deal_post.j2"
+    commentary: CommentaryConfig = Field(default_factory=CommentaryConfig)
 
 
 class ThreadsConfig(BaseModel):

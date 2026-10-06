@@ -1,44 +1,52 @@
 {#
-  채널 발행 메시지 템플릿 (텔레그램 HTML 서식). 이모지는 글마다 최대 2개 (강조 단계 1개 + 링크 1개).
-  구조: 상품명 → 가격 → 평소 가격 근거(숫자로 확인된 것만) → 배송·조건 → 한 줄 평 → 구매 링크(글자) → 고지
-
-  변수: product.*, pname(꾸밈 걷어낸 상품명), shop.*, discount_rate, ref_price/ref_label/ref_pct(평소 가격 근거),
-        avg_price/below_avg_pct, market_price/below_market_pct, link, channels.*
-        tier: 'top'(평소 가격 대비 70%↑ 쌈) | 'must'(50%↑) | 'normal',  tier_pct: 그 근거 비율(%)
-  필터: won (12,900원), pct (35%), local, clean
-  ⚠️ HTML 특수문자는 자동 이스케이프됩니다. <b> <i> <s> <code> <a href> 만 사용 가능.
+  채널 발행 메시지 (텔레그램 HTML). 벤치마크(핫딜방·상위 블로그) 기반 정보형 양식 — 2026-10 개편.
+  구조: 제휴 고지 → 상품명 → ▶ 가격 근거(판매가·평소가·최저가·단가) → 카테고리·할인분류·배송·평점 → 💬 한줄평 → 👉 링크 → ☑️ 주의
+  숫자는 모두 데이터(facts)에서만. 한줄평은 AI(숫자·효능 금지 규칙)로, 없으면 줄이 빠짐.
+  변수: product.*, pname, shop.*, tier, link, ref_price/ref_label/ref_pct, facts.{labels, ship, cat, unit, low_price, avg_price,
+        history_days, sale_pct, comment}
   ⚠️ 한 줄을 통째로 차지하는 {% if %} / {% endif %} 줄은 출력에서 사라집니다. 줄 "안"의 조건은 {% endif +%} 로 닫아야 줄바꿈이 유지됩니다.
 #}
+{% if shop.disclosure %}
+<i>✱ {{ shop.disclosure }}</i>
+
+{% endif %}
 {% if product.headline %}
 [{{ product.headline }}]
-
 {% endif %}
-{% if tier == "top" %}🚨 {% elif tier == "must" %}🔥 {% endif %}<b>{{ pname }}</b>
+{% if tier == "top" %}🚨{% else %}🔥{% endif %} <b>{{ pname }}</b>
 {% if product.has_price %}
 
-<b>{{ product.price | won }}</b>{% if ref_price %}  <s>{{ ref_price | won }}</s>{% elif product.original_price %}  <s>{{ product.original_price | won }}</s>{% endif +%}
+▶ 판매가 : <b>{{ product.price | won }}</b>{% if facts.sale_pct %} (🔻{{ facts.sale_pct }}%){% endif +%}
 {% if ref_price %}
-{{ ref_label }} {{ ref_price | won }}보다 {{ ref_pct }}% 저렴
-{% elif discount_rate %}
-판매처 표시 할인 {{ discount_rate | pct }}
+▶ {{ ref_label }} : <s>{{ ref_price | won }}</s>
+{% elif product.original_price %}
+▶ 정상가 : <s>{{ product.original_price | won }}</s>
+{% endif %}
+{% if facts.low_price %}
+▶ {{ facts.history_days }}일 최저 : {{ facts.low_price | won }}
+{% endif %}
+{% if facts.unit %}
+▶ 단가 : {{ facts.unit }}
 {% endif %}
 {% endif %}
-{% if product.shipping %}
-배송 {{ product.shipping }}
+
+{% if facts.cat %}
+📂 카테고리 : {{ facts.cat }}
+{% endif %}
+{% if facts.labels %}
+🏷 할인분류 : {{ facts.labels | join(" · ") }}
+{% endif %}
+{% if facts.ship %}
+🚚 배송 : {{ facts.ship }}
 {% endif %}
 {% if product.rating or product.review_count %}
-{% if product.rating %}별점 {{ product.rating }}{% endif %}{% if product.rating and product.review_count %} · {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}건{% endif +%}
+⭐ 평점 : {% if product.rating %}{{ product.rating }}점{% endif %}{% if product.rating and product.review_count %} · {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}개{% endif +%}
 {% endif %}
-{% if tier == "top" %}
+{% if facts.comment %}
 
-역대급 가격입니다. 평소의 3분의 1 수준이라 다시 보기 어렵습니다.
-{% elif tier == "must" %}
-
-평소 가격의 절반입니다. 필요했던 분은 꼭 담으세요.
+💬 한줄평 : {{ facts.comment }}
 {% endif %}
 
 👉 <a href="{{ link }}">구매하러 가기</a>
-{% if shop.disclosure %}
 
-<i>{{ shop.disclosure }}</i>
-{% endif %}
+☑️ 가격·재고는 수시로 바뀝니다. 링크 가격이 다르면 마감된 딜이에요.

@@ -22,7 +22,7 @@ def test_post_footer_only_when_kakao_set(repo_root: Path) -> None:
     assert "카톡 오픈채팅" not in plain
     with_kakao = TemplateRenderer(repo_root / "templates", channels={"kakao_openchat_url": KAKAO}).render_deal(sample_deal(), "https://l", shop=shop)
     assert "카톡 오픈채팅" not in with_kakao  # 오픈채팅 안내는 글마다 넣지 않음 (고정 공지로)
-    assert with_kakao.index("https://l") < with_kakao.index("쿠팡 파트너스")
+    assert with_kakao.index("쿠팡 파트너스") < with_kakao.index("https://l")  # 제휴 고지는 맨 위
 
 
 def test_kakao_copy_points_to_telegram(repo_root: Path) -> None:

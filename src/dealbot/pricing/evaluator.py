@@ -89,6 +89,12 @@ class DealEvaluator:
         market_available: bool = False,
     ) -> DealVerdict:
         verdict = self._evaluate(product, stats, quote, market_available=market_available)
+        # 글에 쓰는 가격 근거: 기록된 기간의 최저가와 기록 일수
+        verdict.low_price = stats.min
+        if stats.first_seen_at is not None:
+            from dealbot.utils.timeutil import utcnow
+
+            verdict.history_days = round((utcnow() - stats.first_seen_at).total_seconds() / 86400, 1)
         fc = self.cfg.food
         if verdict.is_deal and self.is_food(product):
             # 식품은 평소 가격 대비 확실히 쌀 때만 (표시 할인율·추천 수만으로는 안 됨)

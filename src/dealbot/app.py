@@ -31,6 +31,7 @@ from dealbot.collectors import (
     CollectorUnavailable,
     build_collector,
 )
+from dealbot.commentary import Commentator
 from dealbot.config import Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dedupe import find_duplicate
@@ -94,6 +95,8 @@ class DealBot:
         self.settings = settings
         self.state = BotState(dry_run=settings.publish.dry_run)
         self.db = Database(settings.db_path)
+        cc = settings.publish.commentary
+        self.commentator = Commentator(enabled=cc.enabled, model=cc.model, timeout=cc.timeout_seconds, db=self.db)
         self.registry: ShopRegistry = settings.shop_registry()
         self.http = httpx.AsyncClient(
             timeout=settings.http.timeout_seconds,
@@ -1362,6 +1365,8 @@ class DealBot:
             log.info("queue #%d sold out before publish — skipped", item.id)
             return True
 
+        if "comment" not in deal.product.extra:
+            deal.product.extra["comment"] = await self.commentator.comment(deal)
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
         photo = await self.deal_photo(deal) if self.publisher.send_photo and not self.publisher.dry_run else None
         result = await self.publisher.publish(deal, silent=silent, photo=photo)
@@ -1379,6 +1384,7 @@ class DealBot:
             if result.dry_run:
                 # 연습 모드: 채널에 올라갔을 글 전체를 관리자 챗으로 보여준다. 스레드/복붙 문구는 실제 발행 때만
                 await self.notifier.notify_published(deal, result, preview=self.publisher.render(deal))
+                self.export_published(deal, None, preview=True)  # 블로그 미리보기(/hotdeal)용 — 실제 블로그 발행엔 안 쓰임
             else:
                 await self.notifier.notify_published(deal, result)
                 self.export_published(deal, photo)
@@ -1387,7 +1393,7 @@ class DealBot:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True
 
-    def export_published(self, deal: Deal, photo: bytes | None = None) -> None:
+    def export_published(self, deal: Deal, photo: bytes | None = None, *, preview: bool = False) -> None:
         """채널에 실제로 올린 딜을 published_deals.jsonl 에 한 줄씩 남긴다 (블로그 자동 발행·카카오 전송이 읽어 감).
         사진은 검사를 통과한 JPEG 를 media/export 에 저장해 경로를 같이 적는다."""
         try:
@@ -1418,8 +1424,10 @@ class DealBot:
                 "disclosure": shop.disclosure if shop else "", "link": link, "product_url": p.url,
                 "image_url": p.image_url, "photo_file": photo_file,
                 "kakao_text": ctx.render_deal(deal, link, shop=shop, template="deal_kakao.j2", autoescape=False),
+                **{k: v for k, v in ctx.deal_facts(deal).items() if k != "ref_price"},
             }
-            with (self.settings.data_dir / "published_deals.jsonl").open("a", encoding="utf-8") as f:
+            name = "preview_deals.jsonl" if preview else "published_deals.jsonl"
+            with (self.settings.data_dir / name).open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         except Exception as e:  # noqa: BLE001 — 내보내기 실패가 발행을 막지 않게
             log.warning("export_published failed: %s", e)

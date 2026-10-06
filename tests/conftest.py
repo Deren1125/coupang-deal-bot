@@ -46,6 +46,14 @@ def _no_page_fetch(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.fixture(autouse=True)
+def _no_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    """테스트에서는 한줄평용 claude CLI 를 부르지 않는다."""
+    import dealbot.commentary as commentary
+
+    monkeypatch.setattr(commentary, "find_claude", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_food_rule(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """테스트 상품 이름이 핫도그·소스·삼겹살처럼 식품이 많아, 식품 기준(평소 가격 대비 50%)은 기본으로 끈다.
     식품 기준을 보는 테스트는 @pytest.mark.food_rule 로 켠다."""

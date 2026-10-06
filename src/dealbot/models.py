@@ -74,6 +74,8 @@ class DealVerdict:
     market_price: int | None = None  # 시중가(쿠팡 검색) 대조 결과
     market_source: str | None = None
     below_market_pct: float | None = None
+    low_price: int | None = None  # 기록된 기간(최대 history_days 일)의 최저가
+    history_days: float | None = None  # 가격 기록이 쌓인 일수
 
 
 @dataclass(slots=True)
@@ -98,7 +100,7 @@ class Deal:
         pdata = {k: v for k, v in pdata.items() if k in known}
         return cls(
             product=Product(**pdata),
-            verdict=DealVerdict(**d["verdict"]),
+            verdict=DealVerdict(**{k: v for k, v in d["verdict"].items() if k in DealVerdict.__dataclass_fields__}),
             affiliate_url=d.get("affiliate_url"),
             detected_at=datetime.fromisoformat(d["detected_at"]) if d.get("detected_at") else None,
         )

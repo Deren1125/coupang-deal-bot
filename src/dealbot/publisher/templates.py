@@ -11,7 +11,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 
 from dealbot.models import Deal
 from dealbot.shops import Shop
-from dealbot.utils.text import clean_name, format_won
+from dealbot.utils.text import clean_name, format_won, unit_price
 
 
 def _pct(value: float | int | None, digits: int = 0) -> str:
@@ -68,6 +68,56 @@ class TemplateRenderer:
             return "must", pct
         return "normal", pct
 
+    def deal_facts(self, deal: Deal) -> dict[str, Any]:
+        """글에 쓰는 사실들 (모두 데이터에서 계산한 것만). 텔레그램·블로그 내보내기가 같이 쓴다."""
+        p, v = deal.product, deal.verdict
+        days = int(min(v.history_days or 0, 30))
+        labels: list[str] = []
+        tier, _ = self.deal_tier(deal)
+        if tier == "top":
+            labels.append("역대급")
+        elif tier == "must":
+            labels.append("강력 추천")
+        if v.low_price and p.price and days >= 3:
+            if p.price < v.low_price:
+                labels.append(f"{days}일 최저가 갱신")
+            elif p.price == v.low_price:
+                labels.append(f"{days}일 최저가")
+        src = (p.source or "").lower()
+        if "goldbox" in src:
+            labels.append("골드박스 특가")  # 골드박스 목록 순서는 판매 순위가 아니라 순위는 쓰지 않음
+        elif "category_best" in src or "best" in src:
+            cat = (p.category or "카테고리").split(">")[-1].strip()
+            labels.append(f"{cat} 베스트 {p.rank}위" if p.rank else f"{cat} 베스트")
+        ship = []
+        if p.is_rocket:
+            ship.append("로켓배송")
+        if p.is_free_shipping:
+            ship.append("무료배송")
+        if not ship and p.shipping:
+            ship.append(str(p.shipping))
+        ref_price = None
+        if v.market_price and (v.below_market_pct or 0) >= 10:
+            ref_price = v.market_price
+        elif v.avg_price and (v.below_avg_pct or 0) >= 10:
+            ref_price = int(v.avg_price)
+        pct = round((1 - p.price / ref_price) * 100) if ref_price and p.price else None
+        if pct is None and v.discount_rate:
+            pct = round(v.discount_rate)
+        return {
+            "labels": labels,
+            "ship": " · ".join(ship),
+            "cat": (p.category or "").split(">")[-1].strip(),
+            "unit": unit_price(clean_name(p.name), p.price),
+            "low_price": v.low_price if days >= 3 else None,
+            "avg_price": int(v.avg_price) if v.avg_price and days >= 3 else None,
+            "history_days": days,
+            "sale_pct": pct,
+            "comment": (p.extra or {}).get("comment"),
+            "rank": p.rank,
+            "ref_price": ref_price,
+        }
+
     def render(self, name: str, *, autoescape: bool = True, **ctx: Any) -> str:
         env = self.env if autoescape else self.env_plain
         template = env.get_template(name)
@@ -119,4 +169,5 @@ class TemplateRenderer:
             ref_price=ref_price,
             ref_label=ref_label,
             ref_pct=round((1 - p.price / ref_price) * 100) if ref_price and p.price else None,
+            facts=self.deal_facts(deal),
         )
