@@ -405,6 +405,8 @@ class DealBot:
         if not url.startswith("http"):
             return "링크는 http:// 또는 https:// 로 시작해야 합니다."
         self.db.set_queue_link(queue_id, url.strip())
+        # 상품 1개에 내 링크 1개 (네이버 쇼핑 커넥트·토스 쉐어링크는 만료 없음) → 같은 상품이 또 나오면 다시 묻지 않고 재사용
+        self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
         self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
         return f"🔗 #{queue_id} 번에 링크를 붙였습니다. 올릴 차례가 되는 대로 채널에 올라갑니다."
 
@@ -1216,6 +1218,10 @@ class DealBot:
             deal.affiliate_url = await self.links.to_affiliate(deal.product)
             return "ok", None
         except ManualLinkRequired as e:
+            saved = self.db.kv_get(f"mylink:{deal.product.product_id}")
+            if saved:  # 전에 관리자가 만들어 준 같은 상품의 내 링크
+                deal.affiliate_url = saved
+                return "ok", None
             if self.settings.publish.dry_run:
                 # 연습 모드(DEALBOT_DRY_RUN)에서는 링크 요청으로 귀찮게 하지 않고 원본 링크로 기록만
                 deal.affiliate_url = deal.product.url

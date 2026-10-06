@@ -78,8 +78,9 @@ DEFAULT_SHOPS: list[Shop] = [
         domains=["naver.com", "naver.me"],
         link_mode="manual",
         provider="naver_connect",  # browser.enabled + link_mode: api 로 바꾸면 브라우저 자동화 시도
-        disclosure=_d("네이버 쇼핑커넥트"),
-        manual_hint="네이버 쇼핑커넥트(네이버에서 '쇼핑커넥트' 검색 → 가입·승인 후) 에서 상품 URL 로 링크 생성",
+        # 네이버 공식 문구 (바꿔 쓰면 안 됨, 글 맨 위)
+        disclosure="이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.",
+        manual_hint="brandconnect.naver.com → 내 크리에이터 스페이스 → 쇼핑 커넥트 → 상품 찾기에서 상품명 검색 → [링크 복사] (한 번 만든 링크는 봇이 기억해 다음에 다시 씀)",
         manual_fallback=True,
     ),
     # ---- 앱에서만 링크를 만들 수 있고(API 없음) 특가 빈도가 낮은 몰: 기본 꺼짐. config.yaml 에서 enabled: true 로 켤 수 있음
