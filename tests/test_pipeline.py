@@ -178,7 +178,7 @@ async def test_submit_manual_post(bot: DealBot) -> None:
     assert "\n[토스쇼핑 첫 구매 시 3,000원 추가 할인]\n" in rendered
     assert "<b>애슐리 크리스피 핫도그 4종, 80g, 8개입, 2세트</b>" in rendered
     assert "<b>14,890원</b>" in rendered and "https://toss.im/_m/P4Qr1ope" in rendered
-    assert "▶ 단가 : 세트당 7,445원" in rendered or "▶ 단가 :" in rendered
+    assert "⚖️ 단가 : 세트당 7,445원" in rendered or "⚖️ 단가 :" in rendered
     # 중복
     assert "이미" in await bot.submit_manual(text)
     assert "⚠️" in await bot.submit_manual("/post 링크 없음")

@@ -241,6 +241,22 @@ BOT_COMMANDS: list[tuple[str, str]] = [
 ]
 
 
+def naver_search_help(name: str, url: str, shop_key: str) -> str:
+    """네이버 쇼핑 커넥트는 상품 주소가 아니라 상품명·스토어명으로 찾는다 → 눌러서 복사할 검색어를 같이 준다."""
+    if shop_key != "naver":
+        return ""
+    import re
+
+    from dealbot.utils.text import clean_name
+
+    store = re.search(r"(?:smartstore|brand)\.naver\.com/([^/?#]+)", url or "")
+    query = truncate(clean_name(name), 40)
+    return ("\n🔎 쇼핑 커넥트 '상품 찾기' 검색어 (눌러서 복사)\n"
+            f"<code>{html.escape(query)}</code>\n"
+            + (f"스토어: <code>{html.escape(store.group(1))}</code>\n" if store else "")
+            + "바로가기: https://brandconnect.naver.com/\n")
+
+
 def is_stale_message(sent_at: datetime | None, now: datetime | None = None, max_age: timedelta = STALE_COMMAND_MAX_AGE) -> bool:
     if sent_at is None:
         return False
@@ -405,6 +421,7 @@ class AdminNotifier:
             f"원본 주소: {html.escape(p.url)}\n"
             + (f"글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
             + (f"{html.escape(auth_note)}\n" if auth_note else "")
+            + naver_search_help(p.name, p.url, shop.key)
             + f"\n👉 {html.escape(hint)}\n"
             f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
             f"안 올리려면 <code>/skip {item.id}</code>"

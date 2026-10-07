@@ -22,10 +22,10 @@ def test_render_deal_post(repo_root: Path) -> None:
     assert lines[0] == "<i>✱ 이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>"  # 고지는 맨 위
     assert "[샘플 · 오늘의 특가]" in lines
     assert "<b>[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L</b>" in text
-    assert "▶ 판매가 : <b>29,900원</b> (🔻29%)\n▶ 평소 가격 : <s>42,000원</s>" in text  # 숫자로 확인된 평소 가격
+    assert "💸 판매가 : <b>29,900원</b> (🔻29%)\n📌 평소 가격 : <s>42,000원</s>" in text  # 숫자로 확인된 평소 가격
     assert "평소보다 확실히" not in text  # 숫자 없는 상투 문구는 쓰지 않음
-    assert '\n👉 <a href="https://link.coupang.com/a/sample">구매하러 가기</a>\n' in text  # 긴 주소 대신 글자 링크
-    assert "☑️ 가격·재고는 수시로" in text
+    assert '\n🛒 <a href="https://link.coupang.com/a/sample">구매하러 가기</a>\n' in text  # 긴 주소 대신 글자 링크
+    assert "⏰ 가격은 금방 바뀌어요" in text
     assert len(text) < 1024  # 사진 캡션 한도
 
 
@@ -118,13 +118,13 @@ def test_emphasis_tiers(repo_root: Path) -> None:
         return Deal(product=p, verdict=DealVerdict(is_deal=True, **v), affiliate_url="https://l")
 
     must = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop)
-    assert "🔥 <b>갈아만든배" in must and "🏷 할인분류 : 강력 추천" in must and "▶ 단가 : 개당 515원 (100ml당 151원)" in must
+    assert "🔥 <b>갈아만든배" in must and "🏷 할인분류 : 강력 추천" in must and "⚖️ 단가 : 개당 515원 (100ml당 151원)" in must
     top = r.render_deal(deal(below_market_pct=72.0, market_price=45000), "https://l", shop=shop)
     assert "🚨 <b>갈아만든배" in top and "역대급" in top and "(🔻73%)" in top
     plain = r.render_deal(deal(below_avg_pct=6.0, avg_price=13207), "https://l", shop=shop)
     assert "🔥 <b>갈아만든배" in plain and "할인분류" not in plain and "평소 가격" not in plain  # 6% 는 근거로 안 씀
     low = r.render_deal(deal(below_avg_pct=20.0, avg_price=15450, low_price=13000, history_days=12.4), "https://l", shop=shop)
-    assert "▶ 12일 최저 : 13,000원" in low and "12일 최저가 갱신" in low
+    assert "📉 12일 최저 : 13,000원" in low and "12일 최저가 갱신" in low
     kakao = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop, template="deal_kakao.j2", autoescape=False)
     assert kakao.startswith("🔥 갈아만든배") and "👉 " in kakao and "평균가" not in kakao and "✱" not in kakao
 
@@ -152,3 +152,11 @@ def test_clean_name_strips_board_decorations() -> None:
     assert clean_name("초특가★슈페리어→골져스 파셜★UP 더블룸") == "슈페리어→골져스 파셜 UP 더블룸"
     assert clean_name("[무배] ★역대급★ 스파클 생수 2L 24개") == "스파클 생수 2L 24개"
     assert clean_name("갈아만든배 340ml 24개") == "갈아만든배 340ml 24개"
+
+
+def test_naver_search_help() -> None:
+    from dealbot.monitoring.admin import naver_search_help
+
+    t = naver_search_help("[무배] 순살족발 300g + 증정", "https://m.smartstore.naver.com/mggtable/products/1", "naver")
+    assert "<code>순살족발 300g + 증정</code>" in t and "<code>mggtable</code>" in t
+    assert naver_search_help("x", "https://toss.im/a", "toss") == ""

@@ -16,22 +16,22 @@
 {% if tier == "top" %}🚨{% else %}🔥{% endif %} <b>{{ pname }}</b>
 {% if product.has_price %}
 
-▶ 판매가 : <b>{{ product.price | won }}</b>{% if facts.sale_pct %} (🔻{{ facts.sale_pct }}%){% endif +%}
+💸 판매가 : <b>{{ product.price | won }}</b>{% if facts.sale_pct %} (🔻{{ facts.sale_pct }}%){% endif +%}
 {% if ref_price %}
-▶ {{ ref_label }} : <s>{{ ref_price | won }}</s>
+📌 {{ ref_label }} : <s>{{ ref_price | won }}</s>
 {% elif product.original_price %}
-▶ 정상가 : <s>{{ product.original_price | won }}</s>
+📌 정상가 : <s>{{ product.original_price | won }}</s>
 {% endif %}
 {% if facts.low_price %}
-▶ {{ facts.history_days }}일 최저 : {{ facts.low_price | won }}
+📉 {{ facts.history_days }}일 최저 : {{ facts.low_price | won }}
 {% endif %}
 {% if facts.unit %}
-▶ 단가 : {{ facts.unit }}
+⚖️ 단가 : {{ facts.unit }}
 {% endif %}
 {% endif %}
 
 {% if facts.cat %}
-📂 카테고리 : {{ facts.cat }}
+🗂 카테고리 : {{ facts.cat }}
 {% endif %}
 {% if facts.labels %}
 🏷 할인분류 : {{ facts.labels | join(" · ") }}
@@ -44,9 +44,9 @@
 {% endif %}
 {% if facts.comment %}
 
-💬 한줄평 : {{ facts.comment }}
+💬 {{ facts.comment }}
 {% endif %}
 
-👉 <a href="{{ link }}">구매하러 가기</a>
+🛒 <a href="{{ link }}">구매하러 가기</a>
 
-☑️ 가격·재고는 수시로 바뀝니다. 링크 가격이 다르면 마감된 딜이에요.
+⏰ 가격은 금방 바뀌어요! 링크 들어갔는데 가격이 다르면 이미 끝난 딜이에요 🥲
