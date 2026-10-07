@@ -1,6 +1,6 @@
 {#
   스레드 첫 글 — 반말 음슴체로 고정. 상황/공감 훅 → 가격 반전 → 숫자 근거 → 마무리 → 제휴 고지(본문 안) → 링크는 댓글.
-  지어낸 경험 금지. 숫자는 데이터에서만. 500자 제한, 순수 텍스트.
+  해요체 한줄평은 말투가 섞여서 넣지 않음. 지어낸 경험 금지. 숫자는 데이터에서만. 500자 제한, 순수 텍스트.
 #}
 {{ facts.thread_hook }}
 
@@ -11,10 +11,6 @@
 {% endif %}
 {% if facts.evidence_casual %}
 {{ facts.evidence_casual }}
-{% endif %}
-{% if facts.comment %}
-
-{{ facts.comment }}
 {% endif %}
 
 {{ facts.thread_close }}
