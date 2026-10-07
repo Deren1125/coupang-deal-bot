@@ -39,6 +39,6 @@ def test_threads_reply_link_fallback(repo_root: Path) -> None:
     kw = dict(shop=shop, template="deal_threads_reply.j2", autoescape=False)
     assert "실시간 딜은 프로필 링크 👆" in TemplateRenderer(repo_root / "templates").render_deal(sample_deal(), "https://l", **kw)
     only_kakao = TemplateRenderer(repo_root / "templates", channels={"kakao_openchat_url": KAKAO}).render_deal(sample_deal(), "https://l", **kw)
-    assert f"실시간 딜 👉 {KAKAO}" in only_kakao
+    assert f"실시간으로 올라오는 곳 👉 {KAKAO}" in only_kakao
     both = TemplateRenderer(repo_root / "templates", channels={"kakao_openchat_url": KAKAO, "telegram_url": TG}).render_deal(sample_deal(), "https://l", **kw)
     assert TG in both and KAKAO not in both

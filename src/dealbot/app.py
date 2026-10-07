@@ -487,6 +487,16 @@ class DealBot:
             + "\n올릴 수 있는 차례가 되는 대로 바로 채널에 올라갑니다."
         )
 
+    async def add_commentary(self, deal: Deal) -> None:
+        """한줄평 + 스레드 첫 줄·판단·짧은 이름 (서버 Claude 로그인). 데이터로 확인된 정보만 넘긴다."""
+        f = self.publisher.renderer.deal_facts(deal)
+        facts = " / ".join(str(x) for x in (f.get("evidence"), f.get("unit"), f.get("ship"), ", ".join(f.get("labels") or [])) if x)
+        wrote = await self.commentator.write(deal, facts)
+        deal.product.extra["comment"] = wrote.get("comment")
+        for k in ("thread_hook", "thread_take", "short_name"):
+            if wrote.get(k):
+                deal.product.extra[k] = wrote[k]
+
     async def test_post(self) -> str:
         """샘플 딜을 관리자 챗에 보내 양식 확인."""
         from dealbot.cli import sample_deal
@@ -494,6 +504,7 @@ class DealBot:
         if self.bot is None or not self.notifier.enabled:
             return "텔레그램 봇 토큰과 관리자 챗 ID 가 있어야 합니다."
         deal = sample_deal()
+        await self.add_commentary(deal)  # 샘플에도 실제처럼 한줄평·스레드 문구를 붙여 보여 줌
         original = (self.publisher.channel_id, self.publisher.dry_run)
         try:
             self.publisher.channel_id = self.notifier.chat_id
@@ -1373,10 +1384,7 @@ class DealBot:
             return True
 
         if "comment" not in deal.product.extra:
-            f = self.publisher.renderer.deal_facts(deal)
-            facts = " / ".join(str(x) for x in (f.get("evidence"), f.get("unit"), f.get("ship"),
-                                                 ", ".join(f.get("labels") or [])) if x)
-            deal.product.extra["comment"] = await self.commentator.comment(deal, facts)
+            await self.add_commentary(deal)
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
         photo = await self.deal_photo(deal) if self.publisher.send_photo and not self.publisher.dry_run else None
         result = await self.publisher.publish(deal, silent=silent, photo=photo)

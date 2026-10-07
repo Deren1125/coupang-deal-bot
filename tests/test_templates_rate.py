@@ -169,3 +169,22 @@ def test_unit_price_bottles_and_unknown_units() -> None:
 
     assert unit_price("트레비 플레인 350ml 20펫", 8900) == "병당 445원 (100ml당 127원)"
     assert unit_price("탄산수 350ml 20입수", 8900) is None  # 모르는 단위면 계산 안 함
+
+
+def test_threads_uses_ai_lines_and_category_hooks(repo_root: Path) -> None:
+    from dealbot.commentary import check_hook, check_short_name
+    from dealbot.shops import ShopRegistry
+
+    r = TemplateRenderer(repo_root / "templates")
+    shop = ShopRegistry().get("coupang")
+    p = Product(source="s", product_id="coupang:7", shop="coupang", name="크리넥스 3겹 데코앤소프트 30m 30롤", price=14900,
+                url="u", category="생활용품>화장지",
+                extra={"thread_take": "롤당 497원 꼴이면 휴지는 이때 사는 거임", "short_name": "크리넥스 30롤"})
+    d = Deal(product=p, verdict=DealVerdict(is_deal=True, avg_price=21800, below_avg_pct=31.7), affiliate_url="https://l")
+    t = r.render_deal(d, "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
+    lines = t.split("\n")
+    assert lines[0] in r.THREAD_HOOKS_BY_CAT[1][1]  # 생활용품 → 휴지·생필품 첫 줄
+    assert "근데 크리넥스 30롤 14,900원임" in t and "평소보다 32% 쌈" in t and "롤당 497원 꼴이면" in t
+    assert check_hook("휴지 떨어진 거 꼭 샤워 끝나고 알게 됨") and check_hook("어제 3개 샀음") is None
+    assert check_short_name("크리넥스 30롤", "크리넥스 3겹 데코앤소프트 30m 30롤") == "크리넥스 30롤"
+    assert check_short_name("크리넥스 프리미엄", "크리넥스 3겹 30롤") is None  # 상품명에 없는 말

@@ -1,16 +1,12 @@
 {#
-  스레드 답글 — 링크 + 실시간 채널 안내. 고지는 본문(첫 글)에 이미 있고, 답글에도 한 번 더. 500자 제한, 순수 텍스트.
+  스레드 답글 — 링크 + 실시간 채널 안내. 제휴 고지는 본문(첫 글)에 있음. 500자 제한, 순수 텍스트.
 #}
-{{ pname }}{% if product.has_price %} {{ product.price | won }}{% endif +%}
-{{ link }}
-{% if shop.disclosure %}
-({{ shop.disclosure }})
-{% endif %}
+👉 {{ link }}
 
 {% if channels.telegram_url %}
-품절되기 전에 올라오는 실시간 딜 👉 {{ channels.telegram_url }}
+이런 거 실시간으로 올라오는 곳 👉 {{ channels.telegram_url }}
 {% elif channels.kakao_openchat_url %}
-품절되기 전에 올라오는 실시간 딜 👉 {{ channels.kakao_openchat_url }}
+이런 거 실시간으로 올라오는 곳 👉 {{ channels.kakao_openchat_url }}
 {% else %}
 실시간 딜은 프로필 링크 👆
 {% endif %}

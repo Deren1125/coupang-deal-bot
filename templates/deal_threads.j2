@@ -1,19 +1,26 @@
 {#
-  스레드 첫 글 — 반말 음슴체로 고정. 상황/공감 훅 → 가격 반전 → 숫자 근거 → 마무리 → 제휴 고지(본문 안) → 링크는 댓글.
-  해요체 한줄평은 말투가 섞여서 넣지 않음. 지어낸 경험 금지. 숫자는 데이터에서만. 500자 제한, 순수 텍스트.
+  스레드 첫 글 — 반말 음슴체로 고정 (2026-10 스레드 제휴글 작법 조사 기반).
+  상황·공감 첫 줄(상품명 X) → "근데 {짧은 이름} {가격}" 반전 → 숫자 근거 → 판단 한 줄 → (가끔) 질문 → 제휴 고지(본문 안) → 링크는 댓글.
+  첫 줄·판단·짧은 이름은 AI(규칙 검사 통과한 것만), 없으면 분류별 문구. 숫자는 데이터에서만. 500자 제한, 순수 텍스트.
 #}
 {{ facts.thread_hook }}
 
 {% if product.has_price %}
-{{ pname }} {{ product.price | won }}임
+근데 {{ facts.short_name }} {{ product.price | won }}임
 {% else %}
-{{ pname }}
+{{ facts.short_name }}
 {% endif %}
 {% if facts.evidence_casual %}
 {{ facts.evidence_casual }}
 {% endif %}
+{% if facts.thread_take %}
+
+{{ facts.thread_take }}
+{% endif %}
+{% if facts.thread_close %}
 
 {{ facts.thread_close }}
+{% endif %}
 {% if shop.disclosure %}
 
 {{ shop.disclosure }}

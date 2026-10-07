@@ -233,7 +233,8 @@ def test_threads_template_within_limit(repo_root: Path) -> None:
     # 첫 글: 반말 훅 + 가격 + 근거 + 제휴 고지(본문 안) + "링크는 댓글에". 링크는 답글에
     assert "29,900원임" in hook and "링크는 댓글에" in hook and "https://" not in hook
     assert "이 포스팅은 쿠팡 파트너스 활동의 일환으로" in hook
-    assert reply.startswith("[샘플] 스탠리 텀블러") and "https://link.coupang.com/a/x" in reply
+    assert reply.startswith("👉 https://link.coupang.com/a/x")
+    assert "근데 " in hook and hook.split("\n")[0] and "[샘플]" not in hook.split("\n")[0]  # 첫 줄은 상품명 없이
 
 
 async def test_publisher_posts_hook_then_reply(db: Database, repo_root: Path) -> None:

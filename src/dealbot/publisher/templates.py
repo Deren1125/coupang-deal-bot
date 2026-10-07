@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
-from dealbot.models import Deal
+from dealbot.models import Deal, Product
 from dealbot.shops import Shop
 from dealbot.utils.text import clean_name, format_won, unit_price
 
@@ -119,16 +119,35 @@ class TemplateRenderer:
             **self.evidence(deal, days=days, ref_price=ref_price, pct=pct, labels=labels, tier=tier),
         }
 
-    # 스레드 첫 줄·마무리 (상품마다 정해진 하나 → 같은 문장 연속 방지). 지어낸 경험 금지
+    # 스레드 첫 줄 (AI 가 못 썼을 때): 분류별 생활 속 순간 → 없으면 일반. 상품마다 정해진 하나라 같은 문장이 연달아 안 나옴
+    THREAD_HOOKS_BY_CAT = (
+        (("식품", "과자", "음료", "생수", "라면", "커피", "간편", "냉동", "축산", "수산", "과일", "채소"),
+         ("야식 생각날 때 꼭 냉장고가 비어 있음", "장보러 가기 귀찮은 날 이거면 됨", "배달비 아까워서 쟁여두는 거 있음?")),
+        (("생활", "세제", "화장지", "휴지", "물티슈", "청소", "욕실", "세탁"),
+         ("휴지 떨어진 거 꼭 샤워 끝나고 알게 됨", "생필품은 쌀 때 사는 게 이기는 거임", "어차피 쓰는 거면 쌀 때 사두는 게 답임")),
+        (("주방", "식기", "조리", "냄비", "프라이팬", "보관"),
+         ("설거지 거리 하나 줄이면 그게 행복임", "주방템은 한 번 사면 몇 년 감")),
+        (("뷰티", "화장품", "스킨", "헤어", "바디", "향수", "클렌징"),
+         ("다 쓴 공병 쌓여 있는 사람 손", "화장대 정리하다 보면 꼭 이게 없음")),
+        (("가전", "디지털", "컴퓨터", "휴대폰", "충전", "이어폰", "모니터", "노트북"),
+         ("충전기는 왜 항상 하나 모자람", "전자기기는 할인할 때 사는 거임")),
+        (("패션", "의류", "신발", "가방", "양말", "속옷"),
+         ("양말은 왜 항상 한 짝씩 사라짐", "기본템은 매년 다시 사게 됨")),
+    )
     THREAD_HOOKS = (
         "오늘 핫딜 중에 이거 하나만 건지면 됨", "쟁여둘 사람은 지금이 타이밍임", "이거 집에 하나씩 있는 거 맞지?",
-        "가격 보고 두 번 확인함", "생필품은 쌀 때 사는 게 이기는 거임", "이 가격 다시 보기 쉽지 않을 듯",
-        "장바구니에 넣어둔 사람 지금 보셈", "필요했던 사람만 보면 됨",
+        "이 가격 다시 보기 쉽지 않을 듯", "장바구니에 넣어둔 사람 지금 보셈", "필요했던 사람만 보면 됨",
     )
-    THREAD_CLOSES = (
-        "필요한 사람만. 안 쓸 거면 싸도 손해임", "찾던 사람 있을 것 같아서 남겨둠", "품절되면 댓글에 표시해둘게",
-        "다들 이런 거 어디서 사?", "급한 거 아니면 패스해도 됨", "더 싼 데 알면 알려줘",
-    )
+    THREAD_CLOSES = ("다들 이런 거 어디서 사?", "더 싼 데 알면 알려줘", "품절되면 댓글에 표시해둘게", "필요한 사람만. 안 쓸 거면 싸도 손해임")
+
+    def _thread_hook(self, p: Product, h: int) -> str:
+        if (p.extra or {}).get("thread_hook"):
+            return p.extra["thread_hook"]
+        text = f"{p.category or ''} {p.name}"
+        for words, hooks in self.THREAD_HOOKS_BY_CAT:
+            if any(w in text for w in words):
+                return hooks[h % len(hooks)]
+        return self.THREAD_HOOKS[h % len(self.THREAD_HOOKS)]
 
     def evidence(self, deal: Deal, *, days: int, ref_price: int | None, pct: int | None, labels: list[str], tier: str) -> dict[str, Any]:
         """가격 근거를 사람 말로: 첫 줄용 짧은 근거, 문장형 근거, 스레드용 반말 근거. 숫자는 데이터에서만."""
@@ -158,8 +177,11 @@ class TemplateRenderer:
             "evidence": sentence,
             "evidence_casual": casual,
             "unit_each": each if each and each != short else None,
-            "thread_hook": self.THREAD_HOOKS[h % len(self.THREAD_HOOKS)],
-            "thread_close": self.THREAD_CLOSES[(h // 7) % len(self.THREAD_CLOSES)],
+            "thread_hook": self._thread_hook(p, h),
+            "thread_take": (p.extra or {}).get("thread_take"),
+            # 마무리 질문은 두 번에 한 번꼴 (매번 질문으로 끝나면 그것도 광고 문법)
+            "thread_close": self.THREAD_CLOSES[(h // 7) % len(self.THREAD_CLOSES)] if h % 2 else None,
+            "short_name": (p.extra or {}).get("short_name") or clean_name(p.name),
         }
 
     def render(self, name: str, *, autoescape: bool = True, **ctx: Any) -> str:
