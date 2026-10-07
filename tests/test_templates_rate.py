@@ -160,3 +160,10 @@ def test_naver_search_help() -> None:
     t = naver_search_help("[무배] 순살족발 300g + 증정", "https://m.smartstore.naver.com/mggtable/products/1", "naver")
     assert "<code>순살족발 300g + 증정</code>" in t and "<code>mggtable</code>" in t
     assert naver_search_help("x", "https://toss.im/a", "toss") == ""
+
+
+def test_unit_price_bottles_and_unknown_units() -> None:
+    from dealbot.utils.text import unit_price
+
+    assert unit_price("트레비 플레인 350ml 20펫", 8900) == "병당 445원 (100ml당 127원)"
+    assert unit_price("탄산수 350ml 20입수", 8900) is None  # 모르는 단위면 계산 안 함

@@ -59,7 +59,7 @@ class Commentator:
         return bool(self.enabled and self.bin)
 
     def _key(self, deal: Deal) -> str:
-        return "comment:" + ":".join(deal.product.product_id.split(":")[:2])
+        return "comment2:" + ":".join(deal.product.product_id.split(":")[:2])  # 말투를 바꾸면 숫자를 올려 예전 한줄평을 다시 쓰게 함
 
     async def comment(self, deal: Deal) -> str | None:
         if not self.available:

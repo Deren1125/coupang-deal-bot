@@ -62,7 +62,7 @@ def clean_name(name: str | None) -> str:
 
 
 _SIZE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(kg|g|ml|l)(?![a-z])", re.I)
-_COUNT = re.compile(r"(?:x\s*)?(\d{1,4})\s*(개입|개|입|팩|봉|캔|병|롤|매|포|구|정|봉지|박스|ea)(?![가-힣a-z])", re.I)
+_COUNT = re.compile(r"(?:x\s*)?(\d{1,4})\s*(개입|개|입|팩|봉지|봉|캔|병|펫|페트|pet|롤|매|포|구|정|박스|박|세트|ea)(?![가-힣a-z])", re.I)
 _TIMES = re.compile(r"[x×*]\s*(\d{1,4})(?![\d.,]*\s*(?:kg|g|ml|l|cm|mm|m)\b)", re.I)
 
 
@@ -80,12 +80,16 @@ def unit_price(name: str | None, price: int | None) -> str | None:
         unit_word = "개"
     if len(counts) > 2 or len(sizes) > 1:
         return None
+    # 모르는 단위가 붙은 숫자가 남아 있으면 (예: '20입수', '3박스입') 개수를 잘못 읽을 수 있으니 계산하지 않음
+    rest = _COUNT.sub(" ", _SIZE.sub(" ", text))
+    if re.search(r"\d\s*(?!겹|단|종|인치|년|세|구|중|차|호|겹|분|시간|도)[가-힣]", rest):
+        return None
     count = 1
     for c in counts:
         count *= c
     if not 1 <= count <= 1000:
         return None
-    word = {"개입": "개", "입": "개", "ea": "개"}.get(unit_word.lower(), unit_word or "개")
+    word = {"개입": "개", "입": "개", "ea": "개", "pet": "병", "펫": "병", "페트": "병", "박": "박스"}.get(unit_word.lower(), unit_word or "개")
     each = f"{word}당 {round(price / count):,}원" if count >= 2 else None
     per = None
     if sizes:
