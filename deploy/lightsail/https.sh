@@ -6,12 +6,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-IP="$(curl -s --max-time 5 https://checkip.amazonaws.com | tr -d '[:space:]')"
+echo "▶ 1/4 서버 주소 확인"
+IP="$(curl -s --max-time 5 https://checkip.amazonaws.com | tr -d '[:space:]' || true)"
+[ -n "$IP" ] || IP="$(curl -s --max-time 5 https://api.ipify.org || true)"
 [ -n "$IP" ] || { echo "⛔ 공인 IP 를 못 읽었어요"; exit 1; }
 DOMAIN="${IP//./-}.sslip.io"
-PORT="$(grep -E '^PORT=' .env | tail -1 | cut -d= -f2-)"
+PORT="$(grep -E '^PORT=' .env | tail -1 | cut -d= -f2- || true)"  # 없으면 기본 8080
 PORT="${PORT:-8080}"
 
+echo "   $DOMAIN"
+echo "▶ 2/4 Caddy(HTTPS) 설치·설정"
 if ! command -v caddy >/dev/null; then
   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -28,6 +32,7 @@ CADDY
 sudo systemctl enable caddy >/dev/null
 sudo systemctl restart caddy
 
+echo "▶ 3/4 봇에 주소 기록 후 재시작"
 # 봇이 이 주소로 콜백 주소를 만들도록 .env 에 기록 (값 하나만 바꿈)
 python3 - .env "$DOMAIN" <<'PY'
 import sys
@@ -39,8 +44,13 @@ PY
 chmod 600 .env
 sudo systemctl restart dealbot || true
 
-sleep 8
-if curl -s --max-time 15 -o /dev/null -w '%{http_code}' "https://$DOMAIN/health" | grep -q '^2'; then
+echo "▶ 4/4 인증서 발급·연결 확인 (최대 1분)"
+ok=""
+for _ in 1 2 3 4 5 6; do
+  sleep 10
+  if curl -s --max-time 15 -o /dev/null -w '%{http_code}' "https://$DOMAIN/health" | grep -q '^2'; then ok=1; break; fi
+done
+if [ -n "$ok" ]; then
   echo "✅ HTTPS 준비됨: https://$DOMAIN"
 else
   echo "⚠️ 아직 https://$DOMAIN 응답이 없어요 — Lightsail 방화벽 80/443 을 열었는지 확인 (인증서 발급에 1~2분 걸릴 수 있음)"
