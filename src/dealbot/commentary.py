@@ -20,15 +20,20 @@ from dealbot.utils.text import clean_name
 log = logging.getLogger(__name__)
 
 SYSTEM = (
-    "너는 핫딜 채널 '오늘의 핫딜'을 운영하는 사람이다. 친구한테 '이거 괜찮더라' 하고 알려주듯 상품 한마디를 쓴다.\n"
-    "- 상품명과 분류에 적힌 정보만 근거로, 어떤 사람이 어떤 상황에서 쓰기 좋은지 1~2문장(60자 이내).\n"
-    "- 말투는 자연스러운 해요체 (~좋아요, ~편해요, ~하기 딱이에요). 매번 같은 끝맺음 반복 금지.\n"
-    "- '~분께 추천드립니다', '~에 안성맞춤입니다', '~를 경험해 보세요' 같은 광고·AI 말투 금지.\n"
-    "- 숫자(가격·할인율·용량·개수·순위·평점), 성분, 효능, 성능 수치, 시장 점유율, 제조사 관계, 후기 내용은 절대 쓰지 않는다.\n"
-    "- 과장 표현(역대급, 미쳤다, 무조건, 강추, 놓치지 마세요)·느낌표·따옴표·이모지 금지.\n"
+    "너는 핫딜 채널 '오늘의 핫딜'을 직접 운영하는 사람이다. 단톡방에서 친구한테 말하듯 상품 한마디를 쓴다.\n"
+    "공식: [확인된 사실이나 숫자 하나] + [판단 하나: 누구에게 / 아쉬운 점 / 팁]. 1~2문장, 70자 이내.\n"
+    "- 숫자는 아래 '확인된 정보'에 있는 숫자만 그대로 쓸 수 있다. 다른 숫자(용량 환산, 기간, 효능 수치)는 만들지 않는다.\n"
+    "- 상품명·분류·확인된 정보에 없는 성분, 효능, 맛, 품질, 후기, 점유율, 제조사 이야기는 쓰지 않는다.\n"
+    "- 직접 사거나 써 본 적이 없으니 '써보니', '먹어보니', '저도 샀어요' 같은 경험담 금지. 대신 '구성 보니', '이 가격이면'처럼 말한다.\n"
+    "- 말투는 해요체. 끝맺음을 ~요/~네요/~예요/~거든요/~죠 중에서 자연스럽게. 느낌표·따옴표·이모지 금지.\n"
+    "- 금지 표현: 추천드립니다, 안성맞춤, 경험해 보세요, 찾고 계셨다면, 잘 맞는 제품, 활용하기 좋아요, 실용적이고 편리한, "
+    "합리적인 가격, 가성비 좋은, 만족도가 높은, 도움이 될 수 있습니다, 역대급, 미쳤다, 무조건, 강력 추천, 인생템, 놓치지 마세요, 서두르세요.\n"
     "- 출력은 그 문장만. 쓸 말이 없으면 SKIP 만 출력."
 )
-BANNED = re.compile(r"\d|역대급|미쳤|무조건|강추|놓치|추천드립니다|안성맞춤|경험해 보세요|!|https?:|[★☆※\"“”]")
+BANNED = re.compile(
+    r"역대급|미쳤|무조건|강추|강력 ?추천|인생템|놓치|서두르|추천드립니다|안성맞춤|경험해 보세요|찾고 계셨다면|잘 맞는 제품|"
+    r"활용하기 좋|실용적이고|합리적인 가격|가성비 좋은|만족도가 높|도움이 될 수|써보니|먹어보니|저도 샀|!|https?:|[★☆※\"“”]"
+)
 
 
 def find_claude() -> str | None:
@@ -39,9 +44,13 @@ def find_claude() -> str | None:
     return None
 
 
-def check_comment(text: str | None) -> str | None:
+def check_comment(text: str | None, facts: str = "") -> str | None:
+    """규칙 검사: 금지 표현, 길이, 그리고 숫자는 '확인된 정보'에 있던 숫자만 (지어낸 숫자 차단)."""
     t = re.sub(r"\s+", " ", (text or "")).strip().strip("'\"")
-    if not t or t.upper() == "SKIP" or len(t) > 80 or BANNED.search(t):
+    if not t or t.upper() == "SKIP" or len(t) > 90 or BANNED.search(t):
+        return None
+    known = set(re.findall(r"\d[\d,.]*", facts))
+    if any(n.rstrip(".,") not in {k.rstrip(".,") for k in known} for n in re.findall(r"\d[\d,.]*", t)):
         return None
     return t
 
@@ -59,9 +68,10 @@ class Commentator:
         return bool(self.enabled and self.bin)
 
     def _key(self, deal: Deal) -> str:
-        return "comment2:" + ":".join(deal.product.product_id.split(":")[:2])  # 말투를 바꾸면 숫자를 올려 예전 한줄평을 다시 쓰게 함
+        return "comment3:" + ":".join(deal.product.product_id.split(":")[:2])  # 말투를 바꾸면 숫자를 올려 예전 한줄평을 다시 쓰게 함
 
-    async def comment(self, deal: Deal) -> str | None:
+    async def comment(self, deal: Deal, facts: str = "") -> str | None:
+        """facts: 데이터로 확인된 정보 (예: '평소 15,200원대인데 오늘 12,400원이에요. / 봉당 716원 꼴 / 로켓배송')."""
         if not self.available:
             return None
         if self.db is not None:
@@ -69,7 +79,8 @@ class Commentator:
             if cached:
                 return cached
         p = deal.product
-        user = f"상품명: {clean_name(p.name)}\n분류: {p.category or '-'}\n쇼핑몰: {p.shop}"
+        user = (f"상품명: {clean_name(p.name)}\n분류: {p.category or '-'}\n쇼핑몰: {p.shop}\n"
+                f"확인된 정보: {facts or '없음'}")
         try:
             proc = await asyncio.create_subprocess_exec(
                 self.bin, "-p", "--output-format", "json", "--model", self.model, "--system-prompt", SYSTEM, "--tools", "",
@@ -91,7 +102,7 @@ class Commentator:
         if payload.get("is_error"):
             log.warning("commentary error: %s", str(payload.get("result"))[:200])
             return None
-        text = check_comment(payload.get("result"))
+        text = check_comment(payload.get("result"), facts)
         if text and self.db is not None:
             self.db.kv_set(self._key(deal), text)
         return text

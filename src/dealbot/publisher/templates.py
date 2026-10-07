@@ -116,6 +116,50 @@ class TemplateRenderer:
             "comment": (p.extra or {}).get("comment"),
             "rank": p.rank,
             "ref_price": ref_price,
+            **self.evidence(deal, days=days, ref_price=ref_price, pct=pct, labels=labels, tier=tier),
+        }
+
+    # 스레드 첫 줄·마무리 (상품마다 정해진 하나 → 같은 문장 연속 방지). 지어낸 경험 금지
+    THREAD_HOOKS = (
+        "오늘 핫딜 중에 이거 하나만 건지면 됨", "쟁여둘 사람은 지금이 타이밍임", "이거 집에 하나씩 있는 거 맞지?",
+        "가격 보고 두 번 확인함", "생필품은 쌀 때 사는 게 이기는 거임", "이 가격 다시 보기 쉽지 않을 듯",
+        "장바구니에 넣어둔 사람 지금 보셈", "필요했던 사람만 보면 됨",
+    )
+    THREAD_CLOSES = (
+        "필요한 사람만. 안 쓸 거면 싸도 손해임", "찾던 사람 있을 것 같아서 남겨둠", "품절되면 댓글에 표시해둘게",
+        "다들 이런 거 어디서 사?", "급한 거 아니면 패스해도 됨", "더 싼 데 알면 알려줘",
+    )
+
+    def evidence(self, deal: Deal, *, days: int, ref_price: int | None, pct: int | None, labels: list[str], tier: str) -> dict[str, Any]:
+        """가격 근거를 사람 말로: 첫 줄용 짧은 근거, 문장형 근거, 스레드용 반말 근거. 숫자는 데이터에서만."""
+        p, v = deal.product, deal.verdict
+        unit = unit_price(clean_name(p.name), p.price)
+        each = f"{unit.split(' (')[0]} 꼴" if unit else None
+        low = next((x for x in labels if "최저가" in x), None)
+        is_market = bool(v.market_price and ref_price == v.market_price)
+        if low:
+            short, casual = f"{days}일 중 제일 쌈", f"최근 {days}일 중 제일 쌈"
+            sentence = f"최근 {days}일 중 제일 싸요."
+        elif ref_price and pct:
+            where = "쿠팡" if is_market else "평소"
+            short, casual = f"{where}보다 {pct}%↓", f"{where}보다 {pct}% 쌈"
+            sentence = (f"쿠팡 최저가 {ref_price:,}원보다 {pct}% 싸요." if is_market
+                        else f"평소 {ref_price:,}원대인데 오늘 {p.price:,}원이에요.")
+        elif each:
+            short, casual, sentence = each, each, f"{each}이에요."
+        elif pct:
+            short, casual, sentence = f"정가 대비 {pct}%↓", f"정가 대비 {pct}% 빠짐", f"정가 대비 {pct}% 내려왔어요."
+        else:
+            short = casual = sentence = None
+        h = sum(map(ord, p.product_id))
+        return {
+            "badge": {"top": "🔥 초특가", "must": "👍 강추"}.get(tier, "☑️"),
+            "evidence_short": short,
+            "evidence": sentence,
+            "evidence_casual": casual,
+            "unit_each": each if each and each != short else None,
+            "thread_hook": self.THREAD_HOOKS[h % len(self.THREAD_HOOKS)],
+            "thread_close": self.THREAD_CLOSES[(h // 7) % len(self.THREAD_CLOSES)],
         }
 
     def render(self, name: str, *, autoescape: bool = True, **ctx: Any) -> str:

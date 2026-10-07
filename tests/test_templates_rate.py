@@ -19,13 +19,11 @@ def test_render_deal_post(repo_root: Path) -> None:
     r = TemplateRenderer(repo_root / "templates")
     text = r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", shop=ShopRegistry().get("coupang"))
     lines = text.splitlines()
-    assert lines[0] == "<i>✱ 이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>"  # 고지는 맨 위
-    assert "[샘플 · 오늘의 특가]" in lines
-    assert "<b>[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L</b>" in text
-    assert "💸 판매가 : <b>29,900원</b> (🔻29%)\n📌 평소 가격 : <s>42,000원</s>" in text  # 숫자로 확인된 평소 가격
+    assert lines[0] == "☑️ <b>29,900원</b> · 평소보다 29%↓"  # 1줄 = 알림 미리보기: 등급 + 가격 + 근거
+    assert lines[1] == "[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L" and "[샘플 · 오늘의 특가]" in lines
     assert "평소보다 확실히" not in text  # 숫자 없는 상투 문구는 쓰지 않음
-    assert '\n🛒 <a href="https://link.coupang.com/a/sample">구매하러 가기</a>\n' in text  # 긴 주소 대신 글자 링크
-    assert "⏰ 가격은 금방 바뀌어요" in text
+    assert '\n👉 <a href="https://link.coupang.com/a/sample">구매하러 가기</a>\n' in text  # 긴 주소 대신 글자 링크
+    assert text.endswith("<i>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>")
     assert len(text) < 1024  # 사진 캡션 한도
 
 
@@ -38,7 +36,7 @@ def test_render_escapes_html(repo_root: Path) -> None:
     assert "할인" not in text and "평균가" not in text and "포스팅" not in text  # 고지 문구 없는 몰
     coupon = Product(source="s", product_id="coupang:c", shop="coupang", name="10% 쿠폰", price=0, url="u", deal_kind="coupon")
     t2 = r.render_deal(Deal(product=coupon, verdict=DealVerdict(is_deal=True)), "https://l")
-    assert "정가" not in t2 and "<b>10% 쿠폰</b>" in t2
+    assert "정가" not in t2 and "10% 쿠폰" in t2
 
 
 def test_status_and_summary_templates_render(repo_root: Path, db: Database) -> None:
@@ -118,13 +116,15 @@ def test_emphasis_tiers(repo_root: Path) -> None:
         return Deal(product=p, verdict=DealVerdict(is_deal=True, **v), affiliate_url="https://l")
 
     must = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop)
-    assert "🔥 <b>갈아만든배" in must and "🏷 할인분류 : 강력 추천" in must and "⚖️ 단가 : 개당 515원 (100ml당 151원)" in must
+    assert must.startswith("👍 강추 <b>12,360원</b> · 평소보다 54%↓") and "⚖️ 개당 515원 꼴" in must
     top = r.render_deal(deal(below_market_pct=72.0, market_price=45000), "https://l", shop=shop)
-    assert "🚨 <b>갈아만든배" in top and "역대급" in top and "(🔻73%)" in top
+    assert top.startswith("🔥 초특가 <b>12,360원</b> · 쿠팡보다 73%↓")
     plain = r.render_deal(deal(below_avg_pct=6.0, avg_price=13207), "https://l", shop=shop)
-    assert "🔥 <b>갈아만든배" in plain and "할인분류" not in plain and "평소 가격" not in plain  # 6% 는 근거로 안 씀
+    assert plain.startswith("☑️ <b>12,360원</b> · 개당 515원 꼴") and "평소" not in plain  # 6% 는 근거로 안 씀
     low = r.render_deal(deal(below_avg_pct=20.0, avg_price=15450, low_price=13000, history_days=12.4), "https://l", shop=shop)
-    assert "📉 12일 최저 : 13,000원" in low and "12일 최저가 갱신" in low
+    assert low.startswith("☑️ <b>12,360원</b> · 12일 중 제일 쌈")
+    th = r.render_deal(deal(below_avg_pct=20.0, avg_price=15450), "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
+    assert "갈아만든배 340ml 24개 12,360원임" in th and "평소보다 20% 쌈" in th and "쿠팡 파트너스" in th and "링크는 댓글에" in th
     kakao = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop, template="deal_kakao.j2", autoescape=False)
     assert kakao.startswith("🔥 갈아만든배") and "👉 " in kakao and "평균가" not in kakao and "✱" not in kakao
 
@@ -142,7 +142,9 @@ def test_comment_rules() -> None:
     from dealbot.commentary import check_comment
 
     assert check_comment("자취생 냉동실 상비용으로 좋습니다.") == "자취생 냉동실 상비용으로 좋습니다."
-    assert check_comment("단백질 20g 함유로 좋습니다") is None  # 숫자 금지
+    assert check_comment("단백질 20g 함유로 좋습니다") is None  # 확인된 정보에 없는 숫자 금지
+    assert check_comment("봉당 716원 꼴이면 편의점 갈 일이 없어요.", "봉당 716원 꼴") == "봉당 716원 꼴이면 편의점 갈 일이 없어요."
+    assert check_comment("써보니 좋아요.") is None  # 지어낸 경험
     assert check_comment("역대급 가격이에요!") is None and check_comment("SKIP") is None
 
 

@@ -1,52 +1,29 @@
 {#
-  채널 발행 메시지 (텔레그램 HTML). 벤치마크(핫딜방·상위 블로그) 기반 정보형 양식 — 2026-10 개편.
-  구조: 제휴 고지 → 상품명 → ▶ 가격 근거(판매가·평소가·최저가·단가) → 카테고리·할인분류·배송·평점 → 💬 한줄평 → 👉 링크 → ☑️ 주의
-  숫자는 모두 데이터(facts)에서만. 한줄평은 AI(숫자·효능 금지 규칙)로, 없으면 줄이 빠짐.
-  변수: product.*, pname, shop.*, tier, link, ref_price/ref_label/ref_pct, facts.{labels, ship, cat, unit, low_price, avg_price,
-        history_days, sale_pct, comment}
+  채널 발행 메시지 (텔레그램 HTML) — 2026-10 상위 핫딜 채널·블로그 분석 기반.
+  1줄 = 알림 미리보기: 등급 + 가격 + 근거 하나. 2줄 = 상품명. 한마디(숫자 1 + 판단 1) → 링크 → 제휴 고지(끝).
+  숫자는 데이터(facts)에서만. 이모지는 등급 1 + 정보줄 1~2 + 링크 1.
   ⚠️ 한 줄을 통째로 차지하는 {% if %} / {% endif %} 줄은 출력에서 사라집니다. 줄 "안"의 조건은 {% endif +%} 로 닫아야 줄바꿈이 유지됩니다.
 #}
-{% if shop.disclosure %}
-<i>✱ {{ shop.disclosure }}</i>
-
+{% if product.has_price %}
+{{ facts.badge }} <b>{{ product.price | won }}</b>{% if facts.evidence_short %} · {{ facts.evidence_short }}{% endif +%}
+{% else %}
+{{ facts.badge }}
 {% endif %}
+{{ pname }}
 {% if product.headline %}
 [{{ product.headline }}]
 {% endif %}
-{% if tier == "top" %}🚨{% else %}🔥{% endif %} <b>{{ pname }}</b>
-{% if product.has_price %}
-
-💸 판매가 : <b>{{ product.price | won }}</b>{% if facts.sale_pct %} (🔻{{ facts.sale_pct }}%){% endif +%}
-{% if ref_price %}
-📌 {{ ref_label }} : <s>{{ ref_price | won }}</s>
-{% elif product.original_price %}
-📌 정상가 : <s>{{ product.original_price | won }}</s>
-{% endif %}
-{% if facts.low_price %}
-📉 {{ facts.history_days }}일 최저 : {{ facts.low_price | won }}
-{% endif %}
-{% if facts.unit %}
-⚖️ 단가 : {{ facts.unit }}
-{% endif %}
-{% endif %}
-
-{% if facts.cat %}
-🗂 카테고리 : {{ facts.cat }}
-{% endif %}
-{% if facts.labels %}
-🏷 할인분류 : {{ facts.labels | join(" · ") }}
-{% endif %}
-{% if facts.ship %}
-🚚 배송 : {{ facts.ship }}
-{% endif %}
-{% if product.rating or product.review_count %}
-⭐ 평점 : {% if product.rating %}{{ product.rating }}점{% endif %}{% if product.rating and product.review_count %} · {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}개{% endif +%}
-{% endif %}
 {% if facts.comment %}
 
-💬 {{ facts.comment }}
+{{ facts.comment }}
+{% endif %}
+{% if facts.unit_each or facts.ship or product.rating %}
+
+{% if facts.unit_each %}⚖️ {{ facts.unit_each }}{% endif %}{% if facts.unit_each and (facts.ship or product.rating) %} · {% endif %}{% if facts.ship %}🚚 {{ facts.ship }}{% endif %}{% if facts.ship and product.rating %} · {% endif %}{% if product.rating %}⭐ {{ product.rating }}{% if product.review_count %} ({{ "{:,}".format(product.review_count) }}){% endif %}{% endif +%}
 {% endif %}
 
-🛒 <a href="{{ link }}">구매하러 가기</a>
+👉 <a href="{{ link }}">구매하러 가기</a>
+{% if shop.disclosure %}
 
-⏰ 가격은 금방 바뀌어요! 링크 들어갔는데 가격이 다르면 이미 끝난 딜이에요 🥲
+<i>{{ shop.disclosure }}</i>
+{% endif %}

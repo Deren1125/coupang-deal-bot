@@ -1373,7 +1373,10 @@ class DealBot:
             return True
 
         if "comment" not in deal.product.extra:
-            deal.product.extra["comment"] = await self.commentator.comment(deal)
+            f = self.publisher.renderer.deal_facts(deal)
+            facts = " / ".join(str(x) for x in (f.get("evidence"), f.get("unit"), f.get("ship"),
+                                                 ", ".join(f.get("labels") or [])) if x)
+            deal.product.extra["comment"] = await self.commentator.comment(deal, facts)
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
         photo = await self.deal_photo(deal) if self.publisher.send_photo and not self.publisher.dry_run else None
         result = await self.publisher.publish(deal, silent=silent, photo=photo)

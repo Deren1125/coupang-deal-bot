@@ -1,30 +1,25 @@
 {#
-  스레드 첫 글(훅) — 500자 제한, 순수 텍스트. 링크와 수수료 고지는 답글(deal_threads_reply.j2)에.
-  잘 되는 핫딜 계정 형식: 한 줄 훅 + 가격 비교 한 줄 + "링크는 댓글에". 변수는 deal_post.j2 와 동일.
+  스레드 첫 글 — 반말 음슴체로 고정. 상황/공감 훅 → 가격 반전 → 숫자 근거 → 마무리 → 제휴 고지(본문 안) → 링크는 댓글.
+  지어낸 경험 금지. 숫자는 데이터에서만. 500자 제한, 순수 텍스트.
 #}
-{% if tier == "top" %}
-{{ pname }} 평소 가격의 3분의 1 떴다
-{{ product.price | won }} ;;
-{% elif tier == "must" %}
-{{ pname }} 반값 떴다
-{{ product.price | won }} ;;
-{% elif product.original_price and product.original_price > product.price %}
-{{ pname }} 이 가격 맞아?
-{{ product.original_price | won }} > {{ product.price | won }} ;;
-{% elif discount_rate %}
-{{ pname }} {{ discount_rate | pct }} 할인 떴다
-{{ product.price | won }} ;;
-{% elif product.has_price %}
-{{ pname }} 특가 떴다
-{{ product.price | won }} ;;
+{{ facts.thread_hook }}
+
+{% if product.has_price %}
+{{ pname }} {{ product.price | won }}임
 {% else %}
 {{ pname }}
 {% endif %}
-{% if product.headline %}
-{{ product.headline }}
+{% if facts.evidence_casual %}
+{{ facts.evidence_casual }}
 {% endif %}
-{% if product.rating %}
-⭐ {{ product.rating }}{% if product.review_count %} · 리뷰 {{ "{:,}".format(product.review_count) }}건{% endif +%}
+{% if facts.comment %}
+
+{{ facts.comment }}
 {% endif %}
 
+{{ facts.thread_close }}
+{% if shop.disclosure %}
+
+{{ shop.disclosure }}
+{% endif %}
 링크는 댓글에 👇
