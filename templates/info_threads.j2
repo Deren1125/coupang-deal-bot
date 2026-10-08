@@ -1,16 +1,15 @@
 {#
   정보 글 — 스레드용 (500자 제한, 평문). 짧게: 제목 + 핵심 본문 + 원문.
+  threads_body: 본문을 260자 안팎에서 줄 끝(없으면 낱말 끝)으로 자르고 '…' 붙인 것 (InfoPostBuilder.context).
+  채널 안내(텔레그램 링크)는 넣지 않는다: 한 글에 날 주소가 둘이면 광고처럼 보이고, 채널 링크는 글마다 반복하지 않는다.
 #}
-📢 {{ product.name }}
+📢 {{ (product.name | clean) or product.name }}
 {% if product.has_price %}
 {{ product.price | won }}
 {% endif %}
-{% if body %}
+{% if threads_body %}
 
-{{ body[:260] }}{% if body | length > 260 %}…{% endif +%}
+{{ threads_body }}
 {% endif %}
 
 원문 👉 {{ source_url }}
-{% if channels.telegram_url %}
-실시간 전체 딜은 {{ channels.telegram_url }}
-{% endif %}

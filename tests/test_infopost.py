@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
 from dealbot.app import DealBot
 from dealbot.collectors import BaseCollector, register
 from dealbot.config import CollectorConfig, Settings
-from dealbot.infopost import PostBody, extract_post_body
-from dealbot.models import Product, PublishResult
+from dealbot.infopost import InfoPostBuilder, PostBody, extract_post_body
+from dealbot.models import Deal, DealVerdict, Product, PublishResult
 from dealbot.monitoring.admin import AdminNotifier
+from dealbot.publisher.templates import TemplateRenderer
 from dealbot.summarize import InfoSummarizer, Summary
 
 HTML = """
@@ -78,6 +80,74 @@ def test_extract_ppomppu_cell_with_duplicate_class_attribute() -> None:
     assert "뽐뿌게시판" not in body.text and "목록" not in body.text.splitlines()
     assert body.images == ["https://cdn4.ppomppu.co.kr/zboard/data3/2026/0911/900w_a.jpg"]
     assert body.links == ["https://www.lfmall.co.kr/app/event/105798"]  # 뽐뿌 리다이렉트(target=base64) 를 풀어 원래 주소로
+
+
+GALAXY = (
+    "<html><body><table><tr><td class='board-contents' class=han>"
+    "<p>&gt; 카드 즉시할인 최대 10%</p>"
+    + "".join(f"<p>▶ Galaxy Tab S12 모델{i} 1,{i}99,000원</p><p>&gt; 쿠폰 할인 최대 7%</p>" for i in range(6))
+    + "<p>- 기간: 10/7~10/20</p><p>-10% 추가 쿠폰은 앱 전용</p>"
+    "<p>사전 구매하신 분들 좋은 딜 되세요~</p></td></tr></table></body></html>"
+)
+
+
+def test_extract_post_body_keeps_per_item_lines_and_board_markers_become_bullets() -> None:
+    """같은 줄 지우기는 바로 위 줄 반복·제목 반복만: 상품마다 붙은 '> 쿠폰…' 줄이 첫 상품에만 남으면 쿠폰이 한 모델 얘기처럼 보인다."""
+    body = extract_post_body(GALAXY, "https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=1", max_chars=2000)
+    lines = body.text.splitlines()
+    assert body.text.count("쿠폰 할인 최대 7%") == 6
+    assert not [ln for ln in lines if ln.lstrip().startswith((">", "▶"))]  # 게시판 인용·화살표 표시는 '· ' 글머리로
+    assert lines[0] == "· 카드 즉시할인 최대 10%" and lines[1] == "· Galaxy Tab S12 모델0 1,099,000원"
+    assert lines[2] == "  └ 쿠폰 할인 최대 7%"  # 상품 줄 바로 아래 '>' 줄은 그 상품에 딸린 설명
+    assert "· 기간: 10/7~10/20" in lines and "-10% 추가 쿠폰은 앱 전용" in lines  # '-10%' 는 글머리가 아니라 숫자
+    assert "좋은 딜 되세요" not in body.text  # 끝인사(잡담)는 뺀다
+    keep = extract_post_body(GALAXY.replace("사전 구매하신 분들 좋은 딜 되세요~", "마이페이지에서 응모하시면 되세요"), "https://x", max_chars=2000)
+    assert keep.text.endswith("마이페이지에서 응모하시면 되세요")  # 안내 문장은 끝에 있어도 남긴다
+
+
+def test_extract_post_body_drops_other_peoples_affiliate_links() -> None:
+    """남의 쿠팡 파트너스·링크프라이스 링크를 공시 없이 퍼 나르지 않는다 (lptag 는 떼고 원래 주소만 남김)."""
+    html = (
+        "<div class='view_content'><p>이벤트 안내 글입니다. 기간 안에 응모하면 적립금을 줍니다.</p>"
+        '<p><a href="https://link.coupang.com/a/cXyZ12">https://link.coupang.com/a/cXyZ12</a></p>'
+        '<p>구매는 https://link.coupang.com/a/abc9 여기서</p>'
+        '<p><a href="https://coupa.ng/bXk1">쿠팡</a> <a href="https://click.linkprice.com/click.php?m=11st&a=A1&l=9999">링크</a>'
+        ' <a href="https://toss.im/_m/AbCd">토스</a></p>'
+        '<p><a href="https://www.11st.co.kr/products/1?lptag=P0001234&trTypeCd=22">11번가</a>'
+        ' <a href="https://pages.coupang.com/p/177293">쿠팡 이벤트</a></p></div>'
+    )
+    body = extract_post_body(html, "https://bbs.ruliweb.com/market/board/1020/read/1")
+    assert body.links == ["https://www.11st.co.kr/products/1?trTypeCd=22", "https://pages.coupang.com/p/177293"]
+    assert "link.coupang.com" not in body.text and "lptag" not in body.raw and "구매는 여기서" in body.text
+
+
+def _info_deal(name: str = "★[쿠팡] 갤럭시 탭 S12 쿠폰 이벤트★") -> Deal:
+    post = "https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=1"
+    p = Product(source="ppomppu", product_id="info:ppomppu:1", shop="coupang", name=name, price=0, url=post, extra={"post_url": post})
+    return Deal(product=p, verdict=DealVerdict(is_deal=True))
+
+
+def test_info_templates_follow_channel_rules(repo_root: Path) -> None:
+    """정보 글도 딜 글과 같은 원칙: 채널 링크를 글마다 붙이지 않고, 긴 주소 대신 글자 링크, 장식 뺀 제목."""
+    channels = {"kakao_openchat_url": "https://open.kakao.com/o/x", "telegram_url": "https://t.me/x"}
+    info = InfoPostBuilder(None, TemplateRenderer(repo_root / "templates", channels=channels))  # type: ignore[arg-type]
+    long = "\n".join(f"▶ Galaxy Tab S12 Ultra {i}56GB Wi-Fi 1,{i}99,000원" for i in range(9))
+    body = PostBody(text=long, links=["https://pages.coupang.com/p/177293", "https://link.coupang.com/a/old"])
+
+    tg = info.render("info_post.j2", _info_deal(), body, autoescape=True)
+    assert tg.startswith("📢 <b>[쿠팡] 갤럭시 탭 S12 쿠폰 이벤트</b>") and "★" not in tg
+    assert '<a href="https://pages.coupang.com/p/177293">이벤트 보러 가기</a>' in tg
+    assert '<a href="https://www.ppomppu.co.kr/zboard/view.php?id=coupon&amp;no=1">원문 보기</a>' in tg
+    assert "카톡 오픈채팅" not in tg and "open.kakao.com" not in tg and "t.me" not in tg
+
+    th = info.render("info_threads.j2", _info_deal(), body, autoescape=False)
+    assert "t.me" not in th and "실시간 전체 딜" not in th and len(th) <= 500
+    cut = th.split("\n\n")[1]  # 제목 다음 본문 덩어리: 줄 중간이 아니라 줄 끝에서 자르고 '…'
+    assert cut.endswith("…") and all(ln in long.splitlines() for ln in cut.rstrip("…").splitlines())
+
+    kakao = info.render("info_kakao.j2", _info_deal(), body, autoescape=False)
+    assert "텔레그램" not in kakao and "t.me" not in kakao and "🔗 https://pages.coupang.com/p/177293" in kakao
+    assert "link.coupang.com" not in tg + th + kakao  # 예전에 저장된 초안의 남의 제휴 링크도 내보내지 않음
 
 
 @register("fake_info")
@@ -153,12 +223,14 @@ async def test_board_post_becomes_info_post(bot: DealBot) -> None:
     assert len(published) == 1
     text = published[0]["text"]
     assert "📢 <b>페이코 이벤트 1</b>" in text and "· 기간: 9월 12일~14일" in text and "결제 시 6,000원 할인" not in text  # 요약본으로 대체
-    assert "https://event.payco.com/1" in text and "원문: https://bbs.ruliweb.com/market/board/1020/read/1" in text
-    assert "카톡 오픈채팅" in text and published[0]["photo"] and published[0]["photo"].startswith(b"\x89PNG")
+    assert '<a href="https://event.payco.com/1">이벤트 보러 가기</a>' in text  # 긴 주소 대신 글자 링크 (딜 글과 같은 양식)
+    assert '<a href="https://bbs.ruliweb.com/market/board/1020/read/1">원문 보기</a>' in text
+    # 오픈채팅 안내는 글마다 넣지 않음 (채널 설명·고정 공지에만)
+    assert "카톡 오픈채팅" not in text and published[0]["photo"] and published[0]["photo"].startswith(b"\x89PNG")
     sent: list[str] = bot.sent  # type: ignore[attr-defined]
     assert any("채널에 올렸습니다" in s for s in sent)
     kakao = [s for s in sent if "카카오 오픈채팅</b> 복사용" in s]
-    assert kakao and "실시간 전체 딜(텔레그램)" in kakao[0] and "<pre>" in kakao[0]
+    assert kakao and "<pre>" in kakao[0] and "텔레그램" not in kakao[0].split("<pre>", 1)[1]
     assert bot.db.count_posts_since(item.deal.detected_at, product_prefix="info:") == 1
 
     # 같은 글은 다시 안 올라가고, 하루 상한을 넘기면 새 글도 안 들어간다

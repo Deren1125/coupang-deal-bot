@@ -2,11 +2,13 @@
   스레드 첫 글 — 반말 음슴체로 고정 (2026-10 스레드 제휴글 작법 조사 기반).
   상황·공감 첫 줄(상품명 X) → "근데 {짧은 이름} {가격}" 반전 → 숫자 근거 → 판단 한 줄 → (가끔) 질문 → 제휴 고지(본문 안) → 링크는 댓글.
   첫 줄·판단·짧은 이름은 AI(규칙 검사 통과한 것만), 없으면 분류별 문구. 숫자는 데이터에서만. 500자 제한, 순수 텍스트.
+  '근데'는 첫 줄이 상황·불편을 말할 때만 (facts.thread_turn). 그냥 하는 말 다음에는 바로 "{짧은 이름} {가격}임".
+  single: 답글 없이 한 글로 올릴 때 — 링크는 ThreadsPublisher 가 고지 아래에 붙인다 (500자에 잘리지 않게).
 #}
 {{ facts.thread_hook }}
 
 {% if product.has_price %}
-근데 {{ facts.short_name }} {{ product.price | won }}임
+{% if facts.thread_turn %}근데 {% endif %}{{ facts.short_name }} {{ product.price | won }}임
 {% else %}
 {{ facts.short_name }}
 {% endif %}
@@ -25,4 +27,6 @@
 
 {{ shop.disclosure }}
 {% endif %}
+{% if not single %}
 링크는 댓글에 👇
+{% endif %}

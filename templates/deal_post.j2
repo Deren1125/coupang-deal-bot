@@ -2,14 +2,16 @@
   채널 발행 메시지 (텔레그램 HTML) — 2026-10 상위 핫딜 채널·블로그 분석 기반.
   1줄 = 알림 미리보기: 등급 + 가격 + 근거 하나. 2줄 = 상품명. 한마디(숫자 1 + 판단 1) → 링크 → 제휴 고지(끝).
   숫자는 데이터(facts)에서만. 이모지는 등급 1 + 정보줄 1~2 + 링크 1.
+  가격 없는 쿠폰·이벤트는 1줄 = 🎟/🎁 + 이름 (배지 하나만 덩그러니 남지 않게), 링크 문구도 '쿠폰 받으러 가기' / '이벤트 보러 가기'.
+  표시(정가) 할인율은 첫 줄 근거로 안 씀 — 평소 가격 근거가 없을 때만 정보줄에 🏷️ 로 보조 표시.
   ⚠️ 한 줄을 통째로 차지하는 {% if %} / {% endif %} 줄은 출력에서 사라집니다. 줄 "안"의 조건은 {% endif +%} 로 닫아야 줄바꿈이 유지됩니다.
 #}
 {% if product.has_price %}
 {{ facts.badge }} <b>{{ product.price | won }}</b>{% if facts.evidence_short %} · {{ facts.evidence_short }}{% endif +%}
-{% else %}
-{{ facts.badge }}
-{% endif %}
 {{ pname }}
+{% else %}
+{{ facts.badge }} <b>{{ pname }}</b>
+{% endif %}
 {% if product.headline %}
 [{{ product.headline }}]
 {% endif %}
@@ -17,12 +19,17 @@
 
 {{ facts.comment }}
 {% endif %}
-{% if facts.unit_each or facts.ship or product.rating %}
+{% set info = [] %}
+{% if facts.unit_each %}{% set _ = info.append("⚖️ " ~ facts.unit_each) %}{% endif %}
+{% if facts.list_pct %}{% set _ = info.append("🏷️ 정가 대비 " ~ facts.list_pct ~ "%↓") %}{% endif %}
+{% if facts.ship %}{% set _ = info.append("🚚 " ~ facts.ship) %}{% endif %}
+{% if product.rating %}{% set _ = info.append("⭐ " ~ product.rating ~ ((" (" ~ "{:,}".format(product.review_count) ~ ")") if product.review_count else "")) %}{% endif %}
+{% if info %}
 
-{% if facts.unit_each %}⚖️ {{ facts.unit_each }}{% endif %}{% if facts.unit_each and (facts.ship or product.rating) %} · {% endif %}{% if facts.ship %}🚚 {{ facts.ship }}{% endif %}{% if facts.ship and product.rating %} · {% endif %}{% if product.rating %}⭐ {{ product.rating }}{% if product.review_count %} ({{ "{:,}".format(product.review_count) }}){% endif %}{% endif +%}
+{{ info | join(" · ") }}
 {% endif %}
 
-👉 <a href="{{ link }}">구매하러 가기</a>
+👉 <a href="{{ link }}">{{ facts.link_label }}</a>
 {% if shop.disclosure %}
 
 <i>{{ shop.disclosure }}</i>

@@ -488,10 +488,26 @@ class DealBot:
         )
 
     async def add_commentary(self, deal: Deal) -> None:
-        """한줄평 + 스레드 첫 줄·판단·짧은 이름 (서버 Claude 로그인). 데이터로 확인된 정보만 넘긴다."""
+        """한줄평 + 스레드 첫 줄·판단·짧은 이름 (서버 Claude 로그인). 데이터로 확인된 정보만 넘긴다.
+        실패해도 발행은 그대로: comment 칸을 None 으로 채워 발행 큐가 같은 글에 다시 묻지 않게 한다."""
+        p = deal.product
         f = self.publisher.renderer.deal_facts(deal)
-        facts = " / ".join(str(x) for x in (f.get("evidence"), f.get("unit"), f.get("ship"), ", ".join(f.get("labels") or [])) if x)
-        wrote = await self.commentator.write(deal, facts)
+        # 등급 낱말('역대급'·'강력 추천')은 봇의 판단이라 '확인된 정보'로 안 넘김 (같은 말이 금지어라 한줄평이 버려짐)
+        labels = [x for x in (f.get("labels") or []) if x not in ("역대급", "강력 추천")]
+        facts = " / ".join(str(x) for x in (f.get("evidence"), f.get("unit"), f.get("ship"), ", ".join(labels)) if x)
+        # 글의 다른 줄에 이미 찍히는 것 (첫 줄 가격·근거, ⚖️ 단가, 🚚 배송) — 한줄평이 같은 숫자를 되풀이하지 않게
+        shown = (f"{p.price:,}원" if p.has_price else None, f.get("evidence_short"), f.get("unit_each"), f.get("ship"))
+        try:
+            wrote = await self.commentator.write(deal, facts, shown=shown)
+        except Exception:  # noqa: BLE001 — 한줄평 때문에 발행이 멈추면 안 됨
+            log.exception("commentary failed")
+            wrote = {}
+        alert = self.commentator.take_alert()  # 연달아 실패해서 쉬기 시작했으면 관리자에게 한 번 알림
+        if alert:
+            try:
+                await self.notifier.notify_error("commentary", alert)
+            except Exception:  # noqa: BLE001
+                log.exception("commentary alert failed")
         deal.product.extra["comment"] = wrote.get("comment")
         for k in ("thread_hook", "thread_take", "short_name"):
             if wrote.get(k):
@@ -543,6 +559,8 @@ class DealBot:
             if item.status != "published":
                 return f"#{queue_id} 는 채널에 올라간 글이 아닙니다 (상태 {item.status})."
             deal, label = item.deal, f"#{queue_id} {item.deal.product.name[:30]}"
+        if "comment" not in deal.product.extra:  # /test 처럼 실제 글과 같은 AI 첫 줄·판단·짧은 이름으로 미리보기
+            await self.add_commentary(deal)
         preview = self._threads_preview(deal, label)
         if self.threads.dry_run:
             return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
@@ -1427,16 +1445,14 @@ class DealBot:
             ctx = self.renderer
             tier, _ = ctx.deal_tier(deal)
             v = deal.verdict
-            ref_price, ref_label = None, ""
-            if v.market_price and (v.below_market_pct or 0) >= 10:
-                ref_price, ref_label = v.market_price, "쿠팡 최저가"
-            elif v.avg_price and (v.below_avg_pct or 0) >= 10:
-                ref_price, ref_label = int(v.avg_price), "평소 가격"
+            # 채널 글 첫 줄과 같은 근거·같은 숫자 (배송비를 반영한 평가기 값, 믿을 만한 평균만)
+            ref_price, ref_pct, is_market = ctx.reference(deal)
+            ref_label = ("쿠팡 최저가" if is_market else "평소 가격") if ref_price else ""
             row = {
                 "product_id": p.product_id, "posted_at": utcnow().isoformat(timespec="seconds"),
                 "name": clean_name(p.name), "raw_name": p.name, "headline": p.headline, "price": p.price,
                 "ref_price": ref_price, "ref_label": ref_label,
-                "ref_pct": round((1 - p.price / ref_price) * 100) if ref_price and p.price else None,
+                "ref_pct": round(ref_pct) if ref_price and ref_pct else None,
                 "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
                 "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
                 "disclosure": shop.disclosure if shop else "", "link": link, "product_url": p.url,

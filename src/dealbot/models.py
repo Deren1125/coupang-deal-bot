@@ -74,6 +74,7 @@ class DealVerdict:
     market_price: int | None = None  # 시중가(쿠팡 검색) 대조 결과
     market_source: str | None = None
     below_market_pct: float | None = None
+    market_title: str | None = None  # 비교한 쿠팡 상품 이름 (관리자가 같은 상품인지 확인용)
     low_price: int | None = None  # 기록된 기간(최대 history_days 일)의 최저가
     history_days: float | None = None  # 가격 기록이 쌓인 일수
 

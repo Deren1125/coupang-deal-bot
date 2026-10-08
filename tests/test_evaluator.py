@@ -164,3 +164,106 @@ def test_food_needs_half_price_against_reference() -> None:
     assert ev.is_food(by_units)  # 음료 묶음 규격
     shampoo = Product(source="s", product_id="coupang:5", shop="coupang", name="케라시스 샴푸 500ml 2개", price=9900, url="u")
     assert not ev.is_food(shampoo)  # 규격이 비슷해도 생활용품은 제외
+
+
+# ---- 배송비: 쿠팡과 비교할 때 딜의 배송비까지 더한다
+
+
+def _toss(name: str, price: int, shipping: str | None, **kw) -> Product:  # type: ignore[no-untyped-def]
+    return Product(source="ppomppu", product_id="toss:1", shop="toss", name=name, price=price, url="u", shipping=shipping, **kw)
+
+
+@pytest.mark.parametrize(
+    ("shipping", "price", "fee"),
+    [
+        (None, 6900, 0), ("무료", 6900, 0), ("무배", 6900, 0), ("0원", 6900, 0), ("무료/카드할인", 6900, 0),
+        ("무료(제주 3,000원)", 6900, 0), ("3,500원", 6900, 3500), ("배송비 3,000원", 6900, 3000), ("3천원", 6900, 3000),
+        ("2,500(3만↑무료)", 6900, 2500), ("2,500(3만↑무료)", 35000, 0), ("3만원이상무료", 40000, 0),
+        ("3만원이상무료", 20000, None), ("조건부무료", 6900, None), ("착불", 6900, None), ("택배비 별도", 6900, None),
+        ("로켓배송", 6900, 0), ("카드할인", 6900, 0),  # 배송비 얘기가 아닌 글은 예전처럼 상품가로 비교
+    ],
+)
+def test_shipping_fee_parsing(shipping: str | None, price: int, fee: int | None) -> None:
+    from dealbot.pricing.evaluator import shipping_fee
+
+    assert shipping_fee(_toss("n", price, shipping)) == fee
+
+
+def test_market_comparison_includes_deal_shipping_fee() -> None:
+    from dealbot.pricing.market import MarketQuote
+
+    ev = DealEvaluator(DealConfig(interest=NO_GATE))
+    quote = MarketQuote(price=9900, source="coupang", title="3M 스카치브라이트 수세미 20개입")
+    # 6,900원 + 배송비 3,500원 = 10,400원 → 쿠팡 무료배송 9,900원보다 비쌈 (예전엔 '쿠팡보다 30%↓' 로 통과)
+    v = ev.evaluate(_toss("3M 스카치브라이트 수세미 20개입", 6900, "3,500원"), PriceStats(), quote, market_available=True)
+    assert not v.is_deal and "above_market_price" in v.reasons and v.below_market_pct == -5.1
+    # 무료배송이면 그대로 30% 싸서 통과
+    v = ev.evaluate(_toss("3M 스카치브라이트 수세미 20개입", 6900, "무료"), PriceStats(), quote, market_available=True)
+    assert v.is_deal and v.reasons == ["below_coupang_price>=20%"] and v.below_market_pct == 30.3
+    assert v.market_title == "3M 스카치브라이트 수세미 20개입"
+    # 배송비를 더해도 20% 넘게 싸면 통과하되, % 는 배송비 포함 값
+    v = ev.evaluate(_toss("n", 5000, "2,500원"), PriceStats(), MarketQuote(price=10000, source="coupang", title="n"), market_available=True)
+    assert v.is_deal and v.below_market_pct == 25.0
+
+
+def test_unknown_shipping_fee_never_makes_a_market_claim() -> None:
+    from dealbot.config import MarketCheckConfig
+    from dealbot.pricing.market import MarketQuote
+
+    quote = MarketQuote(price=9900, source="coupang", title="n")
+    p = _toss("n", 6900, "착불", recommend_count=9)
+    strict = DealEvaluator(DealConfig(interest=NO_GATE, community_min_recommend=5))
+    v = strict.evaluate(p, PriceStats(), quote, market_available=True)
+    assert not v.is_deal and v.reasons == ["market_shipping_unknown"] and v.below_market_pct is None
+    # strict 를 끄면 보조 규칙(추천)으로 판정하되, 글에 '쿠팡보다 N%↓' 를 쓸 근거(below_market_pct)는 남기지 않음
+    loose = DealEvaluator(DealConfig(interest=NO_GATE, community_min_recommend=5, recommend_needs_support=False,
+                                     market=MarketCheckConfig(strict=False)))
+    v = loose.evaluate(p, PriceStats(), quote, market_available=True)
+    assert v.is_deal and "market_shipping_unknown" in v.reasons and v.below_market_pct is None and v.market_price == 9900
+    v = loose.evaluate(_toss("n", 9000, "착불", recommend_count=9), PriceStats(), quote, market_available=True)
+    assert v.is_deal and "market_diff=9.1%" in v.reasons and v.below_market_pct is None
+    # 상품가만으로도 쿠팡보다 비싸면 배송비를 몰라도 탈락
+    v = strict.evaluate(_toss("n", 9900, "착불"), PriceStats(), quote, market_available=True)
+    assert not v.is_deal and "above_market_price" in v.reasons
+
+
+# ---- 식품 판정: 짧은 낱말이 다른 낱말 속에 들어 있어 생기는 오판
+
+
+@pytest.mark.food_rule
+@pytest.mark.parametrize(
+    "name",
+    [
+        "할리스 바닐라 딜라이트 로우슈거, 24개", "스파클 생수 무라벨, 500ml, 40병", "펩시 제로 라임 24캔", "팔도 비빔면 5개",
+        "유니짜장면 4인분", "칼국수면 10인분", "본죽 전복죽 6팩", "양배추즙 30포", "곰곰 냉동 만두 1kg", "닭갈비 1kg",
+        "멸치 다시팩 30개", "다시마 500g", "맥심 모카골드 180T",
+    ],
+)
+def test_is_food_catches_drinks_and_compound_food_words(name: str) -> None:
+    assert DealEvaluator(DealConfig()).is_food(Product(source="s", product_id="x", name=name, price=1, url="u"))
+
+
+@pytest.mark.food_rule
+@pytest.mark.parametrize(
+    "name",
+    [
+        "브라운 면도기 시리즈5", "존스미스 순면 화장솜 면봉 500개", "면 100% 티셔츠", "가죽 지갑 남성 반지갑", "인조가죽 소파",
+        "삼성 비스포크 냉동고 200L", "휴롬 착즙기 H300", "드롱기 커피머신 마그니피카", "LG 27인치 모니터 IPS 화면",
+        "삼성 대화면 TV", "양면 테이프 10개", "수면 양말 5켤레", "다시 입고된 운동화", "스타벅스 텀블러",
+    ],
+)
+def test_is_food_ignores_goods_that_contain_food_syllables(name: str) -> None:
+    assert not DealEvaluator(DealConfig()).is_food(Product(source="s", product_id="x", name=name, price=1, url="u"))
+
+
+@pytest.mark.food_rule
+def test_food_rule_also_reads_the_matched_coupang_title() -> None:
+    from dealbot.pricing.market import MarketQuote
+
+    ev = DealEvaluator(DealConfig(interest=NO_GATE))
+    # 딜 이름만으로는 식품인지 모름 → 쿠팡 상품 이름의 '285ml, 24개' 규격으로 음료임을 알아냄 → 식품 기준(50%) 적용
+    p = _toss("브랜드엑스 바닐라 딜라이트, 24개", 24900, "무료")
+    assert not ev.is_food(p)
+    v = ev.evaluate(p, PriceStats(), MarketQuote(price=35000, source="coupang", title="브랜드엑스 바닐라 딜라이트, 285ml, 24개"),
+                    market_available=True)
+    assert not v.is_deal and v.below_market_pct == 28.9 and v.reasons[-1] == "food_below_ref<50%"

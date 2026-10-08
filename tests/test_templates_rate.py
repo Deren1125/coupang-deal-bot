@@ -117,11 +117,14 @@ def test_emphasis_tiers(repo_root: Path) -> None:
 
     must = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop)
     assert must.startswith("👍 강추 <b>12,360원</b> · 평소보다 54%↓") and "⚖️ 개당 515원 꼴" in must
-    top = r.render_deal(deal(below_market_pct=72.0, market_price=45000), "https://l", shop=shop)
+    top = r.render_deal(deal(below_market_pct=72.5, market_price=45000), "https://l", shop=shop)
     assert top.startswith("🔥 초특가 <b>12,360원</b> · 쿠팡보다 73%↓")
     plain = r.render_deal(deal(below_avg_pct=6.0, avg_price=13207), "https://l", shop=shop)
     assert plain.startswith("☑️ <b>12,360원</b> · 개당 515원 꼴") and "평소" not in plain  # 6% 는 근거로 안 씀
-    low = r.render_deal(deal(below_avg_pct=20.0, avg_price=15450, low_price=13000, history_days=12.4), "https://l", shop=shop)
+    # 평소 가격 대비가 기록 최저가보다 먼저 (스타일 가이드 우선순위), 최저가는 평소 가격 근거가 없을 때
+    both = deal(below_avg_pct=20.0, avg_price=15450, low_price=13000, history_days=12.4, sample_count=6)
+    assert r.render_deal(both, "https://l", shop=shop).startswith("☑️ <b>12,360원</b> · 평소보다 20%↓")
+    low = r.render_deal(deal(below_avg_pct=8.4, avg_price=13500, low_price=13000, history_days=12.4, sample_count=6), "https://l", shop=shop)
     assert low.startswith("☑️ <b>12,360원</b> · 12일 중 제일 쌈")
     th = r.render_deal(deal(below_avg_pct=20.0, avg_price=15450), "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
     assert "갈아만든배 340ml 24개 12,360원임" in th and "평소보다 20% 쌈" in th and "쿠팡 파트너스" in th and "링크는 댓글에" in th
@@ -183,7 +186,7 @@ def test_threads_uses_ai_lines_and_category_hooks(repo_root: Path) -> None:
     d = Deal(product=p, verdict=DealVerdict(is_deal=True, avg_price=21800, below_avg_pct=31.7), affiliate_url="https://l")
     t = r.render_deal(d, "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
     lines = t.split("\n")
-    assert lines[0] in r.THREAD_HOOKS_BY_CAT[1][1]  # 생활용품 → 휴지·생필품 첫 줄
+    assert lines[0] == "휴지 떨어진 거 꼭 샤워 끝나고 알게 됨"  # 분류 '화장지' → 휴지 첫 줄 (상황 문장이라 '근데'로 뒤집음)
     assert "근데 크리넥스 30롤 14,900원임" in t and "평소보다 32% 쌈" in t and "롤당 497원 꼴이면" in t
     assert check_hook("휴지 떨어진 거 꼭 샤워 끝나고 알게 됨") and check_hook("어제 3개 샀음") is None
     assert check_short_name("크리넥스 30롤", "크리넥스 3겹 데코앤소프트 30m 30롤") == "크리넥스 30롤"

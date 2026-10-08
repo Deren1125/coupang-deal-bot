@@ -12,8 +12,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -39,6 +41,25 @@ KV_TOKEN = "threads_access_token"
 KV_TOKEN_EXPIRES = "threads_token_expires_at"
 KV_USER_ID = "threads_user_id"
 KV_USERNAME = "threads_username"
+# 최근 글에 쓴 첫 줄·마무리 (오래된 것부터, JSON 목록). 같은 문구를 최근 10건쯤 안에 다시 안 쓰려고 고를 때 뺀다
+KV_RECENT_LINES = "threads_recent_lines"
+RECENT_LINES_KEEP = 20  # 첫 줄은 매번, 마무리는 두 번에 한 번꼴 → 대략 최근 13~14건
+
+
+def fit_text(text: str, limit: int, keep: str | None = None) -> str:
+    """limit 자를 넘으면 본문을 줄 단위로 줄인다. keep(제휴 고지)부터 끝까지는 자르지 않는다."""
+    if len(text) <= limit:
+        return text
+    if keep and keep in text:
+        i = text.rfind(keep)
+        head, tail = text[:i].rstrip(), text[i:]
+        room = limit - len(tail) - 2
+        if room > 0:
+            cut = head[:room]
+            if "\n" in cut:
+                cut = cut[: cut.rfind("\n")]  # 반쯤 잘린 줄은 통째로 뺌
+            return cut.rstrip() + "\n\n" + tail
+    return text[:limit]
 
 # 메타는 컨테이너(특히 사진)를 처리할 시간이 필요하다 — 바로 게시하면 "(#24) The requested resource does not exist" /
 # "Media ID is not available" 이 난다. 상태를 물어 FINISHED 가 될 때까지 기다리고, 그래도 안 되면 조금 쉬었다 다시 게시한다.
@@ -310,8 +331,8 @@ class ThreadsPublisher:
         self.client = client
         self.db = db
         self.renderer = renderer
-        # 잘 되는 핫딜 계정들은 첫 글을 짧은 훅으로 쓰고, 링크와 수수료 고지는 답글에 단다.
-        # 링크가 든 글은 노출이 줄기도 해서 이 구조가 유리하다. reply_template 을 비우면 한 글로 올린다.
+        # 잘 되는 핫딜 계정들은 첫 글을 짧은 훅으로 쓰고, 링크는 답글에 단다 (수수료 고지는 첫 글·답글 둘 다).
+        # 링크가 든 글은 노출이 줄기도 해서 이 구조가 유리하다. reply_template 을 비우면 한 글로 올리고 링크는 고지 아래에.
         self.reply_template = reply_template
         self.registry = registry or ShopRegistry()
         self.template = template
@@ -351,17 +372,44 @@ class ThreadsPublisher:
         return token
 
     # ------------------------------------------------------------ 발행
-    def render(self, deal: Deal) -> str:
+    def recent_lines(self) -> list[str]:
+        """최근 스레드 글에 쓴 첫 줄·마무리 (오래된 것부터). 읽을 수 없으면 빈 목록."""
+        try:
+            data = json.loads(self.db.kv_get(KV_RECENT_LINES) or "[]")
+        except (AttributeError, TypeError, ValueError):
+            return []
+        return [x for x in data if isinstance(x, str)] if isinstance(data, list) else []
+
+    def _remember_lines(self, deal: Deal, recent: Sequence[str]) -> None:
+        """실제로 올린 글의 첫 줄·마무리를 최근 목록에 남긴다 (미리보기·연습 모드는 남기지 않음)."""
+        picked = self.renderer.thread_lines(deal.product, recent=recent)
+        used = [x for x in (picked["thread_hook"], picked["thread_close"]) if x]
+        lines = [x for x in recent if x not in used] + used
+        try:
+            self.db.kv_set(KV_RECENT_LINES, json.dumps(lines[-RECENT_LINES_KEEP:], ensure_ascii=False))
+        except Exception as e:  # noqa: BLE001 — 기록 실패가 발행을 막지 않게
+            log.warning("threads recent lines not saved: %s", e)
+
+    def render(self, deal: Deal, *, recent: Sequence[str] | None = None) -> str:
         link = deal.affiliate_url or deal.product.url
         shop = self.registry.get(deal.product.shop)
-        return self.renderer.render_deal(deal, link, shop=shop, template=self.template, autoescape=False)[:TEXT_LIMIT]
+        single = not self.reply_template  # 답글이 없으면 링크를 본문 끝(고지 아래)에
+        text = self.renderer.render_deal(
+            deal, link, shop=shop, template=self.template, autoescape=False,
+            recent=self.recent_lines() if recent is None else recent, single=single,
+        )
+        disclosure = shop.disclosure if shop else None
+        if single:
+            tail = f"👉 {link}"
+            return fit_text(text, TEXT_LIMIT - len(tail) - 1, keep=disclosure) + "\n" + tail
+        return fit_text(text, TEXT_LIMIT, keep=disclosure)
 
     def render_reply(self, deal: Deal) -> str | None:
         if not self.reply_template:
             return None
         link = deal.affiliate_url or deal.product.url
         shop = self.registry.get(deal.product.shop)
-        return self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)
+        return self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)[:TEXT_LIMIT]
 
     async def _post_with_fallback(
         self, token: ThreadsToken, text: str, image_url: str | None, fallback_image_url: str | None = None
@@ -412,7 +460,8 @@ class ThreadsPublisher:
     async def publish(self, deal: Deal, *, fallback_image_url: str | None = None) -> PublishResult:
         if not self.enabled:
             return PublishResult(ok=False, error="threads disabled")
-        text = self.render(deal)
+        recent = self.recent_lines()
+        text = self.render(deal, recent=recent)
         reply = self.render_reply(deal)
         if self.dry_run:
             log.info("[DRY-RUN] would post to threads:\n%s\n--- reply ---\n%s", text, reply or "(없음)")
@@ -425,6 +474,7 @@ class ThreadsPublisher:
         except ThreadsError as e:
             return PublishResult(ok=False, error=str(e))
         message_id = int(post_id) if post_id.isdigit() else None
+        self._remember_lines(deal, recent)
         if reply:
             try:
                 await self._reply(token, reply, post_id)

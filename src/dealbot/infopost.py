@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup, Tag
 from dealbot.collectors.ppomppu import BROWSER_HEADERS, decode_html
 from dealbot.models import Deal
 from dealbot.publisher.templates import TemplateRenderer
-from dealbot.utils.urls import unwrap_redirect
+from dealbot.utils.urls import is_affiliate_link, unwrap_redirect
 
 log = logging.getLogger(__name__)
 
@@ -37,8 +37,19 @@ _IMG_SKIP = re.compile(
     r"emoticon|emoji|/icon|smile|/level|blank|spacer|loading|logo|banner|btn_|button|\.svg(\?|$)|/images/(main|menu|common)/|dot\d",
     re.I,
 )
-_URL_LINE = re.compile(r"^\s*(https?://\S+)\s*$")
+_URL_LINE = re.compile(r"^\s*(?:·\s*)?(https?://\S+)\s*$")
+_INLINE_URL = re.compile(r"https?://[^\s<>\"']+")
 _BOARD_HOSTS = ("ruliweb.com", "ppomppu.co.kr", "algumon.com", "clien.net", "fmkorea.com", "quasarzone.com")
+# 남의 제휴(수수료) 링크. 정보 글은 수익 링크·제휴 고지 없이 올리므로, 그대로 내면 남의 파트너스 링크를 공시 없이 퍼 나르게 된다
+_AFFILIATE_HOSTS = ("link.coupang.com", "coupa.ng", "linkprice.com", "s.click.aliexpress.com")
+_AFFILIATE_PATHS = (("toss.im", "/_m/"),)  # 토스 쉐어링크
+_AFFILIATE_PARAMS = {"lptag"}  # 링크프라이스 추적값: 떼면 원래 상품·이벤트 주소만 남는다
+THREADS_BODY_CHARS = 260  # 스레드 글(500자 제한)에 넣는 본문 길이
+# 게시판 표시: 인용(>)과 글머리(▶ ☞ ■ …, 빈칸이 뒤따르는 '-' '*'). '-10%' 는 숫자라 그대로, ※(주의)·→ 는 뜻이 있어 둔다
+_QUOTE_MARK = re.compile(r"^>+\s*")
+_ITEM_MARK = re.compile(r"^(?:[▶►▷▸☞•■□●○◆◇]+\s*|[-*]\s+)")
+# 글 끝의 짧은 끝인사·잡담 ("좋은 딜 되세요~", "즐쇼하세요", "감사합니다"). "응모하시면 되세요" 같은 안내는 건드리지 않게 좁게
+_SIGN_OFF = re.compile(r"좋은\s*(?:딜|쇼핑|하루)|득템\s*하세요|즐(?:거운)?\s*쇼핑|즐쇼|감사합니다\s*[~!.]*$")
 # 본문 상자 안에 섞여 들어오는 게시판 버튼 글자들 (한 줄이 정확히 이것뿐이면 뺀다)
 _NAV_LINES = {"목록", "댓글", "추천", "비추천", "신고", "인쇄", "스크랩", "글쓰기", "답글", "수정", "삭제", "이전글", "다음글", "공유", "URL 복사", "닫기", "더보기"}
 _NOISE_BLOCK = re.compile(r"(^|[_\-\s])(comment|comments|reply|replies|cmt|sns|share|related|banner|ads?)([_\-\s]|$)", re.I)
@@ -59,13 +70,60 @@ class PostBody:
         return not self.text and not self.images
 
 
+def strip_foreign_affiliate(url: str) -> str | None:
+    """본문 링크에서 남의 제휴 표시를 걷어 낸다: lptag 같은 추적값은 떼고, 제휴 전용 주소(파트너스 단축 링크 등)는 None (버림)."""
+    try:
+        u = urlparse(url)
+    except ValueError:
+        return url
+    host = u.netloc.lower()
+    if any(host == h or host.endswith("." + h) for h in _AFFILIATE_HOSTS):
+        return None
+    if any((host == h or host.endswith("." + h)) and u.path.startswith(p) for h, p in _AFFILIATE_PATHS):
+        return None
+    params = parse_qsl(u.query, keep_blank_values=True)
+    if any(k.lower() in _AFFILIATE_PARAMS for k, _ in params):
+        url = urlunparse(u._replace(query=urlencode([(k, v) for k, v in params if k.lower() not in _AFFILIATE_PARAMS])))
+    return None if is_affiliate_link(url) else url
+
+
 def _clean_lines(raw: str) -> list[str]:
+    """줄 정리: 남의 제휴 주소 지우기, 빈칸 합치기, 게시판 버튼 글자 빼기, ▶ / > 같은 게시판 표시는 '· ' 글머리로."""
     out: list[str] = []
+    in_item = False  # 바로 위가 글머리(▶) 줄이거나 거기 딸린 줄인지
     for line in raw.splitlines():
-        s = re.sub(r"[ \t ]+", " ", line).strip()
+        s = _INLINE_URL.sub(lambda m: strip_foreign_affiliate(m.group(0)) or "", line)
+        s = re.sub(r"[ \t ]+", " ", s).strip()
         if not s or s in _NAV_LINES:
             continue
-        out.append(s)
+        if _QUOTE_MARK.match(s):
+            s = _QUOTE_MARK.sub("", s)
+            # 상품 줄(▶) 바로 아래의 '>' 줄은 그 상품에 딸린 설명(쿠폰·조건)이라 들여 써서 붙인다
+            s = ("  └ " if in_item else "· ") + s if s else ""
+        elif _ITEM_MARK.match(s):
+            s = _ITEM_MARK.sub("", s)
+            s = "· " + s if s else ""
+            in_item = True
+        else:
+            in_item = False
+        if s:
+            out.append(s)
+    return out
+
+
+def _dedupe_lines(lines: list[str]) -> list[str]:
+    """바로 위 줄 반복, 제목(첫 줄) 반복, 긴 문단 반복만 지운다.
+    상품마다 붙는 짧은 줄('└ 쿠폰 할인 최대 7%')은 남긴다 — 첫 상품에만 남으면 쿠폰이 한 모델 얘기처럼 보인다."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for ln in lines:
+        if out and (ln == out[-1] or ln == out[0] or (len(ln) >= 40 and ln in seen)):
+            continue
+        out.append(ln)
+        seen.add(ln)
+    # 글 끝의 짧은 끝인사(작성자 잡담)는 뺀다. 숫자가 있으면 정보일 수 있어 둔다
+    while len(out) > 1 and len(out[-1]) <= 30 and not re.search(r"\d", out[-1]) and _SIGN_OFF.search(out[-1]):
+        out.pop()
     return out
 
 
@@ -117,9 +175,11 @@ def _cut(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     cut = text[:max_chars]
-    # 줄 중간에서 끊기지 않게 마지막 줄바꿈까지
+    # 줄 중간에서 끊기지 않게 마지막 줄바꿈까지 (뒷부분에 줄바꿈이 없으면 마지막 빈칸까지: 낱말 중간은 피한다)
     if "\n" in cut[max_chars // 2 :]:
         cut = cut[: cut.rfind("\n")]
+    elif " " in cut[max_chars // 2 :]:
+        cut = cut[: cut.rfind(" ")]
     return cut.rstrip() + "…"
 
 
@@ -183,12 +243,13 @@ def extract_post_body(
         host = urlparse(href).netloc.lower()
         if any(host.endswith(b) for b in _BOARD_HOSTS):
             continue
-        if href not in links:
+        href = strip_foreign_affiliate(href)  # 남의 제휴 링크는 버리고, lptag 같은 추적값은 뗀다
+        if href and href not in links:
             links.append(href)
 
-    # 본문 텍스트: 줄 단위로 정리, URL 만 있는 줄은 빼고, 같은 줄 반복 제거
+    # 본문 텍스트: 줄 단위로 정리, URL 만 있는 줄은 빼고, 반복 줄·끝인사 제거
     lines = [ln for ln in _clean_lines(container.get_text("\n")) if not _URL_LINE.match(ln)]
-    joined = "\n".join(dict.fromkeys(lines))
+    joined = "\n".join(_dedupe_lines(lines))
     return PostBody(
         text=_cut(joined, max_chars),
         images=images,
@@ -244,11 +305,14 @@ class InfoPostBuilder:
 
     def context(self, deal: Deal, body: PostBody) -> dict[str, Any]:
         p = deal.product
+        # 관리자 확인(/ok)으로 저장돼 있던 예전 초안의 링크도 같은 기준으로 거른다
+        links = [u for u in (strip_foreign_affiliate(x) for x in body.links) if u]
         return {
             "product": p,
             "body": body.text,
+            "threads_body": _cut(body.text, THREADS_BODY_CHARS),  # 스레드용: 줄 끝(없으면 낱말 끝)에서 자름
             "images": body.images,
-            "links": body.links,
+            "links": links,
             "source_url": p.extra.get("post_url") or p.url,
             "source_name": p.extra.get("source_label") or p.source,
         }

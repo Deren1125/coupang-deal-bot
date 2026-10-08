@@ -376,6 +376,8 @@ class AdminNotifier:
         p = deal.product
         where = f"어디서: {html.escape(self.source_label(p.source))} → {html.escape(self.shop_label(p.shop))}"
         why = f"고른 이유: {html.escape(humanize_reasons(deal.verdict.reasons))} · 점수 {deal.verdict.score:g}"
+        if deal.verdict.market_title and deal.verdict.market_price:  # 같은 상품(같은 수량)과 비교했는지 눈으로 확인
+            why += f"\n비교한 쿠팡 상품: {html.escape(truncate(deal.verdict.market_title, 60))} {deal.verdict.market_price:,}원"
         if result.dry_run and preview:
             photo = " · 🖼 사진 있음" if p.image_url else ""
             text = (
