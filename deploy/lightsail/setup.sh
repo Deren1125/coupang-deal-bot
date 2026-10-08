@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 # Lightsail(Ubuntu) 에 Docker 없이 설치: 파이썬 가상환경 + systemd 서비스 + 1분 자동 업데이트.
 #   처음:      cd ~ && git clone https://github.com/Deren1125/coupang-deal-bot.git && cd coupang-deal-bot && bash deploy/lightsail/setup.sh
-#   다시 실행: 코드·패키지만 갱신하고 서비스를 재시작한다 (.env 는 그대로).
+#   다시 실행: 최신 코드(GitHub main)를 받고 패키지를 갱신한 뒤 서비스를 재시작한다 (.env 는 그대로).
 # 키 입력은 bash deploy/lightsail/setenv.sh 이름  (화면에 안 보임, 아이패드에서도 됨)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 APP_DIR="$(pwd)"
 RUN_USER="$(id -un)"
 DATA_DIR="${DEALBOT_DATA_DIR:-$HOME/dealbot-data}"
+
+echo "▶ 최신 코드 받기"
+if git pull -q --ff-only origin main; then
+  rm -f var/update_failed_* var/update_bad_* 2>/dev/null || true  # 막혀 있던 자동 업데이트도 다시 시도하게
+else
+  echo "⚠️ 최신 코드를 못 받았어요 — 서버에서 파일을 직접 고쳤으면 git status 로 확인 (지금 있는 코드로 계속 진행)"
+fi
+echo "   지금 코드: $(git log -1 --format='%h %s' | cut -c1-70)"
 
 echo "▶ 1/5 패키지 설치"
 PY=""
@@ -27,6 +35,7 @@ echo "▶ 2/5 가상환경 ($PY)"
 [ -x .venv/bin/python ] || "$PY" -m venv .venv
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -e .
+mkdir -p var && sha256sum pyproject.toml | cut -d' ' -f1 > var/installed_pyproject  # 자동 업데이트는 이게 바뀔 때만 다시 설치
 
 echo "▶ 3/5 데이터 폴더 $DATA_DIR"
 mkdir -p "$DATA_DIR"
@@ -52,6 +61,9 @@ EnvironmentFile=$APP_DIR/.env
 ExecStart=$APP_DIR/.venv/bin/python -m dealbot run
 Restart=always
 RestartSec=15
+# 재시작 때 봇이 하던 발행(스레드 글 → 링크 답글)을 마치고 끄도록: SIGTERM 은 봇에게만, 최대 90초 기다림
+KillMode=mixed
+TimeoutStopSec=90
 [Install]
 WantedBy=multi-user.target
 UNIT

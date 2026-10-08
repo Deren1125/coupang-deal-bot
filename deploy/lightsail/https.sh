@@ -3,8 +3,10 @@
 #   bash deploy/lightsail/https.sh
 # 미리 할 일: Lightsail 콘솔 → 인스턴스 → 네트워킹 → IPv4 방화벽에 HTTP(80), HTTPS(443) 추가
 # 결과 주소 예: https://52-79-136-64.sslip.io/threads/callback  ← 스레드 앱 설정의 '리디렉션 URI' 에 넣는다
+# 주소는 서버 IP 로 만들어지므로 Lightsail 고정 IP 를 붙여 두는 게 좋다 (안 붙이면 서버를 껐다 켤 때 IP·주소가 바뀜)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+CADDY_DIR="${CADDY_DIR:-/etc/caddy}"  # (테스트에서만 바꿈)
 
 echo "▶ 1/4 서버 주소 확인"
 IP="$(curl -s --max-time 5 https://checkip.amazonaws.com | tr -d '[:space:]' || true)"
@@ -13,8 +15,13 @@ IP="$(curl -s --max-time 5 https://checkip.amazonaws.com | tr -d '[:space:]' || 
 DOMAIN="${IP//./-}.sslip.io"
 PORT="$(grep -E '^PORT=' .env | tail -1 | cut -d= -f2- || true)"  # 없으면 기본 8080
 PORT="${PORT:-8080}"
+OLD_DOMAIN="$(grep -E '^PUBLIC_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)"
 
 echo "   $DOMAIN"
+if [ -n "$OLD_DOMAIN" ] && [ "$OLD_DOMAIN" != "$DOMAIN" ]; then
+  echo "⚠️ 서버 주소가 바뀌었어요: $OLD_DOMAIN → $DOMAIN"
+  echo "   스레드·인스타 앱 설정의 리디렉션 URI 도 새 주소로 바꿔야 해요 (맨 아래에 나오는 주소)"
+fi
 echo "▶ 2/4 Caddy(HTTPS) 설치·설정"
 if ! command -v caddy >/dev/null; then
   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
@@ -24,22 +31,52 @@ if ! command -v caddy >/dev/null; then
   sudo apt-get install -y caddy
 fi
 
-sudo tee /etc/caddy/Caddyfile >/dev/null <<CADDY
-$DOMAIN {
+SITE="$DOMAIN {
 	reverse_proxy 127.0.0.1:$PORT
-}
-CADDY
+}"
+# 설치 직후 기본 Caddyfile 이거나 이 스크립트가 쓴 것이면 통째로 바꾸고,
+# 다른 사이트 설정이 들어 있으면 그대로 두고 핫딜 봇 주소는 따로 파일(dealbot.caddy)로 만들어 import 한 줄만 더한다
+KNOWN='^[[:space:]]*(#.*)?$|^:80 \{$|^[[:space:]]*root \* /usr/share/caddy$|^[[:space:]]*file_server$|^[0-9-]+\.sslip\.io \{$|^[[:space:]]*reverse_proxy 127\.0\.0\.1:[0-9]+$|^\}$'
+if [ ! -s "$CADDY_DIR/Caddyfile" ] || ! grep -vqE "$KNOWN" "$CADDY_DIR/Caddyfile"; then
+  printf '%s\n' "$SITE" | sudo tee "$CADDY_DIR/Caddyfile" >/dev/null
+else
+  printf '%s\n' "$SITE" | sudo tee "$CADDY_DIR/dealbot.caddy" >/dev/null
+  if ! grep -qF "import $CADDY_DIR/dealbot.caddy" "$CADDY_DIR/Caddyfile"; then
+    BAK="$CADDY_DIR/Caddyfile.bak-$(date +%m%d_%H%M%S)"
+    sudo cp "$CADDY_DIR/Caddyfile" "$BAK"
+    printf '\nimport %s/dealbot.caddy\n' "$CADDY_DIR" | sudo tee -a "$CADDY_DIR/Caddyfile" >/dev/null
+    echo "   Caddyfile 에 다른 사이트 설정이 있어서 그대로 두고 import 한 줄만 더했어요 (전 파일: $BAK)"
+  fi
+fi
 sudo systemctl enable caddy >/dev/null
 sudo systemctl restart caddy
 
 echo "▶ 3/4 봇에 주소 기록 후 재시작"
-# 봇이 이 주소로 콜백 주소를 만들도록 .env 에 기록 (값 하나만 바꿈)
+# 봇이 이 주소로 콜백 주소를 만들도록 .env 에 기록. 다른 주소를 가리키는 리디렉션 설정(예전 Railway·예시 값)이 남아 있으면
+# 봇이 그걸 먼저 써서 스레드 로그인이 '리디렉션 URI 불일치'로 실패하므로 지운다 (바꾸기 전 .env 는 백업)
+touch .env
+mkdir -p var/env_backups && chmod 700 var/env_backups
+cp .env "var/env_backups/env_$(date +%m%d_%H%M%S_%N)"
+ls -1t var/env_backups/env_* 2>/dev/null | tail -n +21 | xargs -r rm -f --  # setenv.sh 와 같이 최근 20개만
 python3 - .env "$DOMAIN" <<'PY'
 import sys
+from urllib.parse import urlparse
+
 path, domain = sys.argv[1], sys.argv[2]
-lines = [l for l in open(path, encoding="utf-8").read().splitlines() if not l.startswith("PUBLIC_DOMAIN=")]
-lines.append(f"PUBLIC_DOMAIN={domain}")
-open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+out = []
+for line in open(path, encoding="utf-8").read().splitlines():
+    key, _, value = line.partition("=")
+    key = key.strip()
+    if key == "PUBLIC_DOMAIN":
+        continue
+    if key in ("THREADS_REDIRECT_URI", "INSTAGRAM_REDIRECT_URI"):
+        host = urlparse(value.strip().strip("'\"")).hostname or ""
+        if host != domain.split(":")[0]:
+            print(f"   {key} 지움 — 다른 주소({value.strip()})를 가리키고 있었어요. 이제 {domain} 기준으로 자동으로 맞춰져요")
+            continue
+    out.append(line)
+out.append(f"PUBLIC_DOMAIN={domain}")
+open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
 PY
 chmod 600 .env
 sudo systemctl restart dealbot || true
@@ -57,3 +94,6 @@ else
 fi
 echo "스레드 앱 '리디렉션 콜백 URL': https://$DOMAIN/threads/callback"
 echo "그다음 텔레그램 관리자 챗에서 /threadsauth"
+echo
+echo "💡 Lightsail 고정 IP 를 붙여 두면 서버를 껐다 켜도 이 주소가 그대로예요"
+echo "   (콘솔 → 네트워킹 → 고정 IP 만들기 → 이 인스턴스에 연결). 붙인 뒤엔 이 스크립트를 한 번 더 실행하세요."

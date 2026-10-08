@@ -3,17 +3,75 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 import signal
+import time
+from collections.abc import Iterator
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from dealbot.app import DealBot
-from dealbot.monitoring.admin import heartbeat_due
+from dealbot.monitoring.admin import CODE_SHA, heartbeat_due
 from dealbot.utils.timeutil import local_now, next_daily_time, utcnow
 
 log = logging.getLogger(__name__)
+
+# 재시작(SIGTERM) 때 하던 발행(텔레그램 → 스레드 글 → 링크 답글)을 마칠 시간. systemd 기본 TimeoutStopSec(90초) 안
+SHUTDOWN_GRACE_SECONDS = 60.0
+
+# ---- 자동 업데이트(deploy/lightsail/auto-update.sh)와 주고받는 표식. git 으로 받은 서버에서만 쓴다 (도커 이미지엔 없음)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+VAR_DIR: Path | None = _REPO_ROOT / "var" if (_REPO_ROOT / ".git").exists() else None
+UPDATE_MARK_MAX_AGE = 600  # 초. 이보다 오래된 var/updating 은 업데이트가 죽고 남은 찌꺼기로 보고 무시
+
+
+def write_running_version() -> None:
+    """지금 돌고 있는 커밋을 var/running_version 에 적는다 — auto-update.sh 가 받은 코드(HEAD)와 비교해서
+    아직 재시작이 안 됐으면 다시 시도한다. 이전 실행이 강제 종료로 남긴 발행 중 표식도 지운다."""
+    if VAR_DIR is None:
+        return
+    try:
+        (VAR_DIR / "busy").mkdir(parents=True, exist_ok=True)
+        (VAR_DIR / "running_version").write_text(CODE_SHA + "\n", encoding="utf-8")
+        for old in (VAR_DIR / "busy").glob("publish_*"):
+            old.unlink(missing_ok=True)
+    except OSError as e:
+        log.warning("var/running_version 을 못 썼습니다 (자동 업데이트가 재시작 여부를 모름): %s", e)
+
+
+@contextlib.contextmanager
+def publishing_mark() -> Iterator[None]:
+    """발행하는 동안 var/busy/publish_<pid> 를 둔다 — auto-update.sh 는 이게 있으면 재시작을 1분 미룬다."""
+    mark: Path | None = None
+    if VAR_DIR is not None:
+        try:
+            (VAR_DIR / "busy").mkdir(parents=True, exist_ok=True)
+            mark = VAR_DIR / "busy" / f"publish_{os.getpid()}"
+            mark.write_text("publish", encoding="utf-8")
+        except OSError:
+            mark = None
+    try:
+        yield
+    finally:
+        if mark is not None:
+            mark.unlink(missing_ok=True)
+
+
+def update_in_progress(started_at: float) -> bool:
+    """auto-update.sh 가 새 코드를 받는 중(var/updating)이면 True — 그동안 옛 프로세스는 새 글을 시작하지 않는다
+    (받은 새 템플릿을 옛 코드로 그리다 깨지지 않게). 이 프로세스가 켜지기 전부터 있던 표식은
+    재시작 뒤 새 프로세스가 볼 일이 아니므로 무시한다."""
+    if VAR_DIR is None:
+        return False
+    try:
+        mtime = (VAR_DIR / "updating").stat().st_mtime
+    except OSError:
+        return False
+    return mtime >= started_at and time.time() - mtime < UPDATE_MARK_MAX_AGE
 
 
 async def _sleep_or_stop(stop: asyncio.Event, seconds: float) -> None:
@@ -53,9 +111,15 @@ async def collector_loop(bot: DealBot, stop: asyncio.Event) -> None:
 
 async def publisher_loop(bot: DealBot, stop: asyncio.Event) -> None:
     tick = bot.settings.publish.publisher_tick_seconds
+    started = time.time()
     while not stop.is_set():
         try:
-            await bot.process_queue_once()
+            # 표식을 먼저 놓고 업데이트 여부를 본다 (auto-update.sh 는 반대 순서) → 둘이 엇갈려 동시에 진행하지 않음
+            with publishing_mark():
+                if update_in_progress(started):
+                    log.info("자동 업데이트가 새 코드를 받는 중 — 새 글 발행은 재시작 뒤에")
+                else:
+                    await bot.process_queue_once()
         except Exception as e:  # noqa: BLE001
             log.exception("publisher loop error")
             bot.db.log_event("ERROR", "publisher", f"{type(e).__name__}: {e}")
@@ -164,6 +228,7 @@ def _install_signal_handlers(stop: asyncio.Event) -> None:
 async def run_forever(bot: DealBot) -> None:
     stop = asyncio.Event()
     _install_signal_handlers(stop)
+    write_running_version()
 
     try:
         await bot.start_telegram(polling=True)
@@ -208,8 +273,12 @@ async def run_forever(bot: DealBot) -> None:
     try:
         await stop.wait()
     finally:
-        log.info("shutting down...")
-        for t in tasks:
+        stop.set()  # 예외로 빠져나와도 루프들이 멈추도록
+        # 루프들은 stop 을 보고 스스로 끝난다. 발행 중이던 글은 링크 답글·카드까지 마치게 기다렸다가 (최대 SHUTDOWN_GRACE_SECONDS)
+        log.info("shutting down — 하던 작업을 마치는 중 (최대 %d초)...", SHUTDOWN_GRACE_SECONDS)
+        _, pending = await asyncio.wait(tasks, timeout=SHUTDOWN_GRACE_SECONDS)
+        for t in pending:
+            log.warning("종료 대기 시간이 지나 중단합니다: %s", t.get_name())
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         bot.db.log_event("INFO", "lifecycle", "stopped")
