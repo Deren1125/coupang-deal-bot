@@ -198,7 +198,7 @@ def heartbeat_due(last_activity: datetime, now: datetime, minutes: int) -> bool:
 
 # 텔레그램 "/" 메뉴에 등록할 명령 (이름은 영문 소문자·숫자·밑줄만 가능 — 텔레그램 규칙)
 BLOG_RELAY_COMMANDS = ("blog", "blognow", "blogmode", "blogpause", "blogresume", "blogposts", "blogpublish",
-                       "blogretry", "blogdrafts", "blogstatus", "bloglogin", "kakao")
+                       "blogretry", "blogdrafts", "blogstatus", "bloglogin", "blogsubmit", "kakao")
 
 BOT_COMMANDS: list[tuple[str, str]] = [
     ("status", "지금 상태 (수집기·발행·대기열)"),
@@ -227,6 +227,7 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("blogdrafts", "블로그 임시저장함 정리"),
     ("blogstatus", "블로그 상태"),
     ("bloglogin", "블로그 네이버 로그인 확인"),
+    ("blogsubmit", "블로그 검색 등록 기록 (/blogsubmit 번호 = 다시)"),
     ("kakao", "카카오톡 나에게 보내기 연결 (/kakao test)"),
     ("test", "채널에 올라갈 글 양식 미리 보기 (샘플)"),
     ("threadstest", "스레드에 샘플 글 올려 보기 (번호 주면 그 글)"),
@@ -937,6 +938,7 @@ HELP_TEXT = (
     "/blogpause · /blogresume — 블로그 자동 작업 멈춤·재개\n"
     "/blogposts — 블로그 최근 글 · /blogstatus — 블로그 상태 · /bloglogin — 네이버 로그인 확인\n"
     "/blogpublish 번호 — 저장된 글 발행 · /blogretry 번호 — 실패한 글 다시 올리기 · /blogdrafts — 임시저장함 정리\n"
+    "/blogsubmit — 구글 노출 등록(키자드) 기록 · /blogsubmit 번호 — 그 글 다시 등록\n"
     "/kakao — 카카오톡 나에게 보내기 연결 (/kakao test 로 확인)\n\n"
     "/run — 지금 바로 게시판을 확인합니다. /run ppomppu 처럼 하나만도 됩니다.\n"
     "/pause — 잠시 멈춤 (게시판 확인과 올리기 모두). /resume — 다시 시작.\n"
