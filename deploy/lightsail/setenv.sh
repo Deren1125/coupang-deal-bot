@@ -2,16 +2,21 @@
 # .env 의 값 하나를 바꾼다 — 편집기(nano) 없이, Ctrl 키 없이 (아이패드용).
 #   bash deploy/lightsail/setenv.sh TELEGRAM_BOT_TOKEN   → 값 입력(화면에 안 보임) → Enter
 #   bash deploy/lightsail/setenv.sh --clean                    → 이름 없이 값만 있는 줄·같은 이름의 빈 줄 정리 (백업 남김)
-# 같은 이름 줄이 여러 개면 모두 지우고 한 줄로 맞춘다. 바꾸기 전 .env 는 var/env_backups/ 에 백업.
+# 같은 이름 줄이 여러 개면 모두 지우고 한 줄로 맞춘다. 바꾸기 전 .env 는 var/env_backups/ 에 백업 (최근 20개만 남김).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 ENV_FILE=".env"
 touch "$ENV_FILE"
-mkdir -p var/env_backups
-chmod 700 var/env_backups
-cp "$ENV_FILE" "var/env_backups/env_$(date +%m%d_%H%M%S_%N)"
+
+backup() {  # 실제로 바꾸기 직전에만 (값이 틀려 저장 안 한 경우엔 백업도 안 남김)
+  mkdir -p var/env_backups
+  chmod 700 var/env_backups
+  cp "$ENV_FILE" "var/env_backups/env_$(date +%m%d_%H%M%S_%N)"
+  ls -1t var/env_backups/env_* 2>/dev/null | tail -n +21 | xargs -r rm -f --
+}
 
 if [ "${1:-}" = "--clean" ]; then
+  backup
   python3 - "$ENV_FILE" <<'PY'
 import sys
 path = sys.argv[1]
@@ -48,12 +53,24 @@ read -r -s -p "$KEY 값 붙여넣기 (화면에 안 보임) → Enter: " VALUE
 echo
 VALUE="$(printf '%s' "$VALUE" | tr -d '\r\n' | sed 's/^ *//; s/ *$//')"
 [ -n "$VALUE" ] || { echo "⛔ 값이 비어 있어 바꾸지 않았어요"; exit 1; }
-# 키·토큰·ID 는 영문·숫자·기호뿐 — 한글 자판으로 눌린 글자(ㅋ 등)가 섞이면 저장하지 않음
-case "$KEY" in *KEY*|*TOKEN*|*SECRET*|*_ID)
-  if printf '%s' "$VALUE" | LC_ALL=C grep -q '[^ -~]'; then
-    echo "⛔ 값에 한글 등 영문이 아닌 글자가 섞여 있어 저장하지 않았어요 (한/영 키 확인 후 다시 붙여넣기)"; exit 1
-  fi;;
+# 키·토큰·ID·주소는 영문·숫자·기호뿐 — 한글 자판으로 눌린 글자(ㅋ 등)가 섞이면 저장하지 않음.
+# 폴더 경로처럼 한글이 들어갈 수 있는 이름만 예외
+case "$KEY" in
+  *_DIR|*_PATH|DEALBOT_CONFIG|*_TEXT|*_NAME|*_MESSAGE) ;;
+  *)
+    if printf '%s' "$VALUE" | LC_ALL=C grep -q '[^ -~]'; then
+      echo "⛔ 값에 한글 등 영문이 아닌 글자가 섞여 있어 저장하지 않았어요 (한/영 키 확인 후 다시 붙여넣기)"; exit 1
+    fi;;
 esac
+# 모양이 정해진 값은 한 번 더 확인
+bad() { echo "⛔ $KEY: $1 — 저장하지 않았어요"; exit 1; }
+case "$KEY" in
+  PUBLIC_DOMAIN) [[ $VALUE =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || bad "주소 이름만 넣어 주세요 (예: 52-79-136-64.sslip.io, https:// 와 / 는 빼고)" ;;
+  PORT) [[ $VALUE =~ ^[0-9]+$ ]] || bad "숫자만 넣어 주세요 (예: 8080)" ;;
+  TELEGRAM_ADMIN_CHAT_ID) [[ $VALUE =~ ^-?[0-9]+$ ]] || bad "숫자만 넣어 주세요 (@userinfobot 이 알려준 숫자)" ;;
+  *_URI|*_URL) [[ $VALUE =~ ^https?://[^[:space:]]+$ ]] || bad "https:// 로 시작하는 주소를 넣어 주세요" ;;
+esac
+backup
 KEY="$KEY" VALUE="$VALUE" python3 - "$ENV_FILE" <<'PY'
 import os, sys
 path, key, value = sys.argv[1], os.environ["KEY"], os.environ["VALUE"]

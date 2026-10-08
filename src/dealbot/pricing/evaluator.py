@@ -16,13 +16,18 @@ import re
 
 from dealbot.config import DealConfig, SourceRule
 from dealbot.models import DealVerdict, PriceStats, Product
-from dealbot.pricing.market import MarketQuote
+from dealbot.pricing.market import MarketQuote, same_quantity
 
 # ---- 배송비: 뽐뿌 제목 '(6,900원/3,500원)' 의 뒤쪽 원문(Product.shipping)을 원 단위로
 _SHIP_FREE_WORDS = ("무료", "무배", "free")
 _SHIP_PAID_WORDS = ("착불", "별도", "유료", "배송비", "택배비", "선불")  # 돈을 내는데 금액이 안 적힌 경우
+_SHIP_INCLUDED_RE = re.compile(r"(?:배송비?|택배비?|배송료)포함|^포함")  # '배송비포함' = 상품가에 들어 있음
 _SHIP_THRESHOLD_RE = re.compile(r"(\d+(?:\.\d+)?)만원?(?:이상|↑)|(\d{1,3}(?:,\d{3})+|\d{4,})원?(?:이상|↑)")  # '3만↑무료'
-_SHIP_FEE_RE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(천)?")
+# 할인율·개수 숫자는 배송비가 아님: '카드10%', '2개/무료', '1+1/무료'
+_SHIP_FEE_RE = re.compile(
+    r"(?<![\d.,+])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(천)?"
+    r"(?![\d.,]*(?:%|개|입|매|병|캔|팩|봉|포|세트|박스|kg|g|ml|l|\+|x))"
+)
 
 
 def shipping_fee(product: Product) -> int | None:
@@ -31,6 +36,8 @@ def shipping_fee(product: Product) -> int | None:
     is_free_shipping 을 켜므로 그 값보다 원문을 먼저 본다)."""
     s = (product.shipping or "").replace(" ", "").lower()
     if not s:
+        return 0
+    if _SHIP_INCLUDED_RE.search(s):
         return 0
     threshold = None
     m = _SHIP_THRESHOLD_RE.search(s)
@@ -50,6 +57,11 @@ def shipping_fee(product: Product) -> int | None:
         return None  # 조건부 무료인데 조건을 못 넘었거나 조건을 모름
     if any(w in head for w in _SHIP_FREE_WORDS):
         return 0
+    if any(w in head for w in _SHIP_PAID_WORDS):
+        return None
+    # 앞쪽이 배송 얘기가 아니면 뒤쪽 칸도 본다: '카드10%할인/무료' (단 '착불/무료반품' 은 위에서 이미 걸러짐)
+    if any(w in re.split(r"\(", seg)[0] for seg in s.split("/")[1:] for w in _SHIP_FREE_WORDS):
+        return 0
     if any(w in s for w in _SHIP_PAID_WORDS):
         return None
     return 0  # '로켓배송', '카드할인' 처럼 배송비 얘기가 아닌 글 (예전처럼 상품가로 비교)
@@ -60,23 +72,39 @@ def shipping_fee(product: Product) -> int | None:
 # (비빔면·전복죽·양배추즙 O / 면도기·면봉·착즙기 X). 끝에 와도 식품이 아닌 낱말은 뺀다.
 # 값: (그 글자 하나만 쓴 낱말도 식품인가, 식품이 아닌 낱말 패턴). 수면·장면은 낱말 전체일 때만 (칼국수면·짜장면은 식품)
 _WORD_END_FOOD: dict[str, tuple[bool, re.Pattern[str] | None]] = {
-    # '면' 하나만 쓴 낱말은 대개 옷감('면 100%')
-    "면": (False, re.compile(r"(?:화|양|단|측|평|곡|표|순|앞|뒷|옆|윗|밑|겉|대)면$|^(?:전|후|정|이|내|수|지|장|안|세|가)면$")),
+    # '면' 하나만 쓴 낱말은 대개 옷감('면 100%'). 바닥면·접촉면 같은 겉면, '적용하면·사면' 같은 말끝도 식품 아님
+    "면": (False, re.compile(
+        r"(?:화|양|단|측|평|곡|표|순|앞|뒷|옆|윗|밑|겉|대|숙|바닥|아랫|접촉|하|으|되|려|시|사|보|오|주)면$"
+        r"|^(?:전|후|정|이|내|수|지|장|안|세|가)면$"
+    )),
     "죽": (True, re.compile(r"가죽$|^폭죽$")),
     "즙": (True, None),
 }
 # 낱말 그대로 찾으면 엉뚱한 데 걸리는 것: '다시 입고' 의 다시 ≠ 다시마·다시팩
 _FOOD_WORD_RE = {"다시": re.compile(r"다시(?:마|팩|백)|(?<=[가-힣])다시(?![가-힣])")}
 _HANGUL_WORD_RE = re.compile(r"[가-힣]+")
-# 식품 낱말(커피·냉동·면·즙…)이 들어 있지만 식품이 아닌 물건: 있으면 식품 아님
+# 식품 낱말(커피·냉동·면·즙…)이 들어 있거나 음료처럼 '1.8L, 6개' 규격인 물건: 딜 이름에 있으면 식품 아님
 _NON_FOOD_EXTRA = (
-    "면도기", "면봉", "화장솜", "냉동고", "냉동실", "냉장고", "착즙기", "원액기", "머신", "그라인더", "드리퍼", "커피포트", "커피잔",
+    "면도기", "면봉", "화장솜", "냉동고", "냉동실", "냉장고", "착즙기", "원액기", "그라인더", "드리퍼", "커피포트", "커피잔",
     "텀블러", "머그", "모니터", "지갑", "앰플", "부탄",
+    "워셔액", "요소수", "엔진오일", "가그린", "리스테린", "구강청결", "핸드솝", "비누", "에프킬라", "살충", "모기", "디퓨저",
+    "제습", "소독", "세척액", "세척제",
 )
+# 낱말 그대로 막으면 식품까지 걸리는 것: '머신 전용 캡슐', '닭모래집'
+_NON_FOOD_RE = re.compile(r"머신(?!\s*(?:전용|호환))|모래(?!집)")
+# 설정의 non_food_keywords '크림'(화장품)이 들어 있지만 식품인 낱말 → 식품 아님 판정에서는 빼고 본다
+_CREAM_FOOD_RE = re.compile(r"아이스크림|생크림|휘핑크림")
 # 상품명에 식품 낱말이 없는 음료 (예: 뽐뿌 제목 '할리스 바닐라 딜라이트 로우슈거, 24개')
-_FOOD_EXTRA = ("캔커피", "아메리카노", "콜드브루", "로우슈거", "할리스", "맥심", "칸타타", "조지아", "바리스타룰스", "펩시")
-_DRINK_COUNT_RE = re.compile(r"\d+\s*(?:캔|병|펫|페트)(?![가-힣])")  # '24캔', '40병'
-_SIZE_COMMA_RE = re.compile(r"(?<=[a-z가-힣])\s*,\s*(?=\d)")  # '500ml, 40병' → '500ml 40병' (규격 패턴이 읽도록)
+_FOOD_EXTRA = ("캔커피", "아메리카노", "콜드브루", "로우슈거", "할리스", "맥심", "칸타타", "조지아", "바리스타룰스", "펩시",
+               "아이스크림", "생크림", "휘핑크림")
+# 쉼표를 낀 음료 규격 '500ml, 40병' (설정의 규격 패턴은 쉼표가 있으면 못 읽음). 병·캔·페트만: '1.8L, 6개' 는 워셔액일 수도
+_DRINK_SIZE_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:ml|l|리터)\s*,?\s*\d+\s*(?:병|캔|펫|페트)(?![가-힣])")
+# 분류가 이쪽이면 규격 패턴('1.8L, 6개')으로 식품이라 하지 않는다 (쿠팡 categoryName·루리웹 말머리)
+_NON_FOOD_CATEGORIES = (
+    "생활용품", "가전", "디지털", "뷰티", "화장품", "자동차", "문구", "오피스", "완구", "취미", "패션", "의류", "잡화", "스포츠", "레저",
+    "가구", "인테리어", "도서", "반려동물", "주방용품", "컴퓨터", "pc", "하드웨어", "게임",
+)
+_QUOTE_KEY = "_market_quote_food"  # is_food 에 대조한 쿠팡 상품(이름, 분류)을 넘기는 extra 키 (사본에만 씀)
 
 
 def _food_word_hit(word: str, text: str) -> bool:
@@ -141,30 +169,39 @@ class DealEvaluator:
             return f"rank<={ic.max_rank}"
         return None
 
+    def _food_words(self, text: str) -> bool:
+        """식품 낱말(설정 keywords + 음료 이름)이 있는가. text 는 소문자."""
+        return any(k and _food_word_hit(k.lower(), text) for k in self.cfg.food.keywords) or any(k in text for k in _FOOD_EXTRA)
+
     def is_food(self, product: Product) -> bool:
-        """식품류인가: 상품 분류(쿠팡 categoryName·루리웹 말머리)나 상품명의 낱말로 판단."""
+        """식품류인가: 상품 분류(쿠팡 categoryName·루리웹 말머리)나 상품명의 낱말로 판단.
+        evaluate() 가 넘긴 사본이면 대조한 쿠팡 상품의 이름·분류도 보되, 그쪽은 '식품이다' 신호로만 쓴다
+        (쿠팡 이름의 '아이스크림'·'머신'이 딜을 식품 아님으로 바꾸거나, '…, 1.8L, 6개' 규격이 워셔액을 식품으로 만들지 않게)."""
         fc = self.cfg.food
         if not fc.enabled:
             return False
         text = f"{product.name} {product.headline or ''}".lower()
-        if any(k and k.lower() in text for k in (*fc.non_food_keywords, *_NON_FOOD_EXTRA)):
+        veto_text = _CREAM_FOOD_RE.sub(" ", text)
+        if any(k and k.lower() in veto_text for k in (*fc.non_food_keywords, *_NON_FOOD_EXTRA)) or _NON_FOOD_RE.search(veto_text):
             return False
-        cat = (product.category or "").lower()
-        if cat and any(c.lower() in cat for c in fc.categories):
+        quote_title, quote_cat = product.extra.get(_QUOTE_KEY) or ("", None)
+        cats = [c.lower() for c in (product.category, quote_cat) if c]
+        if any(c.lower() in cat for cat in cats for c in fc.categories):
             return True
-        if any(k and _food_word_hit(k.lower(), text) for k in fc.keywords):
+        if self._food_words(text):
             return True
-        if any(k in text for k in _FOOD_EXTRA) or _DRINK_COUNT_RE.search(text):
+        if any(c in cat for cat in cats for c in _NON_FOOD_CATEGORIES):
+            return False  # 생활용품·자동차용품 분류: 규격 패턴이나 쿠팡 이름만으로는 식품이라 하지 않음
+        if quote_title and self._food_words(quote_title.lower()):
             return True
-        sized = _SIZE_COMMA_RE.sub(" ", text)
-        return any(re.search(pat, sized, re.I) for pat in fc.unit_patterns)
+        return bool(_DRINK_SIZE_RE.search(text)) or any(re.search(pat, text, re.I) for pat in fc.unit_patterns)
 
     @staticmethod
-    def _with_quote_title(product: Product, quote: MarketQuote | None) -> Product:
-        """식품 판정용: 대조한 쿠팡 상품 이름('…, 285ml, 24개')도 같이 보게 머리글에 붙인 사본."""
-        if quote is None or not quote.title:
+    def _with_quote(product: Product, quote: MarketQuote | None) -> Product:
+        """식품 판정용 사본: 대조한 쿠팡 상품의 이름·분류를 extra 에 실어 is_food 가 보게 한다 (원본은 그대로)."""
+        if quote is None or not (quote.title or quote.category):
             return product
-        return dataclasses.replace(product, headline=f"{product.headline or ''} {quote.title}".strip())
+        return dataclasses.replace(product, extra={**product.extra, _QUOTE_KEY: (quote.title or "", quote.category)})
 
     def evaluate(
         self,
@@ -174,6 +211,9 @@ class DealEvaluator:
         *,
         market_available: bool = False,
     ) -> DealVerdict:
+        if quote is not None and quote.title and not same_quantity(product.name, quote.title):
+            # 수량·묶음이 다른 쿠팡 상품과는 비교하지 않음 (예전 규칙으로 맞춰 캐시에 남은 2팩 묶음 등)
+            quote = None
         verdict = self._evaluate(product, stats, quote, market_available=market_available)
         # 글에 쓰는 가격 근거: 기록된 기간의 최저가와 기록 일수
         verdict.low_price = stats.min
@@ -182,7 +222,7 @@ class DealEvaluator:
 
             verdict.history_days = round((utcnow() - stats.first_seen_at).total_seconds() / 86400, 1)
         fc = self.cfg.food
-        if verdict.is_deal and self.is_food(self._with_quote_title(product, quote)):
+        if verdict.is_deal and self.is_food(self._with_quote(product, quote)):
             # 식품은 평소 가격 대비 확실히 쌀 때만 (표시 할인율·추천 수만으로는 안 됨)
             ref = max(verdict.below_avg_pct or 0.0, verdict.below_market_pct or 0.0)
             if ref < fc.min_below_reference_pct:

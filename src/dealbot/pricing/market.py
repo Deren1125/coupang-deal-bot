@@ -3,7 +3,7 @@
 - 네이버 쇼핑 검색 API 는 2026-07 종료되어 쓸 수 없고, 쿠팡 검색 API 는 시간당 호출 제한이 빡빡하므로
   후보 딜(가격 조건/추천 조건을 통과한 것)에만, 시간당 max_checks_per_hour 번까지만 조회한다.
 - 상품명 매칭은 토큰 기반: 수량(8개입, 2세트, 500ml …)은 반드시 같아야 하고, 나머지 토큰은 비율로 판단.
-  수량은 '총 몇 개인가'로 비교한다 (40병 = 40개, 24개 x 2박스 = 48개, 1+1 = 2개). 묶음·대용량 상품을
+  수량은 '총 몇 개인가'로 비교한다 (40병 = 40개, 24개 x 2박스 = 48개, 1+1 = 2개, 24캔+24캔 = 48개). 묶음·대용량 상품을
   '쿠팡 최저가'로 잡으면 '쿠팡보다 N%↓'가 부풀려지기 때문.
 """
 
@@ -29,15 +29,26 @@ _QTY_RE = re.compile(
 )
 _THOUSANDS_RE = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")  # '1,000ml' → '1000ml' (안 지우면 '0ml' 로 읽힘)
 _TOKEN_RE = re.compile(r"[0-9a-zA-Z가-힣]+")
-# 낱개 단위는 모두 '개'로 본다 (뽐뿌 제목 '40병' = 쿠팡 표준 이름 '40개')
+# 낱개 단위는 모두 '개'로 본다 (뽐뿌 제목 '40병' = 쿠팡 표준 이름 '40개').
+# 단 '개입'은 한 묶음 안의 개수라 따로 센다: 쿠팡 이름 '…, 6개입, 6개' 는 6개입 묶음 6개 = 36개
 _COUNT_UNITS = {"개", "개입", "입", "병", "캔", "봉", "봉지", "포", "정", "매", "ea"}
 _SIZE_UNITS = {"ml": ("ml", 1), "l": ("ml", 1000), "리터": ("ml", 1000), "g": ("g", 1), "kg": ("g", 1000),
                "cm": ("cm", 1), "mm": ("mm", 1), "인치": ("인치", 1)}
-# 1+1, 2+1 (뒤에 단위가 붙은 '10캔+2캔' 은 덤 묶음이라 아래 '+' 묶음으로 봄)
-_PROMO_RE = re.compile(r"(?<![\d.])([1-9])\s*\+\s*([1-9])(?![\d.]|\s*(?:개|입|병|캔|팩|봉|포|세트|박스|kg|g|ml|l|리터))")
-# 단위 없는 곱수 'x 2' ('500ml x 2', '2Lx6'). 뒤에 단위가 붙으면 _QTY_RE 가 읽는다 ('x 2팩')
-_TIMES_RE = re.compile(r"(?:(?<=[\s,)가-힣])|(?<=ml)|(?<=\dl)|(?<=\dg))x\s*(\d{1,2})(?![\d.,]*\s*[a-wyz가-힣])")
+# 덧셈 수량: 단위 없는 '1+1', '2+1', '1+1+1', '12+12' 는 묶음 수(합만큼 곱함), '24캔+24캔' 처럼 같은 단위면 낱개 합.
+# 단위가 서로 다르면('12병 + 24캔') 다른 상품을 끼운 묶음으로 봄. '10+5%' 할인, '500ml+500ml' 용량은 수량이 아님
+_PLUS_UNIT = r"(?:개입|개(?!월)|입|병|캔|팩|봉지|봉|포|세트|박스)"
+_PLUS_RE = re.compile(
+    rf"(?<![a-z\d.])\d{{1,3}}\s*{_PLUS_UNIT}?(?:\s*\+\s*\d{{1,3}}\s*{_PLUS_UNIT}?)+"
+    r"(?![\d.,%]|\s*(?:원|천|만|%|리터|인치|(?:kg|g|ml|l|cm|mm)(?![a-wyz])))"
+)
+_PLUS_TERM_RE = re.compile(rf"(\d+)\s*({_PLUS_UNIT})?")
+# 단위 없는 곱수 'x 2' ('500ml x 2', '2Lx6', '1kg*2'). 뒤에 단위가 붙으면 _QTY_RE 가 읽는다 ('x 2팩')
+_TIMES_RE = re.compile(
+    r"(?:(?<=[\s,)가-힣])|(?<=ml)|(?<=\dl)|(?<=\dg)|(?<=kg)|(?<=[cm]m))x\s*(\d{1,2})(?![\d.,]*\s*[a-wyz가-힣])"
+)
 _TOTAL_RE = re.compile(r"총\s*(\d+)\s*(?:개입|개|입|병|캔|봉지|봉|포|정|매)")  # '(총 48개)' 가 있으면 그게 낱개 총수
+_PAREN_RE = re.compile(r"\([^()]*\)")
+_BUNDLE_RE = re.compile(r"\+(?!\s*\d+(?:\.\d+)?\s*%)")  # 남은 '+' 는 다른 상품을 끼운 묶음 ('카드 10+5%' 할인은 아님)
 _STOP = {"무료", "무료배송", "배송", "특가", "핫딜", "할인", "쿠폰", "행사", "정품", "국내", "당일", "로켓", "로켓배송", "와우", "세일", "이벤트", "추가", "택배", "본품", "신상", "new", "the", "x"}
 
 
@@ -48,6 +59,7 @@ class MarketQuote:
     title: str
     url: str | None = None
     checked_at: datetime | None = None
+    category: str | None = None  # 쿠팡 categoryName (식품 판정용, 캐시에서 꺼낸 값엔 없음)
 
 
 def _num(text: str) -> str:
@@ -77,32 +89,78 @@ class Quantity:
     bundle: bool
 
 
+def _count_key(unit: str) -> str:
+    if unit in ("개입", "입"):
+        return "개입"
+    return "개" if unit in _COUNT_UNITS else unit
+
+
 def parse_quantity(text: str) -> Quantity:
     t = _num(text).replace("×", "x").replace("*", "x")
     promo = 1
-    for a, b in _PROMO_RE.findall(t):
-        promo *= int(a) + int(b)
-    t = _PROMO_RE.sub(" ", t)
-    sizes: dict[str, set[float]] = {}
-    counts: set[tuple[str, float]] = set()  # 같은 수량을 두 번 적은 제목('40병 (40개)')은 한 번만 센다
-    count = 1.0
+
+    def plus(m: re.Match[str]) -> str:
+        nonlocal promo
+        terms = _PLUS_TERM_RE.findall(m.group(0))
+        units = {_count_key(u) for _, u in terms if u}
+        if len(units) > 1:
+            return m.group(0)  # '12병 + 24캔': 다른 상품을 끼운 묶음 (아래 bundle)
+        total = sum(int(n) for n, _ in terms)
+        if units:
+            unit = next(u for _, u in terms if u)
+            return f" {total}{unit} "  # '24캔+24캔' → 48캔
+        promo *= total  # '1+1' → 2묶음, '햇반 12+12' → 24
+        return " "
+
+    t = _PLUS_RE.sub(plus, t)
+    parens = [m.span() for m in _PAREN_RE.finditer(t)]
+
+    def inside(pos: int) -> bool:
+        return any(a <= pos < b for a, b in parens)
+
+    # 괄호 안 수량은 대개 바깥 수량을 풀어 쓴 것: '12병 (6병x2)', '40병 (40개)', '500ml 40개 (20L)'
+    # → 바깥에 같은 종류가 있으면 괄호 안은 안 셈
+    sizes: dict[bool, dict[str, set[float]]] = {False: {}, True: {}}
+    counts: dict[bool, set[tuple[str, float]]] = {False: set(), True: set()}  # 같은 수량을 두 번 적은 것('40병 40개')은 한 번만
+    mults: dict[bool, list[float]] = {False: [], True: []}
     for m in _QTY_RE.finditer(t):
         n, unit = float(m.group(1)), m.group(2)
+        before = t[: m.start()].rstrip()
+        side = inside(m.start())
         if unit in _SIZE_UNITS:
+            if before.endswith("총"):
+                continue  # '(총 20L)' 은 묶음 전체 용량이지 한 개의 용량이 아님
             dim, scale = _SIZE_UNITS[unit]
-            sizes.setdefault(dim, set()).add(round(n * scale, 3))
-        elif t[: m.start()].rstrip().endswith("x"):
-            count *= n  # '6개입 x 6개', '40병 x 2팩' 의 뒤쪽은 곱수 (같은 수여도 곱함)
+            sizes[side].setdefault(dim, set()).add(round(n * scale, 3))
+        elif before.endswith("x"):
+            mults[side].append(n)  # '6개입 x 6개', '40병 x 2팩' 의 뒤쪽은 곱수 (같은 수여도 곱함)
         else:
-            counts.add(("개" if unit in _COUNT_UNITS else unit, n))
-    for _, n in counts:
-        count *= n
-    for n in _TIMES_RE.findall(t):
-        count *= int(n)
+            counts[side].add((_count_key(unit), n))
+    for m in _TIMES_RE.finditer(t):
+        mults[inside(m.start())].append(int(m.group(1)))
+
+    size_map = dict(sizes[False])
+    for dim, vals in sizes[True].items():
+        size_map.setdefault(dim, vals)
+    use_inner = not (counts[False] or mults[False])
+    if use_inner and promo > 1:
+        inner = 1.0
+        for _, n in counts[True]:
+            inner *= n
+        for n in mults[True]:
+            inner *= n
+        use_inner = inner != promo  # '4L 1+1 (2개)' 의 (2개)는 1+1 을 풀어 쓴 것
+    count = 1.0
+    for side in (False, True) if use_inner else (False,):
+        for _, n in counts[side]:
+            count *= n
+        for n in mults[side]:
+            count *= n
     total = _TOTAL_RE.search(t)
     if total:
-        count = float(total.group(1))
-    return Quantity({k: frozenset(v) for k, v in sizes.items()}, count * promo, "+" in t)
+        count, promo = float(total.group(1)), 1  # '1+1 (총 2개)': 총수에 1+1 이 이미 들어 있음
+    bundle = bool(_BUNDLE_RE.search(t))
+    return Quantity({k: frozenset(v) for k, v in size_map.items()}, count * promo, bundle)
 
 
 def same_quantity(deal_name: str, candidate_title: str) -> bool:
@@ -176,7 +234,8 @@ class CoupangMarketReference:
             if self.cfg.require_first_token and first and first[0] not in c.name.lower():
                 continue  # 브랜드(첫 낱말)가 다르면 다른 상품
             if best is None or c.price < best.price:
-                best = MarketQuote(price=c.price, source=self.source, title=c.name, url=c.affiliate_url or c.url)
+                best = MarketQuote(price=c.price, source=self.source, title=c.name, url=c.affiliate_url or c.url,
+                                   category=c.category)
         return best
 
     async def lookup(self, product: Product) -> MarketQuote | None:

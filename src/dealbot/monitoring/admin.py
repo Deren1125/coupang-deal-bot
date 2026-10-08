@@ -8,6 +8,7 @@ import html
 import logging
 import os
 import re
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -56,6 +57,35 @@ SAFE_CHUNK = 3500
 SEND_GAP_SECONDS = 0.4
 FLOOD_RETRIES = 3
 SEND_FAILED = object()  # 전송 자체가 실패했음을 뜻하는 표시 (텔레그램이 None 을 돌려주는 경우와 구분)
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _code_version(root: Path = _REPO_ROOT) -> tuple[str, str]:
+    """지금 돌고 있는 코드의 git 커밋: (짧은 커밋, '짧은 커밋 MM/DD HH:MM'). 프로세스가 시작할 때 한 번만 읽는다 —
+    서버가 새 코드를 받아 놓고 재시작을 못 했으면 /status 에 옛 커밋이 그대로 보여서 바로 알 수 있다.
+    git 체크아웃이 아니면(도커) 배포 환경변수의 커밋, 그것도 없으면 ('?', '')."""
+    if (root / ".git").exists():
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=format-local:%m/%d %H:%M"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        if out:
+            return out.split(" ", 1)[0], out
+    sha = (os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_SHA") or "").strip()[:7]
+    return (sha, sha) if sha else ("?", "")
+
+
+CODE_SHA, CODE_VERSION = _code_version()
+
+
+def version_label() -> str:
+    """'0.1.0 · 4ccfbc1 10/07 11:05' — 커밋을 모르면 '0.1.0' 만."""
+    return f"{__version__} · {CODE_VERSION}" if CODE_VERSION else __version__
 
 
 def split_message(text: str, limit: int = SAFE_CHUNK) -> list[str]:
@@ -154,6 +184,7 @@ _REASON_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^recommend>=(\d+)$"), "커뮤니티 추천 {0}개 이상"),
     (re.compile(r"^discount_rate>=([\d.]+)%$"), "표시 할인율 {0}% 이상"),
     (re.compile(r"^market_diff=([-\d.]+)%$"), "쿠팡보다 {0}% 쌈(기준 미만)"),
+    (re.compile(r"^market_shipping_unknown$"), "배송비를 몰라 쿠팡 대조 보류"),
     (re.compile(r"^manual$"), "내가 직접 올림"),
     (re.compile(r"^discount_unconfirmed$"), "할인율만 있고 쿠팡 대조로 확인 안 됨"),
 ]
@@ -361,7 +392,7 @@ class AdminNotifier:
         return shop.name if shop else key
 
     async def notify_startup(self, status_text: str, check_lines: list[str] | None = None) -> bool:
-        text = f"🟢 <b>봇이 켜졌습니다</b> (v{__version__})\n"
+        text = f"🟢 <b>봇이 켜졌습니다</b> (v{html.escape(version_label())})\n"
         if check_lines:
             text += "\n<b>자기 점검</b> — ✅ 정상 · ⚠️ 아직 설정 안 함(선택) · ❌ 문제\n" + "\n".join(html.escape(line) for line in check_lines) + "\n"
         text += f"\n{status_text}"
@@ -643,7 +674,7 @@ class StatusReporter:
         data_persistent = not str(data_dir).startswith("/data") or os.path.ismount(data_dir)
         created = from_iso(self.db.kv_get("db_created_at"))
         return {
-            "version": __version__,
+            "version": version_label(),  # 버전 + 지금 돌고 있는 커밋 (서버가 옛 코드인지 /status 로 확인)
             "data_persistent": data_persistent,
             "info_summary": self._info_summary_text(),
             "db_since": fmt_local(created, tz, "%Y-%m-%d") if created else None,
