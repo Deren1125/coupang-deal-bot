@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
+import re
 import signal
 import time
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +29,32 @@ SHUTDOWN_GRACE_SECONDS = 60.0
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 VAR_DIR: Path | None = _REPO_ROOT / "var" if (_REPO_ROOT / ".git").exists() else None
 UPDATE_MARK_MAX_AGE = 600  # 초. 이보다 오래된 var/updating 은 업데이트가 죽고 남은 찌꺼기로 보고 무시
+
+
+# ---- 시작 알림: 자동 업데이트로 하루에도 여러 번 재시작하니, 자기 점검 결과가 그대로면 하루 한 번만 보낸다
+STARTUP_NOTICE_KV = "startup_notice"
+STARTUP_NOTICE_REPEAT = timedelta(hours=24)
+
+
+def _startup_signature(lines: list[str]) -> str:
+    # 매번 바뀌는 숫자(골드박스 n건 등)는 빼고 비교한다
+    return "\n".join(re.sub(r"\d+", "#", line) for line in sorted(lines))
+
+
+def startup_notice_due(db: Any, lines: list[str], now: datetime | None = None) -> bool:
+    """점검 결과가 지난 알림과 다르거나(새 문제·해결된 문제) 하루가 지났을 때만 True."""
+    try:
+        last = json.loads(db.kv_get(STARTUP_NOTICE_KV) or "{}")
+        at = datetime.fromisoformat(last["at"])
+    except (ValueError, KeyError, TypeError):
+        return True
+    if last.get("sig") != _startup_signature(lines):
+        return True
+    return (now or utcnow()) - at >= STARTUP_NOTICE_REPEAT
+
+
+def mark_startup_notice(db: Any, lines: list[str], now: datetime | None = None) -> None:
+    db.kv_set(STARTUP_NOTICE_KV, json.dumps({"sig": _startup_signature(lines), "at": (now or utcnow()).isoformat()}))
 
 
 def write_running_version() -> None:
@@ -249,10 +277,14 @@ async def run_forever(bot: DealBot) -> None:
                 "설정됨" if bot.settings.secrets.has_telegram else "없음",
                 bot.settings.secrets.telegram_admin_chat_id or "없음",
             )
+        elif not startup_notice_due(bot.db, lines):
+            log.info("시작 알림 생략 — 자기 점검 결과가 지난 알림과 같습니다 (/status 로 확인)")
         else:
             sent = await bot.notifier.notify_startup(bot.reporter.status_text(), lines)
             if sent is False:
                 log.warning("시작 알림 전송 실패 — 봇에게 /start 를 먼저 보냈는지, 챗 ID 가 맞는지 확인하세요")
+            else:
+                mark_startup_notice(bot.db, lines)
     except Exception as e:  # noqa: BLE001
         log.warning("startup notice failed: %s", e)
 
