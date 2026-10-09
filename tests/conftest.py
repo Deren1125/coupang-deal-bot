@@ -23,6 +23,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHANNEL_ID",
         "TELEGRAM_ADMIN_CHAT_ID",
+        "NAVER_CLIENT_ID",  # 네이버 쇼핑 검색 API (테스트에서 실제로 부르지 않게)
+        "NAVER_CLIENT_SECRET",
         "DEALBOT_CONFIG",
         "DEALBOT_DATA_DIR",
         "DEALBOT_DRY_RUN",

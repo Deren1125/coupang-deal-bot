@@ -131,7 +131,10 @@ def _dead(pid: int) -> bool:
         except ProcessLookupError:
             return True
         return False
-    return "State:\tZ" in status.read_text()  # 죽고 거둬지기만 기다리는 상태
+    try:
+        return "State:\tZ" in status.read_text()  # 죽고 거둬지기만 기다리는 상태
+    except (FileNotFoundError, ProcessLookupError):  # 확인과 읽기 사이에 거둬짐 = 죽음 (전체 실행 때 타이밍에 따라 났음)
+        return True
 
 
 async def test_cancelled_summary_does_not_leave_the_cli_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,10 +6,15 @@ Product 의 빈 칸을 채운다. 어떤 몰이든 og:* / JSON-LD Product 를 �
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import random
 import re
+import time
 from dataclasses import dataclass
+from datetime import UTC
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -156,6 +161,30 @@ _NOT_PRODUCT_HOST = re.compile(r"^(?:login|nid|accounts?|auth|member|signin|sear
 _STORE_HOSTS = ("smartstore.naver.com", "brand.naver.com")
 
 
+def is_naver_store(url: str | None) -> bool:
+    """네이버 스마트스토어·브랜드스토어 주소인지 (m. 주소 포함)."""
+    if not url:
+        return False
+    host = urlparse(url).netloc.lower().split(":")[0]
+    return any(host == h or host.endswith("." + h) for h in _STORE_HOSTS)
+
+
+def retry_after_seconds(value: str | None, *, now: float | None = None) -> float | None:
+    """Retry-After 머리글 → 기다릴 초. 숫자('7') 또는 HTTP 날짜. 없거나 못 읽으면 None."""
+    v = (value or "").strip()
+    if not v:
+        return None
+    if v.isdigit():
+        return float(v)
+    try:
+        when = parsedate_to_datetime(v)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max(0.0, when.timestamp() - (time.time() if now is None else now))
+
+
 def is_product_page(url: str | None) -> bool:
     """상품 페이지로 보이는 주소인지. 홈(경로 없음)·로그인·검색·이벤트/기획전·분류 목록·스토어 첫 화면이면 False."""
     if not url:
@@ -187,13 +216,71 @@ def page_images(meta: PageMeta) -> list[str]:
 
 
 class PageEnricher:
-    def __init__(self, http: httpx.AsyncClient, *, timeout: float = 20) -> None:
+    def __init__(
+        self,
+        http: httpx.AsyncClient,
+        *,
+        timeout: float = 20,
+        store_min_interval: float = 3.0,
+        store_attempts: int = 3,
+        store_backoff: float = 2.0,
+        store_max_wait: float = 30.0,
+    ) -> None:
         self.http = http
         self.timeout = timeout
+        # 네이버 스토어(스마트스토어·브랜드스토어)는 몰아서 읽으면 429 → 요청 사이 간격 + Retry-After 를 지키는 몇 번의 재시도
+        self.store_min_interval = store_min_interval
+        self.store_attempts = max(1, store_attempts)
+        self.store_backoff = store_backoff
+        self.store_max_wait = store_max_wait
+        self._store_lock = asyncio.Lock()
+        self._store_next = 0.0  # 스토어에 다음 요청을 보내도 되는 시각 (_clock 기준)
+        self._sleep = asyncio.sleep  # 테스트에서 가짜로 바꿔 끼움 (실제로 안 잠)
+        self._clock = time.monotonic
+
+    async def _store_turn(self) -> bool:
+        """스토어에 요청할 차례를 기다린다. 남은 시간이 store_max_wait 보다 길면(긴 Retry-After) 기다리지 않고 False."""
+        async with self._store_lock:
+            # 기다리는 사이 다른 요청이 429 로 쉬는 시간(Retry-After)을 늘렸을 수 있어 깨어날 때마다 다시 본다
+            while (wait := self._store_next - self._clock()) > 0:
+                if wait > self.store_max_wait:
+                    return False
+                await self._sleep(wait)
+            self._store_next = max(self._store_next, self._clock() + self.store_min_interval)
+            return True
+
+    async def _get_store(self, url: str) -> httpx.Response | None:
+        """네이버 스토어 페이지 읽기: 요청 사이 store_min_interval 초, 429·5xx 는 Retry-After(없으면 지수 백오프+지터)만큼 쉬고
+        store_attempts 번까지. Retry-After 가 store_max_wait 보다 길면 더 묻지 않고, 그 시각 전에는 스토어에 요청하지 않는다.
+        차례를 못 받으면 None, 아니면 마지막 응답."""
+        resp: httpx.Response | None = None
+        for i in range(1, self.store_attempts + 1):
+            if not await self._store_turn():
+                log.info("enrich: naver store cooling down (Retry-After) — skip %s", url)
+                return resp
+            resp = await self.http.get(url, follow_redirects=True, timeout=self.timeout)
+            if resp.status_code != 429 and resp.status_code < 500:
+                return resp
+            wait = retry_after_seconds(resp.headers.get("retry-after"))
+            if wait is None:
+                wait = self.store_backoff * (2 ** (i - 1)) * (0.8 + random.random() * 0.4)
+            # 다음 차례는 wait 뒤 (다른 딜의 스토어 요청도 같이 기다림)
+            self._store_next = max(self._store_next, self._clock() + wait)
+            if wait > self.store_max_wait:
+                log.info("enrich: HTTP %s for %s — Retry-After %.0fs, 이번엔 건너뜀", resp.status_code, url, wait)
+                return resp
+            if i < self.store_attempts:
+                log.info("enrich: HTTP %s for %s — %.1fs 뒤 다시 (%d/%d)", resp.status_code, url, wait, i, self.store_attempts)
+        return resp
 
     async def fetch(self, url: str) -> PageMeta | None:
         try:
-            resp = await self.http.get(url, follow_redirects=True, timeout=self.timeout)
+            if is_naver_store(url):
+                resp = await self._get_store(url)
+                if resp is None:
+                    return None
+            else:
+                resp = await self.http.get(url, follow_redirects=True, timeout=self.timeout)
             if resp.status_code >= 400:
                 log.info("enrich: HTTP %s for %s", resp.status_code, url)
                 return None

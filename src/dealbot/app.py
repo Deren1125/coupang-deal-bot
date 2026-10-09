@@ -38,6 +38,7 @@ from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dedupe import find_duplicate
 from dealbot.enrich import PageEnricher, page_images
 from dealbot.infopost import InfoPostBuilder, PostBody
+from dealbot.keyboard import from_korean_keyboard, is_ascii
 from dealbot.links import (
     CoupangDeeplinkProvider,
     LinkConversionError,
@@ -53,6 +54,7 @@ from dealbot.media.imagecheck import (
     coupang_image_url,
     is_board_thumb,
     is_generic_image,
+    naver_image_url,
 )
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import (
@@ -63,6 +65,7 @@ from dealbot.monitoring.admin import (
 )
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
+from dealbot.naver_shop import NaverShopSearch, store_product_no
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
@@ -86,6 +89,15 @@ from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
 from dealbot.utils.text import clean_name, truncate
 from dealbot.utils.timeutil import fmt_local, from_iso, in_time_window, local_now, to_iso, utcnow
 from dealbot.web import WebServer, page
+
+
+def _ascii_sub_id(sub_id: str | None) -> str | None:
+    """쿠팡 서브 ID 가 한/영 전환 실수로 한글이면(예: 'ㅗㅐㅅ') 영문 키('hot')로 바꿔 쓴다 (링크 집계가 깨지지 않게)."""
+    if sub_id and not is_ascii(sub_id):
+        fixed = from_korean_keyboard(sub_id)
+        log.warning("COUPANG_SUB_ID 에 한글이 섞여 있어 영문 키로 바꿔 씀 (%d자)", len(fixed))
+        return fixed
+    return sub_id
 
 log = logging.getLogger(__name__)
 
@@ -126,7 +138,7 @@ class DealBot:
                 settings.secrets.coupang_access_key or "",
                 settings.secrets.coupang_secret_key or "",
                 http=self.http,
-                sub_id=settings.secrets.coupang_sub_id,
+                sub_id=_ascii_sub_id(settings.secrets.coupang_sub_id),
                 max_retries=settings.http.max_retries,
                 retry_backoff=settings.http.retry_backoff_seconds,
                 budget=self.budget,
@@ -167,7 +179,22 @@ class DealBot:
         self.links = LinkRouter(self.registry, settings.links, settings.publish, providers=providers)
 
         self.evaluator = DealEvaluator(settings.deal)
-        self.enricher = PageEnricher(self.http, timeout=settings.http.timeout_seconds)
+        ec = settings.deal.enrich
+        self.enricher = PageEnricher(
+            self.http,
+            timeout=settings.http.timeout_seconds,
+            store_min_interval=ec.store_min_interval_seconds,
+            store_attempts=ec.store_retry_attempts,
+            store_backoff=ec.store_retry_backoff_seconds,
+            store_max_wait=ec.store_max_wait_seconds,
+        )
+        # 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜: 쇼핑 검색 API 에서 같은 상품(상품번호 일치)의 사진. 키가 없으면 건너뜀
+        self.naver_shop = NaverShopSearch(
+            self.http,
+            settings.secrets.naver_client_id,
+            settings.secrets.naver_client_secret,
+            timeout=settings.http.timeout_seconds,
+        )
         self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone, settings.channels.as_dict())
         self.renderer.emphasis = (settings.publish.emphasis_must_pct, settings.publish.emphasis_top_pct)
         self.info = InfoPostBuilder(
@@ -692,6 +719,12 @@ class DealBot:
         except Exception as e:  # noqa: BLE001
             out.append((False, f"템플릿: {e}"))
 
+        sid = self.settings.secrets.coupang_sub_id
+        if sid and re.fullmatch(r"AF\d{5,}", sid.strip()):  # 10/10: 채널 ID 자리에 파트너스 코드(AF…)를 넣은 일
+            out.append((False, "쿠팡 서브 ID 가 파트너스 코드(AF…) 모양 — 쿠팡 파트너스에서 만든 채널 ID 를 넣어야 채널별 실적이 잡힙니다"))
+        if sid and not is_ascii(sid):  # 값은 비밀이 아니지만 그대로 찍지는 않는다
+            out.append((False, f"쿠팡 서브 ID 에 한글이 섞여 있음 (한/영 전환 실수로 보임) — 링크에는 영문 "
+                               f"'{from_korean_keyboard(sid)}' 로 바꿔 씁니다. setenv 로 COUPANG_SUB_ID 를 영문으로 다시 넣어 주세요"))
         if self.coupang is None:
             out.append((None, "쿠팡 API: 키 미설정 (쿠팡 수집/딥링크 꺼짐)"))
         else:
@@ -1224,11 +1257,20 @@ class DealBot:
 
     async def _enrich(self, p: Product) -> list[str]:
         meta = await self.enricher.fetch(p.url)
-        if meta is None:
-            return []
-        filled = PageEnricher.apply(p, meta)
+        filled = PageEnricher.apply(p, meta) if meta is not None else []
         if filled:
             log.info("enriched %s from page: %s", p.name[:40], ", ".join(filled))
+        if (not p.image_url or is_board_thumb(p.image_url)) and store_product_no(p.url):
+            # 스토어 페이지를 못 읽었거나(429) 사진이 없으면: 네이버 쇼핑 검색에서 같은 상품의 사진 (상품번호가 같을 때만)
+            try:
+                img = await self.naver_shop.find_image(p)
+            except Exception as e:  # noqa: BLE001 — 사진 찾기 때문에 수집이 멈추면 안 됨
+                log.info("naver shop search failed for %s: %s", p.name[:40], type(e).__name__)
+                img = None
+            if img:
+                p.image_url = img
+                filled.append("image_url")
+                log.info("enriched %s from naver shop search: image_url", p.name[:40])
         return filled
 
     def _should_record(self, product_id: str, now: Any) -> bool:
@@ -1526,7 +1568,8 @@ class DealBot:
 
     async def deal_photo(self, deal: Deal) -> bytes | None:
         """올릴 상품 사진: 디코딩되고 짧은 변 photo_min_side(600px) 이상인 JPEG (EXIF 방향 반영). 없으면 None → 사진 없이 올린다.
-        순서: 딜의 상품 사진(쿠팡 CDN 은 1000px 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만).
+        순서: 딜의 상품 사진(쿠팡·네이버 CDN 은 큰 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만)
+        → 네이버 스토어 딜이면 쇼핑 검색 API 의 같은 상품(상품번호 일치) 사진.
         게시판 목록 썸네일·로고·기본 배너는 상품 사진으로 쓰지 않는다. 글자 카드도 상품 사진이 아니라 여기서 만들지 않는다
         (카드는 인스타만). 쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고, 못 찾으면 비운다."""
         cc = self.settings.publish
@@ -1540,9 +1583,13 @@ class DealBot:
             tried.add(url)
             return clean_image(await self._fetch_image(url, referer=referer), min_side=cc.photo_min_side)
 
+        def _sizes(url: str | None) -> list[str | None]:
+            # 쿠팡·네이버 CDN 축소본이면 큰 주소부터, 그다음 원래 주소
+            return [u for u in (coupang_image_url(url), naver_image_url(url)) if u != url] + [url]
+
         photo: bytes | None = None
         src: str | None = None
-        for url in (coupang_image_url(p.image_url), p.image_url):
+        for url in _sizes(p.image_url):
             photo = await _try(url)
             if photo is not None:
                 src = url
@@ -1552,7 +1599,18 @@ class DealBot:
                 meta = await self.enricher.fetch(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
-            for url in page_images(meta) if meta else []:
+            for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
+                photo = await _try(url)
+                if photo is not None:
+                    src = url
+                    break
+        if photo is None and store_product_no(p.url):
+            # 스토어 페이지가 막혔으면(429) 네이버 쇼핑 검색에서 같은 상품의 사진 — 상품번호가 다르면 비슷해도 안 씀
+            try:
+                found = await self.naver_shop.find_image(p)
+            except Exception:  # noqa: BLE001
+                found = None
+            for url in _sizes(found):
                 photo = await _try(url)
                 if photo is not None:
                     src = url

@@ -9,7 +9,7 @@ from __future__ import annotations
 import io
 import logging
 import re
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,22 @@ def coupang_image_url(url: str | None, side: int = COUPANG_IMAGE_SIDE) -> str | 
         return f"{m.group(1)}{side}x{side}ex/"
 
     return _COUPANG_THUMB.sub(_bigger, url, count=1)
+
+
+def naver_image_url(url: str | None, side: int = 1000) -> str | None:
+    """네이버 이미지 CDN(*.pstatic.net) 주소의 작은 크기 칸('?type=m510', 'f640_640')을 떼어 원본 크기로. 이미 크거나 다른 주소면 그대로.
+    스토어 페이지 og:image 는 510px 축소본이라 그대로 받으면 짧은 변 600px 검사에서 떨어진다."""
+    if not url:
+        return url
+    u = urlparse(url)
+    host = u.netloc.lower().split(":")[0]
+    if not (host == "pstatic.net" or host.endswith(".pstatic.net")):
+        return url
+    q = parse_qsl(u.query, keep_blank_values=True)
+    sizes = [int(n) for k, v in q if k == "type" for n in re.findall(r"\d+", v)]
+    if not sizes or max(sizes) >= side:
+        return url
+    return urlunparse(u._replace(query=urlencode([(k, v) for k, v in q if k != "type"])))
 
 
 def clean_image(data: bytes | None, *, min_side: int = 600, max_aspect: float = 2.2, max_side: int = 1280) -> bytes | None:

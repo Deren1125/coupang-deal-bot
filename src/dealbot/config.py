@@ -118,6 +118,11 @@ class EnrichConfig(BaseModel):
     shops: list[str] = Field(default_factory=lambda: ["toss", "naver", "oliveyoung", "kurly", "musinsa"])  # "*" = 모든 몰
     exclude_shops: list[str] = Field(default_factory=lambda: ["coupang"])  # 페이지를 못 읽는 몰 (쿠팡은 API 사진을 씀)
     max_per_run: int = 10
+    # 네이버 스마트스토어·브랜드스토어는 몰아서 읽으면 429 를 준다: 요청 사이 간격, 429·5xx 재시도(Retry-After 우선, 없으면 지수 백오프+지터)
+    store_min_interval_seconds: float = 3.0
+    store_retry_attempts: int = 3
+    store_retry_backoff_seconds: float = 2.0
+    store_max_wait_seconds: float = 30.0  # Retry-After 가 이보다 길면 기다리지 않고 건너뜀 (그 시각까지 스토어에 안 감)
 
 
 class AuthenticityConfig(BaseModel):
@@ -516,10 +521,16 @@ class Secrets(BaseModel):
     pushover_user_key: str | None = None
     pushover_app_token: str | None = None
     anthropic_api_key: str | None = None  # 정보 글 요약 (Claude API)
+    naver_client_id: str | None = None  # 네이버 쇼핑 검색 API (스토어 딜의 큰 사진 찾기, 선택)
+    naver_client_secret: str | None = None
 
     @property
     def has_anthropic(self) -> bool:
         return bool(self.anthropic_api_key)
+
+    @property
+    def has_naver_search(self) -> bool:
+        return bool(self.naver_client_id and self.naver_client_secret)
 
     @property
     def has_threads_app(self) -> bool:
@@ -733,6 +744,8 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         pushover_user_key=_env_str("PUSHOVER_USER_KEY"),
         pushover_app_token=_env_str("PUSHOVER_APP_TOKEN"),
         anthropic_api_key=_env_str("ANTHROPIC_API_KEY"),
+        naver_client_id=_env_str("NAVER_CLIENT_ID"),
+        naver_client_secret=_env_str("NAVER_CLIENT_SECRET"),
     )
 
     settings = Settings(
