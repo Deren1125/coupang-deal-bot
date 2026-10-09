@@ -341,6 +341,7 @@ async def test_pipeline_sends_threads_and_copy(settings: Settings) -> None:
 
     settings.collectors = [CollectorConfig(name="fake", type="fake_side", interval_minutes=1)]
     settings.publish.min_interval_seconds = 0
+    settings.threads.enabled = True  # 운영 설정에서는 꺼 둘 수 있음 — 스레드 발행 흐름 자체를 시험
     bot = DealBot(settings)
     sent: list[str] = []
     posted: list[dict[str, str]] = []

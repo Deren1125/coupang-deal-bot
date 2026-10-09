@@ -47,6 +47,7 @@ def _auth_link(msg: str) -> str:
 
 async def test_threads_callback_connects_without_code_copy(settings: Settings) -> None:
     settings.collectors = []
+    settings.threads.enabled = True  # 운영 설정에서는 꺼 둘 수 있음 (2026-10 Meta 차단) — 연결 흐름 자체를 시험
     settings.secrets.threads_app_id = "APPID"
     settings.secrets.threads_app_secret = "SECRET"
     settings.secrets.public_domain = "bot.up.railway.app"

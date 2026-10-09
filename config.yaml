@@ -297,7 +297,7 @@ publish:
 
 # 스레드 자동 발행 (THREADS_APP_ID/SECRET 필요, /threadsauth 로 최초 1회 연결)
 threads:
-  enabled: true
+  enabled: false   # 2026-10-09 주인 결정: 'API access blocked'(Meta 쪽 차단)가 풀릴 때까지 끔. 다시 켜려면 true + /threadsauth
   template: deal_threads.j2               # 한 글: 상황 첫 줄 → 이름·가격 → 비교 금액 → 한마디 → 제휴 고지 → 링크(본문)
   reply_template: null                    # 답글 안 담 (링크는 본문에). 채널 안내 답글을 달려면 deal_threads_reply.j2
   send_photo: true
