@@ -89,6 +89,8 @@ KV_OAUTH_STATE_AT = "threads_oauth_state_at"
 KV_IG_OAUTH_STATE = "instagram_oauth_state"
 KV_IG_OAUTH_STATE_AT = "instagram_oauth_state_at"
 IG_KV_USERNAME = "instagram_username"
+# 관리자가 넘겼거나 답하지 않은 글을 다시 묻기까지 (그사이 더 싸지면 바로 다시 물음)
+REASK_COOLDOWN = timedelta(days=3)
 
 
 class DealBot:
@@ -790,7 +792,7 @@ class DealBot:
             return False
         key = p.external_id or ShopRegistry.product_key(p.shop, p.url).split(":", 1)[-1]
         info = replace(p, product_id=f"info:{p.source}:{key}", deal_kind="info", url=str(post_url), affiliate_url=None)
-        if self._posted_recently(info.product_id, now):
+        if self._posted_recently(info.product_id, now) or self._declined_recently(info, now):
             return False
         dup = self._duplicate_of_recent(info, now)
         if dup:
@@ -1065,6 +1067,9 @@ class DealBot:
                 if self._posted_recently(p.product_id, now):
                     log.debug("deal %s already posted within %dd — skip", p.product_id, cfg.publish.dedup_days)
                     continue
+                if self._declined_recently(p, now):
+                    log.info("deal %s skipped — admin passed on it or did not answer recently", p.name[:40])
+                    continue
                 dup = self._duplicate_of_recent(p, now)
                 if dup:
                     log.info("deal %s skipped as duplicate: %s", p.name[:40], dup)
@@ -1160,6 +1165,15 @@ class DealBot:
                 await self._on_sold_out(p, via="상품 페이지에 재고 없음")
                 dropped += 1
         return dropped
+
+    def _declined_recently(self, p: Product, now: Any) -> bool:
+        """관리자가 넘겼거나 답하지 않은 글은 REASK_COOLDOWN 동안 다시 묻지 않는다 (같은 질문 반복 방지).
+        그사이 더 싸졌으면 새 딜로 본다."""
+        prev = self.db.declined_since(p.product_id, now - REASK_COOLDOWN)
+        if prev is None:
+            return False
+        q = prev.product
+        return not (p.has_price and q.has_price and p.price < q.price)
 
     def _posted_recently(self, product_id: str, now: Any | None = None) -> bool:
         """최근 dedup_days 안에 올린 상품인가.

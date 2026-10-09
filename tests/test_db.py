@@ -151,3 +151,25 @@ def test_market_quotes_and_community_stats(db: Database) -> None:
     db.touch_seen("ppomppu", "1", recommend=None, views=600, comments=4, now=now)
     st = db.community_stats(now - timedelta(hours=1))["ppomppu"]
     assert st["views_ge_500"] == 1 and st["comments_ge_3"] == 1
+
+
+def test_declined_since_only_counts_real_passes(db: Database) -> None:
+    """관리자가 넘긴 글·답이 없던 글만 '이미 물어봄'으로 친다. 자리가 없어 못 물어본 글은 아니다."""
+    now = utcnow()
+    since = now - timedelta(days=3)
+    assert db.enqueue(_deal("a", price=9000), score=5, now=now)
+    db.update_queue_item(1, status="skipped", error="review backlog full (5)")
+    assert db.declined_since("a", since) is None
+    assert db.enqueue(_deal("a", price=9000), score=5, now=now)
+    db.update_queue_item(2, status="skipped", error="skipped by admin")
+    prev = db.declined_since("a", since)
+    assert prev is not None and prev.product.price == 9000
+    assert db.declined_since("a", now + timedelta(seconds=1)) is None  # 기간 밖
+
+    assert db.enqueue(_deal("b"), score=5, now=now)
+    db.update_queue_item(3, status="awaiting_approval")
+    assert db.expire_queue(now - timedelta(hours=1), now, awaiting_older_than=now + timedelta(seconds=1)) == 1
+    assert db.declined_since("b", since) is not None
+    assert db.enqueue(_deal("c"), score=5, now=now - timedelta(days=2))  # 묻기 전에 시간이 지나 버린 글
+    assert db.expire_queue(now - timedelta(hours=1), now) == 1
+    assert db.declined_since("c", since) is None

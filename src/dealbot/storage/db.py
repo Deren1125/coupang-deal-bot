@@ -553,13 +553,25 @@ class Database:
             )
             n = cur.rowcount
             if awaiting_older_than is not None:
-                cur2 = self._conn.execute(
-                    "UPDATE deal_queue SET status = 'expired', updated_at = ? "
+                cur2 = self._conn.execute(  # 관리자에게 물었는데 답이 없던 글 — 다시 묻지 않으려고 표시해 둔다
+                    "UPDATE deal_queue SET status = 'expired', last_error = 'unanswered', updated_at = ? "
                     "WHERE status IN ('awaiting_link', 'awaiting_approval') AND created_at < ?",
                     (to_iso(now), to_iso(awaiting_older_than)),
                 )
                 n += cur2.rowcount
             return n
+
+    def declined_since(self, product_id: str, since: datetime) -> Deal | None:
+        """since 이후 관리자가 넘겼거나(skipped) 묻고도 답이 없어 버린(unanswered) 같은 상품의 마지막 글.
+        자리가 없어 못 물어본 것(review backlog full)은 넘긴 게 아니므로 뺀다."""
+        row = self._one(
+            "SELECT payload FROM deal_queue WHERE product_id = ? AND updated_at >= ? AND ("
+            "(status = 'expired' AND last_error = 'unanswered') OR "
+            "(status = 'skipped' AND COALESCE(last_error, '') NOT LIKE 'review backlog full%')"
+            ") ORDER BY id DESC LIMIT 1",
+            (product_id, to_iso(since)),
+        )
+        return Deal.from_dict(json.loads(row["payload"])) if row else None
 
     def queue_counts(self) -> dict[str, int]:
         rows = self._q("SELECT status, COUNT(*) AS c FROM deal_queue GROUP BY status")

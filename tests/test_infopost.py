@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import dealbot.app as app_mod
 from dealbot.app import DealBot
 from dealbot.collectors import BaseCollector, register
 from dealbot.config import CollectorConfig, Settings
@@ -497,3 +498,34 @@ async def test_priced_deal_with_only_a_board_url_is_not_an_info_post(bot: DealBo
     FakeCollector.products = [_event(31, price=12900)]
     await bot.run_collector(bot.collectors[0])
     assert bot.db.queue_counts() == {}
+
+
+async def test_unanswered_info_post_is_not_asked_again(bot: DealBot, admin_calls: dict[str, list]) -> None:
+    """확인 요청에 답이 없어 버려진 글은 다음 수집 때 같은 질문을 다시 보내지 않는다 (3일 뒤엔 다시 물을 수 있음)."""
+    published: list[dict] = []
+    _wire(bot, body=PostBody(text="원문 최대 50% 할인", images=[], links=[]), published=published)
+    FakeCollector.products = [_event(31)]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    asked = len([s for s in admin_calls["send"] if s.startswith("📝")])
+    assert asked == 1
+    now = datetime.now(UTC)
+    assert bot.db.expire_queue(now - timedelta(days=1), now, awaiting_older_than=now + timedelta(hours=1)) == 1
+
+    FakeCollector.products = [_event(31)]
+    await bot.run_collector(bot.collectors[0])
+    assert not await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"expired": 1}
+    assert len([s for s in admin_calls["send"] if s.startswith("📝")]) == asked
+
+    later = now + app_mod.REASK_COOLDOWN + timedelta(minutes=1)
+    assert not bot._declined_recently(bot.db.get_queue_item(1).deal.product, later)  # type: ignore[union-attr]
+
+
+def test_passed_deal_is_asked_again_only_when_cheaper(bot: DealBot) -> None:
+    now = datetime.now(UTC)
+    p = _event(41, price=10000)
+    assert bot.db.enqueue(Deal(product=p, verdict=DealVerdict(is_deal=True, reasons=["r"], score=5), detected_at=now), score=5, now=now)
+    bot.db.update_queue_item(1, status="skipped", error="skipped by admin")
+    assert bot._declined_recently(p, now)
+    assert not bot._declined_recently(_event(41, price=9000), now)  # 더 싸졌으면 새 딜
