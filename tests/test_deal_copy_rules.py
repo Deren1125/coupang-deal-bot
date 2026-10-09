@@ -126,12 +126,11 @@ def test_shipping_text(raw: str | None, text: str | None) -> None:
 
 def test_post_shows_readable_shipping(r: TemplateRenderer) -> None:
     board = _deal(shop="naver", name="곰곰 특란 30구", price=7000, shipping="네멤무배")
-    assert r.deal_facts(board)["ship"] == "네이버 멤버십 무료배송" and "🚚 네이버 멤버십 무료배송" in _tg(r, board)
+    assert r.deal_facts(board)["ship"] == "네이버 멤버십 무료배송" and "배송관련 : 네이버 멤버십 무료배송" in _tg(r, board)
     fee = _deal(shop="naver", name="곰곰 특란 30구", price=7000, shipping="3,000원")
-    assert "🚚 배송비 3,000원" in _tg(r, fee)
+    assert "배송관련 : 배송비 3,000원" in _tg(r, fee)
     rocket = _deal(name="상품", price=7000, is_rocket=True, is_free_shipping=True, rating=4.9, review_count=52011)
-    line = next(x for x in _tg(r, rocket).splitlines() if "🚚" in x)
-    assert line == "🚚 무료 로켓배송 · ⭐ 4.9 (52,011)"  # 칸 안에는 ' · ' 를 안 씀
+    assert "배송관련 : 무료 로켓배송\n평점점수 : 4.9\n리뷰숫자 : 52,011" in _tg(r, rocket)  # 정보 항목형: 한 줄에 한 칸
 
 
 # ---------------------------------------------------------------- 표시 할인율 (#21)
@@ -139,7 +138,7 @@ def test_list_discount_is_not_the_headline(r: TemplateRenderer) -> None:
     d = _deal(DealVerdict(is_deal=True, discount_rate=62), source="goldbox", name="필립스 전동칫솔", price=15900)
     tg = _tg(r, d)
     assert tg.splitlines()[0] == "☑️ <b>15,900원</b>"
-    assert "🏷️ 정가 대비 62%↓" in tg  # 보조 정보로만
+    assert "정가대비 : 62%↓" in tg  # 보조 정보로만
     facts = r.deal_facts(d)
     assert facts["evidence_short"] is None and facts["evidence_casual"] is None and facts["sale_pct"] is None
     assert "정가" not in _th(r, d)
@@ -344,3 +343,30 @@ def test_fit_text_keeps_disclosure() -> None:
     out = fit_text(body, 200, keep="이 포스팅은 고지입니다.")
     assert len(out) <= 200 and out.startswith("첫 줄") and out.endswith("이 포스팅은 고지입니다.\n링크는 댓글에 👇")
     assert fit_text("짧음", 200, keep="x") == "짧음"
+
+
+# ---------------------------------------------------------------- 채널 글 A 정보 항목형 (주인 선택 2026-10)
+def test_channel_post_is_info_field_layout(r: TemplateRenderer) -> None:
+    d = _deal(DealVerdict(is_deal=True, score=60, below_market_pct=25, market_price=39900, market_source="coupang"),
+              name="스탠리 퀜처 텀블러 1.18L", price=29900, category="주방용품>텀블러", is_rocket=True, is_free_shipping=True,
+              rating=4.7, review_count=1312)
+    d.product.extra["auth"] = {"status": "ok", "reason": "공식 판매처 표시 '공식'"}
+    tg = _tg(r, d)
+    lines = tg.splitlines()
+    assert lines[0].startswith("☑️ <b>29,900원</b>") or lines[0].split(" <b>")[0] in ("🔥 초특가", "👍 강추")  # 1줄 = 가격 (알림 미리보기)
+    assert lines[1] == "<b>스탠리 퀜처 텀블러 1.18L</b>"
+    for row in ("카테고리 : 텀블러", "배송관련 : 무료 로켓배송", "판매처 : 공식 판매처 확인", "평점점수 : 4.7", "리뷰숫자 : 1,312",
+                "방장 한줄평 : 주방템은 한 번 사면 오래 써요"):
+        assert row in lines, row
+    assert tg.index("방장 한줄평") < tg.index("👉") < tg.index("<i>이 포스팅은")  # 링크 → 제휴 고지는 끝
+    assert len(tg) < 1024  # 사진 캡션 한도
+
+
+def test_channel_post_one_liner_prefers_ai_comment_and_skips_unknown_rows(r: TemplateRenderer) -> None:
+    d = _deal(name="이름 모를 상품", price=9900)
+    d.product.extra["comment"] = "출근길 가방에 쏙 들어가는 크기예요"
+    tg = _tg(r, d)
+    assert "방장 한줄평 : 출근길 가방에 쏙 들어가는 크기예요" in tg
+    assert "판매처 :" not in tg and "평점점수" not in tg and "리뷰숫자" not in tg and "순위형성" not in tg  # 모르는 칸은 빼고 지어내지 않음
+    assert r.one_liner(_deal(name="필립스 전동칫솔", price=15900).product).startswith("오래 쓰는 가전")
+    assert not r.one_liner(_deal(name="필립스 전동칫솔 리필모 4입", price=15900).product).startswith("오래 쓰는")  # 소모품은 가전 아님

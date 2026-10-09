@@ -110,7 +110,8 @@ _SHARED_STEMS = ("필요", "쟁여", "가격", "장바구니", "찾던", "품절
 # 큰 가전·전자기기 낱말. 상품명에 이게 있어도 소모품·부속('식기세척기 세제', '드럼세탁기용', '정수기 필터',
 # '아이패드 케이스')이면 그 물건이 아니므로 가전·디지털 첫 줄을 쓰지 않는다
 _APPLIANCE_WORDS = ("세탁기", "건조기", "워시타워", "청소기", "공기청정기", "가습기", "제습기", "커피머신", "에스프레소머신", "에어프라이어",
-                    "전자레인지", "냉장고", "냉동고", "밥솥", "선풍기", "서큘레이터", "식기세척기", "정수기", "전기포트", "드라이기")
+                    "전자레인지", "냉장고", "냉동고", "밥솥", "선풍기", "서큘레이터", "식기세척기", "정수기", "전기포트", "드라이기",
+                    "전동칫솔", "면도기")
 _DIGITAL_WORDS = ("모니터", "노트북", "태블릿", "아이패드", "이어폰", "헤드폰", "헤드셋", "키보드", "마우스", "스마트워치", "갤럭시", "아이폰",
                   "SSD", "외장하드")
 _DURABLE = re.compile("|".join(sorted(_APPLIANCE_WORDS + _DIGITAL_WORDS, key=len, reverse=True)))
@@ -257,7 +258,22 @@ class TemplateRenderer:
         pct = round(ref_pct) if ref_pct else None
         # 표시(정가) 할인율은 근거로 안 씀. 평소 가격 근거가 없을 때만 정보줄에 보조로
         list_pct = round(v.discount_rate) if not pct and v.discount_rate and v.discount_rate >= 10 else None
+        # 채널 글(정보 항목형) 칸: 할인분류 · 가격비교 · 판매처 · 순위형성 · 방장 한줄평
+        kind_map = {"역대급": "초특가", "강력 추천": "강추"}
+        kind_labels = [kind_map.get(x, x) for x in labels if "베스트" not in x]
+        rank_label = next((x for x in labels if "베스트" in x and "위" in x), None)
+        if ref_price and pct:
+            compare = f"쿠팡 최저가 {ref_price:,}원" if is_market else f"평소 {price_band(ref_price, p.price):,}원대"
+        else:
+            compare = None
+        auth = (p.extra or {}).get("auth") or {}
+        genuine = "공식 판매처 확인" if auth.get("status") == "ok" and str(auth.get("reason") or "").startswith("공식") else None
         return {
+            "kind_labels": kind_labels,
+            "rank_label": rank_label,
+            "compare": compare,
+            "genuine": genuine,
+            "one_liner": self.one_liner(p),
             "labels": labels,
             "ship": ship,
             "cat": (p.category or "").split(">")[-1].strip(),
@@ -338,22 +354,54 @@ class TemplateRenderer:
     )
     THREAD_CLOSES_NOPRICE = ("조건은 링크에서 한 번 더 확인", "비슷한 거 알면 알려줘", "기간 있는 거라 미리 봐두면 편함")
 
-    def _hook_pool(self, p: Product) -> tuple[tuple[str, bool], ...]:
-        """상품명의 확실한 낱말 → 쿠팡 분류(구체적인 칸부터) 순으로 맞는 그룹의 첫 줄들. 모르면 일반 문구.
+    def _group(self, p: Product) -> tuple[Any, ...] | None:
+        """상품명의 확실한 낱말 → 쿠팡 분류(구체적인 칸부터) 순으로 맞는 상품 그룹 (THREAD_HOOK_GROUPS 의 한 칸). 모르면 None.
         소모품·부속('식기세척기 세제', '드럼세탁기용', '정수기 필터', '아이폰 케이스')은 이름 속 가전·전자기기 낱말을 안 본다."""
         name = clean_name(p.name)
         for compound in _NOT_THE_WORD:
             name = name.replace(compound, " ")
         if _ACCESSORY.search(name):
             name = _DURABLE.sub(" ", name)
-        for words, _, hooks in self.THREAD_HOOK_GROUPS:
-            if any(w in name for w in words):
-                return hooks
+        for group in self.THREAD_HOOK_GROUPS:
+            if any(w in name for w in group[0]):
+                return group
         for seg in reversed([s.strip() for s in (p.category or "").split(">") if s.strip()]):
-            for _, cat_words, hooks in self.THREAD_HOOK_GROUPS:
-                if any(w in seg for w in cat_words):
-                    return hooks
-        return self.THREAD_HOOKS
+            for group in self.THREAD_HOOK_GROUPS:
+                if any(w in seg for w in group[1]):
+                    return group
+        return None
+
+    def _hook_pool(self, p: Product) -> tuple[tuple[str, bool], ...]:
+        """그 상품 그룹의 스레드 첫 줄들. 모르면 일반 문구."""
+        group = self._group(p)
+        return group[2] if group else self.THREAD_HOOKS
+
+    # 채널 글 '방장 한줄평' (AI 한마디가 없을 때): 그룹 첫 낱말 → 해요체 한 줄. 가격·경험·약속은 지어내지 않는다
+    TG_ONE_LINERS = {
+        "휴지": "휴지는 떨어지기 전에 미리 쟁여두면 편해요",
+        "양말": "양말은 늘 모자라서 넉넉히 있으면 좋아요",
+        "충전기": "충전기는 집·회사·가방에 하나씩 두면 편해요",
+        "세탁기": "오래 쓰는 가전이라 가격 내려왔을 때 보기 좋아요",
+        "모니터": "오래 쓰는 기기라 가격 내려왔을 때 보기 좋아요",
+        "샴푸": "매일 쓰는 거라 떨어지기 전에 챙겨두면 좋아요",
+        "생수": "음료는 박스로 쟁여두면 든든해요",
+        "라면": "출출할 때 꺼내 먹게 쟁여두기 좋아요",
+        "세제": "생필품은 다 쓰기 전에 미리 사두면 편해요",
+        "프라이팬": "주방템은 한 번 사면 오래 써요",
+        "티셔츠": "기본템이라 하나 더 있어도 잘 입게 돼요",
+    }
+    TG_ONE_LINER_DEFAULT = "필요했던 거라면 링크에서 가격 한번 확인해 보세요"
+    TG_ONE_LINER_NOPRICE = "조건이 맞으면 기간 안에 챙겨 보세요"
+
+    def one_liner(self, p: Product) -> str:
+        """방장 한줄평: AI 한마디(commentary)가 있으면 그것, 없으면 상품 그룹별 고정 한 줄."""
+        comment = ((p.extra or {}).get("comment") or "").strip()
+        if comment:
+            return comment
+        if not p.has_price:
+            return self.TG_ONE_LINER_NOPRICE
+        group = self._group(p)
+        return self.TG_ONE_LINERS.get(group[0][0], self.TG_ONE_LINER_DEFAULT) if group else self.TG_ONE_LINER_DEFAULT
 
     def _is_durable(self, pool: tuple[tuple[str, bool], ...]) -> bool:
         """가전·전자기기 첫 줄 그룹인지. 몇 년 쓰는 물건이라 '몇 개씩 쟁여둠?' 같은 말이 안 맞는다."""

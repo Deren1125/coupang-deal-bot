@@ -113,7 +113,7 @@ async def test_submit_manual_enriches(settings: Settings) -> None:
         item = bot.db.next_pending()
         assert item is not None and item.deal.product.image_url == "https://img/t.jpg" and item.deal.product.rating == 4.7
         text = bot.publisher.render(item.deal)
-        assert "⭐ 4.7 (12)" in text and "<b>9,990원</b>" in text
+        assert "평점점수 : 4.7\n리뷰숫자 : 12" in text and "<b>9,990원</b>" in text
     finally:
         await bot.close()
 

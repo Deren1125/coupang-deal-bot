@@ -20,7 +20,7 @@ def test_render_deal_post(repo_root: Path) -> None:
     text = r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", shop=ShopRegistry().get("coupang"))
     lines = text.splitlines()
     assert lines[0] == "☑️ <b>29,900원</b> · 평소보다 29%↓"  # 1줄 = 알림 미리보기: 등급 + 가격 + 근거
-    assert lines[1] == "[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L" and "[샘플 · 오늘의 특가]" in lines
+    assert lines[1] == "<b>[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L</b>" and "[샘플 · 오늘의 특가]" in lines
     assert "평소보다 확실히" not in text  # 숫자 없는 상투 문구는 쓰지 않음
     assert '\n👉 <a href="https://link.coupang.com/a/sample">구매하러 가기</a>\n' in text  # 긴 주소 대신 글자 링크
     assert text.endswith("<i>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>")
@@ -116,7 +116,7 @@ def test_emphasis_tiers(repo_root: Path) -> None:
         return Deal(product=p, verdict=DealVerdict(is_deal=True, **v), affiliate_url="https://l")
 
     must = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop)
-    assert must.startswith("👍 강추 <b>12,360원</b> · 평소보다 54%↓") and "⚖️ 개당 515원 꼴" in must
+    assert must.startswith("👍 강추 <b>12,360원</b> · 평소보다 54%↓") and "단위가격 : 개당 515원 꼴" in must
     top = r.render_deal(deal(below_market_pct=72.5, market_price=45000), "https://l", shop=shop)
     assert top.startswith("🔥 초특가 <b>12,360원</b> · 쿠팡보다 73%↓")
     plain = r.render_deal(deal(below_avg_pct=6.0, avg_price=13207), "https://l", shop=shop)
