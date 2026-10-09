@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 W, H = 1080, 1350
 MARGIN = 72
+# 등급 → 배지. top/must 는 쿠팡 시중가·믿을 만한 평소 가격보다 70%/50% 이상 싼 것 (TemplateRenderer.emphasis)
+TIER_BADGES = {"top": "초특가", "must": "반값 핫딜"}
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
@@ -73,8 +75,10 @@ class DealCard:
             return ImageFont.load_default()
 
     # ------------------------------------------------------------ 그리기
-    def render(self, deal: Deal, photo: bytes | None = None, *, shop_name: str | None = None) -> bytes:
-        """카드 JPEG 바이트. photo 는 상품 사진 원본(없으면 글자만)."""
+    def render(self, deal: Deal, photo: bytes | None = None, *, shop_name: str | None = None, tier: str | None = None) -> bytes:
+        """카드 JPEG 바이트. photo 는 상품 사진 원본(없으면 글자만).
+        tier: 글 첫 줄과 같은 등급(TemplateRenderer.deal_tier — 믿을 수 있는 평소 가격 기준). 모르면 '핫딜'만 단다
+        (예전처럼 날것의 평균 대비 비율로 '역대급'을 붙이면 글과 어긋나는 근거 없는 말이 됨)."""
         p = deal.product
         st = self.style
         img = Image.new("RGB", (W, H), st.background)
@@ -98,13 +102,8 @@ class DealCard:
             draw.rectangle((0, 0, W, photo_h), fill="#F4F4F2")
             self._text_block(draw, p.name, self.font(64), st.ink, MARGIN, photo_h // 2 - 100, W - 2 * MARGIN, max_lines=4)
 
-        # 배지
-        badge = "핫딜"
-        pct = max(deal.verdict.below_avg_pct or 0.0, deal.verdict.below_market_pct or 0.0)
-        if pct >= 70:
-            badge = "역대급 가격"
-        elif pct >= 50:
-            badge = "반값 핫딜"
+        # 배지: 채널 글 첫 줄 배지(🔥 초특가 / 👍 강추)와 같은 등급으로
+        badge = TIER_BADGES.get(tier or "", "핫딜")
         self._badge(draw, badge, self.font(34), MARGIN, photo_h + 40)
 
         y = photo_h + 130
@@ -143,7 +142,7 @@ class DealCard:
         elif p.is_free_shipping or (p.shipping and "무료" in p.shipping):
             bits.append("무료배송")
         if p.rating:
-            bits.append(f"★ {p.rating}" + (f" ({p.review_count:,})" if p.review_count else ""))
+            bits.append(f"별점 {p.rating}" + (f" ({p.review_count:,})" if p.review_count else ""))  # ★ 기호는 안 씀 (H-08)
         if bits and y + 60 < H - 170:
             draw.text((MARGIN, y), "  ·  ".join(bits), font=self.font(36), fill=st.muted)
 
@@ -158,13 +157,16 @@ class DealCard:
         img.save(buf, format="JPEG", quality=88, optimize=True)
         return buf.getvalue()
 
-    def save(self, deal: Deal, photo: bytes | None = None, *, key: str | None = None, shop_name: str | None = None) -> Path:
+    def save(
+        self, deal: Deal, photo: bytes | None = None, *, key: str | None = None, shop_name: str | None = None,
+        tier: str | None = None,
+    ) -> Path:
         """카드를 만들어 out_dir 에 저장하고 경로를 돌려준다. 파일명은 상품 키 해시라 같은 딜은 덮어쓴다."""
         key = key or deal.product.product_id
         name = hashlib.sha1(key.encode()).hexdigest()[:16] + ".jpg"
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / name
-        path.write_bytes(self.render(deal, photo, shop_name=shop_name))
+        path.write_bytes(self.render(deal, photo, shop_name=shop_name, tier=tier))
         return path
 
     def prune(self, keep_days: int = 7) -> int:

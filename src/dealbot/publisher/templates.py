@@ -54,11 +54,14 @@ _BRACKET = re.compile(r"\[[^\[\]]*\]|【[^【】]*】|\([^()]*\)")
 _PROMO_IN_BRACKET = re.compile(r"타임딜|한정|무배|무료배송|네멤|쿠폰|카드|광고|오늘만|특가|단독|핫딜|최저가|적립")
 _MODEL_CODE = re.compile(r"(?<![\w-])(?=[A-Z0-9-]*\d)(?=[A-Z0-9-]*[A-Z])[A-Z0-9-]{8,}(?![\w-])")  # VS28C973DRG
 _QTY = re.compile(r"\d[\d,.]*\s*(?:개입|개|입|병|캔|봉|롤|팩|구|정|매|포|박스|세트|켤레|kg|g|ml|mL|L|l)(?![가-힣A-Za-z])")
+_QTY_ONLY = re.compile(rf"(?:{_QTY.pattern}|[\sx×*])+")  # '12병', '1.05kg', '500ml x 3개' 처럼 수량만 있는 칸
+_PART_SEP = re.compile(r"\s+([+/])\s+")
 
 
 def short_name(name: str | None, limit: int = 26) -> str:
-    """스레드 '근데 {이름} {가격}임' 에 넣을 이름: 게시판·홍보 괄호, 모델 코드, ' + ' 구성품 나열을 빼고 낱말 단위로 줄인다.
-    용량·수량 괄호('(2개)')와 '[샘플]' 표시는 남기고, 줄이다 수량이 잘리면 끝에 다시 붙인다."""
+    """스레드 '근데 {이름} {가격}' 에 넣을 이름: 게시판·홍보 괄호, ' + ' 구성품 나열을 빼고 낱말 단위로 줄인다.
+    용량·수량 괄호('(2개)')와 '[샘플]' 표시는 남긴다. ' / 12병', ' + 1.05kg' 처럼 뒤 칸이 수량이면 빼지 않고 붙인다
+    (묶음 가격이 한 개 값처럼 읽히지 않게). 모델 코드는 그래도 길 때만 빼고, 줄이다 수량이 잘리면 끝에 다시 붙인다."""
     base = clean_name(name)
 
     def _bracket(m: re.Match[str]) -> str:
@@ -69,9 +72,16 @@ def short_name(name: str | None, limit: int = 26) -> str:
         return " " if _PROMO_IN_BRACKET.search(inner) or not re.search(r"\d", inner) else seg
 
     s = _BRACKET.sub(_bracket, base)
-    s = re.split(r"\s+[+/]\s+", s)[0]  # 구성품·옵션 나열은 본품만
-    s = _MODEL_CODE.sub(" ", s)
+    parts = _PART_SEP.split(s)  # [본품, 구분자, 칸, 구분자, 칸, ...]
+    s = parts[0]
+    for sep, part in zip(parts[1::2], parts[2::2], strict=False):
+        if not _QTY.search(part):
+            continue  # 숫자 없는 구성품('물걸레 브러시')·사이즈·연식은 뺀다
+        # '2L / 12병' → '2L 12병' (수량만 있는 칸), '1.05kg + 1.05kg' · '본품 500ml + 리필 500ml' 은 구분자째
+        s += f" {part}" if sep == "/" and _QTY_ONLY.fullmatch(part) else f" {sep} {part}"
     s = " ".join(re.sub(r"\s*,\s*", " ", s).split())  # '로우슈거, 24개' → '로우슈거 24개' (문장 안 쉼표는 어색함)
+    if len(s) > limit:  # 모델 코드('VS28C973DRG')는 길 때만 뺀다 — 짧은 이름에선 'WH-1000XM5' 가 곧 상품 이름
+        s = " ".join(_MODEL_CODE.sub(" ", s).split())
     if len(s) > limit:
         out = ""
         for w in s.split():
@@ -83,10 +93,50 @@ def short_name(name: str | None, limit: int = 26) -> str:
     return s or base
 
 
-# 스레드 첫 줄·마무리가 같은 말을 되풀이하면 어색함 ('필요했던 사람만…' + '필요한 사람만…')
-_SHARED_STEMS = ("필요", "쟁여", "가격", "장바구니", "찾던", "품절")
+def price_band(ref: int, price: int = 0) -> int:
+    """'평소엔 N원대'의 N: 앞 두 자리만 남기고 내린다 (41,233 → 41,000 · 8,750 → 8,700 · 1,234,567 → 1,200,000).
+    내려서 '원대'가 맞는 말로 남게 하되, 오늘 가격보다 낮아지거나 같아지면 한 자리씩 더 살린다 (그래도 안 되면 그대로)."""
+    digits = len(str(abs(ref)))
+    for keep in (2, 3):
+        step = 10 ** max(0, digits - keep)
+        band = ref // step * step
+        if band > price:
+            return band
+    return ref
+
+
+# 스레드 첫 줄·마무리가 같은 말을 되풀이하면 어색함 ('그냥 넘기기엔 아까운 가격' + '가격은 수시로 바뀌니까…')
+_SHARED_STEMS = ("필요", "쟁여", "가격", "장바구니", "찾던", "품절", "링크", "후기")
+# 큰 가전·전자기기 낱말. 상품명에 이게 있어도 소모품·부속('식기세척기 세제', '드럼세탁기용', '정수기 필터',
+# '아이패드 케이스')이면 그 물건이 아니므로 가전·디지털 첫 줄을 쓰지 않는다
+_APPLIANCE_WORDS = ("세탁기", "건조기", "워시타워", "청소기", "공기청정기", "가습기", "제습기", "커피머신", "에스프레소머신", "에어프라이어",
+                    "전자레인지", "냉장고", "냉동고", "밥솥", "선풍기", "서큘레이터", "식기세척기", "정수기", "전기포트", "드라이기")
+_DIGITAL_WORDS = ("모니터", "노트북", "태블릿", "아이패드", "이어폰", "헤드폰", "헤드셋", "키보드", "마우스", "스마트워치", "갤럭시", "아이폰",
+                  "SSD", "외장하드")
+_DURABLE = re.compile("|".join(sorted(_APPLIANCE_WORDS + _DIGITAL_WORDS, key=len, reverse=True)))
+# '건조기 시트', '세탁기 거름망', '밥솥 내솥', '커피머신 세척 태블릿', '노트북 파우치', '다이슨 호환 배터리'도 부속·소모품
+# ('세척'은 '식기세척기' 안의 '세척'을 빼고 본다)
+_ACCESSORY = re.compile(
+    r"세제|세척(?!기)|클리너|필터|호일|봉투|살균제|탈취제|거치대|케이스|커버|필름|(?<!아이)패드|리필|카트리지|정리함|부품|소모품"
+    r"|시트|거름망|내솥|용기|파우치|호환|교체|부속|먼지통|배터리"
+    rf"|(?:{_DURABLE.pattern})\s*(?:용|전용)(?![가-힣])"
+)
+# 낱말이 들어 있지만 다른 물건 ('휴지통'≠휴지, '콜라겐'≠콜라)
+_NOT_THE_WORD = ("휴지통", "마우스피스", "콜라겐")
 # 가격 없는 쿠폰·이벤트 글에 안 맞는 말 (AI 첫 줄에 있으면 쿠폰·이벤트용 문구로 바꿈)
 _PRICE_TALK = re.compile(r"가격|싸|쌈|\d\s*원|쟁여|장바구니")
+# 상품명(게시판 제목)에 붙은 할인 자랑('30% 저렴하게', '평소보다 20% 싸게', '쿠팡보다 10%')은 스레드 이름 줄에서 뺀다.
+# 주인이 뺀 'N% 쌈' 꼴이고(TH-02, 발행 직전 검사에 걸려 글이 안 올라감), 비교는 바로 아랫줄 금액이 한다.
+# '드림카카오 72%'·'과즙 100%'·'10% 할인쿠폰' 같은 상품 정보는 둔다
+_PCT_CLAIM = re.compile(
+    r"(?:(?:평소|쿠팡|평균)\s*(?:가\s*)?(?:보다|대비)\s*)?\d+(?:\.\d+)?\s*%\s*(?:나|더|정도|가량|쯤)?\s*"
+    r"(?:싸\S*|쌈|저렴\S*|빠짐|빠졌\S*|낮음|내려\S*)"
+    r"|(?:평소|쿠팡|평균)\s*(?:가\s*)?(?:보다|대비)\s*\d+(?:\.\d+)?\s*%\S*"
+)
+
+
+def _drop_pct_claims(name: str) -> str:
+    return " ".join(_PCT_CLAIM.sub(" ", name).split()) or name
 
 
 class TemplateRenderer:
@@ -227,10 +277,12 @@ class TemplateRenderer:
                             is_market=is_market, recent=recent),
         }
 
-    # 스레드 첫 줄 (AI 가 못 썼을 때). (문장, 반전): 반전=True 는 생활 속 상황·불편이라 다음 줄을 '근데 {이름} {가격}임' 으로
-    # 뒤집고, False 는 그냥 하는 말이라 '근데' 없이 '{이름} {가격}임'. 가격·경험·약속을 지어내는 말은 넣지 않는다.
+    # 스레드 첫 줄 (AI 가 못 썼을 때). (문장, 반전): 반전=True 는 생활 속 상황·불편이라 다음 줄을 '근데 {이름} {가격}' 으로
+    # 뒤집고, False 는 그냥 하는 말이라 '근데' 없이 '{이름} {가격}'. 가격·경험·약속을 지어내는 말, 훈수('~게 맞음', '~게 답임',
+    # '손해임'), 주인이 뺀 말('필요했던 사람만 보면 됨', '찾던 사람 있을 것 같아서…')은 넣지 않는다 (commentary.THREAD_BANNED).
     # 그룹: (상품명에 이 낱말이 있으면, 쿠팡 분류 칸에 이 말이 있으면, 첫 줄들). 앞 그룹이 먼저.
-    # 상품명은 헷갈리지 않는 낱말만 본다 ('청소기'≠'청소', '커피머신'≠'커피', '바디필로우'≠'바디워시').
+    # 상품명은 헷갈리지 않는 낱말만 본다 ('청소기'≠'청소', '커피머신'≠'커피', '바디필로우'≠'바디워시', '토너'는 프린터 토너도 있어 분류로만).
+    # 뷰티를 먹거리보다 먼저 본다 ('우유 바디워시'는 뷰티).
     THREAD_HOOK_GROUPS: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[tuple[str, bool], ...]], ...] = (
         (("휴지", "화장지", "두루마리", "각티슈", "미용티슈"), ("화장지", "휴지"),
          (("휴지 떨어진 거 꼭 샤워 끝나고 알게 됨", True),)),
@@ -238,15 +290,16 @@ class TemplateRenderer:
          (("양말은 왜 항상 한 짝씩 사라짐", True),)),
         (("충전기", "충전 케이블", "고속충전", "보조배터리", "멀티탭"), (),
          (("충전기는 왜 항상 하나 모자람", True),)),
-        (("세탁기", "건조기", "워시타워", "청소기", "공기청정기", "가습기", "제습기", "커피머신", "에스프레소머신", "에어프라이어",
-          "전자레인지", "냉장고", "냉동고", "밥솥", "선풍기", "서큘레이터", "식기세척기", "정수기", "전기포트", "드라이기"),
+        (_APPLIANCE_WORDS,
          ("가전", "세탁기", "청소기", "냉장고", "주방가전", "계절가전"),
-         (("바꿀 때 된 거 알면서 계속 미루게 됨", True), ("가전은 할인할 때 사는 거임", False),
-          ("큰 가전은 한 번 사면 몇 년 씀", False))),
-        (("모니터", "노트북", "태블릿", "아이패드", "이어폰", "헤드폰", "헤드셋", "키보드", "마우스", "스마트워치", "갤럭시", "아이폰",
-          "SSD", "외장하드"),
+         (("바꿀 때 된 거 알면서 계속 미루게 됨", True), ("고장 나기 전엔 이상하게 안 바꾸게 됨", True),
+          ("가전은 한 번 사면 몇 년 씀", False))),
+        (_DIGITAL_WORDS,
          ("디지털", "컴퓨터", "노트북", "휴대폰", "모니터", "음향", "게임", "카메라"),
-         (("바꿀 때 된 거 알면서 계속 미루게 됨", True), ("전자기기는 할인할 때 사는 거임", False))),
+         (("바꿀 때 된 거 알면서 계속 미루게 됨", True), ("쓰던 게 느려지면 그때부터 계속 눈에 밟힘", True))),
+        (("샴푸", "린스", "트리트먼트", "바디워시", "바디로션", "핸드크림", "선크림", "클렌징", "세럼", "마스크팩", "립밤", "향수"),
+         ("뷰티", "화장품", "스킨", "헤어", "바디", "향수", "클렌징"),
+         (("화장대 정리하다 보면 꼭 이게 없음", True), ("다 쓴 공병 쌓여 있는 사람 손", False))),
         (("생수", "탄산수", "콜라", "사이다", "주스", "이온음료", "캔커피", "아메리카노", "콜드브루", "두유", "커피믹스", "믹스커피"),
          ("생수", "음료", "탄산", "주스"),
          (("마실 거는 꼭 귀찮은 날 떨어짐", True), ("음료는 박스로 쟁여두면 편함", False))),
@@ -257,43 +310,42 @@ class TemplateRenderer:
           ("배달비 아까워서 쟁여두는 거 있음?", False))),
         (("세제", "섬유유연제", "물티슈", "키친타올", "락스", "칫솔", "치약", "쓰레기봉투", "지퍼백"),
          ("생활", "세제", "화장지", "휴지", "물티슈", "욕실", "세탁", "청소"),
-         (("생필품은 꼭 다 쓰고 나서야 생각남", True), ("생필품은 쌀 때 사는 게 이기는 거임", False),
-          ("어차피 쓰는 거면 쌀 때 사두는 게 답임", False))),
-        (("프라이팬", "냄비", "도마", "칼세트", "밀폐용기", "수저", "식기", "텀블러", "보온병", "탈수기", "그릇"),
+         (("생필품은 꼭 다 쓰고 나서야 생각남", True), ("어차피 계속 쓰는 거라 싸게 나오면 눈에 들어옴", False))),
+        (("프라이팬", "냄비", "도마", "칼세트", "밀폐용기", "수저", "식기", "텀블러", "보온병", "탈수기", "그릇", "호일"),
          ("주방", "식기", "조리", "냄비", "프라이팬"),
          (("쓰려고 하면 꼭 설거지통에 들어가 있음", True), ("설거지 거리 하나 줄이면 그게 행복임", False),
           ("주방템은 한 번 사면 몇 년 감", False))),
-        (("샴푸", "린스", "트리트먼트", "바디워시", "바디로션", "핸드크림", "선크림", "클렌징", "토너", "세럼", "마스크팩", "립밤",
-          "향수"),
-         ("뷰티", "화장품", "스킨", "헤어", "바디", "향수", "클렌징"),
-         (("화장대 정리하다 보면 꼭 이게 없음", True), ("다 쓴 공병 쌓여 있는 사람 손", False))),
         (("티셔츠", "속옷", "운동화", "슬리퍼", "레깅스", "패딩", "백팩"),
          ("패션", "의류", "신발", "가방", "속옷", "잡화"),
          (("입으려고 보면 꼭 하나씩 해져 있음", True), ("기본템은 매년 다시 사게 됨", False))),
     )
-    # 일반 문구는 10개 이상 (최근 10건 안에 같은 첫 줄을 다시 안 쓰려면)
+    # 일반 문구는 10개 이상 (최근 10건 안에 같은 첫 줄을 다시 안 쓰려면). 질문형은 몇 개만 (매번 질문이면 그것도 광고 문법)
     THREAD_HOOKS: tuple[tuple[str, bool], ...] = (
-        ("오늘 핫딜 중에 이거 하나만 건지면 됨", False), ("쟁여둘 사람은 지금이 타이밍임", False),
-        ("이거 집에 하나씩 있는 거 맞지?", False), ("장바구니에 넣어둔 사람 지금 보셈", False),
-        ("필요했던 사람만 보면 됨", False), ("살 거면 할인할 때 사는 게 맞음", False),
-        ("어차피 살 거였으면 오늘 보면 됨", False), ("찾던 사람 있을 것 같아서 들고 옴", False),
+        ("오늘 핫딜 중에 이거 하나만 건지면 됨", False), ("이거 집에 하나씩 있는 거 맞지?", False),
+        ("꼭 필요할 때 사면 비싸더라", False), ("가격 보고 두 번 봤음", False),
         ("미뤄둔 거 하나쯤 있지?", False), ("이런 건 알아두면 언젠가 씀", False),
+        ("쟁여둘 사람은 지금이 타이밍임", False), ("그냥 넘기기엔 좀 아까운 가격", False),
+        ("장바구니에 넣어만 두고 안 산 거 있지?", False), ("이 정도면 한 번 볼 만함", False),
+        ("생각난 김에 하나 들여놓기 좋은 날", False),
     )
     THREAD_CLOSES = (
-        "다들 이런 거 어디서 사?", "더 싼 데 알면 알려줘", "안 쓸 거면 싸도 손해임", "이거 써본 사람 후기 좀",
-        "찾던 사람 있을 것 같아서 남겨둠", "링크 가격 다르면 이미 끝난 거임",
+        "다들 이런 거 어디서 사?", "더 싼 데 알면 알려줘", "이거 써본 사람 후기 좀", "링크 가격 다르면 이미 끝난 거임",
+        "가격은 수시로 바뀌니까 링크에서 한 번 더 확인", "다들 이거 몇 개씩 쟁여둠?",
     )
-    # 가격 없는 쿠폰·이벤트: 가격·싸다·쟁여 같은 말 없이
+    # 가격 없는 쿠폰·이벤트: 가격·싸다·쟁여 같은 말 없이. '아는 사람만 챙김' 같은 '~사람만' 문은 쓰지 않는다 (TH-02)
     THREAD_HOOKS_NOPRICE: tuple[tuple[str, bool], ...] = (
-        ("이런 건 아는 사람만 챙김", False), ("관심 있는 사람만 보면 됨", False), ("쓸 일 있는 사람만 챙겨가면 됨", False),
+        ("이런 건 꼭 끝나고 나서 알게 됨", False), ("모르고 지나치기 아까운 거", False), ("조건만 맞으면 챙길 만함", False),
     )
-    THREAD_CLOSES_NOPRICE = ("조건은 링크에서 한 번 더 확인하셈", "비슷한 거 알면 알려줘", "기간 있는 거라 미리 봐두셈")
+    THREAD_CLOSES_NOPRICE = ("조건은 링크에서 한 번 더 확인", "비슷한 거 알면 알려줘", "기간 있는 거라 미리 봐두면 편함")
 
     def _hook_pool(self, p: Product) -> tuple[tuple[str, bool], ...]:
-        """상품명의 확실한 낱말 → 쿠팡 분류(구체적인 칸부터) 순으로 맞는 그룹의 첫 줄들. 모르면 일반 문구."""
+        """상품명의 확실한 낱말 → 쿠팡 분류(구체적인 칸부터) 순으로 맞는 그룹의 첫 줄들. 모르면 일반 문구.
+        소모품·부속('식기세척기 세제', '드럼세탁기용', '정수기 필터', '아이폰 케이스')은 이름 속 가전·전자기기 낱말을 안 본다."""
         name = clean_name(p.name)
-        for compound in ("휴지통", "마우스피스"):  # 낱말이 들어 있지만 다른 물건
+        for compound in _NOT_THE_WORD:
             name = name.replace(compound, " ")
+        if _ACCESSORY.search(name):
+            name = _DURABLE.sub(" ", name)
         for words, _, hooks in self.THREAD_HOOK_GROUPS:
             if any(w in name for w in words):
                 return hooks
@@ -302,6 +354,10 @@ class TemplateRenderer:
                 if any(w in seg for w in cat_words):
                     return hooks
         return self.THREAD_HOOKS
+
+    def _is_durable(self, pool: tuple[tuple[str, bool], ...]) -> bool:
+        """가전·전자기기 첫 줄 그룹인지. 몇 년 쓰는 물건이라 '몇 개씩 쟁여둠?' 같은 말이 안 맞는다."""
+        return any(hooks is pool for words, _, hooks in self.THREAD_HOOK_GROUPS if words in (_APPLIANCE_WORDS, _DIGITAL_WORDS))
 
     @staticmethod
     def _rotate(items: Sequence[Any], h: int, recent: list[str]) -> list[Any]:
@@ -316,6 +372,9 @@ class TemplateRenderer:
         ai = (p.extra or {}).get("thread_hook")
         if p.has_price:
             pool, generic, closes = self._hook_pool(p), self.THREAD_HOOKS, self.THREAD_CLOSES
+            if self._is_durable(pool):  # 냉장고·노트북을 '쟁여'두지는 않음
+                generic = tuple(x for x in generic if "쟁여" not in x[0])
+                closes = tuple(c for c in closes if "쟁여" not in c)
         else:
             pool = generic = self.THREAD_HOOKS_NOPRICE
             closes = self.THREAD_CLOSES_NOPRICE
@@ -332,6 +391,8 @@ class TemplateRenderer:
         close = None
         if h % 2:  # 마무리는 두 번에 한 번꼴 (매번 질문으로 끝나면 그것도 광고 문법)
             options = [c for c in closes if not any(s in hook and s in c for s in _SHARED_STEMS)]
+            if hook.rstrip().endswith("?"):  # 질문은 글 하나에 하나까지 (스타일 가이드 4-2: 질문 1줄은 선택)
+                options = [c for c in options if not c.rstrip().endswith("?")]
             fresh_close = self._rotate(options, h // 7, recent)
             if fresh_close:
                 close = fresh_close[0]
@@ -343,19 +404,25 @@ class TemplateRenderer:
         self, deal: Deal, *, days: int, ref_price: int | None, pct: int | None, labels: list[str], tier: str,
         is_market: bool = False, recent: Sequence[str] = (),
     ) -> dict[str, Any]:
-        """가격 근거를 사람 말로: 첫 줄용 짧은 근거, 문장형 근거, 스레드용 반말 근거. 숫자는 데이터에서만.
-        우선순위: 평소 가격(쿠팡 시중가·최근 평균) 대비 > 기록 최저가 > 단가. 표시(정가) 할인율은 근거로 안 씀."""
+        """가격 근거를 사람 말로: 첫 줄용 짧은 근거, 문장형 근거, 스레드용 근거. 숫자는 데이터에서만.
+        우선순위: 평소 가격(쿠팡 시중가·최근 평균) 대비 > 기록 최저가 > 단가. 표시(정가) 할인율은 근거로 안 씀.
+        스레드 근거(evidence_casual)는 '평소보다 N% 쌈' 대신 비교한 금액을 그대로 보여 준다 (주인 지시 TH-02, 스타일 가이드 6장
+        '같은 상품 쿠팡은 21,900원' / '평소 15,200원대'). 바로 윗줄이 '{이름} {가격}' 이라 금액만 놓아도 차이가 보인다."""
         p = deal.product
         unit = unit_price(clean_name(p.name), p.price)
         each = f"{unit.split(' (')[0]} 꼴" if unit else None
         low = next((x for x in labels if "최저가" in x), None)
         if ref_price and pct:
             where = "쿠팡" if is_market else "평소"
-            short, casual = f"{where}보다 {pct}%↓", f"{where}보다 {pct}% 쌈"
-            sentence = (f"쿠팡 최저가 {ref_price:,}원보다 {pct}% 싸요." if is_market
-                        else f"평소 {ref_price:,}원대인데 오늘 {p.price:,}원이에요.")
+            short = f"{where}보다 {pct}%↓"
+            # 평균은 '원대'(대략 구간)로 말하니 끝자리를 내린다 ('41,233원대' → '41,000원대'). 쿠팡 최저가는 정확한 금액 그대로
+            if is_market:
+                casual, sentence = f"쿠팡 최저가는 {ref_price:,}원", f"쿠팡 최저가 {ref_price:,}원보다 {pct}% 싸요."
+            else:
+                band = price_band(ref_price, p.price)
+                casual, sentence = f"평소엔 {band:,}원대", f"평소 {band:,}원대인데 오늘 {p.price:,}원이에요."
         elif low:
-            short, casual = f"{days}일 중 제일 쌈", f"최근 {days}일 중 제일 쌈"
+            short, casual = f"{days}일 중 제일 쌈", f"최근 {days}일 중 최저가"
             sentence = f"최근 {days}일 중 제일 싸요."
         elif each:
             short, casual, sentence = each, each, f"{each}이에요."
@@ -378,7 +445,7 @@ class TemplateRenderer:
             "unit_each": each if each and each != short else None,
             **self.thread_lines(p, recent=recent),
             "thread_take": (p.extra or {}).get("thread_take"),
-            "short_name": (p.extra or {}).get("short_name") or short_name(p.name),
+            "short_name": _drop_pct_claims((p.extra or {}).get("short_name") or short_name(p.name)),
         }
 
     def render(self, name: str, *, autoescape: bool = True, **ctx: Any) -> str:
@@ -399,7 +466,7 @@ class TemplateRenderer:
         recent: Sequence[str] = (),
         single: bool = False,
     ) -> str:
-        """recent: 최근 스레드 글에 쓴 문구(피해서 고름). single: 스레드를 답글 없이 한 글로 올릴 때 (링크를 본문에)."""
+        """recent: 최근 스레드 글에 쓴 문구(피해서 고름). single: 예전 템플릿 호환용 (스레드 링크는 이제 늘 본문에)."""
         p = deal.product
         shop_ctx = {
             "key": shop.key if shop else p.shop,

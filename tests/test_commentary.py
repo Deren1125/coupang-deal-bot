@@ -403,6 +403,6 @@ async def test_threads_test_sample_runs_the_ai_step(settings) -> None:  # noqa: 
         bot.threads.dry_run = True
         preview = await bot.threads_test()
         assert calls == ["coupang:0000000"]
-        assert "텀블러는 꼭 출근길에 두고 나옴" in preview and "스탠리 퀜처 1.18L 29,900원임" in preview
+        assert "텀블러는 꼭 출근길에 두고 나옴" in preview and "근데 스탠리 퀜처 1.18L 29,900원\n" in preview and "원임" not in preview
     finally:
         await bot.close()

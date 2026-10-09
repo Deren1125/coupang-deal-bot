@@ -127,7 +127,8 @@ def test_emphasis_tiers(repo_root: Path) -> None:
     low = r.render_deal(deal(below_avg_pct=8.4, avg_price=13500, low_price=13000, history_days=12.4, sample_count=6), "https://l", shop=shop)
     assert low.startswith("☑️ <b>12,360원</b> · 12일 중 제일 쌈")
     th = r.render_deal(deal(below_avg_pct=20.0, avg_price=15450), "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
-    assert "갈아만든배 340ml 24개 12,360원임" in th and "평소보다 20% 쌈" in th and "쿠팡 파트너스" in th and "링크는 댓글에" in th
+    assert "갈아만든배 340ml 24개 12,360원\n평소엔 15,000원대" in th and "쿠팡 파트너스" in th  # 평균 15,450 → '원대'는 끝자리 내림
+    assert "원임" not in th and "% 쌈" not in th and "댓글" not in th  # 주인이 뺀 말 (TH-02)
     kakao = r.render_deal(deal(below_avg_pct=55.0, avg_price=27000), "https://l", shop=shop, template="deal_kakao.j2", autoescape=False)
     assert kakao.startswith("🔥 갈아만든배") and "👉 " in kakao and "평균가" not in kakao and "✱" not in kakao
 
@@ -187,7 +188,7 @@ def test_threads_uses_ai_lines_and_category_hooks(repo_root: Path) -> None:
     t = r.render_deal(d, "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
     lines = t.split("\n")
     assert lines[0] == "휴지 떨어진 거 꼭 샤워 끝나고 알게 됨"  # 분류 '화장지' → 휴지 첫 줄 (상황 문장이라 '근데'로 뒤집음)
-    assert "근데 크리넥스 30롤 14,900원임" in t and "평소보다 32% 쌈" in t and "롤당 497원 꼴이면" in t
+    assert "근데 크리넥스 30롤 14,900원\n평소엔 21,000원대" in t and "롤당 497원 꼴이면" in t
     assert check_hook("휴지 떨어진 거 꼭 샤워 끝나고 알게 됨") and check_hook("어제 3개 샀음") is None
     assert check_short_name("크리넥스 30롤", "크리넥스 3겹 데코앤소프트 30m 30롤") == "크리넥스 30롤"
     assert check_short_name("크리넥스 프리미엄", "크리넥스 3겹 30롤") is None  # 상품명에 없는 말

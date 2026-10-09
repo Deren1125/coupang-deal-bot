@@ -42,12 +42,17 @@ SYSTEM = (
     "합리적인 가격, 가성비 좋은, 만족도가 높은, 도움이 될 수 있습니다, 평소보다 확실히 싸게, 역대급, 미쳤다, 무조건, 강추, "
     "강력 추천, 인생템, 놓치지 마세요, 서두르세요.\n"
     "- 쓸 말이 없으면 comment 를 SKIP 으로."
-    "\n\n스레드(Threads)용 글도 같이 쓴다. 말투는 반말 음슴체(~임, ~함, ~듯, ~음)로 고정. ~요·~니다로 끝내지 않는다.\n"
+    "\n\n스레드(Threads)용 글도 같이 쓴다. 말투는 반말로 고정 (끝은 ~함, ~됨, ~음, ~듯처럼). ~요·~니다로 끝내지 않고, "
+    "가격·숫자 뒤에 '임'을 붙이지 않는다.\n"
     "- thread_hook: 상품명 없이 시작하는 첫 줄. 이 상품이 필요해지는 생활 속 순간·공감 (예: '휴지 떨어진 거 꼭 샤워 끝나고 알게 됨'). "
     "30자 이내, 숫자 금지, 지어낸 경험('샀음', '써봤는데') 금지, 질문형은 가끔만.\n"
-    "- thread_take: 판단 한 줄 (누구한테 좋은지 / 아쉬운 점 / 팁). 40자 이내 반말 음슴체. 숫자는 상품명·확인된 정보에 있는 것만.\n"
+    "- thread_take: 판단 한 줄 (누구한테 좋은지 / 아쉬운 점 / 팁). 40자 이내 반말. 가격·할인율·단가(원·%)는 다시 말하지 않는다 "
+    "(바로 윗줄에 가격과 비교 금액이 나간다). 다른 숫자는 상품명·확인된 정보에 있는 것만.\n"
     "- short_name: 상품명을 사람이 부르는 짧은 이름으로 (브랜드 + 핵심 품목 + 용량·수량, 20자 이내). 상품명에 있는 낱말을 그대로 쓰고 "
-    "없는 말은 넣지 않는다. 여러 개 묶음이면 개수(예: 24개, 40병)는 꼭 넣고, 제로·무라벨·로우슈거처럼 종류를 가르는 말은 빼지 않는다."
+    "없는 말은 넣지 않는다. 여러 개 묶음이면 개수(예: 24개, 40병)는 꼭 넣고, 제로·무라벨·로우슈거처럼 종류를 가르는 말은 빼지 않는다.\n"
+    "- 스레드에 쓰지 않는 말: 가격 뒤 '임'(예: '29,900원임', '개당 1,246원 꼴임'), 'N% 쌈'·'N% 싸짐'·'N% 저렴'·'쿠팡보다 N%', "
+    "'필요했던 사람만'·'아는 사람만 챙김' 같은 '~사람만', '찾던 사람 있을 것 같아서'·'찾는 사람 있을 것 같아서 올려둠', "
+    "'링크는 댓글에'·'링크 댓글에', 훈수('~하는 게 맞음', '~게 답임', '손해임')."
 )
 SCHEMA = {
     "type": "object",
@@ -56,28 +61,47 @@ SCHEMA = {
     "required": ["comment", "thread_hook", "thread_take", "short_name"],
 }
 FIELDS: tuple[str, ...] = ("comment", "thread_hook", "thread_take", "short_name")
-# '강추위'·'놓치는 사람' 같은 평범한 말은 걸리지 않게 홍보 표현만 콕 집는다
+# '강추위'·'놓치는 사람' 같은 평범한 말은 걸리지 않게 홍보 표현만 콕 집는다.
+# '평소보다 (확실히) 싸게 나왔어요' 류는 주인이 모든 핫딜 글에서 뺀 말 (H-07)
 BANNED = re.compile(
-    r"역대급|미쳤|무조건|강추(?!위)|강력 ?추천|인생템|놓치지 ?마|놓치지 ?말|놓치면|놓치기 전에|서두르|추천드립니다|안성맞춤|"
-    r"경험해 보세요|찾고 계셨다면|잘 맞는 제품|활용하기 좋|실용적이고|합리적인 가격|가성비 좋은|만족도가 높|도움이 될 수|"
-    r"확실히 싸|써보니|먹어보니|저도 샀|!|https?:|[★☆※\"“”]"
+    r"역대급|미쳤|무조건|강추(?!위)|강력 ?추천|인생템|놓치지 ?마|놓치지 ?말|놓치지 ?않|놓칠 수 없|놓치면|놓치기 전에|서두르|"
+    r"추천드립니다|안성맞춤|경험해 보세요|찾고 계셨다면|잘 맞는 제품|활용하기 좋|실용적이고|합리적인 가격|가성비 좋은|만족도가 높|"
+    r"도움이 될 수|확실히 ?(?:싸|쌈|쌉)|평소보다 ?싸|싸게 ?나왔|써보니|먹어보니|저도 샀|!|https?:|[★☆※\"“”]"
 )
-# 스레드 글(반말 음슴체)에 섞이면 안 되는 존댓말 끝. '필요'·'중요'·'주요' 같은 낱말의 '요'는 빼고 본다
-POLITE = re.compile(r"(?<![필중주수소])요(?=$|[\s.,~?!…])|니다|세요|십시오|죠(?=$|[\s.,~?!…])")
+# 스레드 글(반말)에 섞이면 안 되는 존댓말 끝. '필요'·'중요'·'주요' 같은 낱말의 '요', '다니다'의 '니다'는 빼고 본다
+POLITE = re.compile(r"(?<![필중주수소])요(?=$|[\s.,~?!…])|(?<!다)니다|세요|십시오|죠(?=$|[\s.,~?!…])")
+# 스레드 글에 쓰지 않는 말 (주인 지시 2026-10-07 TH-02, 훈수 말투 A-23). AI 첫 줄·판단 검사와 발행 직전 검사(threads)가 같이 쓴다
+# 정확한 문구만이 아니라 같은 꼴도 막는다: '1,246원 꼴임'·'3만원임', '29%나 쌈'·'29% 싸짐'·'29% 저렴함', '쿠팡보다 29%',
+# '찾는 사람 있을 것 같아서 올려둠', '링크 댓글에', '필요했던 사람은 보면 됨'·'아는 사람만 챙김'
+THREAD_BANNED = re.compile(
+    r"\d\s*(?:만|천)?\s*원\s*(?:대|꼴)?\s*임(?![가-힣])"
+    r"|\d\s*%\s*(?:나|더|정도|가량|쯤)?\s*(?:싸|쌈|저렴|빠짐|빠졌|낮음|내려)"
+    r"|(?:평소|쿠팡|평균)\s*(?:가\s*)?(?:보다|대비)\s*\d+\s*%"
+    r"|찾(?:던|는)\s*사람\s*있을\s*것\s*같아서|있을\s*것\s*같아서\s*(?:링크\s*)?(?:남겨|올려)\s*둠"
+    r"|링크\s*[은는]?\s*(?:첫\s*)?댓글|사람[은만]\s*(?:보면|챙겨|챙김)|필요했던\s*사람"
+    r"|게 맞음|게 답임|손해임|이기는 거임"
+)
+# 스레드 판단 줄은 가격·할인율·단가를 되풀이하지 않는다 (바로 윗줄에 가격과 비교 금액이 나감 — '29% 싸짐'·'…원 꼴임' 이 여기서 생김)
+_TAKE_PRICE = re.compile(r"\d\s*%|\d\s*(?:만\s*|천\s*)?원")
 
-# 숫자 + 단위. 영문 단위·%는 띄어 써도 같은 단위('350 ml'), 한글 단위는 붙여 쓴 것만('24개', '29일')
+# 숫자 + 단위. 영문 단위·%는 띄어 써도 같은 단위('350 ml'). 한글 단위는 붙여 쓴 것('24개', '29일'), 띄어 썼어도 뒤가
+# 조사·빈칸·문장부호·끝이면 단위로 본다('24 시간 들고', '29 일 동안'). 단위가 없는 맨 숫자는 정보·상품명의 숫자와만 맞춘다
+_KO_UNITS = (r"개월|개입|봉지|박스|세트|시간|주일|인분|페트|캡슐|가지|인치|켤레|마리"
+             r"|[개병캔봉팩펫매롤입일주달년분원명인잔포알정장회번살층구]")
 _NUM = re.compile(
     r"(\d[\d,.]*)(?:\s*(kg|ml|g|l|cm|mm|%)(?![a-wyz])"
-    r"|(개월|개입|봉지|박스|세트|시간|주일|인분|페트|[개병캔봉팩펫매롤입일주달년분원]))?",
+    rf"|({_KO_UNITS})|\s({_KO_UNITS})(?=$|[\s.,~?!…]|[이가은는을를에도만씩의와과로]))?",
     re.I,
 )
 _UNIT_SAME = {"개입": "개", "입": "개", "ea": "개", "봉지": "봉", "주일": "주", "페트": "병", "펫": "병", "달": "개월"}
+# 묶음 개수를 '개'로 불러도 같은 수량 ('24캔' 묶음을 '24개 들어 있어서'). 다른 단위끼리는 그대로 엄격하게
+_COUNT_AS_EA = frozenset({"병", "캔", "봉", "팩", "롤", "매"})
 # 숫자 없이 한글로 지어내는 개수·기간 ('두 박스면', '한 달은 버텨요'). '한 병씩'·'한 박스' 같은 평범한 말은 둔다
 _WORD_QTY = re.compile(
     r"(?<![가-힣])(?:두|세|네|다섯|여섯|일곱|여덟|아홉|열|몇|수십|수백)\s?(?:개월|개|병|캔|박스|상자|봉지|봉|팩|롤|묶음|세트|달|주|해|년)"
     r"|(?<![가-힣])한\s?(?:달|주|해)(?=$|[\s,.~은는이가도을를에치간만씩동])|반\s?년"
 )
-_HALF = re.compile(r"반값|반\s?가격|절반|반의 반|반액")
+_HALF = re.compile(r"반값|(?<![가-힣])반\s?가격|절반|반의 반|반액")  # '일반 가격' 은 반값 얘기가 아님
 
 
 def find_claude() -> str | None:
@@ -92,7 +116,7 @@ def _num_tokens(text: str) -> set[tuple[str, str]]:
     """'개당 1,038원 / 500ml' → {('1038', '원'), ('500', 'ml')}. 쉼표는 떼고, 같은 뜻의 단위는 하나로."""
     out: set[tuple[str, str]] = set()
     for m in _NUM.finditer(text or ""):
-        unit = (m.group(2) or m.group(3) or "").lower()
+        unit = (m.group(2) or m.group(3) or m.group(4) or "").lower()
         out.add((m.group(1).rstrip(".,").replace(",", ""), _UNIT_SAME.get(unit, unit)))
     return out
 
@@ -110,6 +134,7 @@ def check_comment(text: str | None, facts: str = "", name: str = "") -> str | No
     if _HALF.search(t) and _max_pct(facts) < 50:
         return None
     allowed = _num_tokens(f"{facts} / {clean_name(name)}" if name else facts)
+    allowed |= {(n, "개") for n, u in allowed if u in _COUNT_AS_EA}
     numbers = {n for n, _ in allowed}
     for n, unit in _num_tokens(t):
         if (n, unit) not in allowed and (unit or n not in numbers):
@@ -118,16 +143,17 @@ def check_comment(text: str | None, facts: str = "", name: str = "") -> str | No
 
 
 def check_take(text: str | None, facts: str = "", name: str = "") -> str | None:
-    """스레드 판단 한 줄: 한줄평 규칙 + 45자 이내 + 반말 음슴체만 (해요체가 섞이면 스레드 글 말투가 두 개가 됨)."""
+    """스레드 판단 한 줄: 한줄평 규칙 + 45자 이내 + 반말만 (해요체가 섞이면 스레드 글 말투가 두 개가 됨).
+    가격·할인율·단가(원·%)를 되풀이하면 뺀다 — 바로 윗줄에 가격과 비교 금액이 있다."""
     t = check_comment(text, facts, name)
-    if not t or len(t) > 45 or POLITE.search(t):
+    if not t or len(t) > 45 or POLITE.search(t) or THREAD_BANNED.search(t) or _TAKE_PRICE.search(t):
         return None
     return t
 
 
 def check_hook(text: str | None) -> str | None:
     t = re.sub(r"\s+", " ", (text or "")).strip().strip("'\"")
-    if (not t or len(t) > 32 or re.search(r"\d", t) or BANNED.search(t) or POLITE.search(t)
+    if (not t or len(t) > 32 or re.search(r"\d", t) or BANNED.search(t) or POLITE.search(t) or THREAD_BANNED.search(t)
             or re.search(r"샀음|샀는데|써봤|먹어봤", t)):
         return None
     return t
@@ -156,18 +182,20 @@ def _sn_counts(words: Iterable[str]) -> set[tuple[int, str]]:
 
 def check_short_name(text: str | None, name: str) -> str | None:
     """짧은 이름: 낱말마다 원래 상품명의 낱말(또는 붙여 쓴 이웃 낱말)과 같아야 (지어낸 말, '무라벨'→'라벨' 같은 조각 차단).
-    묶음 상품이면 개수(24개·40병)가 있어야 — 스레드 '근데 {이름} {가격}임' 이 한 개 값처럼 읽히지 않게."""
+    묶음 상품이면 개수(24개·40병)가 있어야 — 스레드 '근데 {이름} {가격}' 이 한 개 값처럼 읽히지 않게."""
     t = re.sub(r"\s+", " ", (text or "")).strip()
     if not t or len(t) > 22:
         return None
     words = _sn_words(clean_name(name))
     counts = _sn_counts(words)
     allowed = set(words) | {f"{n}{u}" for n, u in counts}  # '24개입' 은 '24개' 로 줄여 써도 됨
+    allowed |= {f"{n}개" for n, u in counts if u in _COUNT_AS_EA}  # '24캔' 묶음을 '24개' 로
     allowed |= {"".join(words[i:j]) for i in range(len(words)) for j in range(i + 2, min(i + 3, len(words)) + 1)}
     mine = _sn_words(t)
     if not mine or any(w not in allowed or (len(w) < 2 and not w.isdigit()) for w in mine):
         return None
     packs = {c for c in counts if c[0] > 1}
+    packs |= {(n, "개") for n, u in packs if u in _COUNT_AS_EA}
     if packs and not packs & _sn_counts(mine):
         return None
     return t
@@ -181,6 +209,11 @@ _LEAD = re.compile(
     r"|^(?:무배|무료\s?(?:로켓\s?)?배송|로켓\s?배송)(?:이라서|이라|라서|라|이고|고|에|으로|까지|인데|이니)?,?\s+"
 )
 _SENTENCE = re.compile(r"(?<=[.?~…])\s+")
+# 앞머리(단가·배송)를 걷어낸 나머지가 그 앞머리에 기대는 말이면 버린다: '개당 1,038원이면 커피 한 잔 값도 안 돼요' 에서
+# 앞을 빼면 딜 전체 값 얘기가 되고, '무료 로켓배송이라 내일 도착해요' 에서 앞을 빼면 근거 없는 약속이 된다
+_NEEDS_LEAD = re.compile(r"싸|쌉|저렴|값|가격|공짜|이득|비싸|보다|도착|내일|오늘|새벽")
+# 걷어낸 나머지가 잇는 말로 시작하면 깨진 문장 ('좋고, 사무실에 두기 편해요.')
+_DANGLING = re.compile(r"^(?:[가-힣]+고,|(?:좋|싸|저렴하|괜찮|편하|넉넉하|든든하|무난하)(?:고|며|아서|서|니까|니|은데|는데)(?=[\s,]))")
 
 
 def _amounts(s: str) -> set[str]:
@@ -207,7 +240,8 @@ def drop_repeats(text: str | None, shown: Iterable[str | None]) -> str | None:
             if not m:
                 break
             cur = cur[m.end():]
-        if repeated(cur) or (cur != sentence and (len(cur) < 8 or " " not in cur)):
+        stripped = cur != sentence
+        if repeated(cur) or (stripped and (len(cur) < 8 or " " not in cur or _NEEDS_LEAD.search(cur) or _DANGLING.match(cur))):
             continue
         keep.append(cur)
     return " ".join(keep) or None

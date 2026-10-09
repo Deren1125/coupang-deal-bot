@@ -43,6 +43,10 @@ def _no_page_fetch(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(PageEnricher, "fetch", nothing)
     monkeypatch.setattr(InfoPostBuilder, "fetch", nothing)
+    # 발행 전 사진 확인(deal_photo)은 연습 모드에서도 돌므로 사진 받기도 막는다
+    from dealbot.app import DealBot
+
+    monkeypatch.setattr(DealBot, "_fetch_image", nothing)
 
 
 @pytest.fixture(autouse=True)

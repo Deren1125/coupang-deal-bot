@@ -41,10 +41,11 @@ def test_kakao_copy_has_no_channel_ad_or_tier_filler(repo_root: Path) -> None:
 
 
 def test_threads_reply_link_fallback(repo_root: Path) -> None:
+    """선택 답글은 채널 안내만 (링크·고지는 첫 글 본문에 있음). 채널 주소가 없으면 빈 글 → 답글을 안 단다."""
     shop = ShopRegistry().get("coupang")
     kw = dict(shop=shop, template="deal_threads_reply.j2", autoescape=False)
-    assert "실시간 딜은 프로필 링크 👆" in TemplateRenderer(repo_root / "templates").render_deal(sample_deal(), "https://l", **kw)
+    assert TemplateRenderer(repo_root / "templates").render_deal(sample_deal(), "https://l", **kw) == ""
     only_kakao = TemplateRenderer(repo_root / "templates", channels={"kakao_openchat_url": KAKAO}).render_deal(sample_deal(), "https://l", **kw)
     assert f"실시간으로 올라오는 곳 👉 {KAKAO}" in only_kakao
     both = TemplateRenderer(repo_root / "templates", channels={"kakao_openchat_url": KAKAO, "telegram_url": TG}).render_deal(sample_deal(), "https://l", **kw)
-    assert TG in both and KAKAO not in both
+    assert TG in both and KAKAO not in both and "https://l" not in both

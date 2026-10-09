@@ -57,6 +57,7 @@ def clean_name(name: str | None) -> str:
     for _ in range(3):
         s = _TAG.sub("", s)
     s = _HYPE.sub("", s)
+    s = re.sub(r"\s*[\[(【]\s*[\])】]", "", s)  # 홍보 낱말만 들어 있던 괄호가 비면 괄호째 ('(역대급)' → '()' 방지)
     s = re.sub(r"\s*→\s*", "→", s)
     s = re.sub(r"\s{2,}", " ", s).strip(" -·:,")
     return s or name.strip()

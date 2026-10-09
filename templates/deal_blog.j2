@@ -21,8 +21,8 @@
 {% if product.rating or product.review_count %}
 {% if product.rating %}별점 {{ product.rating }}점{% endif %}{% if product.rating and product.review_count %}, {% endif %}{% if product.review_count %}리뷰 {{ "{:,}".format(product.review_count) }}건{% endif %}입니다.
 {% endif %}
-{% if product.shipping %}
-배송: {{ product.shipping }}
+{% if facts.ship %}
+{{ facts.ship }}
 {% endif %}
 
 구매 링크: {{ link }}

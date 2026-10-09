@@ -37,16 +37,65 @@ SITE="$DOMAIN {
 # 설치 직후 기본 Caddyfile 이거나 이 스크립트가 쓴 것이면 통째로 바꾸고,
 # 다른 사이트 설정이 들어 있으면 그대로 두고 핫딜 봇 주소는 따로 파일(dealbot.caddy)로 만들어 import 한 줄만 더한다
 KNOWN='^[[:space:]]*(#.*)?$|^:80 \{$|^[[:space:]]*root \* /usr/share/caddy$|^[[:space:]]*file_server$|^[0-9-]+\.sslip\.io \{$|^[[:space:]]*reverse_proxy 127\.0\.0\.1:[0-9]+$|^\}$'
+BAK=""
+if [ -s "$CADDY_DIR/Caddyfile" ]; then
+  BAK="$CADDY_DIR/Caddyfile.bak-$(date +%m%d_%H%M%S)"
+  sudo cp "$CADDY_DIR/Caddyfile" "$BAK"
+  ls -1t "$CADDY_DIR"/Caddyfile.bak-* 2>/dev/null | tail -n +6 | xargs -r sudo rm -f --  # 백업은 최근 5개만
+fi
+# dealbot.caddy 도 바꾸기 전 내용을 남겨 둔다. 점검에 걸려 Caddyfile 을 되돌릴 때 같이 되돌린다
+# (옛 Caddyfile 이 이미 dealbot.caddy 를 import 하고 있으면 새 dealbot.caddy 가 그대로 읽히므로)
+INC_BAK=""
+WROTE_INC=""
+if [ -e "$CADDY_DIR/dealbot.caddy" ]; then
+  INC_BAK="$CADDY_DIR/dealbot.caddy.bak"
+  sudo cp "$CADDY_DIR/dealbot.caddy" "$INC_BAK"
+fi
+restore_caddy() {
+  if [ -n "$BAK" ]; then sudo cp "$BAK" "$CADDY_DIR/Caddyfile"; fi
+  if [ -n "$INC_BAK" ]; then
+    sudo cp "$INC_BAK" "$CADDY_DIR/dealbot.caddy"
+  elif [ -n "$WROTE_INC" ]; then
+    sudo rm -f "$CADDY_DIR/dealbot.caddy"
+  fi
+}
 if [ ! -s "$CADDY_DIR/Caddyfile" ] || ! grep -vqE "$KNOWN" "$CADDY_DIR/Caddyfile"; then
   printf '%s\n' "$SITE" | sudo tee "$CADDY_DIR/Caddyfile" >/dev/null
 else
-  printf '%s\n' "$SITE" | sudo tee "$CADDY_DIR/dealbot.caddy" >/dev/null
-  if ! grep -qF "import $CADDY_DIR/dealbot.caddy" "$CADDY_DIR/Caddyfile"; then
-    BAK="$CADDY_DIR/Caddyfile.bak-$(date +%m%d_%H%M%S)"
-    sudo cp "$CADDY_DIR/Caddyfile" "$BAK"
-    printf '\nimport %s/dealbot.caddy\n' "$CADDY_DIR" | sudo tee -a "$CADDY_DIR/Caddyfile" >/dev/null
-    echo "   Caddyfile 에 다른 사이트 설정이 있어서 그대로 두고 import 한 줄만 더했어요 (전 파일: $BAK)"
+  # 예전 https.sh 가 Caddyfile 에 직접 쓴 봇 주소 블록(…sslip.io { reverse_proxy 127.0.0.1:N })은 뺀다.
+  # 남겨 두면 dealbot.caddy 와 같은 주소가 두 번 정의돼 Caddy 가 설정을 거부하고 다른 사이트까지 멈춘다 (IP 가 바뀐 옛 블록은 인증서만 계속 실패)
+  # 새 내용은 임시 파일에 먼저 만든다. 'python … | sudo tee Caddyfile' 로 바로 쓰면 tee 가 파일부터 비워서, python 이 실패하면
+  # (UTF-8 이 아닌 Caddyfile, 못 읽는 백업) 빈 Caddyfile 만 남고 다음 재시작·재부팅 때 모든 사이트가 사라진다
+  TMP_CADDY="$(mktemp)"
+  if ! python3 - "$BAK" "import $CADDY_DIR/dealbot.caddy" >"$TMP_CADDY" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+own = re.compile(r"^[0-9-]+\.sslip\.io \{[ \t]*\n(?:[ \t]*reverse_proxy 127\.0\.0\.1:[0-9]+[ \t]*\n)+\}[ \t]*(?:\n|$)", re.M)
+text = own.sub("", text).rstrip("\n") + "\n"
+if sys.argv[2] not in text.splitlines():
+    text += "\n" + sys.argv[2] + "\n"
+sys.stdout.write(text)
+PY
+  then
+    rm -f "$TMP_CADDY"
+    echo "⛔ Caddyfile 을 읽지 못해서(UTF-8 이 아니거나 읽을 수 없음) 아무것도 바꾸지 않았어요. Caddy 는 그대로 돌고 있어요."
+    echo "   확인: $CADDY_DIR/Caddyfile"
+    exit 1
   fi
+  printf '%s\n' "$SITE" | sudo tee "$CADDY_DIR/dealbot.caddy" >/dev/null
+  WROTE_INC=1
+  sudo cp "$TMP_CADDY" "$CADDY_DIR/Caddyfile"
+  rm -f "$TMP_CADDY"
+  echo "   Caddyfile 에 다른 사이트 설정이 있어서 그대로 두고 봇 주소는 import 한 줄로만 넣었어요 (전 파일: $BAK)"
+fi
+# 다시 켜기 전에 설정을 점검한다. 틀렸으면 원래 파일로 되돌리고 멈춘다 (Caddy 가 안 떠서 다른 사이트까지 멈추지 않게)
+if ! sudo caddy validate --adapter caddyfile --config "$CADDY_DIR/Caddyfile" >/dev/null 2>&1; then
+  restore_caddy
+  echo "⛔ 새 Caddy 설정이 점검(caddy validate)에서 걸려서 원래 Caddyfile(과 dealbot.caddy)로 되돌렸어요. Caddy 는 그대로 돌고 있어요."
+  echo "   확인: sudo caddy validate --adapter caddyfile --config $CADDY_DIR/Caddyfile"
+  exit 1
 fi
 sudo systemctl enable caddy >/dev/null
 sudo systemctl restart caddy

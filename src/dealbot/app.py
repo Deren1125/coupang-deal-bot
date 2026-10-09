@@ -36,7 +36,7 @@ from dealbot.commentary import Commentator
 from dealbot.config import Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dedupe import find_duplicate
-from dealbot.enrich import PageEnricher
+from dealbot.enrich import PageEnricher, page_images
 from dealbot.infopost import InfoPostBuilder, PostBody
 from dealbot.links import (
     CoupangDeeplinkProvider,
@@ -48,7 +48,12 @@ from dealbot.links import (
 )
 from dealbot.manual import parse_manual_post
 from dealbot.media.card import CardStyle, DealCard
-from dealbot.media.imagecheck import clean_image, is_board_thumb
+from dealbot.media.imagecheck import (
+    clean_image,
+    coupang_image_url,
+    is_board_thumb,
+    is_generic_image,
+)
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import (
     BOT_COMMANDS,
@@ -173,14 +178,18 @@ class DealBot:
             timeout=settings.http.timeout_seconds,
         )
         sm = settings.info_posts.summarizer
+        # API 키가 먼저, 없으면 서버의 claude 로그인(한줄평과 같은 CLI·모델). 설정에서 끄면 둘 다 안 씀
         self.summarizer = InfoSummarizer(
             settings.secrets.anthropic_api_key if sm.enabled else None,
             model=sm.model,
             max_chars=settings.info_posts.max_chars,
             timeout=sm.timeout_seconds,
+            use_cli=sm.enabled,
+            cli_model=settings.publish.commentary.model,
+            cli_timeout=max(sm.timeout_seconds, 120),
         )
-        if settings.info_posts.enabled and not self.summarizer.configured:
-            log.warning("ANTHROPIC_API_KEY not set — info posts will wait for admin approval (/ok) instead of being summarized")
+        if settings.info_posts.enabled and sm.enabled and self.summarizer.backend is None:
+            log.warning("info summarizer off (no ANTHROPIC_API_KEY and no claude CLI) — info posts will wait for admin approval (/ok)")
         self._pending_notice_ready = False
         self.rate_limiter = RateLimiter(self.db, settings.publish)
 
@@ -274,7 +283,8 @@ class DealBot:
             labels={c.name: c.label for c in settings.collectors if c.label},
         )
         self.reporter = StatusReporter(
-            settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget
+            settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget,
+            summarizer=self.summarizer,
         )
         # ---- 작은 웹 서버: 스레드 OAuth 콜백·/health. Railway 공개 도메인을 붙이면 승인만 눌러도 스레드가 연결된다
         self.web = WebServer(settings.secrets.web_port)
@@ -523,11 +533,12 @@ class DealBot:
             return "텔레그램 봇 토큰과 관리자 챗 ID 가 있어야 합니다."
         deal = sample_deal()
         await self.add_commentary(deal)  # 샘플에도 실제처럼 한줄평·스레드 문구를 붙여 보여 줌
+        photo = await self.deal_photo(deal)  # 실제 글처럼 확인된 상품 사진만 (샘플의 쿠팡 로고는 사진으로 안 씀)
         original = (self.publisher.channel_id, self.publisher.dry_run)
         try:
             self.publisher.channel_id = self.notifier.chat_id
             self.publisher.dry_run = False
-            result = await self.publisher.publish(deal)
+            result = await self.publisher.publish(deal, photo=photo)
         finally:
             self.publisher.channel_id, self.publisher.dry_run = original
         if not result.ok:
@@ -541,7 +552,7 @@ class DealBot:
         hook, reply = self.threads.render(deal), self.threads.render_reply(deal)
         text = f"🧵 <b>스레드에는 이렇게 올라갑니다 ({html.escape(label)})</b>\n<pre>{html.escape(hook)}</pre>"
         if reply:
-            text += f"\n답글(링크):\n<pre>{html.escape(reply)}</pre>"
+            text += f"\n답글:\n<pre>{html.escape(reply)}</pre>"
         return text
 
     async def threads_test(self, queue_id: int | None = None) -> str:
@@ -563,6 +574,8 @@ class DealBot:
             deal, label = item.deal, f"#{queue_id} {item.deal.product.name[:30]}"
         if "comment" not in deal.product.extra:  # /test 처럼 실제 글과 같은 AI 첫 줄·판단·짧은 이름으로 미리보기
             await self.add_commentary(deal)
+        if queue_id is None:
+            await self.deal_photo(deal)  # 샘플도 실제처럼 확인된 상품 사진만 (샘플의 쿠팡 로고는 사진으로 안 씀)
         preview = self._threads_preview(deal, label)
         if self.threads.dry_run:
             return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
@@ -1418,7 +1431,8 @@ class DealBot:
         if "comment" not in deal.product.extra:
             await self.add_commentary(deal)
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
-        photo = await self.deal_photo(deal) if self.publisher.send_photo and not self.publisher.dry_run else None
+        # 사진은 연습 모드·사진 끔이어도 확인한다 (블로그 내보내기·미리보기용, 보내는 건 publisher 가 send_photo 일 때만)
+        photo = await self.deal_photo(deal)
         result = await self.publisher.publish(deal, silent=silent, photo=photo)
         if result.ok:
             self.db.record_post(
@@ -1434,7 +1448,7 @@ class DealBot:
             if result.dry_run:
                 # 연습 모드: 채널에 올라갔을 글 전체를 관리자 챗으로 보여준다. 스레드/복붙 문구는 실제 발행 때만
                 await self.notifier.notify_published(deal, result, preview=self.publisher.render(deal))
-                self.export_published(deal, None, preview=True)  # 블로그 미리보기(/hotdeal)용 — 실제 블로그 발행엔 안 쓰임
+                self.export_published(deal, photo, preview=True)  # 블로그 미리보기(/hotdeal)용 — 실제 블로그 발행엔 안 쓰임
             else:
                 await self.notifier.notify_published(deal, result)
                 self.export_published(deal, photo)
@@ -1443,9 +1457,12 @@ class DealBot:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True
 
+    EXPORT_KEEP_DAYS = 14  # media/export 의 사진은 블로그가 가져간 뒤 이만큼 지나면 지운다
+
     def export_published(self, deal: Deal, photo: bytes | None = None, *, preview: bool = False) -> None:
         """채널에 실제로 올린 딜을 published_deals.jsonl 에 한 줄씩 남긴다 (블로그 자동 발행·카카오 전송이 읽어 감).
-        사진은 검사를 통과한 JPEG 를 media/export 에 저장해 경로를 같이 적는다."""
+        사진은 deal_photo 가 확인한 상품 사진(600px 이상 JPEG)만 media/export 에 저장해 경로를 적는다.
+        글자 카드는 상품 사진이 아니라 블로그 사진으로 내보내지 않는다. photo_kind: 'product' | 'none', photo_src: 받은 주소."""
         try:
             p = deal.product
             shop = self.registry.get(p.shop)
@@ -1456,6 +1473,7 @@ class DealBot:
             if photo:
                 photo_file = str(out_dir / f"{re.sub(r'[^A-Za-z0-9_-]+', '_', p.product_id)}_{int(time.time())}.jpg")
                 Path(photo_file).write_bytes(photo)
+            self._prune_exports(out_dir)
             ctx = self.renderer
             tier, _ = ctx.deal_tier(deal)
             v = deal.verdict
@@ -1470,7 +1488,8 @@ class DealBot:
                 "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
                 "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
                 "disclosure": shop.disclosure if shop else "", "link": link, "product_url": p.url,
-                "image_url": p.image_url, "photo_file": photo_file,
+                "image_url": p.image_url, "photo_file": photo_file, "photo_kind": "product" if photo_file else "none",
+                "photo_src": p.image_url if photo_file else None,
                 "kakao_text": ctx.render_deal(deal, link, shop=shop, template="deal_kakao.j2", autoescape=False),
                 **{k: v for k, v in ctx.deal_facts(deal).items() if k != "ref_price"},
             }
@@ -1480,45 +1499,67 @@ class DealBot:
         except Exception as e:  # noqa: BLE001 — 내보내기 실패가 발행을 막지 않게
             log.warning("export_published failed: %s", e)
 
-    async def _fetch_image(self, url: str | None) -> bytes | None:
-        """상품 사진 원본을 받아 온다 (카드에 얹을 용도). 실패하면 None."""
+    def _prune_exports(self, out_dir: Path) -> None:
+        cutoff = time.time() - self.EXPORT_KEEP_DAYS * 86400
+        for f in out_dir.glob("*.jpg"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink()
+            except OSError:
+                pass
+
+    async def _fetch_image(self, url: str | None, *, referer: str | None = None) -> bytes | None:
+        """사진 원본을 받아 온다. 이미지인지는 clean_image 가 직접 열어 본다 (octet-stream 으로 주는 CDN 도 있음). 실패하면 None.
+        referer: 상품 페이지 주소 (외부에서 가져가는 걸 막는 CDN 은 사진 주소 자신을 Referer 로 주면 거절함)."""
         if not url:
             return None
         try:
-            resp = await self.http.get(url, follow_redirects=True, timeout=15, headers={"Referer": url})
-            ctype = resp.headers.get("content-type", "")
-            if resp.status_code != 200 or not ctype.startswith("image/") or len(resp.content) > 10_000_000:
+            resp = await self.http.get(url, follow_redirects=True, timeout=15, headers={"Referer": referer or url})
+            ctype = resp.headers.get("content-type", "").lower()
+            if resp.status_code != 200 or ctype.startswith(("text/", "application/json")) or len(resp.content) > 10_000_000:
+                log.info("photo fetch: HTTP %s %s for %s", resp.status_code, ctype or "-", url[:100])
                 return None
             return resp.content
         except Exception as e:  # noqa: BLE001
-            log.debug("image fetch failed %s: %s", url, e)
+            log.info("photo fetch failed %s: %s", url[:100], e)
             return None
 
     async def deal_photo(self, deal: Deal) -> bytes | None:
-        """채널에 올릴 사진 (검사·변환한 JPEG 바이트). 순서: 상품 사진 → 상품 페이지 대표 사진 → 딜 카드.
-        상품 사진이 못 쓰는 것이면 deal.product.image_url 을 비워, 스레드·인스타도 카드 사진을 쓰게 한다."""
+        """올릴 상품 사진: 디코딩되고 짧은 변 photo_min_side(600px) 이상인 JPEG (EXIF 방향 반영). 없으면 None → 사진 없이 올린다.
+        순서: 딜의 상품 사진(쿠팡 CDN 은 1000px 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만).
+        게시판 목록 썸네일·로고·기본 배너는 상품 사진으로 쓰지 않는다. 글자 카드도 상품 사진이 아니라 여기서 만들지 않는다
+        (카드는 인스타만). 쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고, 못 찾으면 비운다."""
         cc = self.settings.publish
         p = deal.product
-        photo = clean_image(await self._fetch_image(p.image_url), min_side=cc.photo_min_side) if p.image_url else None
+        referer = p.url if p.url and p.url.startswith("http") else None
+        tried: set[str] = set()
+
+        async def _try(url: str | None) -> bytes | None:
+            if not url or url in tried or is_board_thumb(url) or is_generic_image(url):
+                return None
+            tried.add(url)
+            return clean_image(await self._fetch_image(url, referer=referer), min_side=cc.photo_min_side)
+
+        photo: bytes | None = None
+        src: str | None = None
+        for url in (coupang_image_url(p.image_url), p.image_url):
+            photo = await _try(url)
+            if photo is not None:
+                src = url
+                break
         if photo is None and p.url and not is_board_thumb(p.url) and p.shop not in self.settings.deal.enrich.exclude_shops:
             try:
                 meta = await self.enricher.fetch(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
-            if meta and meta.image and meta.image != p.image_url:
-                photo = clean_image(await self._fetch_image(meta.image), min_side=cc.photo_min_side)
+            for url in page_images(meta) if meta else []:
+                photo = await _try(url)
                 if photo is not None:
-                    p.image_url = meta.image
-        if photo is None:
-            if p.image_url:
-                log.info("product image unusable — using card: %s", p.image_url[:80])
-            p.image_url = None
-            if self.card is not None:
-                shop = self.registry.get(p.shop)
-                try:
-                    photo = await asyncio.to_thread(self.card.render, deal, None, shop_name=shop.name if shop else None)
-                except Exception as e:  # noqa: BLE001
-                    log.warning("card render failed: %s", e)
+                    src = url
+                    break
+        if photo is None and p.image_url:
+            log.info("no usable product photo — posting without photo: %s", p.image_url[:100])
+        p.image_url = src
         return photo
 
     async def make_card(self, deal: Deal) -> str | None:
@@ -1529,10 +1570,11 @@ class DealBot:
         if not base:
             log.debug("no public domain — card image cannot be served")
             return None
-        photo = await self._fetch_image(deal.product.image_url)
+        photo = await self._fetch_image(deal.product.image_url, referer=deal.product.url)
         shop = self.registry.get(deal.product.shop)
+        tier, _ = self.renderer.deal_tier(deal)  # 배지는 글 첫 줄과 같은 등급으로
         try:
-            path = await asyncio.to_thread(self.card.save, deal, photo, shop_name=shop.name if shop else None)
+            path = await asyncio.to_thread(self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier)
         except Exception as e:  # noqa: BLE001
             log.warning("card render failed: %s", e)
             return None
@@ -1550,16 +1592,18 @@ class DealBot:
             and (deal.product.deal_kind != "info" or self.settings.instagram.info_posts)
         )
         want_threads = self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run)
-        card_url = await self.make_card(deal) if (want_ig or want_threads) else None
+        card_url = await self.make_card(deal) if want_ig else None  # 카드는 사진이 꼭 있어야 하는 인스타만
         if want_threads:
-            result = await self.threads.publish(deal, fallback_image_url=card_url)
+            # 스레드는 deal_photo 가 확인한 상품 사진만 (못 쓰면 글만). 글자 카드는 상품 사진 대신 쓰지 않는다
+            result = await self.threads.publish(deal)
             if result.ok:
                 self.db.log_event("INFO", "threads", f"{deal.product.product_id} {'dry-run' if result.dry_run else result.message_id}")
                 log.info("threads posted: %s", deal.product.name[:40])
-                if result.error:  # 올라가긴 했지만 사진이 빠졌거나 링크 답글이 실패한 경우
+                if result.error:  # 올라가긴 했지만 사진이 빠졌거나 (선택) 답글이 실패한 경우
                     self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
                     if result.error.startswith("답글"):
-                        await self.notifier.send(f"⚠️ <b>스레드 글은 올라갔지만 링크 답글이 실패했습니다</b>\n<code>{html.escape(result.error)}</code>")
+                        await self.notifier.send(f"⚠️ <b>스레드 글은 올라갔지만 답글이 실패했습니다</b> (링크는 본문에 있음)\n"
+                                                 f"<code>{html.escape(result.error)}</code>")
             else:
                 self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
                 log.warning("threads post failed: %s", result.error)

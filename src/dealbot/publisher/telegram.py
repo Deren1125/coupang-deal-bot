@@ -79,11 +79,17 @@ class TelegramPublisher:
 
     async def publish(self, deal: Deal, *, silent: bool = False, photo: bytes | None = None) -> PublishResult:
         """silent=True 면 구독자에게 알림 없이 올린다 (야간 무음 시간대).
-        photo: 미리 받아 검사한 사진 바이트 (주소를 텔레그램에 넘기면 게시판 사진처럼 막힌 주소는 깨진다)."""
+        photo: 미리 받아 검사한 사진 바이트 (주소를 텔레그램에 넘기면 게시판 사진처럼 막힌 주소는 깨진다).
+        deal_photo 를 거친 딜은 product.image_url 이 확인된 사진 주소이거나 None 이다."""
         text = self.render(deal)
-        if photo is not None:
-            return await self.publish_raw(text, photo=photo if self.send_photo else None, silent=silent)
         image = deal.product.image_url
+        if photo is not None:
+            # 사진 끔(send_photo: false)·캡션이 길어 글로 보낼 때는 같은(확인된) 사진 주소로 큰 미리보기를 띄운다
+            return await self.publish_raw(text, photo=photo if self.send_photo else None, preview_url=image, silent=silent)
+        if not image:
+            # 확인된 사진이 없으면 사진 없이 + 미리보기도 끈다. 옵션을 안 주면 텔레그램이 본문 첫 링크(제휴 링크) 쇼핑몰의
+            # og:image(로고·공유 배너·작은 썸네일일 수 있음)로 미리보기를 만들어, 검사하지 않은 사진이 붙는다 (T-09)
+            return await self.publish_raw(text, preview_disabled=True, silent=silent)
         return await self.publish_raw(text, photo=image if self.send_photo else None, preview_url=image, silent=silent)
 
     async def publish_raw(
@@ -92,9 +98,11 @@ class TelegramPublisher:
         *,
         photo: bytes | str | None = None,
         preview_url: str | None = None,
+        preview_disabled: bool = False,
         silent: bool = False,
     ) -> PublishResult:
-        """완성된 HTML 본문을 채널에 올린다. photo 는 URL 또는 봇이 받아 둔 사진 바이트."""
+        """완성된 HTML 본문을 채널에 올린다. photo 는 URL 또는 봇이 받아 둔 사진 바이트.
+        preview_disabled=True 면 글로 보낼 때 링크 미리보기를 끈다 (확인된 사진이 없을 때)."""
         if self.dry_run:
             log.info("[DRY-RUN] would publish to %s:\n%s", self.channel_id, text)
             return PublishResult(ok=True, dry_run=True)
@@ -112,7 +120,10 @@ class TelegramPublisher:
                     # 이미지 URL 문제 등 → 텍스트 발행으로 대체
                     log.warning("send_photo failed (%s); falling back to text message", e)
 
-            preview = LinkPreviewOptions(url=image, prefer_large_media=True, show_above_text=True) if image else None
+            if preview_disabled:
+                preview = LinkPreviewOptions(is_disabled=True)
+            else:
+                preview = LinkPreviewOptions(url=image, prefer_large_media=True, show_above_text=True) if image else None
             msg = await self.bot.send_message(
                 chat_id=self.channel_id,
                 text=text[:MESSAGE_LIMIT],

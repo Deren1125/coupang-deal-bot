@@ -193,7 +193,9 @@ async def test_publisher_falls_back_to_text_when_image_fails(db: Database, repo_
             return httpx.Response(200, json={"id": "9"})
         return httpx.Response(404, json={"error": {"message": "nope"}})
 
-    pub = _publisher(db, repo_root, handler)
+    # 선택 답글(채널 안내)을 켜 둔 경우: 부모 글이 아직 조회 안 되면 다시 시도
+    pub = ThreadsPublisher(_client(handler), db, TemplateRenderer(repo_root / "templates", channels={"telegram_url": "https://t.me/x"}),
+                           reply_template="deal_threads_reply.j2")
     db.kv_set(KV_TOKEN, "T")
     db.kv_set(KV_USER_ID, "999")
     deal = sample_deal()
@@ -230,10 +232,10 @@ def test_threads_template_within_limit(repo_root: Path) -> None:
     reply = r.render_deal(sample_deal(), "https://link.coupang.com/a/x", shop=shop, template="deal_threads_reply.j2")
     assert len(hook) <= 500 and len(reply) <= 500
     assert "<b>" not in hook and "<b>" not in reply  # 스레드는 평문
-    # 첫 글: 반말 훅 + 가격 + 근거 + 제휴 고지(본문 안) + "링크는 댓글에". 링크는 답글에
-    assert "29,900원임" in hook and "링크는 댓글에" in hook and "https://" not in hook
+    # 한 글: 반말 훅 + 이름·가격(뒤에 '임' 없음) + 비교 금액 + 제휴 고지(본문 안). 링크는 ThreadsPublisher 가 고지 아래에 붙임
+    assert "29,900원\n평소엔 42,000원대" in hook and "원임" not in hook and "댓글" not in hook and "https://" not in hook
     assert "이 포스팅은 쿠팡 파트너스 활동의 일환으로" in hook
-    assert reply.startswith("👉 https://link.coupang.com/a/x")
+    assert reply == ""  # 선택 답글은 채널 안내만 — 채널 주소가 없으면 빈 글
     assert "근데 " in hook and hook.split("\n")[0] and "[샘플]" not in hook.split("\n")[0]  # 첫 줄은 상품명 없이
 
 
@@ -257,11 +259,21 @@ async def test_publisher_posts_hook_then_reply(db: Database, repo_root: Path) ->
     result = await pub.publish(sample_deal())
     assert result.ok and result.message_id == 100 and result.error is None
     containers = [c for c in seen if c["path"].endswith("/threads")]
-    assert len(containers) == 2
-    assert "reply_to_id" not in containers[0] and "링크는 댓글에" in containers[0]["text"]
-    assert containers[1]["reply_to_id"] == "100" and "https://link.coupang.com" in containers[1]["text"]
+    assert len(containers) == 1  # 기본은 한 글: 링크는 본문 (주인 지시로 '링크는 댓글에 👇' 안 씀)
+    assert "reply_to_id" not in containers[0] and "댓글" not in containers[0]["text"]
+    assert containers[0]["text"].endswith("👉 https://link.coupang.com/a/sample")
 
-    # 답글 실패는 훅이 올라갔으니 실패로 치지 않되 error 로 알린다
+    # 선택 답글(채널 안내)을 켜면: 링크 없는 답글이 첫 글 아래에
+    seen.clear()
+    published["n"] = 0
+    with_reply = ThreadsPublisher(_client(handler), db, TemplateRenderer(repo_root / "templates", channels={"telegram_url": "https://t.me/x"}),
+                                  reply_template="deal_threads_reply.j2")
+    assert (await with_reply.publish(sample_deal())).ok
+    containers = [c for c in seen if c["path"].endswith("/threads")]
+    assert len(containers) == 2 and containers[1]["reply_to_id"] == "100"
+    assert "https://t.me/x" in containers[1]["text"] and "link.coupang.com" not in containers[1]["text"]
+
+    # 답글 실패는 글(링크 포함)이 올라갔으니 실패로 치지 않되 error 로 알린다
     calls = {"n": 0}
 
     def flaky(req: httpx.Request) -> httpx.Response:
@@ -270,7 +282,8 @@ async def test_publisher_posts_hook_then_reply(db: Database, repo_root: Path) ->
             return httpx.Response(400, json={"error": {"message": "reply blocked"}})
         return httpx.Response(200, json={"id": "X"})
 
-    pub2 = _publisher(db, repo_root, flaky)
+    pub2 = ThreadsPublisher(_client(flaky), db, TemplateRenderer(repo_root / "templates", channels={"telegram_url": "https://t.me/x"}),
+                            reply_template="deal_threads_reply.j2")
     r2 = await pub2.publish(sample_deal())
     assert r2.ok and r2.error and "reply blocked" in r2.error
 

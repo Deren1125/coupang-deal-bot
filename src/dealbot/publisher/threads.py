@@ -23,6 +23,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from dealbot.commentary import THREAD_BANNED
 from dealbot.models import Deal, PublishResult
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.shops import ShopRegistry
@@ -34,7 +35,7 @@ log = logging.getLogger(__name__)
 GRAPH_BASE = "https://graph.threads.net"
 AUTH_BASE = "https://threads.com/oauth/authorize"  # 메타 문서 기준 (threads.net 은 여기로 리디렉션됨)
 API_VERSION = "v1.0"
-SCOPES = "threads_basic,threads_content_publish,threads_manage_replies"  # 링크는 첫 글의 답글로 올리므로 답글 권한도 필요
+SCOPES = "threads_basic,threads_content_publish,threads_manage_replies"  # 답글(선택: 채널 안내)을 달 때 쓰는 권한도 받아 둠
 TEXT_LIMIT = 500
 
 KV_TOKEN = "threads_access_token"
@@ -44,6 +45,17 @@ KV_USERNAME = "threads_username"
 # 최근 글에 쓴 첫 줄·마무리 (오래된 것부터, JSON 목록). 같은 문구를 최근 10건쯤 안에 다시 안 쓰려고 고를 때 뺀다
 KV_RECENT_LINES = "threads_recent_lines"
 RECENT_LINES_KEEP = 20  # 첫 줄은 매번, 마무리는 두 번에 한 번꼴 → 대략 최근 13~14건
+
+
+def thread_problems(text: str, *, disclosure: str | None = None, link: str | None = None) -> list[str]:
+    """올리기 직전 검사: 주인이 뺀 말·훈수(THREAD_BANNED), 제휴 고지(공식 문구 그대로), 본문 링크가 빠졌는지.
+    렌더러가 이런 말을 만들지 않으니 평소엔 빈 목록 — 걸리면 글을 올리지 않고 관리자에게 알린다."""
+    problems = [f"쓰지 않기로 한 말 '{m.group(0)}'" for m in THREAD_BANNED.finditer(text)]
+    if disclosure and disclosure not in text:
+        problems.append("제휴 고지 문구가 빠짐")
+    if link and link not in text:
+        problems.append("링크가 빠짐")
+    return problems
 
 
 def fit_text(text: str, limit: int, keep: str | None = None) -> str:
@@ -323,7 +335,7 @@ class ThreadsPublisher:
         *,
         registry: ShopRegistry | None = None,
         template: str = "deal_threads.j2",
-        reply_template: str | None = "deal_threads_reply.j2",
+        reply_template: str | None = None,
         enabled: bool = True,
         dry_run: bool = False,
         refresh_before_days: int = 7,
@@ -331,8 +343,8 @@ class ThreadsPublisher:
         self.client = client
         self.db = db
         self.renderer = renderer
-        # 잘 되는 핫딜 계정들은 첫 글을 짧은 훅으로 쓰고, 링크는 답글에 단다 (수수료 고지는 첫 글·답글 둘 다).
-        # 링크가 든 글은 노출이 줄기도 해서 이 구조가 유리하다. reply_template 을 비우면 한 글로 올리고 링크는 고지 아래에.
+        # 링크는 늘 첫 글 본문(제휴 고지 바로 아래)에 둔다 — 주인 지시(10/7)로 '링크는 댓글에 👇' 구성은 안 씀.
+        # reply_template 은 선택: 링크 없는 답글(실시간 채널 안내)을 따로 달고 싶을 때만.
         self.reply_template = reply_template
         self.registry = registry or ShopRegistry()
         self.template = template
@@ -391,25 +403,29 @@ class ThreadsPublisher:
             log.warning("threads recent lines not saved: %s", e)
 
     def render(self, deal: Deal, *, recent: Sequence[str] | None = None) -> str:
+        """올릴 글 전체. 링크는 제휴 고지 바로 아래에 붙여, 본문이 길어 줄일 때도 고지·링크는 안 잘리게 한다."""
         link = deal.affiliate_url or deal.product.url
         shop = self.registry.get(deal.product.shop)
-        single = not self.reply_template  # 답글이 없으면 링크를 본문 끝(고지 아래)에
         text = self.renderer.render_deal(
             deal, link, shop=shop, template=self.template, autoescape=False,
-            recent=self.recent_lines() if recent is None else recent, single=single,
+            recent=self.recent_lines() if recent is None else recent, single=True,
         )
         disclosure = shop.disclosure if shop else None
-        if single:
-            tail = f"👉 {link}"
-            return fit_text(text, TEXT_LIMIT - len(tail) - 1, keep=disclosure) + "\n" + tail
-        return fit_text(text, TEXT_LIMIT, keep=disclosure)
+        tail = f"👉 {link}"
+        return fit_text(text, TEXT_LIMIT - len(tail) - 1, keep=disclosure) + "\n" + tail
+
+    def problems(self, deal: Deal, text: str) -> list[str]:
+        shop = self.registry.get(deal.product.shop)
+        return thread_problems(text, disclosure=shop.disclosure if shop else None, link=deal.affiliate_url or deal.product.url)
 
     def render_reply(self, deal: Deal) -> str | None:
+        """선택 답글 (링크 없음). 템플릿이 없거나 빈 글이면 None → 답글을 안 단다."""
         if not self.reply_template:
             return None
         link = deal.affiliate_url or deal.product.url
         shop = self.registry.get(deal.product.shop)
-        return self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)[:TEXT_LIMIT]
+        text = self.renderer.render_deal(deal, link, shop=shop, template=self.reply_template, autoescape=False)[:TEXT_LIMIT]
+        return text.strip() or None
 
     async def _post_with_fallback(
         self, token: ThreadsToken, text: str, image_url: str | None, fallback_image_url: str | None = None
@@ -463,6 +479,10 @@ class ThreadsPublisher:
         recent = self.recent_lines()
         text = self.render(deal, recent=recent)
         reply = self.render_reply(deal)
+        problems = self.problems(deal, text)
+        if problems:  # 렌더러·AI 검사를 빠져나온 말이 있으면 올리지 않는다 (연습 모드도 같은 결과를 보여 줌)
+            log.warning("threads post blocked: %s\n%s", problems, text)
+            return PublishResult(ok=False, error="스레드 글 규칙 위반으로 안 올림: " + " · ".join(problems))
         if self.dry_run:
             log.info("[DRY-RUN] would post to threads:\n%s\n--- reply ---\n%s", text, reply or "(없음)")
             return PublishResult(ok=True, dry_run=True)
@@ -479,7 +499,7 @@ class ThreadsPublisher:
             try:
                 await self._reply(token, reply, post_id)
             except ThreadsError as e:
-                # 훅은 올라갔으니 실패로 치지 않되, 링크가 빠진 글이 되므로 알린다
-                log.warning("threads reply (link) failed for %s: %s", post_id, e)
-                return PublishResult(ok=True, message_id=message_id, error=f"답글(링크) 게시 실패: {e}")
+                # 링크는 본문에 있으니 글은 성공. 답글(채널 안내)만 빠졌다고 남긴다
+                log.warning("threads reply failed for %s: %s", post_id, e)
+                return PublishResult(ok=True, message_id=message_id, error=f"답글 게시 실패: {e}")
         return PublishResult(ok=True, message_id=message_id, error=note)

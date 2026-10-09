@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 import httpx
 
 from dealbot.coupang.auth import build_authorization
+from dealbot.media.imagecheck import coupang_image_url
 from dealbot.models import Product
 from dealbot.utils.retry import RetryableError, retry_async
 
@@ -264,7 +265,7 @@ def parse_api_product(raw: dict[str, Any], source: str) -> Product | None:
         name=str(name).strip(),
         price=price,
         url=page,
-        image_url=raw.get("productImage") or None,
+        image_url=coupang_image_url(raw.get("productImage") or None),  # CDN 썸네일 주소면 1000px 로
         original_price=original,
         discount_rate=discount,
         category=raw.get("categoryName") or None,

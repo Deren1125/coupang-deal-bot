@@ -196,6 +196,7 @@ _KIND_LABELS = {
     "summary": "일일 요약",
     "maintenance": "정리 작업",
     "threads": "스레드 게시",
+    "commentary": "AI 한줄평",
     "control": "관리자 조작",
     "lifecycle": "시작/종료",
 }
@@ -550,8 +551,10 @@ class StatusReporter:
         registry: ShopRegistry | None = None,
         links: LinkRouter | None = None,
         budget: Any | None = None,
+        summarizer: Any | None = None,
     ) -> None:
         self.settings = settings
+        self.summarizer = summarizer  # InfoSummarizer — /status 의 정보 글 요약 줄 (API / 서버 CLI / 꺼짐)
         self.db = db
         self.state = state
         self.rate = rate_limiter
@@ -603,7 +606,22 @@ class StatusReporter:
         if not cfg.enabled:
             return "끔"
         sm = cfg.summarizer
-        how = f"요약 자동 ({sm.model})" if sm.enabled and self.settings.secrets.has_anthropic else "요약 꺼짐 (ANTHROPIC_API_KEY 없음 → 확인 요청으로 옴)"
+        backend = getattr(self.summarizer, "backend", None) if self.summarizer is not None else (
+            "api" if sm.enabled and self.settings.secrets.has_anthropic else None)
+        if backend == "api":
+            how = f"요약 자동 (API {sm.model})"
+        elif backend == "cli":
+            how = f"요약 자동 (서버 claude CLI · {getattr(self.summarizer, 'cli_model', None) or '기본 모델'})"
+        elif not sm.enabled:
+            how = "요약 꺼짐 (설정) → 확인 요청으로 옴"
+        else:
+            how = "요약 꺼짐 (ANTHROPIC_API_KEY·서버 claude CLI 없음 → 확인 요청으로 옴)"
+        down = None
+        if self.summarizer is not None and backend and not getattr(self.summarizer, "available", True):
+            # 키 오류로 꺼졌거나, CLI 로그인이 풀려 잠깐 쉬는 중 (다시 로그인하면 이어서 됨)
+            down = getattr(self.summarizer, "disabled_reason", None) or getattr(self.summarizer, "last_error", None)
+        if down:
+            how += f" · ⚠️ {down}"
         mode = {"auto": "요약되면 바로 올림", "always": "항상 확인 후 올림", "never": "확인 없이 올림"}.get(cfg.review, cfg.review)
         return f"{how} · {mode}"
 

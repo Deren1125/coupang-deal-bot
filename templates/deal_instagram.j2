@@ -14,7 +14,7 @@
 {{ pname }}
 {% endif %}
 {% if product.has_price %}
-{{ product.price | won }}{% if product.original_price and product.original_price > product.price %} (정가 {{ product.original_price | won }}){% endif %}{% if product.shipping %} · 배송 {{ product.shipping }}{% endif +%}
+{{ product.price | won }}{% if product.original_price and product.original_price > product.price %} (정가 {{ product.original_price | won }}){% endif %}{% if facts.ship %} · {{ facts.ship }}{% endif +%}
 {% endif %}
 {% if product.headline %}
 {{ product.headline }}

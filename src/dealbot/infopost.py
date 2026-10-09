@@ -38,7 +38,10 @@ _IMG_SKIP = re.compile(
     re.I,
 )
 _URL_LINE = re.compile(r"^\s*(?:·\s*)?(https?://\S+)\s*$")
-_INLINE_URL = re.compile(r"https?://[^\s<>\"']+")
+# 주소는 ASCII 문자까지만 ('…/a/abc에서 받으세요' 의 '에서' 를 주소로 먹지 않게). 끝의 . , ) 는 문장 부호라 뺀다
+_INLINE_URL = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&*+;=%]+(?<![.,)\]!?])")
+# 남의 제휴 주소를 지우고 남은 '링크:' · '구매링크:' 같은 이름표
+_LINK_LABEL = re.compile(r"(?:구매\s*)?(?:링크|주소|바로\s*가기|바로가기)\s*[:：]\s*")
 _BOARD_HOSTS = ("ruliweb.com", "ppomppu.co.kr", "algumon.com", "clien.net", "fmkorea.com", "quasarzone.com")
 # 남의 제휴(수수료) 링크. 정보 글은 수익 링크·제휴 고지 없이 올리므로, 그대로 내면 남의 파트너스 링크를 공시 없이 퍼 나르게 된다
 _AFFILIATE_HOSTS = ("link.coupang.com", "coupa.ng", "linkprice.com", "s.click.aliexpress.com")
@@ -92,7 +95,22 @@ def _clean_lines(raw: str) -> list[str]:
     out: list[str] = []
     in_item = False  # 바로 위가 글머리(▶) 줄이거나 거기 딸린 줄인지
     for line in raw.splitlines():
-        s = _INLINE_URL.sub(lambda m: strip_foreign_affiliate(m.group(0)) or "", line)
+        removed = False
+
+        def _url(m: re.Match[str]) -> str:
+            nonlocal removed
+            kept = strip_foreign_affiliate(m.group(0))
+            if kept is not None:
+                return kept
+            removed = True
+            # '…/a/abc에서 받으세요' 처럼 조사가 붙어 있으면 문장이 깨지지 않게 원문 링크(글 끝에 붙음)를 가리킨다
+            return "원문 링크" if re.match(r"[가-힣]", m.string[m.end():m.end() + 1]) else ""
+
+        s = _INLINE_URL.sub(_url, line)
+        if removed:  # 주소만 빠지고 '링크:' 이름표가 남으면 이름표도 빼고, 이름표뿐인 줄은 버린다
+            s = _LINK_LABEL.sub("", s)
+            if re.fullmatch(r"[^\d]{0,12}[:：]\s*(?:\([^)]*\))?", s.strip()) or re.fullmatch(r"\s*\([^)]*\)\s*", s):
+                continue
         s = re.sub(r"[ \t ]+", " ", s).strip()
         if not s or s in _NAV_LINES:
             continue

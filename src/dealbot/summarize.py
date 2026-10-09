@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,10 +50,11 @@ _AMOUNT_LINE = re.compile(r"^\s*할인액\s*[:：]\s*([\d,]+)\s*원?\s*$", re.M)
 # 요약기가 없을 때 본문 숫자로 대략 보는 용도: "최대 60%", "60% 할인/세일", "4,800원 할인", "6만원 적립"
 # 숫자와 혜택 말은 같은 줄에서만 잇는다 ([ \t]*). 줄을 넘기면 "1,099,000원⏎쿠폰 할인 최대 7%" 의 판매가를 혜택으로 읽는다
 _BENEFIT = r"(?:할인|세일|적립|캐시백|쿠폰|페이백|환급|증정|지급|off)"
-# 금액 뒤에 오는 혜택 말: "할인가 / 쿠폰 적용가 / 세일가" 처럼 가격을 가리키는 꼴은 뺀다 (판매가는 혜택 금액이 아님)
+# 금액 뒤에 오는 혜택 말: "할인가 / 할인 적용가 / 할인 후 가격 / 쿠폰 적용가 / 세일가" 처럼 가격을 가리키는 꼴만 뺀다
+# (판매가는 혜택 금액이 아님). '할인 가능', '할인 적용!', '쿠폰 받아가세요', '쿠폰 사용 가능' 은 혜택 금액이라 읽는다
 _AMOUNT_BENEFIT = (
-    r"(?:할인(?![ \t]*(?:가|적용|후))|세일(?![ \t]*(?:가|기간))|적립|캐시백"
-    r"|쿠폰(?![ \t]*(?:적용|사용|가(?![입능])|할인가|받고|받아|받으면))|페이백|환급|증정|지급|off)"
+    r"(?:할인(?![ \t]*(?:가(?![능입])|적용[ \t]*(?:가|시)|후[ \t]*가))|세일(?![ \t]*(?:가(?![능입])|기간))|적립|캐시백"
+    r"|쿠폰(?![ \t]*(?:적용|사용[ \t]*시|가(?![입능])|할인가))|페이백|환급|증정|지급|off)"
 )
 _RATE_LEAD = re.compile(r"(?:최대|최고|전[ \t]*품목|전[ \t]*상품|up[ \t]*to)[ \t]*(\d{1,3})[ \t]*%", re.I)
 _RATE_TRAIL = re.compile(r"(\d{1,3})[ \t]*%[ \t]*[^\n\d%]{0,4}?" + _BENEFIT, re.I)
@@ -65,6 +67,8 @@ _BULLET = re.compile(r"^\s*(?:[•▪◦▶►▷▸☞→>]+\s*|[-*]+\s+|\d+[.)
 _MD_EMPHASIS = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
 # claude CLI 가 로그인·인증 문제로 실패했을 때의 메시지 ("Invalid API key · Please run /login", "Not logged in" 등)
 _CLI_AUTH = re.compile(r"log ?in|logged|\bauth|api key|credential|oauth|token (?:has )?expired", re.I)
+# CLI 로그인이 풀리면 이만큼 쉬었다가 다시 해 본다 (봇을 다시 켜지 않아도 서버에서 다시 로그인하면 이어서 됨)
+CLI_AUTH_RETRY_SECONDS = 600
 
 
 @dataclass(slots=True)
@@ -141,7 +145,8 @@ def clean_summary(raw: str, *, title: str = "", max_chars: int = 500) -> str:
 
 
 class InfoSummarizer:
-    """게시판 글 → 채널 안내문. API 키가 있으면 API, 없으면 서버의 claude CLI. 둘 다 없으면 configured=False 로 조용히 꺼져 있다."""
+    """게시판 글 → 채널 안내문. API 키가 있으면 API, 없으면 서버의 claude CLI. 둘 다 없으면 configured=False 로 조용히 꺼져 있다.
+    설정에서 요약기를 끄면(info_posts.summarizer.enabled: false) 앱이 키 없이 use_cli=False 로 만들어 정말 꺼진다 (app.py)."""
 
     def __init__(
         self,
@@ -163,7 +168,8 @@ class InfoSummarizer:
         self.cli_model = cli_model  # None 이면 --model 을 넘기지 않고 CLI 기본 모델을 쓴다
         self.cli_timeout = cli_timeout if cli_timeout is not None else max(timeout, 120)  # CLI 는 처음 뜰 때 느리다
         self.last_error: str | None = None
-        self.disabled_reason: str | None = None  # 키·모델·로그인 오류처럼 다시 해도 안 되는 것은 이 프로세스 동안 끈다
+        self.disabled_reason: str | None = None  # API 키·모델 오류처럼 다시 해도 안 되는 것은 이 프로세스 동안 끈다
+        self._cli_down_until = 0.0  # CLI 로그인이 풀렸을 때 다시 해 볼 때까지 (봇 재시작 없이 다시 로그인하면 이어서 됨)
         self._client: anthropic.AsyncAnthropic | None = None
 
     @property
@@ -181,7 +187,8 @@ class InfoSummarizer:
 
     @property
     def available(self) -> bool:
-        return self.configured and self.disabled_reason is None
+        cli_down = self.backend == "cli" and time.monotonic() < self._cli_down_until
+        return self.configured and self.disabled_reason is None and not cli_down
 
     def _get_client(self) -> anthropic.AsyncAnthropic:
         if self._client is None:
@@ -201,6 +208,8 @@ class InfoSummarizer:
             return Summary(error="요약 기능이 꺼져 있음 (ANTHROPIC_API_KEY·서버 claude CLI 둘 다 없음)")
         if self.disabled_reason:
             return Summary(error=self.disabled_reason)
+        if self.backend == "cli" and time.monotonic() < self._cli_down_until:
+            return Summary(error=self.last_error or "서버 claude CLI 로그인이 풀림")
         if len(text.strip()) < 10:
             return Summary(error="본문이 거의 없음")
         system = SYSTEM_PROMPT.format(max_chars=self.max_chars)
@@ -287,10 +296,16 @@ class InfoSummarizer:
             self.last_error = f"claude CLI 실행 실패 ({e.strerror or e})"
             log.warning("summarizer cli: could not start: %s", e)
             return None, self.last_error
+        finally:
+            if proc is not None and proc.returncode is None:  # 취소(종료·스케줄러 정지)될 때도 CLI 가 남지 않게
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
         try:
             payload = json.loads(out.decode("utf-8", "replace") or "{}")
         except ValueError:
             payload = None
+        if isinstance(payload, list):  # verbose 설정이면 메시지 목록으로 나옴 → 마지막 result 만 본다 (한줄평과 같음)
+            payload = next((m for m in reversed(payload) if isinstance(m, dict) and m.get("type") == "result"), None)
         if not isinstance(payload, dict) or not payload:
             self.last_error = "claude CLI 응답을 읽지 못함"
             log.warning("summarizer cli: unreadable output (exit %s): %s", proc.returncode, err.decode("utf-8", "replace")[:200])
@@ -299,9 +314,11 @@ class InfoSummarizer:
         if payload.get("is_error"):
             detail = str(result or payload.get("subtype") or "")[:200]
             if _CLI_AUTH.search(detail):
-                self.disabled_reason = "서버 claude CLI 로그인이 풀림 (서버에서 claude 로 다시 로그인 필요)"
+                self._cli_down_until = time.monotonic() + CLI_AUTH_RETRY_SECONDS
+                self.last_error = (f"서버 claude CLI 로그인이 풀림 (서버에서 claude 로 다시 로그인하면 "
+                                   f"{CLI_AUTH_RETRY_SECONDS // 60}분 안에 다시 시도함)")
                 log.error("summarizer cli: not logged in: %s", detail)
-                return None, self.disabled_reason
+                return None, self.last_error
             self.last_error = f"claude CLI 오류 ({detail[:80] or '내용 없음'})"
             log.warning("summarizer cli: error: %s", detail)
             return None, self.last_error

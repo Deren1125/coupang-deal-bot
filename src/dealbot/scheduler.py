@@ -22,8 +22,24 @@ from dealbot.utils.timeutil import local_now, next_daily_time, utcnow
 
 log = logging.getLogger(__name__)
 
-# 재시작(SIGTERM) 때 하던 발행(텔레그램 → 스레드 글 → 링크 답글)을 마칠 시간. systemd 기본 TimeoutStopSec(90초) 안
+# 재시작(SIGTERM) 때 하던 발행(텔레그램 → 스레드 글 → 답글)을 마칠 시간. systemd TimeoutStopSec(90초) 안.
+# 기다리는 건 발행 루프만 — 수집·정리 같은 다른 루프는 바로 끊는다 (재시작이 긁어 오기 때문에 늦어지지 않게)
 SHUTDOWN_GRACE_SECONDS = 60.0
+# systemd 밖(도커 compose 기본 10초 뒤 강제 종료)에서는 짧게 기다려 close()(DB 닫기·'stopped' 기록)까지 마친다
+SHUTDOWN_GRACE_OUTSIDE_SYSTEMD = 8.0
+
+
+def shutdown_grace() -> float:
+    """발행 루프를 기다릴 시간. DEALBOT_SHUTDOWN_GRACE_SECONDS 로 바꿀 수 있고, systemd(INVOCATION_ID 있음)가 아니면 짧게."""
+    raw = os.environ.get("DEALBOT_SHUTDOWN_GRACE_SECONDS", "").strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            log.warning("DEALBOT_SHUTDOWN_GRACE_SECONDS 가 숫자가 아님 — 기본값 사용")
+    if os.environ.get("INVOCATION_ID"):
+        return SHUTDOWN_GRACE_SECONDS
+    return min(SHUTDOWN_GRACE_SECONDS, SHUTDOWN_GRACE_OUTSIDE_SYSTEMD)
 
 # ---- 자동 업데이트(deploy/lightsail/auto-update.sh)와 주고받는 표식. git 으로 받은 서버에서만 쓴다 (도커 이미지엔 없음)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -306,9 +322,14 @@ async def run_forever(bot: DealBot) -> None:
         await stop.wait()
     finally:
         stop.set()  # 예외로 빠져나와도 루프들이 멈추도록
-        # 루프들은 stop 을 보고 스스로 끝난다. 발행 중이던 글은 링크 답글·카드까지 마치게 기다렸다가 (최대 SHUTDOWN_GRACE_SECONDS)
-        log.info("shutting down — 하던 작업을 마치는 중 (최대 %d초)...", SHUTDOWN_GRACE_SECONDS)
-        _, pending = await asyncio.wait(tasks, timeout=SHUTDOWN_GRACE_SECONDS)
+        # 발행 중이던 글은 스레드 글·답글까지 마치게 발행 루프만 기다리고 (최대 shutdown_grace()), 나머지 루프는 바로 끊는다
+        publisher = next(t for t in tasks if t.get_name() == "publisher_loop")
+        for t in tasks:
+            if t is not publisher:
+                t.cancel()
+        grace = shutdown_grace()
+        log.info("shutting down — 하던 발행을 마치는 중 (최대 %g초)...", grace)
+        _, pending = await asyncio.wait([publisher], timeout=grace)
         for t in pending:
             log.warning("종료 대기 시간이 지나 중단합니다: %s", t.get_name())
             t.cancel()

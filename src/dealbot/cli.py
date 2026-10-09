@@ -184,7 +184,8 @@ async def cmd_test_post(args: argparse.Namespace) -> int:
                 return 1
             bot.publisher.channel_id = bot.notifier.chat_id
             bot.publisher.dry_run = False
-        result = await bot.publisher.publish(deal)
+        photo = await bot.deal_photo(deal)  # 실제 글처럼 확인된 상품 사진만 (못 쓰면 사진 없이)
+        result = await bot.publisher.publish(deal, photo=photo)
         print(result)
         return 0 if result.ok else 1
     finally:

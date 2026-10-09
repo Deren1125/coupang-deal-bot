@@ -108,7 +108,7 @@ def test_reference_gap_beats_short_low_label(r: TemplateRenderer) -> None:
     tg = _tg(r, d)
     assert tg.startswith("🔥 초특가 <b>9,900원</b> · 쿠팡보다 72%↓") and "3일" not in tg
     th = _th(r, d)
-    assert "쿠팡보다 72% 쌈" in th and "3일" not in th
+    assert "쿠팡 최저가는 36,000원" in th and "3일" not in th
 
 
 # ---------------------------------------------------------------- 배송 (#9)
@@ -247,10 +247,10 @@ def test_threads_uses_short_name_when_ai_missing(r: TemplateRenderer) -> None:
     long = ("삼성전자 비스포크 AI 제트 400W 무선청소기 VS28C973DRG 새틴 그레이지 청정스테이션 포함 + 물걸레 브러시 + 침구 브러시 "
             "+ 연장관 풀세트 2024년형 정품 국내 AS (타임딜 한정)")
     th = _th(r, _deal(name=long, price=699000))
-    assert "삼성전자 비스포크 AI 제트 400W 무선청소기 699,000원임" in th
+    assert "삼성전자 비스포크 AI 제트 400W 무선청소기 699,000원\n" in th
     assert "VS28C973DRG" not in th and "타임딜" not in th and "+" not in th
     ai = _deal(name=long, price=699000, extra={"short_name": "비스포크 제트 청소기"})
-    assert "비스포크 제트 청소기 699,000원임" in _th(r, ai)
+    assert "비스포크 제트 청소기 699,000원\n" in _th(r, ai)
 
 
 # ---------------------------------------------------------------- 마무리 겹침·반복 (#17)
@@ -313,16 +313,17 @@ async def test_threads_rotation_over_ten_posts(db: Database, repo_root: Path) ->
     assert db.kv_get(KV_RECENT_LINES) == saved
 
 
-# ---------------------------------------------------------------- 답글 고지 (#11)
+# ---------------------------------------------------------------- 고지 + 링크 (#11, TH-02)
 @pytest.mark.parametrize("shop_key", ["coupang", "toss", "naver"])
 def test_reply_carries_disclosure(repo_root: Path, db: Database, shop_key: str) -> None:
+    """링크는 답글이 아니라 본문에: 공식 고지 문구 바로 아래 링크. 기본은 답글 없음."""
     shop = REG.get(shop_key)
     assert shop is not None and shop.disclosure
     pub = ThreadsPublisher(_client(_ok), db, TemplateRenderer(repo_root / "templates"))
     d = _deal(shop=shop_key, product_id=f"{shop_key}:1", name="상품 24개", price=9900)
-    reply = pub.render_reply(d)
-    assert reply is not None and reply.startswith(f"👉 {LINK}\n{shop.disclosure}") and len(reply) <= TEXT_LIMIT
-    assert shop.disclosure in pub.render(d)  # 첫 글에도 그대로
+    assert pub.render_reply(d) is None
+    post = pub.render(d)
+    assert post.endswith(f"{shop.disclosure}\n👉 {LINK}") and len(post) <= TEXT_LIMIT and not pub.problems(d, post)
 
 
 # ---------------------------------------------------------------- 한 글 모드 (#22)

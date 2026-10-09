@@ -281,7 +281,7 @@ class PublishConfig(BaseModel):
     max_publish_attempts: int = 3
     publisher_tick_seconds: int = 20
     send_photo: bool = True
-    photo_min_side: int = 300  # 사진의 짧은 변이 이보다 작으면(게시판 목록 썸네일 등) 쓰지 않고 카드/상품 페이지 사진으로
+    photo_min_side: int = 600  # 사진의 짧은 변이 이보다 작으면(목록 썸네일·저해상도) 상품 페이지 사진을 보고, 그래도 없으면 사진 없이
     # 이 시간대(현지 시각)에는 채널 글을 무음으로 올린다 (구독자 알림 없이). 예: "00:00-07:00". 비우면 항상 알림
     quiet_hours: str | None = None
     # 내 링크를 기다리는 글이 이 개수 이상 쌓이면, 새 링크 요청은 보내지 않고 건너뛴다 (관리자 챗 폭주 방지). 0 = 제한 없음
@@ -296,8 +296,8 @@ class ThreadsConfig(BaseModel):
     """스레드 자동 발행. 인증은 /threadsauth 로 한 번만."""
 
     enabled: bool = True
-    template: str = "deal_threads.j2"  # 첫 글(훅): 짧게, 링크 없이
-    reply_template: str | None = "deal_threads_reply.j2"  # 답글: 링크 + 수수료 고지. 비우면 한 글로
+    template: str = "deal_threads.j2"  # 한 글: 링크는 제휴 고지 아래 본문에 (주인 지시로 '링크는 댓글에' 안 씀)
+    reply_template: str | None = None  # 선택: 링크 없는 답글(채널 안내). deal_threads_reply.j2
     send_photo: bool = True
     refresh_before_days: int = 7
 
@@ -360,7 +360,8 @@ class LinksConfig(BaseModel):
 
 
 class InfoSummarizerConfig(BaseModel):
-    """정보 글 본문을 Claude API 로 채널 양식에 맞게 짧게 다시 쓴다. ANTHROPIC_API_KEY 가 있어야 돈다."""
+    """정보 글 본문을 채널 양식에 맞게 짧게 다시 쓴다. ANTHROPIC_API_KEY 가 있으면 API 를 먼저 쓰고,
+    없으면 서버에 로그인된 claude CLI(한줄평과 같은 것)로. enabled: false 면 둘 다 안 씀."""
 
     enabled: bool = True
     model: str = "claude-opus-5"

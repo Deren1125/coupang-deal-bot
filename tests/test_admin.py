@@ -49,6 +49,16 @@ def bot(settings: Settings) -> DealBot:
 
 
 async def test_dry_run_sends_full_preview_and_skips_side_channels(bot: DealBot) -> None:
+    import io
+
+    from PIL import Image
+
+    async def fetch(url: str, **_kw: object) -> bytes:  # 연습 모드에서도 사진을 실제로 확인함 → 받을 수 있는 사진을 줌
+        out = io.BytesIO()
+        Image.new("RGB", (800, 800), (200, 60, 60)).save(out, "JPEG")
+        return out.getvalue()
+
+    bot._fetch_image = fetch  # type: ignore[method-assign]
     assert bot.state.dry_run
     FakeCollector.products = [_product()]
     await bot.run_collector(bot.collectors[0])

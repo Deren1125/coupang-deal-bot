@@ -11,6 +11,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -24,7 +25,8 @@ log = logging.getLogger(__name__)
 @dataclass(slots=True)
 class PageMeta:
     title: str | None = None
-    image: str | None = None
+    image: str | None = None  # og:image (없으면 JSON-LD Product.image)
+    ld_image: str | None = None  # JSON-LD Product.image — 상품 자체 사진이라 og:image(공유용 대표 이미지)보다 먼저 씀
     description: str | None = None
     price: int | None = None
     original_price: int | None = None
@@ -95,7 +97,8 @@ def parse_page_meta(html: str) -> PageMeta:
             img = p.get("image")
             if isinstance(img, list):
                 img = img[0] if img else None
-            meta.image = meta.image or (img if isinstance(img, str) else None)
+            meta.ld_image = meta.ld_image or (img if isinstance(img, str) else None)
+            meta.image = meta.image or meta.ld_image
             offers = p.get("offers")
             if isinstance(offers, list):
                 offers = offers[0] if offers else None
@@ -136,6 +139,53 @@ def parse_page_meta(html: str) -> PageMeta:
     return meta
 
 
+# 최종 주소가 이런 곳이면 상품 페이지가 아님 (홈·로그인·검색·기획전/이벤트로 돌려보낸 경우) → 거기 og:image 는 상품 사진이 아님
+_NOT_PRODUCT_PATH = re.compile(
+    r"log-?in|sign-?in|logon"
+    r"|/(?:auth|member|members|search|event|events|promotion|promotions|exhibition|exhibitions|planshop|plan|special"
+    r"|campaigns?)(?:[/.]|$)"
+    r"|/display/main(?:[/.]|$)"  # 롯데온 '/p/display/main/…' 같은 몰 첫 화면
+    r"|^/(?:main|home|index)(?:\.\w+)?/?$|/(?:main|index)\.(?:html?|php|jsp|aspx?|do)$",  # '/MW/html/main.html'
+    re.I,
+)
+# 분류 목록 ('/np/categories/186764'). 카페24 상품 주소('/product/이름/123/category/24/display/1/')엔 분류 칸이 같이 있어 상품 표시가 있으면 둔다
+_LISTING_PATH = re.compile(r"/categor(?:y|ies)(?:[/.]|$)", re.I)
+_PRODUCT_MARK = re.compile(r"/(?:products?|goods)/", re.I)
+_NOT_PRODUCT_HOST = re.compile(r"^(?:login|nid|accounts?|auth|member|signin|search|event|events|promotion|sale|campaign)\.", re.I)
+# 스마트스토어·브랜드스토어는 '/{스토어}' 가 스토어 첫 화면(og:image = 스토어 프로필·로고) — '/products/' 가 있어야 상품
+_STORE_HOSTS = ("smartstore.naver.com", "brand.naver.com")
+
+
+def is_product_page(url: str | None) -> bool:
+    """상품 페이지로 보이는 주소인지. 홈(경로 없음)·로그인·검색·이벤트/기획전·분류 목록·스토어 첫 화면이면 False."""
+    if not url:
+        return False
+    u = urlparse(url)
+    host = u.netloc.lower().split(":")[0]
+    path = u.path or "/"
+    if path.rstrip("/") == "" or _NOT_PRODUCT_HOST.match(host):
+        return False
+    if any(host == h or host.endswith("." + h) for h in _STORE_HOSTS) and "/products/" not in path:
+        return False
+    if _LISTING_PATH.search(path) and not _PRODUCT_MARK.search(path):
+        return False
+    return not _NOT_PRODUCT_PATH.search(path)
+
+
+def page_images(meta: PageMeta) -> list[str]:
+    """상품 페이지에서 상품 사진으로 써도 되는 주소 (JSON-LD Product.image 먼저, 그다음 og:image).
+    최종 주소(리디렉션 뒤)가 상품 페이지가 아니거나, 로고·기본 배너 주소면 빈 목록. final_url 을 모르면(직접 만든 meta) 주소만 본다."""
+    from dealbot.media.imagecheck import is_board_thumb, is_generic_image
+
+    if meta.final_url is not None and not is_product_page(meta.final_url):
+        return []
+    out: list[str] = []
+    for url in (meta.ld_image, meta.image):
+        if url and url not in out and not is_generic_image(url) and not is_board_thumb(url):
+            out.append(url)
+    return out
+
+
 class PageEnricher:
     def __init__(self, http: httpx.AsyncClient, *, timeout: float = 20) -> None:
         self.http = http
@@ -149,6 +199,11 @@ class PageEnricher:
                 return None
             meta = parse_page_meta(resp.text)
             meta.final_url = str(resp.url)
+            # '//cdn…/a.jpg', '/upload/1.jpg' 같은 상대 주소는 페이지 주소 기준으로 (그대로 두면 사진을 못 받음)
+            if meta.image:
+                meta.image = urljoin(meta.final_url, meta.image)
+            if meta.ld_image:
+                meta.ld_image = urljoin(meta.final_url, meta.ld_image)
             return meta
         except httpx.HTTPError as e:
             log.info("enrich failed for %s: %s", url, e)
@@ -165,8 +220,9 @@ class PageEnricher:
         filled: list[str] = []
         from dealbot.media.imagecheck import is_board_thumb
 
-        if meta.image and (not product.image_url or is_board_thumb(product.image_url)):
-            product.image_url = meta.image  # 게시판 목록 썸네일보다 상품 페이지 대표 사진을 우선
+        images = page_images(meta)  # 상품 페이지가 아니거나 로고·배너면 안 씀
+        if images and (not product.image_url or is_board_thumb(product.image_url)):
+            product.image_url = images[0]  # 게시판 목록 썸네일보다 상품 페이지 사진을 우선
             filled.append("image_url")
         if (not product.name or product.name == product.url) and meta.title:
             product.name = meta.title

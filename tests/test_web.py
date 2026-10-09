@@ -99,7 +99,7 @@ async def test_threads_callback_connects_without_code_copy(settings: Settings) -
         # /threadstest: 연습 모드면 미리보기만, 실제 모드면 올리고 링크를 돌려준다
         preview = await bot.threads_test()
         assert "🧵 <b>스레드에는 이렇게 올라갑니다 (샘플 딜)</b>" in preview and "<pre>" in preview and "연습 모드" in preview
-        assert "답글(링크):" in preview and "link.coupang.com" in preview
+        assert "답글" not in preview and "👉 https://link.coupang.com/a/sample</pre>" in preview  # 링크는 본문 끝 (답글 없음)
 
         posted: list[str] = []
 
@@ -119,7 +119,7 @@ async def test_threads_callback_connects_without_code_copy(settings: Settings) -
         bot.threads.dry_run = False
         msg = await bot.threads_test()
         assert "✅ 스레드에 올렸습니다: https://www.threads.com/@hotdeal/post/ABC" in msg and "지워 주세요" in msg
-        assert posted == ["IMAGE", "TEXT"]  # 훅(사진) + 링크 답글
+        assert posted == ["TEXT"]  # 한 글 (링크는 본문). 샘플의 쿠팡 로고는 확인된 상품 사진이 아니라 안 붙임
         assert "글이 없습니다" in await bot.threads_test(999)
     finally:
         await bot.close()

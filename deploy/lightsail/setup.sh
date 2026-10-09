@@ -1,21 +1,14 @@
 #!/usr/bin/env bash
 # Lightsail(Ubuntu) 에 Docker 없이 설치: 파이썬 가상환경 + systemd 서비스 + 1분 자동 업데이트.
 #   처음:      cd ~ && git clone https://github.com/Deren1125/coupang-deal-bot.git && cd coupang-deal-bot && bash deploy/lightsail/setup.sh
-#   다시 실행: 최신 코드(GitHub main)를 받고 패키지를 갱신한 뒤 서비스를 재시작한다 (.env 는 그대로).
+#   다시 실행: 패키지·서비스를 다시 맞추고, 최신 코드(GitHub main)는 자동 업데이트와 똑같은 관문으로 받은 뒤 재시작한다
+#              (점검 selftest 를 통과한 커밋만, 발행 중이면 기다림, 실패하면 돌던 코드로 되돌림. .env 는 그대로).
 # 키 입력은 bash deploy/lightsail/setenv.sh 이름  (화면에 안 보임, 아이패드에서도 됨)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 APP_DIR="$(pwd)"
 RUN_USER="$(id -un)"
 DATA_DIR="${DEALBOT_DATA_DIR:-$HOME/dealbot-data}"
-
-echo "▶ 최신 코드 받기"
-if git pull -q --ff-only origin main; then
-  rm -f var/update_failed_* var/update_bad_* 2>/dev/null || true  # 막혀 있던 자동 업데이트도 다시 시도하게
-else
-  echo "⚠️ 최신 코드를 못 받았어요 — 서버에서 파일을 직접 고쳤으면 git status 로 확인 (지금 있는 코드로 계속 진행)"
-fi
-echo "   지금 코드: $(git log -1 --format='%h %s' | cut -c1-70)"
 
 echo "▶ 1/5 패키지 설치"
 PY=""
@@ -73,6 +66,20 @@ sudo systemctl enable dealbot >/dev/null
 echo "▶ 5/5 자동 업데이트 (1분마다 GitHub 확인)"
 bash deploy/lightsail/auto-update.sh enable
 
+# 최신 코드는 직접 git pull 하지 않고 자동 업데이트 스크립트로 받는다: 점검(selftest)에 떨어진 커밋을 다시 깔거나
+# 그 기록(update_bad_*)을 지우지 않고, 받는 동안 돌고 있는 봇은 발행을 쉰다 (var/updating)
+echo "▶ 최신 코드 확인 (자동 업데이트와 같은 점검)"
+T0="$(date +%s)"
+bash deploy/lightsail/auto-update.sh now \
+  || echo "⚠️ 최신 코드를 못 받았어요 — 위 이유를 확인해 주세요 (지금 있는 코드로 계속 진행)"
+echo "   지금 코드: $(git log -1 --format='%h %s' | cut -c1-70)"
+UPDATED=""  # 방금 자동 업데이트가 지금 코드로 재시작했으면 아래에서 또 재시작하지 않음 (짧은·긴 커밋 비교)
+RUN_NOW="$(tr -d '[:space:]' < var/running_version 2>/dev/null || true)"
+HEAD_NOW="$(git rev-parse HEAD)"
+if [ -n "$RUN_NOW" ] && [ "$(stat -c %Y var/running_version)" -ge "$T0" ] && [ "${HEAD_NOW#"$RUN_NOW"}" != "$HEAD_NOW" ]; then
+  UPDATED=1
+fi
+
 missing=""
 for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHANNEL_ID TELEGRAM_ADMIN_CHAT_ID COUPANG_ACCESS_KEY COUPANG_SECRET_KEY; do
   grep -qE "^$k=.+" .env || missing="$missing $k"
@@ -84,7 +91,7 @@ if [ -n "$missing" ]; then
   echo "   다 넣은 뒤:   sudo systemctl restart dealbot"
   exit 0
 fi
-sudo systemctl restart dealbot
+[ -n "$UPDATED" ] || sudo systemctl restart dealbot
 sleep 5
 systemctl is-active --quiet dealbot && echo "✅ 핫딜 봇 실행 중 (연습 모드면 관리자 챗으로 미리보기만 갑니다)" \
   || echo "⚠️ 시작 실패 — journalctl -u dealbot -n 50 확인"
