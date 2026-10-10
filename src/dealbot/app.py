@@ -321,6 +321,7 @@ class DealBot:
             registry=self.registry,
             labels={c.name: c.label for c in settings.collectors if c.label},
         )
+        self.notifier.owner_relay = self.owner_notice
         self.reporter = StatusReporter(
             settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget,
             summarizer=self.summarizer,
@@ -460,7 +461,7 @@ class DealBot:
         # 상품 1개에 내 링크 1개 (네이버 쇼핑 커넥트·토스 쉐어링크는 만료 없음) → 같은 상품이 또 나오면 다시 묻지 않고 재사용
         self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
         self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
-        return f"🔗 #{queue_id} 번에 링크를 붙였습니다. 올릴 차례가 되는 대로 채널에 올라갑니다."
+        return self.notifier.link_done_text(item)
 
     def skip_item(self, queue_id: int) -> str:
         item = self.db.get_queue_item(queue_id)
@@ -1985,6 +1986,10 @@ class DealBot:
             return f"✅ 스레드 연결 완료: @{me.get('username')} (토큰 만료 {expires}, 자동 갱신됨)"
         except ThreadsError as e:
             return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
+
+    def owner_notice(self, kind: str, text: str) -> None:
+        """주인 카톡 '나에게 보내기' 요청을 Blog-Auto 받은편지함에 (카톡 토큰은 Blog-Auto 가 가지고 있어 거기서 보낸다)."""
+        self.relay_to_blog({"owner_notice": {"kind": kind, "text": text, "at": time.time()}})
 
     def relay_to_blog(self, update: dict) -> None:
         """블로그(demiyum) 명령·버튼 → Blog-Auto 가 읽는 받은편지함 파일에 한 줄 (Blog-Auto 가 처리하고 이 봇으로 답함)."""

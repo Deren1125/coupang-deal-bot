@@ -141,7 +141,7 @@ async def test_manual_link_flow_for_toss(bot: DealBot) -> None:
 
     assert "http" in await bot.attach_link(item.id, "not a url")
     msg = await bot.attach_link(item.id, "https://toss.im/_m/MYLINK")
-    assert "붙였습니다" in msg and bot.db.queue_counts() == {"pending": 1}
+    assert "상품 링크 완료" in msg and "토스 핫도그" in msg and bot.db.queue_counts() == {"pending": 1}  # 10/10: 무슨 상품인지
     assert await bot.process_queue_once()
     assert bot.db.queue_counts() == {"published": 1}
     assert bot.db.recent_posts()[0]["affiliate_url"] == "https://toss.im/_m/MYLINK"

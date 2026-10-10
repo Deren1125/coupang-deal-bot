@@ -414,6 +414,7 @@ monitoring:
   notify_failure_attempts: false  # 재시도 중 실패(⚠️)는 조용히, 최종 포기(❌)만 알림
   notify_on_error: true
   notify_on_manual_link: true    # 토스/네이버 등 수동 링크가 필요할 때 알림
+  kakao_relay: true              # 링크 요청·링크 완료를 카카오톡 '나에게 보내기'로도 (Blog-Auto 가 보냄 · 카톡 연결은 /kakao)
   error_alert_cooldown_minutes: 30
   daily_summary: false           # 매일 21:00 하루 요약 끔 (/status 로 언제든 볼 수 있음). 켜려면 true
   daily_summary_time: "21:00"

@@ -492,6 +492,8 @@ class MonitoringConfig(BaseModel):
     notify_failure_attempts: bool = False
     notify_on_error: bool = True
     notify_on_manual_link: bool = True
+    # 링크 요청·링크 완료를 블로그 프로그램(Blog-Auto)이 카카오톡 '나에게 보내기'로도 보내게 받은편지함에 남긴다 (주인 요청 10/10)
+    kakao_relay: bool = True
     error_alert_cooldown_minutes: int = 30
     daily_summary: bool = True  # 매일 daily_summary_time 에 하루 요약을 보낼지 (/status 로 언제든 볼 수 있음)
     daily_summary_time: str = "21:00"

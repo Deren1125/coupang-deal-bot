@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -299,6 +300,11 @@ def is_stale_message(sent_at: datetime | None, now: datetime | None = None, max_
     return now - sent_at > max_age
 
 
+def _short_url(url: str, limit: int = 90) -> str:
+    """카톡 한 통(200자)에 들어가게: 긴 상품 주소는 쿼리(추적값)를 뗀다 (상품 경로는 그대로)."""
+    return url if len(url) <= limit else url.split("#", 1)[0].split("?", 1)[0]
+
+
 class AdminNotifier:
     def __init__(
         self,
@@ -322,6 +328,17 @@ class AdminNotifier:
         self.bot_username: str | None = None
         self.last_sent_at: datetime | None = None  # 마지막으로 관리자 챗에 무언가 보낸 시각 (하트비트 판단용)
         self._last_alert: dict[str, datetime] = {}
+        # 카톡 '나에게 보내기' 중계 (app 이 Blog-Auto 받은편지함에 쓰는 함수를 넣어 줌). None 이면 안 보냄
+        self.owner_relay: Callable[[str, str], None] | None = None
+
+    def _relay(self, kind: str, text: str) -> None:
+        """주인에게 카톡으로도 (링크 요청·링크 완료). 실패해도 텔레그램 알림은 그대로."""
+        if self.owner_relay is None or not getattr(self.cfg, "kakao_relay", True):
+            return
+        try:
+            self.owner_relay(kind, text)
+        except Exception as e:  # noqa: BLE001
+            log.warning("kakao relay failed: %s", e)
 
     @property
     def enabled(self) -> bool:
@@ -402,8 +419,10 @@ class AdminNotifier:
         return sent
 
     async def notify_published(self, deal: Deal, result: PublishResult, preview: str | None = None) -> None:
-        """발행 알림. DRY-RUN 이면 채널에 올라갔을 글 전체(preview)를 그대로 보여준다 (연습 모드 미리보기는 설정과 무관하게 항상)."""
-        if not self.cfg.notify_on_publish and not (result.dry_run and preview):
+        """발행 알림. DRY-RUN 이면 채널에 올라갔을 글 전체(preview)를 그대로 보여준다 (연습 모드 미리보기는 설정과 무관하게 항상).
+        주인이 링크를 붙여 준 딜은 알림을 꺼 두었어도 '채널에 올렸어요'를 보낸다 (링크 완료 뒤 한 번 더 — 10/10)."""
+        owner_link = bool(deal.product.extra.get("owner_link")) and not result.dry_run
+        if not self.cfg.notify_on_publish and not (result.dry_run and preview) and not owner_link:
             return
         p = deal.product
         where = f"어디서: {html.escape(self.source_label(p.source))} → {html.escape(self.shop_label(p.shop))}"
@@ -421,7 +440,8 @@ class AdminNotifier:
             )
             await self.send(text, silent=True)
             return
-        head = "🧪 <b>연습 발행</b>" if result.dry_run else "✅ <b>채널에 올렸습니다</b>"
+        head = ("🧪 <b>연습 발행</b>" if result.dry_run else
+                "📣 <b>링크를 붙여 주신 상품을 채널에 올렸어요</b>" if owner_link else "✅ <b>채널에 올렸습니다</b>")
         price = f"{p.price:,}원" if p.has_price else "가격 없음"
         text = (
             f"{head}\n"
@@ -462,6 +482,11 @@ class AdminNotifier:
             f"안 올리려면 <code>/skip {item.id}</code>"
         )
         message_id = await self.send_with_id(text)
+        self._relay(
+            "link_request",
+            f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}\n{_short_url(p.url)}\n"
+            "→ 텔레그램 딜봇의 링크 요청 메시지에 답장으로 링크를 보내 주세요",
+        )
         await self._push(
             "manual_link",
             f"내 링크가 필요합니다 #{item.id} [{shop.name}]",
@@ -470,6 +495,15 @@ class AdminNotifier:
             tags=["link"],
         )
         return message_id
+
+    def link_done_text(self, item: QueueItem) -> str:
+        """주인이 링크를 붙였을 때 답장 (주인 요청 10/10: '○○ 상품 링크 완료' 알림)."""
+        p = item.deal.product
+        price = f" · {p.price:,}원" if p.has_price else ""
+        shop = self.shop_label(p.shop)
+        self._relay("link_done", f"✅ 상품 링크 완료 #{item.id} [{shop}]\n{truncate(p.name, 60)}{price}\n올릴 차례가 되면 채널에 올라가요")
+        return (f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n"
+                "올릴 차례가 되면 바로 채널에 올라가요 (올라가면 한 번 더 알려 드려요)")
 
     async def notify_deal_review(self, item: QueueItem, shop_name: str, reason: str) -> int | None:
         """오픈마켓 딜의 공식 판매처가 확인되지 않음: 관리자가 보고 /ok 하면 링크를 만들어 올린다."""

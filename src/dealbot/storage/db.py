@@ -535,6 +535,7 @@ class Database:
         if item is None:
             return None
         item.deal.affiliate_url = url
+        item.deal.product.extra["owner_link"] = True  # 주인이 만든 링크 (발행되면 '채널에 올렸어요'를 따로 알림)
         self.update_queue_item(item_id, status="pending", error=None, deal=item.deal, now=now, reset_created=True)
         return self.get_queue_item(item_id)
 
