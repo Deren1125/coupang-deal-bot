@@ -4,6 +4,8 @@
 상품명으로 검색해서 '같은 상품'(검색 결과의 링크·productId 에 딜 주소와 같은 스토어 상품번호가 있고,
 스토어·몰 이름이 둘 다 있으면 서로 같은 것)일 때만 그 사진을 쓴다. 비슷한 다른 상품의 사진은 쓰지 않는다.
 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 없으면 건너뛴다 (로그 한 번). 키 값은 로그에 남기지 않는다.
+쇼핑 검색은 developers.naver.com(예전 개발자센터) 키로만 된다. 네이버 클라우드 API HUB 에는 쇼핑 검색이 없다
+(10/10 확인: HUB /search/v1/shop → 404, 같은 키로 openapi.naver.com → 401). 그런 키면 첫 호출의 401 뒤로 끈다.
 """
 
 from __future__ import annotations
@@ -167,7 +169,11 @@ class NaverShopSearch:
         )
         if resp.status_code in _DEAD:
             self.disabled_reason = f"HTTP {resp.status_code}"
-            log.warning("naver shop search: HTTP %s — 키가 틀렸거나 API 를 쓸 수 없음. 다시 시작할 때까지 끔", resp.status_code)
+            log.warning(
+                "naver shop search: HTTP %s — 키가 틀렸거나 API 를 쓸 수 없음 (네이버 클라우드 API HUB 키는 쇼핑 검색이 없어 안 됨, "
+                "developers.naver.com 의 예전 키만 됨). 다시 시작할 때까지 끔",
+                resp.status_code,
+            )
             raise _Unavailable
         resp.raise_for_status()
         data = resp.json()

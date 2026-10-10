@@ -11,7 +11,7 @@
 | `LINKPRICE_AFFILIATE_ID` | 링크프라이스 어필리에이트 센터 | 11번가/G마켓/옥션/SSG/롯데온/알리 자동화 |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys | 정보 글(상품 링크 없는 게시판 글)을 채널 양식으로 요약해 자동 발행 (없으면 확인 요청으로 옴) |
 | `ADPICK_AFFID` | 애드픽 | 애드픽 핫딜 API 수집 |
-| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | developers.naver.com → 애플리케이션 등록 → 검색 API | 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜에 쇼핑 검색의 같은 상품(상품번호 일치) 사진을 씀 (선택, 없으면 건너뜀) |
+| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | developers.naver.com → 애플리케이션 등록 → 검색 API (예전 개발자센터 키만 됨. 네이버 클라우드 API HUB 키는 쇼핑 검색이 없어 401) | 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜에 쇼핑 검색의 같은 상품(상품번호 일치) 사진을 씀 (선택, 없으면 건너뜀) |
 | `NTFY_TOPIC` 또는 `PUSHOVER_USER_KEY`+`PUSHOVER_APP_TOKEN` | ntfy 앱 / pushover.net | 휴대폰 푸시 알림 (선택) |
 | (계정만) 토스 쉐어링크, 네이버 쇼핑커넥트, 올리브영/컬리/무신사 큐레이터 | 각 앱/사이트 | 반자동 발행 |
 
