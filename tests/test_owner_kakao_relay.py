@@ -89,3 +89,33 @@ def test_long_store_url_keeps_kakao_text_in_one_message() -> None:
     url = "https://brand.naver.com/daekket/products/13008954661?" + "nl-query=%EB%8D%B0%EC%BC%93&" * 6
     assert _short_url(url) == "https://brand.naver.com/daekket/products/13008954661"
     assert _short_url("https://link.coupang.com/a/abc") == "https://link.coupang.com/a/abc"
+
+
+async def test_owner_linked_deal_relays_a_published_notice_to_kakao(bot: DealBot, settings: Settings) -> None:
+    async def fake_send(text: str, *, silent: bool = False) -> int:
+        return 1
+
+    bot.notifier.send_with_id = fake_send  # type: ignore[method-assign]
+    bot.notifier.channel_post_base = "https://t.me/oneul_hotdeal"
+    plain = Deal(_product(), DealVerdict(is_deal=True))
+    await bot.notifier.notify_published(plain, PublishResult(ok=True, message_id=1, dry_run=False))
+    practice = Deal(_product(extra={"owner_link": True}), DealVerdict(is_deal=True))
+    await bot.notifier.notify_published(practice, PublishResult(ok=True, message_id=2, dry_run=True))
+    assert not [u for u in _inbox(settings) if "owner_notice" in u]  # 보통 딜·연습 발행은 카톡 안 보냄
+    mine = Deal(_product(name="데켓 주물 IH 오발쿡플레이트 31cm " + "아주 긴 상품명 " * 20, extra={"owner_link": True}),
+                DealVerdict(is_deal=True))
+    await bot.notifier.notify_published(mine, PublishResult(ok=True, message_id=77, dry_run=False))
+    notes = [u["owner_notice"] for u in _inbox(settings) if "owner_notice" in u]
+    assert len(notes) == 1 and notes[0]["kind"] == "published"
+    text = notes[0]["text"]
+    assert "채널에 올렸어요" in text and "데켓 주물" in text and "https://t.me/oneul_hotdeal/77" in text
+    assert "<" not in text and len(text) <= 200  # HTML 없이 카톡 한 통
+
+
+def test_channel_post_base_only_for_public_channels() -> None:
+    from dealbot.monitoring.admin import channel_post_base
+
+    assert channel_post_base("@oneul_hotdeal") == "https://t.me/oneul_hotdeal"
+    assert channel_post_base("-1001234567890", "https://t.me/oneul_hotdeal") == "https://t.me/oneul_hotdeal"
+    assert channel_post_base("-1001234567890", "https://t.me/+AbCdEf") is None
+    assert channel_post_base(None) is None

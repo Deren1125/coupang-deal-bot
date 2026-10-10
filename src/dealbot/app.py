@@ -61,6 +61,7 @@ from dealbot.monitoring.admin import (
     BOT_COMMANDS,
     AdminNotifier,
     StatusReporter,
+    channel_post_base,
     register_admin_handlers,
 )
 from dealbot.monitoring.push import PushNotifier
@@ -322,6 +323,7 @@ class DealBot:
             labels={c.name: c.label for c in settings.collectors if c.label},
         )
         self.notifier.owner_relay = self.owner_notice
+        self.notifier.channel_post_base = channel_post_base(settings.secrets.telegram_channel_id, settings.channels.telegram_url)
         self.reporter = StatusReporter(
             settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget,
             summarizer=self.summarizer,

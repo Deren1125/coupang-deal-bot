@@ -305,6 +305,18 @@ def _short_url(url: str, limit: int = 90) -> str:
     return url if len(url) <= limit else url.split("#", 1)[0].split("?", 1)[0]
 
 
+_PUBLIC_CHANNEL_RE = re.compile(r"^(?:@|https?://t\.me/)([A-Za-z]\w{3,})/?$")
+
+
+def channel_post_base(channel_id: str | int | None, telegram_url: str = "") -> str | None:
+    """공개 채널 글 주소의 앞부분 (https://t.me/이름). 비공개 채널(-100…)·초대 링크(t.me/+…)면 None."""
+    for cand in (str(channel_id or "").strip(), (telegram_url or "").strip()):
+        m = _PUBLIC_CHANNEL_RE.match(cand)
+        if m:
+            return f"https://t.me/{m.group(1)}"
+    return None
+
+
 class AdminNotifier:
     def __init__(
         self,
@@ -330,9 +342,10 @@ class AdminNotifier:
         self._last_alert: dict[str, datetime] = {}
         # 카톡 '나에게 보내기' 중계 (app 이 Blog-Auto 받은편지함에 쓰는 함수를 넣어 줌). None 이면 안 보냄
         self.owner_relay: Callable[[str, str], None] | None = None
+        self.channel_post_base: str | None = None  # 공개 채널이면 'https://t.me/이름' (카톡 '올렸어요'에 글 주소 붙임)
 
     def _relay(self, kind: str, text: str) -> None:
-        """주인에게 카톡으로도 (링크 요청·링크 완료). 실패해도 텔레그램 알림은 그대로."""
+        """주인에게 카톡으로도 (링크 요청·링크 완료·올렸어요). 실패해도 텔레그램 알림은 그대로."""
         if self.owner_relay is None or not getattr(self.cfg, "kakao_relay", True):
             return
         try:
@@ -440,6 +453,10 @@ class AdminNotifier:
             )
             await self.send(text, silent=True)
             return
+        if owner_link:  # 카톡에도 '올렸어요' (HTML 없이 한 통 200자 안)
+            post = f"\n{self.channel_post_base}/{result.message_id}" if self.channel_post_base and result.message_id else ""
+            price_s = f" · {p.price:,}원" if p.has_price else ""
+            self._relay("published", f"📣 채널에 올렸어요 [{self.shop_label(p.shop)}]\n{truncate(p.name, 60)}{price_s}{post}")
         head = ("🧪 <b>연습 발행</b>" if result.dry_run else
                 "📣 <b>링크를 붙여 주신 상품을 채널에 올렸어요</b>" if owner_link else "✅ <b>채널에 올렸습니다</b>")
         price = f"{p.price:,}원" if p.has_price else "가격 없음"
