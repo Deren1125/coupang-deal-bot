@@ -187,6 +187,10 @@ class DealBot:
             store_attempts=ec.store_retry_attempts,
             store_backoff=ec.store_retry_backoff_seconds,
             store_max_wait=ec.store_max_wait_seconds,
+            store_breaker_after=ec.store_breaker_after,
+            store_breaker_seconds=ec.store_breaker_seconds,
+            store_breaker_max_seconds=ec.store_breaker_max_seconds,
+            store_cache_seconds=ec.store_cache_seconds,
         )
         # 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜: 쇼핑 검색 API 에서 같은 상품(상품번호 일치)의 사진. 키가 없으면 건너뜀
         self.naver_shop = NaverShopSearch(

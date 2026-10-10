@@ -131,6 +131,75 @@ async def test_store_requests_are_spaced_but_other_shops_are_not() -> None:
     assert sleeps == [3.0] and len(seen) == 3  # 다른 몰은 그대로
 
 
+def _switch_server(status: list[int]) -> tuple[httpx.AsyncClient, list[str]]:
+    """status[0] 으로 응답하는 가짜 스토어 (테스트 중에 바꿀 수 있음)."""
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        return httpx.Response(status[0], text=STORE_HTML if status[0] == 200 else "")
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler)), seen
+
+
+@pytest.mark.real_fetch
+async def test_store_breaker_pauses_after_blocked_rounds_and_backs_off(caplog: pytest.LogCaptureFixture) -> None:
+    """10/10 서버: 스토어가 늘 429 인데 수집·정품 확인·품절 확인이 같은 주소를 3번씩 두드림 → 막힌 판이 2번 연속이면
+    스토어 전체를 10분 쉬고, 또 막히면 20분… (최대 2시간). 한 번 열리면 처음으로."""
+    status = [429]
+    http, seen = _switch_server(status)
+    enricher = PageEnricher(http, store_attempts=1, store_min_interval=0.5)
+    clock, _ = _fake_time(enricher)
+    caplog.set_level(logging.INFO, logger="dealbot.enrich")
+    url = "https://brand.naver.com/b/products/{}".format
+    assert await enricher.fetch(url(1)) is None and len(seen) == 1  # 1판 막힘: 아직 안 쉼
+    assert await enricher.fetch(url(2)) is None and len(seen) == 2  # 2판 연속 → 10분 쉼
+    for n in range(3, 6):
+        assert await enricher.fetch(url(n)) is None
+    assert len(seen) == 2  # 쉬는 동안은 어느 스토어 주소에도 안 감
+    assert sum("cooling down" in r.getMessage() for r in caplog.records) == 1  # '쉬는 중' 로그는 한 번만
+    clock[0] += 601
+    assert await enricher.fetch(url(6)) is None and len(seen) == 3  # 다시 한 판 → 또 막힘 → 20분
+    clock[0] += 601
+    assert await enricher.fetch(url(7)) is None and len(seen) == 3
+    clock[0] += 600
+    status[0] = 200
+    assert await enricher.fetch(url(8)) is not None and len(seen) == 4  # 열림 → 처음으로
+    status[0] = 429
+    assert await enricher.fetch(url(9)) is None and len(seen) == 5
+    clock[0] += 1
+    assert await enricher.fetch(url(10)) is None and len(seen) == 6  # 1판만 막힌 뒤라 바로 쉬지 않음
+    warns = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 3 and "10분" in warns[0] and "20분" in warns[1] and "10분" in warns[2]
+
+
+@pytest.mark.real_fetch
+async def test_store_breaker_caps_the_pause() -> None:
+    http, _ = _switch_server([429])
+    enricher = PageEnricher(http, store_attempts=1, store_min_interval=0.5, store_breaker_seconds=600, store_breaker_max_seconds=7200)
+    clock, _ = _fake_time(enricher)
+    for _ in range(12):
+        await enricher.fetch(STORE_URL + "?n=1")
+        clock[0] = max(clock[0], enricher._store_next) + 1  # 쉬는 시간이 끝날 때마다 한 판
+    assert enricher._store_next - clock[0] <= 7200  # 아무리 막혀도 2시간 넘게는 안 쉼
+
+
+@pytest.mark.real_fetch
+async def test_store_page_is_remembered_briefly_but_failures_are_not() -> None:
+    status = [429]
+    http, seen = _switch_server(status)
+    enricher = PageEnricher(http, store_attempts=1, store_min_interval=0.5, store_cache_seconds=300)
+    clock, _ = _fake_time(enricher)
+    assert await enricher.fetch(STORE_URL) is None and len(seen) == 1
+    status[0] = 200
+    clock[0] += 1
+    first = await enricher.fetch(STORE_URL)  # 막힌 결과는 기억하지 않음 → 다시 읽음
+    assert first is not None and len(seen) == 2
+    assert await enricher.fetch(STORE_URL) is first and len(seen) == 2  # 수집 → 정품 확인 → 발행 사진: 같은 페이지 다시 안 읽음
+    clock[0] += 301
+    assert await enricher.fetch(STORE_URL) is not None and len(seen) == 3  # 5분 지나면 새로 (품절 확인이 너무 낡지 않게)
+
+
 def test_retry_after_parsing() -> None:
     assert retry_after_seconds("7") == 7.0
     assert retry_after_seconds(None) is None and retry_after_seconds("soon") is None

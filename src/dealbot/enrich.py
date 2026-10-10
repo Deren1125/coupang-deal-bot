@@ -225,6 +225,10 @@ class PageEnricher:
         store_attempts: int = 3,
         store_backoff: float = 2.0,
         store_max_wait: float = 30.0,
+        store_breaker_after: int = 2,
+        store_breaker_seconds: float = 600.0,
+        store_breaker_max_seconds: float = 7200.0,
+        store_cache_seconds: float = 300.0,
     ) -> None:
         self.http = http
         self.timeout = timeout
@@ -235,6 +239,16 @@ class PageEnricher:
         self.store_max_wait = store_max_wait
         self._store_lock = asyncio.Lock()
         self._store_next = 0.0  # 스토어에 다음 요청을 보내도 되는 시각 (_clock 기준)
+        # 이 서버에서 스토어는 거의 늘 429 (10/10: 한 딜에 수집·정품 확인·품절 확인이 각자 3번씩, 상품당 하루 13~88번).
+        # 연속으로 막힌 판(재시도까지 다 실패)이 store_breaker_after 번이면 스토어 전체를 쉬고(10분→20분→… 최대 2시간), 한 번 열리면 처음으로
+        self.store_breaker_after = store_breaker_after
+        self.store_breaker = store_breaker_seconds
+        self.store_breaker_max = store_breaker_max_seconds
+        self._store_strikes = 0
+        self._cool_noted = 0.0  # '쉬는 중' 로그를 쉬는 구간마다 한 번만
+        # 같은 딜을 수집·정품 확인·발행 사진에서 연달아 읽으므로, 읽은 스토어 페이지는 잠깐 기억해 다시 묻지 않는다
+        self.store_cache = store_cache_seconds
+        self._store_cache: dict[str, tuple[float, PageMeta]] = {}
         self._sleep = asyncio.sleep  # 테스트에서 가짜로 바꿔 끼움 (실제로 안 잠)
         self._clock = time.monotonic
 
@@ -256,10 +270,14 @@ class PageEnricher:
         resp: httpx.Response | None = None
         for i in range(1, self.store_attempts + 1):
             if not await self._store_turn():
-                log.info("enrich: naver store cooling down (Retry-After) — skip %s", url)
+                if self._clock() >= self._cool_noted:
+                    self._cool_noted = self._store_next
+                    left = (self._store_next - self._clock()) / 60
+                    log.info("enrich: naver store cooling down (%.0f분 남음) — skip %s", left, url)
                 return resp
             resp = await self.http.get(url, follow_redirects=True, timeout=self.timeout)
             if resp.status_code != 429 and resp.status_code < 500:
+                self._store_strikes = 0
                 return resp
             wait = retry_after_seconds(resp.headers.get("retry-after"))
             if wait is None:
@@ -268,14 +286,33 @@ class PageEnricher:
             self._store_next = max(self._store_next, self._clock() + wait)
             if wait > self.store_max_wait:
                 log.info("enrich: HTTP %s for %s — Retry-After %.0fs, 이번엔 건너뜀", resp.status_code, url, wait)
+                self._strike(resp.status_code)
                 return resp
             if i < self.store_attempts:
                 log.info("enrich: HTTP %s for %s — %.1fs 뒤 다시 (%d/%d)", resp.status_code, url, wait, i, self.store_attempts)
+        self._strike(resp.status_code if resp is not None else 0)
         return resp
 
+    def _strike(self, status: int) -> None:
+        """한 판(재시도 포함)이 끝내 막힘. store_breaker_after 번 연속이면 스토어 전체를 점점 길게 쉰다."""
+        self._store_strikes += 1
+        over = self._store_strikes - self.store_breaker_after
+        if self.store_breaker_after <= 0 or over < 0:
+            return
+        pause = min(self.store_breaker_max, self.store_breaker * (2 ** min(over, 16)))
+        self._store_next = max(self._store_next, self._clock() + pause)
+        log.warning(
+            "enrich: naver store %d판 연속 막힘(HTTP %s) — %.0f분 동안 스토어 페이지를 읽지 않음", self._store_strikes, status, pause / 60
+        )
+
     async def fetch(self, url: str) -> PageMeta | None:
+        store = is_naver_store(url)
+        if store:
+            hit = self._store_cache.get(url)
+            if hit is not None and hit[0] > self._clock():
+                return hit[1]
         try:
-            if is_naver_store(url):
+            if store:
                 resp = await self._get_store(url)
                 if resp is None:
                     return None
@@ -291,6 +328,13 @@ class PageEnricher:
                 meta.image = urljoin(meta.final_url, meta.image)
             if meta.ld_image:
                 meta.ld_image = urljoin(meta.final_url, meta.ld_image)
+            if store and self.store_cache > 0:
+                if len(self._store_cache) >= 200:
+                    now = self._clock()
+                    self._store_cache = {k: v for k, v in self._store_cache.items() if v[0] > now}
+                    while len(self._store_cache) >= 200:
+                        self._store_cache.pop(next(iter(self._store_cache)))
+                self._store_cache[url] = (self._clock() + self.store_cache, meta)
             return meta
         except httpx.HTTPError as e:
             log.info("enrich failed for %s: %s", url, e)

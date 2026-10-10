@@ -123,6 +123,11 @@ class EnrichConfig(BaseModel):
     store_retry_attempts: int = 3
     store_retry_backoff_seconds: float = 2.0
     store_max_wait_seconds: float = 30.0  # Retry-After 가 이보다 길면 기다리지 않고 건너뜀 (그 시각까지 스토어에 안 감)
+    # 재시도까지 다 막힌 판이 이만큼 연속이면 스토어 전체를 쉼 (breaker_seconds 부터 두 배씩, 최대 breaker_max_seconds. 0 = 안 쉼)
+    store_breaker_after: int = 2
+    store_breaker_seconds: float = 600.0
+    store_breaker_max_seconds: float = 7200.0
+    store_cache_seconds: float = 300.0  # 읽은 스토어 페이지를 이만큼 기억 (수집·정품 확인·발행 사진이 같은 페이지를 다시 안 읽게)
 
 
 class AuthenticityConfig(BaseModel):
