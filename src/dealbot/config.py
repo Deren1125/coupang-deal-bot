@@ -128,6 +128,11 @@ class EnrichConfig(BaseModel):
     store_breaker_seconds: float = 600.0
     store_breaker_max_seconds: float = 7200.0
     store_cache_seconds: float = 300.0  # 읽은 스토어 페이지를 이만큼 기억 (수집·정품 확인·발행 사진이 같은 페이지를 다시 안 읽게)
+    # 그래도 사진이 없는 네이버 스토어 딜: 발행 직전에만 실제 크롬(로그인 없는 빈 창)으로 한 번 열어 상품 사진을 읽음 (주인 결정 10/10)
+    store_browser: bool = False
+    store_browser_min_interval_seconds: float = 60.0  # 열기 사이 간격
+    store_browser_min_free_mb: int = 500  # 서버 여유 메모리가 이보다 적으면 열지 않음 (블로그 크롬이 떠 있을 때 등)
+    store_browser_timeout_seconds: float = 45.0
 
 
 class AuthenticityConfig(BaseModel):

@@ -178,10 +178,13 @@ async def test_store_breaker_caps_the_pause() -> None:
     http, _ = _switch_server([429])
     enricher = PageEnricher(http, store_attempts=1, store_min_interval=0.5, store_breaker_seconds=600, store_breaker_max_seconds=7200)
     clock, _ = _fake_time(enricher)
+    pauses: list[float] = []
     for _ in range(12):
         await enricher.fetch(STORE_URL + "?n=1")
+        pauses.append(round(enricher._store_next - clock[0]))  # 이 판 직후 정한 쉬는 시간 (시계를 넘기기 전에 잼)
         clock[0] = max(clock[0], enricher._store_next) + 1  # 쉬는 시간이 끝날 때마다 한 판
-    assert enricher._store_next - clock[0] <= 7200  # 아무리 막혀도 2시간 넘게는 안 쉼
+    assert pauses[1:6] == [600, 1200, 2400, 4800, 7200]  # 10분부터 두 배씩
+    assert max(pauses) == 7200 and pauses[-1] == pauses[-2] == 7200  # 아무리 막혀도 2시간 넘게는 안 쉼 (상한에 닿고 머묾)
 
 
 @pytest.mark.real_fetch

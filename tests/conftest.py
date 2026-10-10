@@ -52,6 +52,17 @@ def _no_page_fetch(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.fixture(autouse=True)
+def _no_real_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """테스트는 진짜 크롬을 띄우지 않는다: 스토어 사진 브라우저는 기본으로 '못 엶'. 필요한 테스트는 인스턴스에 가짜를 끼운다."""
+    from dealbot.store_browser import StoreBrowser
+
+    async def closed(self: object, url: str) -> tuple[int, str, str]:
+        return 0, "", ""
+
+    monkeypatch.setattr(StoreBrowser, "_open_page", closed)
+
+
+@pytest.fixture(autouse=True)
 def _no_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     """테스트에서는 한줄평용 claude CLI 를 부르지 않는다."""
     import dealbot.commentary as commentary

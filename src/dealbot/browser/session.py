@@ -9,6 +9,7 @@ import asyncio
 import glob
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,13 +23,21 @@ def find_chromium_executable(explicit: str | None = None) -> str | None:
     env = os.environ.get("DEALBOT_CHROMIUM_PATH")
     if env and os.path.exists(env):
         return env
-    base = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-    if base:
-        for pattern in ("chromium-*/chrome-linux/chrome", "chromium-*/chrome-linux64/chrome", "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"):
-            hits = sorted(glob.glob(os.path.join(base, pattern)))
+    # PLAYWRIGHT_BROWSERS_PATH, 없으면 사용자 캐시(~/.cache/ms-playwright — 서버에선 블로그 봇이 설치한 크롬). 가장 새 버전부터
+    bases = [b for b in (os.environ.get("PLAYWRIGHT_BROWSERS_PATH"), os.path.expanduser("~/.cache/ms-playwright")) if b]
+    for base in bases:
+        # 본체 크롬(옛 chrome-linux·새 chrome-linux64 를 함께) 중 가장 새 판, 없으면 headless 셸
+        for patterns in (("chromium-*/chrome-linux/chrome", "chromium-*/chrome-linux64/chrome"),
+                         ("chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell",)):
+            hits = sorted((h for pat in patterns for h in glob.glob(os.path.join(base, pat))), key=_revision)
             if hits:
                 return hits[-1]
     return None
+
+
+def _revision(path: str) -> int:
+    m = re.search(r"-(\d+)[/\\]", path)
+    return int(m.group(1)) if m else 0
 
 
 class BrowserUnavailable(Exception):

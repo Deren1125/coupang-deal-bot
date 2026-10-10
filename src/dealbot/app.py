@@ -85,6 +85,7 @@ from dealbot.publisher.threads import (
 from dealbot.shops import ShopRegistry
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
+from dealbot.store_browser import StoreBrowser, store_browser_check
 from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
 from dealbot.utils.text import clean_name, truncate
 from dealbot.utils.timeutil import fmt_local, from_iso, in_time_window, local_now, to_iso, utcnow
@@ -191,6 +192,13 @@ class DealBot:
             store_breaker_seconds=ec.store_breaker_seconds,
             store_breaker_max_seconds=ec.store_breaker_max_seconds,
             store_cache_seconds=ec.store_cache_seconds,
+        )
+        # 일반 요청이 막힌(429) 네이버 스토어 딜: 발행 직전에만 실제 크롬(로그인 없는 빈 창)으로 한 번 (주인 결정 10/10)
+        self.store_browser = StoreBrowser(
+            enabled=ec.store_browser,
+            min_interval=ec.store_browser_min_interval_seconds,
+            min_free_mb=ec.store_browser_min_free_mb,
+            timeout=ec.store_browser_timeout_seconds,
         )
         # 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜: 쇼핑 검색 API 에서 같은 상품(상품번호 일치)의 사진. 키가 없으면 건너뜀
         self.naver_shop = NaverShopSearch(
@@ -767,6 +775,8 @@ class DealBot:
             out.append((None, "텔레그램: 토큰 미설정 (오프라인)"))
 
         out.append((True, f"휴대폰 푸시: {self.push.provider}") if self.push.enabled else (None, "휴대폰 푸시: 미설정 (텔레그램 알림만)"))
+        if self.store_browser.enabled:
+            out.append(store_browser_check())
         if not self.settings.threads.enabled:
             out.append((None, "스레드: 꺼짐"))
         elif not self.settings.secrets.has_threads_app:
@@ -1573,7 +1583,7 @@ class DealBot:
     async def deal_photo(self, deal: Deal) -> bytes | None:
         """올릴 상품 사진: 디코딩되고 짧은 변 photo_min_side(600px) 이상인 JPEG (EXIF 방향 반영). 없으면 None → 사진 없이 올린다.
         순서: 딜의 상품 사진(쿠팡·네이버 CDN 은 큰 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만)
-        → 네이버 스토어 딜이면 쇼핑 검색 API 의 같은 상품(상품번호 일치) 사진.
+        → 네이버 스토어 딜이면 실제 크롬으로 한 번 연 스토어 페이지 사진(일반 요청이 429 일 때) → 쇼핑 검색 API 의 같은 상품(상품번호 일치) 사진.
         게시판 목록 썸네일·로고·기본 배너는 상품 사진으로 쓰지 않는다. 글자 카드도 상품 사진이 아니라 여기서 만들지 않는다
         (카드는 인스타만). 쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고, 못 찾으면 비운다."""
         cc = self.settings.publish
@@ -1593,6 +1603,7 @@ class DealBot:
 
         photo: bytes | None = None
         src: str | None = None
+        page_had_photo = False  # 일반 요청으로 읽은 페이지에 사진 주소가 있었음 → 크롬도 같은 주소를 줄 테니 안 엶
         for url in _sizes(p.image_url):
             photo = await _try(url)
             if photo is not None:
@@ -1601,6 +1612,19 @@ class DealBot:
         if photo is None and p.url and not is_board_thumb(p.url) and p.shop not in self.settings.deal.enrich.exclude_shops:
             try:
                 meta = await self.enricher.fetch(p.url)
+            except Exception:  # noqa: BLE001
+                meta = None
+            page_had_photo = bool(meta and page_images(meta))
+            for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
+                photo = await _try(url)
+                if photo is not None:
+                    src = url
+                    break
+        if photo is None and not page_had_photo and store_product_no(p.url) and p.shop not in self.settings.deal.enrich.exclude_shops:
+            # 일반 요청이 막혔으면(429) 실제 크롬으로 한 번 (로그인 없는 빈 창, 발행 직전에만 — 주인 결정 10/10).
+            # 페이지를 읽었는데 사진이 600px 미만 등으로 못 쓴 경우엔 크롬도 같은 사진을 주므로 열지 않는다 (검토 지적)
+            try:
+                meta = await self.store_browser.page_meta(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
             for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:

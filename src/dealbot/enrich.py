@@ -201,6 +201,18 @@ def is_product_page(url: str | None) -> bool:
     return not _NOT_PRODUCT_PATH.search(path)
 
 
+def page_meta_at(html: str, final_url: str) -> PageMeta:
+    """페이지 HTML → PageMeta (최종 주소 기준). '//cdn…/a.jpg', '/upload/1.jpg' 같은 상대 사진 주소는 페이지 주소 기준으로
+    (그대로 두면 사진을 못 받음)."""
+    meta = parse_page_meta(html)
+    meta.final_url = final_url
+    if meta.image:
+        meta.image = urljoin(final_url, meta.image)
+    if meta.ld_image:
+        meta.ld_image = urljoin(final_url, meta.ld_image)
+    return meta
+
+
 def page_images(meta: PageMeta) -> list[str]:
     """상품 페이지에서 상품 사진으로 써도 되는 주소 (JSON-LD Product.image 먼저, 그다음 og:image).
     최종 주소(리디렉션 뒤)가 상품 페이지가 아니거나, 로고·기본 배너 주소면 빈 목록. final_url 을 모르면(직접 만든 meta) 주소만 본다."""
@@ -321,13 +333,7 @@ class PageEnricher:
             if resp.status_code >= 400:
                 log.info("enrich: HTTP %s for %s", resp.status_code, url)
                 return None
-            meta = parse_page_meta(resp.text)
-            meta.final_url = str(resp.url)
-            # '//cdn…/a.jpg', '/upload/1.jpg' 같은 상대 주소는 페이지 주소 기준으로 (그대로 두면 사진을 못 받음)
-            if meta.image:
-                meta.image = urljoin(meta.final_url, meta.image)
-            if meta.ld_image:
-                meta.ld_image = urljoin(meta.final_url, meta.ld_image)
+            meta = page_meta_at(resp.text, str(resp.url))
             if store and self.store_cache > 0:
                 if len(self._store_cache) >= 200:
                     now = self._clock()
