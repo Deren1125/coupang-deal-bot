@@ -274,3 +274,29 @@ def test_instagram_redirect_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN")
     s = load_settings(ROOT / "config.yaml", load_env=False)
     assert s.secrets.instagram_redirect_uri == "https://localhost/instagram/callback" and s.secrets.public_base_url is None
+
+
+async def test_threads_user_token_connects_without_the_login_page(settings: Settings) -> None:
+    """/threadstoken: 개발자 화면 '사용자 토큰 생성기' 토큰으로 연결 (웹 로그인이 돌기만 할 때 — 주인 10/12)."""
+    bot = DealBot(settings)
+    try:
+        def handler(req: httpx.Request) -> httpx.Response:
+            if req.url.path.endswith("/access_token"):  # 이미 장기 토큰이면 바꿀 수 없다고 나옴
+                return httpx.Response(400, json={"error": {"message": "already long-lived", "code": 190}})
+            if req.url.path.endswith("/me"):
+                tok = dict(req.url.params).get("access_token")
+                if tok != "GOOD":
+                    return httpx.Response(400, json={"error": {"message": "Invalid OAuth access token", "code": 190}})
+                return httpx.Response(200, json={"id": "42", "username": "oneul_hot_deal"})
+            return httpx.Response(404, json={})
+
+        bot.threads.client = ThreadsClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+                                           app_id="APPID", app_secret="SECRET", retry_backoff=0.01)
+        bad = await bot.threads_submit_token("BAD")
+        assert bad.startswith("❌") and bot.db.kv_get(KV_TOKEN) in (None, "")
+        ok = await bot.threads_submit_token(" GOOD ")
+        assert "✅ 스레드 연결 완료: @oneul_hot_deal" in ok and "/threadstest" in ok
+        tok = bot.threads.stored_token()
+        assert tok is not None and tok.access_token == "GOOD" and tok.user_id == "42" and tok.expires_at is not None
+    finally:
+        await bot.close()

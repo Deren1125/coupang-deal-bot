@@ -2014,6 +2014,19 @@ class DealBot:
         except ThreadsError as e:
             return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
 
+    async def threads_submit_token(self, token: str) -> str:
+        """/threadstoken: 메타 개발자 화면에서 만든 사용자 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""
+        try:
+            tok = await self.threads.client.from_user_token(token)
+            me = await self.threads.client.me(tok.access_token)
+        except ThreadsError as e:
+            return f"❌ 연결하지 못했어요: {html.escape(str(e))}\n토큰을 다시 만들어 보내 주세요 (테스터로 수락한 계정으로 만든 토큰이어야 해요)."
+        self.threads.save_token(tok)
+        self.db.kv_set(KV_USERNAME, str(me.get("username") or ""))
+        self.db.log_event("INFO", "threads", f"authorized by user token as {me.get('username')}")
+        expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
+        return f"✅ 스레드 연결 완료: @{html.escape(str(me.get('username') or ''))} (토큰 만료 {expires}, 자동 갱신됨). 이제 /threadstest 로 시험해 보세요."
+
     def owner_notice(self, kind: str, text: str) -> None:
         """주인 카톡 '나에게 보내기' 요청을 Blog-Auto 받은편지함에 (카톡 토큰은 Blog-Auto 가 가지고 있어 거기서 보낸다)."""
         self.relay_to_blog({"owner_notice": {"kind": kind, "text": text, "at": time.time()}})

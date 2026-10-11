@@ -209,6 +209,29 @@ class ThreadsClient:
             expires_at=utcnow() + timedelta(seconds=expires_in) if expires_in else None,
         )
 
+    async def from_user_token(self, token: str) -> ThreadsToken:
+        """메타 개발자 화면 '사용자 토큰 생성기'로 만든 토큰을 그대로 받는다 (웹 로그인이 돌기만 할 때 — 주인 10/12).
+        단기 토큰이면 장기(60일)로 바꾸고, 이미 장기면 그대로 쓴다 (생성기 토큰은 보통 60일). 만료일을 모르면 59일로 잡아 자동 갱신이 돌게."""
+        token = token.strip()
+        expires_in = 0
+        if self.app_id and self.app_secret:
+            try:
+                long = await self._request(
+                    "GET",
+                    f"{GRAPH_BASE}/access_token",
+                    params={"grant_type": "th_exchange_token", "client_secret": self.app_secret, "access_token": token},
+                )
+                token = long.get("access_token") or token
+                expires_in = int(long.get("expires_in") or 0)
+            except ThreadsError as e:  # 이미 장기 토큰이면 바꿀 수 없다고 나옴 → 그대로 씀
+                log.info("threads user token: long-lived exchange skipped (%s)", e)
+        me = await self.me(token)  # 토큰이 진짜인지 여기서 확인 (틀리면 ThreadsError)
+        return ThreadsToken(
+            access_token=token,
+            user_id=str(me.get("id") or ""),
+            expires_at=utcnow() + (timedelta(seconds=expires_in) if expires_in else timedelta(days=59)),
+        )
+
     async def refresh(self, token: str) -> ThreadsToken:
         body = await self._request(
             "GET", f"{GRAPH_BASE}/refresh_access_token", params={"grant_type": "th_refresh_token", "access_token": token}
