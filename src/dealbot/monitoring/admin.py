@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import html
 import logging
 import os
 import re
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
-from telegram import Bot, Update
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, RetryAfter, TelegramError
 from telegram.ext import (
@@ -32,6 +34,7 @@ from dealbot import __version__
 from dealbot.config import MonitoringConfig, Settings
 from dealbot.links import LinkRouter
 from dealbot.models import Deal, PublishResult
+from dealbot.monitoring import nl as nlmod
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState
 from dealbot.publisher.rate_limiter import RateLimiter
@@ -139,13 +142,18 @@ async def send_one(send: Any, text: str, **kwargs: Any) -> Any:
     return SEND_FAILED
 
 
-async def send_chunks(send: Any, text: str, *, gap: float = SEND_GAP_SECONDS, **kwargs: Any) -> Any:
-    """긴 글을 줄 단위로 나눠, 사이에 간격을 두고 보낸다. 첫 메시지를 돌려준다."""
+async def send_chunks(
+    send: Any, text: str, *, gap: float = SEND_GAP_SECONDS, on_sent: Callable[[Any], None] | None = None, **kwargs: Any
+) -> Any:
+    """긴 글을 줄 단위로 나눠, 사이에 간격을 두고 보낸다. 첫 메시지를 돌려준다.
+    on_sent: 보낸 조각마다 불림 (보낸 메시지 기록 — 긴 보고의 가운데 조각에 답장해도 어느 메시지인지 알게)."""
     first = SEND_FAILED
     for i, chunk in enumerate(split_message(text)):
         if i:
             await asyncio.sleep(gap)
         msg = await send_one(send, chunk, **kwargs)
+        if on_sent is not None and msg is not SEND_FAILED and msg is not None:
+            on_sent(msg)
         if first is SEND_FAILED:
             first = msg
     return first
@@ -343,6 +351,9 @@ class AdminNotifier:
         # 카톡 '나에게 보내기' 중계 (app 이 Blog-Auto 받은편지함에 쓰는 함수를 넣어 줌). None 이면 안 보냄
         self.owner_relay: Callable[[str, str], None] | None = None
         self.channel_post_base: str | None = None  # 공개 채널이면 'https://t.me/이름' (카톡 '올렸어요'에 글 주소 붙임)
+        # 보낸 메시지 기록 (message_id, 글, 종류, 딜 번호) — 같은 챗에 Blog-Auto 도 같은 봇으로 보내서, 답장 대상이
+        # 딜봇 메시지인지 블로그 메시지인지 가리는 데 쓴다 (말 명령). app 이 넣어 줌. None 이면 기록 안 함
+        self.msg_log: Callable[[int | None, str, str, int | None], None] | None = None
 
     def _relay(self, kind: str, text: str) -> None:
         """주인에게 카톡으로도 (링크 요청·링크 완료·올렸어요). 실패해도 텔레그램 알림은 그대로."""
@@ -369,8 +380,8 @@ class AdminNotifier:
     async def send(self, text: str, *, silent: bool = False) -> bool:
         return (await self.send_with_id(text, silent=silent)) is not None
 
-    async def send_with_id(self, text: str, *, silent: bool = False) -> int | None:
-        """보내고 텔레그램 message_id 를 돌려준다 (나중에 고치거나 지우려고)."""
+    async def send_with_id(self, text: str, *, silent: bool = False, kind: str = "", queue_id: int | None = None) -> int | None:
+        """보내고 텔레그램 message_id 를 돌려준다 (나중에 고치거나 지우려고). 조각마다 보낸 메시지 기록에 남긴다."""
         if not self.enabled:
             log.warning(
                 "관리자 알림을 보낼 수 없어 건너뜁니다 (봇 토큰/관리자 챗 ID 확인 필요): %s",
@@ -381,8 +392,12 @@ class AdminNotifier:
         # silent 는 "일상 알림" 표시일 뿐, 실제 무음 여부는 monitoring.quiet_notices 가 결정
         quiet = silent and self.cfg.quiet_notices
         send = functools.partial(self.bot.send_message, chat_id=self.chat_id, link_preview_options=None)
+        def record(m: Any) -> None:
+            if self.msg_log is not None:
+                self.msg_log(getattr(m, "message_id", None), text, kind, queue_id)
+
         try:
-            msg = await send_chunks(send, text, disable_notification=quiet)
+            msg = await send_chunks(send, text, disable_notification=quiet, on_sent=record)
         except TelegramError as e:
             log.error("admin notify failed: %s", e)
             return None
@@ -498,7 +513,7 @@ class AdminNotifier:
             f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
             f"안 올리려면 <code>/skip {item.id}</code>"
         )
-        message_id = await self.send_with_id(text)
+        message_id = await self.send_with_id(text, kind="link", queue_id=item.id)
         self._relay(
             "link_request",
             f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}\n{_short_url(p.url)}\n"
@@ -534,7 +549,7 @@ class AdminNotifier:
             + (f"게시글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
             + f"\n👉 공식 판매처가 맞으면 <code>/ok {item.id}</code> → 링크를 만들어 채널에 올립니다 · 아니면 <code>/skip {item.id}</code>"
         )
-        message_id = await self.send_with_id(text)
+        message_id = await self.send_with_id(text, kind="review_auth", queue_id=item.id)
         await self._push("info_review", f"정품 확인 필요 #{item.id} [{shop_name}]", f"{truncate(p.name, 70)}\n{reason}", tags=["mag"])
         return message_id
 
@@ -550,7 +565,7 @@ class AdminNotifier:
             f"👉 <code>/ok {item.id}</code> 이대로 올리기 · <code>/skip {item.id}</code> 안 올리기\n"
             f"글을 고치려면 <b>이 메시지에 답장</b>으로 본문을 새로 써 보내세요. 제목·원문 주소는 봇이 붙입니다."
         )
-        message_id = await self.send_with_id(text)
+        message_id = await self.send_with_id(text, kind="review_info", queue_id=item.id)
         await self._push("info_review", f"정보 글 확인 #{item.id}", f"{truncate(item.deal.product.name, 70)}\n{reason}", tags=["memo"])
         return message_id
 
@@ -1015,7 +1030,17 @@ class BotController(Protocol):
     async def naver_link_test(self, url: str) -> str: ...
 
 
-HELP_TEXT = (
+HELP_NL = (
+    "💬 <b>이제 말로 하셔도 돼요</b>\n"
+    "· 링크 요청(🔗 #번호)에 답장으로 링크만 보내면 지금처럼 바로 붙여서 올려요\n"
+    "· \"675번 올리지 마\", \"677 정품 맞아 올려\", \"대기열 보여줘\", \"딜봇 잠깐 멈춰\"\n"
+    "· 블로그(demiyum) 일도 여기서: \"블로그 12번 발행해\", \"블로그 상태 어때?\" — 블로그 프로그램이 받아서 처리해요\n"
+    "· 채널에 올라가거나 건너뛰는 일은 버튼으로 한 번 물어봐요. 조회는 바로 해요\n"
+    "· '멈춰'처럼 딜봇인지 블로그인지 애매하면 물어봐요\n"
+    "· 링크와 말을 같이 보내면 예전엔 바로 채널에 올라갔지만, 이제는 먼저 물어봐요\n\n"
+)
+
+HELP_TEXT = HELP_NL + (
     "🤖 <b>명령어 안내</b>\n"
     "\n<b>상태 보기</b>\n"
     "/status — 지금 상태 한눈에. 게시판 확인 현황, 올린 글 수, 기다리는 글, 쇼핑몰별 링크 처리 방식.\n"
@@ -1064,17 +1089,33 @@ def register_admin_handlers(
     admin_chat_id: int | str,
     reporter: StatusReporter,
     controller: BotController,
+    nl: nlmod.NLRouter | None = None,
 ) -> None:
     chat_id = normalize_chat_id(admin_chat_id)
     only_admin = filters.Chat(chat_id=chat_id) if isinstance(chat_id, int) else filters.Chat(username=str(chat_id).lstrip("@"))
 
-    async def reply(update: Update, text: str) -> None:
+    def _track(sent: Any, text: str = "", kind: str = "") -> Any:
+        """관리자 챗에 보낸 메시지를 기록한다 (답장 대상이 딜봇 메시지인지 Blog-Auto 메시지인지 가리려고).
+        이 파일의 reply_text·reply_photo·reply_document 는 모두 이것을 거친다 (테스트가 확인)."""
+        if nl is not None and sent is not None and sent is not SEND_FAILED:
+            nl.record(getattr(sent, "message_id", None), text, kind)
+        return sent
+
+    async def reply(update: Update, text: str, markup: InlineKeyboardMarkup | None = None) -> None:
         msg = update.effective_message
         if msg is not None:
-            await send_chunks(msg.reply_text, text)
+            extra = {"reply_markup": markup} if markup is not None else {}
+            await send_chunks(msg.reply_text, text, on_sent=lambda m: _track(m, text), **extra)
+
+    async def say(update: Update, text: str, markup: InlineKeyboardMarkup | None = None) -> None:
+        """말 명령의 답 (주인이 쓴 말·AI 가 쓴 말이 섞여 있어 HTML 로 해석되지 않게)."""
+        await reply(update, html.escape(text, quote=False), markup)
 
     async def drop_stale(update: object, _: ContextTypes.DEFAULT_TYPE) -> None:
         # 봇이 꺼져 있던 동안 쌓인 오래된 명령은 실행하지 않는다 (재배포 직후 옛 /run, /post 가 다시 도는 것 방지)
+        # 버튼은 예외: 버튼의 effective_message 는 버튼이 달린 (오래전에 보낸) 메시지라 5분 넘은 버튼이 조용히 버려졌다
+        if getattr(update, "callback_query", None) is not None:
+            return
         msg = getattr(update, "effective_message", None)
         if msg is not None and is_stale_message(getattr(msg, "date", None)):
             log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), (getattr(msg, "text", "") or "")[:40])
@@ -1202,9 +1243,9 @@ def register_admin_handlers(
         if msg is None:
             return
         if data:
-            await msg.reply_photo(photo=data, caption=caption[:1000])
+            _track(await msg.reply_photo(photo=data, caption=caption[:1000]), caption)
         else:
-            await msg.reply_text(caption[:4096])
+            _track(await msg.reply_text(caption[:4096]), caption)
 
     async def cmd_naverlogin(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         data, text = await controller.naver_login()
@@ -1213,7 +1254,7 @@ def register_admin_handlers(
             async def _wait() -> None:
                 result = await controller.naver_login_wait()
                 if update.effective_message:
-                    await update.effective_message.reply_text(result)
+                    _track(await update.effective_message.reply_text(result), result)
 
             ctx.application.create_task(_wait())
 
@@ -1236,9 +1277,9 @@ def register_admin_handlers(
             return
         if data:
             name = re.sub(r"[^A-Za-z0-9._-]+", "_", args[0].split("//", 1)[-1])[:60] + ".html"
-            await msg.reply_document(document=data, filename=name, caption=f"{text}\n이 파일을 Claude 에게 올려주면 셀렉터를 맞춥니다.")
+            _track(await msg.reply_document(document=data, filename=name, caption=f"{text}\n이 파일을 Claude 에게 올려주면 셀렉터를 맞춥니다."), text)
         else:
-            await msg.reply_text(text)
+            _track(await msg.reply_text(text), text)
 
     async def cmd_naverlink(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
@@ -1247,27 +1288,32 @@ def register_admin_handlers(
             return
         await reply(update, await controller.naver_link_test(args[0]))
 
-    async def on_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        """관리자의 일반 메시지: (1) 링크 요청에 답장 → 링크 붙이기, (2) URL 포함 메시지 → 직접 발행."""
+    async def batch_lines(update: Update, text: str) -> bool:
+        """고정 공지에 한 번에 답하기: "번호 링크" / "번호 ok" / "번호 skip" 줄들. 처리했으면 True."""
+        rows = [ln for ln in text.splitlines() if ln.strip()]
+        parsed = [m for m in (_BATCH_LINE_RE.match(ln) for ln in rows) if m]
+        if not rows or len(parsed) != len(rows):
+            return False
+        answers: list[str] = []
+        for m in parsed:
+            qid, action = int(m.group(1)), m.group(2)
+            if action.lower().startswith("http"):
+                answers.append(await controller.attach_link(qid, action))
+            elif action.lower() in _BATCH_OK:
+                answers.append(controller.approve_item(qid))
+            else:
+                answers.append(controller.skip_item(qid))
+        await reply(update, "\n".join(answers))
+        await controller.refresh_pending_notice()
+        return True
+
+    async def on_text_legacy(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        """말 명령을 끈 경우의 예전 동작: (1) 링크 요청에 답장 → 링크 붙이기, (2) URL 포함 메시지 → 직접 발행."""
         msg = update.effective_message
         if msg is None or not msg.text:
             return
         urls = find_urls(msg.text)
-        # 고정 공지에 한 번에 답하기: "번호 링크" / "번호 ok" / "번호 skip" 줄들
-        rows = [ln for ln in msg.text.splitlines() if ln.strip()]
-        parsed = [m for m in (_BATCH_LINE_RE.match(ln) for ln in rows) if m]
-        if rows and len(parsed) == len(rows):
-            answers: list[str] = []
-            for m in parsed:
-                qid, action = int(m.group(1)), m.group(2)
-                if action.lower().startswith("http"):
-                    answers.append(await controller.attach_link(qid, action))
-                elif action.lower() in _BATCH_OK:
-                    answers.append(controller.approve_item(qid))
-                else:
-                    answers.append(controller.skip_item(qid))
-            await reply(update, "\n".join(answers))
-            await controller.refresh_pending_notice()
+        if await batch_lines(update, msg.text):
             return
         replied = msg.reply_to_message
         if replied is not None and replied.text:
@@ -1286,9 +1332,234 @@ def register_admin_handlers(
             return
         await reply(update, "무엇을 할지 모르겠습니다. 링크 요청 메시지에 답장으로 링크를 보내거나, /help 로 명령어를 확인하세요.")
 
+    # ---------------------------------------------------------------- 말 명령 (주인 요청 10/11)
+    class _NLCtx:
+        """말에서 바꾼 기존 명령을 기존 처리 함수에 넣을 때 쓰는 ctx (ctx.args 만 바꿔 끼움)."""
+
+        def __init__(self, ctx: Any, args: list[str]) -> None:
+            self.args = args
+            self.application = getattr(ctx, "application", None)
+            self.bot = getattr(ctx, "bot", None)
+
+    def _slash_name(text: str) -> str:
+        head = (text or "").strip().split(maxsplit=1)
+        return head[0][1:].split("@")[0].lower() if head and head[0].startswith("/") else ""
+
+    def _from_bot(msg: Any) -> bool:
+        return bool(getattr(getattr(msg, "from_user", None), "is_bot", False))
+
+    def _looks_like_body(text: str) -> bool:
+        return len([ln for ln in text.splitlines() if ln.strip()]) >= 2 or len(text.strip()) >= 80
+
+    def _base(msg: Any) -> dict[str, Any]:
+        """버튼을 누른 뒤 블로그 별칭 명령을 넘길 때 쓸 챗·보낸 사람."""
+        user = getattr(msg, "from_user", None)
+        return {"chat": {"id": getattr(getattr(msg, "chat", None), "id", chat_id), "type": "private"},
+                "from": user.to_dict() if user is not None and hasattr(user, "to_dict") else None}
+
+    async def nl_exec(update: Update, ctx: Any, cmds: list[str], text: str) -> None:
+        """바꾼 명령을 기존 처리 함수로 실행 (명령어로 보낸 것과 똑같이). /post 는 주인의 원래 글로 올린다."""
+        for canonical in cmds:
+            name, _, rest = canonical.partition(" ")
+            if name == "/post":
+                await reply(update, await controller.submit_manual(text))
+                continue
+            fn = command_fns.get(name.lstrip("/"))
+            if fn is None:
+                log.warning("nl: no handler for %s", name)
+                continue
+            await fn(update, _NLCtx(ctx, rest.split()))
+
+    def _buttons(rows: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data)] for label, data in rows])
+
+    async def nl_apply(update: Update, ctx: Any, d: nlmod.Decision, text: str, msg: Any, ref: nlmod.Ref, *, why: str = "router") -> None:
+        assert nl is not None
+        if d.blog_text and d.act != "blog":  # 섞인 메시지: 블로그 부분은 바로 넘김 (Blog-Auto 가 자기 일은 자기가 확인)
+            nl.relay_nl(msg.to_dict(), why, text=d.blog_text, partial=True)
+        if d.act == "blog":
+            nl.relay_nl(msg.to_dict(), why, text=None if d.blog_text in ("", text) else d.blog_text)
+        elif d.act in ("chat", "none"):
+            await say(update, d.reply)
+        elif d.act == "fail":
+            if d.reply:
+                await say(update, d.reply)
+            elif nl.wants_blog_anyway(text):
+                nl.relay_nl(msg.to_dict(), why)
+            else:
+                await say(update, nl.suggest(text, ref))
+        elif d.act == "ask":
+            if not d.options:
+                await say(update, d.reply)
+                return
+            opts = [{"label": o.label, "cmds": o.cmds, "relay": o.relay} for o in d.options[: nlmod.MAX_BUTTONS]]
+            token = nl.put_pending({"options": opts, "text": text, **_base(msg)})
+            rows = [(o["label"], f"dnl:pick:{token}:{i}") for i, o in enumerate(opts)] + [("취소", f"dnl:no:{token}")]
+            await say(update, d.reply, _buttons(rows))
+        elif d.act == "confirm":
+            token = nl.put_pending({"cmds": d.canonicals, "text": text, **_base(msg)})
+            ok = "올리기" if d.post_preview else "실행"
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(ok, callback_data=f"dnl:ok:{token}"),
+                                        InlineKeyboardButton("취소", callback_data=f"dnl:no:{token}")]])
+            await say(update, d.confirm_text(), kb)
+        elif d.act == "exec":
+            await say(update, d.echo())
+            await nl_exec(update, ctx, d.canonicals, text)
+
+    async def passthrough(update: Update, msg: Any, text: str) -> None:
+        """딜봇에 없는 명령: 블로그 명령이면 Blog-Auto 로 그대로, 아니면 모른다고."""
+        if nl is not None and _slash_name(text) in nlmod.BLOG_PASSTHROUGH:
+            nl.relay_nl(msg.to_dict(), "passthrough")
+            log.info("nl deal act=relay why=passthrough cmd=/%s", _slash_name(text))
+            return
+        await say(update, nlmod.UNKNOWN_COMMAND)
+
+    async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """관리자의 일반 메시지. 정해진 흐름(일괄 줄·링크 답장·정보 글 본문 답장·블로그 메시지 답장)이 먼저, 나머지는 말 명령."""
+        msg = update.effective_message
+        if msg is None or not msg.text:
+            return
+        if nl is None or not nl.enabled:
+            await on_text_legacy(update, ctx)
+            return
+        if _from_bot(msg):
+            return
+        text = msg.text
+        if await batch_lines(update, text):
+            return
+        if text.lstrip().startswith("/"):  # 텔레그램이 명령으로 표시하지 않는 한글 명령 (/사진 …)
+            await passthrough(update, msg, text)
+            return
+        ref = nl.reply_ref(msg)
+        urls = find_urls(text)
+        if ref.kind == "deal" and ref.queue_id:
+            info = ref.sub == "review_info" or nlmod.strip_html(ref.text).lstrip().startswith(REVIEW_MARK)
+            if info and _looks_like_body(text):
+                # 정보 글 확인 요청에 본문을 새로 써서 답장 → 그 본문으로 올림 (짧은 말은 본문으로 쓰지 않고 해석)
+                await reply(update, controller.approve_item(ref.queue_id, text))
+                await controller.refresh_pending_notice()
+                return
+            if urls:  # 링크 요청(🔗 #번호)에 링크 답장 → 바로 붙임 (주인이 정한 흐름)
+                await reply(update, await controller.attach_link(ref.queue_id, urls[0]))
+                await controller.refresh_pending_notice()
+                return
+        if ref.kind == "blog":  # Blog-Auto 가 보낸 메시지에 답장 → 그쪽 해석기가 처리 (#번호는 블로그 글 번호)
+            nl.relay_nl(msg.to_dict(), "reply_blog")
+            log.info("nl deal act=relay why=reply_blog")
+            return
+        if nl.is_chitchat(text, ref):
+            await say(update, nlmod.CHAT_OK)
+            return
+        if not nl.rate_ok():
+            await say(update, nlmod.RATE_LIMITED)
+            return
+        try:
+            d = await nl.route(text, ref)
+            await nl_apply(update, ctx, d, text, msg, ref)
+        except Exception:  # noqa: BLE001
+            log.exception("nl router failed")
+            await say(update, nlmod.ROUTER_BUG)
+
+    async def on_media(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """사진·파일. 블로그 글 사진(블로그 메시지에 답장·/photo 설명·말로 블로그 글)이면 Blog-Auto 로 통째로 넘긴다.
+        앨범은 설명이나 답장이 있는 첫 사진이 정한 대로 나머지도 따라간다 (Blog-Auto 가 묶음으로 받게)."""
+        msg = update.effective_message
+        if msg is None or nl is None or not nl.enabled or _from_bot(msg):
+            return
+        group = nl.group(getattr(msg, "media_group_id", None))
+        md = msg.to_dict()
+        if group is not None and group["state"] is not None:
+            if group["state"] == "relay":
+                nl.relay_nl(md, "media")
+            return
+        caption = msg.caption or ""
+        ref = nl.reply_ref(msg)
+        state, why, text = "ignore", "media", None
+        if caption.lstrip().startswith("/"):
+            if _slash_name(caption) in nlmod.BLOG_MEDIA_COMMANDS:
+                state, why = "relay", "passthrough"
+            else:
+                await say(update, nlmod.UNKNOWN_COMMAND)
+        elif ref.kind == "blog":
+            state, why = "relay", "reply_blog"
+        elif not caption.strip():
+            if group is not None:
+                group["held"].append(md)  # 설명 없는 앞 사진: 설명 있는 사진이 오면 같이 처리
+            return  # 설명도 답장도 없는 사진은 예전처럼 무시
+        elif not nl.rate_ok():
+            await say(update, nlmod.RATE_LIMITED)
+        else:
+            doc = getattr(msg, "document", None)
+            is_image = bool(getattr(msg, "photo", None)) or str(getattr(doc, "mime_type", "") or "").startswith("image/")
+            try:
+                d = await nl.route(caption, ref, photos=1 if is_image else 0,
+                                   file="" if doc is None else str(getattr(doc, "file_name", "") or ""))
+            except Exception:  # noqa: BLE001
+                log.exception("nl router failed (media)")
+                d = nlmod.Decision("fail", reply=nlmod.ROUTER_BUG)
+            if d.act == "blog" or (d.act == "fail" and not d.reply and nl.wants_blog_anyway(caption)):
+                state, text = "relay", None if d.blog_text in ("", caption) else d.blog_text
+            else:
+                await nl_apply(update, ctx, d, caption, msg, ref, why="media")
+        if group is not None:
+            group["state"] = state
+        if state == "relay":
+            for held in (group or {}).get("held", []):
+                nl.relay_nl(held, why)
+            nl.relay_nl(md, why, text=text)
+            log.info("nl deal act=relay why=%s media=%s", why, "album" if group is not None else "1")
+
+    async def on_other_command(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        """딜봇에 등록되지 않은 명령 (/fix /drop /publish …): 블로그 명령이면 Blog-Auto 로 그대로 넘긴다."""
+        msg = update.effective_message
+        if msg is None or _from_bot(msg):
+            return
+        await passthrough(update, msg, msg.text or "")
+
+    async def on_nl_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """말 명령의 확인·고르기 버튼 (dnl:ok:T / dnl:no:T / dnl:pick:T:i). 한 번만 처리된다 (두 번째 누름은 '이미 처리')."""
+        q = update.callback_query
+        chat = update.effective_chat
+        if q is None or nl is None or chat is None or not (
+            chat.id == chat_id or (isinstance(chat_id, str) and chat.username == chat_id.lstrip("@"))
+        ):
+            return
+        with contextlib.suppress(TelegramError):
+            await q.answer("접수")
+        parts = (q.data or "").split(":")
+        if len(parts) < 3:
+            return
+        kind, token = parts[1], parts[2]
+        status, p = nl.take_pending(token)
+        with contextlib.suppress(TelegramError, AttributeError):
+            await q.edit_message_reply_markup(reply_markup=None)  # 누른 버튼은 지운다
+        if status == "gone" or p is None:
+            await say(update, nlmod.EXPIRED if status == "expired" else nlmod.HANDLED)
+            return
+        if kind == "no":
+            await say(update, nlmod.CANCELLED)
+            return
+        cmds: list[str] = list(p.get("cmds") or [])
+        if kind == "pick":
+            options = p.get("options") or []
+            i = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else -1
+            if not 0 <= i < len(options):
+                await say(update, nlmod.HANDLED)
+                return
+            opt = options[i]
+            if opt.get("relay"):
+                nl.relay_alias(opt["relay"], p.get("chat") or {"id": chat_id}, p.get("from"))
+                await say(update, f"📨 블로그 프로그램에 넘겼어요: {opt['relay']}")
+                log.info("nl confirm token=%s pick relay=%s", token, opt["relay"])
+                return
+            cmds = list(opt.get("cmds") or [])
+        log.info('nl confirm token=%s %s cmds="%s" age=%ds', token, kind, nlmod.log_text(" · ".join(cmds)),
+                 int(time.time() - float(p.get("at") or time.time())))
+        await nl_exec(update, ctx, cmds, str(p.get("text") or ""))
+
     async def cmd_unknown_chat(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_chat and update.effective_message:
-            await update.effective_message.reply_text(
+            await update.effective_message.reply_text(  # 기록 안 함: 관리자 챗이 아님
                 f"이 봇은 개인 관리용입니다. (chat id: {update.effective_chat.id})"
             )
 
@@ -1297,12 +1568,17 @@ def register_admin_handlers(
         chat = update.effective_chat
         if chat is None or not (chat.id == chat_id or (isinstance(chat_id, str) and chat.username == chat_id.lstrip("@"))):
             return  # 관리자 챗 것만
+        if (getattr(update.callback_query, "data", None) or "").startswith("dnl:"):
+            return  # 딜봇 말 명령 버튼은 여기서 처리 (on_nl_callback)
         controller.relay_to_blog(update.to_dict())
 
     for cmd in BLOG_RELAY_COMMANDS:
         app.add_handler(CommandHandler(cmd, relay, filters=only_admin))
+    if nl is not None:
+        app.add_handler(CallbackQueryHandler(on_nl_callback, pattern=r"^dnl:"))
     app.add_handler(CallbackQueryHandler(relay))
 
+    command_fns: dict[str, Callable[..., Any]] = {}
     for cmd, fn in (
         ("status", cmd_status),
         ("queue", cmd_queue),
@@ -1336,6 +1612,7 @@ def register_admin_handlers(
         ("start", cmd_help),
     ):
         app.add_handler(CommandHandler(cmd, fn, filters=only_admin))
+        command_fns[cmd] = fn
     async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """명령 처리 중 예외가 나면 조용히 묻지 말고 관리자에게 알린다."""
         err = ctx.error
@@ -1356,11 +1633,15 @@ def register_admin_handlers(
                 f"<code>{html.escape(detail)[:400]}</code>"
             )
         try:
-            await message.reply_text(text, parse_mode=ParseMode.HTML)
+            _track(await message.reply_text(text, parse_mode=ParseMode.HTML), text)
         except TelegramError as e:
             log.error("오류 알림 전송도 실패: %s", e)
 
     app.add_error_handler(on_error)
     app.add_handler(TypeHandler(Update, drop_stale), group=-1)
     app.add_handler(MessageHandler(only_admin & filters.TEXT & ~filters.COMMAND, on_text))
+    if nl is not None and nl.enabled:
+        # 사진·파일 (설명 칸 글은 TEXT 가 아니라 따로), 그리고 딜봇에 없는 명령 — 모든 CommandHandler 뒤에 둬야 함
+        app.add_handler(MessageHandler(only_admin & (filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, on_media))
+        app.add_handler(MessageHandler(only_admin & filters.COMMAND, on_other_command))
     app.add_handler(CommandHandler(["start", "status", "help"], cmd_unknown_chat, filters=~only_admin))

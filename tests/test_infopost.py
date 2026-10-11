@@ -259,7 +259,7 @@ async def test_info_posts_can_be_disabled(bot: DealBot) -> None:
 async def test_pending_notice_is_pinned_and_updated(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, list] = {"send": [], "edit": [], "pin": []}
 
-    async def send_with_id(text: str, *, silent: bool = False) -> int:
+    async def send_with_id(text: str, *, silent: bool = False, **_kw: object) -> int:
         calls["send"].append(text)
         return 77
 
@@ -299,7 +299,7 @@ async def test_pending_notice_is_pinned_and_updated(bot: DealBot, monkeypatch: p
 def admin_calls(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     calls: dict[str, list] = {"send": [], "edit": [], "pin": []}
 
-    async def send_with_id(text: str, *, silent: bool = False) -> int:
+    async def send_with_id(text: str, *, silent: bool = False, **_kw: object) -> int:
         calls["send"].append(text)
         return 100 + len(calls["send"])
 

@@ -6,7 +6,7 @@ import json
 import logging
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -109,6 +109,15 @@ CREATE TABLE IF NOT EXISTS kv (
     value          TEXT
 );
 
+-- 관리자 챗에 이 봇(딜봇)이 보낸 메시지 기록. 같은 챗에 Blog-Auto 도 같은 봇 토큰으로 글을 보내서,
+-- 답장 대상의 #번호가 딜 대기열 번호인지 블로그 글 번호인지 이 기록으로 가린다 (말 명령)
+CREATE TABLE IF NOT EXISTS admin_msgs (
+    message_id     INTEGER PRIMARY KEY,
+    kind           TEXT,
+    queue_id       INTEGER,
+    at             TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS market_quotes (
     product_id     TEXT PRIMARY KEY,
     price          INTEGER NOT NULL,
@@ -190,6 +199,8 @@ class Database:
             # 기존 DB 를 새 버전으로 처음 열 때는 가장 오래된 기록 시각을 쓴다 (기록이 언제부터 쌓였는지 보여주기 위함)
             row = self._conn.execute("SELECT MIN(first_seen_at) AS t FROM products").fetchone()
             self.kv_set("db_created_at", (row["t"] if row and row["t"] else None) or to_iso(utcnow()))
+        if self.kv_get("admin_msgs_since") is None:
+            self._seed_admin_msgs()
 
     def _migrate(self) -> None:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}
@@ -793,6 +804,55 @@ class Database:
                 "INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+
+    def kv_take(self, key: str) -> str | None:
+        """읽고 바로 지운다 (버튼을 두 번 눌러도 한 번만 처리)."""
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+            if row is None:
+                return None
+            self._conn.execute("DELETE FROM kv WHERE key = ?", (key,))
+            return row["value"]
+
+    def kv_delete_prefix(self, prefix: str, *, keep: Callable[[str, str | None], bool] | None = None) -> int:
+        """prefix 로 시작하는 kv 를 지운다 (keep(key, value) 가 True 인 것은 남김)."""
+        rows = self._q("SELECT key, value FROM kv WHERE key LIKE ?", (prefix.replace("%", "") + "%",))
+        gone = [r["key"] for r in rows if keep is None or not keep(r["key"], r["value"])]
+        with self._lock:
+            for k in gone:
+                self._conn.execute("DELETE FROM kv WHERE key = ?", (k,))
+        return len(gone)
+
+    # ------------------------------------------------------- admin_msgs
+    def _seed_admin_msgs(self) -> None:
+        """기록을 처음 켤 때: 이미 보낸 링크 요청·확인 요청 메시지(kv 에 id 가 남아 있음)를 옮겨 둔다.
+        확인 요청은 정품 확인·정보 글 확인 둘 중 무엇인지 몰라 종류를 비워 둔다 (답장 때 글 첫머리로 가림)."""
+        now = to_iso(utcnow())
+        for prefix, kind in (("link_notice:", "link"), ("review_notice:", "")):
+            for r in self._q("SELECT key, value FROM kv WHERE key LIKE ?", (prefix + "%",)):
+                qid, mid = r["key"][len(prefix):], str(r["value"] or "")
+                if qid.isdigit() and mid.isdigit():
+                    self.record_admin_msg(int(mid), kind, int(qid), now=now)
+        self.kv_set("admin_msgs_since", now)
+
+    def record_admin_msg(self, message_id: int, kind: str, queue_id: int | None, *, now: str | None = None) -> None:
+        if not message_id:
+            return
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO admin_msgs (message_id, kind, queue_id, at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(message_id) DO UPDATE SET kind = excluded.kind, queue_id = excluded.queue_id",
+                (int(message_id), kind, queue_id, now or to_iso(utcnow())),
+            )
+
+    def admin_msg(self, message_id: int) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM admin_msgs WHERE message_id = ?", (int(message_id),))
+        return dict(row) if row else None
+
+    def prune_admin_msgs(self, days: int = 30, now: datetime | None = None) -> int:
+        cut = to_iso((now or utcnow()) - timedelta(days=days))
+        with self._lock:
+            return self._conn.execute("DELETE FROM admin_msgs WHERE at < ?", (cut,)).rowcount
 
     # ------------------------------------------------------------ summary
     def summary(self, since: datetime, until: datetime | None = None) -> PeriodSummary:

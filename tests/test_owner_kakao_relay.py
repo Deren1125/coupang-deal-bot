@@ -38,7 +38,7 @@ def _product(**kw: object) -> Product:
 async def test_link_request_and_link_done_go_to_kakao_inbox(bot: DealBot, settings: Settings) -> None:
     sent: list[str] = []
 
-    async def fake_send(text: str, *, silent: bool = False) -> int:
+    async def fake_send(text: str, *, silent: bool = False, **_kw: object) -> int:
         sent.append(text)
         return 1
 
@@ -69,7 +69,7 @@ async def test_relay_can_be_turned_off(bot: DealBot, settings: Settings) -> None
 async def test_owner_linked_deal_gets_a_published_notice_even_when_notices_are_off(bot: DealBot) -> None:
     sent: list[str] = []
 
-    async def fake_send(text: str, *, silent: bool = False) -> int:
+    async def fake_send(text: str, *, silent: bool = False, **_kw: object) -> int:
         sent.append(text)
         return 1
 
@@ -92,7 +92,7 @@ def test_long_store_url_keeps_kakao_text_in_one_message() -> None:
 
 
 async def test_owner_linked_deal_relays_a_published_notice_to_kakao(bot: DealBot, settings: Settings) -> None:
-    async def fake_send(text: str, *, silent: bool = False) -> int:
+    async def fake_send(text: str, *, silent: bool = False, **_kw: object) -> int:
         return 1
 
     bot.notifier.send_with_id = fake_send  # type: ignore[method-assign]

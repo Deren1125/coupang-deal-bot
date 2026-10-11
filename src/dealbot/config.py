@@ -484,8 +484,22 @@ class BrowserConfig(BaseModel):
     naver_connect: NaverConnectConfig = Field(default_factory=NaverConnectConfig)
 
 
+class NLRouterConfig(BaseModel):
+    """관리자 챗 '말 명령' (주인 요청 10/11): 명령어 대신 그냥 말로 보내면 AI 가 기존 명령으로 바꿔 실행한다.
+    false 면 예전 그대로 (일반 메시지는 링크 답장·직접 발행만). 모델은 비워 두면 정보 글 요약기(API)·한줄평(CLI)과 같은 것."""
+
+    enabled: bool = True
+    model: str | None = None  # API 모델 (None → info_posts.summarizer.model)
+    cli_model: str | None = None  # 서버 claude CLI 모델 (None → publish.commentary.model)
+    timeout_seconds: float = 30
+    confidence: float = 0.75  # 이보다 확신이 낮으면 실행하지 않고 물어봄
+    rate_10min: int = 20  # 10분에 이만큼 넘게 오면 AI 를 부르지 않고 쉬어 감
+    rate_day: int = 200
+
+
 class MonitoringConfig(BaseModel):
     push: PushConfig = Field(default_factory=PushConfig)
+    nl_router: NLRouterConfig = Field(default_factory=NLRouterConfig)
     notify_on_publish: bool = True
     notify_on_failure: bool = True
     # 재시도 중인 실패(1·2번째)도 알릴지. False 면 최종 포기(❌)만 알림

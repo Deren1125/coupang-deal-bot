@@ -37,7 +37,7 @@ def bot(settings: Settings) -> DealBot:
     sent: list[str] = []
     edits: list[tuple[int, str]] = []
 
-    async def send_with_id(text: str, *, silent: bool = False) -> int:
+    async def send_with_id(text: str, *, silent: bool = False, **_kw: object) -> int:
         sent.append(text)
         return 70 + len(sent)
 

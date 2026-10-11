@@ -419,4 +419,8 @@ monitoring:
   daily_summary: false           # 매일 21:00 하루 요약 끔 (/status 로 언제든 볼 수 있음). 켜려면 true
   daily_summary_time: "21:00"
   quiet_notices: false           # false: 시작/미리보기/발행 알림도 소리·진동과 함께 (true 면 무음)
+  nl_router:                      # 말 명령: 명령어 대신 "675번 올리지 마"처럼 말로 (false 면 예전 그대로)
+    enabled: true
+    timeout_seconds: 30
+    confidence: 0.75               # 확신이 이보다 낮으면 실행하지 않고 물어봄
   heartbeat_minutes: 0             # 0 = '정상 가동 중' 생존 보고 끔 (에러·요청만 받음). N 이면 관리자 챗이 N분 조용할 때 보고

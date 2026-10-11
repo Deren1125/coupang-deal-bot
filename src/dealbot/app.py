@@ -47,6 +47,7 @@ from dealbot.links import (
     ManualLinkRequired,
     ShopSkipped,
 )
+from dealbot.llm_json import JsonAsker
 from dealbot.manual import parse_manual_post
 from dealbot.media.card import CardStyle, DealCard
 from dealbot.media.imagecheck import (
@@ -64,6 +65,7 @@ from dealbot.monitoring.admin import (
     channel_post_base,
     register_admin_handlers,
 )
+from dealbot.monitoring.nl import NLRouter
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.naver_shop import NaverShopSearch, store_product_no
@@ -323,6 +325,26 @@ class DealBot:
             labels={c.name: c.label for c in settings.collectors if c.label},
         )
         self.notifier.owner_relay = self.owner_notice
+        # 말 명령 (주인 요청 10/11): 일반 말 → 기존 명령. AI 는 정보 글 요약기처럼 API 키가 있으면 API, 없으면 서버 claude CLI
+        nc = settings.monitoring.nl_router
+        self.nl = NLRouter(
+            nc,
+            self.db,
+            JsonAsker(
+                settings.secrets.anthropic_api_key,
+                model=nc.model or sm.model,
+                cli_model=nc.cli_model or settings.publish.commentary.model,
+                timeout=nc.timeout_seconds,
+            ),
+            relay=self.relay_to_blog,
+            parse_post=lambda text: parse_manual_post(text, self.registry),
+            shop_of=lambda url: (shop.key if (shop := self.registry.by_url(url)) else None),
+            shop_name=self.notifier.shop_label,
+            collectors=self.collector_names,
+            paused=lambda: self.state.paused,
+            tz=settings.app.timezone,
+        )
+        self.notifier.msg_log = self.nl.record
         self.notifier.channel_post_base = channel_post_base(settings.secrets.telegram_channel_id, settings.channels.telegram_url)
         self.reporter = StatusReporter(
             settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget,
@@ -364,6 +386,7 @@ class DealBot:
                 admin_chat_id=settings.secrets.telegram_admin_chat_id,
                 reporter=self.reporter,
                 controller=self,
+                nl=self.nl,
             )
 
     # ------------------------------------------------------------ lifecycle
@@ -389,6 +412,7 @@ class DealBot:
         try:
             me = await self.application.bot.get_me()
             self.notifier.bot_username = me.username
+            self.nl.bot_id = me.id  # 답장 대상이 이 봇(딜봇·Blog-Auto 공용) 메시지인지 가릴 때
         except Exception as e:  # noqa: BLE001
             log.warning("get_me failed: %s", e)
         try:
@@ -1993,6 +2017,10 @@ class DealBot:
         """주인 카톡 '나에게 보내기' 요청을 Blog-Auto 받은편지함에 (카톡 토큰은 Blog-Auto 가 가지고 있어 거기서 보낸다)."""
         self.relay_to_blog({"owner_notice": {"kind": kind, "text": text, "at": time.time()}})
 
+    def relay_nl(self, message: dict, why: str) -> None:
+        """말 명령: 원래 메시지를 'nl' 표시와 함께 Blog-Auto 받은편지함에 (Blog-Auto 의 해석기가 처리하고 답함)."""
+        self.nl.relay_nl(message, why)
+
     def relay_to_blog(self, update: dict) -> None:
         """블로그(demiyum) 명령·버튼 → Blog-Auto 가 읽는 받은편지함 파일에 한 줄 (Blog-Auto 가 처리하고 이 봇으로 답함)."""
         try:
@@ -2124,6 +2152,8 @@ class DealBot:
             price_history_days=self.settings.app.prune_price_history_days,
             events_days=self.settings.app.prune_events_days,
         )
+        pruned["admin_msgs"] = self.db.prune_admin_msgs(30)
+        pruned["nl_pending"] = self.nl.prune_pending()
         log.info("maintenance: pruned %s", pruned)
 
     def __repr__(self) -> str:

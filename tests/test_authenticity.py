@@ -76,7 +76,7 @@ def bot(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> DealBot:
     lotteon.enabled, lotteon.disabled_reason = True, None
     calls: dict[str, list] = {"send": [], "edit": []}
 
-    async def send_with_id(text: str, *, silent: bool = False) -> int:
+    async def send_with_id(text: str, *, silent: bool = False, **_kw: object) -> int:
         calls["send"].append(text)
         return 100 + len(calls["send"])
 
