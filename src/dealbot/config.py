@@ -325,9 +325,17 @@ class InstagramConfig(BaseModel):
     template: str = "deal_instagram.j2"
     refresh_before_days: int = 7
     info_posts: bool = False  # 정보 글(이벤트류)도 올릴지. 기본은 상품 딜만
+    # 카드·본문 양식. current = 지금 쓰는 카드 + template. A/B/C 는 후보 양식(주인이 고르기 전까지 current 유지):
+    # A 사진 크게 + 큰 가격, B 저장각 정보 카드, C 사진 꽉 채움 + 가격 스티커 (본문은 deal_instagram_a/b/c.j2)
+    style: Literal["current", "A", "B", "C"] = "current"
     # 확인된 상품 사진(deal_photo — 텔레그램에 올린 그 사진)이 없을 때: skip = 인스타엔 안 올리고 기록만 (기본),
     # text_card = 사진 없는 글자 카드로 올림. 로고·기본 이미지·게시판 썸네일은 어느 쪽이든 카드에 안 넣는다
     no_photo: Literal["skip", "text_card"] = "skip"
+
+    @field_validator("style", mode="before")
+    @classmethod
+    def _style_upper(cls, v: Any) -> Any:
+        return v.upper() if isinstance(v, str) and v.lower() in ("a", "b", "c") else v
 
 
 class CardConfig(BaseModel):
@@ -335,6 +343,8 @@ class CardConfig(BaseModel):
 
     enabled: bool = True
     font_path: str | None = None  # 비우면 서버 글꼴(나눔고딕 등)을 찾음
+    font_heavy_path: str | None = None  # 큰 가격용 아주 굵은 글꼴 (비우면 나눔고딕 ExtraBold → 없으면 font_path)
+    font_regular_path: str | None = None  # 작은 안내 글자용 보통 굵기 (비우면 나눔고딕 → 없으면 font_path)
     footer: str = "오늘의 핫딜"
     footer_note: str = "구매 링크는 프로필 링크에서"
     keep_days: int = 7  # 만든 카드 파일 보관 기간

@@ -21,6 +21,7 @@
   .price { font-size: 20px; font-weight: 700; color: #e8442b; }
   .orig { color: #888; text-decoration: line-through; font-size: 14px; margin-left: 6px; }
   .rate { color: #e8442b; font-weight: 700; font-size: 14px; margin-left: 6px; }
+  .no { color: #e8442b; font-weight: 700; font-size: 14px; margin-right: 4px; }
   .meta { color: #666; font-size: 13px; margin: 4px 0 10px; }
   .btn { display: block; text-align: center; background: #111; color: #fff; text-decoration: none; padding: 12px; border-radius: 10px; font-weight: 600; }
   .empty { color: #666; padding: 32px 0; text-align: center; }
@@ -36,7 +37,7 @@
 <main>
 {% for it in items %}
   <article class="deal">
-    <p class="name">{{ it.name }}</p>
+    <p class="name">{% if show_numbers is defined and show_numbers %}<span class="no">#{{ it.id }}</span> {% endif %}{{ it.name }}</p>
     {% if it.price %}
     <div><span class="price">{{ "{:,}".format(it.price) }}원</span>{% if it.original_price %}<span class="orig">{{ "{:,}".format(it.original_price) }}원</span>{% endif %}{% if it.discount_rate %}<span class="rate">{{ it.discount_rate | round | int }}%↓</span>{% endif %}</div>
     {% endif %}

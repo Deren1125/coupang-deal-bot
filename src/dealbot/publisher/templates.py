@@ -513,8 +513,10 @@ class TemplateRenderer:
         autoescape: bool = True,
         recent: Sequence[str] = (),
         single: bool = False,
+        extra: dict[str, Any] | None = None,
     ) -> str:
-        """recent: 최근 스레드 글에 쓴 문구(피해서 고름). single: 예전 템플릿 호환용 (스레드 링크는 이제 늘 본문에)."""
+        """recent: 최근 스레드 글에 쓴 문구(피해서 고름). single: 예전 템플릿 호환용 (스레드 링크는 이제 늘 본문에).
+        extra: 템플릿에 더 넘길 변수 (인스타 후보 양식의 ig 등)."""
         p = deal.product
         shop_ctx = {
             "key": shop.key if shop else p.shop,
@@ -551,4 +553,5 @@ class TemplateRenderer:
             ref_pct=round(ref_pct) if ref_price and ref_pct else None,
             single=single,
             facts=self.deal_facts(deal, recent=recent),
+            **(extra or {}),
         )

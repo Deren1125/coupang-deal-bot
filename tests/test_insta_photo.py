@@ -91,7 +91,7 @@ async def test_logo_only_deal_never_becomes_a_card(bot) -> None:  # type: ignore
                      url="https://www.coupang.com/vp/products/9", image_url=LOGO), DealVerdict(is_deal=True))
     photo = await bot.deal_photo(d)
     assert photo is None and d.product.image_url is None and seen == []
-    await bot._publish_side_channels(d, photo=photo)
+    await bot._publish_side_channels(d, photo=photo, deal_no=9)
     assert spy.saved == [] and spy.posted == [] and seen == []  # 카드도 안 만들고, 사진을 다시 받지도 않음
     assert any("coupang:9 skipped: 확인된 상품 사진 없음" in m for m in _ig_events(bot))
     assert not list((bot.settings.data_dir / "media").glob("*.jpg"))
@@ -147,7 +147,7 @@ async def test_naver_store_browser_photo_is_the_card_photo(bot) -> None:  # type
              affiliate_url=STORE_URL)
     photo = await bot.deal_photo(d)
     assert photo is not None and calls == [STORE_URL] and d.product.image_url == OG
-    await bot._publish_side_channels(d, photo=photo)
+    await bot._publish_side_channels(d, photo=photo, deal_no=12)
     assert spy.saved == [photo]  # 텔레그램에 쓴 바로 그 바이트
     assert seen == [OG]  # 카드 때문에 다시 받지 않음
     assert len(spy.posted) == 1 and (spy.posted[0] or "").startswith("https://bot.example.com/media/")
@@ -165,27 +165,29 @@ async def test_no_photo_skips_instagram_by_default(bot) -> None:  # type: ignore
     spy = _Spy(bot)
     d = Deal(Product(source="ppomppu", product_id="gmarket:1", shop="gmarket", name="상품", price=9900,
                      url="https://item.gmarket.co.kr/Item?goodscode=1", image_url=None), DealVerdict(is_deal=True))
-    await bot._publish_side_channels(d, photo=None)
+    await bot._publish_side_channels(d, photo=None, deal_no=4)
     assert spy.saved == [] and spy.posted == []
     assert any("gmarket:1 skipped" in m for m in _ig_events(bot))
 
 
-async def test_no_photo_text_card_option_makes_a_clean_card(bot) -> None:  # type: ignore[no-untyped-def]
+@pytest.mark.parametrize("style", ["current", "A", "B", "C"])
+async def test_no_photo_text_card_option_makes_a_clean_card(bot, style: str) -> None:  # type: ignore[no-untyped-def]
     bot.settings.instagram.no_photo = "text_card"
+    bot.card.layout = style
     spy = _Spy(bot)
     d = Deal(Product(source="goldbox", product_id="coupang:6", shop="coupang", name="곰곰 특란 30구", price=6900,
                      url="https://www.coupang.com/vp/products/6", image_url=None), DealVerdict(is_deal=True))
-    await bot._publish_side_channels(d, photo=None)
+    await bot._publish_side_channels(d, photo=None, deal_no=6)
     assert spy.saved == [None] and len(spy.posted) == 1 and (spy.posted[0] or "").endswith(".jpg")
     assert not any("skipped" in m for m in _ig_events(bot))
 
 
 async def test_publish_hands_the_telegram_photo_to_instagram(bot) -> None:  # type: ignore[no-untyped-def]
-    """발행 흐름: 텔레그램 글에 쓴 그 사진 바이트가 그대로 인스타 쪽으로 간다."""
+    """발행 흐름: 텔레그램 글에 쓴 그 사진 바이트와 큐 번호(핫딜 페이지 /d/번호)가 그대로 인스타 쪽으로 간다."""
     got: dict[str, object] = {}
 
-    async def side(deal: Deal, *, photo: bytes | None = None) -> None:
-        got.update(photo=photo)
+    async def side(deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
+        got.update(photo=photo, deal_no=deal_no)
 
     async def fake_publish(deal: Deal, **kw: object) -> PublishResult:
         got["telegram_photo"] = kw.get("photo")
@@ -203,5 +205,5 @@ async def test_publish_hands_the_telegram_photo_to_instagram(bot) -> None:  # ty
              DealVerdict(is_deal=True, discount_rate=60), affiliate_url="https://link.coupang.com/re/AFFSDP?lptag=AF1&pageKey=77")
     assert bot.db.enqueue(d, score=40.0)
     assert await bot.process_queue_once()
-    assert got.get("photo") is not None and got["photo"] is got["telegram_photo"]
+    assert got.get("photo") is not None and got["photo"] is got["telegram_photo"] and got["deal_no"] == 1
     assert seen == ["https://img.example/p.jpg"]  # 사진은 한 번만 받음

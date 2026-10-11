@@ -300,6 +300,7 @@ class DealBot:
             enabled=settings.instagram.enabled,
             dry_run=self.state.dry_run,
             refresh_before_days=settings.instagram.refresh_before_days,
+            style=settings.instagram.style,
         )
         self.card: DealCard | None = None
         if settings.card.enabled:
@@ -308,6 +309,9 @@ class DealBot:
                     settings.data_dir / "media",
                     font_path=settings.card.font_path,
                     style=CardStyle(footer=settings.card.footer, footer_note=settings.card.footer_note),
+                    layout=settings.instagram.style,
+                    font_heavy_path=settings.card.font_heavy_path,
+                    font_regular_path=settings.card.font_regular_path,
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("deal card disabled: %s", e)
@@ -1536,7 +1540,7 @@ class DealBot:
             else:
                 await self.notifier.notify_published(deal, result)
                 self.export_published(deal, photo)
-                await self._publish_side_channels(deal, photo=photo)
+                await self._publish_side_channels(deal, photo=photo, deal_no=item.id)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True
@@ -1676,7 +1680,7 @@ class DealBot:
         p.image_url = src
         return photo
 
-    async def make_card(self, deal: Deal, photo: bytes | None) -> str | None:
+    async def make_card(self, deal: Deal, photo: bytes | None, *, deal_no: int | None = None) -> str | None:
         """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None.
         photo: deal_photo 가 확인한 상품 사진 바이트 (텔레그램 글에 쓴 그 사진). 여기서 사진을 다시 받지 않는다 —
         예전엔 image_url 을 날것으로 다시 받아 쿠팡 로고가 카드에 크게 들어가거나(/instatest), 외부 반출을 막는 스토어 사진이 빠졌다.
@@ -1691,8 +1695,15 @@ class DealBot:
             return None
         shop = self.registry.get(deal.product.shop)
         tier, _ = self.renderer.deal_tier(deal)  # 배지는 글 첫 줄과 같은 등급으로
+        info = None
+        if self.card.layout != "current":
+            from dealbot.publisher.insta_style import card_info
+
+            info = card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
         try:
-            path = await asyncio.to_thread(self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier)
+            path = await asyncio.to_thread(
+                self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier, info=info,
+            )
         except Exception as e:  # noqa: BLE001
             log.warning("card render failed: %s", e)
             return None
@@ -1709,9 +1720,9 @@ class DealBot:
             return "확인된 상품 사진 없음"
         return None
 
-    async def _publish_side_channels(self, deal: Deal, *, photo: bytes | None = None) -> None:
+    async def _publish_side_channels(self, deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
         """텔레그램 채널 발행 후: 카드 이미지 → 스레드·인스타그램 자동 게시 + 복붙 문구를 관리자 챗으로.
-        photo: 텔레그램 글에 쓴 확인된 상품 사진(deal_photo) — 인스타 카드도 이 사진만 쓴다."""
+        photo: 텔레그램 글에 쓴 확인된 상품 사진(deal_photo) — 인스타 카드도 이 사진만 쓴다. deal_no: 핫딜 페이지 번호."""
         want_ig = (
             self.settings.instagram.enabled
             and (self.instagram.configured or self.instagram.dry_run)
@@ -1725,7 +1736,7 @@ class DealBot:
             self.db.log_event("INFO", "instagram", f"{deal.product.product_id} skipped: {ig_skip}")
             log.info("instagram skipped (%s): %s", ig_skip, deal.product.name[:40])
         # 카드는 사진이 꼭 있어야 하는 인스타만. 사진은 텔레그램 글과 같은 확인된 상품 사진
-        card_url = await self.make_card(deal, photo) if want_ig else None
+        card_url = await self.make_card(deal, photo, deal_no=deal_no) if want_ig else None
         if want_threads:
             # 스레드는 deal_photo 가 확인한 상품 사진만 (못 쓰면 글만). 글자 카드는 상품 사진 대신 쓰지 않는다
             result = await self.threads.publish(deal)
@@ -1742,7 +1753,7 @@ class DealBot:
                 log.warning("threads post failed: %s", result.error)
                 await self.notifier.send(f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>")
         if want_ig:
-            ig = await self.instagram.publish(deal, card_url)
+            ig = await self.instagram.publish(deal, card_url, deal_no=deal_no)
             if ig.ok:
                 self.db.log_event("INFO", "instagram", f"{deal.product.product_id} {'dry-run' if ig.dry_run else ig.message_id}")
                 log.info("instagram posted: %s", deal.product.name[:40])
@@ -1960,9 +1971,10 @@ class DealBot:
             if item.status != "published":
                 return f"#{queue_id} 는 채널에 올라간 글이 아닙니다 (상태 {item.status})."
             deal, label = item.deal, f"#{queue_id} {item.deal.product.name[:30]}"
+        deal_no = queue_id
         # 실제 발행과 같은 규칙: 텔레그램 글처럼 확인된 상품 사진만 (샘플의 쿠팡 로고는 사진으로 안 씀)
         photo = await self.deal_photo(deal)
-        caption = self.instagram.render(deal)
+        caption = self.instagram.render(deal, deal_no=deal_no)
         preview = f"📸 <b>인스타그램에는 이렇게 올라갑니다 ({html.escape(label)})</b>\n<pre>{html.escape(caption)}</pre>"
         skip = self._ig_skip_reason(photo)
         if skip:
@@ -1970,11 +1982,11 @@ class DealBot:
                 f"\n\n⏭ 이 딜은 인스타에 올리지 않습니다: {skip} (로고·기본 이미지·작은 썸네일은 카드에 안 씀). 실제 딜도 같은 규칙입니다."
                 + ("\n사진이 있는 실제 딜로 시험하려면 /instatest 번호" if queue_id is None else "")
             )
-        card_url = await self.make_card(deal, photo)
+        card_url = await self.make_card(deal, photo, deal_no=deal_no)
         preview += f"\n사진(카드): {card_url}" if card_url else "\n⚠️ 카드 이미지를 만들 수 없습니다 (공개 도메인이 없거나 card.enabled 가 꺼짐) — 인스타는 사진이 필수라 올릴 수 없습니다."
         if self.instagram.dry_run:
             return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
-        result = await self.instagram.publish(deal, card_url)
+        result = await self.instagram.publish(deal, card_url, deal_no=deal_no)
         if not result.ok:
             return preview + f"\n\n❌ 올리지 못했습니다: <code>{html.escape(result.error or '')}</code>"
         link = None
@@ -2025,6 +2037,8 @@ class DealBot:
             hours=cfg.page_hours,
             disclosures=disclosures,
             channels=self.settings.channels.as_dict(),
+            # 인스타 후보 양식(A/B/C)은 카드·본문에 '#번호' 를 적으므로 페이지에도 번호를 보여 찾기 쉽게
+            show_numbers=self.settings.instagram.style != "current",
         )
         return 200, html_text
 
