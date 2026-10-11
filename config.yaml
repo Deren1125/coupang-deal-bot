@@ -35,6 +35,17 @@ browser:
       create_button: "text=링크 발급"
       result: "input[readonly], textarea[readonly], a[href*='naver.me'], a[href*='connect']"
 
+# 네이버 쇼핑커넥트 링크 자동 만들기 (주인 결정 10/11: 제재 위험을 알고도 자동화 — 위 browser 와는 다른 새 방식).
+# 브라우저 일은 Blog-Auto 가 아카이브 계정(finance 프로필)으로 한다 → Blog-Auto config/hotdeal.yaml 의 shopping_connect 도 켜야 동작.
+# 쇼핑커넥트에 있으면 그 링크(이미 있으면 재사용), 없는 상품은 내 링크 없이 원본 주소로(제휴 고지 없음, 주인에게 안 물음),
+# 오류·시간 초과·로그인·한도면 예전처럼 주인에게 링크 요청. 로그인·제한 안내로 멈추면 카톡으로 한 번 알림.
+autolink:
+  naver:
+    enabled: false        # 켜기 전에 서버에서 읽기 전용 확인(probes/sc_lookup.py)부터
+    wait_minutes: 30      # Blog-Auto 답을 기다리는 시간. 넘으면 링크 요청
+    not_found_days: 7     # 쇼핑커넥트에 없던 상품번호는 이 기간 다시 찾지 않고 원본 주소로
+    unverified: manual    # 판매처 확인이 안 된 딜: manual = 예전처럼 링크 요청 / auto = 그래도 자동
+
 http:
   timeout_seconds: 20
   max_retries: 3
@@ -303,6 +314,7 @@ publish:
   quiet_hours: "00:00-07:00"     # 이 시간대(한국시간)에는 채널 글을 무음으로 올림 (구독자 알림 없음). 비우면 항상 알림
   max_awaiting_links: 6          # 내 링크 요청이 이 개수 이상 쌓이면 새 요청은 건너뜀 (관리자 챗 폭주 방지). 0 = 제한 없음
   allow_raw_links: false         # 제휴 링크를 못 만드는 쇼핑몰(미등록 몰 포함)은 건너뜀. true 면 수익 없는 원본 링크로라도 발행
+                                 # (예외: 쇼핑커넥트에 없는 네이버 딜은 이 값과 상관없이 원본 주소로 — 위 autolink)
   templates_dir: templates
   template: deal_post.j2
   # 한줄평: 서버의 Claude Code 로그인(구독)으로 상품마다 '누구에게 좋은지' 1~2문장. 숫자·효능 같은 사실은 못 쓰게 막음

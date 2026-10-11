@@ -70,8 +70,9 @@ CREATE TABLE IF NOT EXISTS deal_queue (
 );
 DROP INDEX IF EXISTS idx_queue_pending_product;
 DROP INDEX IF EXISTS idx_queue_open_product;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_open_product_v2
-    ON deal_queue(product_id) WHERE status IN ('pending', 'awaiting_link', 'awaiting_approval');
+DROP INDEX IF EXISTS idx_queue_open_product_v2;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_open_product_v3
+    ON deal_queue(product_id) WHERE status IN ('pending', 'awaiting_link', 'awaiting_approval', 'awaiting_autolink');
 CREATE INDEX IF NOT EXISTS idx_queue_status ON deal_queue(status, score DESC, created_at);
 
 CREATE TABLE IF NOT EXISTS source_items (
@@ -397,7 +398,7 @@ class Database:
 
     # -------------------------------------------------------------- queue
     def enqueue(self, deal: Deal, *, score: float, now: datetime | None = None) -> bool:
-        """대기열에 추가. 이미 열려 있으면(pending/awaiting_link/awaiting_approval) False."""
+        """대기열에 추가. 이미 열려 있으면(pending/awaiting_link/awaiting_approval/awaiting_autolink) False."""
         now = now or utcnow()
         ts = to_iso(now)
         payload = json.dumps(deal.to_dict(), ensure_ascii=False)
@@ -488,7 +489,10 @@ class Database:
 
     def open_queue_names(self) -> list[dict[str, Any]]:
         """아직 처리 중인(대기·링크 대기·확인 대기) 글의 상품명·가격."""
-        rows = self._q("SELECT id, product_id, payload, status FROM deal_queue WHERE status IN ('pending', 'awaiting_link', 'awaiting_approval')")
+        rows = self._q(
+            "SELECT id, product_id, payload, status FROM deal_queue "
+            "WHERE status IN ('pending', 'awaiting_link', 'awaiting_approval', 'awaiting_autolink')"
+        )
         out: list[dict[str, Any]] = []
         for r in rows:
             try:
@@ -540,13 +544,18 @@ class Database:
         )
         return [self._row_to_queue_item(r) for r in rows]
 
-    def set_queue_link(self, item_id: int, url: str, now: datetime | None = None) -> QueueItem | None:
-        """관리자가 만든 제휴 링크를 붙이고 다시 pending 으로."""
+    def set_queue_link(self, item_id: int, url: str, now: datetime | None = None, *, auto: bool = False) -> QueueItem | None:
+        """관리자가 만든 제휴 링크를 붙이고 다시 pending 으로. auto: 쇼핑커넥트 자동 링크 (주인 알림 없이)."""
         item = self.get_queue_item(item_id)
         if item is None:
             return None
         item.deal.affiliate_url = url
-        item.deal.product.extra["owner_link"] = True  # 주인이 만든 링크 (발행되면 '채널에 올렸어요'를 따로 알림)
+        extra = item.deal.product.extra
+        extra.pop("raw_link", None)  # 원본 주소로 올리려던 글이어도 링크가 생겼으면 링크·고지로
+        if auto:
+            extra["auto_link"] = True
+        else:
+            extra["owner_link"] = True  # 주인이 만든 링크 (발행되면 '채널에 올렸어요'를 따로 알림)
         self.update_queue_item(item_id, status="pending", error=None, deal=item.deal, now=now, reset_created=True)
         return self.get_queue_item(item_id)
 
@@ -571,6 +580,12 @@ class Database:
                     (to_iso(now), to_iso(awaiting_older_than)),
                 )
                 n += cur2.rowcount
+                cur3 = self._conn.execute(  # 자동 링크 답을 끝내 못 받은 글 (보통은 그 전에 주인 요청으로 넘어감) — 주인이 넘긴 것은 아님
+                    "UPDATE deal_queue SET status = 'expired', last_error = 'autolink unanswered', updated_at = ? "
+                    "WHERE status = 'awaiting_autolink' AND created_at < ?",
+                    (to_iso(now), to_iso(awaiting_older_than)),
+                )
+                n += cur3.rowcount
             return n
 
     def declined_since(self, product_id: str, since: datetime) -> Deal | None:

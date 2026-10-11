@@ -664,6 +664,8 @@ class StatusReporter:
         rows = []
         for s in self.registry.all():
             mode = self.links.describe(s) if self.links else s.link_mode
+            if s.key == "naver" and s.enabled and s.link_mode == "manual" and self.settings.autolink.naver.enabled:
+                mode = "자동 (쇼핑커넥트, Blog-Auto) — 없는 상품은 원본 주소, 안 되면 내 링크 요청"
             rows.append({"key": s.key, "name": s.name, "enabled": s.enabled, "mode": mode, "reason": s.disabled_reason})
         return rows
 

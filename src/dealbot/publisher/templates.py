@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from dealbot.models import Deal, Product
-from dealbot.shops import Shop
+from dealbot.shops import Shop, deal_disclosure
 from dealbot.utils.text import clean_name, format_won, unit_price
 
 
@@ -519,7 +519,7 @@ class TemplateRenderer:
         shop_ctx = {
             "key": shop.key if shop else p.shop,
             "name": shop.name if shop else p.shop,
-            "disclosure": shop.disclosure if shop else None,
+            "disclosure": deal_disclosure(shop, p.extra),
             "link_mode": shop.link_mode if shop else "raw",
         }
         tier, tier_pct = self.deal_tier(deal)

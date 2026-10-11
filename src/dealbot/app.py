@@ -16,7 +16,7 @@ import secrets as pysecrets
 import time
 import traceback
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ import httpx
 from telegram import Bot, BotCommand, Update
 from telegram.ext import Application
 
-from dealbot import __version__
+from dealbot import __version__, autolink
 from dealbot.authenticity import AuthResult, check_authenticity
 from dealbot.collectors import (
     BaseCollector,
@@ -68,7 +68,7 @@ from dealbot.monitoring.admin import (
 from dealbot.monitoring.nl import REGISTRY_DAYS, NLRouter
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
-from dealbot.naver_shop import NaverShopSearch, store_product_no
+from dealbot.naver_shop import NaverShopSearch, store_name, store_product_no
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
@@ -85,7 +85,7 @@ from dealbot.publisher.threads import (
     ThreadsToken,
     authorize_url,
 )
-from dealbot.shops import ShopRegistry
+from dealbot.shops import ShopRegistry, deal_disclosure
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import Database, QueueItem
 from dealbot.store_browser import StoreBrowser, store_browser_check
@@ -234,6 +234,8 @@ class DealBot:
             log.warning("info summarizer off (no ANTHROPIC_API_KEY and no claude CLI) — info posts will wait for admin approval (/ok)")
         self._pending_notice_ready = False
         self.rate_limiter = RateLimiter(self.db, settings.publish)
+        # 네이버 쇼핑커넥트 자동 링크: Blog-Auto 가 쓰는 답 파일 (받은편지함과 같은 폴더)
+        self.autolink_results = autolink.ResultReader(settings.data_dir / autolink.RESULTS_FILE, self.db)
 
         # ---- 텔레그램
         self.application: Application | None = None  # type: ignore[type-arg]
@@ -473,21 +475,43 @@ class DealBot:
             self.state.collectors[t].run_requested = True
         return f"🔄 곧 확인할게요: {', '.join(targets)} (1분 안에 시작)"
 
-    async def attach_link(self, queue_id: int, url: str) -> str:
-        item = self.db.get_queue_item(queue_id)
+    @staticmethod
+    def _link_problem(item: QueueItem | None, queue_id: int, url: str) -> str | None:
+        """링크를 붙일 수 없는 이유 (주인 답장·쇼핑커넥트 자동 링크 같은 기준). 붙일 수 있으면 None."""
         if item is None:
             return f"#{queue_id} 번 글이 없습니다. /queue 나 /pending 에서 번호를 확인해 주세요."
         if item.status == "awaiting_approval":
             return f"#{queue_id} 번은 확인을 기다리는 글이라 링크가 아니라 답이 필요합니다: <code>/ok {queue_id}</code> 또는 <code>/skip {queue_id}</code>"
-        if item.status not in ("awaiting_link", "pending", "failed"):
+        if item.status not in ("awaiting_link", "pending", "failed", autolink.STATUS):
             return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없습니다."
         if not url.startswith("http"):
             return "링크는 http:// 또는 https:// 로 시작해야 합니다."
+        return None
+
+    async def attach_link(self, queue_id: int, url: str) -> str:
+        item = self.db.get_queue_item(queue_id)
+        problem = self._link_problem(item, queue_id, url)
+        if problem or item is None:
+            return problem or ""
+        if item.status == autolink.STATUS:
+            self._cancel_autolink(queue_id)  # 주인이 먼저 붙였으면 Blog-Auto 일은 거둔다
         self.db.set_queue_link(queue_id, url.strip())
         # 상품 1개에 내 링크 1개 (네이버 쇼핑 커넥트·토스 쉐어링크는 만료 없음) → 같은 상품이 또 나오면 다시 묻지 않고 재사용
         self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
         self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
         return self.notifier.link_done_text(item)
+
+    def attach_auto_link(self, queue_id: int, url: str) -> str | None:
+        """쇼핑커넥트 자동 링크를 주인이 답장한 것처럼 붙인다 (같은 확인·같은 재사용 기억). 주인 알림은 없음 (주인 결정 10/11).
+        붙였으면 None, 못 붙였으면 이유."""
+        item = self.db.get_queue_item(queue_id)
+        problem = self._link_problem(item, queue_id, url)
+        if problem or item is None:
+            return problem or "no item"
+        self.db.set_queue_link(queue_id, url.strip(), auto=True)
+        self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
+        self.db.log_event("INFO", "autolink", f"#{queue_id} {url}")
+        return None
 
     def skip_item(self, queue_id: int) -> str:
         item = self.db.get_queue_item(queue_id)
@@ -495,6 +519,8 @@ class DealBot:
             return f"#{queue_id} 번 글이 없습니다."
         if item.status in ("published",):
             return f"#{queue_id} 번은 이미 채널에 올라갔습니다."
+        if item.status == autolink.STATUS:
+            self._cancel_autolink(queue_id)
         self.db.update_queue_item(queue_id, status="skipped", error="skipped by admin")
         return f"⏭ #{queue_id} 번은 건너뛰었습니다. 올리지 않습니다."
 
@@ -1211,9 +1237,11 @@ class DealBot:
         so = self.settings.deal.sold_out
         pid = product.product_id
         out: dict[str, Any] = {"cancelled": [], "marked": False}
-        for item in self.db.items_for_product(pid, ("pending", "awaiting_link")):
+        for item in self.db.items_for_product(pid, ("pending", "awaiting_link", autolink.STATUS)):
             self.db.update_queue_item(item.id, status="expired", error=f"sold out ({via})")
             out["cancelled"].append(item.id)
+            if item.status == autolink.STATUS:
+                self._cancel_autolink(item.id)  # 주인에게 물은 적 없는 글 — 알림 없이 Blog-Auto 일만 거둔다
             if item.status == "awaiting_link":
                 await self.refresh_pending_notice()
                 notice = self.db.kv_get(f"link_notice:{item.id}")
@@ -1393,6 +1421,175 @@ class DealBot:
         except Exception as e:  # noqa: BLE001
             return "fail", f"{type(e).__name__}: {e}"
 
+    async def _request_manual_link(self, item: QueueItem, deal: Deal, shop: Any, auth: AuthResult, why: str | None) -> bool:
+        """주인에게 내 링크를 요청한다 (예전 흐름 그대로). 요청이 이미 많이 쌓였으면 건너뛴다."""
+        cap = self.settings.publish.max_awaiting_links
+        pid = deal.product.product_id
+        if cap and self.db.queue_counts().get("awaiting_link", 0) >= cap:
+            # 링크 요청이 이미 여러 건 쌓여 있으면 더 보내지 않는다 (관리자 챗 폭주 방지). 딜은 어차피 곧 지난다
+            self.db.update_queue_item(item.id, status="skipped", error=f"manual link backlog full ({cap})")
+            self.db.log_event("INFO", "queue", f"{pid} skipped: {cap} manual link requests already waiting")
+            log.info("queue #%d skipped — %d manual link requests already waiting", item.id, cap)
+            return True
+        self.db.update_queue_item(item.id, status="awaiting_link", error="manual link required", deal=deal)
+        if shop is not None:
+            auth_note = None if auth.status == "ok" else f"⚠️ 정품 확인: {auth.reason}. 링크를 만들기 전에 판매자가 공식 판매처인지 확인해 주세요."
+            notice_id = await self.notifier.notify_manual_link(item, shop, auth_note=auth_note)
+            if notice_id:
+                self.db.kv_set(f"link_notice:{item.id}", str(notice_id))
+        log.info("queue #%d awaiting manual link (%s)", item.id, why)
+        await self.refresh_pending_notice()
+        return True
+
+    # ------------------------------------------------- 네이버 쇼핑커넥트 자동 링크 (Blog-Auto 가 브라우저 일)
+    def _autolink_product_no(self, deal: Deal, shop: Any, auth: AuthResult) -> str | None:
+        """자동 링크를 시도할 네이버 딜이면 스토어 상품번호, 아니면 None (→ 예전처럼 주인에게 링크 요청)."""
+        cfg = self.settings.autolink.naver
+        if not cfg.enabled or shop is None or shop.key != "naver" or self.state.dry_run:
+            return None
+        if auth.status != "ok" and cfg.unverified != "auto":
+            return None  # 판매처 확인이 안 된 딜은 주인이 보고 링크를 만든다 (예전 흐름)
+        until = from_iso(self.db.kv_get(autolink.KV_STOP))
+        if until and until > utcnow():
+            return None  # Blog-Auto 가 멈춘 동안(한도·시간 밖·로그인·제한)은 묻지 않고 예전 흐름으로
+        return store_product_no(deal.product.url)
+
+    def _sc_known_missing(self, product_no: str) -> bool:
+        cfg = self.settings.autolink.naver
+        at = from_iso(self.db.kv_get(f"{autolink.KV_MISS}{product_no}"))
+        return bool(at and utcnow() - at < timedelta(days=cfg.not_found_days))
+
+    def _request_autolink(self, item: QueueItem, deal: Deal, product_no: str) -> None:
+        """Blog-Auto 에 쇼핑커넥트 링크를 부탁한다. 글마다 한 번 (job 을 kv 에 먼저 남기고 받은편지함에 한 줄)."""
+        p = deal.product
+        job = f"{item.id}-{time.time_ns()}"
+        self.db.kv_set(f"{autolink.KV_JOB}{item.id}", json.dumps({"job": job, "no": product_no, "at": to_iso(utcnow())}))
+        self.db.update_queue_item(item.id, status=autolink.STATUS, error="auto link requested", deal=deal)
+        self.relay_to_blog({"connect_link": {
+            "id": item.id, "job": job, "product_no": product_no, "store": store_name(p.url), "name": p.name[:120],
+            "queries": autolink.job_queries(p.name), "url": p.url, "at": time.time(),
+        }})
+        log.info("queue #%d → 쇼핑커넥트 자동 링크 부탁 (상품번호 %s)", item.id, product_no)
+
+    def _cancel_autolink(self, queue_id: int) -> None:
+        """기다리던 자동 링크를 거둔다: 늦게 온 답은 무시되고, Blog-Auto 는 아직 시작 안 한 일을 버린다."""
+        raw = self.db.kv_take(f"{autolink.KV_JOB}{queue_id}")
+        if raw:
+            job = (json.loads(raw) or {}).get("job")
+            self.relay_to_blog({"connect_cancel": {"id": queue_id, "job": job, "at": time.time()}})
+
+    def _post_raw_link(self, item: QueueItem, deal: Deal, why: str) -> None:
+        """쇼핑커넥트에 없는 네이버 상품: 내 링크 없이 원본 주소로, 제휴 고지 없이 올린다 (주인 결정 10/11). 주인에게 묻지 않음."""
+        deal.affiliate_url = deal.product.url
+        deal.product.extra["raw_link"] = "sc_not_found"
+        self.db.update_queue_item(item.id, status="pending", error=None, deal=deal, reset_created=True)
+        self.db.log_event("INFO", "autolink", f"#{item.id} {why} → 원본 주소로")
+        log.info("queue #%d %s → 원본 주소로 (고지 없이)", item.id, why)
+
+    async def autolink_tick(self) -> int:
+        """Blog-Auto 의 답을 반영하고, 너무 오래 답이 없는 글은 주인 요청으로 넘긴다. 처리한 글 수."""
+        rows, pos = self.autolink_results.read()
+        n = 0
+        for row in rows:
+            if row.get("resume") is True:  # Blog-Auto 에서 주인이 멈춤을 풀었음 (python -m blogauto shopconnect resume)
+                self.db.kv_set(autolink.KV_STOP, "")
+                self.db.kv_delete_prefix("autolink_alert:")  # 다시 멈추면 또 알림
+                log.info("쇼핑커넥트 자동 링크 다시 시작")
+                continue
+            try:
+                n += await self._apply_autolink_result(row)
+            except Exception as e:  # noqa: BLE001 — 한 줄 때문에 나머지가 막히지 않게 (그 글은 시간이 지나면 주인 요청으로)
+                log.warning("autolink result failed (%s): %s", row.get("id"), e)
+        if rows:
+            self.autolink_results.commit(pos)
+        elif pos != int(self.db.kv_get(autolink.KV_POS) or 0):
+            self.autolink_results.commit(pos)  # 파일이 새로 만들어짐
+        return n + await self._autolink_timeouts()
+
+    async def _apply_autolink_result(self, row: dict[str, Any]) -> int:
+        try:
+            qid = int(row.get("id"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0
+        raw = self.db.kv_get(f"{autolink.KV_JOB}{qid}")
+        marker = json.loads(raw) if raw else None
+        if not isinstance(marker, dict) or not row.get("job") or marker.get("job") != row.get("job"):
+            # 이미 반영했거나(같은 줄을 다시 읽음) 취소·시간 초과로 넘어간 글의 늦은 답
+            log.info("autolink: 반영하지 않은 답 #%s (%s)", qid, "ok" if row.get("ok") else row.get("reason"))
+            return 0
+        self.db.kv_take(f"{autolink.KV_JOB}{qid}")  # 먼저 지워 둔다 → 같은 답이 두 번 반영되지 않음
+        item = self.db.get_queue_item(qid)
+        if item is None or item.status != autolink.STATUS:
+            return 0
+        no = str(marker.get("no") or "")
+        self._note_autolink_stop(row)
+        if (row.get("product_no") and str(row.get("product_no")) != no) or store_product_no(item.deal.product.url) != no:
+            await self._autolink_fallback(item, "product_no mismatch")
+            return 1
+        if row.get("ok"):
+            link = str(row.get("link") or "").strip()
+            why = await autolink.verify_link(self.http, link, no, deal_url=item.deal.product.url)
+            if why is None:
+                why = self.attach_auto_link(qid, link)
+            if why is None:
+                log.info("autolink #%d 상품 %s: 링크 붙임 (%s, 수수료 %s)", qid, no,
+                         "기존 링크" if row.get("existing") else "새로 발급", row.get("commission") or "-")
+                return 1
+            log.warning("autolink #%d 상품 %s: 링크를 붙이지 않음 (%s)", qid, no, why)
+            await self._autolink_fallback(item, f"link check: {why}")
+            return 1
+        reason = str(row.get("reason") or "error")
+        if reason == "not_found":
+            self.db.kv_set(f"{autolink.KV_MISS}{no}", to_iso(utcnow()))
+            self._post_raw_link(item, item.deal, "쇼핑커넥트에 없음")
+            return 1
+        await self._autolink_fallback(item, reason)
+        return 1
+
+    def _note_autolink_stop(self, row: dict[str, Any]) -> None:
+        """Blog-Auto 가 멈춘다고 하면(한도·시간 밖·로그인·제한) 그때까지는 묻지 않는다. 로그인·제한만 주인에게 한 번 알림."""
+        retry_at = row.get("retry_at")
+        if isinstance(retry_at, (int, float)) and retry_at > time.time():
+            until = datetime.fromtimestamp(float(retry_at), tz=UTC)
+            old = from_iso(self.db.kv_get(autolink.KV_STOP))
+            if old is None or until > old:
+                self.db.kv_set(autolink.KV_STOP, to_iso(until))
+        reason = str(row.get("reason") or "")
+        if reason in autolink.ALERT_REASONS:
+            day = local_now(self.settings.app.timezone).strftime("%Y-%m-%d")
+            key = f"autolink_alert:{reason}"
+            if self.db.kv_get(key) != day:
+                self.db.kv_set(key, day)
+                self.db.log_event("WARNING", "autolink", f"stopped: {reason}")
+                log.warning("쇼핑커넥트 자동 링크 멈춤: %s", reason)
+                self.owner_notice(
+                    "autolink_stop",
+                    f"⛔ 쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 네이버 딜은 예전처럼 링크를 요청할게요.",
+                )
+
+    async def _autolink_timeouts(self) -> int:
+        cutoff = utcnow() - timedelta(minutes=self.settings.autolink.naver.wait_minutes)
+        n = 0
+        for item in self.db.awaiting_items(50, statuses=(autolink.STATUS,)):
+            raw = self.db.kv_get(f"{autolink.KV_JOB}{item.id}")
+            marker = json.loads(raw) if raw else {}
+            at = from_iso(marker.get("at")) if isinstance(marker, dict) else None
+            if at is not None and at > cutoff:
+                continue
+            self._cancel_autolink(item.id)
+            await self._autolink_fallback(item, "timeout")
+            n += 1
+        return n
+
+    async def _autolink_fallback(self, item: QueueItem, why: str) -> None:
+        """자동 링크가 안 됨 (오류·시간 초과·로그인·한도…): 예전처럼 주인에게 링크 요청."""
+        self.db.log_event("INFO", "autolink", f"#{item.id} {why} → 링크 요청")
+        cached = item.deal.product.extra.get("auth")
+        auth = (AuthResult(str(cached.get("status") or "ok"), str(cached.get("reason") or ""), cached.get("seller"))
+                if isinstance(cached, dict) else AuthResult("ok", ""))
+        shop = self.registry.get(item.deal.product.shop)
+        await self._request_manual_link(item, item.deal, shop, auth, f"autolink: {why}")
+
     def _needs_deeplink(self, item: QueueItem) -> bool:
         """쿠팡 딥링크 API 호출이 필요한 글인가 (쿠팡 딜인데 아직 제휴 링크가 없음)."""
         p = item.deal.product
@@ -1417,6 +1614,7 @@ class DealBot:
         if expired or not self._pending_notice_ready:
             self._pending_notice_ready = True
             await self.refresh_pending_notice()
+        await self.autolink_tick()
 
         if self.state.paused or not cfg.enabled:
             return False
@@ -1479,22 +1677,15 @@ class DealBot:
                 log.info("queue #%d sold out before link request — skipped", item.id)
                 return True
             shop = self.registry.get(err or "")
-            cap = cfg.max_awaiting_links
-            if cap and self.db.queue_counts().get("awaiting_link", 0) >= cap:
-                # 링크 요청이 이미 여러 건 쌓여 있으면 더 보내지 않는다 (관리자 챗 폭주 방지). 딜은 어차피 곧 지난다
-                self.db.update_queue_item(item.id, status="skipped", error=f"manual link backlog full ({cap})")
-                self.db.log_event("INFO", "queue", f"{pid} skipped: {cap} manual link requests already waiting")
-                log.info("queue #%d skipped — %d manual link requests already waiting", item.id, cap)
+            product_no = self._autolink_product_no(deal, shop, auth)
+            if product_no:
+                # 네이버: 주인에게 묻기 전에 쇼핑커넥트에서 자동으로 (주인 결정 10/11). 안 되면 아래와 같은 링크 요청으로 돌아온다
+                if self._sc_known_missing(product_no):
+                    self._post_raw_link(item, deal, "쇼핑커넥트에 없던 상품 (기억)")
+                else:
+                    self._request_autolink(item, deal, product_no)
                 return True
-            self.db.update_queue_item(item.id, status="awaiting_link", error="manual link required", deal=deal)
-            if shop is not None:
-                auth_note = None if auth.status == "ok" else f"⚠️ 정품 확인: {auth.reason}. 링크를 만들기 전에 판매자가 공식 판매처인지 확인해 주세요."
-                notice_id = await self.notifier.notify_manual_link(item, shop, auth_note=auth_note)
-                if notice_id:
-                    self.db.kv_set(f"link_notice:{item.id}", str(notice_id))
-            log.info("queue #%d awaiting manual link (%s)", item.id, err)
-            await self.refresh_pending_notice()
-            return True
+            return await self._request_manual_link(item, deal, shop, auth, err)
         if state == "skip":
             self.db.update_queue_item(item.id, status="skipped", error=err)
             return True
@@ -1570,7 +1761,7 @@ class DealBot:
                 "ref_pct": round(ref_pct) if ref_price and ref_pct else None,
                 "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
                 "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
-                "disclosure": shop.disclosure if shop else "", "link": link, "product_url": p.url,
+                "disclosure": deal_disclosure(shop, p.extra) or "", "link": link, "product_url": p.url,
                 "image_url": p.image_url, "photo_file": photo_file, "photo_kind": "product" if photo_file else "none",
                 "photo_src": p.image_url if photo_file else None,
                 "kakao_text": ctx.render_deal(deal, link, shop=shop, template="deal_kakao.j2", autoescape=False),
@@ -1963,8 +2154,9 @@ class DealBot:
             if p.deal_kind == "info" or not (it.deal.affiliate_url or p.url):
                 continue
             shop = self.registry.get(p.shop)
-            if shop is not None and shop.disclosure and shop.disclosure not in disclosures:
-                disclosures.append(shop.disclosure)
+            disc = deal_disclosure(shop, p.extra)
+            if disc and disc not in disclosures:
+                disclosures.append(disc)
             rows.append(
                 {
                     "id": it.id,

@@ -46,6 +46,13 @@ class Shop:
         return any(host == d or host.endswith("." + d) for d in self.domains)
 
 
+def deal_disclosure(shop: Shop | None, extra: dict | None = None) -> str | None:
+    """글에 붙일 제휴 고지. 쇼핑커넥트에 없어 원본 주소로 올리는 네이버 딜(extra['raw_link'])은 수수료가 없으니 고지도 없음 (주인 결정 10/11)."""
+    if shop is None or (extra or {}).get("raw_link"):
+        return None
+    return shop.disclosure
+
+
 def _d(text: str) -> str:
     return f"이 포스팅은 {text} 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
 
