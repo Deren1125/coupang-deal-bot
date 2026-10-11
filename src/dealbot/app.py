@@ -622,11 +622,10 @@ class DealBot:
         return text
 
     async def threads_test(self, queue_id: int | None = None) -> str:
-        """스레드에 실제로 올려 양식을 본다. 번호 없으면 샘플 딜, 번호가 있으면 채널에 올렸던 그 글을 다시."""
+        """스레드에 실제로 올려 양식을 본다. 번호 없으면 샘플 딜, 번호가 있으면 채널에 올렸던 그 글을 다시.
+        자동 게시(config threads.enabled)가 꺼져 있어도 시험 글은 올린다 — 차단이 풀렸는지 켜기 전에 확인하는 용도 (주인 10/12)."""
         from dealbot.cli import sample_deal
 
-        if not self.settings.threads.enabled:
-            return "스레드 자동 게시가 꺼져 있습니다 (config threads.enabled)."
         if self.threads.stored_token() is None:
             return "스레드가 연결되어 있지 않습니다. /threadsauth 먼저 해 주세요."
         if queue_id is None:
@@ -654,6 +653,8 @@ class DealBot:
             lines.append(f"참고: {html.escape(result.error)}")
         if queue_id is None:
             lines.append("샘플 글이니 확인한 뒤 스레드 앱에서 지워 주세요.")
+        if not self.settings.threads.enabled:
+            lines.append("자동 게시는 아직 꺼져 있어요 (시험 글만 올렸어요). 켜려면 config threads.enabled 를 true 로.")
         return "\n".join(lines)
 
     async def _threads_permalink(self, message_id: int | None) -> str | None:

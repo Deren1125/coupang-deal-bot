@@ -121,6 +121,11 @@ async def test_threads_callback_connects_without_code_copy(settings: Settings) -
         msg = await bot.threads_test()
         assert "✅ 스레드에 올렸습니다: https://www.threads.com/@hotdeal/post/ABC" in msg and "지워 주세요" in msg
         assert posted == ["TEXT"]  # 한 글 (링크는 본문). 샘플의 쿠팡 로고는 확인된 상품 사진이 아니라 안 붙임
+        # 자동 게시가 꺼져 있어도 시험 글은 올라가고, 꺼져 있다고 알려 준다 (차단이 풀렸는지 켜기 전에 확인)
+        bot.settings.threads.enabled = False
+        msg = await bot.threads_test()
+        assert "✅ 스레드에 올렸습니다" in msg and "자동 게시는 아직 꺼져 있어요" in msg
+        bot.settings.threads.enabled = True
         assert "글이 없습니다" in await bot.threads_test(999)
     finally:
         await bot.close()
