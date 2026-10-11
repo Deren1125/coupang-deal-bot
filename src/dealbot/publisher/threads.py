@@ -473,8 +473,9 @@ class ThreadsPublisher:
             return PublishResult(ok=False, error=str(e))
         return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None, error=note)
 
-    async def publish(self, deal: Deal, *, fallback_image_url: str | None = None) -> PublishResult:
-        if not self.enabled:
+    async def publish(self, deal: Deal, *, fallback_image_url: str | None = None, force: bool = False) -> PublishResult:
+        """force=True: 자동 게시가 꺼져 있어도 올림 (/threadstest 시험 글만)."""
+        if not self.enabled and not force:
             return PublishResult(ok=False, error="threads disabled")
         recent = self.recent_lines()
         text = self.render(deal, recent=recent)

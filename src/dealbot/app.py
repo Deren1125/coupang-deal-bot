@@ -644,7 +644,7 @@ class DealBot:
         preview = self._threads_preview(deal, label)
         if self.threads.dry_run:
             return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
-        result = await self.threads.publish(deal)
+        result = await self.threads.publish(deal, force=True)  # 자동 게시가 꺼져 있어도 시험 글은
         if not result.ok:
             return preview + f"\n\n❌ 올리지 못했습니다: <code>{html.escape(result.error or '')}</code>"
         link = await self._threads_permalink(result.message_id)
