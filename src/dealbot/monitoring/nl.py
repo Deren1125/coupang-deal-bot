@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
@@ -21,14 +22,14 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
 from dealbot.shops import find_urls
 from dealbot.storage.db import Database, QueueItem
 from dealbot.utils.text import truncate
-from dealbot.utils.timeutil import from_iso, local_now
+from dealbot.utils.timeutil import from_iso, local_now, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,10 @@ REPLY_CAP = 600
 MAX_CANDIDATES = 15
 MAX_BUTTONS = 5
 MAX_ALSO = 3
+ASK_GRACE = 5  # AI 호출 상한 = timeout_seconds + 이만큼 (API 는 시간 초과 뒤 한 번 더 시도해서 더 걸릴 수 있음)
+REGISTRY_DAYS = 30  # 보낸 메시지 기록을 이만큼 남긴다 (매일 정리). 이보다 오래된 메시지는 기록이 없어도 블로그 것이라 단정하지 않음
+# 한 딜에 대해 보낸 메시지 (보낼 때 정한 번호를 믿음). 그 밖의 것(📌 고정 공지처럼 고쳐 쓰는 메시지)은 지금 글의 #번호로 본다
+_ITEM_KINDS = frozenset({"link", "review_auth", "review_info", "link_done", "soldout"})
 
 # ---------------------------------------------------------------- 주인에게 보이는 말
 ECHO = "이렇게 이해했어요: {plain} ({canonical})"
@@ -132,8 +137,9 @@ BLOG_MEDIA_COMMANDS = frozenset({"photo", "사진", "write", "글", "쓰기", "l
 _REF_RE = re.compile(r"#(\d+)")
 _TAG_RE = re.compile(r"<[^>]+>")
 _BLOG_HINT = re.compile(r"\[오늘의 핫딜\]|발행 대기|임시저장|네이버|블로그")
-# 딜봇 자신의 요청 메시지 첫머리 (기록 시작 전 메시지라도 이것이면 딜 메시지 — '네이버' 몰 이름이 들어 있어도)
-_DEAL_HEAD = re.compile(r"^(?:📌\s*)?(?:🔗 내 링크가 필요합니다|🔎 정품 확인 필요|📝 정보 글 확인|✅ 상품 링크 완료|⛔ 품절되어 취소|🗂)")
+# 딜봇 자신의 요청 메시지·📌 고정 공지 첫머리 (기록 시작 전 메시지라도 이것이면 딜 메시지 — '네이버' 몰 이름이 들어 있어도).
+# '📌' 만으로는 안 됨: Blog-Auto 의 /notices 목록도 '📌 고정된 공지' 로 시작한다
+_DEAL_HEAD = re.compile(r"^(?:📌\s*)?(?:🔗 내 링크가 필요합니다|🔗 내가 링크를 만들어 줘야 하는 글|🔎 정품 확인 필요|📝 정보 글 확인|✅ 상품 링크 완료|⛔ 품절되어 취소|🗂)")
 _BLOG_WORDS = re.compile(r"블로그|demiyum|모음글", re.I)
 _DEAL_WORDS = re.compile(r"딜봇|채널|게시판")  # 이 말이 있어야 '멈춰'를 딜봇 일로 본다
 _CONNECT_WORDS = re.compile(r"쇼핑|커넥트|링크")
@@ -371,11 +377,15 @@ class NLRouter:
         text = getattr(r, "text", None) or getattr(r, "caption", None) or ""
         row = self.db.admin_msg(int(getattr(r, "message_id", 0) or 0))
         if row is not None:
-            return Ref("deal", row.get("kind") or msg_kind(text), row.get("queue_id"), text)
+            kind, q = row.get("kind") or msg_kind(text), row.get("queue_id")
+            if kind not in _ITEM_KINDS and text:  # 고정 공지는 같은 메시지를 고쳐 써서, 보낼 때의 번호가 지금 목록과 다를 수 있음
+                q = single_ref(text)
+            return Ref("deal", kind, q, text)
         since = from_iso(self.db.kv_get("admin_msgs_since"))
         sent: datetime | None = getattr(r, "date", None)
-        if since is not None and isinstance(sent, datetime) and sent >= since:
+        if since is not None and isinstance(sent, datetime) and sent >= max(since, utcnow() - timedelta(days=REGISTRY_DAYS)):
             return Ref("blog", "", None, text)  # 기록에 없는 이 봇 메시지 = 같은 토큰으로 보낸 Blog-Auto 메시지
+        # (기록을 지운 지 오래된 메시지 — 한 달 넘게 고쳐 쓰는 📌 고정 공지 등 — 는 아래 글 짐작으로)
         if not _DEAL_HEAD.match(strip_html(text).lstrip()) and _BLOG_HINT.search(text):  # 기록 시작 전 메시지: 글로 짐작
             return Ref("blog", "", None, text)
         m = _REF_RE.search(text)
@@ -454,7 +464,10 @@ class NLRouter:
         try:
             if self.asker is None:
                 raise RuntimeError("AI 없음")
-            data = await self.asker.ask(SYSTEM, self.context(text, ref, cands, photos=photos, file=file), schema())
+            # 그동안 다른 메시지가 막히지 않게 여기서 한 번 더 자른다 (CLI 는 취소되면 요약기처럼 프로세스를 끝냄)
+            limit = float(getattr(self.cfg, "timeout_seconds", 30) or 30) + ASK_GRACE
+            data = await asyncio.wait_for(self.asker.ask(SYSTEM, self.context(text, ref, cands, photos=photos, file=file), schema()),
+                                          timeout=limit)
         except Exception as e:  # noqa: BLE001 — LLMError·시간 초과·그 밖의 오류 모두 '안내만'
             d = Decision("fail", error=f"{type(e).__name__}: {e}")
             self._log(text, ref, d, ms=int((time.monotonic() - t0) * 1000), msg_id=msg_id)
@@ -485,6 +498,7 @@ class NLRouter:
         raw = [{"intent": intent, "post": data.get("post"), "args": data.get("args")}]
         raw += [a for a in (data.get("also") or [])[:MAX_ALSO] if isinstance(a, dict)]
         typed = self.typed_ids(text)
+        also_posts = {a.get("post") for a in raw[1:]}  # 적은 번호가 다른 할 일의 번호면 첫 할 일 번호를 바꾸지 않음
         actions: list[Action] = []
         for i, a in enumerate(raw):
             name = str(a.get("intent") or "")
@@ -496,7 +510,8 @@ class NLRouter:
                 return Decision("ask", reply=NOT_UNDERSTOOD, blog_text=blog_text, **base)
             post = a.get("post")
             post = int(post) if isinstance(post, int) and not isinstance(post, bool) and post in cands else None
-            if i == 0 and len(typed) == 1 and typed[0] != post and (post is None or post == ref.queue_id):
+            if (i == 0 and len(typed) == 1 and typed[0] != post and typed[0] not in also_posts
+                    and (post is None or post == ref.queue_id)):
                 post = typed[0]  # 주인이 적은 번호가 답장 대상보다 우선
             if photos and cmd.name not in ("/help", "/status"):
                 return Decision("fail", reply=DEAL_PHOTO, blog_text=blog_text, **base)

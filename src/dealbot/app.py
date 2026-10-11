@@ -65,7 +65,7 @@ from dealbot.monitoring.admin import (
     channel_post_base,
     register_admin_handlers,
 )
-from dealbot.monitoring.nl import NLRouter
+from dealbot.monitoring.nl import REGISTRY_DAYS, NLRouter
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.naver_shop import NaverShopSearch, store_product_no
@@ -2152,7 +2152,7 @@ class DealBot:
             price_history_days=self.settings.app.prune_price_history_days,
             events_days=self.settings.app.prune_events_days,
         )
-        pruned["admin_msgs"] = self.db.prune_admin_msgs(30)
+        pruned["admin_msgs"] = self.db.prune_admin_msgs(REGISTRY_DAYS)
         pruned["nl_pending"] = self.nl.prune_pending()
         log.info("maintenance: pruned %s", pruned)
 

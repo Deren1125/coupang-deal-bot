@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import itertools
 import json
 import logging
@@ -308,6 +309,54 @@ async def test_legacy_replies_use_text_hints(env: Env) -> None:
     naver = env.bot_msg("🔗 <b>내 링크가 필요합니다 #676</b> [네이버 스마트스토어]", record=False, date=old)
     await env.text("https://naver.me/abc", reply_to=naver)  # 몰 이름 '네이버' 가 있어도 딜봇 링크 요청
     assert env.ctrl.named("attach_link")[-1] == ("attach_link", 676, "https://naver.me/abc")
+
+
+async def test_url_reply_to_edited_pinned_notice_uses_current_number(env: Env) -> None:
+    llm = with_llm(env, ans("/status"))
+    pin = env.bot_msg("📌 🔗 내가 링크를 만들어 줘야 하는 글 (1건)\n• #675 애슐리")  # 보낼 때는 #675 하나
+    pin.text = "📌 🔗 내가 링크를 만들어 줘야 하는 글 (1건)\n• #680 비비고"  # 같은 메시지를 고쳐 씀 (675 는 끝남)
+    await env.text("https://toss.im/_m/abc", reply_to=pin)
+    assert env.ctrl.named("attach_link") == [("attach_link", 680, "https://toss.im/_m/abc")] and llm.calls == []
+
+
+async def test_old_unrecorded_deal_message_is_not_taken_for_blog(env: Env) -> None:
+    """기록은 30일 뒤 지워진다 — 한 달 넘게 고쳐 쓰는 고정 공지에 답해도 Blog-Auto 로 넘기지 않음."""
+    with_llm(env, ans("/status"))
+    env.db.kv_set("admin_msgs_since", (utcnow() - timedelta(days=90)).isoformat())
+    pin = env.bot_msg("📌 🔗 내가 링크를 만들어 줘야 하는 글 (1건)\n• #680 비비고 [네이버]", record=False,
+                      date=utcnow() - timedelta(days=nlmod.REGISTRY_DAYS + 5))
+    await env.text("https://toss.im/_m/abc", reply_to=pin)
+    assert env.relayed == [] and env.ctrl.named("attach_link") == [("attach_link", 680, "https://toss.im/_m/abc")]
+    old = env.bot_msg("✅ #681 처리했습니다", record=False, date=utcnow() - timedelta(days=nlmod.REGISTRY_DAYS + 5))
+    await env.text("https://toss.im/_m/def", reply_to=old)  # 글 짐작에 걸리는 말이 없어도 예전처럼 딜 메시지로
+    assert env.relayed == [] and env.ctrl.named("attach_link")[-1] == ("attach_link", 681, "https://toss.im/_m/def")
+
+
+async def test_typed_number_of_another_action_does_not_move_the_reply_deal(env: Env) -> None:
+    a = add_item(env.db, "애슐리 핫도그")
+    b = add_item(env.db, "비비고 만두", status="awaiting_approval")
+    req = env.bot_msg(f"🔗 <b>내 링크가 필요합니다 #{a}</b>", kind="link", q=a)
+    with_llm(env, ans("/skip", a, also=[{"intent": "/ok", "post": b, "args": ""}]))
+    await env.text(f"이건 패스, {b}번은 올려", reply_to=req)
+    assert f"/skip {a}\n/ok {b}" in env.texts[-1]
+    await env.press(env.press_data("실행"))
+    assert env.ctrl.named("skip_item") == [("skip_item", a)] and env.ctrl.named("approve_item") == [("approve_item", b, None)]
+
+
+async def test_slow_ai_is_cut_off(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Slow:
+        last_backend = "api"
+
+        async def ask(self, *_a: Any) -> dict[str, Any]:
+            await asyncio.sleep(5)
+            return ans("/status")
+
+    monkeypatch.setattr(nlmod, "ASK_GRACE", 0)
+    env.nl.cfg.timeout_seconds = 0.05
+    env.nl.asker = Slow()
+    t0 = time.monotonic()
+    await env.text("상태 어때")
+    assert time.monotonic() - t0 < 2 and env.texts[-1].startswith("🤖 지금 말을 알아듣는 AI가 응답하지 않아요")
 
 
 async def test_info_review_long_body_short_ok_and_short_edit(env: Env) -> None:
