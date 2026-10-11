@@ -300,3 +300,30 @@ async def test_threads_user_token_connects_without_the_login_page(settings: Sett
         assert tok is not None and tok.access_token == "GOOD" and tok.user_id == "42" and tok.expires_at is not None
     finally:
         await bot.close()
+
+
+async def test_instagram_user_token_connects_without_the_login_page(settings: Settings) -> None:
+    """/instatoken: Instagram API 설정의 '액세스 토큰 생성' 토큰으로 연결 (웹 로그인이 돌기만 할 때 — 주인 10/12)."""
+    from dealbot.publisher.instagram import KV_TOKEN as IG_KV_TOKEN
+    from dealbot.publisher.instagram import InstagramClient
+
+    bot = DealBot(settings)
+    try:
+        def handler(req: httpx.Request) -> httpx.Response:
+            if req.url.path.endswith("/access_token"):  # 이미 장기 토큰
+                return httpx.Response(400, json={"error": {"message": "Invalid parameter", "code": 100}})
+            if req.url.path.endswith("/me"):
+                if dict(req.url.params).get("access_token") != "GOOD":
+                    return httpx.Response(400, json={"error": {"message": "Invalid OAuth access token", "code": 190}})
+                return httpx.Response(200, json={"user_id": "17841", "username": "oneul_hot_deal"})
+            return httpx.Response(404, json={})
+
+        bot.instagram.client = InstagramClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+                                               app_id="IGAPP", app_secret="IGSECRET", retry_backoff=0.01)
+        assert (await bot.instagram_submit_token("BAD")).startswith("❌") and bot.db.kv_get(IG_KV_TOKEN) in (None, "")
+        ok = await bot.instagram_submit_token(" GOOD ")
+        assert "✅ 인스타그램 연결 완료: @oneul_hot_deal" in ok and "/instatest" in ok
+        tok = bot.instagram.stored_token()
+        assert tok is not None and tok.access_token == "GOOD" and tok.user_id == "17841" and tok.expires_at is not None
+    finally:
+        await bot.close()

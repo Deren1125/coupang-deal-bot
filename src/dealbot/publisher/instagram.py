@@ -164,6 +164,30 @@ class InstagramClient:
             expires_at=utcnow() + timedelta(seconds=expires_in) if expires_in else None,
         )
 
+    async def from_user_token(self, token: str) -> InstagramToken:
+        """메타 개발자 화면(Instagram API 설정)의 '액세스 토큰 생성'으로 만든 토큰을 그대로 받는다 (웹 로그인이 돌기만 할 때 — 주인 10/12).
+        단기면 장기(60일)로 바꾸고, 이미 장기면 그대로. 만료일을 모르면 59일로 잡아 자동 갱신이 돌게."""
+        token = token.strip()
+        expires_in = 0
+        if self.app_secret:
+            try:
+                long = await self._request(
+                    "GET",
+                    f"{GRAPH_BASE}/access_token",
+                    params={"grant_type": "ig_exchange_token", "client_secret": self.app_secret, "access_token": token},
+                    step="long_token",
+                )
+                token = long.get("access_token") or token
+                expires_in = int(long.get("expires_in") or 0)
+            except InstagramError as e:  # 이미 장기 토큰이면 바꿀 수 없다고 나옴 → 그대로 씀
+                log.info("instagram user token: long-lived exchange skipped (%s)", e)
+        me = await self.me(token)  # 토큰이 진짜인지 여기서 확인 (틀리면 InstagramError)
+        return InstagramToken(
+            access_token=token,
+            user_id=str(me.get("user_id") or me.get("id") or ""),
+            expires_at=utcnow() + (timedelta(seconds=expires_in) if expires_in else timedelta(days=59)),
+        )
+
     async def refresh(self, token: InstagramToken) -> InstagramToken:
         body = await self._request(
             "GET",

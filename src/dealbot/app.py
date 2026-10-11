@@ -1911,6 +1911,19 @@ class DealBot:
         except InstagramError as e:
             return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /instaauth 로 다시 받아 주세요."
 
+    async def instagram_submit_token(self, token: str) -> str:
+        """/instatoken: 메타 개발자 화면에서 만든 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""
+        try:
+            tok = await self.instagram.client.from_user_token(token)
+            me = await self.instagram.client.me(tok.access_token)
+        except InstagramError as e:
+            return f"❌ 연결하지 못했어요: {html.escape(str(e))}\n토큰을 다시 만들어 보내 주세요 (테스터로 수락한 프로페셔널 계정으로 만든 토큰이어야 해요)."
+        username = str(me.get("username") or "")
+        self.instagram.save_token(tok, username)
+        self.db.log_event("INFO", "instagram", f"authorized by user token as {username}")
+        expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
+        return f"✅ 인스타그램 연결 완료: @{html.escape(username)} (토큰 만료 {expires}, 자동 갱신됨). 이제 /instatest 로 시험해 보세요."
+
     async def instagram_test(self, queue_id: int | None = None) -> str:
         """인스타그램에 실제로 올려 본다. 번호 없으면 샘플 딜, 있으면 채널에 올렸던 그 글."""
         from dealbot.cli import sample_deal
