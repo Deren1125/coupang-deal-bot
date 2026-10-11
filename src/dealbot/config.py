@@ -325,10 +325,13 @@ class InstagramConfig(BaseModel):
     template: str = "deal_instagram.j2"
     refresh_before_days: int = 7
     info_posts: bool = False  # 정보 글(이벤트류)도 올릴지. 기본은 상품 딜만
+    # 확인된 상품 사진(deal_photo — 텔레그램에 올린 그 사진)이 없을 때: skip = 인스타엔 안 올리고 기록만 (기본),
+    # text_card = 사진 없는 글자 카드로 올림. 로고·기본 이미지·게시판 썸네일은 어느 쪽이든 카드에 안 넣는다
+    no_photo: Literal["skip", "text_card"] = "skip"
 
 
 class CardConfig(BaseModel):
-    """딜 카드 이미지(1080×1350 JPEG). 인스타그램은 항상, 스레드는 상품 사진이 없거나 거절될 때 쓴다."""
+    """딜 카드 이미지(1080×1350 JPEG). 인스타그램만 — 사진은 텔레그램 글과 같은 확인된 상품 사진(deal_photo)만."""
 
     enabled: bool = True
     font_path: str | None = None  # 비우면 서버 글꼴(나눔고딕 등)을 찾음
