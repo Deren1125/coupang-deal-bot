@@ -447,7 +447,7 @@ class NLRouter:
         return json.dumps(ctx, ensure_ascii=False)
 
     # ------------------------------------------------------------ 해석
-    async def route(self, text: str, ref: Ref, *, photos: int = 0, file: str = "") -> Decision:
+    async def route(self, text: str, ref: Ref, *, photos: int = 0, file: str = "", msg_id: int | None = None) -> Decision:
         """AI 한 번 → 검사 → 결정. AI 가 답하지 않으면 act='fail' (아무것도 실행하지 않음)."""
         cands = self.candidates(text, ref)
         t0 = time.monotonic()
@@ -457,10 +457,10 @@ class NLRouter:
             data = await self.asker.ask(SYSTEM, self.context(text, ref, cands, photos=photos, file=file), schema())
         except Exception as e:  # noqa: BLE001 — LLMError·시간 초과·그 밖의 오류 모두 '안내만'
             d = Decision("fail", error=f"{type(e).__name__}: {e}")
-            self._log(text, ref, d, ms=int((time.monotonic() - t0) * 1000))
+            self._log(text, ref, d, ms=int((time.monotonic() - t0) * 1000), msg_id=msg_id)
             return d
         d = self.decide(data, text, ref, cands, photos=photos)
-        self._log(text, ref, d, ms=int((time.monotonic() - t0) * 1000))
+        self._log(text, ref, d, ms=int((time.monotonic() - t0) * 1000), msg_id=msg_id)
         return d
 
     def decide(self, data: dict[str, Any], text: str, ref: Ref, cands: dict[int, QueueItem], *, photos: int = 0) -> Decision:
@@ -683,11 +683,11 @@ class NLRouter:
         self.relay({"update_id": 0, "message": msg})
 
     # ------------------------------------------------------------ 기록
-    def _log(self, text: str, ref: Ref, d: Decision, *, ms: int) -> None:
+    def _log(self, text: str, ref: Ref, d: Decision, *, ms: int, msg_id: int | None = None) -> None:
         q = d.actions[0].post if d.actions else None
         risk = "irreversible" if d.act == "confirm" else (d.actions[0].cmd.risk if d.actions else "-")
         backend = getattr(self.asker, "last_backend", None) or "-"
         extra = f' err="{log_text(d.error)}"' if d.error else ""
-        log.info('nl deal reply=%s intent=%s q=%s also=%d conf=%.2f risk=%s act=%s backend=%s ms=%d%s text="%s"',
-                 ref.label, d.intent or "-", q if q is not None else "-", max(len(d.actions) - 1, 0), d.confidence,
+        log.info('nl deal msg=%s reply=%s intent=%s q=%s also=%d conf=%.2f risk=%s act=%s backend=%s ms=%d%s text="%s"',
+                 msg_id or "-", ref.label, d.intent or "-", q if q is not None else "-", max(len(d.actions) - 1, 0), d.confidence,
                  risk, d.act, backend, ms, extra, log_text(text))

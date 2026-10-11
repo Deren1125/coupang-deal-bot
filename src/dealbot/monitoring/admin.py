@@ -1454,7 +1454,7 @@ def register_admin_handlers(
             await say(update, nlmod.RATE_LIMITED)
             return
         try:
-            d = await nl.route(text, ref)
+            d = await nl.route(text, ref, msg_id=getattr(msg, "message_id", None))
             await nl_apply(update, ctx, d, text, msg, ref)
         except Exception:  # noqa: BLE001
             log.exception("nl router failed")
@@ -1493,7 +1493,8 @@ def register_admin_handlers(
             is_image = bool(getattr(msg, "photo", None)) or str(getattr(doc, "mime_type", "") or "").startswith("image/")
             try:
                 d = await nl.route(caption, ref, photos=1 if is_image else 0,
-                                   file="" if doc is None else str(getattr(doc, "file_name", "") or ""))
+                                   file="" if doc is None else str(getattr(doc, "file_name", "") or ""),
+                                   msg_id=getattr(msg, "message_id", None))
             except Exception:  # noqa: BLE001
                 log.exception("nl router failed (media)")
                 d = nlmod.Decision("fail", reply=nlmod.ROUTER_BUG)

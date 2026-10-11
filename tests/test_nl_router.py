@@ -632,7 +632,7 @@ async def test_log_line_has_intent_act_and_no_url_path(env: Env, caplog: pytest.
     with caplog.at_level(logging.INFO, logger="dealbot.monitoring.nl"):
         await env.text("이 페이지 화면 찍어줘 https://www.algumon.com/n/deal?secret=1 " + "가" * 80)
     line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("nl deal"))
-    assert "intent=/shot" in line and "act=exec" in line
+    assert "intent=/shot" in line and "act=exec" in line and re.search(r"msg=\d+", line)
     text = line.split('text="', 1)[1].rstrip('"')
     assert len(text) <= 60 and "secret" not in line and "/n/deal" not in line and "www.algumon.com" in line
 
@@ -647,6 +647,13 @@ def test_help_mentions_words_and_catalog_is_consistent() -> None:
     assert "blog" in s["properties"]["intent"]["enum"]
     for c in nlmod.DEAL_CATALOG:
         assert c.name in nlmod.SYSTEM
+
+
+def test_every_catalog_command_has_a_registered_handler(env: Env) -> None:
+    """목록에 넣은 명령은 모두 딜봇의 실제 명령 처리 함수로 실행된다 (/post 는 주인의 원래 글로 submit_manual)."""
+    registered = {c for h, _ in env.app.handlers for c in getattr(h, "commands", ())}
+    for c in nlmod.DEAL_CATALOG:
+        assert c.name.lstrip("/") in registered, c.name
 
 
 def test_registry_seeding_from_old_notices(tmp_path: Path) -> None:
