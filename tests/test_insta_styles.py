@@ -68,7 +68,7 @@ def _pub(r: TemplateRenderer) -> InstagramPublisher:
 # ---------------------------------------------------------------- 설정
 def test_config_keeps_the_current_style_until_the_owner_picks() -> None:
     s = load_settings(ROOT / "config.yaml", load_env=False)
-    assert s.instagram.style == "current" and s.instagram.no_photo == "skip" and s.instagram.info_posts is False
+    assert s.instagram.style == "B" and s.instagram.no_photo == "skip" and s.instagram.info_posts is False
 
 
 def test_style_accepts_lowercase() -> None:
@@ -156,8 +156,9 @@ async def test_deals_page_shows_numbers_only_for_variant_styles(settings) -> Non
         assert bot.db.enqueue(deal, score=40.0)
         bot.db.update_queue_item(1, status="published", deal=deal)
         bot.db.record_post(deal, channel_id=None, message_id=1, dry_run=True)
+        bot.settings.instagram.style = "current"
         _, body = await bot.web.dispatch("GET", "/")
-        assert 'class="no"' not in body  # 기본(current)은 지금 페이지 그대로
+        assert 'class="no"' not in body  # current 는 예전 페이지 그대로
         bot.settings.instagram.style = "A"
         _, body = await bot.web.dispatch("GET", "/")
         assert '<span class="no">#1</span>' in body
