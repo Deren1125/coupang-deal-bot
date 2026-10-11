@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dealbot.app import DealBot
-from dealbot.monitoring.admin import CODE_SHA, heartbeat_due
+from dealbot.monitoring.admin import CODE_SHA, heartbeat_due, kakao_fit
 from dealbot.utils.timeutil import local_now, next_daily_time, utcnow
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,28 @@ def startup_notice_due(db: Any, lines: list[str], now: datetime | None = None) -
 
 def mark_startup_notice(db: Any, lines: list[str], now: datetime | None = None) -> None:
     db.kv_set(STARTUP_NOTICE_KV, json.dumps({"sig": _startup_signature(lines), "at": (now or utcnow()).isoformat()}))
+
+
+SELFCHECK_BAD_KV = "selfcheck_bad"
+
+
+async def selfcheck_alerts(bot: DealBot, lines: list[str]) -> None:
+    """자기 점검에서 새로 ❌ 가 된 항목만 주인 카톡 (지난 시작 때도 ❌ 였던 것은 다시 알리지 않음)."""
+    bad = sorted(line[2:].strip() for line in lines if line.startswith("❌"))
+    try:
+        before = set(json.loads(bot.db.kv_get(SELFCHECK_BAD_KV) or "[]"))
+    except ValueError:
+        before = set()
+    bot.db.kv_set(SELFCHECK_BAD_KV, json.dumps(bad, ensure_ascii=False))
+    for item in bad:
+        if item in before:
+            continue
+        name = item.split(":", 1)[0][:30]
+        await bot.notifier.alert(
+            "selfcheck", f"❌ <b>자기 점검 실패</b>: {html.escape(item[:300])}\n/status 로 확인해 주세요",
+            kakao_fit(f"⛔[멈춤] 딜봇 자기 점검 실패: {item[:80]}", "→ 텔레그램 핫딜봇 /status"),
+            key=f"selfcheck:{name}", short=f"딜봇 점검 실패 {name}"[:48],
+        )
 
 
 def write_running_version() -> None:
@@ -164,6 +187,7 @@ async def publisher_loop(bot: DealBot, stop: asyncio.Event) -> None:
                     log.info("자동 업데이트가 새 코드를 받는 중 — 새 글 발행은 재시작 뒤에")
                 else:
                     await bot.process_queue_once()
+                    bot.notifier.error_cleared("publisher")
         except Exception as e:  # noqa: BLE001
             log.exception("publisher loop error")
             bot.db.log_event("ERROR", "publisher", f"{type(e).__name__}: {e}")
@@ -201,6 +225,16 @@ async def daily_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
         return
     await _daily_job_loop(
         bot, stop, hhmm=bot.settings.monitoring.daily_summary_time, marker_key="daily_summary_marker", label="summary", job=bot.daily_summary
+    )
+
+
+async def owner_summary_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """저녁 요약(카톡)에 넣을 딜봇 하루 정리를 Blog-Auto 에 넘긴다 (Blog-Auto 가 21~22시에 블로그 요약과 함께 문장으로 보냄)."""
+    if not bot.notifier.silent_policy:
+        return
+    await _daily_job_loop(
+        bot, stop, hhmm=bot.settings.monitoring.owner_summary_time, marker_key="owner_summary_marker", label="owner_summary",
+        job=bot.owner_summary,
     )
 
 
@@ -286,6 +320,7 @@ async def run_forever(bot: DealBot) -> None:
         lines = [("✅ " if ok else "⚠️ " if ok is None else "❌ ") + text for ok, text in checks]
         for line in lines:
             log.info("self-check: %s", line)
+        await selfcheck_alerts(bot, lines)
         if not bot.notifier.enabled:
             log.warning(
                 "관리자 알림을 보낼 수 없습니다 — TELEGRAM_BOT_TOKEN=%s, TELEGRAM_ADMIN_CHAT_ID=%s. "
@@ -313,6 +348,7 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(collector_loop(bot, stop), name="collector_loop"),
         asyncio.create_task(publisher_loop(bot, stop), name="publisher_loop"),
         asyncio.create_task(daily_summary_loop(bot, stop), name="daily_summary_loop"),
+        asyncio.create_task(owner_summary_loop(bot, stop), name="owner_summary_loop"),
         asyncio.create_task(blog_digest_loop(bot, stop), name="blog_digest_loop"),
         asyncio.create_task(maintenance_loop(bot, stop), name="maintenance_loop"),
         asyncio.create_task(heartbeat_loop(bot, stop), name="heartbeat_loop"),

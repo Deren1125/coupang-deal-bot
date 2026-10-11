@@ -38,6 +38,7 @@ exit 0
 for a in "$@"; do
   case "$a" in
     text=*) printf '%s\n----\n' "${a#text=}" >> "$SIM/notify.log" ;;
+    disable_notification=*) echo "$a" >> "$SIM/curl_flags.log" ;;
     https://checkip.amazonaws.com) echo "${FAKE_IP:-3.35.1.2}"; exit 0 ;;
     */health) printf '200'; exit 0 ;;
   esac
@@ -281,6 +282,23 @@ def test_selftest_failure_rolls_back_and_keeps_old_bot(server: Server) -> None:
     r = server.run()
     assert r.returncode == 0, r.stdout + r.stderr
     assert server.runs(v3) and len(server.notices()) == 1
+
+
+def test_bad_update_is_silent_on_telegram_and_asks_blogauto_for_a_kakao(server: Server) -> None:
+    """주인 결정 10/11: 업데이트 알림은 소리 없이, 막힌 업데이트(bad)는 Blog-Auto 받은편지함에 카톡 한 줄(v2)도."""
+    import json
+
+    (server.srv / "data").mkdir()  # 딜봇 데이터 폴더 (.env 에 DEALBOT_DATA_DIR 가 없으면 data)
+    server.commit("bad", {"BROKEN": "x"})
+    assert server.run().returncode != 0
+    assert server.log("curl_flags.log").split() == ["disable_notification=true"]
+    rows = [json.loads(x)["owner_notice"] for x in (server.srv / "data" / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1 and rows[0]["v"] == 2 and rows[0]["kind"] == "update_bad"
+    assert rows[0]["key"].startswith("update:") and rows[0]["text"].startswith("⚠️[할 일] 딜봇 업데이트 막힘: ")
+    assert len(rows[0]["text"]) <= 200 and rows[0]["text"].endswith("봇은 지금 버전으로 계속 돌아요")
+    server.age_markers(30)
+    server.run()  # 같은 커밋은 다시 안 받음 → 줄도 하나 그대로
+    assert len((server.srv / "data" / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
 
 def test_crash_after_restart_rolls_back_to_the_running_version(server: Server) -> None:

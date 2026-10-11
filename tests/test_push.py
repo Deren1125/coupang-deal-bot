@@ -67,6 +67,7 @@ async def test_manual_link_triggers_push(settings, tmp_path) -> None:  # type: i
     settings.publish.min_interval_seconds = 0
     settings.publish.dry_run = False
     settings.secrets.ntfy_topic = "topic1"
+    settings.monitoring.push.events = ["manual_link"]  # 운영 설정은 비워 둠 (주인 결정 10/11: 카톡으로) — 켰을 때의 흐름
     bot = DealBot(settings)
     calls: list[httpx.Request] = []
     bot.push = PushNotifier(settings.monitoring.push, settings.secrets, _http(calls))

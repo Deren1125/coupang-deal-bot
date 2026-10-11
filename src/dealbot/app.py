@@ -59,10 +59,12 @@ from dealbot.media.imagecheck import (
 )
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import (
+    _AUTH_RE,
     BOT_COMMANDS,
     AdminNotifier,
     StatusReporter,
     channel_post_base,
+    kakao_fit,
     register_admin_handlers,
 )
 from dealbot.monitoring.nl import REGISTRY_DAYS, NLRouter
@@ -325,6 +327,9 @@ class DealBot:
             labels={c.name: c.label for c in settings.collectors if c.label},
         )
         self.notifier.owner_relay = self.owner_notice
+        # 알림 정책 (주인 결정 10/11): 할 일 카톡은 Blog-Auto 받은편지함으로(v2), Blog-Auto 생존 신호로 카톡이 되는지 본다
+        self.notifier.owner_inbox = self.relay_to_blog
+        self.notifier.status_path = settings.data_dir / "blogauto_status.json"
         # 말 명령 (주인 요청 10/11): 일반 말 → 기존 명령. AI 는 정보 글 요약기처럼 API 키가 있으면 API, 없으면 서버 claude CLI
         nc = settings.monitoring.nl_router
         self.nl = NLRouter(
@@ -496,6 +501,7 @@ class DealBot:
         if item.status in ("published",):
             return f"#{queue_id} 번은 이미 채널에 올라갔습니다."
         self.db.update_queue_item(queue_id, status="skipped", error="skipped by admin")
+        self.notifier.resolve(f"link:{queue_id}", f"review:{queue_id}")  # 아직 안 보낸 카톡 알림은 취소
         return f"⏭ #{queue_id} 번은 건너뛰었습니다. 올리지 않습니다."
 
     def approve_item(self, queue_id: int, text: str | None = None) -> str:
@@ -507,6 +513,7 @@ class DealBot:
             return f"#{queue_id} 번은 확인을 기다리는 글이 아닙니다 (지금 '{item.status}' 상태)."
         deal = item.deal
         p = deal.product
+        self.notifier.resolve(f"review:{queue_id}")  # 답했음 — 아직 안 보낸 확인 요청 카톡은 취소
         if p.deal_kind != "info" and "info_draft" not in p.extra:
             # 정품 확인 요청에 대한 답: 링크 변환과 발행을 이어서 한다
             p.extra["auth_approved"] = True
@@ -584,6 +591,11 @@ class DealBot:
         if alert:
             try:
                 await self.notifier.notify_error("commentary", alert)
+                await self.notifier.alert(  # 주인이 서버에서 다시 로그인해야 풀림 → 카톡 (정보 글 요약과 같은 키)
+                    "claude_login", None,
+                    kakao_fit("⚠️[할 일] 딜봇 서버 claude 로그인을 확인해 주세요", "한줄평·정보 글 요약이 멈췄어요 (발행은 계속)"),
+                    key="login:claude_cli", short="딜봇 claude 로그인",
+                )
             except Exception:  # noqa: BLE001
                 log.exception("commentary alert failed")
         deal.product.extra["comment"] = wrote.get("comment")
@@ -1168,6 +1180,7 @@ class DealBot:
                     log.info("deal queued [%s/%s] %s %s원 (%s)", name, p.shop, p.name[:40], f"{p.price:,}", ", ".join(verdict.reasons))
             result.update(collected=len(products), deals=deals, queued=queued)
             self.db.finish_run(run_id, status="ok", collected=len(products), deals=deals, queued=queued)
+            self.notifier.error_cleared(f"collector:{name}")
             log.info("collector '%s' done: collected=%d deals=%d queued=%d", name, len(products), deals, queued)
         except CoupangRateLimited as e:
             # 시간당 호출 예산이 찬 것은 고장이 아니다: 조용히 건너뛰고 다음 시간에 다시
@@ -1381,10 +1394,13 @@ class DealBot:
                 self.db.kv_set(cooldown_key, to_iso(until))
                 self.db.log_event("WARNING", "links", f"{shop.key}: {e} → {hours:g}h cooldown")
                 log.warning("linkprice link failed for %s (%s) — skipping this shop for %gh", shop.key, e, hours)
-                await self.notifier.send(
+                await self.notifier.alert(
+                    "linkprice",
                     f"⚠️ <b>{html.escape(shop.name)}</b> 링크를 만들지 못했습니다. {hours:g}시간 동안 이 몰의 딜은 건너뜁니다.\n"
                     "링크프라이스에서 이 머천트가 승인됐는지 확인해 주세요. 승인되면 다음 딜부터 자동으로 다시 시도합니다.\n"
-                    f"<code>{html.escape(truncate(str(e), 200))}</code>"
+                    f"<code>{html.escape(truncate(str(e), 200))}</code>",
+                    kakao_fit(f"⚠️[할 일] 링크프라이스 {shop.name} 링크를 못 만들어요", "→ 머천트 승인 확인 (그동안 이 몰 딜은 건너뜀)"),
+                    key=f"linkprice:{shop.key}", short=f"링크프라이스 {shop.name} 승인", ttl_h=168,
                 )
                 return "skip", f"linkprice link failed: {e}"
             return "fail", str(e)
@@ -1720,7 +1736,8 @@ class DealBot:
             else:
                 self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
                 log.warning("threads post failed: %s", result.error)
-                await self.notifier.send(f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>")
+                await self._sns_failed("스레드", "threadsauth", f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>",
+                                       result.error or "")
         if want_ig:
             ig = await self.instagram.publish(deal, card_url)
             if ig.ok:
@@ -1729,9 +1746,20 @@ class DealBot:
             else:
                 self.db.log_event("WARNING", "instagram", f"{deal.product.product_id}: {ig.error}")
                 log.warning("instagram post failed: %s", ig.error)
-                await self.notifier.send(f"⚠️ <b>인스타그램 발행 실패</b>\n<code>{html.escape(ig.error or '')}</code>")
+                await self._sns_failed("인스타그램", "instaauth", f"⚠️ <b>인스타그램 발행 실패</b>\n<code>{html.escape(ig.error or '')}</code>",
+                                       ig.error or "")
         for block in self.copy_blocks.build(deal):
             await self.notifier.send(block.as_telegram_html(), silent=True)
+
+    async def _sns_failed(self, sns: str, cmd: str, tg_text: str, error: str) -> None:
+        """스레드·인스타 발행 실패: 연결(토큰·권한)이 끊긴 것이면 주인 카톡 (다시 연결해야 풀림), 아니면 텔레그램만 (소리 없이)."""
+        if _AUTH_RE.search(error):
+            await self.notifier.alert(
+                "sns_auth", tg_text, kakao_fit(f"⚠️[할 일] {sns} 연결이 끊겼어요", f"→ 텔레그램 핫딜봇 /{cmd}"),
+                key=f"sns:{cmd}", short=f"{sns} 다시 연결", ttl_h=24,
+            )
+        else:
+            await self.notifier.send(tg_text)
 
     async def threads_auth_url(self) -> str:
         if not self.settings.secrets.has_threads_app:
@@ -1814,7 +1842,7 @@ class DealBot:
 
     async def _notify_quiet(self, text: str) -> None:
         try:
-            await self.notifier.send(text)
+            await self.notifier.send(text, silent=True)
         except Exception as e:  # noqa: BLE001
             log.warning("notify failed: %s", e)
 
@@ -2110,6 +2138,8 @@ class DealBot:
         self.state.set_error(f"[publish] {error}")
         log.warning("publish failed (%d/%d) %s: %s", attempts, self.settings.publish.max_publish_attempts, item.product_id, error)
         await self.notifier.notify_publish_failed(item.deal, error, final=final)
+        if final:
+            await self.notifier.publish_failed_final(error)  # 3번 이어지면 '발행 막힘' 급한 카톡
 
     async def drain_queue(self, max_items: int | None = None) -> int:
         n = 0
@@ -2137,6 +2167,28 @@ class DealBot:
         await self.notifier.notify_daily_summary(text)
         self.db.kv_set("last_daily_summary_at", to_iso(now))
         return text
+
+    async def owner_summary(self) -> str:
+        """저녁 요약(카톡, Blog-Auto 가 21~22시에 문장으로 보냄)에 넣을 딜봇 하루 정리 — 표가 아니라 문장 (주인 결정 10/11)."""
+        now = utcnow()
+        s = self.db.summary(now - timedelta(days=1), now)
+        posted = "연습으로 미리 본 딜" if self.state.dry_run else "채널에 올린 딜"
+        day = f"오늘 딜봇은 {posted}이 {s.published}개예요" + (f" (끝내 못 올린 것 {s.publish_failed}개)" if s.publish_failed else "") + "."
+        if s.run_errors:
+            day += f" 게시판 확인 중 오류가 {s.run_errors}번 있었지만 봇은 계속 돌았어요."
+        if self.state.paused:
+            day += " 지금은 발행이 멈춰 있어요 (/resume)."
+        self.notifier.summary("day", day, replace=True)
+        waiting = []
+        links = self.db.awaiting_items(50)
+        if links:
+            ids = " ".join(f"#{it.id}" for it in links[:5]) + (" …" if len(links) > 5 else "")
+            waiting.append(f"핫딜봇에서 내 링크를 기다리는 딜이 {len(links)}개 있어요 ({ids}).")
+        asks = self.db.awaiting_items(50, statuses=("awaiting_approval",))
+        if asks:
+            waiting.append(f"확인(/ok)을 기다리는 딜이 {len(asks)}개 있어요.")
+        self.notifier.summary("waiting", " ".join(waiting) or "", replace=True)
+        return day + (" " + " ".join(waiting) if waiting else "")
 
     def heartbeat(self) -> None:
         self.db.kv_set("heartbeat", to_iso(utcnow()))

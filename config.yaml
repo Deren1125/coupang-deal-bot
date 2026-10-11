@@ -407,14 +407,16 @@ monitoring:
   # 휴대폰 푸시 (NTFY_TOPIC 또는 PUSHOVER_* 가 .env 에 있으면 자동 사용)
   push:
     provider: auto             # auto | ntfy | pushover | none
-    events: [manual_link, info_review]  # manual_link | info_review | publish_failed | error | daily_summary | startup
+    events: []                 # 주인 결정 10/11: 휴대폰 푸시 대신 카톡 (manual_link | info_review | publish_failed | error | daily_summary | startup)
     ntfy_url: https://ntfy.sh
   notify_on_publish: false           # 채널에 올릴 때마다 오던 '✅ 채널에 올렸습니다' 알림 끔 (카톡 복붙 문구는 그대로 옴)
   notify_on_failure: true
   notify_failure_attempts: false  # 재시도 중 실패(⚠️)는 조용히, 최종 포기(❌)만 알림
   notify_on_error: true
   notify_on_manual_link: true    # 토스/네이버 등 수동 링크가 필요할 때 알림
-  kakao_relay: true              # 링크 요청·링크 완료를 카카오톡 '나에게 보내기'로도 (Blog-Auto 가 보냄 · 카톡 연결은 /kakao)
+  kakao_relay: true              # 주인이 해야 할 일(링크 요청·확인·고장)을 카카오톡 '나에게 보내기'로 (Blog-Auto 가 보냄 · 카톡 연결은 /kakao)
+  telegram_silent: true          # 주인 결정 10/11: 관리자 챗 알림은 소리 없이 (할 일은 카톡, 카톡이 안 되면 텔레그램으로 소리 내서). 명령 답장은 그대로
+  owner_summary_time: "20:50"    # 저녁 요약(카톡)에 넣을 딜봇 하루 정리를 Blog-Auto 에 넘기는 시각
   error_alert_cooldown_minutes: 30
   daily_summary: false           # 매일 21:00 하루 요약 끔 (/status 로 언제든 볼 수 있음). 켜려면 true
   daily_summary_time: "21:00"

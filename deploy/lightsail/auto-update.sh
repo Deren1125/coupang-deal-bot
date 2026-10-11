@@ -49,8 +49,27 @@ notify() {  # 관리자 챗으로 알림 (토큰은 .env 에서 읽기만, 출�
   tok="$(grep -E '^TELEGRAM_BOT_TOKEN=' .env | tail -1 | cut -d= -f2-)"
   chat="$(grep -E '^TELEGRAM_ADMIN_CHAT_ID=' .env | tail -1 | cut -d= -f2-)"
   [ -n "$tok" ] && [ -n "$chat" ] || return 0
+  # 주인 결정 10/11: 관리자 챗 알림은 소리 없이 (막혀서 주인이 봐야 하는 것은 아래 owner_notice 로 카톡)
   curl -s -o /dev/null --max-time 10 "https://api.telegram.org/bot$tok/sendMessage" \
-    --data-urlencode "chat_id=$chat" --data-urlencode "text=$1" || true
+    --data-urlencode "chat_id=$chat" --data-urlencode "text=$1" --data-urlencode "disable_notification=true" || true
+}
+
+owner_notice() {  # $1 카톡 글, $2 키 — Blog-Auto 받은편지함에 owner_notice v2 한 줄 (Blog-Auto 가 카톡 '나에게 보내기'로 보냄)
+  local dir
+  dir="$(grep -E '^DEALBOT_DATA_DIR=' .env | tail -1 | cut -d= -f2- | tr -d "\"'")"
+  dir="${dir:-data}"
+  [ -d "$dir" ] || return 0
+  command -v python3 >/dev/null || return 0
+  NOTE_TEXT="$1" NOTE_KEY="$2" python3 -c '
+import json, os, sys, time
+text = os.environ["NOTE_TEXT"]
+tail = "\n봇은 지금 버전으로 계속 돌아요"
+head = text if len(text) + len(tail) <= 200 else text[: 199 - len(tail)] + "\u2026"
+note = {"v": 2, "kind": "update_bad", "key": os.environ["NOTE_KEY"], "text": head + tail,
+        "short": "딜봇 업데이트 막힘", "urgent": False, "link": "", "ttl_h": 24, "at": time.time()}
+with open(sys.argv[1], "a", encoding="utf-8") as f:
+    f.write(json.dumps({"owner_notice": note}, ensure_ascii=False) + "\n")
+' "$dir/blogauto_inbox.jsonl" || true
 }
 
 mkdir -p var
@@ -102,6 +121,7 @@ fail() {  # $1 알림 내용, $2 retry(10분 뒤 다시) | bad(새 커밋이 올
   touch "$marker"
   echo "⚠️ $1"
   [ -n "$first" ] && notify "⚠️ 핫딜 봇 자동 업데이트: $1"
+  [ -n "$first" ] && [ "${2:-retry}" = bad ] && owner_notice "⚠️[할 일] 딜봇 업데이트 막힘: $1" "update:$R_SHORT"
   exit 1
 }
 rollback() {  # fail 과 같지만 먼저 돌고 있던 코드로 되돌리고, 이미 재시작했으면 그 버전으로 다시 켠다

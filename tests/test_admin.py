@@ -124,6 +124,7 @@ async def test_push_test_sends_ntfy(bot: DealBot) -> None:
     bot.push = PushNotifier(bot.settings.monitoring.push, bot.settings.secrets, httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     bot.notifier.push = bot.push
     bot.notifier.bot_username = "hotdeal_info_bot"
+    bot.settings.monitoring.push.events = ["manual_link", "info_review"]  # 운영 설정은 비워 둠 (주인 결정 10/11: 카톡으로)
     msg = await bot.push_test()
     assert msg.startswith("📲") and "dealbot-abc" in msg and "manual_link" in msg
     body = json.loads(calls[0].content)
@@ -202,6 +203,12 @@ async def test_quiet_notices_controls_silent_flag(settings: Settings) -> None:
     renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone)
     n = AdminNotifier(FakeBot(), 42, settings.monitoring, renderer, settings.app.timezone)  # type: ignore[arg-type]
     assert settings.monitoring.quiet_notices is False
+    # 주인 결정 10/11 (telegram_silent, 기본 켜짐): 알림은 모두 소리 없이, 카톡 대신 알림(loud)만 소리와 함께
+    assert settings.monitoring.telegram_silent is True
+    await n.send("x")
+    await n.send_with_id("y", loud=True)
+    assert calls[-2]["disable_notification"] is True and calls[-1]["disable_notification"] is False
+    settings.monitoring.telegram_silent = False  # 끄면 예전 그대로
     await n.send("a", silent=True)
     assert calls[-1]["disable_notification"] is False  # 기본: 일상 알림도 소리와 함께
     settings.monitoring.quiet_notices = True

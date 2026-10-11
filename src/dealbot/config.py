@@ -512,9 +512,13 @@ class MonitoringConfig(BaseModel):
     daily_summary: bool = True  # 매일 daily_summary_time 에 하루 요약을 보낼지 (/status 로 언제든 볼 수 있음)
     daily_summary_time: str = "21:00"
     quiet_notices: bool = False  # true: 시작/미리보기/발행 알림을 무음으로 (false: 모든 알림이 소리·진동과 함께 옴)
+    # 주인 결정 10/11: 관리자 챗 알림은 소리 없이. 주인이 해야 할 일(링크·확인·고장)은 Blog-Auto 가 카톡으로 보내고,
+    # Blog-Auto·카톡이 안 될 때만 텔레그램으로 소리 내서. 명령에 대한 답장은 그대로 (소리와 함께). false 면 예전 그대로
+    telegram_silent: bool = True
+    owner_summary_time: str = "20:50"  # 저녁 요약(카톡, Blog-Auto 가 21~22시에 보냄)에 넣을 딜봇 하루 정리를 넘기는 시각
     heartbeat_minutes: int = 0  # 관리자 챗이 N분 동안 조용하면 "정상 가동 중" 짧은 상태를 보냄 (0 = 끔). 특가 알림이 있으면 그걸로 대신함
 
-    @field_validator("daily_summary_time")
+    @field_validator("daily_summary_time", "owner_summary_time")
     @classmethod
     def _hhmm(cls, v: str) -> str:
         hh, mm = v.split(":")
