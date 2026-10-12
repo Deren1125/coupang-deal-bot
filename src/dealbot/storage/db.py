@@ -495,12 +495,16 @@ class Database:
             )
 
     def recent_post_names(self, days: int, now: datetime | None = None, *, include_dry_run: bool = True) -> list[dict[str, Any]]:
-        """최근 며칠 안에 올린 글의 상품명·가격 (이름이 비슷한 중복을 거르는 용도)."""
+        """최근 며칠 안에 올린 글의 상품명·가격 (이름이 비슷한 중복을 거르는 용도).
+        정보 글(info:…)은 products 표에 없어서 대기열에 남은 이름을 쓴다 — 없으면 이름이 비어 중복 검사를 그냥 통과했다
+        (10/12 「토너세이브 프린터 특가」가 뽐뿌 글 번호만 다르게 두 번 올라감)."""
         now = now or utcnow()
         where = "" if include_dry_run else " AND p.dry_run = 0"
         rows = self._q(
             f"""
-            SELECT p.product_id, p.price, p.posted_at, pr.name
+            SELECT p.product_id, p.price, p.posted_at,
+                   COALESCE(pr.name, (SELECT json_extract(q.payload, '$.product.name') FROM deal_queue q
+                                      WHERE q.product_id = p.product_id ORDER BY q.id DESC LIMIT 1)) AS name
             FROM posts p LEFT JOIN products pr ON pr.product_id = p.product_id
             WHERE p.posted_at >= ?{where}
             ORDER BY p.posted_at DESC LIMIT 500
