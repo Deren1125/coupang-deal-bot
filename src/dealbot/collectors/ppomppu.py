@@ -192,8 +192,8 @@ def _later_price(chunk: str, amounts: list[re.Match[str]], i: int, value: int) -
     개수·용량·어림값('1만원대')·혜택 금액('2,000원 추가적립')은 건너뛰고 처음 만나는 금액을 본다. 그 금액이
     정가·쿠폰 없는 값·배송비·몇 개 살 때의 값이면 None. 앞 금액보다 크면 앞 금액이 쿠폰·적립 금액일 수 있어야 하고
     (500원 단위), 작으면 쿠폰으로 깎인 값답게 앞 금액의 40% 이상이어야 한다 ('17,900원 쿠폰적용 3,000원' 은 판매가가
-    아니다). 앞 금액의 한 몫일 수 있는 값 — 단위당 값('개당', '꼴', '/100g')과 혜택 말 뒤의 값('추가할인 8,000원') —
-    은 절반보다 커야 한다."""
+    아니다). 단위당 값('개당', '꼴', '/100g')은 앞 금액을 나눈 값일 수 있어 절반보다 커야 하고, 혜택 말 바로 뒤의 값
+    ('추가할인 8,000원')은 대개 할인액이라 60% 이상이어야 한다."""
     a = amounts[i]
     for j in range(i + 1, len(amounts)):
         b = amounts[j]
@@ -211,8 +211,10 @@ def _later_price(chunk: str, amounts: list[re.Match[str]], i: int, value: int) -
             return None
         if b_value > value:
             return b_value if value % 500 == 0 else None
-        if _UNIT_BEFORE.search(gap) or _UNIT_AFTER.match(after) or _BENEFIT_BEFORE.search(lead):
+        if _UNIT_BEFORE.search(gap) or _UNIT_AFTER.match(after):
             return b_value if b_value * 2 > value else None
+        if _BENEFIT_BEFORE.search(lead):
+            return b_value if b_value * 5 >= value * 3 else None
         return b_value if b_value * 5 >= value * 2 else None
     return None
 
