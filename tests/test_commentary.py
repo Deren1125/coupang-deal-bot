@@ -375,12 +375,22 @@ def test_invented_quantities_are_blocked() -> None:
     assert check_comment("두 박스 사면 한 달은 버텨요.", facts) is None
     assert check_comment("한 달은 거뜬해요.", facts) is None
     assert check_comment("반값이라 지금 사두면 좋아요.", facts) is None
-    # 큰 수·한자어 수·인원·기간·배수도 지어낸 수량 (#56)
+    # 큰 수·한자어 수·인원·기간·배수도 지어낸 수량
     dumpling = "비비고 왕교자 1.05kg 2개"
     for said in ("스무 개 넘게 들어 있어요.", "열두 개씩 소분해 두면 편해요.", "두 사람이 일주일은 먹을 양이에요.",
-                 "네 식구 반찬으로 넉넉해요.", "에어프라이어에 십 분이면 끝나요.", "2배 넉넉한 구성이에요.", "이틀이면 다 먹어요."):
+                 "네 식구 반찬으로 넉넉해요.", "에어프라이어에 십 분이면 끝나요.", "2배 넉넉한 구성이에요.", "이틀이면 다 먹어요.",
+                 "세 배 넉넉해요.", "백 개 넘게 들어 있어요.", "보름이면 다 먹어요.", "세 분이서 나눠 먹기 좋아요."):
         assert check_comment(said, facts, dumpling) is None, said
         assert check_take(said.replace("요.", ""), facts, dumpling) is None, said
+    # 수+단위처럼 생긴 보통 낱말은 수량이 아니다 (백팩·열 배출·세배·보름달·백년초 …)
+    for said, name in (("출근용 백팩으로 딱이에요.", "샘소나이트 백팩"), ("백팩 수납공간이 넉넉해요.", "샘소나이트 백팩"),
+                       ("열 배출이 잘 돼서 조용해요.", "노트북 쿨링패드"), ("열분산 패드라 발열이 덜해요.", "CPU 쿨러"),
+                       ("설날 세배 선물로 무난해요.", "정관장 선물세트"), ("칸이 세분화돼서 정리가 쉬워요.", "수납함"),
+                       ("보름달 모양이라 귀여워요.", "호빵"), ("백년초 즙이라 상큼해요.", "백년초 즙"),
+                       ("백주부 소스라 간편해요.", "백설 소스"), ("천년초 성분이 들어 있어요.", "천년초 비누"),
+                       ("열 봉합이 깔끔해요.", "진공포장기")):
+        assert check_comment(said, facts, name) == said, said
+    assert check_take("출근용 백팩으로 딱임", facts, "샘소나이트 백팩") == "출근용 백팩으로 딱임"
     assert check_comment("2개라 나눠 두기 좋아요.", facts, dumpling)  # 상품명의 수량은 그대로
     assert check_comment("한 끼 반찬으로 꺼내 먹기 편해요.", facts, dumpling)
     assert check_comment("반값이라 지금 사두면 좋아요.", "평소보다 55% 싸요.")  # 실제로 반값 이상이면 허용
