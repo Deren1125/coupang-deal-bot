@@ -1,0 +1,19 @@
+{#
+  인스타그램 후보 양식 A — 사진 크게 + 큰 가격 카드의 본문. 첫 줄은 사실만(이름 · 가격 · 비교 가격), 링크는 눌리지 않으니 프로필 링크로.
+  ig 변수는 publisher/insta_style.caption_context. 해시태그 5개까지. 고지는 카드 안(짧게) + 끝에 몰 고지 문구.
+#}
+{{ ig.hook }}
+
+{{ pname }}
+{% for label, value in ig.rows %}
+· {{ label }} {{ value }}
+{% endfor %}
+
+{{ ig.cta }}
+가격·재고는 올린 시점 기준이라 바뀔 수 있어요
+{% if ig.disclosure %}
+
+{{ ig.disclosure }}
+{% endif %}
+
+{{ ig.hashtags }}

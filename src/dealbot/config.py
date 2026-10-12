@@ -221,6 +221,21 @@ class SoldOutConfig(BaseModel):
     mark_published_hours: int = 24  # 올린 지 N시간 안의 채널 글만 품절 표시를 붙임
 
 
+class PageCheckConfig(BaseModel):
+    """상품 페이지 가격 대조 (주인 결정 10/12, 큐 #22). 수집 때 읽는 상품 페이지의 가격·옵션을 제목 가격과 맞춰 본다.
+    - 제목 가격 ±tolerance_pct 안의 페이지 가격(판매가·할인가·쿠폰가·정가·옵션가·배송비 포함가·2~4개 묶음가 중 아무거나)이
+      있으면 그 값으로 진행 (시중가 대조도 그 값으로). 다른 옵션에 맞으면 옵션 이름을 남김
+    - 맞는 값의 옵션 수량이 제목과 다르거나(24개 ↔ 12개) 맞는 값이 없으면 보류(held): 링크 요청·발행 없이 관리자 챗에 짧은 메모
+    - 페이지를 못 읽었거나 가격이 없으면(토스 웹 페이지는 늘 가격 없음) 지금처럼 진행하고 로그만"""
+
+    enabled: bool = True
+    tolerance_pct: float = 10
+    # 제목에 카드·쿠폰·적립·멤버십 같은 말이 있으면 글 가격이 페이지에 안 보이는 할인 뒤 값일 수 있어,
+    # 글 가격이 페이지 가격보다 이만큼(%)까지 싼 것도 맞은 것으로 본다 (한쪽만. 0 = 안 씀)
+    discount_tolerance_pct: float = 25
+    shops: list[str] = Field(default_factory=lambda: ["toss", "naver"])
+
+
 class SourceRule(BaseModel):
     """수집원별 기준 재정의. 사이트마다 추천 수의 의미가 달라서 필요하다.
     (예: 루리웹 핫딜 게시판은 추천이 후하고, 뽐뿌는 짜다)"""
@@ -242,6 +257,7 @@ class DealConfig(BaseModel):
     # 원본 주소가 쇼핑몰이 아니라 게시판 글이면(본문에서 상품 링크를 못 찾은 이벤트 글 등) 링크 요청 없이 건너뜀
     require_shop_url: bool = True
     sold_out: SoldOutConfig = Field(default_factory=SoldOutConfig)
+    page_check: PageCheckConfig = Field(default_factory=PageCheckConfig)
     per_source: dict[str, SourceRule] = Field(default_factory=dict)
     interest: InterestConfig = Field(default_factory=InterestConfig)
     market: MarketCheckConfig = Field(default_factory=MarketCheckConfig)
@@ -325,13 +341,26 @@ class InstagramConfig(BaseModel):
     template: str = "deal_instagram.j2"
     refresh_before_days: int = 7
     info_posts: bool = False  # 정보 글(이벤트류)도 올릴지. 기본은 상품 딜만
+    # 카드·본문 양식. current = 지금 쓰는 카드 + template. A/B/C 는 후보 양식(주인이 고르기 전까지 current 유지):
+    # A 사진 크게 + 큰 가격, B 저장각 정보 카드, C 사진 꽉 채움 + 가격 스티커 (본문은 deal_instagram_a/b/c.j2)
+    style: Literal["current", "A", "B", "C"] = "current"
+    # 확인된 상품 사진(deal_photo — 텔레그램에 올린 그 사진)이 없을 때: skip = 인스타엔 안 올리고 기록만 (기본),
+    # text_card = 사진 없는 글자 카드로 올림. 로고·기본 이미지·게시판 썸네일은 어느 쪽이든 카드에 안 넣는다
+    no_photo: Literal["skip", "text_card"] = "skip"
+
+    @field_validator("style", mode="before")
+    @classmethod
+    def _style_upper(cls, v: Any) -> Any:
+        return v.upper() if isinstance(v, str) and v.lower() in ("a", "b", "c") else v
 
 
 class CardConfig(BaseModel):
-    """딜 카드 이미지(1080×1350 JPEG). 인스타그램은 항상, 스레드는 상품 사진이 없거나 거절될 때 쓴다."""
+    """딜 카드 이미지(1080×1350 JPEG). 인스타그램만 — 사진은 텔레그램 글과 같은 확인된 상품 사진(deal_photo)만."""
 
     enabled: bool = True
     font_path: str | None = None  # 비우면 서버 글꼴(나눔고딕 등)을 찾음
+    font_heavy_path: str | None = None  # 큰 가격용 아주 굵은 글꼴 (비우면 나눔고딕 ExtraBold → 없으면 font_path)
+    font_regular_path: str | None = None  # 작은 안내 글자용 보통 굵기 (비우면 나눔고딕 → 없으면 font_path)
     footer: str = "오늘의 핫딜"
     footer_note: str = "구매 링크는 프로필 링크에서"
     keep_days: int = 7  # 만든 카드 파일 보관 기간

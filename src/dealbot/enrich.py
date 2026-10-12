@@ -22,6 +22,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from dealbot.models import Product
+from dealbot.page_price import PageOption, PagePrices, jsonld_prices, naver_state_prices
 from dealbot.utils.text import parse_price
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class PageMeta:
     available: bool | None = None  # 재고 표시. True 있음 / False 품절 / None 모름
     seller: str | None = None  # JSON-LD offers.seller.name (정품 확인용)
     text: str = ""  # 페이지에 보이는 글 (앞부분만, 정품 확인용)
+    prices: PagePrices | None = None  # 페이지에 보이는 가격·옵션 (제목 가격 대조용, page_price). 못 읽으면 None
 
 
 def _availability(value: object) -> bool | None:
@@ -75,7 +77,7 @@ def _walk_jsonld(node: Any, out: list[dict[str, Any]]) -> None:
             _walk_jsonld(v, out)
 
 
-def parse_page_meta(html: str) -> PageMeta:
+def parse_page_meta(html: str, url: str | None = None) -> PageMeta:
     soup = BeautifulSoup(html, "html.parser")
     meta = PageMeta(
         title=_meta(soup, "og:title", "twitter:title") or (soup.title.get_text(strip=True) if soup.title else None),
@@ -90,6 +92,7 @@ def parse_page_meta(html: str) -> PageMeta:
         meta.original_price = parse_price(orig_txt)
     meta.available = _availability(_meta(soup, "product:availability", "og:availability"))
 
+    ld_products: list[dict[str, Any]] = []
     for script in soup.find_all("script", attrs={"type": re.compile("ld\\+json", re.I)}):
         try:
             data = json.loads(script.string or script.get_text() or "")
@@ -97,6 +100,7 @@ def parse_page_meta(html: str) -> PageMeta:
             continue
         products: list[dict[str, Any]] = []
         _walk_jsonld(data, products)
+        ld_products = products
         for p in products:
             meta.title = meta.title or p.get("name")
             img = p.get("image")
@@ -129,6 +133,14 @@ def parse_page_meta(html: str) -> PageMeta:
                     meta.review_count = parse_price(str(rc)) if not isinstance(rc, int) else rc
         if products:
             break
+
+    # 제목 가격 대조용 가격·옵션: 네이버 스토어 상품 데이터 → JSON-LD offers → 가격 메타 (+정가). 토스 웹 페이지엔 가격이 없음
+    meta.prices = naver_state_prices(html, url) or jsonld_prices(ld_products)
+    if meta.prices is None and meta.price:
+        meta.prices = PagePrices(options=[PageOption(label=None, prices=(meta.price,), lead=True)], source="meta")
+    lead = meta.prices.options[0] if meta.prices and len(meta.prices.options) == 1 else None
+    if lead is not None and meta.original_price and meta.original_price not in lead.prices:
+        lead.prices = (*lead.prices, meta.original_price)  # 정가와 같은 가격을 적은 글도 맞은 것으로 (더 비싸게 보는 쪽이라 안전)
 
     # 본문 텍스트에서 별점/리뷰 보조 추출 (JSON-LD 가 없을 때)
     text = soup.get_text(" ", strip=True)[:20000]
@@ -204,7 +216,7 @@ def is_product_page(url: str | None) -> bool:
 def page_meta_at(html: str, final_url: str) -> PageMeta:
     """페이지 HTML → PageMeta (최종 주소 기준). '//cdn…/a.jpg', '/upload/1.jpg' 같은 상대 사진 주소는 페이지 주소 기준으로
     (그대로 두면 사진을 못 받음)."""
-    meta = parse_page_meta(html)
+    meta = parse_page_meta(html, final_url)
     meta.final_url = final_url
     if meta.image:
         meta.image = urljoin(final_url, meta.image)

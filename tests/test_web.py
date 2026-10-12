@@ -121,6 +121,11 @@ async def test_threads_callback_connects_without_code_copy(settings: Settings) -
         msg = await bot.threads_test()
         assert "✅ 스레드에 올렸습니다: https://www.threads.com/@hotdeal/post/ABC" in msg and "지워 주세요" in msg
         assert posted == ["TEXT"]  # 한 글 (링크는 본문). 샘플의 쿠팡 로고는 확인된 상품 사진이 아니라 안 붙임
+        # 자동 게시가 꺼져 있어도 시험 글은 올라가고, 꺼져 있다고 알려 준다 (차단이 풀렸는지 켜기 전에 확인)
+        bot.settings.threads.enabled = bot.threads.enabled = False  # 서버처럼 게시기까지 꺼진 상태
+        msg = await bot.threads_test()
+        assert "✅ 스레드에 올렸습니다" in msg and "자동 게시는 아직 꺼져 있어요" in msg
+        bot.settings.threads.enabled = bot.threads.enabled = True
         assert "글이 없습니다" in await bot.threads_test(999)
     finally:
         await bot.close()
@@ -244,8 +249,27 @@ async def test_instagram_callback_and_test_command(settings: Settings, tmp_path:
         assert bot.db.kv_get(ig.KV_TOKEN) == "L" and bot.db.kv_get(ig.KV_USER_ID) == "178" and bot.db.kv_get(ig.KV_USERNAME) == "oneul_hot_deal"
         assert "✅ 연결됨 @oneul_hot_deal" in bot.reporter.status_text()
 
+        # 샘플 딜의 사진 주소는 쿠팡 로고 → 실제 딜과 같은 규칙으로 인스타엔 안 올림 (카드도 안 만듦, 로고 카드 금지)
         preview = await bot.instagram_test()
-        assert "📸 <b>인스타그램에는 이렇게 올라갑니다 (샘플 딜)</b>" in preview and "사진(카드): https://bot.up.railway.app/media/" in preview
+        assert "📸 <b>인스타그램에는 이렇게 올라갑니다 (샘플 딜)</b>" in preview and "/media/" not in preview
+        assert "올리지 않습니다: 확인된 상품 사진 없음" in preview and "/instatest 번호" in preview
+        assert not list((settings.data_dir / "media").glob("*.jpg"))
+
+        # 확인된 상품 사진이 있는 딜이면 그 사진으로 카드를 만들어 올림
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (800, 800), (40, 120, 200)).save(buf, "JPEG")
+        verified = buf.getvalue()
+
+        async def deal_photo(deal):  # type: ignore[no-untyped-def]
+            return verified
+
+        bot.deal_photo = deal_photo  # type: ignore[method-assign]
+        preview = await bot.instagram_test()
+        assert "사진(카드): https://bot.up.railway.app/media/" in preview
         assert "연습 모드" in preview
         card_name = preview.split("/media/")[1].split()[0]
         assert (settings.data_dir / "media" / card_name).exists()
@@ -269,3 +293,56 @@ def test_instagram_redirect_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN")
     s = load_settings(ROOT / "config.yaml", load_env=False)
     assert s.secrets.instagram_redirect_uri == "https://localhost/instagram/callback" and s.secrets.public_base_url is None
+
+
+async def test_threads_user_token_connects_without_the_login_page(settings: Settings) -> None:
+    """/threadstoken: 개발자 화면 '사용자 토큰 생성기' 토큰으로 연결 (웹 로그인이 돌기만 할 때 — 주인 10/12)."""
+    bot = DealBot(settings)
+    try:
+        def handler(req: httpx.Request) -> httpx.Response:
+            if req.url.path.endswith("/access_token"):  # 이미 장기 토큰이면 바꿀 수 없다고 나옴
+                return httpx.Response(400, json={"error": {"message": "already long-lived", "code": 190}})
+            if req.url.path.endswith("/me"):
+                tok = dict(req.url.params).get("access_token")
+                if tok != "GOOD":
+                    return httpx.Response(400, json={"error": {"message": "Invalid OAuth access token", "code": 190}})
+                return httpx.Response(200, json={"id": "42", "username": "oneul_hot_deal"})
+            return httpx.Response(404, json={})
+
+        bot.threads.client = ThreadsClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+                                           app_id="APPID", app_secret="SECRET", retry_backoff=0.01)
+        bad = await bot.threads_submit_token("BAD")
+        assert bad.startswith("❌") and bot.db.kv_get(KV_TOKEN) in (None, "")
+        ok = await bot.threads_submit_token(" GOOD ")
+        assert "✅ 스레드 연결 완료: @oneul_hot_deal" in ok and "/threadstest" in ok
+        tok = bot.threads.stored_token()
+        assert tok is not None and tok.access_token == "GOOD" and tok.user_id == "42" and tok.expires_at is not None
+    finally:
+        await bot.close()
+
+
+async def test_instagram_user_token_connects_without_the_login_page(settings: Settings) -> None:
+    """/instatoken: Instagram API 설정의 '액세스 토큰 생성' 토큰으로 연결 (웹 로그인이 돌기만 할 때 — 주인 10/12)."""
+    from dealbot.publisher.instagram import KV_TOKEN as IG_KV_TOKEN
+    from dealbot.publisher.instagram import InstagramClient
+
+    bot = DealBot(settings)
+    try:
+        def handler(req: httpx.Request) -> httpx.Response:
+            if req.url.path.endswith("/access_token"):  # 이미 장기 토큰
+                return httpx.Response(400, json={"error": {"message": "Invalid parameter", "code": 100}})
+            if req.url.path.endswith("/me"):
+                if dict(req.url.params).get("access_token") != "GOOD":
+                    return httpx.Response(400, json={"error": {"message": "Invalid OAuth access token", "code": 190}})
+                return httpx.Response(200, json={"user_id": "17841", "username": "oneul_hot_deal"})
+            return httpx.Response(404, json={})
+
+        bot.instagram.client = InstagramClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+                                               app_id="IGAPP", app_secret="IGSECRET", retry_backoff=0.01)
+        assert (await bot.instagram_submit_token("BAD")).startswith("❌") and bot.db.kv_get(IG_KV_TOKEN) in (None, "")
+        ok = await bot.instagram_submit_token(" GOOD ")
+        assert "✅ 인스타그램 연결 완료: @oneul_hot_deal" in ok and "/instatest" in ok
+        tok = bot.instagram.stored_token()
+        assert tok is not None and tok.access_token == "GOOD" and tok.user_id == "17841" and tok.expires_at is not None
+    finally:
+        await bot.close()

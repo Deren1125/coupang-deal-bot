@@ -1,7 +1,9 @@
 """딜 카드 이미지 — 인스타그램·스레드에 올릴 1080×1350(4:5) JPEG.
 
 인스타그램은 사진 없는 글을 못 올리고 사진 규격(JPEG, 4:5 ~ 1.91:1, 320~1440px)이 있어 게시판 썸네일은 대부분 거절된다.
-그래서 상품 사진(있으면)에 상품명·가격·할인율을 얹은 카드를 봇이 직접 만들어 공개 도메인(/media/…)으로 서빙한다.
+그래서 상품 사진에 상품명·가격·할인율을 얹은 카드를 봇이 직접 만들어 공개 도메인(/media/…)으로 서빙한다.
+사진은 텔레그램 글에 쓴 확인된 상품 사진(app.deal_photo)만 받는다 — 여기서 따로 받아 오지 않는다 (로고·기본 이미지가 카드에 크게 들어가던 문제).
+양식(layout): current = 지금 카드, A/B/C = 후보 양식 (media/card_variants.py).
 Pillow 만 쓰고, 한글 글꼴은 서버(도커)의 나눔고딕이나 config 로 준 글꼴을 쓴다. 글꼴이 없으면 Pillow 기본 글꼴로라도 만든다.
 """
 
@@ -12,6 +14,7 @@ import io
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
@@ -33,6 +36,45 @@ FONT_CANDIDATES = [
     "C:/Windows/Fonts/malgunbd.ttf",
     "C:/Windows/Fonts/malgun.ttf",
 ]
+# 큰 가격용 아주 굵은 글꼴, 작은 안내 글자용 보통 굵기 (없으면 위 굵은 글꼴로)
+HEAVY_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/nanum/NanumGothicExtraBold.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumSquareEB.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Black.ttc",
+]
+REGULAR_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",
+    "C:/Windows/Fonts/malgun.ttf",
+]
+Layout = Literal["current", "A", "B", "C"]
+LAYOUTS: tuple[str, ...] = ("current", "A", "B", "C")
+
+
+@dataclass(slots=True)
+class CardInfo:
+    """후보 양식(A/B/C) 카드에 쓰는 사실들 — 모두 데이터에서 계산한 값만 (insta_style.card_info 가 만든다).
+    비교 가격은 글 첫 줄과 같은 근거(TemplateRenderer.reference): 쿠팡 최저가 또는 믿을 만한 평소 가격, 10% 이상 차이일 때만."""
+
+    name: str
+    price: int | None = None
+    short: str = ""  # 한 줄용 짧은 이름 (수량은 남김, templates.short_name) — C 양식 아래 띠
+    ref_price: int | None = None
+    ref_label: str = ""  # '쿠팡 최저가' | '평소 가격'
+    ref_text: str = ""  # 비교 가격 글 — 채널 글과 같은 말: '쿠팡 최저가 22,900원' | '평소 40,000원대' (평균은 가격대로만)
+    ref_pct: int | None = None
+    list_price: int | None = None  # 표시 정가 (근거가 약해 비교 가격이 없을 때만 보조로)
+    list_pct: int | None = None
+    low_label: str | None = None  # '30일 최저가' 처럼 기록으로 확인된 것만
+    ship: str = ""
+    unit: str | None = None
+    rating: float | None = None
+    review_count: int | None = None
+    shop_name: str = ""
+    category: str = ""
+    deal_no: int | None = None  # 핫딜 페이지(/d/번호)의 번호 — 프로필 링크에서 찾는 표시
+    disclosure: str = ""  # 카드 안 고지 (짧게). 공정위 지침: 사진 게시물은 사진 안에 표시
 
 
 @dataclass(slots=True)
@@ -47,26 +89,39 @@ class CardStyle:
     footer_note: str = "구매 링크는 프로필 링크에서"
 
 
-def find_font(explicit: str | None = None) -> str | None:
-    for path in ([explicit] if explicit else []) + FONT_CANDIDATES:
+def find_font(explicit: str | None = None, candidates: list[str] | None = None) -> str | None:
+    for path in ([explicit] if explicit else []) + (FONT_CANDIDATES if candidates is None else candidates):
         if path and Path(path).exists():
             return path
     return None
 
 
 class DealCard:
-    def __init__(self, out_dir: Path, *, font_path: str | None = None, style: CardStyle | None = None) -> None:
+    def __init__(
+        self,
+        out_dir: Path,
+        *,
+        font_path: str | None = None,
+        style: CardStyle | None = None,
+        layout: str = "current",
+        font_heavy_path: str | None = None,
+        font_regular_path: str | None = None,
+    ) -> None:
         self.out_dir = Path(out_dir)
         self.style = style or CardStyle()
+        self.layout = layout if layout in LAYOUTS else "current"
         self.font_path = find_font(font_path)
         if self.font_path is None:
             log.warning("한글 글꼴을 찾지 못했습니다 — 카드의 한글이 깨질 수 있습니다 (도커는 나눔고딕 포함, 로컬은 card.font_path 설정)")
+        self.font_heavy_path = find_font(font_heavy_path, HEAVY_FONT_CANDIDATES) or self.font_path
+        self.font_regular_path = find_font(font_regular_path, REGULAR_FONT_CANDIDATES) or self.font_path
 
     # ------------------------------------------------------------ 글꼴
-    def font(self, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-        if self.font_path:
+    def font(self, size: int, path: str | None = None) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+        path = path or self.font_path
+        if path:
             try:
-                return ImageFont.truetype(self.font_path, size)
+                return ImageFont.truetype(path, size)
             except OSError:
                 pass
         try:
@@ -74,11 +129,32 @@ class DealCard:
         except TypeError:  # 옛 Pillow
             return ImageFont.load_default()
 
+    def font_heavy(self, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+        return self.font(size, self.font_heavy_path)
+
+    def font_regular(self, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+        return self.font(size, self.font_regular_path)
+
     # ------------------------------------------------------------ 그리기
-    def render(self, deal: Deal, photo: bytes | None = None, *, shop_name: str | None = None, tier: str | None = None) -> bytes:
-        """카드 JPEG 바이트. photo 는 상품 사진 원본(없으면 글자만).
+    def render(
+        self, deal: Deal, photo: bytes | None = None, *, shop_name: str | None = None, tier: str | None = None,
+        layout: str | None = None, info: CardInfo | None = None,
+    ) -> bytes:
+        """카드 JPEG 바이트. photo 는 확인된 상품 사진(deal_photo 결과, 없으면 글자 카드).
         tier: 글 첫 줄과 같은 등급(TemplateRenderer.deal_tier — 믿을 수 있는 평소 가격 기준). 모르면 '핫딜'만 단다
-        (예전처럼 날것의 평균 대비 비율로 '역대급'을 붙이면 글과 어긋나는 근거 없는 말이 됨)."""
+        (예전처럼 날것의 평균 대비 비율로 '역대급'을 붙이면 글과 어긋나는 근거 없는 말이 됨).
+        layout: 없으면 이 카드의 기본 양식. A/B/C 는 info(CardInfo) 의 사실로 그린다."""
+        layout = layout or self.layout
+        if layout in ("A", "B", "C"):
+            from dealbot.media.card_variants import render_variant
+
+            if info is None:
+                info = CardInfo(name=deal.product.name, price=deal.product.price if deal.product.has_price else None,
+                                shop_name=shop_name or "")
+            img = render_variant(self, layout, info, photo)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=90, optimize=True)
+            return buf.getvalue()
         p = deal.product
         st = self.style
         img = Image.new("RGB", (W, H), st.background)
@@ -159,14 +235,17 @@ class DealCard:
 
     def save(
         self, deal: Deal, photo: bytes | None = None, *, key: str | None = None, shop_name: str | None = None,
-        tier: str | None = None,
+        tier: str | None = None, layout: str | None = None, info: CardInfo | None = None,
     ) -> Path:
-        """카드를 만들어 out_dir 에 저장하고 경로를 돌려준다. 파일명은 상품 키 해시라 같은 딜은 덮어쓴다."""
+        """카드를 만들어 out_dir 에 저장하고 경로를 돌려준다. 파일명은 상품 키(+양식) 해시라 같은 딜은 덮어쓴다."""
         key = key or deal.product.product_id
+        layout = layout or self.layout
+        if layout != "current":
+            key = f"{key}|{layout}"
         name = hashlib.sha1(key.encode()).hexdigest()[:16] + ".jpg"
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / name
-        path.write_bytes(self.render(deal, photo, shop_name=shop_name, tier=tier))
+        path.write_bytes(self.render(deal, photo, shop_name=shop_name, tier=tier, layout=layout, info=info))
         return path
 
     def prune(self, keep_days: int = 7) -> int:
