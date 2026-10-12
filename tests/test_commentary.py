@@ -375,6 +375,14 @@ def test_invented_quantities_are_blocked() -> None:
     assert check_comment("두 박스 사면 한 달은 버텨요.", facts) is None
     assert check_comment("한 달은 거뜬해요.", facts) is None
     assert check_comment("반값이라 지금 사두면 좋아요.", facts) is None
+    # 큰 수·한자어 수·인원·기간·배수도 지어낸 수량 (#56)
+    dumpling = "비비고 왕교자 1.05kg 2개"
+    for said in ("스무 개 넘게 들어 있어요.", "열두 개씩 소분해 두면 편해요.", "두 사람이 일주일은 먹을 양이에요.",
+                 "네 식구 반찬으로 넉넉해요.", "에어프라이어에 십 분이면 끝나요.", "2배 넉넉한 구성이에요.", "이틀이면 다 먹어요."):
+        assert check_comment(said, facts, dumpling) is None, said
+        assert check_take(said.replace("요.", ""), facts, dumpling) is None, said
+    assert check_comment("2개라 나눠 두기 좋아요.", facts, dumpling)  # 상품명의 수량은 그대로
+    assert check_comment("한 끼 반찬으로 꺼내 먹기 편해요.", facts, dumpling)
     assert check_comment("반값이라 지금 사두면 좋아요.", "평소보다 55% 싸요.")  # 실제로 반값 이상이면 허용
     # 평범한 말은 그대로
     assert check_comment("한 병씩 꺼내 마시기 좋아요.", facts)
