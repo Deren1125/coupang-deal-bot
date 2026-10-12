@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import functools
 import html
+import json
 import logging
 import os
 import re
@@ -311,6 +312,23 @@ def is_stale_message(sent_at: datetime | None, now: datetime | None = None, max_
     return now - sent_at > max_age
 
 
+KAKAO_LIMIT = 200  # 카카오 텍스트 한 통
+KAKAO_SHORT = 48  # 카톡 묶음 알림의 한 줄
+STATUS_FRESH = timedelta(minutes=15)  # Blog-Auto 생존 신호가 이보다 오래되면 카톡을 못 믿고 텔레그램으로 소리 내서
+LOUD_AGAIN = timedelta(hours=6)  # 소리 내서 대신 알리는 것은 같은 일마다 이 간격으로 한 번
+FALLBACK_NOTE = "\n(카톡 알림이 안 돼서 텔레그램으로 알려요)"
+_AUTH_RE = re.compile(r"token|oauth|auth|permission|expired|session|권한|인증|만료|로그인", re.I)
+
+
+def kakao_fit(head: str, tail: str = "", limit: int = KAKAO_LIMIT) -> str:
+    """카톡 한 통(200자): 첫 줄(이름이 든 줄)만 '…' 로 줄이고, 둘째 줄(어디서 할지 · '→' 안내)은 그대로."""
+    tail = f"\n{tail}" if tail else ""
+    room = limit - len(tail)
+    if len(head) > room:
+        head = head[: max(1, room - 1)].rstrip() + "…"
+    return head + tail
+
+
 def _short_url(url: str, limit: int = 90) -> str:
     """카톡 한 통(200자)에 들어가게: 긴 상품 주소는 쿼리(추적값)를 뗀다 (상품 경로는 그대로)."""
     return url if len(url) <= limit else url.split("#", 1)[0].split("?", 1)[0]
@@ -357,9 +375,78 @@ class AdminNotifier:
         # 보낸 메시지 기록 (message_id, 글, 종류, 딜 번호) — 같은 챗에 Blog-Auto 도 같은 봇으로 보내서, 답장 대상이
         # 딜봇 메시지인지 블로그 메시지인지 가리는 데 쓴다 (말 명령). app 이 넣어 줌. None 이면 기록 안 함
         self.msg_log: Callable[[int | None, str, str, int | None], None] | None = None
+        # 알림 정책 (주인 결정 10/11): Blog-Auto 받은편지함에 owner_notice v2 한 줄 쓰기 (app.relay_to_blog) · Blog-Auto 생존 신호 파일
+        self.owner_inbox: Callable[[dict], None] | None = None
+        self.status_path: Path | None = None
+        self._loud_sent: dict[str, datetime] = {}  # 소리 내서 대신 알린 일 (같은 일은 6시간에 한 번)
+        self._final_fails: list[datetime] = []  # 채널 발행 최종 실패 (성공하면 비움) — 3번 이어지면 '발행 막힘'
+        self._err_since: dict[str, datetime] = {}  # 오류 종류별로 실패가 이어진 첫 시각 (성공하면 지움)
+        self._err_recent: dict[str, list[datetime]] = {}
+
+    @property
+    def silent_policy(self) -> bool:
+        """주인 결정 10/11: 관리자 챗 알림은 소리 없이, 할 일은 카톡으로 (monitoring.telegram_silent)."""
+        return bool(getattr(self.cfg, "telegram_silent", False))
+
+    def blogauto_ok(self) -> bool:
+        """Blog-Auto 가 살아 있고(15분 안 생존 신호) 카톡이 되는가 — 아니면 할 일 알림은 텔레그램으로 소리 내서."""
+        if self.status_path is None:
+            return False
+        try:
+            data = json.loads(self.status_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        at = data.get("at")
+        if not isinstance(at, (int, float)) or time.time() - at > STATUS_FRESH.total_seconds():
+            return False
+        return bool(data.get("kakao_ok"))
+
+    def owner_line(self, note: dict[str, Any]) -> bool:
+        """Blog-Auto 받은편지함에 owner_notice v2 한 줄 (카톡 알림·해결·저녁 요약). 실패해도 텔레그램은 그대로.
+        한 줄을 남겼으면 True — 못 남겼으면(카톡 넘기기 꺼짐·파일 오류) 할 일 알림은 텔레그램으로 소리 내서 (alert)."""
+        if self.owner_inbox is None or not getattr(self.cfg, "kakao_relay", True):
+            return False
+        try:
+            return self.owner_inbox({"owner_notice": {"v": 2, "at": time.time(), **note}}) is not False
+        except Exception as e:  # noqa: BLE001
+            log.warning("owner notice failed: %s", e)
+            return False
+
+    def resolve(self, *keys: str) -> None:
+        """주인이 처리함 (링크 붙임·/skip·/ok·품절) — Blog-Auto 가 아직 안 보낸 카톡은 보내지 않게."""
+        if self.silent_policy and keys:
+            self.owner_line({"resolve": list(keys)})
+
+    def summary(self, cat: str, text: str, *, replace: bool = False) -> None:
+        """저녁 요약(카톡)에 넣을 한 줄 — 딜봇 몫 (Blog-Auto 가 21~22시에 문장으로 보냄)."""
+        if self.silent_policy and (text or replace):  # replace 에 빈 글이면 그 줄을 비움 (기다리는 일이 없어짐)
+            self.owner_line({"kind": "summary", "cat": cat, "text": text, "replace": replace})
+
+    async def alert(self, kind: str, tg_text: str | None, kakao_text: str, *, key: str, short: str, group: str = "",
+                    urgent: bool = False, link: str = "", ttl_h: float = 24, msg_kind: str = "",
+                    queue_id: int | None = None) -> int | None:
+        """주인이 해야 할 일: 텔레그램 자세한 내용(답장할 자리) + Blog-Auto 가 보낼 카톡 한 통(v2).
+        Blog-Auto 가 살아 있고 카톡이 되면 텔레그램은 소리 없이, 아니면 소리 내서(같은 일은 6시간에 한 번) — 그래도 카톡 줄은 남긴다
+        (Blog-Auto 가 곧 살아나면 보내고, 같은 키라 두 번 가지 않음)."""
+        if not self.silent_policy:
+            return await self.send_with_id(tg_text, kind=msg_kind, queue_id=queue_id) if tg_text else None
+        # 카톡 줄을 먼저 남긴다 — 못 남겼으면 Blog-Auto 가 살아 있어도 카톡이 안 가니 텔레그램으로 소리 내서 (할 일을 잃지 않게)
+        queued = self.owner_line({"kind": kind, "key": key, "group": group, "text": kakao_fit(kakao_text),
+                                  "short": short[:KAKAO_SHORT], "urgent": urgent, "link": link, "ttl_h": ttl_h})
+        loud = False
+        text = tg_text
+        if not queued or not self.blogauto_ok():
+            now = utcnow()
+            last = self._loud_sent.get(key)
+            if last is None or now - last >= LOUD_AGAIN:
+                self._loud_sent[key] = now
+                loud = True
+                # 첫 글자는 그대로 (📝 정보 글 확인처럼 첫 글자로 답장 대상을 알아보는 메시지가 있음)
+                text = f"{tg_text or html.escape(kakao_text)}{FALLBACK_NOTE}"
+        return await self.send_with_id(text, loud=loud, kind=msg_kind, queue_id=queue_id) if text else None
 
     def _relay(self, kind: str, text: str) -> None:
-        """주인에게 카톡으로도 (링크 요청·링크 완료·올렸어요). 실패해도 텔레그램 알림은 그대로."""
+        """주인에게 카톡으로도 (예전 v1: 링크 요청·링크 완료·올렸어요 — telegram_silent 를 끈 경우). 실패해도 텔레그램 알림은 그대로."""
         if self.owner_relay is None or not getattr(self.cfg, "kakao_relay", True):
             return
         try:
@@ -383,8 +470,10 @@ class AdminNotifier:
     async def send(self, text: str, *, silent: bool = False) -> bool:
         return (await self.send_with_id(text, silent=silent)) is not None
 
-    async def send_with_id(self, text: str, *, silent: bool = False, kind: str = "", queue_id: int | None = None) -> int | None:
-        """보내고 텔레그램 message_id 를 돌려준다 (나중에 고치거나 지우려고). 조각마다 보낸 메시지 기록에 남긴다."""
+    async def send_with_id(self, text: str, *, silent: bool = False, loud: bool = False, kind: str = "",
+                           queue_id: int | None = None) -> int | None:
+        """보내고 텔레그램 message_id 를 돌려준다 (나중에 고치거나 지우려고). 조각마다 보낸 메시지 기록에 남긴다.
+        소리: telegram_silent(주인 결정 10/11)면 소리 없이, loud=True(카톡 대신 알림)만 소리와 함께."""
         if not self.enabled:
             log.warning(
                 "관리자 알림을 보낼 수 없어 건너뜁니다 (봇 토큰/관리자 챗 ID 확인 필요): %s",
@@ -392,8 +481,8 @@ class AdminNotifier:
             )
             return None
         assert self.bot is not None
-        # silent 는 "일상 알림" 표시일 뿐, 실제 무음 여부는 monitoring.quiet_notices 가 결정
-        quiet = silent and self.cfg.quiet_notices
+        # telegram_silent 면 모두 소리 없이 (loud 만 예외). 끄면 예전처럼 silent + monitoring.quiet_notices 가 결정
+        quiet = (self.silent_policy or (silent and self.cfg.quiet_notices)) and not loud
         send = functools.partial(self.bot.send_message, chat_id=self.chat_id, link_preview_options=None)
         def record(m: Any) -> None:
             if self.msg_log is not None:
@@ -453,6 +542,13 @@ class AdminNotifier:
         """발행 알림. DRY-RUN 이면 채널에 올라갔을 글 전체(preview)를 그대로 보여준다 (연습 모드 미리보기는 설정과 무관하게 항상).
         주인이 링크를 붙여 준 딜은 알림을 꺼 두었어도 '채널에 올렸어요'를 보낸다 (링크 완료 뒤 한 번 더 — 10/10)."""
         owner_link = bool(deal.product.extra.get("owner_link")) and not result.dry_run
+        if not result.dry_run:
+            self._final_fails.clear()  # 채널에 올라갔으니 '발행 막힘' 셈은 처음부터
+        if owner_link and self.silent_policy:  # 주인 결정 10/11: '채널에 올렸어요'는 카톡·텔레그램 대신 저녁 요약에만
+            self.summary("published", truncate(deal.product.name, 40))
+            if not self.cfg.notify_on_publish:
+                return
+            owner_link = False  # 발행 알림을 켜 두었으면 보통 발행 알림으로 (소리 없이)
         if not self.cfg.notify_on_publish and not (result.dry_run and preview) and not owner_link:
             return
         p = deal.product
@@ -471,10 +567,7 @@ class AdminNotifier:
             )
             await self.send(text, silent=True)
             return
-        if owner_link:  # 카톡에도 '올렸어요' (HTML 없이 한 통 200자 안)
-            post = f"\n{self.channel_post_base}/{result.message_id}" if self.channel_post_base and result.message_id else ""
-            price_s = f" · {p.price:,}원" if p.has_price else ""
-            self._relay("published", f"📣 채널에 올렸어요 [{self.shop_label(p.shop)}]\n{truncate(p.name, 60)}{price_s}{post}")
+        # '채널에 올렸어요' 카톡은 없앰 (주인 결정 10/11 — 알림 정책 스위치와 상관없이)
         head = ("🧪 <b>연습 발행</b>" if result.dry_run else
                 "📣 <b>링크를 붙여 주신 상품을 채널에 올렸어요</b>" if owner_link else "✅ <b>채널에 올렸습니다</b>")
         price = f"{p.price:,}원" if p.has_price else "가격 없음"
@@ -498,6 +591,22 @@ class AdminNotifier:
         if final:
             await self._push("publish_failed", f"채널에 올리지 못함 [{self.shop_label(p.shop)}]", f"{truncate(p.name, 60)}\n{error[:200]}")
 
+    async def publish_failed_final(self, error: str) -> None:
+        """채널 발행 최종 실패 한 번 (알림 설정과 상관없이 셈): 3번 이어지거나 한 시간 안에 3번이면 '발행 막힘' 급한 카톡."""
+        if not self.silent_policy:
+            return
+        now = utcnow()
+        self._final_fails = [t for t in self._final_fails if now - t < timedelta(hours=24)] + [now]
+        recent = [t for t in self._final_fails if now - t <= timedelta(minutes=60)]
+        if len(self._final_fails) >= 3 or len(recent) >= 3:
+            n = len(self._final_fails)
+            await self.alert(
+                "publish_broken",
+                f"⛔ <b>채널에 {n}건 연속 못 올리고 있어요</b>\n마지막 이유: <code>{html.escape(error[:300])}</code>\n/errors 로 확인해 주세요",
+                kakao_fit(f"⛔[멈춤] 딜봇이 채널에 못 올리고 있어요 ({n}건 연속 실패)", "→ 텔레그램 핫딜봇 /errors"),
+                key="publish_broken", short="딜봇 채널 발행 막힘", urgent=True, ttl_h=6,
+            )
+
     async def notify_manual_link(self, item: QueueItem, shop: Shop, *, auth_note: str | None = None) -> int | None:
         """자동 변환이 안 되는 쇼핑몰: 관리자에게 링크 생성을 요청. 보낸 메시지 id 를 돌려준다."""
         if not self.cfg.notify_on_manual_link:
@@ -516,12 +625,20 @@ class AdminNotifier:
             f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
             f"안 올리려면 <code>/skip {item.id}</code>"
         )
-        message_id = await self.send_with_id(text, kind="link", queue_id=item.id)
-        self._relay(
-            "link_request",
-            f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}\n{_short_url(p.url)}\n"
-            "→ 텔레그램 딜봇의 링크 요청 메시지에 답장으로 링크를 보내 주세요",
-        )
+        if self.silent_policy:  # 주인 결정 10/11: 할 일은 카톡 (주소 줄 없이 한 통), 텔레그램은 답장할 자리
+            message_id = await self.alert(
+                "link_request", text,
+                kakao_fit(f"🔔[할 일] 링크 필요 #{item.id} [{shop.name}] {truncate(p.name, 60)}{price}",
+                          f"→ 텔레그램 핫딜봇 #{item.id} 에 답장"),
+                key=f"link:{item.id}", short=f"핫딜 링크 #{item.id}", group="link_request", msg_kind="link", queue_id=item.id,
+            )
+        else:
+            message_id = await self.send_with_id(text, kind="link", queue_id=item.id)
+            self._relay(
+                "link_request",
+                f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}\n{_short_url(p.url)}\n"
+                "→ 텔레그램 딜봇의 링크 요청 메시지에 답장으로 링크를 보내 주세요",
+            )
         await self._push(
             "manual_link",
             f"내 링크가 필요합니다 #{item.id} [{shop.name}]",
@@ -536,7 +653,12 @@ class AdminNotifier:
         p = item.deal.product
         price = f" · {p.price:,}원" if p.has_price else ""
         shop = self.shop_label(p.shop)
-        self._relay("link_done", f"✅ 상품 링크 완료 #{item.id} [{shop}]\n{truncate(p.name, 60)}{price}\n올릴 차례가 되면 채널에 올라가요")
+        if self.silent_policy:  # 주인 결정 10/11: '상품 링크 완료' 카톡은 없이 저녁 요약에만 · 아직 안 보낸 링크 요청 카톡은 취소
+            self.resolve(f"link:{item.id}")
+            self.summary("link_done", truncate(p.name, 40))
+            return (f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n"
+                    "올릴 차례가 되면 바로 채널에 올라가요")
+        # '상품 링크 완료' 카톡은 없앰 (주인 결정 10/11 — 알림 정책 스위치와 상관없이)
         return (f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n"
                 "올릴 차례가 되면 바로 채널에 올라가요 (올라가면 한 번 더 알려 드려요)")
 
@@ -552,7 +674,11 @@ class AdminNotifier:
             + (f"게시글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
             + f"\n👉 공식 판매처가 맞으면 <code>/ok {item.id}</code> → 링크를 만들어 채널에 올립니다 · 아니면 <code>/skip {item.id}</code>"
         )
-        message_id = await self.send_with_id(text, kind="review_auth", queue_id=item.id)
+        message_id = await self.alert(
+            "review_auth", text,
+            kakao_fit(f"🔔[할 일] 정품 확인 #{item.id} {truncate(p.name, 60)}", f"→ 텔레그램 핫딜봇에서 /ok {item.id} 또는 /skip {item.id}"),
+            key=f"review:{item.id}", short=f"정품 확인 #{item.id}", group="review_auth", msg_kind="review_auth", queue_id=item.id,
+        )
         await self._push("info_review", f"정품 확인 필요 #{item.id} [{shop_name}]", f"{truncate(p.name, 70)}\n{reason}", tags=["mag"])
         return message_id
 
@@ -568,13 +694,19 @@ class AdminNotifier:
             f"👉 <code>/ok {item.id}</code> 이대로 올리기 · <code>/skip {item.id}</code> 안 올리기\n"
             f"글을 고치려면 <b>이 메시지에 답장</b>으로 본문을 새로 써 보내세요. 제목·원문 주소는 봇이 붙입니다."
         )
-        message_id = await self.send_with_id(text, kind="review_info", queue_id=item.id)
+        message_id = await self.alert(
+            "review_info", text,
+            kakao_fit(f"🔔[할 일] 정보 글 확인 #{item.id} {truncate(item.deal.product.name, 50)} — 이대로 올릴까요?",
+                      f"→ 텔레그램 핫딜봇에서 /ok {item.id} · /skip {item.id}"),
+            key=f"review:{item.id}", short=f"정보 글 확인 #{item.id}", group="review_info", msg_kind="review_info", queue_id=item.id,
+        )
         await self._push("info_review", f"정보 글 확인 #{item.id}", f"{truncate(item.deal.product.name, 70)}\n{reason}", tags=["memo"])
         return message_id
 
     async def notify_sold_out_cancel(self, item: QueueItem, via: str, notice_message_id: int | None) -> None:
         """내 링크를 기다리던 글이 품절됨: 보냈던 링크 요청 메시지를 고쳐서 헛수고를 막는다."""
         p = item.deal.product
+        self.resolve(f"link:{item.id}")  # 링크를 만들 필요가 없어졌으니 아직 안 보낸 카톡은 취소
         text = (
             f"⛔ <b>품절되어 취소했습니다 #{item.id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
             f"{html.escape(truncate(p.name, 80))}\n"
@@ -584,15 +716,45 @@ class AdminNotifier:
             return
         await self.send(text, silent=True)
 
+    def error_cleared(self, kind: str) -> None:
+        """그 종류의 작업이 다시 성공함 — '계속 실패' 셈을 처음부터."""
+        self._err_since.pop(kind, None)
+        self._err_recent.pop(kind, None)
+
+    async def _escalate(self, kind: str, message: str) -> None:
+        """오류가 이어지면 주인 카톡: 게시판 확인이 2시간 넘게 계속 실패 · 발행 작업이 30분 안에 3번 실패(급함)."""
+        if not self.silent_policy:
+            return
+        now = utcnow()
+        since = self._err_since.setdefault(kind, now)
+        recent = [t for t in self._err_recent.get(kind, []) if now - t <= timedelta(minutes=30)] + [now]
+        self._err_recent[kind] = recent
+        if kind.startswith("collector:") and now - since >= timedelta(hours=2):
+            site = describe_kind(kind, self.labels).removesuffix(" 확인 중")
+            await self.alert(
+                "collector_stuck", None,
+                kakao_fit(f"⚠️[할 일] 딜봇 {site} 확인이 2시간째 실패 중", "→ 서버 점검 필요 (텔레그램 핫딜봇 /errors)"),
+                key=kind, short=f"딜봇 {site} 수집 실패", ttl_h=12,
+            )
+        elif kind == "publisher" and len(recent) >= 3:
+            await self.alert(
+                "publisher_stuck", None,
+                kakao_fit(f"⛔[멈춤] 딜봇 발행 대기열이 멈췄어요 ({truncate(message, 60)})", "→ 서버 점검 필요 · 텔레그램 핫딜봇 /errors"),
+                key="publisher_stuck", short="딜봇 발행 멈춤", urgent=True, ttl_h=6,
+            )
+
     async def notify_price_hold(self, queue_id: int, product: Product, check: PageCheck) -> int | None:
         """제목 가격이 상품 페이지 가격과 안 맞아 보류함 (링크 요청 없음): 관리자 챗에 조용히 한 줄 + 상품."""
         text = (
             f"{html.escape(hold_line(queue_id, check), quote=False)}\n"
             f"[{html.escape(self.shop_label(product.shop))}] {html.escape(truncate(product.name, 60))} · {html.escape(product.url)}"
         )
+        # 알림 정책 (주인 결정 10/11): 보류는 주인이 할 일이 아니라 소식 — 텔레그램은 조용히, 카톡은 저녁 요약에만 (할 일 카톡 아님)
+        self.summary("held", truncate(product.name, 40))
         return await self.send_with_id(text, silent=True, kind="price_hold", queue_id=queue_id)
 
     async def notify_error(self, kind: str, message: str) -> None:
+        await self._escalate(kind, message)
         if not self.cfg.notify_on_error:
             return
         now = utcnow()
@@ -1010,7 +1172,7 @@ class BotController(Protocol):
 
     async def blog_digest(self, *, preview: bool = False) -> str: ...
 
-    def relay_to_blog(self, update: dict) -> None: ...
+    def relay_to_blog(self, update: dict) -> bool | None: ...
 
     async def test_post(self) -> str: ...
 

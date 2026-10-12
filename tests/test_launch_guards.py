@@ -130,11 +130,11 @@ class _FailingLinkPrice:
 async def test_linkprice_failure_puts_shop_on_cooldown(bot: DealBot) -> None:
     sent: list[str] = []
 
-    async def capture(text: str, *, silent: bool = False) -> bool:
+    async def capture(text: str, *, silent: bool = False, **_kw: object) -> int:
         sent.append(text)
-        return True
+        return 1
 
-    bot.notifier.send = capture  # type: ignore[method-assign]
+    bot.notifier.send_with_id = capture  # type: ignore[method-assign]
     bot.state.dry_run = False  # 테스트 환경은 텔레그램이 없어 연습 모드로 뜨므로 실제 모드로 강제
     bot.settings.deal.authenticity.enabled = False  # 링크 변환만 보는 테스트 (정품 확인은 test_authenticity)
     prov = _FailingLinkPrice()

@@ -35,7 +35,7 @@ class FakeBot:
             publish=SimpleNamespace(publisher_tick_seconds=0.05),
             secrets=SimpleNamespace(has_telegram=False, telegram_admin_chat_id=None),
         )
-        self.notifier = SimpleNamespace(enabled=False)
+        self.notifier = SimpleNamespace(enabled=False, error_cleared=lambda *_: None)
         self.state = SimpleNamespace(set_error=lambda *_: None)
         self.db = SimpleNamespace(log_event=lambda *a: self.calls.append(f"log:{a[-1]}"))
         self.queue = 1
@@ -77,7 +77,8 @@ def var_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     async def idle(bot: Any, stop: asyncio.Event) -> None:
         await stop.wait()
 
-    for name in ("collector_loop", "daily_summary_loop", "blog_digest_loop", "maintenance_loop", "heartbeat_loop", "soldout_loop"):
+    for name in ("collector_loop", "daily_summary_loop", "owner_summary_loop", "blog_digest_loop", "maintenance_loop",
+                 "heartbeat_loop", "soldout_loop"):
         monkeypatch.setattr(sched, name, idle)
     return d
 
