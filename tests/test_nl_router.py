@@ -560,6 +560,62 @@ async def test_drop_stale_keeps_old_buttons_but_drops_old_text(env: Env) -> None
         await drop(txt, None)
 
 
+def _stale_token_msg(text: str, *, chat_id: int = ADMIN, deletable: bool = True) -> tuple[SimpleNamespace, list[str], list[str]]:
+    """봇이 멈춰 있던 동안 온 (30분 전) 명령. 지운 기록·봇이 보낸 말을 함께 돌려준다."""
+    deleted: list[str] = []
+    sent: list[str] = []
+
+    async def delete() -> None:
+        if not deletable:
+            raise RuntimeError("Message can't be deleted")
+        deleted.append(text)
+
+    async def send_message(note: str, **_kw: Any) -> None:
+        sent.append(note)
+
+    m = SimpleNamespace(date=utcnow() - timedelta(minutes=30), text=text, delete=delete,
+                        chat=Chat(id=chat_id, username=None, send_message=send_message))
+    return m, deleted, sent
+
+
+@pytest.mark.parametrize("cmd", ["/threadstoken", "/instatoken", "/InstaToken@oneul_bot"])
+async def test_stale_token_command_is_not_run_but_its_message_is_deleted(
+    env: Env, cmd: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """재배포·재시작 중에 보낸 토큰 명령은 5분이 지나 실행되지 않지만, 토큰이 든 메시지는 그래도 지운다 (채팅에 남지 않게)."""
+    from telegram.ext import ApplicationHandlerStop
+
+    drop = next(h.callback for h, g in env.app.handlers if g == -1)
+    secret = "IGAAT-secret-value-123"
+    m, deleted, sent = _stale_token_msg(f"{cmd} {secret}")
+    with caplog.at_level(logging.DEBUG), pytest.raises(ApplicationHandlerStop):
+        await drop(SimpleNamespace(callback_query=None, effective_message=m), None)
+    assert len(deleted) == 1 and len(sent) == 1 and "지웠어요" in sent[0] and "다시 보내" in sent[0]
+    assert secret not in caplog.text and secret not in sent[0] and env.ctrl.calls == []
+
+
+async def test_stale_token_command_that_cannot_be_deleted_tells_the_owner(env: Env, caplog: pytest.LogCaptureFixture) -> None:
+    from telegram.ext import ApplicationHandlerStop
+
+    drop = next(h.callback for h, g in env.app.handlers if g == -1)
+    m, deleted, sent = _stale_token_msg("/threadstoken THQV-secret", deletable=False)
+    with caplog.at_level(logging.DEBUG), pytest.raises(ApplicationHandlerStop):
+        await drop(SimpleNamespace(callback_query=None, effective_message=m), None)
+    assert deleted == [] and len(sent) == 1 and "직접 지우고" in sent[0] and "THQV-secret" not in caplog.text
+
+
+@pytest.mark.parametrize(("text", "chat_id"), [("/run ppomppu", ADMIN), ("/threadstoken", ADMIN), ("/threadstoken abc", 777)])
+async def test_other_stale_messages_are_only_dropped(env: Env, text: str, chat_id: int) -> None:
+    """토큰이 없는 옛 명령, 관리자 챗이 아닌 곳의 토큰 명령은 예전처럼 버리기만 한다 (지우지도 답하지도 않음)."""
+    from telegram.ext import ApplicationHandlerStop
+
+    drop = next(h.callback for h, g in env.app.handlers if g == -1)
+    m, deleted, sent = _stale_token_msg(text, chat_id=chat_id)
+    with pytest.raises(ApplicationHandlerStop):
+        await drop(SimpleNamespace(callback_query=None, effective_message=m), None)
+    assert deleted == [] and sent == []
+
+
 # ------------------------------------------------------------------ 사진·파일·명령
 async def test_photo_caption_for_blog_is_relayed(env: Env) -> None:
     with_llm(env, ans("blog"))

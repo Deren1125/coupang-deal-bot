@@ -167,6 +167,7 @@ def strip_html(text: str) -> str:
     return plain.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&#x27;", "'").replace("&amp;", "&")
 STALE_COMMAND_MAX_AGE = timedelta(minutes=5)  # 봇이 꺼져 있던 동안 쌓인 명령 중 이보다 오래된 것은 무시
 # (배포 중 답이 없어 같은 명령을 여러 번 보내는 일이 잦다. 오래된 것까지 한꺼번에 처리하면 flood 에 걸린다)
+SECRET_COMMANDS = ("/threadstoken", "/instatoken")  # 뒤에 토큰이 붙는 명령: 오래돼 실행하지 않아도 메시지는 지운다
 
 
 # 수집기(출처) 코드명 → 관리자 챗 표시명. config.yaml 의 collectors[].label 이 있으면 그쪽이 우선
@@ -1298,8 +1299,24 @@ def register_admin_handlers(
         msg = getattr(update, "effective_message", None)
         if msg is not None and is_stale_message(getattr(msg, "date", None)):
             # 명령 이름만 남긴다 (/threadstoken 처럼 뒤에 비밀 값이 붙는 명령이 있음)
-            log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), ((getattr(msg, "text", "") or "").split() or [""])[0][:40])
+            words = (getattr(msg, "text", "") or "").split() or [""]
+            log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), words[0][:40])
+            if len(words) > 1 and words[0].split("@", 1)[0].lower() in SECRET_COMMANDS and only_admin.filter(msg):
+                await _drop_stale_token(msg)
             raise ApplicationHandlerStop
+
+    async def _drop_stale_token(msg: Any) -> None:
+        """봇이 멈춰 있던 동안 온 토큰 명령: 실행은 안 하지만 토큰이 든 메시지는 지운다 (_token_cmd 까지 가지 않으므로 여기서)."""
+        try:
+            await msg.delete()
+            note = "봇이 멈춰 있던 동안 온 토큰 명령이라 연결하지 않았어요. 토큰이 든 메시지는 지웠어요 — 다시 보내 주세요."
+        except Exception as e:  # noqa: BLE001 — 못 지워도 알림은 보냄 (48시간 넘은 메시지는 봇이 못 지움)
+            log.warning("stale token command: could not delete the owner's message: %s", type(e).__name__)
+            note = "봇이 멈춰 있던 동안 온 토큰 명령이라 연결하지 않았어요. 토큰이 든 메시지를 지우지 못했어요 — 직접 지우고 다시 보내 주세요."
+        try:
+            await msg.chat.send_message(note)
+        except Exception as e:  # noqa: BLE001
+            log.warning("stale token command: notice not sent: %s", type(e).__name__)
 
     async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.status_text())
