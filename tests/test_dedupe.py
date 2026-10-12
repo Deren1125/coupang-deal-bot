@@ -54,6 +54,11 @@ def test_color_only_matters_when_both_names_name_one() -> None:
     assert similarity("소니 WH-1000XM5 블랙", "소니 WH-1000XM5 실버") == 0.0
     assert similarity("삼성 비스포크 냉장고 화이트", "삼성 비스포크 냉장고 그레이") == 0.0
     assert similarity("농심 신라면 블랙 134g 32봉", "농심 신라면 134g 32봉") == 0.0
+    # 브랜드 이름 속 색 글자는 색이 아니다 (레드미·블루독·그린핑거)
+    assert similarity("샤오미 레드미 노트 13 블랙", "샤오미 레드미 노트 13 실버") == 0.0
+    assert similarity("블루독 패딩 점퍼 네이비 110", "블루독 패딩 점퍼 베이지 110") == 0.0
+    assert similarity("그린핑거 유아 로션 핑크 320ml", "그린핑거 유아 로션 화이트 320ml") == 0.0
+    assert similarity("샤오미 레드미 노트 13 블랙", "샤오미 레드미 노트 13") >= 0.8
 
 
 def test_count_unit_spelling_is_the_same_number() -> None:
