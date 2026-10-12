@@ -57,7 +57,7 @@ from dealbot.media.imagecheck import (
     is_generic_image,
     naver_image_url,
 )
-from dealbot.models import Deal, DealVerdict, Product
+from dealbot.models import Deal, DealVerdict, Product, PublishResult
 from dealbot.monitoring.admin import (
     _AUTH_RE,
     BOT_COMMANDS,
@@ -2145,7 +2145,10 @@ class DealBot:
         card_url = await self.make_card(deal, photo, deal_no=deal_no) if want_ig else None
         if want_threads:
             # 스레드는 deal_photo 가 확인한 상품 사진만 (못 쓰면 글만). 글자 카드는 상품 사진 대신 쓰지 않는다
-            result = await self.threads.publish(deal)
+            try:
+                result = await self.threads.publish(deal)
+            except Exception as e:  # noqa: BLE001 — 재시도 뒤에도 남은 5xx·429·시간 초과: 실패로 알리고 인스타는 그대로 올린다
+                result = PublishResult(ok=False, error=f"{type(e).__name__}: {e}")
             if result.ok:
                 self.db.log_event("INFO", "threads", f"{deal.product.product_id} {'dry-run' if result.dry_run else result.message_id}")
                 log.info("threads posted: %s", deal.product.name[:40])
@@ -2160,7 +2163,10 @@ class DealBot:
                 await self._sns_failed("스레드", "threadsauth", f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>",
                                        result.error or "")
         if want_ig:
-            ig = await self.instagram.publish(deal, card_url, deal_no=deal_no)
+            try:
+                ig = await self.instagram.publish(deal, card_url, deal_no=deal_no)
+            except Exception as e:  # noqa: BLE001 — 스레드와 같음: 실패로 알리고 복붙 문구는 그대로 보낸다
+                ig = PublishResult(ok=False, error=f"{type(e).__name__}: {e}")
             if ig.ok:
                 self.db.log_event("INFO", "instagram", f"{deal.product.product_id} {'dry-run' if ig.dry_run else ig.message_id}")
                 log.info("instagram posted: %s", deal.product.name[:40])

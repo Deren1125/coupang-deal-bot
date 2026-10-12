@@ -207,3 +207,36 @@ async def test_publish_hands_the_telegram_photo_to_instagram(bot) -> None:  # ty
     assert await bot.process_queue_once()
     assert got.get("photo") is not None and got["photo"] is got["telegram_photo"] and got["deal_no"] == 1
     assert seen == ["https://img.example/p.jpg"]  # 사진은 한 번만 받음
+
+
+# ---------------------------------------------------------------- 4. 스레드가 예외로 끝나도 인스타는 올린다
+@pytest.mark.parametrize("boom", ["retryable", "timeout"])
+async def test_threads_server_error_does_not_skip_instagram(bot, boom: str) -> None:  # type: ignore[no-untyped-def]
+    """스레드가 5xx·429 를 재시도 뒤에도 돌려주거나(RetryableError) 시간 초과로 끝나도: 스레드 실패만 알리고 인스타·복붙 문구는 그대로."""
+    import httpx
+
+    from dealbot.utils.retry import RetryableError
+
+    bot.settings.threads.enabled = True
+    bot.threads.dry_run = True  # 연결된 것처럼 (실제 요청은 아래 가짜가 받음)
+
+    async def threads_down(deal: Deal, **_kw: object) -> PublishResult:
+        if boom == "retryable":
+            raise RetryableError("threads api 500: upstream error")
+        raise httpx.ReadTimeout("timed out")
+
+    bot.threads.publish = threads_down
+    sent: list[str] = []
+
+    async def send(text: str, *, silent: bool = False) -> bool:
+        sent.append(text)
+        return True
+
+    bot.notifier.send = send
+    spy = _Spy(bot)
+    d = Deal(Product(source="goldbox", product_id="coupang:8", shop="coupang", name="에어프라이어", price=39900,
+                     url="https://www.coupang.com/vp/products/8"), DealVerdict(is_deal=True))
+    await bot._publish_side_channels(d, photo=_jpeg(900, 900), deal_no=8)
+    assert len(spy.posted) == 1  # 인스타는 올라감
+    assert any("스레드 발행 실패" in t for t in sent)
+    assert any("coupang:8" in e["message"] for e in bot.db.recent_events(20) if e["kind"] == "threads")
