@@ -36,7 +36,7 @@ from dealbot.commentary import Commentator
 from dealbot.config import Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dedupe import find_duplicate
-from dealbot.enrich import PageEnricher, page_images
+from dealbot.enrich import PageEnricher, PageMeta, page_images
 from dealbot.infopost import InfoPostBuilder, PostBody
 from dealbot.keyboard import from_korean_keyboard, is_ascii
 from dealbot.links import (
@@ -69,6 +69,7 @@ from dealbot.monitoring.nl import REGISTRY_DAYS, NLRouter
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.naver_shop import NaverShopSearch, store_product_no
+from dealbot.page_price import DISCOUNT_WORDS, PageCheck, check_page_price, hold_line
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
@@ -1138,9 +1139,12 @@ class DealBot:
                     else:
                         log.info("skip %s — source url is not a %s page: %s", p.name[:40], p.shop, p.url)
                     continue
-                if self._should_enrich(p) and enriched < cfg.deal.enrich.max_per_run:
+                check_price = self._wants_page_check(p)
+                if (self._should_enrich(p) or check_price) and enriched < cfg.deal.enrich.max_per_run:
                     enriched += 1
-                    await self._enrich(p)
+                    await self._enrich(p, check_price=check_price)
+                elif check_price:
+                    self._check_page_price(p, None, why="이번 판 페이지 읽기 한도")
                 if not p.has_price and not cfg.deal.accept_coupons_and_events:
                     # 가격 없는 글(쿠폰·이벤트)은 특가 판정을 못 하니 정보 글로만
                     if self._queue_info_post(p, now):
@@ -1148,6 +1152,10 @@ class DealBot:
                     continue
                 stats = self.db.price_stats(p.product_id, cfg.deal.history_days, now)
                 verdict = self.evaluator.evaluate(p, stats)
+                if (p.extra.get("page_price") or {}).get("status") == "hold":
+                    # 제목 가격이 상품 페이지와 안 맞음: 시중가 대조·가격 기록·링크 요청 없이 보류 (주인 결정 10/12, #22)
+                    await self._hold_for_price(p, verdict, now)
+                    continue
                 if p.has_price and self._should_record(p.product_id, now):
                     self.db.record_observation(p, now)
                 if self._needs_market_check(p, verdict):
@@ -1301,8 +1309,10 @@ class DealBot:
             return False
         return not p.image_url or is_board_thumb(p.image_url) or p.rating is None or not p.has_price
 
-    async def _enrich(self, p: Product) -> list[str]:
+    async def _enrich(self, p: Product, *, check_price: bool = False) -> list[str]:
         meta = await self.enricher.fetch(p.url)
+        if check_price:
+            self._check_page_price(p, meta)  # 제목 가격 대조는 빈 칸 채우기 전에 (제목 가격 그대로)
         filled = PageEnricher.apply(p, meta) if meta is not None else []
         if filled:
             log.info("enriched %s from page: %s", p.name[:40], ", ".join(filled))
@@ -1318,6 +1328,91 @@ class DealBot:
                 filled.append("image_url")
                 log.info("enriched %s from naver shop search: image_url", p.name[:40])
         return filled
+
+    def _wants_page_check(self, p: Product) -> bool:
+        """제목 가격을 상품 페이지 가격과 대조할 딜인가 (토스·네이버, 가격 있는 상품 딜, 최근에 올린 상품 아님)."""
+        pc = self.settings.deal.page_check
+        if not pc.enabled or not p.has_price or p.deal_kind == "info" or p.source == "manual":
+            return False
+        if "*" not in pc.shops and p.shop not in pc.shops:
+            return False
+        return not self._posted_recently(p.product_id)
+
+    def _page_tolerance(self, p: Product) -> dict[str, float]:
+        """가격 대조 허용 폭. 글 제목·배송 칸에 카드·쿠폰 같은 말이 있으면 페이지에 안 보이는 할인 몫(한쪽)을 더 봐 준다."""
+        pc = self.settings.deal.page_check
+        said = f"{p.extra.get('title') or p.name} {p.shipping or ''}"
+        return {"tolerance_pct": pc.tolerance_pct, "discount_tolerance_pct": pc.discount_tolerance_pct if DISCOUNT_WORDS.search(said) else 0}
+
+    def _check_page_price(self, p: Product, meta: PageMeta | None, *, why: str | None = None) -> PageCheck:
+        """상품 페이지 가격·옵션을 제목 가격과 대조해 p.extra['page_price'] 에 남긴다.
+        맞으면(±tolerance_pct) 맞은 페이지 가격을 p.price 로 (시중가 대조·발행이 실제 값으로), 원래 제목 가격은 extra['title_price'].
+        다른 옵션에 맞으면 extra['page_option'] 에 옵션 이름. 못 읽었으면 지금처럼 진행 (unverified)."""
+        title_price = int(p.extra.get("title_price") or p.price)
+        if meta is None:
+            check = PageCheck("unverified", title_price, reason=why or "페이지를 못 읽음")
+        else:
+            check = check_page_price(p.name, title_price, meta.prices, page_title=meta.title, **self._page_tolerance(p))
+        p.extra["page_price"] = check.to_dict()
+        if check.status == "unverified":
+            log.info("page price unverified for %s (%s원): %s", p.name[:40], f"{title_price:,}", check.reason)
+        elif check.status in ("ok", "option"):
+            if check.matched_price and check.matched_price != p.price:
+                p.extra["title_price"] = title_price
+                p.price = check.matched_price
+            if check.status == "option" and check.matched_label:
+                p.extra["page_option"] = check.matched_label
+            log.info(
+                "page price verified for %s: 글 %s원 ↔ 페이지 %s원%s",
+                p.name[:40], f"{title_price:,}", f"{check.matched_price or 0:,}",
+                f" (옵션 '{check.matched_label}')" if check.status == "option" else "",
+            )
+        return check
+
+    def _hold_note_log(self, queue_id: int, p: Product, check: PageCheck) -> None:
+        detail = hold_line(queue_id, check)
+        log.info("queue #%d held — %s · %s", queue_id, detail, p.name[:40])
+        self.db.log_event("INFO", "page_price", f"{p.product_id} {detail}")
+
+    async def _hold_for_price(self, p: Product, verdict: DealVerdict, now: Any) -> int | None:
+        """수집 때 가격이 안 맞은 딜을 보류로 남기고 관리자 챗에 조용히 한 줄. 관심 없는 글·최근에 올렸거나 넘긴 글·
+        같은 가격으로 이미 보류한 글은 조용히 넘어간다. 보류 번호(없으면 None)."""
+        if any(r == "low_interest" or r.startswith(("excluded", "few_reviews")) for r in verdict.reasons):
+            return None  # 가격이 맞았어도 안 올렸을 글 (관심 없음·제외 낱말·후기 적음) — 메모 안 보냄
+        if self._posted_recently(p.product_id, now) or self._declined_recently(p, now):
+            return None
+        prev = self.db.held_since(p.product_id, now - REASK_COOLDOWN)
+        if prev is not None and prev.product.price == p.price:
+            log.debug("deal %s already held at the same title price — no new note", p.product_id)
+            return None
+        check = PageCheck(**p.extra["page_price"])
+        deal = Deal(product=p, verdict=verdict, detected_at=now)
+        queue_id = self.db.add_held(deal, score=verdict.score, error=f"held: page price ({check.reason})", now=now)
+        self._hold_note_log(queue_id, p, check)
+        await self.notifier.notify_price_hold(queue_id, p, check)
+        return queue_id
+
+    async def _hold_item(self, item: QueueItem, deal: Deal) -> None:
+        """발행 직전에 읽은 페이지(사진 때문에 이미 연 페이지)로 가격이 안 맞는 게 드러난 글: 올리지 않고 보류."""
+        p = deal.product
+        check = PageCheck(**p.extra["page_price"])
+        self.db.update_queue_item(item.id, status="held", error=f"held: page price ({check.reason}, before publish)", deal=deal)
+        self._hold_note_log(item.id, p, check)
+        await self.notifier.notify_price_hold(item.id, p, check)
+
+    def _recheck_page_price(self, p: Product, meta: PageMeta | None) -> None:
+        """수집 때 페이지 가격을 확인 못 한 딜: 발행 직전에 사진 때문에 이미 읽은 페이지가 있으면 그걸로 대조 (새로 열지 않음).
+        이미 정한 판정(시중가 대조)은 그대로 두고, 가격이 안 맞으면 보류만 한다."""
+        state = p.extra.get("page_price")
+        if meta is None or meta.prices is None or not isinstance(state, dict) or state.get("status") != "unverified":
+            return
+        check = check_page_price(
+            p.name, int(state.get("title_price") or p.price), meta.prices, page_title=meta.title, **self._page_tolerance(p)
+        )
+        p.extra["page_price"] = check.to_dict()
+        if check.status == "option" and check.matched_label:
+            p.extra["page_option"] = check.matched_label
+        log.info("page price checked before publish for %s: %s", p.name[:40], check.status)
 
     def _should_record(self, product_id: str, now: Any) -> bool:
         gap = self.settings.deal.observation_min_gap_hours
@@ -1521,6 +1616,9 @@ class DealBot:
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
         # 사진은 연습 모드·사진 끔이어도 확인한다 (블로그 내보내기·미리보기용, 보내는 건 publisher 가 send_photo 일 때만)
         photo = await self.deal_photo(deal)
+        if (deal.product.extra.get("page_price") or {}).get("status") == "hold":
+            await self._hold_item(item, deal)  # 사진 때문에 연 상품 페이지 가격이 글 가격과 다름 → 올리지 않음
+            return True
         result = await self.publisher.publish(deal, silent=silent, photo=photo)
         if result.ok:
             self.db.record_post(
@@ -1646,6 +1744,7 @@ class DealBot:
                 meta = await self.enricher.fetch(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
+            self._recheck_page_price(p, meta)
             page_had_photo = bool(meta and page_images(meta))
             for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
                 photo = await _try(url)
@@ -1659,6 +1758,7 @@ class DealBot:
                 meta = await self.store_browser.page_meta(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
+            self._recheck_page_price(p, meta)  # 크롬으로 연 김에 가격도 (따로 열지 않음)
             for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
                 photo = await _try(url)
                 if photo is not None:

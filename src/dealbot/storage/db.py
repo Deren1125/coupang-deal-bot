@@ -414,6 +414,29 @@ class Database:
             except sqlite3.IntegrityError:
                 return False
 
+    def add_held(self, deal: Deal, *, score: float, error: str, now: datetime | None = None) -> int:
+        """가격이 맞지 않아 보류(held)한 딜을 기록하고 번호를 돌려준다. 링크 요청·발행은 하지 않는다 (열린 글로 세지 않음)."""
+        now = now or utcnow()
+        ts = to_iso(now)
+        payload = json.dumps(deal.to_dict(), ensure_ascii=False)
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO deal_queue (product_id, source, payload, score, status, last_error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'held', ?, ?, ?)
+                """,
+                (deal.product.product_id, deal.product.source, payload, score, error, ts, ts),
+            )
+            return int(cur.lastrowid or 0)
+
+    def held_since(self, product_id: str, since: datetime) -> Deal | None:
+        """since 이후 가격 대조로 보류한 같은 상품의 마지막 글 (같은 글을 다시 볼 때 메모를 또 보내지 않으려고)."""
+        row = self._one(
+            "SELECT payload FROM deal_queue WHERE product_id = ? AND status = 'held' AND updated_at >= ? ORDER BY id DESC LIMIT 1",
+            (product_id, to_iso(since)),
+        )
+        return Deal.from_dict(json.loads(row["payload"])) if row else None
+
     def _row_to_queue_item(self, r: sqlite3.Row) -> QueueItem:
         return QueueItem(
             id=int(r["id"]),

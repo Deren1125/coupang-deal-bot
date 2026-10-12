@@ -33,10 +33,11 @@ from telegram.ext import (
 from dealbot import __version__
 from dealbot.config import MonitoringConfig, Settings
 from dealbot.links import LinkRouter
-from dealbot.models import Deal, PublishResult
+from dealbot.models import Deal, Product, PublishResult
 from dealbot.monitoring import nl as nlmod
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState
+from dealbot.page_price import PageCheck, hold_line
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import normalize_chat_id
 from dealbot.publisher.templates import TemplateRenderer
@@ -582,6 +583,14 @@ class AdminNotifier:
         if notice_message_id and await self.edit(notice_message_id, text):
             return
         await self.send(text, silent=True)
+
+    async def notify_price_hold(self, queue_id: int, product: Product, check: PageCheck) -> int | None:
+        """제목 가격이 상품 페이지 가격과 안 맞아 보류함 (링크 요청 없음): 관리자 챗에 조용히 한 줄 + 상품."""
+        text = (
+            f"{html.escape(hold_line(queue_id, check), quote=False)}\n"
+            f"[{html.escape(self.shop_label(product.shop))}] {html.escape(truncate(product.name, 60))} · {html.escape(product.url)}"
+        )
+        return await self.send_with_id(text, silent=True, kind="price_hold", queue_id=queue_id)
 
     async def notify_error(self, kind: str, message: str) -> None:
         if not self.cfg.notify_on_error:

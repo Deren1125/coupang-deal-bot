@@ -284,6 +284,7 @@ class TemplateRenderer:
             "sale_pct": pct,
             "list_pct": list_pct,
             "comment": (p.extra or {}).get("comment"),
+            "option": (p.extra or {}).get("page_option"),  # 글 가격이 상품 페이지의 기본이 아닌 다른 옵션 값일 때 그 옵션 ('2L 12개')
             "rank": p.rank,
             "ref_price": ref_price,
             # 블로그 내보내기 줄에도 첫 줄 근거와 같은 기준 (믿을 수 없는 평균이면 None)

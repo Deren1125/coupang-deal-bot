@@ -15,6 +15,7 @@
 [{{ product.headline }}]
 {% endif %}
 {% set rows = [] %}
+{% if product.has_price and facts.option %}{% set _ = rows.append("구매옵션 : " ~ facts.option) %}{% endif %}
 {% if facts.cat %}{% set _ = rows.append("카테고리 : " ~ facts.cat) %}{% endif %}
 {% if facts.kind_labels %}{% set _ = rows.append("할인분류 : " ~ (facts.kind_labels | join(" · "))) %}{% endif %}
 {% if product.has_price and facts.compare %}{% set _ = rows.append("가격비교 : " ~ facts.compare) %}{% endif %}
