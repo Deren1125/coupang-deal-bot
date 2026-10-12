@@ -42,8 +42,26 @@ BROWSER_HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
-# "[쿠팡] 상품명 (12,900원/무료)" 형태
-_TITLE_RE = re.compile(r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*(?:\((?P<meta>[^()]*)\))?\s*$")
+# "[쿠팡] 상품명 (12,900원/무료)" 형태. 끝 괄호 안의 괄호 한 겹("3,000원(3만↑무료)", "무료(와우)")과
+# 괄호 뒤의 짧은 꼬리말("와우", "카드할인")도 받는다 — 꼬리말은 가격 괄호 뒤일 때만 이름에서 뺀다
+_TITLE_RE = re.compile(
+    r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*"
+    r"(?:\((?P<meta>(?:[^()]|\([^()]*\))*)\)\s*(?P<note>[^()]{0,15}?))?\s*$"
+)
+# 괄호 속 금액 후보: "12,900원", "1.5만원", "3만5천원", "1만2000원", "12900"
+_AMOUNT_RE = re.compile(
+    r"(?P<num>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?P<man>\s*만(?:\s*\d+\s*천|\d{1,4}(?![\d,]))?|\s*천)?(?P<won>\s*원)?"
+)
+# 단위 없는 숫자 바로 뒤에 붙은 개수·용량 단위 — 가격이 아니다 ("100매 9,900원", "10,000mAh", "500ml 24개")
+_QTY_AFTER = re.compile(
+    r"(?:개|팩|매|입|캔|병|봉|롤|박스|세트|장(?!바구니)|켤레|족|포(?!함)|정(?![가상])|알|캡슐|마리|인분|종|개월|일(?![시반])|년|시간|명|겹|벌|권|곽|갑|송이|포기|근|키로|리터|그램|미리)"
+    r"|\s*(?:ml|l|g|kg|mg|cc|mah|wh|gb|tb|cm|mm|m|w|v|hz|p|ea|box|set|pcs|%|인치)(?![a-z])",
+    re.IGNORECASE,
+)
+# 금액 뒤에 이런 말이 오면 판매가가 아니라 혜택·조건 금액 ("10,000원 할인", "5,000원 쿠폰", "5만원 이상").
+# '할인가'·'쿠폰가'·'쿠폰적용' 은 그 금액이 판매가라는 뜻이라 뺀다
+_BENEFIT_AFTER = re.compile(r"^\s*(?:할인|쿠폰|적립|캐시백|페이백|환급|증정|이상|미만|초과)(?!\s*(?:가|적용))")
+_ARROW_RE = re.compile(r"→|->|⇒|➡|▶")  # "29,900원→19,900원" 은 화살표 뒤가 지금 가격
 _COUPON_WORDS = ("쿠폰", "할인코드", "적립", "캐시백")
 _DATE_META = re.compile(r"^\s*~?\s*\d{1,2}\s*/\s*\d{1,2}")  # "(~9/13)", "(9/12~9/14)" 같은 기간 표기
 _NAME_PRICE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{3,})\s*원")
@@ -54,22 +72,48 @@ _SKIP_HOSTS = ("ppomppu.co.kr",)
 
 def parse_title(title: str) -> dict[str, Any]:
     """제목 → shop_tag / name / price / shipping."""
-    m = _TITLE_RE.match(title.strip())
+    text = title.strip()
+    m = _TITLE_RE.match(text)
     if not m:
-        return {"shop_tag": None, "name": title.strip(), "price": None, "shipping": None}
+        return {"shop_tag": None, "name": text, "price": None, "shipping": None}
     meta = (m.group("meta") or "").strip()
     name = m.group("name").strip()
     shop_tag = m.group("shop").strip()
+    price_text, _, shipping = meta.partition("/")
+    price = _meta_price(price_text)
+    if (m.group("note") or "(" in meta) and price is None and not _SHIPPING_WORDS.search(shipping):
+        # 가격 괄호가 아닌데 뒤에 말이 더 있거나 괄호가 겹친 제목("에어팟 프로 2 (USB-C) 화이트")은 통째로 이름
+        whole = text[m.start("name"):].strip()
+        return {"shop_tag": shop_tag, "name": whole, "price": _price_in_name(whole), "shipping": None}
     if meta and (meta.startswith("~") or _DATE_META.match(meta)):
         # "(~9/13)" 은 기간이지 가격이 아니다 — 이름에 남기고 가격은 이름에서 찾는다
         return {"shop_tag": shop_tag, "name": f"{name} ({meta})", "price": _price_in_name(name), "shipping": None}
-    price_text, _, shipping = meta.partition("/")
-    price = parse_price(price_text) if price_text else None
-    if price is not None and price < 100:  # 가격일 리 없는 숫자 (날짜·개수 등)
-        price = None
     if price is None:
         price = _price_in_name(name)
     return {"shop_tag": shop_tag, "name": name, "price": price, "shipping": shipping.strip() or None}
+
+
+_SHIPPING_WORDS = re.compile(r"무료|무배|배송|착불|\d\s*원")
+
+
+def _meta_price(text: str) -> int | None:
+    """괄호 속 가격 칸("12,900원", "2개 12,900원", "29,900원→19,900원")의 판매가. 맨 앞 숫자가 아니라
+    개수·용량("2개", "500ml", "10,000mAh"), 혜택 금액("10,000원 할인"), 100 미만의 수를 건너뛴 첫 금액.
+    화살표가 있으면 그 뒤에서 먼저 찾는다. 없으면 None."""
+    if not text:
+        return None
+    parts = _ARROW_RE.split(text)
+    for chunk in ([parts[-1], text] if len(parts) > 1 else [text]):
+        for a in _AMOUNT_RE.finditer(chunk):
+            after = chunk[a.end():]
+            if _BENEFIT_AFTER.match(after):
+                continue
+            if not (a.group("man") or a.group("won")) and _QTY_AFTER.match(after):
+                continue
+            value = parse_price(a.group(0))
+            if value is not None and value >= 100:  # 100 미만은 가격일 리 없는 수 (날짜·개수 등)
+                return value
+    return None
 
 
 def _price_in_name(name: str) -> int | None:

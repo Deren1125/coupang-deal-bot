@@ -39,6 +39,53 @@ def test_parse_title() -> None:
     assert guess_kind("상품", 1000) == "hotdeal"
 
 
+def test_parse_title_price_skips_quantities_and_benefit_amounts() -> None:
+    """괄호 속 맨 앞 숫자가 아니라 판매가: 개수·용량·옛 가격(화살표 앞)·할인 금액은 가격이 아니다."""
+    assert parse_title("[쿠팡] 상품 (29,900원→19,900원/무료)")["price"] == 19900
+    assert parse_title("[쿠팡] 상품 (정가 29,900원 -> 19,900원 / 무료)")["price"] == 19900
+    assert parse_title("[쿠팡] 앤커 보조배터리 (10,000mAh 19,900원/무료)")["price"] == 19900
+    assert parse_title("[쿠팡] 비비고 왕교자 (2개 12,900원/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 비비고 왕교자 (1+1 12,900원/무료)")["price"] == 12900
+    assert parse_title("[네이버] 하림 닭가슴살 (2팩 25,800원/무료)")["price"] == 25800
+    assert parse_title("[쿠팡] 코카콜라 제로 (500ml 24개 12,900원/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 크리넥스 물티슈 (100매 9,900원/무료)")["price"] == 9900
+    assert parse_title("[쿠팡] 삼다수 (2Lx24개 12,900원/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 상품 (1만원 할인 후 19,900원/무료)")["price"] == 19900
+    t = parse_title("[쿠팡] 로켓프레시 첫구매 쿠폰 (10,000원 할인)")
+    assert t["price"] is None and guess_kind(t["name"], t["price"]) == "coupon"  # 쿠폰 금액을 상품 가격으로 올리지 않음
+    assert parse_title("[쿠팡] 로켓프레시 (5,000원 쿠폰)")["price"] is None
+    assert parse_title("[쿠팡] 상품 (5만원 이상 구매시 1만원 할인)")["price"] is None
+    # 지금껏 읽던 모양은 그대로
+    assert parse_title("[쿠팡] 상품 (12900/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 상품 (12900x2/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 상품 (1만2000원/무료)")["price"] == 12000
+    assert parse_title("[쿠팡] 상품 (3만5천원/무료)")["price"] == 35000
+    assert parse_title("[쿠팡] 상품 (19,900원 쿠폰가/무료)")["price"] == 19900
+    assert parse_title("[쿠팡] 상품 (19,900원 쿠폰적용/무료)")["price"] == 19900
+    assert parse_title("[쿠팡] 상품 (현대카드 7,700원/무료)")["price"] == 7700
+    assert parse_title("[쿠팡] 상품 (12900 + 배송비 3,000원)")["price"] == 12900
+    assert parse_title("[쿠팡] 상품 (19,900원 + 3,000원 적립/무료)")["price"] == 19900
+
+
+def test_parse_title_nested_shipping_and_trailing_note() -> None:
+    """끝 괄호 안 괄호("3,000원(3만↑무료)")와 괄호 뒤 꼬리말("와우", "카드할인")이 이름·가격·배송을 망치지 않는다."""
+    t = parse_title("[네이버] 동원 리챔 오리지널 200g 10개 (25,900원/3,000원(3만↑무료))")
+    assert t == {"shop_tag": "네이버", "name": "동원 리챔 오리지널 200g 10개", "price": 25900, "shipping": "3,000원(3만↑무료)"}
+    t = parse_title("[G마켓] 오뚜기 진라면 매운맛 120g 40개 (19,800원/무료(스마일클럽))")
+    assert t["name"] == "오뚜기 진라면 매운맛 120g 40개" and t["shipping"] == "무료(스마일클럽)"
+    t = parse_title("[쿠팡] 삼다수 2L 24병 (15,840원/무료) 와우")
+    assert t == {"shop_tag": "쿠팡", "name": "삼다수 2L 24병", "price": 15840, "shipping": "무료"}
+    t = parse_title("[11번가] 갤럭시 버즈3 프로 (189,000원/무료) 카드할인")
+    assert t["name"] == "갤럭시 버즈3 프로" and t["price"] == 189000 and guess_kind(t["name"], t["price"]) == "hotdeal"
+    assert parse_title("[네이버] 굽네 닭가슴살 30팩 (29,900원/무료) 적립포함")["price"] == 29900
+    assert parse_title("[쿠팡] 상품 (19,900원(쿠폰적용)/무료)")["price"] == 19900
+    # 가격 괄호가 아니면 예전처럼 통째로 이름
+    assert parse_title("[쿠팡] 에어팟 프로 2 (USB-C) 화이트")["name"] == "에어팟 프로 2 (USB-C) 화이트"
+    assert parse_title("[쿠팡] 상품 (옵션) 블랙 (12,900원/무료)")["name"] == "상품 (옵션) 블랙"
+    t = parse_title("[토스] 9,900원 샴푸 (~9/13) 선착순")
+    assert t["name"] == "9,900원 샴푸 (~9/13) 선착순" and t["price"] == 9900 and t["shipping"] is None
+
+
 def test_parse_list_page(fixtures_dir: Path) -> None:
     html = (fixtures_dir / "ppomppu_list.html").read_text(encoding="utf-8")
     items = parse_list_page(html, row_selector="tr.baseList", title_selector="a.baseList-title", thumb_selector="img")
