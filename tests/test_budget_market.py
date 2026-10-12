@@ -132,7 +132,7 @@ def test_budget_caps_a_kind_so_it_cannot_starve_the_rest() -> None:
     assert not b.available("goldbox") and not b.available("deeplink")
 
 
-# ---------------------------------------------------------------- 게시판이 같은 글을 5분마다 다시 돌려줄 때 (#25)
+# ---------------------------------------------------------------- 게시판이 같은 글을 5분마다 다시 돌려줄 때
 _RUNS: list[list[Product]] = []
 
 
