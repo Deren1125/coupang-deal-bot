@@ -14,7 +14,7 @@ from typing import Any
 from dealbot.config import BlogDigestConfig
 from dealbot.publisher.copyblocks import CopyBlock
 from dealbot.publisher.templates import TemplateRenderer, format_won
-from dealbot.shops import ShopRegistry
+from dealbot.shops import ShopRegistry, deal_disclosure
 from dealbot.storage.db import QueueItem
 
 log = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ class BlogDigestBuilder:
             "original_price": p.original_price,
             "discount_rate": rate,
             "shop_name": shop.name if shop else p.shop,
-            "disclosure": shop.disclosure if shop else None,
+            "disclosure": deal_disclosure(shop, p.extra),
             "link": deal.affiliate_url or p.url,
             "rating": p.rating,
             "review_count": p.review_count,

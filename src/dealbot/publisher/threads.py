@@ -26,7 +26,7 @@ import httpx
 from dealbot.commentary import THREAD_BANNED
 from dealbot.models import Deal, PublishResult
 from dealbot.publisher.templates import TemplateRenderer
-from dealbot.shops import ShopRegistry
+from dealbot.shops import ShopRegistry, deal_disclosure
 from dealbot.utils.retry import RetryableError, retry_async
 from dealbot.utils.timeutil import from_iso, to_iso, utcnow
 
@@ -433,13 +433,13 @@ class ThreadsPublisher:
             deal, link, shop=shop, template=self.template, autoescape=False,
             recent=self.recent_lines() if recent is None else recent, single=True,
         )
-        disclosure = shop.disclosure if shop else None
+        disclosure = deal_disclosure(shop, deal.product.extra)
         tail = f"👉 {link}"
         return fit_text(text, TEXT_LIMIT - len(tail) - 1, keep=disclosure) + "\n" + tail
 
     def problems(self, deal: Deal, text: str) -> list[str]:
         shop = self.registry.get(deal.product.shop)
-        return thread_problems(text, disclosure=shop.disclosure if shop else None, link=deal.affiliate_url or deal.product.url)
+        return thread_problems(text, disclosure=deal_disclosure(shop, deal.product.extra), link=deal.affiliate_url or deal.product.url)
 
     def render_reply(self, deal: Deal) -> str | None:
         """선택 답글 (링크 없음). 템플릿이 없거나 빈 글이면 None → 답글을 안 단다."""

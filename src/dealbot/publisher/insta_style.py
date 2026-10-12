@@ -15,7 +15,7 @@ from typing import Any
 from dealbot.media.card import CardInfo
 from dealbot.models import Deal
 from dealbot.publisher.templates import TemplateRenderer, price_band, shipping_text, short_name
-from dealbot.shops import Shop
+from dealbot.shops import Shop, deal_disclosure
 from dealbot.utils.text import clean_name, unit_price
 
 STYLE_TEMPLATES = {"A": "deal_instagram_a.j2", "B": "deal_instagram_b.j2", "C": "deal_instagram_c.j2"}
@@ -94,7 +94,7 @@ def card_info(deal: Deal, renderer: TemplateRenderer, *, shop: Shop | None, deal
         shop_name=shop.name if shop else (p.shop if p.shop and p.shop != "unknown" else ""),
         category=(p.category or "").split(">")[-1].strip(),
         deal_no=deal_no,
-        disclosure=short_disclosure(shop.disclosure if shop else None),
+        disclosure=short_disclosure(deal_disclosure(shop, p.extra)),
     )
 
 
@@ -140,5 +140,5 @@ def caption_context(deal: Deal, info: CardInfo, *, shop: Shop | None) -> dict[st
         "cta": cta,
         "deal_no": info.deal_no,
         "hashtags": " ".join(hashtags(deal, shop)),
-        "disclosure": shop.disclosure if shop and shop.disclosure else "",
+        "disclosure": deal_disclosure(shop, p.extra) or "",
     }

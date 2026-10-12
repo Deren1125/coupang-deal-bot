@@ -403,6 +403,23 @@ class LinksConfig(BaseModel):
     provider_error_cooldown_hours: float = 6
 
 
+class NaverAutoLinkConfig(BaseModel):
+    """네이버 쇼핑커넥트 링크 자동 만들기 (주인 결정 10/11). 브라우저 일은 Blog-Auto 가 아카이브 계정 프로필로 하고,
+    딜봇은 받은편지함으로 묻고 connect_results.jsonl 의 답을 읽는다. 끄면(false) 예전처럼 주인에게 링크 요청."""
+
+    enabled: bool = False
+    # Blog-Auto 의 답을 이만큼 기다리고, 없으면 예전처럼 주인에게 링크 요청 (Blog-Auto 는 20분 넘은 일은 시작하지 않음)
+    wait_minutes: float = 30
+    # 쇼핑커넥트에 없던 상품번호는 이 기간 다시 찾지 않고 원본 주소로 (참여 상품은 매달 1일에 바뀜)
+    not_found_days: float = 7
+    # 정품·공식 판매처 확인이 안 된 딜: manual = 예전처럼 주인에게 링크 요청(주인이 판매처를 보고 만듦), auto = 그래도 자동으로
+    unverified: Literal["manual", "auto"] = "manual"
+
+
+class AutoLinkConfig(BaseModel):
+    naver: NaverAutoLinkConfig = Field(default_factory=NaverAutoLinkConfig)
+
+
 class InfoSummarizerConfig(BaseModel):
     """정보 글 본문을 채널 양식에 맞게 짧게 다시 쓴다. ANTHROPIC_API_KEY 가 있으면 API 를 먼저 쓰고,
     없으면 서버에 로그인된 claude CLI(한줄평과 같은 것)로. enabled: false 면 둘 다 안 씀."""
@@ -675,6 +692,7 @@ class Settings(BaseModel):
     # yaml 키는 copy 지만 BaseModel.copy 와 겹쳐 속성명은 copy_cfg
     copy_cfg: CopyConfig = Field(default_factory=CopyConfig, alias="copy")
     links: LinksConfig = Field(default_factory=LinksConfig)
+    autolink: AutoLinkConfig = Field(default_factory=AutoLinkConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     info_posts: InfoPostsConfig = Field(default_factory=InfoPostsConfig)
     blog_digest: BlogDigestConfig = Field(default_factory=BlogDigestConfig)
