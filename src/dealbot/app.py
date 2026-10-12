@@ -1268,10 +1268,10 @@ class DealBot:
             return False
 
     async def _on_sold_out(self, product: Product, via: str) -> dict[str, Any]:
-        """품절 확인 → 기다리는 글 내리기 + 링크 요청 메시지 고치기 + 채널 글에 품절 표시."""
+        """품절 확인 → 기다리는 글 내리기 + 링크 요청 메시지 고치기 + 채널 글에 품절 표시 + 블로그가 안 쓰게 품절 기록."""
         so = self.settings.deal.sold_out
         pid = product.product_id
-        out: dict[str, Any] = {"cancelled": [], "marked": False}
+        out: dict[str, Any] = {"cancelled": [], "marked": False, "exported": False}
         for item in self.db.items_for_product(pid, ("pending", "awaiting_link", autolink.STATUS)):
             self.db.update_queue_item(item.id, status="expired", error=f"sold out ({via})")
             out["cancelled"].append(item.id)
@@ -1283,6 +1283,7 @@ class DealBot:
                 await self.notifier.notify_sold_out_cancel(item, via, int(notice) if notice else None)
             log.info("sold out (%s): queue #%d dropped — %s", via, item.id, product.name[:40])
         post = self.db.latest_post(pid)
+        out["exported"] = self._export_sold_out(pid, post)
         if (
             post
             and post.get("message_id")
@@ -1299,9 +1300,32 @@ class DealBot:
                         self.db.kv_set(f"soldout_marked:{pid}", to_iso(utcnow()))
                         out["marked"] = True
                         await self.notifier.send(f"⛔ 채널 글에 품절 표시를 붙였습니다: {product.name[:60]} ({via})", silent=True)
-        if out["cancelled"] or out["marked"]:
-            self.db.log_event("INFO", "soldout", f"{pid} via={via} cancelled={out['cancelled']} marked={out['marked']}")
+        if out["cancelled"] or out["marked"] or out["exported"]:
+            self.db.log_event(
+                "INFO", "soldout", f"{pid} via={via} cancelled={out['cancelled']} marked={out['marked']} exported={out['exported']}"
+            )
         return out
+
+    def _export_sold_out(self, pid: str, post: dict[str, Any] | None) -> bool:
+        """채널에 실제로 올린 상품이 품절됨: published_deals.jsonl 에 품절 줄을 남겨 Blog-Auto 가 그 전에 올라온 같은 상품을
+        블로그에 쓰지 않게 한다 (링크·가격 없는 줄 — Blog-Auto 가 이 모양을 읽음). 한 번 올린 글마다 한 줄만,
+        연습 모드 글(미리보기)에는 남기지 않는다. 남겼으면 True."""
+        if not post or post.get("dry_run"):
+            return False
+        key = f"soldout_exported:{pid}"
+        posted_at = str(post.get("posted_at") or "")
+        if self.db.kv_get(key) == posted_at:
+            return False  # 이 발행 건은 이미 남김 (게시판이 같은 품절 글을 계속 돌려줌)
+        try:
+            row = {"product_id": pid, "sold_out": True, "posted_at": utcnow().isoformat(timespec="seconds")}
+            with (self.settings.data_dir / "published_deals.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except Exception as e:  # noqa: BLE001 — 내보내기 실패가 품절 처리를 막지 않게
+            log.warning("sold-out export failed: %s", e)
+            return False
+        self.db.kv_set(key, posted_at)
+        log.info("sold out exported for the blog: %s", pid)
+        return True
 
     async def recheck_awaiting(self) -> int:
         """내 링크를 기다리는 글의 상품 페이지를 다시 읽어 품절이면 내린다. 내린 개수를 돌려준다."""

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from dealbot.app import DealBot
@@ -151,3 +153,53 @@ async def test_published_post_gets_sold_out_banner(bot: DealBot) -> None:
     assert bot.db.kv_get("soldout_marked:toss:ABC")
     await bot.run_collector(bot.collectors[0])
     assert len(marked) == 1  # 한 번만 표시
+
+
+def _export_rows(bot: DealBot, name: str = "published_deals.jsonl") -> list[dict]:
+    path = bot.settings.data_dir / name
+    return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+async def test_sold_out_after_publish_is_exported_for_the_blog(bot: DealBot) -> None:
+    """채널에 올린 딜이 품절되면 published_deals.jsonl 에 품절 줄을 남긴다 (Blog-Auto 가 그 딜을 블로그에 안 씀). 발행 한 번에 한 줄."""
+
+    async def fake_publish(deal, **_kw):  # type: ignore[no-untyped-def]
+        return PublishResult(ok=True, message_id=5)
+
+    bot.publisher.publish = fake_publish  # type: ignore[method-assign]
+    bot.publisher.channel_id = "@ch"
+    p = _toss("[토스쇼핑] 토스 핫도그 14,890원")
+    p.affiliate_url = "https://toss.im/_m/MINE"
+    FakeCollector.products = [p]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once() and bot.db.queue_counts() == {"published": 1}
+    rows = _export_rows(bot)
+    assert len(rows) == 1 and rows[0]["link"] and not rows[0].get("sold_out")
+
+    FakeCollector.products = [_toss("[종료] 토스 핫도그 14,890원")]
+    await bot.run_collector(bot.collectors[0])
+    await bot.run_collector(bot.collectors[0])  # 게시판이 같은 품절 글을 또 돌려줘도 한 줄만
+    rows = _export_rows(bot)
+    assert len(rows) == 2
+    sold = rows[1]
+    assert sold["product_id"] == "toss:ABC" and sold["sold_out"] is True and "link" not in sold and "price" not in sold
+    assert sold["posted_at"] >= rows[0]["posted_at"]  # Blog-Auto 는 품절 줄보다 먼저 올라온 같은 상품을 뺀다
+    assert not _export_rows(bot, "preview_deals.jsonl")
+
+
+async def test_sold_out_of_a_preview_post_is_not_exported(bot: DealBot) -> None:
+    """연습 모드로 미리 본 글이 품절돼도 실제 블로그용 파일에는 아무것도 쓰지 않는다."""
+
+    async def fake_publish(deal, **_kw):  # type: ignore[no-untyped-def]
+        return PublishResult(ok=True, dry_run=True)
+
+    bot.publisher.publish = fake_publish  # type: ignore[method-assign]
+    p = _toss("[토스쇼핑] 토스 핫도그 14,890원")
+    p.affiliate_url = "https://toss.im/_m/MINE"
+    FakeCollector.products = [p]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    FakeCollector.products = [_toss("[종료] 토스 핫도그 14,890원")]
+    await bot.run_collector(bot.collectors[0])
+    assert _export_rows(bot) == []
+    assert all(not r.get("sold_out") for r in _export_rows(bot, "preview_deals.jsonl"))
