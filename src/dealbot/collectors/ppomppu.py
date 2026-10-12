@@ -52,15 +52,20 @@ _TITLE_RE = re.compile(
 _AMOUNT_RE = re.compile(
     r"(?P<num>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?P<man>\s*만(?:\s*\d+\s*천|\d{1,4}(?![\d,]))?|\s*천)?(?P<won>\s*원)?"
 )
-# 단위 없는 숫자 바로 뒤에 붙은 개수·용량 단위 — 가격이 아니다 ("100매 9,900원", "10,000mAh", "500ml 24개")
+# 단위 없는 숫자 바로 뒤에 붙은 개수·용량 단위 — 가격이 아니다 ("100매 9,900원", "10,000mAh", "500ml 24개").
+# 곱하기 x 가 붙어 있어도 단위다 ("500mlx24개")
 _QTY_AFTER = re.compile(
     r"(?:개|팩|매|입|캔|병|봉|롤|박스|세트|장(?!바구니)|켤레|족|포(?!함)|정(?![가상])|알|캡슐|마리|인분|종|개월|일(?![시반])|년|시간|명|겹|벌|권|곽|갑|송이|포기|근|키로|리터|그램|미리)"
-    r"|\s*(?:ml|l|g|kg|mg|cc|mah|wh|gb|tb|cm|mm|m|w|v|hz|p|ea|box|set|pcs|%|인치)(?![a-z])",
+    r"|\s*(?:ml|l|g|kg|mg|cc|mah|wh|gb|tb|cm|mm|m|w|v|hz|p|ea|box|set|pcs|%|인치)(?![a-wyz])",
     re.IGNORECASE,
 )
 # 금액 뒤에 이런 말이 오면 판매가가 아니라 혜택·조건 금액 ("10,000원 할인", "5,000원 쿠폰", "5만원 이상").
-# '할인가'·'쿠폰가'·'쿠폰적용' 은 그 금액이 판매가라는 뜻이라 뺀다
-_BENEFIT_AFTER = re.compile(r"^\s*(?:할인|쿠폰|적립|캐시백|페이백|환급|증정|이상|미만|초과)(?!\s*(?:가|적용))")
+# 그 금액이 판매가라는 말이 이어지면 뺀다: 할인가·쿠폰가·쿠폰(할인)가·할인된 가격, 쿠폰적용·쿠폰 미적용, 적립포함·증정품 포함,
+# 쿠폰 사용시·적립금 사용시, 끝에 붙은 '쿠폰 후' ('1만원 할인 후 19,900원' 은 뒤 금액이 판매가)
+_BENEFIT_AFTER = re.compile(
+    r"^\s*(?:할인|쿠폰|적립|캐시백|페이백|환급|증정|이상|미만|초과)"
+    r"(?![금품된]?\s*(?:할인\s*)?(?:가|적용|미적용|포함|사용|후(?!\D*\d)))"
+)
 _ARROW_RE = re.compile(r"→|->|⇒|➡|▶")  # "29,900원→19,900원" 은 화살표 뒤가 지금 가격
 _COUPON_WORDS = ("쿠폰", "할인코드", "적립", "캐시백")
 _DATE_META = re.compile(r"^\s*~?\s*\d{1,2}\s*/\s*\d{1,2}")  # "(~9/13)", "(9/12~9/14)" 같은 기간 표기
@@ -81,6 +86,9 @@ def parse_title(title: str) -> dict[str, Any]:
     shop_tag = m.group("shop").strip()
     price_text, _, shipping = meta.partition("/")
     price = _meta_price(price_text)
+    if price is None and _SHIPPING_WORDS.search(shipping):
+        # 배송비 칸까지 적힌 상품 딜("12,900원 할인/무료")이면 혜택 말이 붙은 금액도 판매가로 본다
+        price = _meta_price(price_text, benefit_ok=True)
     if (m.group("note") or "(" in meta) and price is None and not _SHIPPING_WORDS.search(shipping):
         # 가격 괄호가 아닌데 뒤에 말이 더 있거나 괄호가 겹친 제목("에어팟 프로 2 (USB-C) 화이트")은 통째로 이름
         whole = text[m.start("name"):].strip()
@@ -96,17 +104,17 @@ def parse_title(title: str) -> dict[str, Any]:
 _SHIPPING_WORDS = re.compile(r"무료|무배|배송|착불|\d\s*원")
 
 
-def _meta_price(text: str) -> int | None:
+def _meta_price(text: str, *, benefit_ok: bool = False) -> int | None:
     """괄호 속 가격 칸("12,900원", "2개 12,900원", "29,900원→19,900원")의 판매가. 맨 앞 숫자가 아니라
-    개수·용량("2개", "500ml", "10,000mAh"), 혜택 금액("10,000원 할인"), 100 미만의 수를 건너뛴 첫 금액.
-    화살표가 있으면 그 뒤에서 먼저 찾는다. 없으면 None."""
+    개수·용량("2개", "500ml", "10,000mAh"), 혜택 금액("10,000원 할인", benefit_ok 면 이것도 금액), 100 미만의 수를
+    건너뛴 첫 금액. 화살표가 있으면 그 뒤에서 먼저 찾는다. 없으면 None."""
     if not text:
         return None
     parts = _ARROW_RE.split(text)
     for chunk in ([parts[-1], text] if len(parts) > 1 else [text]):
         for a in _AMOUNT_RE.finditer(chunk):
             after = chunk[a.end():]
-            if _BENEFIT_AFTER.match(after):
+            if not benefit_ok and _BENEFIT_AFTER.match(after):
                 continue
             if not (a.group("man") or a.group("won")) and _QTY_AFTER.match(after):
                 continue

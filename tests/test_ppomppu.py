@@ -50,7 +50,10 @@ def test_parse_title_price_skips_quantities_and_benefit_amounts() -> None:
     assert parse_title("[쿠팡] 코카콜라 제로 (500ml 24개 12,900원/무료)")["price"] == 12900
     assert parse_title("[쿠팡] 크리넥스 물티슈 (100매 9,900원/무료)")["price"] == 9900
     assert parse_title("[쿠팡] 삼다수 (2Lx24개 12,900원/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 코카콜라 제로 (500mlx24개 12,900원/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 삼성 메모리 (128GBx2 59,000원/무료)")["price"] == 59000
     assert parse_title("[쿠팡] 상품 (1만원 할인 후 19,900원/무료)")["price"] == 19900
+    assert parse_title("[쿠팡] 상품 (12,900원 쿠폰 후 9,900원/무료)")["price"] == 9900
     t = parse_title("[쿠팡] 로켓프레시 첫구매 쿠폰 (10,000원 할인)")
     assert t["price"] is None and guess_kind(t["name"], t["price"]) == "coupon"  # 쿠폰 금액을 상품 가격으로 올리지 않음
     assert parse_title("[쿠팡] 로켓프레시 (5,000원 쿠폰)")["price"] is None
@@ -65,6 +68,16 @@ def test_parse_title_price_skips_quantities_and_benefit_amounts() -> None:
     assert parse_title("[쿠팡] 상품 (현대카드 7,700원/무료)")["price"] == 7700
     assert parse_title("[쿠팡] 상품 (12900 + 배송비 3,000원)")["price"] == 12900
     assert parse_title("[쿠팡] 상품 (19,900원 + 3,000원 적립/무료)")["price"] == 19900
+    # 혜택 말 뒤에 그 금액이 판매가라는 말이 이어지면 가격 (배송비 칸이 있든 없든)
+    for said in ("쿠폰할인가", "쿠폰 할인가", "쿠폰 미적용", "쿠폰미적용", "적립포함", "적립 포함", "증정품 포함",
+                 "쿠폰 사용시", "쿠폰사용가", "적립금 사용시", "캐시백 포함", "할인된 가격", "쿠폰 후", "할인 후"):
+        for meta in (f"12,900원 {said}/무료", f"12,900원 {said}"):
+            t = parse_title(f"[쿠팡] 상품 ({meta})")
+            assert t["price"] == 12900 and guess_kind(t["name"], t["price"]) == "hotdeal", meta
+    # 배송비 칸까지 적힌 상품 딜은 혜택 말만 붙은 금액도 가격 (예전처럼). 배송비 칸이 없으면 쿠폰·이벤트
+    assert parse_title("[쿠팡] 상품 (12,900원 할인/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 상품 (12,900원 쿠폰 할인/무료)")["price"] == 12900
+    assert parse_title("[쿠팡] 상품 (12,900원 할인)")["price"] is None
 
 
 def test_parse_title_nested_shipping_and_trailing_note() -> None:
