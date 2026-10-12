@@ -18,6 +18,9 @@ from dealbot.utils.timeutil import from_iso, to_iso, utcnow
 
 log = logging.getLogger(__name__)
 
+# 채널에 보냈지만 텔레그램 답이 없던(시간 초과) 발행 실패의 last_error 머리말 — 올라갔을 수 있어 다시 보내지 않은 글
+MAYBE_POSTED = "maybe posted"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS products (
     product_id     TEXT PRIMARY KEY,
@@ -335,6 +338,15 @@ class Database:
             (product_id,),
         )
         return from_iso(row["posted_at"]) if row else None
+
+    def maybe_posted_within(self, product_id: str, days: int, now: datetime | None = None) -> bool:
+        """최근 days 안에 채널에 보냈지만 텔레그램 답을 못 받아(시간 초과) 올라갔는지 모르는 같은 상품 글이 있나.
+        다시 줄 세우면 같은 딜이 두 번 올라갈 수 있다. 주인이 /link 로 다시 올리면 그 글은 pending 이 되어 여기서 빠진다."""
+        now = now or utcnow()
+        return self._one(
+            "SELECT 1 FROM deal_queue WHERE product_id = ? AND status = 'failed' AND last_error LIKE ? AND updated_at >= ? LIMIT 1",
+            (product_id, f"{MAYBE_POSTED}%", to_iso(now - timedelta(days=days))),
+        ) is not None
 
     def posted_within(self, product_id: str, days: int, now: datetime | None = None, *, include_dry_run: bool = True) -> bool:
         last = self.last_posted_at(product_id, include_dry_run=include_dry_run)

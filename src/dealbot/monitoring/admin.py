@@ -592,6 +592,21 @@ class AdminNotifier:
         if final:
             await self._push("publish_failed", f"채널에 올리지 못함 [{self.shop_label(p.shop)}]", f"{truncate(p.name, 60)}\n{error[:200]}")
 
+    async def notify_publish_unsure(self, queue_id: int, deal: Deal, error: str) -> None:
+        """채널에 보냈지만 텔레그램 답이 시간 안에 안 옴: 이미 올라갔을 수 있어 다시 보내지 않았다 (같은 딜 두 번 방지).
+        주인이 채널을 보고, 없으면 /link 로 다시 올린다."""
+        if not self.cfg.notify_on_failure:
+            return
+        p = deal.product
+        link = deal.affiliate_url or p.url
+        await self.send(
+            f"❓ <b>채널에 올라갔는지 모릅니다 #{queue_id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
+            f"{html.escape(truncate(p.name, 80))}\n"
+            f"텔레그램 답이 늦어(시간 초과) 두 번 올라가지 않게 다시 보내지 않았어요. 채널에 없으면 "
+            f"<code>/link {queue_id} {html.escape(link)}</code> 로 다시 올려 주세요.\n"
+            f"이유: <code>{html.escape(error[:300])}</code>"
+        )
+
     async def publish_failed_final(self, error: str) -> None:
         """채널 발행 최종 실패 한 번 (알림 설정과 상관없이 셈): 3번 이어지거나 한 시간 안에 3번이면 '발행 막힘' 급한 카톡."""
         if not self.silent_policy:

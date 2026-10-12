@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from telegram import Bot, LinkPreviewOptions
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, RetryAfter, TelegramError
+from telegram.error import BadRequest, RetryAfter, TelegramError, TimedOut
 
 from dealbot.models import Deal, PublishResult
 from dealbot.publisher.templates import TemplateRenderer
@@ -134,5 +135,11 @@ class TelegramPublisher:
             return PublishResult(ok=True, message_id=msg.message_id)
         except RetryAfter as e:
             return PublishResult(ok=False, error=f"rate limited by telegram, retry after {e.retry_after}s")
+        except TimedOut as e:
+            if isinstance(e.__cause__, httpx.ConnectTimeout | httpx.PoolTimeout | httpx.WriteTimeout):
+                # 텔레그램에 닿지 못했거나 다 보내지 못한 시간 초과: 안 올라간 게 확실하니 보통 실패처럼 다시 시도해도 된다
+                return PublishResult(ok=False, error=f"TimedOut: {e}")
+            # 다 보낸 뒤 답을 기다리다 시간 초과: 텔레그램은 이미 올렸을 수 있다 → 자동으로 다시 보내지 않게 표시 (같은 딜 두 번 방지)
+            return PublishResult(ok=False, error=f"TimedOut: {e}", maybe_posted=True)
         except TelegramError as e:
             return PublishResult(ok=False, error=f"{type(e).__name__}: {e}")

@@ -120,6 +120,42 @@ async def test_failure_attempts_and_expiry(bot: DealBot, settings: Settings) -> 
     assert bot.db.queue_counts().get("expired") == 1
 
 
+async def test_timeout_after_send_is_not_published_twice(bot: DealBot) -> None:
+    """텔레그램이 글을 받은 뒤 답만 늦은(시간 초과) 경우: 이미 올라갔을 수 있어 20초 뒤에 다시 보내지 않고,
+    같은 딜이 다시 수집돼도 줄 세우지 않는다. 주인이 채널을 보고 없으면 /link 로 다시 올린다."""
+    FakeCollector.products = [_p("1", 5000, discount_rate=50)]
+    await bot.run_collector(bot.collectors[0])
+    sent: list[str] = []
+
+    async def timed_out(deal, **_kw):  # type: ignore[no-untyped-def]
+        sent.append(deal.product.product_id)
+        return PublishResult(ok=False, error="TimedOut: Timed out", maybe_posted=True)
+
+    notes: list[tuple[int, str]] = []
+
+    async def unsure(queue_id: int, deal: Deal, error: str) -> None:
+        notes.append((queue_id, error))
+
+    bot.publisher.publish = timed_out  # type: ignore[method-assign]
+    bot.notifier.notify_publish_unsure = unsure  # type: ignore[method-assign]
+    assert await bot.process_queue_once()
+    item = bot.db.items_for_product("coupang:1", ("failed",))[0]
+    assert item.last_error == "maybe posted: TimedOut: Timed out" and item.attempts == 1
+    assert notes == [(item.id, item.last_error)]
+    assert not await bot.process_queue_once() and sent == ["coupang:1"]  # 자동으로 다시 보내지 않음
+    await bot.run_collector(bot.collectors[0])  # 게시판이 같은 딜을 또 돌려줘도
+    assert bot.db.queue_counts() == {"failed": 1}
+
+    async def ok_publish(deal, **_kw):  # type: ignore[no-untyped-def]
+        sent.append(deal.product.product_id)
+        return PublishResult(ok=True, message_id=9)
+
+    bot.publisher.publish = ok_publish  # type: ignore[method-assign]
+    await bot.attach_link(item.id, "https://link.coupang.com/a/again")  # 채널에 없어서 주인이 다시 올림
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"published": 1} and sent == ["coupang:1", "coupang:1"]
+
+
 async def test_manual_link_flow_for_toss(bot: DealBot) -> None:
     bot.settings.publish.dry_run = False  # 연습 모드에서는 링크 요청을 생략하므로 실제 모드로
     toss = Product(source="fake", product_id="toss:ABC", shop="toss", name="토스 핫도그", price=14890,

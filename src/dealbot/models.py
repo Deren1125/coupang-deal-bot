@@ -113,3 +113,4 @@ class PublishResult:
     message_id: int | None = None
     error: str | None = None
     dry_run: bool = False
+    maybe_posted: bool = False  # 보낸 뒤 답을 못 받음(시간 초과): 실패지만 이미 올라갔을 수 있다 — 자동으로 다시 보내지 않는다

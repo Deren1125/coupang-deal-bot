@@ -90,7 +90,7 @@ from dealbot.publisher.threads import (
 )
 from dealbot.shops import ShopRegistry, deal_disclosure
 from dealbot.soldout import looks_sold_out
-from dealbot.storage.db import Database, QueueItem
+from dealbot.storage.db import MAYBE_POSTED, Database, QueueItem
 from dealbot.store_browser import StoreBrowser, store_browser_check
 from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
 from dealbot.utils.text import clean_name, truncate
@@ -245,7 +245,11 @@ class DealBot:
         self.bot: Bot | None = None
         if settings.secrets.has_telegram:
             try:
-                self.application = Application.builder().token(settings.secrets.telegram_bot_token or "").build()
+                # 응답 대기 시간을 넉넉히: 기본(읽기 5초)이면 텔레그램이 글을 올린 뒤 답이 늦을 때 실패로 보여 같은 딜을 또 올릴 수 있었다
+                self.application = (
+                    Application.builder().token(settings.secrets.telegram_bot_token or "")
+                    .read_timeout(30).write_timeout(30).media_write_timeout(60).build()
+                )
                 self.bot = self.application.bot
             except Exception as e:  # noqa: BLE001 — 토큰 형식 오류로 봇 전체가 죽지 않도록
                 log.error(
@@ -985,7 +989,7 @@ class DealBot:
         silent = in_time_window(local_now(self.settings.app.timezone), self.settings.publish.quiet_hours)
         result = await self.publisher.publish_raw(text, photo=photo, silent=silent)
         if not result.ok:
-            await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
+            await self._handle_publish_failure(item, result.error or "unknown error", deal=deal, maybe_posted=result.maybe_posted)
             return True
         self.db.record_post(
             deal,
@@ -1357,9 +1361,11 @@ class DealBot:
 
         연습 모드에서는 미리보기 기록까지 세어 같은 글을 반복해서 보여주지 않는다.
         실제 모드에서는 미리보기 기록을 무시한다 (연습 때 본 딜이 진짜 발행에서 빠지면 안 되므로).
+        채널에 보냈는데 답이 없어(시간 초과) 올라갔는지 모르는 글도 올린 것으로 센다 (같은 딜 두 번 방지).
         """
-        return self.db.posted_within(
-            product_id, self.settings.publish.dedup_days, now, include_dry_run=self.state.dry_run
+        days = self.settings.publish.dedup_days
+        return self.db.posted_within(product_id, days, now, include_dry_run=self.state.dry_run) or self.db.maybe_posted_within(
+            product_id, days, now
         )
 
     def _duplicate_of_recent(self, p: Product, now: Any) -> str | None:
@@ -1946,7 +1952,7 @@ class DealBot:
                 self.export_published(deal, photo)
                 await self._publish_side_channels(deal, photo=photo, deal_no=item.id)
         else:
-            await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
+            await self._handle_publish_failure(item, result.error or "unknown error", deal=deal, maybe_posted=result.maybe_posted)
         return True
 
     EXPORT_KEEP_DAYS = 14  # media/export 의 사진은 블로그가 가져간 뒤 이만큼 지나면 지운다
@@ -2598,16 +2604,25 @@ class DealBot:
             await self.notifier.send(block.as_telegram_html(), silent=True)
         return f"📋 {', '.join(b.name for b in blocks)} 문구를 보냈습니다."
 
-    async def _handle_publish_failure(self, item: QueueItem, error: str, deal: Deal | None = None) -> None:
+    async def _handle_publish_failure(
+        self, item: QueueItem, error: str, deal: Deal | None = None, *, maybe_posted: bool = False
+    ) -> None:
+        """maybe_posted: 보낸 뒤 텔레그램 답만 못 받음(시간 초과) — 이미 올라갔을 수 있어 자동으로 다시 보내지 않고
+        주인에게 채널 확인을 부탁한다 (없으면 /link 로 다시). 다른 실패는 max_publish_attempts 까지 다시 시도."""
+        if maybe_posted:
+            error = f"{MAYBE_POSTED}: {error}"
         attempts = item.attempts + 1
-        final = attempts >= self.settings.publish.max_publish_attempts
+        final = maybe_posted or attempts >= self.settings.publish.max_publish_attempts
         self.db.update_queue_item(
             item.id, status="failed" if final else "pending", error=error, increment_attempts=True, deal=deal
         )
         self.db.log_event("ERROR" if final else "WARNING", "publish", f"{item.product_id}: {error}")
         self.state.set_error(f"[publish] {error}")
         log.warning("publish failed (%d/%d) %s: %s", attempts, self.settings.publish.max_publish_attempts, item.product_id, error)
-        await self.notifier.notify_publish_failed(item.deal, error, final=final)
+        if maybe_posted:
+            await self.notifier.notify_publish_unsure(item.id, deal or item.deal, error)
+        else:
+            await self.notifier.notify_publish_failed(item.deal, error, final=final)
         if final:
             await self.notifier.publish_failed_final(error)  # 3번 이어지면 '발행 막힘' 급한 카톡
 

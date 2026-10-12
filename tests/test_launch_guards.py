@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from dealbot.app import DealBot
@@ -50,6 +51,38 @@ async def test_publisher_passes_silent_flag(repo_root: Path) -> None:
     assert (await pub.publish(deal)).ok and fake.calls[-1]["disable_notification"] is False
     deal.product.image_url = None
     assert (await pub.publish(deal, silent=True)).ok and fake.calls[-1]["disable_notification"] is True
+
+
+class _SlowBot(_FakeBot):
+    """보낸 뒤(또는 보내기 전) 시간 초과가 나는 텔레그램."""
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__()
+        self.cause = cause
+
+    async def send_message(self, **kw):  # type: ignore[no-untyped-def]
+        from telegram.error import TimedOut
+
+        self.calls.append(kw)
+        raise TimedOut() from self.cause
+
+
+@pytest.mark.parametrize(
+    ("cause", "maybe_posted"),
+    [
+        (httpx.ReadTimeout("read"), True),  # 다 보낸 뒤 답을 기다리다 → 올라갔을 수 있음
+        (httpx.ConnectTimeout("connect"), False),  # 닿지도 못함 → 다시 시도해도 됨
+        (httpx.PoolTimeout("pool"), False),
+    ],
+)
+async def test_timeout_after_send_is_marked_maybe_posted(repo_root: Path, cause: Exception, maybe_posted: bool) -> None:
+    fake = _SlowBot(cause)
+    pub = TelegramPublisher(fake, "-100123", TemplateRenderer(repo_root / "templates"))  # type: ignore[arg-type]
+    deal = sample_deal()
+    deal.product.image_url = None
+    result = await pub.publish(deal)
+    assert not result.ok and result.error and result.error.startswith("TimedOut")
+    assert result.maybe_posted is maybe_posted and len(fake.calls) == 1
 
 
 @register("fake_guard")
