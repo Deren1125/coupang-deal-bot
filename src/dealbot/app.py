@@ -1217,6 +1217,9 @@ class DealBot:
                 if self._declined_recently(p, now):
                     log.info("deal %s skipped — admin passed on it or did not answer recently", p.name[:40])
                     continue
+                if self._held_recently(p, now):
+                    log.info("deal %s skipped — held recently for a page price mismatch at this title price", p.name[:40])
+                    continue
                 dup = self._duplicate_of_recent(p, now)
                 if dup:
                     log.info("deal %s skipped as duplicate: %s", p.name[:40], dup)
@@ -1450,7 +1453,14 @@ class DealBot:
 
     async def _hold_for_price(self, p: Product, verdict: DealVerdict, now: Any) -> int | None:
         """수집 때 가격이 안 맞은 딜을 보류로 남기고 관리자 챗에 조용히 한 줄. 관심 없는 글·최근에 올렸거나 넘긴 글·
-        같은 가격으로 이미 보류한 글은 조용히 넘어간다. 보류 번호(없으면 None)."""
+        같은 가격으로 이미 보류한 글은 조용히 넘어간다. 보류 번호(없으면 None).
+        앞서 줄 세운 같은 상품 글(대기·링크 요청 중)이 있으면 새 보류 글 대신 그 글을 보류한다 — 예전 판정대로 올라가지 않게."""
+        open_items = self.db.items_for_product(p.product_id, ("pending", "awaiting_link", autolink.STATUS))
+        for item in open_items:
+            held = Deal(product=p, verdict=verdict, affiliate_url=item.deal.affiliate_url, detected_at=item.deal.detected_at)
+            await self._hold_item(item, held, when="re-collected")
+        if open_items:
+            return open_items[0].id
         if any(r == "low_interest" or r.startswith(("excluded", "few_reviews")) for r in verdict.reasons):
             return None  # 가격이 맞았어도 안 올렸을 글 (관심 없음·제외 낱말·후기 적음) — 메모 안 보냄
         if self._posted_recently(p.product_id, now) or self._declined_recently(p, now):
@@ -1468,12 +1478,29 @@ class DealBot:
 
     async def _hold_item(self, item: QueueItem, deal: Deal, *, when: str = "before publish") -> None:
         """발행 직전에 읽은 페이지(사진 때문에 이미 연 페이지)로 가격이 안 맞는 게 드러난 글: 올리지 않고 보류.
-        when: 'before link' 면 쇼핑커넥트에 묻기 전에 드러난 것 (링크 요청·자동 링크 없음)."""
+        when: 'before link' 면 쇼핑커넥트에 묻기 전에 드러난 것 (링크 요청·자동 링크 없음),
+        're-collected' 면 줄 서 있던 글을 다시 수집해 읽은 페이지로 드러난 것 (링크 요청 중이면 그 메시지를 보류 안내로 고침)."""
         p = deal.product
         check = PageCheck(**p.extra["page_price"])
         self.db.update_queue_item(item.id, status="held", error=f"held: page price ({check.reason}, {when})", deal=deal)
         self._hold_note_log(item.id, p, check)
-        await self.notifier.notify_price_hold(item.id, p, check)
+        notice: int | None = None
+        if item.status == autolink.STATUS:
+            self._cancel_autolink(item.id)  # 쇼핑커넥트 자동 링크 일도 거둔다 (주인에게 물은 적 없는 글)
+        elif item.status == "awaiting_link":
+            self.notifier.resolve(f"link:{item.id}")  # 링크를 만들 필요가 없어졌으니 아직 안 보낸 카톡은 취소
+            raw = self.db.kv_get(f"link_notice:{item.id}")
+            notice = int(raw) if raw else None
+            await self.refresh_pending_notice()
+        await self.notifier.notify_price_hold(item.id, p, check, notice_message_id=notice)
+
+    def _held_recently(self, p: Product, now: Any) -> bool:
+        """같은 제목 가격으로 최근에 가격 대조 보류한 상품을, 이번엔 페이지를 못 읽었다고(429 등) 다시 줄 세우지 않는다.
+        이번에 페이지 가격이 맞았거나(ok·option) 제목 가격이 바뀌었으면 새 딜로 본다."""
+        if (p.extra.get("page_price") or {}).get("status") in ("ok", "option"):
+            return False
+        prev = self.db.held_since(p.product_id, now - REASK_COOLDOWN)
+        return prev is not None and p.has_price and prev.product.price == p.price
 
     def _recheck_page_price(self, p: Product, meta: PageMeta | None) -> None:
         """수집 때 페이지 가격을 확인 못 한 딜: 발행 직전에 사진 때문에 이미 읽은 페이지가 있으면 그걸로 대조 (새로 열지 않음).

@@ -206,6 +206,47 @@ async def test_case22_reproduction_is_held_without_link_request(bot: DealBot, ca
     assert bot.db.queue_counts() == {"held": 1} and len(bot.sent) == 1  # type: ignore[attr-defined]
 
 
+async def test_hold_found_later_holds_the_open_link_request_too(bot: DealBot) -> None:
+    """먼저 페이지를 못 읽어(429) 줄 세우고 링크까지 요청한 딜을, 다음 수집에서 읽은 페이지가 안 맞는다고 하면:
+    새 보류 글을 따로 만들지 않고 그 글 자체를 보류한다 (링크 요청 메시지도 보류 안내로 고침). 주인이 링크를 보내도 올라가지 않고,
+    다시 못 읽은 판에서도 같은 제목 가격이면 또 줄 세우지 않는다. 제목 가격이 바뀌면 새 딜로 본다."""
+    edits: list[tuple[int, str]] = []
+
+    async def edit(message_id: int, text: str) -> bool:
+        edits.append((message_id, text))
+        return True
+
+    bot.notifier.edit = edit  # type: ignore[method-assign]
+    _serve(bot, {})  # 1판: 페이지 막힘 → 확인 못 함으로 진행
+    FakePageCollector.products = [_toss()]
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"awaiting_link": 1} and len(bot.link_requests) == 1  # type: ignore[attr-defined]
+    item = bot.db.awaiting_items()[0]
+
+    _serve(bot, {TOSS_URL: _meta("page_case22_options.html", TOSS_URL)})  # 2판: 페이지를 읽었더니 24개가 아니라 12개 값
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"held": 1}  # 링크 요청 중이던 그 글이 보류로 (따로 보류 글을 만들지 않음)
+    held = bot.db.get_queue_item(item.id)
+    assert held is not None and held.status == "held" and held.last_error == "held: page price (quantity, re-collected)"
+    assert held.deal.product.extra["page_price"]["status"] == "hold"
+    assert edits and edits[0][0] == 2 and edits[0][1].splitlines()[0] == HOLD_22.format(n=item.id)  # 링크 요청 메시지를 고침
+    assert "링크를 만들 필요가 없습니다" in edits[0][1]
+
+    reply = await bot.attach_link(item.id, "https://toss.im/_m/MINE")  # 주인이 그사이 링크를 만들어 보내도
+    assert "'held' 상태라 링크를 붙일 수 없습니다" in reply
+    assert not await bot.process_queue_once() and bot.db.recent_posts() == []
+
+    _serve(bot, {})  # 3판: 다시 막힘 — 같은 제목 가격이면 또 줄 세우지 않음
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"held": 1}
+    assert len(edits) == 1 and len(bot.sent) == 0  # type: ignore[attr-defined]  # 같은 보류를 또 알리지 않음
+
+    FakePageCollector.products = [_toss(price=5900)]  # 제목 가격이 바뀌면 새 딜 (확인 못 함으로 진행)
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"held": 1, "pending": 1}
+
+
 async def test_matching_page_price_proceeds_and_market_uses_page_price(bot: DealBot) -> None:
     page = PageMeta(title="풀무원 샘물 생수, 무라벨, 2L, 24개", final_url=TOSS_URL,
                     prices=_prices((None, (6800,))))

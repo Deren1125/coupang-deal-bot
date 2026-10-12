@@ -744,14 +744,19 @@ class AdminNotifier:
                 key="publisher_stuck", short="딜봇 발행 멈춤", urgent=True, ttl_h=6,
             )
 
-    async def notify_price_hold(self, queue_id: int, product: Product, check: PageCheck) -> int | None:
-        """제목 가격이 상품 페이지 가격과 안 맞아 보류함 (링크 요청 없음): 관리자 챗에 조용히 한 줄 + 상품."""
+    async def notify_price_hold(
+        self, queue_id: int, product: Product, check: PageCheck, *, notice_message_id: int | None = None
+    ) -> int | None:
+        """제목 가격이 상품 페이지 가격과 안 맞아 보류함 (링크 요청 없음): 관리자 챗에 조용히 한 줄 + 상품.
+        notice_message_id: 이미 보낸 링크 요청 메시지 — 있으면 그 메시지를 보류 안내로 고친다 (헛수고 방지)."""
         text = (
             f"{html.escape(hold_line(queue_id, check), quote=False)}\n"
             f"[{html.escape(self.shop_label(product.shop))}] {html.escape(truncate(product.name, 60))} · {html.escape(product.url)}"
         )
         # 알림 정책 (주인 결정 10/11): 보류는 주인이 할 일이 아니라 소식 — 텔레그램은 조용히, 카톡은 저녁 요약에만 (할 일 카톡 아님)
         self.summary("held", truncate(product.name, 40))
+        if notice_message_id and await self.edit(notice_message_id, text + "\n링크를 만들 필요가 없습니다."):
+            return notice_message_id
         return await self.send_with_id(text, silent=True, kind="price_hold", queue_id=queue_id)
 
     async def notify_error(self, kind: str, message: str) -> None:
