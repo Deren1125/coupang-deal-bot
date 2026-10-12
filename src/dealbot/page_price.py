@@ -246,10 +246,11 @@ DISCOUNT_WORDS = re.compile(r"카드|쿠폰|적립|멤버십|회원|첫\s*구매
 
 
 def _within(title: int, price: int, tol: float, below: float = 0) -> bool:
-    """페이지 가격이 제목 가격의 ±tol% 안. below 가 있으면 제목이 페이지보다 그만큼(%)까지 싼 것도 맞은 것으로."""
+    """페이지 가격이 제목 가격의 ±tol% 안. below 가 있으면 제목이 페이지보다 그만큼(%)까지 싼 것도 맞은 것으로.
+    싼 정도는 페이지 가격 기준으로 잰다 (25% 면 페이지 10,000원에 제목 7,500원까지)."""
     if abs(price - title) <= title * tol / 100:
         return True
-    return below > 0 and title < price <= title * (1 + below / 100)
+    return below > 0 and price * (1 - below / 100) <= title < price
 
 
 def _candidates(opt: PageOption, fee: int | None) -> list[tuple[int, str | None, int]]:

@@ -382,6 +382,11 @@ def test_card_discount_in_title_is_tolerated_one_way() -> None:
     assert check_page_price("샴푸 1L", 12900, page, discount_tolerance_pct=25).status == "ok"
     assert check_page_price("샴푸 1L", 17900, page, discount_tolerance_pct=25).status == "hold"  # 글이 더 비싼 쪽은 그대로 ±10%
     assert check_page_price(NAME_22, 6410, _prices(("2L 24개", (14465,))), discount_tolerance_pct=25).status == "hold"  # #22 는 그대로
+    # 25% 는 페이지 가격 기준: 10,000원 페이지에 카드가 7,500원(25%)까지 맞고, 그보다 싸면 보류
+    ten = _prices((None, (10000,)))
+    assert check_page_price("샴푸 1L", 7700, ten, discount_tolerance_pct=25).status == "ok"
+    assert check_page_price("샴푸 1L", 7500, ten, discount_tolerance_pct=25).status == "ok"
+    assert check_page_price("샴푸 1L", 7400, ten, discount_tolerance_pct=25).status == "hold"
 
 
 async def test_card_word_in_post_title_widens_match(bot: DealBot) -> None:
