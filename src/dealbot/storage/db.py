@@ -617,11 +617,12 @@ class Database:
 
     def declined_since(self, product_id: str, since: datetime) -> Deal | None:
         """since 이후 관리자가 넘겼거나(skipped) 묻고도 답이 없어 버린(unanswered) 같은 상품의 마지막 글.
-        자리가 없어 못 물어본 것(review backlog full)은 넘긴 게 아니므로 뺀다."""
+        자리가 없어 못 물어본 것(review backlog full · manual link backlog full)은 넘긴 게 아니므로 뺀다."""
         row = self._one(
             "SELECT payload FROM deal_queue WHERE product_id = ? AND updated_at >= ? AND ("
             "(status = 'expired' AND last_error = 'unanswered') OR "
-            "(status = 'skipped' AND COALESCE(last_error, '') NOT LIKE 'review backlog full%')"
+            "(status = 'skipped' AND COALESCE(last_error, '') NOT LIKE 'review backlog full%' "
+            "AND COALESCE(last_error, '') NOT LIKE 'manual link backlog full%')"
             ") ORDER BY id DESC LIMIT 1",
             (product_id, to_iso(since)),
         )

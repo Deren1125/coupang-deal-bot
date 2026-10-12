@@ -161,13 +161,16 @@ def test_declined_since_only_counts_real_passes(db: Database) -> None:
     db.update_queue_item(1, status="skipped", error="review backlog full (5)")
     assert db.declined_since("a", since) is None
     assert db.enqueue(_deal("a", price=9000), score=5, now=now)
-    db.update_queue_item(2, status="skipped", error="skipped by admin")
+    db.update_queue_item(2, status="skipped", error="manual link backlog full (6)")  # 링크 요청 자리가 차서 못 물어봄
+    assert db.declined_since("a", since) is None
+    assert db.enqueue(_deal("a", price=9000), score=5, now=now)
+    db.update_queue_item(3, status="skipped", error="skipped by admin")
     prev = db.declined_since("a", since)
     assert prev is not None and prev.product.price == 9000
     assert db.declined_since("a", now + timedelta(seconds=1)) is None  # 기간 밖
 
     assert db.enqueue(_deal("b"), score=5, now=now)
-    db.update_queue_item(3, status="awaiting_approval")
+    db.update_queue_item(4, status="awaiting_approval")
     assert db.expire_queue(now - timedelta(hours=1), now, awaiting_older_than=now + timedelta(seconds=1)) == 1
     assert db.declined_since("b", since) is not None
     assert db.enqueue(_deal("c"), score=5, now=now - timedelta(days=2))  # 묻기 전에 시간이 지나 버린 글
