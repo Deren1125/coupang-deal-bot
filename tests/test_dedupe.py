@@ -59,6 +59,10 @@ def test_color_only_matters_when_both_names_name_one() -> None:
     assert similarity("블루독 패딩 점퍼 네이비 110", "블루독 패딩 점퍼 베이지 110") == 0.0
     assert similarity("그린핑거 유아 로션 핑크 320ml", "그린핑거 유아 로션 화이트 320ml") == 0.0
     assert similarity("샤오미 레드미 노트 13 블랙", "샤오미 레드미 노트 13") >= 0.8
+    assert similarity("샤오미 레드미 13C 블랙", "샤오미 레드미 13C 블루") == 0.0
+    # 브랜드가 아닌 '레드 미드'·'레드 미니' 의 레드는 색이다
+    assert similarity("Nike Air Force 레드 미드", "Nike Air Force 블랙 미드") == 0.0
+    assert similarity("나이키 덩크 레드 미니", "나이키 덩크 블랙 미니") == 0.0
 
 
 def test_count_unit_spelling_is_the_same_number() -> None:
