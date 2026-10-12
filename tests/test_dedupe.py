@@ -22,6 +22,35 @@ def test_similarity_ignores_tags_prices_and_shipping_words() -> None:
     assert similarity("다이슨 에어랩", "다이슨 슈퍼소닉 드라이어") < 0.8
 
 
+def test_variant_words_make_a_different_product() -> None:
+    """제로·프로·무라벨·맛처럼 한쪽 이름에만 있는 변형 낱말이면 같은 상품으로 보지 않는다 (띄어쓰기·영문 표기 차이는 같은 것)."""
+    assert similarity("[쿠팡] 코카콜라 350ml 24캔 (15,900원/무료)", "[쿠팡] 코카콜라 제로 350ml 24캔 (15,900원/무료)") == 0.0
+    assert similarity("삼성 갤럭시 버즈3", "삼성 갤럭시 버즈3 프로") == 0.0
+    assert similarity("아이폰 16 프로 256GB", "아이폰 16 프로 맥스 256GB") == 0.0
+    assert similarity("갤럭시 S24+ 256GB", "갤럭시 S24 256GB") == 0.0
+    assert similarity("신라면 블랙 컵 105g 12개", "신라면 컵 105g 12개") == 0.0
+    assert similarity("삼다수 무라벨 2L 12병", "삼다수 2L 12병") == 0.0
+    assert similarity("펩시 제로슈거 라임 355ml 24캔", "펩시 제로슈거 망고 355ml 24캔") == 0.0
+    # 같은 상품의 표기 차이는 그대로 같은 것
+    assert similarity("[쿠팡] 코카콜라 제로 350ml 24캔", "코카콜라제로 350ml 24캔") >= 0.8
+    assert similarity("펩시 제로슈거 라임 355ml 24캔", "펩시 제로 슈거 라임 355ml 24캔") >= 0.8
+    assert similarity("아이폰 16 프로 256GB", "아이폰 16 Pro 256GB") >= 0.8
+    assert similarity("아이나비 블랙박스 QXD8000", "아이나비 QXD8000") >= 0.8
+    assert similarity("락토핏 프로바이오틱스 60포", "락토핏 프로바이오틱스 유산균 60포") >= 0.8
+
+
+def test_count_unit_spelling_is_the_same_number() -> None:
+    """24개·24병·24캔·24개입, '2Lx24개' 는 같은 수량. 묶음(팩·롤)이나 다른 수는 그대로 다른 상품."""
+    assert similarity("풀무원 샘물 2L 24개", "풀무원 샘물 2L 24병") >= 0.8
+    assert similarity("코카콜라 제로 355ml 24캔", "코카콜라 제로 355ml 24개") >= 0.8
+    assert similarity("농심 신라면 120g 40개입", "농심 신라면 120g 40봉") >= 0.8
+    assert similarity("풀무원 샘물 2L 24개", "풀무원 샘물 2Lx24개") >= 0.8
+    assert similarity("햇반 210g 24개", "햇반 210gX24개") >= 0.8
+    assert similarity("햇반 210g 24개", "햇반 210g 12개") == 0.0
+    assert similarity("햇반 210g 24개", "햇반 130g 24개") == 0.0
+    assert similarity("풀무원 샘물 2L 24팩", "풀무원 샘물 2L 24개") == 0.0
+
+
 def test_find_duplicate_allows_clearly_cheaper_deal() -> None:
     recent = [{"product_id": "coupang:1", "name": "스탠리 텀블러 1.18L", "price": 29900, "posted_at": "2026-09-11T10:00:00+00:00"}]
     dup = find_duplicate("[네이버] 스탠리 텀블러 1.18L", 29900, recent)
