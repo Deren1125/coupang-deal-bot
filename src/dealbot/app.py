@@ -2147,6 +2147,8 @@ class DealBot:
             want_ig = False
             self.db.log_event("INFO", "instagram", f"{deal.product.product_id} skipped: {ig_skip}")
             log.info("instagram skipped (%s): %s", ig_skip, deal.product.name[:40])
+        if want_ig:
+            deal_no = self._page_deal_no(deal_no)  # 카드·본문의 '#번호' 는 핫딜 페이지에 있는 글만
         # 카드는 사진이 꼭 있어야 하는 인스타만. 사진은 텔레그램 글과 같은 확인된 상품 사진
         card_url = await self.make_card(deal, photo, deal_no=deal_no) if want_ig else None
         if want_threads:
@@ -2403,7 +2405,7 @@ class DealBot:
             if item.status != "published":
                 return f"#{queue_id} 는 채널에 올라간 글이 아닙니다 (상태 {item.status})."
             deal, label = item.deal, f"#{queue_id} {item.deal.product.name[:30]}"
-        deal_no = queue_id
+        deal_no = self._page_deal_no(queue_id)  # 실제 발행과 같이: 핫딜 페이지에 있는 글만 '#번호'
         # 실제 발행과 같은 규칙: 텔레그램 글처럼 확인된 상품 사진만 (샘플의 쿠팡 로고는 사진으로 안 씀)
         photo = await self.deal_photo(deal)
         caption = self.instagram.render(deal, deal_no=deal_no)
@@ -2434,19 +2436,36 @@ class DealBot:
         return "\n".join(lines)
 
     # ----------------------------------------------------------- 핫딜 페이지 (인스타 프로필 링크용)
+    def _page_items(self, now: Any | None = None) -> list[QueueItem]:
+        """핫딜 페이지(/)에 보이는 딜. 정보 글·링크 없는 글은 먼저 뺀다 (자리를 차지하지 않게).
+        인스타 후보 양식(A/B/C)은 카드·본문에 '#번호' 를 적으므로 기간 안의 딜을 모두 번호 순(큰 번호 = 최근)으로 — 점수로 자르면
+        인스타 글의 번호가 페이지에 없을 수 있었다. 예전 양식(current)은 그대로 점수 순 위에서 page_max_items 개."""
+        cfg = self.settings.web
+        now = now or utcnow()
+        # 끝 시각을 조금 뒤로: 방금(같은 초에) 올라간 글도 들어가게
+        items = [
+            it
+            for it in self.db.published_items_between(
+                now - timedelta(hours=cfg.page_hours), now + timedelta(minutes=1), include_dry_run=self.state.dry_run
+            )
+            if it.deal.product.deal_kind != "info" and (it.deal.affiliate_url or it.deal.product.url)
+        ]
+        if self.settings.instagram.style != "current":
+            return sorted(items, key=lambda x: x.id, reverse=True)
+        return sorted(items, key=lambda x: x.score, reverse=True)[: cfg.page_max_items]
+
+    def _page_deal_no(self, item_id: int | None) -> int | None:
+        """인스타 카드·본문에 적을 핫딜 페이지 번호: 그 글이 지금 페이지에 있을 때만 (페이지에서 찾을 수 없는 번호는 적지 않음)."""
+        if item_id is None:
+            return None
+        return item_id if any(it.id == item_id for it in self._page_items()) else None
+
     async def _deals_page(self, query: dict[str, str]) -> tuple[int, str]:
         cfg = self.settings.web
-        now = utcnow()
-        # 끝 시각을 조금 뒤로: 방금(같은 초에) 올라간 글도 들어가게
-        items = self.db.published_items_between(
-            now - timedelta(hours=cfg.page_hours), now + timedelta(minutes=1), include_dry_run=self.state.dry_run
-        )
         rows = []
         disclosures: list[str] = list(self.settings.blog_digest.always_disclosures)
-        for it in sorted(items, key=lambda x: x.score, reverse=True)[: cfg.page_max_items]:
+        for it in self._page_items():
             p = it.deal.product
-            if p.deal_kind == "info" or not (it.deal.affiliate_url or p.url):
-                continue
             shop = self.registry.get(p.shop)
             disc = deal_disclosure(shop, p.extra)
             if disc and disc not in disclosures:

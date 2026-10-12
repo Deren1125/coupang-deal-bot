@@ -373,7 +373,7 @@ class WebConfig(BaseModel):
     public_page: bool = True  # "/" 에 최근 채널 딜 목록(구매 링크 포함) 페이지를 연다 — 인스타 프로필 링크용
     site_title: str = "오늘의 핫딜"
     page_hours: int = 48  # 페이지에 보여줄 기간
-    page_max_items: int = 30
+    page_max_items: int = 30  # 예전 인스타 양식(current)만: 점수 순 위에서 이만큼. 번호 양식(A/B/C)은 기간 안의 딜을 모두 (인스타 '#번호' 를 찾게)
 
 
 class CopyTarget(BaseModel):

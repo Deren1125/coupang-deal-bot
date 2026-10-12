@@ -164,3 +164,56 @@ async def test_deals_page_shows_numbers_only_for_variant_styles(settings) -> Non
         assert '<span class="no">#1</span>' in body
     finally:
         await bot.close()
+
+
+async def test_numbered_page_lists_every_deal_and_caption_numbers_only_page_deals(settings) -> None:  # type: ignore[no-untyped-def]
+    """번호 양식이면 핫딜 페이지가 기간 안의 딜을 점수로 자르지 않고 모두 번호 순(최근 먼저)으로 보여 준다 —
+    인스타 글의 '#번호' 를 페이지에서 찾을 수 있게. 페이지에 없는 글(기간이 지난 글)엔 카드·본문에 번호를 적지 않는다."""
+    from datetime import timedelta
+
+    from dealbot.app import DealBot
+    from dealbot.models import PublishResult
+    from dealbot.utils.timeutil import utcnow
+
+    settings.collectors = []
+    bot = DealBot(settings)
+    try:
+        bot.settings.instagram.style = "B"
+        bot.settings.web.page_max_items = 3
+        for i in range(1, 6):  # 최근 글일수록 점수가 낮음 → 점수로 3개만 자르면 #4·#5 가 빠졌다
+            d = _market_deal(f"샴푸 {i}호")
+            d.product.product_id = f"coupang:{i}"
+            assert bot.db.enqueue(d, score=50.0 - i)
+            bot.db.update_queue_item(i, status="published", deal=d)
+            bot.db.record_post(d, channel_id=None, message_id=i, dry_run=True)
+        info = _market_deal("이벤트 안내")
+        info.product.product_id, info.product.deal_kind = "info:1", "info"
+        assert bot.db.enqueue(info, score=99.0)
+        bot.db.update_queue_item(6, status="published", deal=info)
+        _, body = await bot.web.dispatch("GET", "/")
+        shown = [int(n) for n in re.findall(r'<span class="no">#(\d+)</span>', body)]
+        assert shown == [5, 4, 3, 2, 1]  # 정보 글은 빠지고, 낮은 점수의 최근 글도 모두
+        bot.settings.instagram.style = "current"
+        _, body = await bot.web.dispatch("GET", "/")
+        assert body.count('href="/d/') == 3  # 예전 양식은 그대로 점수 순 상위 page_max_items
+        bot.settings.instagram.style = "B"
+
+        old = _market_deal("오래된 샴푸")
+        old.product.product_id = "coupang:old"
+        assert bot.db.enqueue(old, score=10.0)
+        bot.db.update_queue_item(7, status="published", deal=old, now=utcnow() - timedelta(hours=60))
+        assert bot._page_deal_no(5) == 5 and bot._page_deal_no(7) is None and bot._page_deal_no(None) is None
+
+        got: list[int | None] = []
+
+        async def publish(deal: Deal, image_url: str | None, *, deal_no: int | None = None) -> PublishResult:
+            got.append(deal_no)
+            return PublishResult(ok=True, dry_run=True)
+
+        bot.instagram.publish = publish  # type: ignore[method-assign]
+        await bot._publish_side_channels(_market_deal("샴푸 5호"), photo=_photo(), deal_no=5)
+        await bot._publish_side_channels(old, photo=_photo(), deal_no=7)
+        assert got == [5, None]  # 페이지에 없는 글엔 '#번호' 를 적지 않음
+        assert "핫딜 페이지 #7" not in bot.instagram.render(old, deal_no=bot._page_deal_no(7))
+    finally:
+        await bot.close()
