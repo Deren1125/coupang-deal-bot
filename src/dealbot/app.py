@@ -235,12 +235,6 @@ class DealBot:
         )
         if settings.info_posts.enabled and sm.enabled and self.summarizer.backend is None:
             log.warning("info summarizer off (no ANTHROPIC_API_KEY and no claude CLI) — info posts will wait for admin approval (/ok)")
-        # 모델 이름은 저장소에 없고 서버 .env 에서 받는다. 없으면 한 번 알리고 안전하게: CLI 는 기본 모델, API 는 건너뜀
-        if not cc.model:
-            log.warning("%s 가 없어 claude CLI 는 기본 모델로 씀 (한줄평, CLI 로 도는 요약·말 명령)", ENV_MODEL_COMMENTARY)
-        if settings.secrets.anthropic_api_key and not sm.model:
-            log.warning("%s 가 없어 ANTHROPIC_API_KEY 가 있어도 Claude API 는 건너뜀 — 정보 글 요약·말 명령은 서버 claude CLI 로",
-                        ENV_MODEL_SUMMARIZER)
         self._pending_notice_ready = False
         self.rate_limiter = RateLimiter(self.db, settings.publish)
         # 네이버 쇼핑커넥트 자동 링크: Blog-Auto 가 쓰는 답 파일 (받은편지함과 같은 폴더)
@@ -363,6 +357,15 @@ class DealBot:
             tz=settings.app.timezone,
         )
         self.notifier.msg_log = self.nl.record
+        # 모델 이름은 저장소에 없고 서버 .env 에서 받는다. 없으면 한 번 알리고 안전하게: CLI 는 기본 모델, API 는 건너뜀
+        # 그 이름을 실제로 쓰는 기능이 켜져 있을 때만 알린다 (꺼 둔 기능·설정에 따로 적은 모델 때문에 시작 로그가 시끄럽지 않게)
+        info_ai = settings.info_posts.enabled and sm.enabled
+        nl_cli = self.nl.enabled and not nc.cli_model and self.nl.asker.backend != "api"
+        if not cc.model and (cc.enabled or (info_ai and self.summarizer.backend != "api") or nl_cli):
+            log.warning("%s 가 없어 claude CLI 는 기본 모델로 씀 (한줄평, CLI 로 도는 요약·말 명령)", ENV_MODEL_COMMENTARY)
+        if settings.secrets.anthropic_api_key and not sm.model and (info_ai or (self.nl.enabled and not nc.model)):
+            log.warning("%s 가 없어 ANTHROPIC_API_KEY 가 있어도 Claude API 는 건너뜀 — 정보 글 요약·말 명령은 서버 claude CLI 로",
+                        ENV_MODEL_SUMMARIZER)
         self.notifier.channel_post_base = channel_post_base(settings.secrets.telegram_channel_id, settings.channels.telegram_url)
         self.reporter = StatusReporter(
             settings, self.db, self.state, self.rate_limiter, self.renderer, self.registry, self.links, budget=self.budget,

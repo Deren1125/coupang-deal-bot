@@ -267,3 +267,38 @@ def test_bot_warns_once_per_missing_model_name(settings, caplog: pytest.LogCaptu
         assert bot.commentator.model == "test-cli-model"
     finally:
         bot.db.close()
+
+
+def test_model_name_warning_only_for_features_that_use_it(settings, caplog: pytest.LogCaptureFixture) -> None:  # type: ignore[no-untyped-def]
+    """꺼 둔 기능이나 설정에 모델을 따로 적은 말 명령 때문에 모델 이름 경고가 뜨지 않는다 (쓰는 기능이 있을 때만)."""
+    import logging
+
+    from dealbot.app import DealBot
+
+    def warned() -> list[str]:
+        with caplog.at_level(logging.WARNING, logger="dealbot.app"):
+            bot = DealBot(settings)
+        bot.db.close()
+        out = [r.getMessage() for r in caplog.records if "DEALBOT_MODEL_" in r.getMessage()]
+        caplog.clear()
+        return out
+
+    settings.collectors = []
+    settings.secrets.anthropic_api_key = "sk-test"
+    settings.publish.commentary.enabled = False
+    settings.info_posts.enabled = False
+    settings.monitoring.nl_router.enabled = False
+    assert warned() == []
+    # 말 명령만 켜고 모델을 설정에 따로 적어 두면 .env 이름이 없어도 쓸 데가 없다
+    settings.monitoring.nl_router.enabled = True
+    settings.monitoring.nl_router.model, settings.monitoring.nl_router.cli_model = "test-model", "test-cli-model"
+    assert warned() == []
+    # 말 명령이 .env 이름에 기대면 알린다 (API 이름이 없으면 CLI 로 가고, CLI 는 기본 모델)
+    settings.monitoring.nl_router.model, settings.monitoring.nl_router.cli_model = None, None
+    got = warned()
+    assert len(got) == 2 and any("DEALBOT_MODEL_SUMMARIZER" in w for w in got) and any("DEALBOT_MODEL_COMMENTARY" in w for w in got)
+    # 한줄평만 켜져 있으면 CLI 이름만
+    settings.monitoring.nl_router.enabled = False
+    settings.publish.commentary.enabled = True
+    got = warned()
+    assert len(got) == 1 and "DEALBOT_MODEL_COMMENTARY" in got[0]
