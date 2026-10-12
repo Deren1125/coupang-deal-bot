@@ -1420,11 +1420,12 @@ class DealBot:
         await self.notifier.notify_price_hold(queue_id, p, check)
         return queue_id
 
-    async def _hold_item(self, item: QueueItem, deal: Deal) -> None:
-        """발행 직전에 읽은 페이지(사진 때문에 이미 연 페이지)로 가격이 안 맞는 게 드러난 글: 올리지 않고 보류."""
+    async def _hold_item(self, item: QueueItem, deal: Deal, *, when: str = "before publish") -> None:
+        """발행 직전에 읽은 페이지(사진 때문에 이미 연 페이지)로 가격이 안 맞는 게 드러난 글: 올리지 않고 보류.
+        when: 'before link' 면 쇼핑커넥트에 묻기 전에 드러난 것 (링크 요청·자동 링크 없음)."""
         p = deal.product
         check = PageCheck(**p.extra["page_price"])
-        self.db.update_queue_item(item.id, status="held", error=f"held: page price ({check.reason}, before publish)", deal=deal)
+        self.db.update_queue_item(item.id, status="held", error=f"held: page price ({check.reason}, {when})", deal=deal)
         self._hold_note_log(item.id, p, check)
         await self.notifier.notify_price_hold(item.id, p, check)
 
@@ -1559,6 +1560,30 @@ class DealBot:
         at = from_iso(self.db.kv_get(f"{autolink.KV_MISS}{product_no}"))
         return bool(at and utcnow() - at < timedelta(days=cfg.not_found_days))
 
+    async def _held_before_autolink(self, item: QueueItem, deal: Deal) -> bool:
+        """쇼핑커넥트에 묻기 전 가격 대조 (주인 결정 10/12 보류 규칙): 보류할 딜이면 보류하고 True — 검색·발급 없음.
+        수집 때 페이지를 못 읽은(unverified) 딜은 여기서 한 번 더 본다: 품절 확인 때 읽은 페이지(캐시)로, 그래도 모르면
+        스토어 크롬으로 (발행 때 사진용으로 다시 열지 않게 크롬이 읽은 페이지는 잠시 기억). 못 읽으면 예전처럼 진행."""
+        p = deal.product
+        state = p.extra.get("page_price")
+        if isinstance(state, dict) and state.get("status") == "unverified":
+            meta: PageMeta | None = None
+            if self._can_check_page(p):
+                try:
+                    meta = await self.enricher.fetch(p.url)
+                except Exception:  # noqa: BLE001
+                    meta = None
+            if (meta is None or meta.prices is None) and p.shop not in self.settings.deal.enrich.exclude_shops:
+                try:
+                    meta = await self.store_browser.page_meta(p.url)
+                except Exception:  # noqa: BLE001
+                    meta = None
+            self._recheck_page_price(p, meta)
+        if (p.extra.get("page_price") or {}).get("status") == "hold":
+            await self._hold_item(item, deal, when="before link")
+            return True
+        return False
+
     def _request_autolink(self, item: QueueItem, deal: Deal, product_no: str) -> None:
         """Blog-Auto 에 쇼핑커넥트 링크를 부탁한다. 글마다 한 번 (job 을 kv 에 먼저 남기고 받은편지함에 한 줄)."""
         p = deal.product
@@ -1613,7 +1638,12 @@ class DealBot:
             return 0
         raw = self.db.kv_get(f"{autolink.KV_JOB}{qid}")
         marker = json.loads(raw) if raw else None
-        if not isinstance(marker, dict) or not row.get("job") or marker.get("job") != row.get("job"):
+        mine = isinstance(marker, dict) and bool(row.get("job")) and marker.get("job") == row.get("job")
+        at = row.get("at")
+        if mine or (isinstance(at, (int, float)) and time.time() - at <= 3600):
+            # 멈춤(로그인·제한·한도·시간 밖)은 늦게 온 답(그 글은 이미 주인 요청으로 넘어감)이어도 따르고 알린다
+            self._note_autolink_stop(row)
+        if not mine or not isinstance(marker, dict):
             # 이미 반영했거나(같은 줄을 다시 읽음) 취소·시간 초과로 넘어간 글의 늦은 답
             log.info("autolink: 반영하지 않은 답 #%s (%s)", qid, "ok" if row.get("ok") else row.get("reason"))
             return 0
@@ -1622,7 +1652,6 @@ class DealBot:
         if item is None or item.status != autolink.STATUS:
             return 0
         no = str(marker.get("no") or "")
-        self._note_autolink_stop(row)
         if (row.get("product_no") and str(row.get("product_no")) != no) or store_product_no(item.deal.product.url) != no:
             await self._autolink_fallback(item, "product_no mismatch")
             return 1
@@ -1664,7 +1693,8 @@ class DealBot:
                 log.warning("쇼핑커넥트 자동 링크 멈춤: %s", reason)
                 self.owner_notice(
                     "autolink_stop",
-                    f"⛔ 쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 네이버 딜은 예전처럼 링크를 요청할게요.",
+                    f"⛔ 쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 네이버 딜은 예전처럼 링크를 요청할게요. "
+                    f"{autolink.RESUME_HINT}",
                 )
 
     async def _autolink_timeouts(self) -> int:
@@ -1780,6 +1810,8 @@ class DealBot:
             product_no = self._autolink_product_no(deal, shop, auth)
             if product_no:
                 # 네이버: 주인에게 묻기 전에 쇼핑커넥트에서 자동으로 (주인 결정 10/11). 안 되면 아래와 같은 링크 요청으로 돌아온다
+                if await self._held_before_autolink(item, deal):
+                    return True  # 가격이 안 맞아 보류할 딜은 쇼핑커넥트에서 찾지도 발급하지도 않는다
                 if self._sc_known_missing(product_no):
                     self._post_raw_link(item, deal, "쇼핑커넥트에 없던 상품 (기억)")
                 else:

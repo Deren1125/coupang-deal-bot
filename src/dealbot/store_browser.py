@@ -70,8 +70,12 @@ class StoreBrowser:
         min_free_mb: int = 500,
         timeout: float = 45.0,
         executable_path: str | None = None,
+        cache_seconds: float = 1800.0,
     ) -> None:
         self.enabled = enabled
+        # 읽은 페이지는 잠시 기억: 쇼핑커넥트에 묻기 전 가격 대조로 연 페이지를 발행 때 사진용으로 다시 열지 않게
+        self.cache_seconds = cache_seconds
+        self._cache: dict[str, tuple[float, PageMeta]] = {}
         self.min_interval = min_interval
         self.min_free_mb = min_free_mb
         self.timeout = timeout
@@ -87,6 +91,9 @@ class StoreBrowser:
         """스토어 상품 페이지를 크롬으로 열어 읽은 메타. 스토어 주소가 아니거나, 꺼졌거나, 못 열면 None."""
         if not self.enabled or self.disabled_reason or not is_naver_store(url):
             return None
+        hit = self._cache.get(url)
+        if hit is not None and hit[0] > self._clock():
+            return hit[1]
         async with self._lock:
             wait = self._next - self._clock()
             if wait > 0:
@@ -114,6 +121,10 @@ class StoreBrowser:
             return None
         meta = page_meta_at(html, final_url or url)
         log.info("store browser: %s → 사진 %s (%.0f초)", url, (meta.ld_image or meta.image or "없음")[:120], took)
+        if self.cache_seconds > 0:
+            now = self._clock()
+            self._cache = {k: v for k, v in self._cache.items() if v[0] > now}
+            self._cache[url] = (now + self.cache_seconds, meta)
         return meta
 
     async def _open_page(self, url: str) -> tuple[int, str, str]:

@@ -385,3 +385,123 @@ async def test_resume_from_blogauto_lets_the_bot_ask_again(bot: DealBot, setting
     _reply(settings, {"resume": True, "at": time.time()})
     await bot.autolink_tick()
     await _ask(bot, settings, _product(price=50000))
+
+
+# ── 가격 대조 보류(page-price)와 쇼핑커넥트: 보류할 딜은 찾지도 발급하지도 않는다 ──────────────
+
+WATER_URL = "https://smartstore.naver.com/water/products/11223344556"
+WATER_NAME = "풀무원 샘물 생수 무라벨 2L 24개"
+
+
+def _water_page(url: str = WATER_URL) -> Any:
+    from pathlib import Path
+
+    from dealbot.enrich import page_meta_at
+
+    return page_meta_at((Path(__file__).parent / "fixtures" / "naver_store_state.html").read_text(encoding="utf-8"), url)
+
+
+def _unverified_water(price: int) -> Product:
+    return _product(url=WATER_URL, name=WATER_NAME, price=price, extra={
+        "auth": {"status": "ok", "reason": "공식 판매처"},
+        "page_price": {"status": "unverified", "title_price": price, "reason": "페이지를 못 읽음"},
+    })
+
+
+def _pages(bot: DealBot, *, plain: Any = None, chrome: Any = None) -> list[str]:
+    opened: list[str] = []
+
+    async def fetch(url: str) -> Any:
+        opened.append(f"plain {url}")
+        return plain
+
+    async def page_meta(url: str) -> Any:
+        opened.append(f"chrome {url}")
+        return chrome
+
+    bot.enricher.fetch = fetch  # type: ignore[method-assign]
+    bot.store_browser.page_meta = page_meta  # type: ignore[method-assign]
+    return opened
+
+
+async def test_price_held_deal_never_reaches_shopping_connect(bot: DealBot, settings: Settings) -> None:
+    """수집 때 페이지를 못 읽은 네이버 딜: 쇼핑커넥트에 묻기 전에 (품절 확인 때 읽은 페이지 → 안 되면 스토어 크롬) 가격을 보고,
+    안 맞으면 보류 — Blog-Auto 에 부탁도, 주인 링크 요청도 없음."""
+    opened = _pages(bot, plain=None, chrome=_water_page())
+    qid = _enqueue(bot, _unverified_water(6410))
+    assert await bot.process_queue_once()
+    item = bot.db.get_queue_item(qid)
+    assert item is not None and item.status == "held" and item.last_error.endswith("before link)")  # type: ignore[union-attr]
+    assert not [u for u in _inbox(settings) if "connect_link" in u]
+    assert opened == [f"plain {WATER_URL}", f"chrome {WATER_URL}"]
+    assert len(bot.sent) == 1 and "보류" in bot.sent[0]  # type: ignore[attr-defined]  # 조용한 보류 메모 한 줄, 링크 요청 아님
+    assert bot.db.queue_counts() == {"held": 1}
+
+
+async def test_held_items_are_never_picked_for_a_link(bot: DealBot, settings: Settings) -> None:
+    bot.db.add_held(Deal(_product(), DealVerdict(is_deal=True, score=5)), score=5, error="held: page price (price)")
+    assert not await bot.process_queue_once()
+    await bot.autolink_tick()
+    assert _inbox(settings) == [] and bot.sent == []  # type: ignore[attr-defined]
+
+
+async def test_unverified_deal_whose_page_matches_goes_to_shopping_connect(bot: DealBot, settings: Settings) -> None:
+    _pages(bot, plain=_water_page())  # 품절 확인 때 읽은 페이지로 충분 → 크롬은 안 엶
+    qid = _enqueue(bot, _unverified_water(14500))
+    assert await bot.process_queue_once()
+    item = bot.db.get_queue_item(qid)
+    assert item is not None and item.status == autolink.STATUS
+    assert item.deal.product.extra["page_price"]["status"] in ("ok", "option")  # 발행 때 다시 대조하지 않게 남김
+    assert _job(settings)["product_no"] == "11223344556"
+
+
+async def test_unreadable_page_still_asks_shopping_connect(bot: DealBot, settings: Settings) -> None:
+    opened = _pages(bot)  # 둘 다 못 읽음 → 예전처럼 진행
+    qid = _enqueue(bot, _unverified_water(6410))
+    assert await bot.process_queue_once()
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
+    assert len(opened) == 2
+
+
+async def test_late_login_answer_still_stops_and_alerts(bot: DealBot, settings: Settings) -> None:
+    """딜봇이 이미 시간 초과로 주인에게 넘긴 글의 늦은 답이라도 로그인 멈춤은 따르고 카톡으로 알린다 (한 번)."""
+    qid, job = await _ask(bot, settings)
+    bot.settings.autolink.naver.wait_minutes = 0
+    await bot.autolink_tick()  # 시간 초과 → 주인 요청
+    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
+    row = {"id": qid, "job": job["job"], "product_no": NO, "ok": False, "reason": "login", "retry_at": time.time() + 3600,
+           "at": time.time()}
+    _reply(settings, row)
+    assert await bot.autolink_tick() == 0
+    notes = [u["owner_notice"]["text"] for u in _inbox(settings) if u.get("owner_notice", {}).get("kind") == "autolink_stop"]
+    assert len(notes) == 1 and "deploy/login.sh finance" in notes[0] and "shopconnect resume" in notes[0]
+    assert bot._autolink_product_no(_enqueue_deal(), bot.registry.get("naver"), _ok_auth()) is None  # 멈춘 동안은 묻지 않음
+    # 오래된 줄(한 시간 넘음)은 다시 읽어도 알림·멈춤에 쓰지 않는다
+    bot.db.kv_set(autolink.KV_STOP, "")
+    bot.db.kv_delete_prefix("autolink_alert:")
+    _reply(settings, {**row, "at": time.time() - 7200})
+    await bot.autolink_tick()
+    assert len([u for u in _inbox(settings) if u.get("owner_notice", {}).get("kind") == "autolink_stop"]) == 1
+
+
+def _enqueue_deal() -> Deal:
+    return Deal(_product(), DealVerdict(is_deal=True, score=5))
+
+
+def _ok_auth() -> Any:
+    from dealbot.authenticity import AuthResult
+
+    return AuthResult("ok", "")
+
+
+def test_instagram_styles_drop_the_disclosure_for_raw_naver_links(bot: DealBot) -> None:
+    from dealbot.publisher import insta_style
+
+    naver = bot.registry.get("naver")
+    deal = Deal(_product(), DealVerdict(is_deal=True, discount_rate=30), affiliate_url=URL)
+    deal.product.extra["raw_link"] = "sc_not_found"
+    info = insta_style.card_info(deal, bot.renderer, shop=naver)
+    assert not info.disclosure and insta_style.caption_context(deal, info, shop=naver)["disclosure"] == ""
+    deal.product.extra.pop("raw_link")
+    info = insta_style.card_info(deal, bot.renderer, shop=naver)
+    assert info.disclosure and "쇼핑 커넥트" in insta_style.caption_context(deal, info, shop=naver)["disclosure"]

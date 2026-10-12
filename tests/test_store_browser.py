@@ -331,3 +331,14 @@ def test_newest_full_chromium_is_found_across_layouts(tmp_path, monkeypatch: pyt
     monkeypatch.delenv("DEALBOT_CHROMIUM_PATH", raising=False)
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
     assert find_chromium_executable().endswith("chromium-1243/chrome-linux64/chrome")  # 본체 크롬 중 가장 새 판 (셸보다 먼저)
+
+
+async def test_page_read_is_remembered_for_a_while() -> None:
+    """쇼핑커넥트에 묻기 전 가격 대조로 연 페이지를 발행 때 사진용으로 다시 열지 않는다 (30분 기억)."""
+    sb, opened, _ = _browser((200, STORE_URL, HTML))
+    first = await sb.page_meta(STORE_URL)
+    again = await sb.page_meta(STORE_URL)
+    assert first is not None and again is first and opened == [STORE_URL]
+    sb._clock = lambda: 10_000_000.0  # type: ignore[assignment]  # 한참 뒤
+    await sb.page_meta(STORE_URL)
+    assert opened == [STORE_URL, STORE_URL]
