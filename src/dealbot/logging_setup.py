@@ -56,6 +56,7 @@ def setup_logging(
         except OSError as e:
             root.warning("파일 로그를 쓸 수 없어 화면 로그만 사용합니다 (%s): %s", log_dir, e)
 
-    # 시끄러운 라이브러리 로그 억제
+    # 시끄러운 라이브러리 로그 억제. httpx 는 요청마다 주소를 INFO 로 남기는데 텔레그램 주소엔 봇 토큰이 들어 있다
+    # (스레드·인스타 주소엔 access_token) → INFO 로 내리지 말 것 (tests/test_logging_setup.py)
     for noisy in ("httpx", "httpcore", "telegram", "apscheduler"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
