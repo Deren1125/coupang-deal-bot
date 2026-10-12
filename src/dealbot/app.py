@@ -1637,6 +1637,7 @@ class DealBot:
             if row.get("resume") is True:  # Blog-Auto 에서 주인이 멈춤을 풀었음 (python -m blogauto shopconnect resume)
                 self.db.kv_set(autolink.KV_STOP, "")
                 self.db.kv_delete_prefix("autolink_alert:")  # 다시 멈추면 또 알림
+                self.notifier.resolve(*(f"autolink:{r}" for r in autolink.ALERT_REASONS))  # 아직 안 간 멈춤 카톡은 보내지 않게
                 log.info("쇼핑커넥트 자동 링크 다시 시작")
                 continue
             try:
@@ -1709,11 +1710,15 @@ class DealBot:
                 self.db.kv_set(key, day)
                 self.db.log_event("WARNING", "autolink", f"stopped: {reason}")
                 log.warning("쇼핑커넥트 자동 링크 멈춤: %s", reason)
-                self.owner_notice(
-                    "autolink_stop",
-                    f"⛔ 쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 네이버 딜은 예전처럼 링크를 요청할게요. "
-                    f"{autolink.RESUME_HINT}",
-                )
+                text = (f"쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 네이버 딜은 예전처럼 링크를 요청할게요. "
+                        f"{autolink.RESUME_HINT}")
+                if self.notifier.silent_policy:  # 알림 정책(10/11): 카톡 할 일 한 통 (v2 키 — 다시 시작하면 해결)
+                    if not self.notifier.owner_line({"kind": "autolink_stop", "key": f"autolink:{reason}", "urgent": True,
+                                                     "text": kakao_fit(f"⛔[멈춤] {text}"), "short": "쇼핑커넥트 자동 링크 멈춤",
+                                                     "ttl_h": 24}):
+                        log.error("쇼핑커넥트 멈춤 카톡 줄을 남기지 못함: %s", reason)
+                else:
+                    self.owner_notice("autolink_stop", f"⛔ {text}")
 
     async def _autolink_timeouts(self) -> int:
         cutoff = utcnow() - timedelta(minutes=self.settings.autolink.naver.wait_minutes)

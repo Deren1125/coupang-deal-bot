@@ -385,6 +385,12 @@ async def test_resume_from_blogauto_lets_the_bot_ask_again(bot: DealBot, setting
     _reply(settings, {"resume": True, "at": time.time()})
     await bot.autolink_tick()
     await _ask(bot, settings, _product(price=50000))
+    # 알림 정책(10/11): 멈춤 카톡은 v2 할 일 한 통(⛔[멈춤], 키 autolink:login), 다시 시작하면 그 키를 해결
+    notes = [u["owner_notice"] for u in _inbox(settings) if "owner_notice" in u]
+    stop = [n for n in notes if n.get("kind") == "autolink_stop"]
+    assert len(stop) == 1 and stop[0]["v"] == 2 and stop[0]["key"] == "autolink:login" and stop[0]["urgent"] is True
+    assert stop[0]["text"].startswith("⛔[멈춤] 쇼핑커넥트 자동 링크 멈춤")
+    assert any("autolink:login" in (n.get("resolve") or []) for n in notes)
 
 
 # ── 가격 대조 보류(page-price)와 쇼핑커넥트: 보류할 딜은 찾지도 발급하지도 않는다 ──────────────
