@@ -177,6 +177,16 @@ async def test_owner_summary_lines_are_sentences(bot: DealBot, settings: Setting
     assert _inbox(settings)[-1] == {**_inbox(settings)[-1], "cat": "waiting", "text": "", "replace": True}  # 기다리는 일이 없어지면 비움
 
 
+async def test_owner_summary_names_what_was_posted(bot: DealBot, settings: Settings) -> None:
+    """숫자만이 아니라 무엇을 올렸는지 이름으로 (주인 결정 10/11)."""
+    item = _queued(bot)
+    bot.db.update_queue_item(item.id, status="published")
+    bot.db.record_post(item.deal, channel_id="@c", message_id=1, dry_run=bot.state.dry_run)
+    await bot.owner_summary()
+    day = [n for n in _inbox(settings) if n.get("cat") == "day"][-1]["text"]
+    assert day.startswith("오늘 딜봇은") and "1개예요 — 「데켓 주물 IH" in day and day.endswith(".")
+
+
 async def test_new_selfcheck_failure_alerts_once(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
     from dealbot.scheduler import selfcheck_alerts
 
@@ -201,13 +211,13 @@ async def test_old_v1_relay_when_policy_is_off(bot: DealBot, settings: Settings,
     assert f"#{item.id}" in notes[-1]["text"] and "brand.naver.com/daekket" in notes[-1]["text"] and len(notes[-1]["text"]) <= 200
     bot.db.update_queue_item(item.id, status="awaiting_link", error="manual")
     msg = await bot.attach_link(item.id, "https://naver.me/abc")
-    assert "상품 링크 완료" in msg and _inbox(settings)[-1]["kind"] == "link_done"
+    assert "상품 링크 완료" in msg  # 텔레그램 답장은 그대로
     bot.notifier.cfg.notify_on_publish = False
     mine = Deal(_product(extra={"owner_link": True}), DealVerdict(is_deal=True))
     await bot.notifier.notify_published(mine, PublishResult(ok=True, message_id=77, dry_run=False))
     assert "링크를 붙여 주신 상품을 채널에 올렸어요" in sent[-1][0]
-    note = _inbox(settings)[-1]
-    assert note["kind"] == "published" and "https://t.me/oneul_hotdeal/77" in note["text"] and "<" not in note["text"]
+    # '상품 링크 완료'·'채널에 올렸어요' 카톡은 정책을 꺼도 없음 (주인 결정 10/11) — 링크 요청 카톡만 남는다
+    assert [n["kind"] for n in _inbox(settings)] == ["link_request"]
 
 
 async def test_relay_can_be_turned_off(bot: DealBot, settings: Settings) -> None:
@@ -215,6 +225,66 @@ async def test_relay_can_be_turned_off(bot: DealBot, settings: Settings) -> None
     bot.notifier._relay("link_request", "x")
     bot.notifier.summary("day", "x")
     assert not _inbox(settings)
+
+
+async def test_alert_is_loud_when_the_kakao_line_cannot_be_written(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
+    """Blog-Auto 는 살아 있어도 받은편지함에 못 썼거나(파일 오류) 카톡 넘기기를 꺼 두었으면 할 일은 텔레그램으로 소리 내서."""
+    _healthy(settings)
+    item = _queued(bot)
+    bot.notifier.owner_inbox = lambda note: False  # 받은편지함 쓰기 실패 (relay_to_blog 가 False)
+    await bot.notifier.notify_manual_link(item, bot.registry.get("naver"))
+    assert sent[-1][1] is True and sent[-1][0].endswith("(카톡 알림이 안 돼서 텔레그램으로 알려요)")
+    bot.notifier.owner_inbox = bot.relay_to_blog
+    bot.notifier.cfg.kakao_relay = False
+    await bot.notifier.notify_deal_review(item, "네이버", "공식 판매처 확인 안 됨")
+    assert sent[-1][1] is True and not _inbox(settings)
+
+
+def test_relay_to_blog_reports_a_failed_write(bot: DealBot, settings: Settings) -> None:
+    assert bot.relay_to_blog({"owner_notice": {"v": 2, "resolve": ["link:1"]}}) is True
+    bot.settings.data_dir = settings.data_dir / "missing" / "dir"
+    assert bot.relay_to_blog({"owner_notice": {"v": 2, "resolve": ["link:1"]}}) is False
+
+
+async def test_price_hold_is_routine_silent_telegram_and_summary_not_kakao(bot: DealBot, settings: Settings) -> None:
+    """상품 페이지 가격이 안 맞아 보류한 딜 (10/12): 주인이 할 일이 아니라 소식 — 텔레그램은 소리 없이, 저녁 요약에만."""
+    from dealbot.page_price import PageCheck
+
+    _healthy(settings)
+    calls: list[dict] = []
+
+    async def fake_send(text: str, **kw: object) -> int:
+        calls.append({"text": text, **kw})
+        return 1
+
+    bot.notifier.send_with_id = fake_send  # type: ignore[method-assign]
+    check = PageCheck(status="hold", title_price=9900, page_price=19900, page_label="2개입", reason="price")
+    await bot.notifier.notify_price_hold(22, _product(price=9900), check)
+    assert len(calls) == 1 and calls[0]["text"].startswith("⏸ #22 보류") and not calls[0].get("loud")
+    notes = _inbox(settings)
+    assert [(n["kind"], n["cat"]) for n in notes] == [("summary", "held")] and "데켓 주물" in notes[0]["text"]
+    assert not [n for n in notes if n.get("key")]  # 할 일 카톡(키 있는 알림)은 없음
+
+
+async def test_price_hold_telegram_has_no_sound_under_the_policy(bot: DealBot) -> None:
+    from dealbot.page_price import PageCheck
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self.kw: list[dict] = []
+
+        async def send_message(self, **kw: object):  # type: ignore[no-untyped-def]
+            self.kw.append(kw)
+
+            class M:
+                message_id = 5
+            return M()
+
+    fake = FakeBot()
+    bot.notifier.bot = fake  # type: ignore[assignment]
+    bot.notifier.chat_id = "1"
+    await bot.notifier.notify_price_hold(22, _product(price=9900), PageCheck(status="hold", title_price=9900, reason="price"))
+    assert fake.kw and all(k.get("disable_notification") is True for k in fake.kw)
 
 
 def test_kakao_fit_trims_only_the_first_line() -> None:

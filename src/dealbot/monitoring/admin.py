@@ -401,14 +401,16 @@ class AdminNotifier:
             return False
         return bool(data.get("kakao_ok"))
 
-    def owner_line(self, note: dict[str, Any]) -> None:
-        """Blog-Auto 받은편지함에 owner_notice v2 한 줄 (카톡 알림·해결·저녁 요약). 실패해도 텔레그램은 그대로."""
+    def owner_line(self, note: dict[str, Any]) -> bool:
+        """Blog-Auto 받은편지함에 owner_notice v2 한 줄 (카톡 알림·해결·저녁 요약). 실패해도 텔레그램은 그대로.
+        한 줄을 남겼으면 True — 못 남겼으면(카톡 넘기기 꺼짐·파일 오류) 할 일 알림은 텔레그램으로 소리 내서 (alert)."""
         if self.owner_inbox is None or not getattr(self.cfg, "kakao_relay", True):
-            return
+            return False
         try:
-            self.owner_inbox({"owner_notice": {"v": 2, "at": time.time(), **note}})
+            return self.owner_inbox({"owner_notice": {"v": 2, "at": time.time(), **note}}) is not False
         except Exception as e:  # noqa: BLE001
             log.warning("owner notice failed: %s", e)
+            return False
 
     def resolve(self, *keys: str) -> None:
         """주인이 처리함 (링크 붙임·/skip·/ok·품절) — Blog-Auto 가 아직 안 보낸 카톡은 보내지 않게."""
@@ -428,9 +430,12 @@ class AdminNotifier:
         (Blog-Auto 가 곧 살아나면 보내고, 같은 키라 두 번 가지 않음)."""
         if not self.silent_policy:
             return await self.send_with_id(tg_text, kind=msg_kind, queue_id=queue_id) if tg_text else None
+        # 카톡 줄을 먼저 남긴다 — 못 남겼으면 Blog-Auto 가 살아 있어도 카톡이 안 가니 텔레그램으로 소리 내서 (할 일을 잃지 않게)
+        queued = self.owner_line({"kind": kind, "key": key, "group": group, "text": kakao_fit(kakao_text),
+                                  "short": short[:KAKAO_SHORT], "urgent": urgent, "link": link, "ttl_h": ttl_h})
         loud = False
         text = tg_text
-        if not self.blogauto_ok():
+        if not queued or not self.blogauto_ok():
             now = utcnow()
             last = self._loud_sent.get(key)
             if last is None or now - last >= LOUD_AGAIN:
@@ -438,10 +443,7 @@ class AdminNotifier:
                 loud = True
                 # 첫 글자는 그대로 (📝 정보 글 확인처럼 첫 글자로 답장 대상을 알아보는 메시지가 있음)
                 text = f"{tg_text or html.escape(kakao_text)}{FALLBACK_NOTE}"
-        msg_id = await self.send_with_id(text, loud=loud, kind=msg_kind, queue_id=queue_id) if text else None
-        self.owner_line({"kind": kind, "key": key, "group": group, "text": kakao_fit(kakao_text), "short": short[:KAKAO_SHORT],
-                         "urgent": urgent, "link": link, "ttl_h": ttl_h})
-        return msg_id
+        return await self.send_with_id(text, loud=loud, kind=msg_kind, queue_id=queue_id) if text else None
 
     def _relay(self, kind: str, text: str) -> None:
         """주인에게 카톡으로도 (예전 v1: 링크 요청·링크 완료·올렸어요 — telegram_silent 를 끈 경우). 실패해도 텔레그램 알림은 그대로."""
@@ -565,10 +567,7 @@ class AdminNotifier:
             )
             await self.send(text, silent=True)
             return
-        if owner_link:  # 카톡에도 '올렸어요' (HTML 없이 한 통 200자 안)
-            post = f"\n{self.channel_post_base}/{result.message_id}" if self.channel_post_base and result.message_id else ""
-            price_s = f" · {p.price:,}원" if p.has_price else ""
-            self._relay("published", f"📣 채널에 올렸어요 [{self.shop_label(p.shop)}]\n{truncate(p.name, 60)}{price_s}{post}")
+        # '채널에 올렸어요' 카톡은 없앰 (주인 결정 10/11 — 알림 정책 스위치와 상관없이)
         head = ("🧪 <b>연습 발행</b>" if result.dry_run else
                 "📣 <b>링크를 붙여 주신 상품을 채널에 올렸어요</b>" if owner_link else "✅ <b>채널에 올렸습니다</b>")
         price = f"{p.price:,}원" if p.has_price else "가격 없음"
@@ -659,7 +658,7 @@ class AdminNotifier:
             self.summary("link_done", truncate(p.name, 40))
             return (f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n"
                     "올릴 차례가 되면 바로 채널에 올라가요")
-        self._relay("link_done", f"✅ 상품 링크 완료 #{item.id} [{shop}]\n{truncate(p.name, 60)}{price}\n올릴 차례가 되면 채널에 올라가요")
+        # '상품 링크 완료' 카톡은 없앰 (주인 결정 10/11 — 알림 정책 스위치와 상관없이)
         return (f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n"
                 "올릴 차례가 되면 바로 채널에 올라가요 (올라가면 한 번 더 알려 드려요)")
 
@@ -1173,7 +1172,7 @@ class BotController(Protocol):
 
     async def blog_digest(self, *, preview: bool = False) -> str: ...
 
-    def relay_to_blog(self, update: dict) -> None: ...
+    def relay_to_blog(self, update: dict) -> bool | None: ...
 
     async def test_post(self) -> str: ...
 
