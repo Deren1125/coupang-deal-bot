@@ -37,6 +37,23 @@ def test_variant_words_make_a_different_product() -> None:
     assert similarity("아이폰 16 프로 256GB", "아이폰 16 Pro 256GB") >= 0.8
     assert similarity("아이나비 블랙박스 QXD8000", "아이나비 QXD8000") >= 0.8
     assert similarity("락토핏 프로바이오틱스 60포", "락토핏 프로바이오틱스 유산균 60포") >= 0.8
+    # 변형 글자가 다른 낱말 속에 있으면 변형이 아니다
+    assert similarity("한우 프라임 등심 1kg", "한우 등심 1kg") >= 0.8
+    assert similarity("홈플러스 신라면 120g 40개", "신라면 120g 40개") >= 0.8
+    assert similarity("홈플러스 시그니처 우유 2.3L", "시그니처 우유 2.3L") >= 0.8
+
+
+def test_color_only_matters_when_both_names_name_one() -> None:
+    """한쪽만 색을 적은 같은 딜은 같은 것. 두 이름의 색이 서로 다르면 다른 상품. 묶음 식품의 '블랙'은 제품 라인."""
+    assert similarity("[쿠팡] 에어팟 맥스 블랙", "[쿠팡] 에어팟 맥스") >= 0.8
+    assert similarity("소니 WH-1000XM5 블랙", "소니 WH-1000XM5") >= 0.8
+    assert similarity("스탠리 퀜처 887ml 블랙", "스탠리 퀜처 887ml") >= 0.8
+    assert similarity("나이키 에어포스 1 블랙 270", "나이키 에어포스 1 270") >= 0.8
+    assert similarity("블루투스 이어폰 화이트", "블루투스 이어폰") >= 0.8  # 블루투스는 색이 아님
+    assert similarity("나이키 에어포스 1 블랙 270", "나이키 에어포스 1 화이트 270") == 0.0
+    assert similarity("소니 WH-1000XM5 블랙", "소니 WH-1000XM5 실버") == 0.0
+    assert similarity("삼성 비스포크 냉장고 화이트", "삼성 비스포크 냉장고 그레이") == 0.0
+    assert similarity("농심 신라면 블랙 134g 32봉", "농심 신라면 134g 32봉") == 0.0
 
 
 def test_count_unit_spelling_is_the_same_number() -> None:

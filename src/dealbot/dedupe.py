@@ -19,20 +19,20 @@ _TIMES = re.compile(r"(\d[a-z가-힣]*)\s*[x×*]\s*(?=\d)")  # '2lx24개' → '2
 # 낱개를 세는 단위는 같은 수로 본다: 24개 = 24병 = 24캔 = 24개입 (팩·롤·박스는 묶음이라 그대로)
 _COUNT_UNIT = re.compile(r"(?<=\d)(?:개입|개|입|병|캔|봉지|봉|포|정|매|ea)$")
 # 한쪽 이름에만 있으면 다른 상품인 변형 낱말 (제로·프로·맛). 한글은 띄어쓰기와 무관하게 붙여 쓴 이름에서,
-# 영문은 낱말로 찾고, '프로'와 'pro' 처럼 같은 뜻은 같은 열쇠로 묶는다
+# 영문은 낱말로 찾고, '프로'와 'pro' 처럼 같은 뜻은 같은 열쇠로 묶는다. 낱말 속 글자는 뺀다 (홈플러스·프라임·스타라이트)
 _VARIANT_KO = {
     "zero": r"제로",
     "pro": r"프로(?!바이오|폴리스|틴|모션|젝|그램|필)",
-    "plus": r"플러스",
+    "plus": r"(?<!홈)플러스",
     "ultra": r"울트라",
     "max": r"맥스(?!봉)",
     "mini": r"미니(?!언)",
-    "lite": r"라이트(?!닝)",
-    "black": r"블랙(?!박스|프라이데이|야크)",
+    "lite": r"(?<!스타)라이트(?!닝)",
     "nolabel": r"무라벨",
     "lowsugar": r"로우슈거|저당|무가당|슈가프리",
     "decaf": r"디카페인",
-    **{w: w for w in ("라임", "레몬", "망고", "복숭아", "딸기", "청포도", "자몽", "오렌지", "체리", "블루베리",
+    "라임": r"(?<![프슬])라임",
+    **{w: w for w in ("레몬", "망고", "복숭아", "딸기", "청포도", "자몽", "오렌지", "체리", "블루베리",
                       "바닐라", "녹차", "말차", "매운맛", "순한맛")},
 }
 _VARIANT_EN = {
@@ -44,6 +44,26 @@ _VARIANT_EN = {
     "mini": r"(?<![a-z])mini(?![a-z])",
     "lite": r"(?<![a-z])lite(?![a-z])",
 }
+# 색. 두 이름 모두 색을 적었는데 겹치는 색이 없을 때만 다른 상품 (블랙 vs 실버). 한쪽만 색을 적었으면 같은 딜일 수 있다
+# ('에어팟 맥스 블랙' = '에어팟 맥스'). 색 글자가 든 다른 낱말은 뺀다 (블루투스·블루베리·화이트닝·얼그레이·레드향 …)
+_COLOR_KO = {
+    "black": r"블랙(?!박스|프라이데이|야크)",
+    "white": r"화이트(?!닝)",
+    "silver": r"실버",
+    "gray": r"(?<![얼디])그레이",
+    "navy": r"네이비",
+    "pink": r"핑크(?!퐁)",
+    "blue": r"블루(?!투스|베리|레이|라이트)",
+    "red": r"레드(?!향|불|와인)",
+    "green": r"그린(?!티)",
+    "beige": r"베이지",
+    "gold": r"골드(?!키위)",
+    "purple": r"퍼플",
+}
+_COLOR_EN = re.compile(r"(?<![a-z])(black|white|silver|gray|grey|navy|pink|blue|red|green|beige|gold|purple)(?![a-z])")
+# '신라면 블랙 120g 40봉' 처럼 용량과 개수가 함께 적힌 묶음 식품의 블랙은 색이 아니라 제품 라인 (변형 낱말로 본다)
+_WEIGHT = re.compile(r"\d(?:g|kg|ml|l)(?![a-z])")
+_PACK = re.compile(r"\d(?:개입|개|입|봉지|봉|캔|병|컵|팩)(?![가-힣])")
 
 
 def normalize_name(name: str) -> str:
@@ -59,10 +79,18 @@ def _numbers(norm: str) -> set[str]:
     return {_COUNT_UNIT.sub("개", n) for n in _NUMBER.findall(norm)}
 
 
-def _variants(norm: str, compact: str) -> set[str]:
-    return {k for k, pat in _VARIANT_KO.items() if re.search(pat, compact)} | {
+def _marks(norm: str, compact: str) -> tuple[set[str], set[str]]:
+    """(변형 낱말, 색)."""
+    variants = {k for k, pat in _VARIANT_KO.items() if re.search(pat, compact)} | {
         k for k, pat in _VARIANT_EN.items() if re.search(pat, norm)
     }
+    colors = {k for k, pat in _COLOR_KO.items() if re.search(pat, compact)} | {
+        "gray" if c == "grey" else c for c in _COLOR_EN.findall(norm)
+    }
+    if "black" in colors and _WEIGHT.search(norm) and _PACK.search(norm):
+        colors.discard("black")
+        variants.add("black")
+    return variants, colors
 
 
 def _compact(s: str) -> str:
@@ -78,8 +106,10 @@ def similarity(a: str, b: str) -> float:
     # 숫자(모델·용량·수량)가 다르면 다른 상품이다: S26 vs S25, 1.18L vs 0.7L, 30롤 vs 24롤 (24개와 24병은 같은 수)
     if _numbers(na) != _numbers(nb):
         return 0.0
-    # 변형 낱말이 한쪽에만 있으면 다른 상품이다: 코카콜라 vs 코카콜라 제로, 버즈3 vs 버즈3 프로, 라임 vs 망고
-    if _variants(na, ca) != _variants(nb, cb):
+    # 변형 낱말이 한쪽에만 있으면 다른 상품이다: 코카콜라 vs 코카콜라 제로, 버즈3 vs 버즈3 프로, 라임 vs 망고.
+    # 색은 둘 다 적었는데 다를 때만: 블랙 vs 실버
+    (va, cola), (vb, colb) = _marks(na, ca), _marks(nb, cb)
+    if va != vb or (cola and colb and not cola & colb):
         return 0.0
     ratio = SequenceMatcher(None, ca, cb).ratio()
     ta = {t for t in _TOKEN.findall(na) if len(t) >= 2}
