@@ -59,13 +59,17 @@ _QTY_AFTER = re.compile(
     r"|\s*(?:ml|l|g|kg|mg|cc|mah|wh|gb|tb|cm|mm|m|w|v|hz|p|ea|box|set|pcs|%|인치)(?![a-wyz])",
     re.IGNORECASE,
 )
-# 금액 뒤에 이런 말이 오면 판매가가 아니라 혜택·조건 금액 ("10,000원 할인", "5,000원 쿠폰", "5만원 이상").
-# 그 금액이 판매가라는 말이 이어지면 뺀다: 할인가·쿠폰가·쿠폰(할인)가·할인된 가격, 쿠폰적용·쿠폰 미적용, 적립포함·증정품 포함,
-# 쿠폰 사용시·적립금 사용시, 끝에 붙은 '쿠폰 후' ('1만원 할인 후 19,900원' 은 뒤 금액이 판매가)
-_BENEFIT_AFTER = re.compile(
-    r"^\s*(?:할인|쿠폰|적립|캐시백|페이백|환급|증정|이상|미만|초과)"
-    r"(?![금품된]?\s*(?:할인\s*)?(?:가|적용|미적용|포함|사용|후(?!\D*\d)))"
-)
+# 금액 뒤에 이런 말이 오면 판매가가 아니라 혜택·조건 금액 ("10,000원 할인", "5,000원 쿠폰", "5만원 이상")
+_BENEFIT_AFTER = re.compile(r"^\s*(?:할인|쿠폰|적립|캐시백|페이백|환급|증정|이상|미만|초과)")
+# 혜택 말 뒤에 그 금액이 판매가라는 말이 이어지면 판매가다: 할인가·쿠폰가·쿠폰(할인)가·할인된 가격, 쿠폰적용·쿠폰 미적용,
+# 적립포함·증정품 포함, 쿠폰 사용시·적립금 사용시, 쿠폰 후. 단 그 말 바로 뒤에 다른 판매가가 오면 앞 금액은 혜택 금액이다
+# ('5,000원 쿠폰 사용시 19,900원', '1만원 적립 포함 12,900원'). '할인 후' 는 뒤 어디에 판매가가 있어도 그렇다
+# ('1만원 할인 후 개당 9,900원'). '쿠폰 미적용 시 24,900원' 의 뒤 금액은 쿠폰 없는 값이라 앞 금액이 그대로 판매가
+_PRICE_WORDING = re.compile(r"[금품된]?\s*(?:할인\s*)?(?:(?P<unapplied>미적용)|(?P<then>후)|가|적용|포함|사용)")
+# 판매가라는 말과 뒤 금액 사이에 와도 되는 말 ('사용시 19,900원', '적용시 실구매가 19,900원'). 다른 말('개당', '배송비',
+# '정가')이 끼면 뒤 금액은 판매가가 아니다
+_THEN_GAP = re.compile(r"(?:\s|[,:=]|시|최종|실|구매|결제|가격|가|금액)*")
+_SHIPPING_AFTER = re.compile(r"\s*(?:배송|택배)")  # '2,500원 배송' 은 배송비
 _ARROW_RE = re.compile(r"→|->|⇒|➡|▶")  # "29,900원→19,900원" 은 화살표 뒤가 지금 가격
 _COUPON_WORDS = ("쿠폰", "할인코드", "적립", "캐시백")
 _DATE_META = re.compile(r"^\s*~?\s*\d{1,2}\s*/\s*\d{1,2}")  # "(~9/13)", "(9/12~9/14)" 같은 기간 표기
@@ -113,15 +117,42 @@ def _meta_price(text: str, *, benefit_ok: bool = False) -> int | None:
     parts = _ARROW_RE.split(text)
     for chunk in ([parts[-1], text] if len(parts) > 1 else [text]):
         for a in _AMOUNT_RE.finditer(chunk):
-            after = chunk[a.end():]
-            if not benefit_ok and _BENEFIT_AFTER.match(after):
-                continue
-            if not (a.group("man") or a.group("won")) and _QTY_AFTER.match(after):
-                continue
-            value = parse_price(a.group(0))
-            if value is not None and value >= 100:  # 100 미만은 가격일 리 없는 수 (날짜·개수 등)
+            value = _amount_price(a, chunk[a.end():], benefit_ok=benefit_ok)
+            if value is not None:
                 return value
     return None
+
+
+def _amount_price(a: re.Match[str], after: str, *, benefit_ok: bool = False) -> int | None:
+    """금액 후보 a 가 판매가면 그 값. 뒤 글(after)이 혜택·조건 말이거나(benefit_ok 면 봐준다) 개수·용량 단위면,
+    100 미만이면 None."""
+    if not benefit_ok and _is_benefit(after):
+        return None
+    if not (a.group("man") or a.group("won")) and _QTY_AFTER.match(after):
+        return None
+    value = parse_price(a.group(0))
+    return value if value is not None and value >= 100 else None  # 100 미만은 가격일 리 없는 수 (날짜·개수 등)
+
+
+def _is_benefit(after: str) -> bool:
+    """금액 뒤 글(after)로 보아 혜택·조건 금액인가. '쿠폰가'·'쿠폰 사용시' 처럼 판매가라는 말이 붙어도 그 말 바로 뒤에
+    판매가가 오면 혜택 금액이다. 뒤 금액이 개수·용량('쿠폰적용 2개')이거나 혜택 금액('쿠폰적용 3,000원 적립'),
+    배송비('2,500원 배송')면 앞 금액이 판매가."""
+    b = _BENEFIT_AFTER.match(after)
+    if not b:
+        return False
+    said = _PRICE_WORDING.match(after, b.end())
+    if not said:
+        return True
+    if said.group("unapplied"):
+        return False
+    rest = after[said.end():]
+    if said.group("then"):
+        return _meta_price(rest) is not None
+    a = _AMOUNT_RE.match(rest, _THEN_GAP.match(rest).end())
+    if not a or _SHIPPING_AFTER.match(rest, a.end()):
+        return False
+    return _amount_price(a, rest[a.end():]) is not None
 
 
 def _price_in_name(name: str) -> int | None:
