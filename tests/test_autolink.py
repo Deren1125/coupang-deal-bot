@@ -505,3 +505,10 @@ def test_instagram_styles_drop_the_disclosure_for_raw_naver_links(bot: DealBot) 
     deal.product.extra.pop("raw_link")
     info = insta_style.card_info(deal, bot.renderer, shop=naver)
     assert info.disclosure and "쇼핑 커넥트" in insta_style.caption_context(deal, info, shop=naver)["disclosure"]
+
+
+async def test_name_without_search_words_goes_to_the_owner_at_once(bot: DealBot, settings: Settings) -> None:
+    qid = _enqueue(bot, _product(name="[네이버] (무료배송)"))
+    assert await bot.process_queue_once()
+    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
+    assert not [u for u in _inbox(settings) if "connect_link" in u]

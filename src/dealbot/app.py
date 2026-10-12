@@ -1553,6 +1553,8 @@ class DealBot:
         until = from_iso(self.db.kv_get(autolink.KV_STOP))
         if until and until > utcnow():
             return None  # Blog-Auto 가 멈춘 동안(한도·시간 밖·로그인·제한)은 묻지 않고 예전 흐름으로
+        if not autolink.job_queries(deal.product.name):
+            return None  # 검색어가 안 남는 이름 — Blog-Auto 가 받지 않으니 30분 기다리지 않고 바로 주인에게
         return store_product_no(deal.product.url)
 
     def _sc_known_missing(self, product_no: str) -> bool:
