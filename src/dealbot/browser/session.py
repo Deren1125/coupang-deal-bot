@@ -70,7 +70,7 @@ class BrowserSession:
             "headless": self.headless,
             "locale": self.locale,
             "viewport": {"width": 1280, "height": 900},
-            "args": ["--disable-blink-features=AutomationControlled"],
+            # 자동화 표시(navigator.webdriver 등)를 숨기는 플래그는 넣지 않는다 (위장 금지)
         }
         try:
             self._pw = await async_playwright().start()

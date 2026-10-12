@@ -5,9 +5,10 @@
 - 로그인 없는 빈 창만 쓴다 (프로필 폴더 없음 — 블로그 봇의 네이버 로그인 프로필과 섞이지 않게).
 - 한 번에 하나, 열기 사이 min_interval 초. 서버 여유 메모리가 min_free_mb 보다 적으면 열지 않는다 (블로그 크롬이 떠 있을 때 등).
 - 사진·글꼴·동영상은 받지 않는다 (사진 주소는 HTML 메타에 있음, 메모리·전송량 절약). 다 읽으면 바로 닫는다.
-- 먼저 창 없는 크롬(새 headless — 진짜 크롬과 같은 본체, 브라우저 이름에서 'Headless' 를 뺌). 그게 막히면(403·429)
-  서버 가상 화면(Xvfb :99)에 창을 띄워 한 번 더 — 단 다른 크롬(블로그 봇)이 떠 있지 않을 때만. 같은 화면에 창이 뜨면
-  블로그 봇 글쓰기(포커스·클립보드 붙여넣기)를 건드릴 수 있어서.
+- 먼저 창 없는 크롬. 브라우저 이름(HeadlessChrome)·실행 방식은 그대로 둔다 — 위장(stealth)하지 않음.
+  그게 막히면(403·429) 서버 가상 화면(Xvfb :99)에 창을 띄운 보통 크롬으로 한 번 더 — 단 다른 크롬(블로그 봇)이 떠 있지
+  않을 때만. 같은 화면에 창이 뜨면 블로그 봇 글쓰기(포커스·클립보드 붙여넣기)를 건드릴 수 있어서.
+  그래도 막히면 사진은 네이버 쇼핑 검색 API 로 찾는다 (app.deal_photo).
 playwright 나 크롬이 없으면 한 번 알리고 다시 시작할 때까지 건너뛴다.
 """
 
@@ -148,24 +149,13 @@ class StoreBrowser:
         return got
 
     async def _load(self, pw: Any, url: str, *, headless: bool) -> tuple[int, str, str]:
+        # 브라우저 이름(user agent)·채널은 건드리지 않는다: 창 없는 크롬은 HeadlessChrome 그대로 (위장 금지)
         kwargs: dict[str, Any] = {"headless": headless, "args": ["--no-first-run", "--disable-dev-shm-usage"]}
-        if headless:
-            kwargs["channel"] = "chromium"  # 새 headless (진짜 크롬 본체). 기본값은 예전 headless 셸이라 티가 남
-        else:
+        if not headless:
             kwargs["env"] = {**os.environ, "DISPLAY": ":99"}
         browser = await self._launch(pw, **kwargs)
         try:
-            ua = None
-            if headless:
-                probe = await browser.new_page()
-                ua = str(await probe.evaluate("navigator.userAgent")).replace("HeadlessChrome", "Chrome")
-                await probe.close()
-            ctx = await browser.new_context(
-                locale="ko-KR",
-                timezone_id="Asia/Seoul",
-                viewport={"width": 1280, "height": 900},
-                **({"user_agent": ua} if ua else {}),
-            )
+            ctx = await browser.new_context(locale="ko-KR", timezone_id="Asia/Seoul", viewport={"width": 1280, "height": 900})
             await ctx.route("**/*", _skip_heavy)
             page = await ctx.new_page()
             resp = await page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
@@ -178,7 +168,7 @@ class StoreBrowser:
         """playwright 에 딸린 크롬 → 없으면 설치된 다른 크로미움(서버: 블로그 봇이 설치한 것)."""
         try:
             if self.executable_path:
-                return await pw.chromium.launch(executable_path=self.executable_path, **{k: v for k, v in kwargs.items() if k != "channel"})
+                return await pw.chromium.launch(executable_path=self.executable_path, **kwargs)
             return await pw.chromium.launch(**kwargs)
         except Exception as first:  # noqa: BLE001
             if "executable" not in str(first).lower():  # "Executable doesn't exist at …" 말고(메모리 등)는 이번만 실패
@@ -187,7 +177,6 @@ class StoreBrowser:
             if not exe or exe == self.executable_path:
                 raise _Unavailable(f"크롬 실행 파일 없음 ({str(first).splitlines()[0][:80]})") from first
             log.info("store browser: playwright 기본 크롬이 없어 %s 로 엶", exe)
-            kwargs.pop("channel", None)  # 실행 파일을 직접 주면 channel 은 안 씀 (본체 크롬의 --headless 는 새 headless)
             return await pw.chromium.launch(executable_path=exe, **kwargs)
 
 

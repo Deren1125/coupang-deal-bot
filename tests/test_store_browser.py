@@ -164,6 +164,92 @@ async def test_headless_first_then_screen_only_when_blocked_and_free(
     assert loads.calls == calls and got[0] == code
 
 
+class _FakePlaywright:
+    """_load 가 부르는 playwright 가짜: 띄운 옵션·만든 창 옵션·페이지에서 실행한 스크립트를 기록한다."""
+
+    def __init__(self) -> None:
+        self.launches: list[dict[str, object]] = []
+        self.contexts: list[dict[str, object]] = []
+        self.evaluated: list[str] = []
+        self.chromium = self
+
+    async def launch(self, **kw: object) -> _FakePlaywright:
+        self.launches.append(kw)
+        return self
+
+    async def new_page(self) -> _FakePlaywright:
+        return self
+
+    async def new_context(self, **kw: object) -> _FakePlaywright:
+        self.contexts.append(kw)
+        return self
+
+    async def route(self, *_a: object) -> None:
+        return None
+
+    async def evaluate(self, script: str) -> str:
+        self.evaluated.append(script)
+        return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36"
+
+    async def goto(self, url: str, **_kw: object) -> object:
+        self.url = url
+        return type("Resp", (), {"status": 200})()
+
+    async def wait_for_timeout(self, _ms: float) -> None:
+        return None
+
+    async def content(self) -> str:
+        return HTML
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.parametrize("headless", [True, False])
+async def test_browser_is_not_disguised(headless: bool) -> None:
+    """위장 금지: 브라우저 이름(user agent)을 바꾸지 않고 (창 없는 크롬은 HeadlessChrome 그대로),
+    탐지를 피하려는 채널·플래그도 주지 않는다. 막히면 가상 화면의 보통 크롬 → 쇼핑 검색 API 사진으로."""
+    pw = _FakePlaywright()
+    got = await StoreBrowser()._load(pw, STORE_URL, headless=headless)
+    assert got == (200, STORE_URL, HTML)
+    (launch,) = pw.launches
+    assert "channel" not in launch and not any("AutomationControlled" in str(a) for a in launch["args"])  # type: ignore[attr-defined]
+    assert [k for kw in pw.contexts for k in kw if k in ("user_agent", "extra_http_headers")] == []
+    assert pw.evaluated == []  # navigator.userAgent 를 읽어 고쳐 쓰지 않음
+
+
+async def test_login_browser_does_not_hide_automation(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    """쇼핑커넥트 로그인 창(BrowserSession)도 자동화 표시를 숨기는 플래그(AutomationControlled)를 넣지 않는다."""
+    import playwright.async_api as pwa
+
+    from dealbot.browser.session import BrowserSession
+
+    seen: dict[str, object] = {}
+
+    class _Pw:
+        def __init__(self) -> None:
+            self.chromium = self
+
+        async def start(self) -> _Pw:
+            return self
+
+        async def launch_persistent_context(self, _profile: str, **kw: object) -> _Pw:
+            seen.update(kw)
+            return self
+
+        async def close(self) -> None:
+            return None
+
+        async def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr(pwa, "async_playwright", _Pw)
+    session = BrowserSession(tmp_path / "profile")
+    await session.start()
+    await session.close()
+    assert seen and not any("AutomationControlled" in str(a) for a in seen.get("args") or [])  # type: ignore[attr-defined]
+
+
 def test_other_chrome_running_reads_command_lines(tmp_path) -> None:  # type: ignore[no-untyped-def]
     def proc(pid: str, cmd: bytes) -> None:
         (tmp_path / pid).mkdir()
