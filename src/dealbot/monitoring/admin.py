@@ -1298,9 +1298,10 @@ def register_admin_handlers(
             return
         msg = getattr(update, "effective_message", None)
         if msg is not None and is_stale_message(getattr(msg, "date", None)):
-            # 명령 이름만 남긴다 (/threadstoken 처럼 뒤에 비밀 값이 붙는 명령이 있음)
+            # 명령 이름만 남긴다 (/threadstoken 처럼 뒤에 비밀 값이 붙는 명령이 있음). 명령이 아닌 글은 첫 낱말도 안 남김 (토큰만 붙여넣은 글)
             words = (getattr(msg, "text", "") or "").split() or [""]
-            log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), words[0][:40])
+            shown = words[0][:40] if words[0].startswith("/") else "(명령 아닌 글)"
+            log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), shown)
             if len(words) > 1 and words[0].split("@", 1)[0].lower() in SECRET_COMMANDS and only_admin.filter(msg):
                 await _drop_stale_token(msg)
             raise ApplicationHandlerStop

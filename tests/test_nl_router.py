@@ -616,6 +616,20 @@ async def test_other_stale_messages_are_only_dropped(env: Env, text: str, chat_i
     assert deleted == [] and sent == []
 
 
+
+async def test_stale_plain_text_is_not_logged(env: Env, caplog: pytest.LogCaptureFixture) -> None:
+    """명령이 아닌 옛 메시지(토큰만 붙여넣은 글 등)는 첫 낱말도 로그에 남기지 않는다. 명령은 이름만 남긴다."""
+    from telegram.ext import ApplicationHandlerStop
+
+    drop = next(h.callback for h, g in env.app.handlers if g == -1)
+    for text in ("IGAAT-bare-secret-456", "/run ppomppu"):
+        m, _, _ = _stale_token_msg(text)
+        with caplog.at_level(logging.DEBUG), pytest.raises(ApplicationHandlerStop):
+            await drop(SimpleNamespace(callback_query=None, effective_message=m), None)
+    assert "IGAAT-bare-secret-456" not in caplog.text and "IGAAT" not in caplog.text
+    assert "/run" in caplog.text and "ppomppu" not in caplog.text
+
+
 # ------------------------------------------------------------------ 사진·파일·명령
 async def test_photo_caption_for_blog_is_relayed(env: Env) -> None:
     with_llm(env, ans("blog"))
