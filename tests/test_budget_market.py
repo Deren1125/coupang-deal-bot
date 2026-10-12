@@ -3,7 +3,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from dealbot.config import DealConfig, InterestConfig, MarketCheckConfig
+from dealbot.app import DealBot
+from dealbot.collectors import BaseCollector, register
+from dealbot.config import CollectorConfig, DealConfig, InterestConfig, MarketCheckConfig, Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.models import PriceStats, Product
 from dealbot.pricing.evaluator import DealEvaluator
@@ -128,3 +130,72 @@ def test_budget_caps_a_kind_so_it_cannot_starve_the_rest() -> None:
     for _ in range(3):
         b.record("goldbox")
     assert not b.available("goldbox") and not b.available("deeplink")
+
+
+# ---------------------------------------------------------------- 게시판이 같은 글을 5분마다 다시 돌려줄 때 (#25)
+_RUNS: list[list[Product]] = []
+
+
+@register("fake_market_rerun")
+class _RerunCollector(BaseCollector):
+    """판마다 새 Product 를 돌려준다 (실제 수집기처럼 — 앞 판에서 고친 값이 남지 않게)."""
+
+    async def collect(self) -> list[Product]:
+        return _RUNS.pop(0) if _RUNS else []
+
+
+def _toss_deal(pid: str, name: str, price: int) -> Product:
+    return Product(source="fake", product_id=f"toss:{pid}", shop="toss", name=name, price=price,
+                   url=f"https://toss.im/_m/{pid}", recommend_count=9, discount_rate=50)
+
+
+@pytest.fixture
+def rerun_bot(settings: Settings) -> DealBot:
+    settings.collectors = [CollectorConfig(name="fake", type="fake_market_rerun", interval_minutes=1)]
+    _RUNS.clear()
+    b = DealBot(settings)
+    yield b
+    b.db.close()
+
+
+async def test_market_no_match_is_remembered_but_a_skipped_lookup_is_not(rerun_bot: DealBot) -> None:
+    searches: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        searches.append(req.url.params["keyword"])
+        return httpx.Response(200, json={"rCode": "0", "data": {"productData": [
+            {"productId": 3, "productName": "전혀 다른 상품", "productPrice": 1000, "productUrl": "https://link.coupang.com/re/3"},
+        ]}})
+
+    client = CoupangClient("a", "s", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), retry_backoff=0.01)
+    ref = CoupangMarketReference(client, MarketCheckConfig(max_checks_per_hour=5))
+    rerun_bot.market = ref
+    hotdog = "애슐리 크리스피 핫도그 8개입 2세트"
+    _RUNS.extend([[_toss_deal("1", hotdog, 14890)], [_toss_deal("1", hotdog, 14890)],
+                  [_toss_deal("2", "풀무원 샘물 2L 24개", 9900)]])
+    for _ in range(2):
+        await rerun_bot.run_collector(rerun_bot.collectors[0])
+    assert len(searches) == 1  # 쿠팡에 없던 상품을 5분마다 다시 찾지 않음 (시간당 예산을 같은 글이 다 쓰지 않게)
+    assert rerun_bot.db.get_market_quote("toss:1", 24)["price"] == 0
+    ref.cfg.max_checks_per_hour = 1
+    await rerun_bot.run_collector(rerun_bot.collectors[0])  # 예산이 다 차서 검색을 못 한 것은 '없음'으로 기억하지 않음
+    assert len(searches) == 1 and rerun_bot.db.get_market_quote("toss:2", 24) is None
+
+
+async def test_no_market_lookup_when_the_quote_cannot_change_anything(rerun_bot: DealBot) -> None:
+    looked: list[str] = []
+
+    async def market_quote(p: Product) -> MarketQuote | None:
+        looked.append(p.product_id)
+        return None
+
+    rerun_bot.market = object()  # type: ignore[assignment]  # 시중가 대조가 켜진 환경
+    rerun_bot._market_quote = market_quote  # type: ignore[method-assign]
+    hotdog = "애슐리 크리스피 핫도그 8개입 2세트"
+    _RUNS.extend([[_toss_deal("1", hotdog, 14890), _toss_deal("9", "위생장갑 100매", 900)],
+                  [_toss_deal("1", hotdog, 14890), _toss_deal("9", "위생장갑 100매", 900)]])
+    for _ in range(2):
+        await rerun_bot.run_collector(rerun_bot.collectors[0])
+    assert rerun_bot.db.queue_counts() == {"pending": 1}
+    # 대기열에 이미 있는 글은 다시 대조하지 않고, 최저가 미만(대조 전에 탈락)은 처음부터 대조하지 않음
+    assert looked == ["toss:1"]

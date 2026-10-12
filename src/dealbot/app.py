@@ -115,6 +115,9 @@ KV_IG_OAUTH_STATE_AT = "instagram_oauth_state_at"
 IG_KV_USERNAME = "instagram_username"
 # 관리자가 넘겼거나 답하지 않은 글을 다시 묻기까지 (그사이 더 싸지면 바로 다시 물음)
 REASK_COOLDOWN = timedelta(days=3)
+# 같은 상품을 다시 줄 세울 수 없는 열린 글 상태 (db 의 idx_queue_open_product_v3 와 같음)
+OPEN_STATUSES = ("pending", "awaiting_link", "awaiting_approval", autolink.STATUS)
+MARKET_NO_MATCH = "none"  # 쿠팡 검색에 맞는 상품이 없었음 (market_quotes 에 가격 0 으로 남김)
 
 
 class DealBot:
@@ -1209,7 +1212,7 @@ class DealBot:
                     continue
                 if p.has_price and self._should_record(p.product_id, now):
                     self.db.record_observation(p, now)
-                if self._needs_market_check(p, verdict):
+                if self._needs_market_check(p, verdict, now):
                     quote = await self._market_quote(p)
                     verdict = self.evaluator.evaluate(p, stats, quote, market_available=True)
                 if not verdict.is_deal:
@@ -1529,24 +1532,39 @@ class DealBot:
         last = self.db.last_observed_at(product_id)
         return last is None or (now - last) >= timedelta(hours=gap)
 
-    def _needs_market_check(self, p: Product, verdict: DealVerdict) -> bool:
-        """시중가 대조는 쿠팡 검색 예산을 쓰므로 '후보'에만: 다른 몰 + 가격 있음 + (판정 통과 또는 표시 할인율 후보)."""
+    def _needs_market_check(self, p: Product, verdict: DealVerdict, now: Any | None = None) -> bool:
+        """시중가 대조는 쿠팡 검색 예산을 쓰므로 '후보'에만: 다른 몰 + 가격 있음 + (판정 통과 또는 표시 할인율 후보).
+        게시판이 5분마다 같은 글을 다시 돌려주므로, 대조 결과로 바뀔 게 없는 글은 예산을 쓰지 않는다:
+        대조 전에 이미 떨어진 글(최저가 미만·가격 없음·후기 적음), 이미 대기열에 있거나 최근에 넘겼거나 같은 값으로 보류한 글."""
         if self.market is None or p.shop == "coupang" or not p.has_price:
             return False
         if self._posted_recently(p.product_id):
             return False
         if "low_interest" in verdict.reasons or any(r.startswith("excluded") for r in verdict.reasons):
             return False
+        if any(r in ("below_min_price", "no_price") or r.startswith("few_reviews") for r in verdict.reasons):
+            return False  # 시중가 대조보다 먼저 정해지는 탈락 — 대조해도 판정이 같다
+        if self.db.items_for_product(p.product_id, OPEN_STATUSES):
+            return False  # 이미 대기·링크 요청 중 (다시 줄 세우지 않음)
+        now = now or utcnow()
+        if self._declined_recently(p, now) or self._held_recently(p, now):
+            return False  # 어차피 아래에서 건너뜀
         return True  # 관심도 게이트를 통과한 다른 몰의 딜은 (d) 대조가 기본
 
     async def _market_quote(self, p: Product) -> MarketQuote | None:
+        """쿠팡 시중가. 맞은 값과 '검색했는데 맞는 상품 없음'을 cache_hours 동안 기억한다 (없음은 가격 0 으로).
+        예산·한도·오류로 검색을 못 한 것은 기억하지 않는다 (다음 판에 다시)."""
         assert self.market is not None
         cached = self.db.get_market_quote(p.product_id, self.settings.deal.market.cache_hours)
         if cached:
+            if int(cached["price"]) <= 0:
+                return None
             return MarketQuote(price=int(cached["price"]), source=cached["source"], title=cached.get("title") or "", url=cached.get("url"))
         quote = await self.market.lookup(p)
         if quote is not None:
             self.db.set_market_quote(p.product_id, price=quote.price, source=quote.source, title=quote.title, url=quote.url)
+        elif getattr(self.market, "last_no_match", False):
+            self.db.set_market_quote(p.product_id, price=0, source=MARKET_NO_MATCH, title=None, url=None)
         return quote
 
     async def _ensure_link(self, item: QueueItem) -> tuple[str, str | None]:

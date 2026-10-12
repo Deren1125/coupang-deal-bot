@@ -215,6 +215,8 @@ class CoupangMarketReference:
         self.client = client
         self.cfg = cfg
         self._checks: deque[float] = deque()
+        # 마지막 lookup 이 실제로 검색했는데 맞는 상품이 없었나 (예산·한도·오류로 건너뛴 것과 구분 — 부르는 쪽이 '없음'을 기억)
+        self.last_no_match = False
 
     def budget_available(self) -> bool:
         now = time.monotonic()
@@ -239,6 +241,7 @@ class CoupangMarketReference:
         return best
 
     async def lookup(self, product: Product) -> MarketQuote | None:
+        self.last_no_match = False
         if product.shop == "coupang" or not product.has_price:
             return None
         if not self.budget_available():
@@ -259,5 +262,6 @@ class CoupangMarketReference:
         if quote:
             log.info("market ref for '%s' → %s원 (%s)", product.name[:40], f"{quote.price:,}", quote.title[:40])
         else:
+            self.last_no_match = True
             log.info("market ref: no match for '%s' (%d candidates)", keyword, len(candidates))
         return quote
