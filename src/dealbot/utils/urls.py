@@ -8,7 +8,7 @@ import re
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 COUPANG_HOSTS = {"www.coupang.com", "coupang.com", "m.coupang.com", "link.coupang.com"}
-_PRODUCT_PATH_RE = re.compile(r"/vp/products/(\d+)")
+_PRODUCT_PATH_RE = re.compile(r"/v[pm]/products/(\d+)")  # PC /vp/, 모바일 m.coupang.com/vm/
 _KEEP_QUERY = ("itemId", "vendorItemId")
 
 

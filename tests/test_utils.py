@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from dealbot.shops import ShopRegistry
 from dealbot.utils.text import format_won, parse_price, truncate
 from dealbot.utils.timeutil import humanize_delta, next_daily_time
 from dealbot.utils.urls import (
@@ -44,7 +45,7 @@ def test_format_won_and_truncate() -> None:
     "url,pid",
     [
         ("https://www.coupang.com/vp/products/7381234?itemId=1&vendorItemId=2", "7381234"),
-        ("https://m.coupang.com/vm/products/555", None),
+        ("https://m.coupang.com/vm/products/555", "555"),  # 모바일 상품 주소
         ("https://link.coupang.com/re/AFFSDP?lptag=AF123&pageKey=99887&itemId=1", "99887"),
         ("https://link.coupang.com/a/abcd", None),
         ("not a url", None),
@@ -58,6 +59,10 @@ def test_canonical_url_strips_tracking() -> None:
     u = "https://www.coupang.com/vp/products/7381234?itemId=11&vendorItemId=22&src=abc&lptag=x"
     assert canonical_product_url(u) == "https://www.coupang.com/vp/products/7381234?itemId=11&vendorItemId=22"
     assert canonical_product_url("https://link.coupang.com/a/abcd") is None
+    # 모바일 상품 주소도 PC 상품 주소로 (딥링크 변환·상품 키가 PC 주소와 같아짐)
+    m = "https://m.coupang.com/vm/products/7381234?itemId=11&vendorItemId=22&sourceType=SDP"
+    assert canonical_product_url(m) == "https://www.coupang.com/vp/products/7381234?itemId=11&vendorItemId=22"
+    assert ShopRegistry.product_key("coupang", m) == "coupang:7381234:22"
 
 
 def test_link_classification() -> None:
