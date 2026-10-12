@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,34 @@ def test_load_repo_config(repo_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_
     assert s.publish.dry_run is True
     assert s.db_path == tmp_path / "dealbot.db"
     assert s.templates_dir == (repo_root / "templates").resolve()
+
+
+def test_model_names_come_only_from_the_server_env(repo_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """모델 이름은 저장소(config.yaml·코드)에 두지 않는다: 서버 .env 의 DEALBOT_MODEL_* 에서만. 없으면 None (CLI 기본 모델·API 건너뜀)."""
+    monkeypatch.setenv("DEALBOT_DATA_DIR", str(tmp_path))
+    s = load_settings(repo_root / "config.yaml", load_env=False)
+    assert s.publish.commentary.model is None and s.info_posts.summarizer.model is None
+    assert s.monitoring.nl_router.model is None and s.monitoring.nl_router.cli_model is None
+    monkeypatch.setenv("DEALBOT_MODEL_COMMENTARY", "test-cli-model")
+    monkeypatch.setenv("DEALBOT_MODEL_SUMMARIZER", "'test-model'")  # 따옴표째 붙여넣어도 됨
+    s = load_settings(repo_root / "config.yaml", load_env=False)
+    assert s.publish.commentary.model == "test-cli-model" and s.info_posts.summarizer.model == "test-model"
+
+
+def test_no_model_ids_in_the_repo(repo_root: Path) -> None:
+    """버전이 붙은 모델 ID 가 코드·설정·문서·테스트 어디에도 없다 (모델 이름은 서버 .env 에서만)."""
+    pattern = re.compile(r"claude-(?:\d|[a-z]+-\d)", re.IGNORECASE)
+    files = [repo_root / n for n in ("config.yaml", "README.md", "Dockerfile", "docker-compose.yml", "pyproject.toml", "railway.json", "Makefile")]
+    for d in ("src", "tests", "docs", "deploy", "templates"):
+        files += [f for f in (repo_root / d).rglob("*") if f.is_file() and f.suffix in {".py", ".yaml", ".yml", ".md", ".sh", ".j2", ".toml", ".json", ".txt", ".service", ".conf"}]
+    found = []
+    for f in files:
+        if not f.is_file() or f.name.startswith(".env") or "fixtures" in f.parts:
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        found += [f"{f.relative_to(repo_root)}: {m.group(0)}" for m in pattern.finditer(text)]
+    assert found == []
+    assert "model:" not in (repo_root / "config.yaml").read_text(encoding="utf-8")
 
 
 def test_defaults_without_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

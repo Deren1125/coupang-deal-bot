@@ -279,6 +279,23 @@ async def test_add_commentary_survives_writer_crash(settings) -> None:  # noqa: 
 # ---------------------------------------------------------------- 실패가 조용히 묻히지 않는다 (#38, #43)
 
 
+@pytest.mark.parametrize("model", [None, "test-cli-model"])
+async def test_cli_model_is_passed_only_when_set(tmp_path: Path, model: str | None) -> None:
+    """모델 이름(서버 .env 의 DEALBOT_MODEL_COMMENTARY)이 없으면 --model 없이 CLI 기본 모델, 있으면 그대로 --model 로."""
+    (tmp_path / "out").write_text(_ok(**GOOD), encoding="utf-8")
+    script = tmp_path / "claude"
+    script.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args.txt"\ncat > /dev/null\ncat "{tmp_path}/out"\n')
+    script.chmod(0o755)
+    c = Commentator(enabled=True, model=model)
+    c.bin = str(script)
+    assert await c.write(_deal(), "")
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    if model is None:
+        assert "--model" not in args
+    else:
+        assert args[args.index("--model") + 1] == model
+
+
 def test_missing_cli_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="dealbot.commentary"):
         Commentator(enabled=True)

@@ -10,6 +10,8 @@
 | `COUPANG_ACCESS_KEY`, `COUPANG_SECRET_KEY` | 쿠팡파트너스 → 링크 생성 → API | 쿠팡 자동화 |
 | `LINKPRICE_AFFILIATE_ID` | 링크프라이스 어필리에이트 센터 | 11번가/G마켓/옥션/SSG/롯데온/알리 자동화 |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys | 정보 글(상품 링크 없는 게시판 글)을 채널 양식으로 요약해 자동 발행 (없으면 확인 요청으로 옴) |
+| `DEALBOT_MODEL_SUMMARIZER` | 쓸 Claude API 모델 이름 | `ANTHROPIC_API_KEY` 로 요약·말 명령을 할 때 필수. 없으면 API 는 건너뛰고 서버 claude CLI 로 (저장소에는 모델 이름을 두지 않음) |
+| `DEALBOT_MODEL_COMMENTARY` | 쓸 claude CLI 모델 이름 | 한줄평과 CLI 로 도는 요약·말 명령의 `--model` (선택, 없으면 CLI 기본 모델) |
 | `ADPICK_AFFID` | 애드픽 | 애드픽 핫딜 API 수집 |
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | developers.naver.com → 애플리케이션 등록 → 검색 API (예전 개발자센터 키만 됨. 네이버 클라우드 API HUB 키는 쇼핑 검색이 없어 401) | 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜에 쇼핑 검색의 같은 상품(상품번호 일치) 사진을 씀 (선택, 없으면 건너뜀) |
 | `NTFY_TOPIC` 또는 `PUSHOVER_USER_KEY`+`PUSHOVER_APP_TOKEN` | ntfy 앱 / pushover.net | 휴대폰 푸시 알림 (선택) |
@@ -156,7 +158,7 @@
 
 - 커뮤니티 추천이 `min_recommend` 이상인 글만, 하루 `max_per_day` 건까지.
 - 발행 때 게시판 글을 다시 읽어 본문만 뽑고(메뉴·댓글 제외), 원문 사진이 있으면 봇이 받아서 같이 올립니다.
-- **요약**: `ANTHROPIC_API_KEY` 를 넣어 두면 봇이 본문을 채널 양식(한 줄 요약 + `·` 항목 몇 줄, 담백한 안내체, `max_chars` 이내)으로 다시 써서 올립니다. 원문에 있는 사실·숫자만 쓰고, 작성자 잡담·게시판 메뉴는 뺍니다. 모델은 `info_posts.summarizer.model` 로 바꿀 수 있습니다.
+- **요약**: `ANTHROPIC_API_KEY` 를 넣어 두면 봇이 본문을 채널 양식(한 줄 요약 + `·` 항목 몇 줄, 담백한 안내체, `max_chars` 이내)으로 다시 써서 올립니다. 원문에 있는 사실·숫자만 쓰고, 작성자 잡담·게시판 메뉴는 뺍니다. API 모델 이름은 서버 `.env` 의 `DEALBOT_MODEL_SUMMARIZER` 로 정합니다 (없으면 API 대신 서버 claude CLI 로 요약).
 - **확인(승인)**: `info_posts.review` 가 `auto`(기본)면 요약이 만들어진 글만 바로 올리고, 요약을 못 만들었거나(키 없음, API 오류) 본문 위치를 확실히 못 찾은 글은 관리자 챗에 "📝 정보 글 확인 #번호" 로 미리 보여 줍니다. `/ok 번호` 로 그대로 올리거나, 그 메시지에 **답장으로 본문을 새로 써 보내면 그 글로** 올라갑니다. `/skip 번호` 는 안 올림. `always` 면 모든 정보 글을 확인 후 올리고, `never` 면 확인 없이 올립니다. 확인을 기다리는 글은 `manual_link_ttl_hours` 가 지나면 자동으로 버립니다.
 - **혜택 기준**: 브랜드 세일·이벤트 글은 할인율 `min_discount_rate`(기본 40%) 이상이거나 할인·적립 금액 `min_discount_amount`(기본 5,000원) 이상일 때만 올립니다. 요약기가 원문에서 가장 큰 혜택을 읽어 판단하고(결제 조건 금액은 제외), 요약기가 없으면 본문 숫자로 대략 판단합니다. 기준에 못 미치면 조용히 건너뛰고 `/errors` 가 아니라 로그(`info_skip`)에만 남습니다.
 - 양식은 플랫폼별로 따로: 텔레그램 `info_post.j2`, 카톡 복붙 `info_kakao.j2`, 스레드 `info_threads.j2`.

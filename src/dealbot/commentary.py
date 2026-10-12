@@ -268,9 +268,9 @@ _PROMPT_TAG = hashlib.sha1((SYSTEM + json.dumps(SCHEMA)).encode()).hexdigest()[:
 
 
 class Commentator:
-    def __init__(self, *, enabled: bool = True, model: str = "sonnet", timeout: float = 90, db=None) -> None:
+    def __init__(self, *, enabled: bool = True, model: str | None = None, timeout: float = 90, db=None) -> None:
         self.enabled = enabled
-        self.model = model
+        self.model = model  # None 이면 --model 을 넘기지 않고 CLI 기본 모델
         self.timeout = timeout
         self.db = db
         self.bin = find_claude() if enabled else None
@@ -357,8 +357,8 @@ class Commentator:
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                self.bin, "-p", "--output-format", "json", "--model", self.model, "--system-prompt", SYSTEM, "--tools", "",
-                "--json-schema", json.dumps(SCHEMA, ensure_ascii=False),
+                self.bin, "-p", "--output-format", "json", *(["--model", self.model] if self.model else []),
+                "--system-prompt", SYSTEM, "--tools", "", "--json-schema", json.dumps(SCHEMA, ensure_ascii=False),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
             )

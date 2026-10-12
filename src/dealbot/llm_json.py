@@ -1,6 +1,6 @@
 """JSON 으로만 답하게 묻는 작은 AI 호출기 (관리자 챗 '말 명령' 해석용).
 
-정보 글 요약기(summarize.InfoSummarizer)와 같은 방식: ANTHROPIC_API_KEY 가 있으면 API, 없으면 서버에 로그인된 claude CLI.
+정보 글 요약기(summarize.InfoSummarizer)와 같은 방식: ANTHROPIC_API_KEY 와 API 모델 이름이 있으면 API, 아니면 서버에 로그인된 claude CLI.
 둘 다 답을 JSON 스키마에 맞춰 받는다 (API 는 output_config.format, CLI 는 --json-schema 의 structured_output).
 실패는 모두 LLMError 로 — 부르는 쪽은 아무것도 실행하지 않고 명령어를 안내한다.
 """
@@ -32,7 +32,7 @@ class JsonAsker:
         self,
         api_key: str | None,
         *,
-        model: str,
+        model: str | None = None,
         cli_bin: str | None = None,
         cli_model: str | None = None,
         timeout: float = 30,
@@ -40,8 +40,8 @@ class JsonAsker:
         max_tokens: int = 2000,
     ) -> None:
         self.api_key = api_key
-        self.model = model
-        self.cli_bin = cli_bin if cli_bin is not None else (None if api_key else commentary.find_claude())
+        self.model = model  # API 모델 이름 (서버 .env). 없으면 키가 있어도 API 는 안 씀
+        self.cli_bin = cli_bin if cli_bin is not None else (None if (api_key and model) else commentary.find_claude())
         self.cli_model = cli_model  # None 이면 --model 을 넘기지 않고 CLI 기본 모델
         self.timeout = timeout
         self.effort = effort
@@ -53,7 +53,7 @@ class JsonAsker:
 
     @property
     def backend(self) -> str | None:
-        if self.api_key:
+        if self.api_key and self.model:
             return "api"
         if self.cli_bin:
             return "cli"

@@ -290,7 +290,8 @@ class CommentaryConfig(BaseModel):
     """딜 한줄평 (서버에 로그인된 Claude Code CLI 사용). 없거나 실패하면 한줄평 없이 올림."""
 
     enabled: bool = True
-    model: str = "sonnet"
+    # CLI 모델 이름은 저장소에 두지 않는다: 서버 .env 의 DEALBOT_MODEL_COMMENTARY. 없으면 --model 없이 (CLI 기본 모델)
+    model: str | None = None
     timeout_seconds: float = 90
 
 
@@ -421,11 +422,12 @@ class AutoLinkConfig(BaseModel):
 
 
 class InfoSummarizerConfig(BaseModel):
-    """정보 글 본문을 채널 양식에 맞게 짧게 다시 쓴다. ANTHROPIC_API_KEY 가 있으면 API 를 먼저 쓰고,
-    없으면 서버에 로그인된 claude CLI(한줄평과 같은 것)로. enabled: false 면 둘 다 안 씀."""
+    """정보 글 본문을 채널 양식에 맞게 짧게 다시 쓴다. ANTHROPIC_API_KEY 와 API 모델 이름이 둘 다 있으면 API 를 먼저 쓰고,
+    아니면 서버에 로그인된 claude CLI(한줄평과 같은 것)로. enabled: false 면 둘 다 안 씀."""
 
     enabled: bool = True
-    model: str = "claude-opus-5"
+    # API 모델 이름은 저장소에 두지 않는다: 서버 .env 의 DEALBOT_MODEL_SUMMARIZER. 없으면 API 는 건너뛰고 CLI 로
+    model: str | None = None
     raw_chars: int = 4000  # 요약기에 넘기는 원문 최대 길이
     timeout_seconds: float = 60
 
@@ -535,8 +537,8 @@ class NLRouterConfig(BaseModel):
     false 면 예전 그대로 (일반 메시지는 링크 답장·직접 발행만). 모델은 비워 두면 정보 글 요약기(API)·한줄평(CLI)과 같은 것."""
 
     enabled: bool = True
-    model: str | None = None  # API 모델 (None → info_posts.summarizer.model)
-    cli_model: str | None = None  # 서버 claude CLI 모델 (None → publish.commentary.model)
+    model: str | None = None  # API 모델 (None → info_posts.summarizer.model = DEALBOT_MODEL_SUMMARIZER)
+    cli_model: str | None = None  # 서버 claude CLI 모델 (None → publish.commentary.model = DEALBOT_MODEL_COMMENTARY)
     timeout_seconds: float = 30
     confidence: float = 0.75  # 이보다 확신이 낮으면 실행하지 않고 물어봄
     rate_10min: int = 20  # 10분에 이만큼 넘게 오면 AI 를 부르지 않고 쉬어 감
@@ -743,6 +745,11 @@ class Settings(BaseModel):
         return v
 
 
+# 모델 이름은 저장소(코드·config.yaml)에 두지 않고 서버 .env 에서 받는다
+ENV_MODEL_COMMENTARY = "DEALBOT_MODEL_COMMENTARY"  # 서버 claude CLI 모델 (한줄평, CLI 로 도는 요약·말 명령)
+ENV_MODEL_SUMMARIZER = "DEALBOT_MODEL_SUMMARIZER"  # Claude API 모델 (정보 글 요약, API 로 도는 말 명령)
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
@@ -838,5 +845,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
     settings.publish.dry_run = _env_bool("DEALBOT_DRY_RUN", settings.publish.dry_run)
     if os.getenv("TZ") and not raw.get("app", {}).get("timezone"):
         settings.app.timezone = os.environ["TZ"]
+    settings.publish.commentary.model = _env_str(ENV_MODEL_COMMENTARY) or settings.publish.commentary.model
+    settings.info_posts.summarizer.model = _env_str(ENV_MODEL_SUMMARIZER) or settings.info_posts.summarizer.model
 
     return settings

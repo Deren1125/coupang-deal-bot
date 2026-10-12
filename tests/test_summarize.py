@@ -31,7 +31,7 @@ class FakeMessages:
 
 
 def _summarizer(answer: str | Exception, stop: str = "end_turn", max_chars: int = 300) -> tuple[InfoSummarizer, FakeMessages]:
-    s = InfoSummarizer("sk-test", model="claude-opus-5", max_chars=max_chars)
+    s = InfoSummarizer("sk-test", model="test-model", max_chars=max_chars)
     fm = FakeMessages(answer, stop)
     s._client = SimpleNamespace(messages=fm)  # type: ignore[assignment]
     return s, fm
@@ -61,7 +61,7 @@ async def test_summarize_happy_path() -> None:
     r = await s.summarize(title="[페이코] 결제 이벤트", source="루리웹", text="본문 " * 20, links=["https://event.payco.com/1"])
     assert r.text == "12,000원 이상 결제하면 4,800원 할인\n· 기간: 9월 12일~14일" and not r.skip and r.error is None
     call = fm.calls[0]
-    assert call["model"] == "claude-opus-5" and "300자 이내" in call["system"]
+    assert call["model"] == "test-model" and "300자 이내" in call["system"]
     user = call["messages"][0]["content"]
     assert "[제목] [페이코] 결제 이벤트" in user and "[게시판] 루리웹" in user and "https://event.payco.com/1" in user
 
@@ -222,3 +222,48 @@ async def test_summarize_backend_choice(tmp_path: Path, monkeypatch: pytest.Monk
     off = InfoSummarizer(None, use_cli=False)
     assert not off.configured and off.backend is None
     assert "ANTHROPIC_API_KEY" in ((await off.summarize(title="t", source="s", text="본문 " * 10)).error or "") and _calls(tmp_path) == 0
+
+
+async def test_api_key_without_a_model_name_uses_the_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """API 모델 이름(서버 .env 의 DEALBOT_MODEL_SUMMARIZER)이 없으면 키가 있어도 API 를 부르지 않고 서버 claude CLI 로."""
+    _fake_claude(tmp_path, monkeypatch, {"is_error": False, "result": "라코스테 최대 60% 세일\n- 기간: 9/11~9/14"})
+    s = InfoSummarizer("sk-test")
+    fm = FakeMessages("쓰이면 안 되는 답")
+    s._client = SimpleNamespace(messages=fm)  # type: ignore[assignment]
+    assert s.backend == "cli" and s.describe()["model"] == "CLI 기본값"
+    r = await s.summarize(title="t", source="s", text="본문 " * 10)
+    assert r.text and fm.calls == [] and _calls(tmp_path) == 1
+    # CLI 도 없으면 꺼진 상태 (죽지 않고 확인 요청으로)
+    monkeypatch.setattr(commentary, "find_claude", lambda: None)
+    off = InfoSummarizer("sk-test")
+    assert off.backend is None and (await off.summarize(title="t", source="s", text="본문 " * 10)).error
+
+
+def test_bot_warns_once_per_missing_model_name(settings, caplog: pytest.LogCaptureFixture) -> None:  # type: ignore[no-untyped-def]
+    """모델 이름이 서버 .env 에 없으면 시작할 때 한 번씩 알리고 안전하게 돈다 (API 는 건너뛰고 CLI 는 기본 모델).
+    넣어 두면 그 이름 그대로 쓴다 (예전 동작과 같음)."""
+    import logging
+
+    from dealbot.app import DealBot
+
+    settings.collectors = []
+    settings.secrets.anthropic_api_key = "sk-test"
+    with caplog.at_level(logging.WARNING, logger="dealbot.app"):
+        bot = DealBot(settings)
+    try:
+        warned = [r.getMessage() for r in caplog.records if "DEALBOT_MODEL_" in r.getMessage()]
+        assert len(warned) == 2 and any("DEALBOT_MODEL_SUMMARIZER" in w for w in warned)
+        assert bot.summarizer.backend != "api" and bot.nl.asker.backend != "api" and bot.commentator.model is None
+    finally:
+        bot.db.close()
+    caplog.clear()
+    settings.publish.commentary.model, settings.info_posts.summarizer.model = "test-cli-model", "test-model"
+    with caplog.at_level(logging.WARNING, logger="dealbot.app"):
+        bot = DealBot(settings)
+    try:
+        assert not [r for r in caplog.records if "DEALBOT_MODEL_" in r.getMessage()]
+        assert bot.summarizer.backend == "api" and bot.summarizer.model == "test-model"
+        assert bot.nl.asker.backend == "api" and bot.nl.asker.model == "test-model" and bot.nl.asker.cli_model == "test-cli-model"
+        assert bot.commentator.model == "test-cli-model"
+    finally:
+        bot.db.close()

@@ -1,7 +1,7 @@
 """정보 글 요약: 게시판 글 본문을 채널 양식(짧은 안내문)으로 다시 쓴다.
 
-ANTHROPIC_API_KEY 가 있으면 Claude API(anthropic SDK)를 쓰고, 없으면 서버에 로그인된 Claude Code CLI(`claude -p`,
-한줄평과 같은 것)로 쓴다. 둘 다 없으면 꺼진 상태로 두고, 그때는 앱이 관리자 승인으로 넘긴다.
+ANTHROPIC_API_KEY 와 API 모델 이름(서버 .env)이 있으면 Claude API(anthropic SDK)를 쓰고, 아니면 서버에 로그인된
+Claude Code CLI(`claude -p`, 한줄평과 같은 것)로 쓴다. 둘 다 없으면 꺼진 상태로 두고, 그때는 앱이 관리자 승인으로 넘긴다.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from dealbot import commentary  # find_claude 는 모듈째로 불러 쓴다 (�
 
 log = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-5"
 SKIP_TOKEN = "SKIP"
 
 SYSTEM_PROMPT = """당신은 한국 핫딜·혜택 정보 텔레그램 채널 '오늘의 핫딜'의 편집자입니다.
@@ -152,7 +151,7 @@ class InfoSummarizer:
         self,
         api_key: str | None,
         *,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         max_chars: int = 500,
         timeout: float = 60,
         use_cli: bool = True,
@@ -160,11 +159,11 @@ class InfoSummarizer:
         cli_timeout: float | None = None,
     ) -> None:
         self.api_key = api_key
-        self.model = model
+        self.model = model  # API 모델 이름 (서버 .env). 없으면 키가 있어도 API 는 안 씀
         self.max_chars = max_chars
         self.timeout = timeout
-        # 키가 없으면 서버에 로그인된 claude CLI 로 (한줄평 Commentator 와 같은 실행 파일). 요약기를 설정에서 끄면 use_cli=False
-        self.cli_bin = commentary.find_claude() if (use_cli and not api_key) else None
+        # 키·모델이 없으면 서버에 로그인된 claude CLI 로 (한줄평 Commentator 와 같은 실행 파일). 요약기를 설정에서 끄면 use_cli=False
+        self.cli_bin = commentary.find_claude() if (use_cli and not self._api_ready) else None
         self.cli_model = cli_model  # None 이면 --model 을 넘기지 않고 CLI 기본 모델을 쓴다
         self.cli_timeout = cli_timeout if cli_timeout is not None else max(timeout, 120)  # CLI 는 처음 뜰 때 느리다
         self.last_error: str | None = None
@@ -173,9 +172,13 @@ class InfoSummarizer:
         self._client: anthropic.AsyncAnthropic | None = None
 
     @property
+    def _api_ready(self) -> bool:
+        return bool(self.api_key and self.model)
+
+    @property
     def backend(self) -> str | None:
-        """'api' (ANTHROPIC_API_KEY) / 'cli' (서버 claude 로그인) / None (꺼짐)."""
-        if self.api_key:
+        """'api' (ANTHROPIC_API_KEY + API 모델 이름) / 'cli' (서버 claude 로그인) / None (꺼짐)."""
+        if self._api_ready:
             return "api"
         if self.cli_bin:
             return "cli"
@@ -230,7 +233,7 @@ class InfoSummarizer:
                 max_tokens=4000,  # 생각 토큰까지 포함한 상한. 답 자체는 몇백 자
                 system=system,
                 messages=[{"role": "user", "content": user}],
-                # thinking 은 지정하지 않는다: Claude Opus 5 는 기본이 adaptive 라 같고, 다른 모델을 넣어도 400 이 안 난다
+                # thinking 은 지정하지 않는다: 모델 기본값을 따르고, 어떤 모델을 넣어도 400 이 안 난다
             )
         except anthropic.AuthenticationError:
             self.disabled_reason = "ANTHROPIC_API_KEY 가 올바르지 않음"

@@ -849,7 +849,7 @@ class StatusReporter:
             return "끔"
         sm = cfg.summarizer
         backend = getattr(self.summarizer, "backend", None) if self.summarizer is not None else (
-            "api" if sm.enabled and self.settings.secrets.has_anthropic else None)
+            "api" if sm.enabled and self.settings.secrets.has_anthropic and sm.model else None)
         if backend == "api":
             how = f"요약 자동 (API {sm.model})"
         elif backend == "cli":

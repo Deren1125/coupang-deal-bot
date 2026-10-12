@@ -33,7 +33,7 @@ from dealbot.collectors import (
     build_collector,
 )
 from dealbot.commentary import Commentator
-from dealbot.config import Settings
+from dealbot.config import ENV_MODEL_COMMENTARY, ENV_MODEL_SUMMARIZER, Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dedupe import find_duplicate
 from dealbot.enrich import PageEnricher, PageMeta, page_images
@@ -235,6 +235,12 @@ class DealBot:
         )
         if settings.info_posts.enabled and sm.enabled and self.summarizer.backend is None:
             log.warning("info summarizer off (no ANTHROPIC_API_KEY and no claude CLI) — info posts will wait for admin approval (/ok)")
+        # 모델 이름은 저장소에 없고 서버 .env 에서 받는다. 없으면 한 번 알리고 안전하게: CLI 는 기본 모델, API 는 건너뜀
+        if not cc.model:
+            log.warning("%s 가 없어 claude CLI 는 기본 모델로 씀 (한줄평, CLI 로 도는 요약·말 명령)", ENV_MODEL_COMMENTARY)
+        if settings.secrets.anthropic_api_key and not sm.model:
+            log.warning("%s 가 없어 ANTHROPIC_API_KEY 가 있어도 Claude API 는 건너뜀 — 정보 글 요약·말 명령은 서버 claude CLI 로",
+                        ENV_MODEL_SUMMARIZER)
         self._pending_notice_ready = False
         self.rate_limiter = RateLimiter(self.db, settings.publish)
         # 네이버 쇼핑커넥트 자동 링크: Blog-Auto 가 쓰는 답 파일 (받은편지함과 같은 폴더)

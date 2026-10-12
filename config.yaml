@@ -329,8 +329,7 @@ publish:
   template: deal_post.j2
   # 한줄평: 서버의 Claude Code 로그인(구독)으로 상품마다 '누구에게 좋은지' 1~2문장. 숫자·효능 같은 사실은 못 쓰게 막음
   commentary:
-    enabled: true
-    model: sonnet
+    enabled: true                # 모델은 여기 두지 않음: 서버 .env 의 DEALBOT_MODEL_COMMENTARY (없으면 CLI 기본 모델)
     timeout_seconds: 90
 
 # 스레드 자동 발행 (THREADS_APP_ID/SECRET 필요, /threadsauth 로 최초 1회 연결)
@@ -395,8 +394,7 @@ info_posts:
   min_discount_rate: 40
   min_discount_amount: 5000
   summarizer:                  # 게시판 글을 채널 양식(한 줄 요약 + '·' 항목)으로 다시 쓰기. ANTHROPIC_API_KEY 가 있으면 API, 없으면 서버 claude 로그인(CLI)
-    enabled: true
-    model: claude-opus-5
+    enabled: true              # API 모델은 여기 두지 않음: 서버 .env 의 DEALBOT_MODEL_SUMMARIZER (없으면 API 건너뛰고 CLI 로)
     raw_chars: 4000            # 요약기에 넘기는 원문 최대 길이
     timeout_seconds: 60
 

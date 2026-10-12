@@ -29,6 +29,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "DEALBOT_DATA_DIR",
         "DEALBOT_DRY_RUN",
         "LOG_LEVEL",
+        "DEALBOT_MODEL_COMMENTARY",  # 모델 이름은 서버 .env 에서만 (테스트는 필요할 때 직접 넣음)
+        "DEALBOT_MODEL_SUMMARIZER",
     ):
         monkeypatch.delenv(k, raising=False)
 

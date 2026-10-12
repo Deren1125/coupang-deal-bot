@@ -801,6 +801,13 @@ async def test_json_asker_api_path(monkeypatch: pytest.MonkeyPatch) -> None:
         await asker.ask("S", "U", {})
 
 
+def test_json_asker_needs_an_api_model_name_for_the_api() -> None:
+    """API 모델 이름(서버 .env)이 없으면 키가 있어도 API 를 쓰지 않는다: CLI 가 있으면 CLI, 없으면 꺼짐."""
+    assert JsonAsker("key", model="test-model").backend == "api"
+    assert JsonAsker("key", cli_bin="/opt/fake/claude").backend == "cli"
+    assert JsonAsker("key").backend is None  # 테스트에서는 claude CLI 를 못 찾음
+
+
 async def test_json_asker_without_backend_raises() -> None:
     asker = JsonAsker(None, model="m")  # 테스트에서는 claude CLI 를 못 찾음
     assert asker.backend is None
