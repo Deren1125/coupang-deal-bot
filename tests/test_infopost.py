@@ -529,3 +529,27 @@ def test_passed_deal_is_asked_again_only_when_cheaper(bot: DealBot) -> None:
     bot.db.update_queue_item(1, status="skipped", error="skipped by admin")
     assert bot._declined_recently(p, now)
     assert not bot._declined_recently(_event(41, price=9000), now)  # 더 싸졌으면 새 딜
+
+
+def test_same_info_post_reposted_under_another_board_number_is_skipped(bot: DealBot) -> None:
+    """10/12: 「토너세이브 프린터 & 복합기 특가 최대 31% 할인」이 뽐뿌 글 번호만 다르게(304096 → 304106) 두 번 올라갔다.
+    정보 글은 products 표에 이름이 없어 '최근 올린 글' 이름이 비어 중복 검사를 통과했다 — 대기열 이름으로 비교한다."""
+    now = datetime.now(UTC)
+    title = "토너세이브 프린터 & 복합기 특가 최대 31% 할인"
+
+    def ev(i: int) -> Product:
+        post = f"https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no={i}"
+        return Product(source="fake", product_id=f"etc:board{i}", shop="etc", name=title, price=0, url=post,
+                       external_id=str(i), recommend_count=9, extra={"post_url": post, "title": title})
+
+    assert bot._queue_info_post(ev(304096), now)
+    first = next(iter(bot.db.open_queue_names()))
+    bot.db.update_queue_item(first["queue_id"], status="published")
+    deal = Deal(product=Product(source="fake", product_id=first["product_id"], shop="etc", name=title, price=0,
+                                url="https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no=304096"),
+                verdict=DealVerdict(is_deal=True, reasons=["info_post"], score=9), detected_at=now)
+    bot.db.record_post(deal, channel_id="@ch", message_id=147, dry_run=False)
+    assert not bot._queue_info_post(ev(304106), now + timedelta(hours=11))  # 같은 제목 재게시 → 건너뜀
+    other = ev(304200)
+    other.name = "네이버페이 주말 적립 이벤트"
+    assert bot._queue_info_post(other, now + timedelta(hours=11))  # 다른 글은 그대로 올라감

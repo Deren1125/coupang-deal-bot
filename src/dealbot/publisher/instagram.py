@@ -164,6 +164,30 @@ class InstagramClient:
             expires_at=utcnow() + timedelta(seconds=expires_in) if expires_in else None,
         )
 
+    async def from_user_token(self, token: str) -> InstagramToken:
+        """메타 개발자 화면(Instagram API 설정)의 '액세스 토큰 생성'으로 만든 토큰을 그대로 받는다 (웹 로그인이 돌기만 할 때 — 주인 10/12).
+        단기면 장기(60일)로 바꾸고, 이미 장기면 그대로. 만료일을 모르면 59일로 잡아 자동 갱신이 돌게."""
+        token = token.strip()
+        expires_in = 0
+        if self.app_secret:
+            try:
+                long = await self._request(
+                    "GET",
+                    f"{GRAPH_BASE}/access_token",
+                    params={"grant_type": "ig_exchange_token", "client_secret": self.app_secret, "access_token": token},
+                    step="long_token",
+                )
+                token = long.get("access_token") or token
+                expires_in = int(long.get("expires_in") or 0)
+            except InstagramError as e:  # 이미 장기 토큰이면 바꿀 수 없다고 나옴 → 그대로 씀
+                log.info("instagram user token: long-lived exchange skipped (%s)", e)
+        me = await self.me(token)  # 토큰이 진짜인지 여기서 확인 (틀리면 InstagramError)
+        return InstagramToken(
+            access_token=token,
+            user_id=str(me.get("user_id") or me.get("id") or ""),
+            expires_at=utcnow() + (timedelta(seconds=expires_in) if expires_in else timedelta(days=59)),
+        )
+
     async def refresh(self, token: InstagramToken) -> InstagramToken:
         body = await self._request(
             "GET",
@@ -269,6 +293,7 @@ class InstagramPublisher:
         enabled: bool = True,
         dry_run: bool = False,
         refresh_before_days: int = 7,
+        style: str = "current",
     ) -> None:
         self.client = client
         self.db = db
@@ -278,6 +303,7 @@ class InstagramPublisher:
         self.enabled = enabled
         self.dry_run = dry_run
         self.refresh_before_days = refresh_before_days
+        self.style = style  # current | A | B | C (config instagram.style)
 
     # ------------------------------------------------------------ 토큰
     def stored_token(self) -> InstagramToken | None:
@@ -313,15 +339,25 @@ class InstagramPublisher:
         return token
 
     # ------------------------------------------------------------ 발행
-    def render(self, deal: Deal) -> str:
+    def render(self, deal: Deal, *, deal_no: int | None = None, style: str | None = None) -> str:
+        """본문. style 이 A/B/C 면 후보 양식 템플릿(deal_instagram_a/b/c.j2), 아니면 config 의 template.
+        deal_no: 핫딜 페이지의 번호 (프로필 링크에서 찾는 표시, 후보 양식만 씀)."""
+        from dealbot.publisher import insta_style
+
         link = deal.affiliate_url or deal.product.url
         shop = self.registry.get(deal.product.shop)
-        return self.renderer.render_deal(deal, link, shop=shop, template=self.template, autoescape=False)[:CAPTION_LIMIT]
+        style = style or self.style
+        template = insta_style.template_for(style, self.template)
+        extra = None
+        if template != self.template:
+            info = insta_style.card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
+            extra = {"ig": insta_style.caption_context(deal, info, shop=shop)}
+        return self.renderer.render_deal(deal, link, shop=shop, template=template, autoescape=False, extra=extra)[:CAPTION_LIMIT]
 
-    async def publish(self, deal: Deal, image_url: str | None) -> PublishResult:
+    async def publish(self, deal: Deal, image_url: str | None, *, deal_no: int | None = None) -> PublishResult:
         if not self.enabled:
             return PublishResult(ok=False, error="instagram disabled")
-        caption = self.render(deal)
+        caption = self.render(deal, deal_no=deal_no)
         if self.dry_run:
             log.info("[DRY-RUN] would post to instagram (%s):\n%s", image_url, caption)
             return PublishResult(ok=True, dry_run=True)

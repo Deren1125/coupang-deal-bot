@@ -36,7 +36,7 @@ from dealbot.commentary import Commentator
 from dealbot.config import Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dedupe import find_duplicate
-from dealbot.enrich import PageEnricher, page_images
+from dealbot.enrich import PageEnricher, PageMeta, page_images
 from dealbot.infopost import InfoPostBuilder, PostBody
 from dealbot.keyboard import from_korean_keyboard, is_ascii
 from dealbot.links import (
@@ -71,6 +71,7 @@ from dealbot.monitoring.nl import REGISTRY_DAYS, NLRouter
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.naver_shop import NaverShopSearch, store_product_no
+from dealbot.page_price import DISCOUNT_WORDS, PageCheck, check_page_price, hold_line
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
@@ -302,6 +303,7 @@ class DealBot:
             enabled=settings.instagram.enabled,
             dry_run=self.state.dry_run,
             refresh_before_days=settings.instagram.refresh_before_days,
+            style=settings.instagram.style,
         )
         self.card: DealCard | None = None
         if settings.card.enabled:
@@ -310,6 +312,9 @@ class DealBot:
                     settings.data_dir / "media",
                     font_path=settings.card.font_path,
                     style=CardStyle(footer=settings.card.footer, footer_note=settings.card.footer_note),
+                    layout=settings.instagram.style,
+                    font_heavy_path=settings.card.font_heavy_path,
+                    font_regular_path=settings.card.font_regular_path,
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("deal card disabled: %s", e)
@@ -634,11 +639,10 @@ class DealBot:
         return text
 
     async def threads_test(self, queue_id: int | None = None) -> str:
-        """스레드에 실제로 올려 양식을 본다. 번호 없으면 샘플 딜, 번호가 있으면 채널에 올렸던 그 글을 다시."""
+        """스레드에 실제로 올려 양식을 본다. 번호 없으면 샘플 딜, 번호가 있으면 채널에 올렸던 그 글을 다시.
+        자동 게시(config threads.enabled)가 꺼져 있어도 시험 글은 올린다 — 차단이 풀렸는지 켜기 전에 확인하는 용도 (주인 10/12)."""
         from dealbot.cli import sample_deal
 
-        if not self.settings.threads.enabled:
-            return "스레드 자동 게시가 꺼져 있습니다 (config threads.enabled)."
         if self.threads.stored_token() is None:
             return "스레드가 연결되어 있지 않습니다. /threadsauth 먼저 해 주세요."
         if queue_id is None:
@@ -657,7 +661,7 @@ class DealBot:
         preview = self._threads_preview(deal, label)
         if self.threads.dry_run:
             return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
-        result = await self.threads.publish(deal)
+        result = await self.threads.publish(deal, force=True)  # 자동 게시가 꺼져 있어도 시험 글은
         if not result.ok:
             return preview + f"\n\n❌ 올리지 못했습니다: <code>{html.escape(result.error or '')}</code>"
         link = await self._threads_permalink(result.message_id)
@@ -666,6 +670,8 @@ class DealBot:
             lines.append(f"참고: {html.escape(result.error)}")
         if queue_id is None:
             lines.append("샘플 글이니 확인한 뒤 스레드 앱에서 지워 주세요.")
+        if not self.settings.threads.enabled:
+            lines.append("자동 게시는 아직 꺼져 있어요 (시험 글만 올렸어요). 켜려면 config threads.enabled 를 true 로.")
         return "\n".join(lines)
 
     async def _threads_permalink(self, message_id: int | None) -> str | None:
@@ -1145,9 +1151,12 @@ class DealBot:
                     else:
                         log.info("skip %s — source url is not a %s page: %s", p.name[:40], p.shop, p.url)
                     continue
-                if self._should_enrich(p) and enriched < cfg.deal.enrich.max_per_run:
+                check_price = self._wants_page_check(p)
+                if (self._should_enrich(p) or check_price) and enriched < cfg.deal.enrich.max_per_run:
                     enriched += 1
-                    await self._enrich(p)
+                    await self._enrich(p, check_price=check_price)
+                elif check_price:
+                    self._check_page_price(p, None, why="이번 판 페이지 읽기 한도")
                 if not p.has_price and not cfg.deal.accept_coupons_and_events:
                     # 가격 없는 글(쿠폰·이벤트)은 특가 판정을 못 하니 정보 글로만
                     if self._queue_info_post(p, now):
@@ -1155,6 +1164,10 @@ class DealBot:
                     continue
                 stats = self.db.price_stats(p.product_id, cfg.deal.history_days, now)
                 verdict = self.evaluator.evaluate(p, stats)
+                if (p.extra.get("page_price") or {}).get("status") == "hold":
+                    # 제목 가격이 상품 페이지와 안 맞음: 시중가 대조·가격 기록·링크 요청 없이 보류 (주인 결정 10/12, #22)
+                    await self._hold_for_price(p, verdict, now)
+                    continue
                 if p.has_price and self._should_record(p.product_id, now):
                     self.db.record_observation(p, now)
                 if self._needs_market_check(p, verdict):
@@ -1309,8 +1322,10 @@ class DealBot:
             return False
         return not p.image_url or is_board_thumb(p.image_url) or p.rating is None or not p.has_price
 
-    async def _enrich(self, p: Product) -> list[str]:
+    async def _enrich(self, p: Product, *, check_price: bool = False) -> list[str]:
         meta = await self.enricher.fetch(p.url)
+        if check_price:
+            self._check_page_price(p, meta)  # 제목 가격 대조는 빈 칸 채우기 전에 (제목 가격 그대로)
         filled = PageEnricher.apply(p, meta) if meta is not None else []
         if filled:
             log.info("enriched %s from page: %s", p.name[:40], ", ".join(filled))
@@ -1326,6 +1341,91 @@ class DealBot:
                 filled.append("image_url")
                 log.info("enriched %s from naver shop search: image_url", p.name[:40])
         return filled
+
+    def _wants_page_check(self, p: Product) -> bool:
+        """제목 가격을 상품 페이지 가격과 대조할 딜인가 (토스·네이버, 가격 있는 상품 딜, 최근에 올린 상품 아님)."""
+        pc = self.settings.deal.page_check
+        if not pc.enabled or not p.has_price or p.deal_kind == "info" or p.source == "manual":
+            return False
+        if "*" not in pc.shops and p.shop not in pc.shops:
+            return False
+        return not self._posted_recently(p.product_id)
+
+    def _page_tolerance(self, p: Product) -> dict[str, float]:
+        """가격 대조 허용 폭. 글 제목·배송 칸에 카드·쿠폰 같은 말이 있으면 페이지에 안 보이는 할인 몫(한쪽)을 더 봐 준다."""
+        pc = self.settings.deal.page_check
+        said = f"{p.extra.get('title') or p.name} {p.shipping or ''}"
+        return {"tolerance_pct": pc.tolerance_pct, "discount_tolerance_pct": pc.discount_tolerance_pct if DISCOUNT_WORDS.search(said) else 0}
+
+    def _check_page_price(self, p: Product, meta: PageMeta | None, *, why: str | None = None) -> PageCheck:
+        """상품 페이지 가격·옵션을 제목 가격과 대조해 p.extra['page_price'] 에 남긴다.
+        맞으면(±tolerance_pct) 맞은 페이지 가격을 p.price 로 (시중가 대조·발행이 실제 값으로), 원래 제목 가격은 extra['title_price'].
+        다른 옵션에 맞으면 extra['page_option'] 에 옵션 이름. 못 읽었으면 지금처럼 진행 (unverified)."""
+        title_price = int(p.extra.get("title_price") or p.price)
+        if meta is None:
+            check = PageCheck("unverified", title_price, reason=why or "페이지를 못 읽음")
+        else:
+            check = check_page_price(p.name, title_price, meta.prices, page_title=meta.title, **self._page_tolerance(p))
+        p.extra["page_price"] = check.to_dict()
+        if check.status == "unverified":
+            log.info("page price unverified for %s (%s원): %s", p.name[:40], f"{title_price:,}", check.reason)
+        elif check.status in ("ok", "option"):
+            if check.matched_price and check.matched_price != p.price:
+                p.extra["title_price"] = title_price
+                p.price = check.matched_price
+            if check.status == "option" and check.matched_label:
+                p.extra["page_option"] = check.matched_label
+            log.info(
+                "page price verified for %s: 글 %s원 ↔ 페이지 %s원%s",
+                p.name[:40], f"{title_price:,}", f"{check.matched_price or 0:,}",
+                f" (옵션 '{check.matched_label}')" if check.status == "option" else "",
+            )
+        return check
+
+    def _hold_note_log(self, queue_id: int, p: Product, check: PageCheck) -> None:
+        detail = hold_line(queue_id, check)
+        log.info("queue #%d held — %s · %s", queue_id, detail, p.name[:40])
+        self.db.log_event("INFO", "page_price", f"{p.product_id} {detail}")
+
+    async def _hold_for_price(self, p: Product, verdict: DealVerdict, now: Any) -> int | None:
+        """수집 때 가격이 안 맞은 딜을 보류로 남기고 관리자 챗에 조용히 한 줄. 관심 없는 글·최근에 올렸거나 넘긴 글·
+        같은 가격으로 이미 보류한 글은 조용히 넘어간다. 보류 번호(없으면 None)."""
+        if any(r == "low_interest" or r.startswith(("excluded", "few_reviews")) for r in verdict.reasons):
+            return None  # 가격이 맞았어도 안 올렸을 글 (관심 없음·제외 낱말·후기 적음) — 메모 안 보냄
+        if self._posted_recently(p.product_id, now) or self._declined_recently(p, now):
+            return None
+        prev = self.db.held_since(p.product_id, now - REASK_COOLDOWN)
+        if prev is not None and prev.product.price == p.price:
+            log.debug("deal %s already held at the same title price — no new note", p.product_id)
+            return None
+        check = PageCheck(**p.extra["page_price"])
+        deal = Deal(product=p, verdict=verdict, detected_at=now)
+        queue_id = self.db.add_held(deal, score=verdict.score, error=f"held: page price ({check.reason})", now=now)
+        self._hold_note_log(queue_id, p, check)
+        await self.notifier.notify_price_hold(queue_id, p, check)
+        return queue_id
+
+    async def _hold_item(self, item: QueueItem, deal: Deal) -> None:
+        """발행 직전에 읽은 페이지(사진 때문에 이미 연 페이지)로 가격이 안 맞는 게 드러난 글: 올리지 않고 보류."""
+        p = deal.product
+        check = PageCheck(**p.extra["page_price"])
+        self.db.update_queue_item(item.id, status="held", error=f"held: page price ({check.reason}, before publish)", deal=deal)
+        self._hold_note_log(item.id, p, check)
+        await self.notifier.notify_price_hold(item.id, p, check)
+
+    def _recheck_page_price(self, p: Product, meta: PageMeta | None) -> None:
+        """수집 때 페이지 가격을 확인 못 한 딜: 발행 직전에 사진 때문에 이미 읽은 페이지가 있으면 그걸로 대조 (새로 열지 않음).
+        이미 정한 판정(시중가 대조)은 그대로 두고, 가격이 안 맞으면 보류만 한다."""
+        state = p.extra.get("page_price")
+        if meta is None or meta.prices is None or not isinstance(state, dict) or state.get("status") != "unverified":
+            return
+        check = check_page_price(
+            p.name, int(state.get("title_price") or p.price), meta.prices, page_title=meta.title, **self._page_tolerance(p)
+        )
+        p.extra["page_price"] = check.to_dict()
+        if check.status == "option" and check.matched_label:
+            p.extra["page_option"] = check.matched_label
+        log.info("page price checked before publish for %s: %s", p.name[:40], check.status)
 
     def _should_record(self, product_id: str, now: Any) -> bool:
         gap = self.settings.deal.observation_min_gap_hours
@@ -1532,6 +1632,9 @@ class DealBot:
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
         # 사진은 연습 모드·사진 끔이어도 확인한다 (블로그 내보내기·미리보기용, 보내는 건 publisher 가 send_photo 일 때만)
         photo = await self.deal_photo(deal)
+        if (deal.product.extra.get("page_price") or {}).get("status") == "hold":
+            await self._hold_item(item, deal)  # 사진 때문에 연 상품 페이지 가격이 글 가격과 다름 → 올리지 않음
+            return True
         result = await self.publisher.publish(deal, silent=silent, photo=photo)
         if result.ok:
             self.db.record_post(
@@ -1551,7 +1654,7 @@ class DealBot:
             else:
                 await self.notifier.notify_published(deal, result)
                 self.export_published(deal, photo)
-                await self._publish_side_channels(deal)
+                await self._publish_side_channels(deal, photo=photo, deal_no=item.id)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal)
         return True
@@ -1657,6 +1760,7 @@ class DealBot:
                 meta = await self.enricher.fetch(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
+            self._recheck_page_price(p, meta)
             page_had_photo = bool(meta and page_images(meta))
             for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
                 photo = await _try(url)
@@ -1670,6 +1774,7 @@ class DealBot:
                 meta = await self.store_browser.page_meta(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
+            self._recheck_page_price(p, meta)  # 크롬으로 연 김에 가격도 (따로 열지 않음)
             for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
                 photo = await _try(url)
                 if photo is not None:
@@ -1691,19 +1796,30 @@ class DealBot:
         p.image_url = src
         return photo
 
-    async def make_card(self, deal: Deal) -> str | None:
-        """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None."""
+    async def make_card(self, deal: Deal, photo: bytes | None, *, deal_no: int | None = None) -> str | None:
+        """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None.
+        photo: deal_photo 가 확인한 상품 사진 바이트 (텔레그램 글에 쓴 그 사진). 여기서 사진을 다시 받지 않는다 —
+        예전엔 image_url 을 날것으로 다시 받아 쿠팡 로고가 카드에 크게 들어가거나(/instatest), 외부 반출을 막는 스토어 사진이 빠졌다.
+        사진이 없으면 instagram.no_photo 가 text_card 일 때만 글자 카드, skip(기본)이면 None."""
         if self.card is None:
             return None
         base = self.settings.secrets.public_base_url
         if not base:
             log.debug("no public domain — card image cannot be served")
             return None
-        photo = await self._fetch_image(deal.product.image_url, referer=deal.product.url)
+        if photo is None and self.settings.instagram.no_photo != "text_card":
+            return None
         shop = self.registry.get(deal.product.shop)
         tier, _ = self.renderer.deal_tier(deal)  # 배지는 글 첫 줄과 같은 등급으로
+        info = None
+        if self.card.layout != "current":
+            from dealbot.publisher.insta_style import card_info
+
+            info = card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
         try:
-            path = await asyncio.to_thread(self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier)
+            path = await asyncio.to_thread(
+                self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier, info=info,
+            )
         except Exception as e:  # noqa: BLE001
             log.warning("card render failed: %s", e)
             return None
@@ -1713,15 +1829,30 @@ class DealBot:
             pass
         return f"{base}/media/{path.name}"
 
-    async def _publish_side_channels(self, deal: Deal) -> None:
-        """텔레그램 채널 발행 후: 카드 이미지 → 스레드·인스타그램 자동 게시 + 복붙 문구를 관리자 챗으로."""
+    def _ig_skip_reason(self, photo: bytes | None) -> str | None:
+        """인스타에 안 올리는 이유 (사진 규칙). 확인된 상품 사진이 없고 no_photo 가 skip 이면 올리지 않는다
+        — 인스타는 사진이 꼭 있어야 하고, 로고·기본 이미지를 크게 띄운 카드는 계정 인상을 해친다."""
+        if photo is None and self.settings.instagram.no_photo == "skip":
+            return "확인된 상품 사진 없음"
+        return None
+
+    async def _publish_side_channels(self, deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
+        """텔레그램 채널 발행 후: 카드 이미지 → 스레드·인스타그램 자동 게시 + 복붙 문구를 관리자 챗으로.
+        photo: 텔레그램 글에 쓴 확인된 상품 사진(deal_photo) — 인스타 카드도 이 사진만 쓴다. deal_no: 핫딜 페이지 번호."""
         want_ig = (
             self.settings.instagram.enabled
             and (self.instagram.configured or self.instagram.dry_run)
             and (deal.product.deal_kind != "info" or self.settings.instagram.info_posts)
         )
         want_threads = self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run)
-        card_url = await self.make_card(deal) if want_ig else None  # 카드는 사진이 꼭 있어야 하는 인스타만
+        ig_skip = self._ig_skip_reason(photo) if want_ig else None
+        if ig_skip:
+            # 사진 없는 딜은 인스타에 안 올림 (실패가 아니라 규칙이라 관리자 알림 없이 기록만)
+            want_ig = False
+            self.db.log_event("INFO", "instagram", f"{deal.product.product_id} skipped: {ig_skip}")
+            log.info("instagram skipped (%s): %s", ig_skip, deal.product.name[:40])
+        # 카드는 사진이 꼭 있어야 하는 인스타만. 사진은 텔레그램 글과 같은 확인된 상품 사진
+        card_url = await self.make_card(deal, photo, deal_no=deal_no) if want_ig else None
         if want_threads:
             # 스레드는 deal_photo 가 확인한 상품 사진만 (못 쓰면 글만). 글자 카드는 상품 사진 대신 쓰지 않는다
             result = await self.threads.publish(deal)
@@ -1739,7 +1870,7 @@ class DealBot:
                 await self._sns_failed("스레드", "threadsauth", f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>",
                                        result.error or "")
         if want_ig:
-            ig = await self.instagram.publish(deal, card_url)
+            ig = await self.instagram.publish(deal, card_url, deal_no=deal_no)
             if ig.ok:
                 self.db.log_event("INFO", "instagram", f"{deal.product.product_id} {'dry-run' if ig.dry_run else ig.message_id}")
                 log.info("instagram posted: %s", deal.product.name[:40])
@@ -1938,6 +2069,19 @@ class DealBot:
         except InstagramError as e:
             return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /instaauth 로 다시 받아 주세요."
 
+    async def instagram_submit_token(self, token: str) -> str:
+        """/instatoken: 메타 개발자 화면에서 만든 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""
+        try:
+            tok = await self.instagram.client.from_user_token(token)
+            me = await self.instagram.client.me(tok.access_token)
+        except InstagramError as e:
+            return f"❌ 연결하지 못했어요: {html.escape(str(e))}\n토큰을 다시 만들어 보내 주세요 (테스터로 수락한 프로페셔널 계정으로 만든 토큰이어야 해요)."
+        username = str(me.get("username") or "")
+        self.instagram.save_token(tok, username)
+        self.db.log_event("INFO", "instagram", f"authorized by user token as {username}")
+        expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
+        return f"✅ 인스타그램 연결 완료: @{html.escape(username)} (토큰 만료 {expires}, 자동 갱신됨). 이제 /instatest 로 시험해 보세요."
+
     async def instagram_test(self, queue_id: int | None = None) -> str:
         """인스타그램에 실제로 올려 본다. 번호 없으면 샘플 딜, 있으면 채널에 올렸던 그 글."""
         from dealbot.cli import sample_deal
@@ -1955,13 +2099,22 @@ class DealBot:
             if item.status != "published":
                 return f"#{queue_id} 는 채널에 올라간 글이 아닙니다 (상태 {item.status})."
             deal, label = item.deal, f"#{queue_id} {item.deal.product.name[:30]}"
-        caption = self.instagram.render(deal)
-        card_url = await self.make_card(deal)
+        deal_no = queue_id
+        # 실제 발행과 같은 규칙: 텔레그램 글처럼 확인된 상품 사진만 (샘플의 쿠팡 로고는 사진으로 안 씀)
+        photo = await self.deal_photo(deal)
+        caption = self.instagram.render(deal, deal_no=deal_no)
         preview = f"📸 <b>인스타그램에는 이렇게 올라갑니다 ({html.escape(label)})</b>\n<pre>{html.escape(caption)}</pre>"
+        skip = self._ig_skip_reason(photo)
+        if skip:
+            return preview + (
+                f"\n\n⏭ 이 딜은 인스타에 올리지 않습니다: {skip} (로고·기본 이미지·작은 썸네일은 카드에 안 씀). 실제 딜도 같은 규칙입니다."
+                + ("\n사진이 있는 실제 딜로 시험하려면 /instatest 번호" if queue_id is None else "")
+            )
+        card_url = await self.make_card(deal, photo, deal_no=deal_no)
         preview += f"\n사진(카드): {card_url}" if card_url else "\n⚠️ 카드 이미지를 만들 수 없습니다 (공개 도메인이 없거나 card.enabled 가 꺼짐) — 인스타는 사진이 필수라 올릴 수 없습니다."
         if self.instagram.dry_run:
             return preview + "\n\n연습 모드라 실제로 올리지는 않았습니다."
-        result = await self.instagram.publish(deal, card_url)
+        result = await self.instagram.publish(deal, card_url, deal_no=deal_no)
         if not result.ok:
             return preview + f"\n\n❌ 올리지 못했습니다: <code>{html.escape(result.error or '')}</code>"
         link = None
@@ -2012,6 +2165,8 @@ class DealBot:
             hours=cfg.page_hours,
             disclosures=disclosures,
             channels=self.settings.channels.as_dict(),
+            # 인스타 후보 양식(A/B/C)은 카드·본문에 '#번호' 를 적으므로 페이지에도 번호를 보여 찾기 쉽게
+            show_numbers=self.settings.instagram.style != "current",
         )
         return 200, html_text
 
@@ -2040,6 +2195,19 @@ class DealBot:
             return f"✅ 스레드 연결 완료: @{me.get('username')} (토큰 만료 {expires}, 자동 갱신됨)"
         except ThreadsError as e:
             return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
+
+    async def threads_submit_token(self, token: str) -> str:
+        """/threadstoken: 메타 개발자 화면에서 만든 사용자 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""
+        try:
+            tok = await self.threads.client.from_user_token(token)
+            me = await self.threads.client.me(tok.access_token)
+        except ThreadsError as e:
+            return f"❌ 연결하지 못했어요: {html.escape(str(e))}\n토큰을 다시 만들어 보내 주세요 (테스터로 수락한 계정으로 만든 토큰이어야 해요)."
+        self.threads.save_token(tok)
+        self.db.kv_set(KV_USERNAME, str(me.get("username") or ""))
+        self.db.log_event("INFO", "threads", f"authorized by user token as {me.get('username')}")
+        expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
+        return f"✅ 스레드 연결 완료: @{html.escape(str(me.get('username') or ''))} (토큰 만료 {expires}, 자동 갱신됨). 이제 /threadstest 로 시험해 보세요."
 
     def owner_notice(self, kind: str, text: str) -> None:
         """주인 카톡 '나에게 보내기' 요청을 Blog-Auto 받은편지함에 (카톡 토큰은 Blog-Auto 가 가지고 있어 거기서 보낸다)."""

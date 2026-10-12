@@ -34,10 +34,11 @@ from telegram.ext import (
 from dealbot import __version__
 from dealbot.config import MonitoringConfig, Settings
 from dealbot.links import LinkRouter
-from dealbot.models import Deal, PublishResult
+from dealbot.models import Deal, Product, PublishResult
 from dealbot.monitoring import nl as nlmod
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState
+from dealbot.page_price import PageCheck, hold_line
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import normalize_chat_id
 from dealbot.publisher.templates import TemplateRenderer
@@ -277,8 +278,10 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("ppstats", "커뮤니티 글 추천 분포"),
     ("threadsauth", "스레드 연결 (최초 1회)"),
     ("threadscode", "스레드 인증 코드 입력"),
+    ("threadstoken", "스레드 연결: 개발자 화면에서 만든 토큰으로 (/threadstoken 토큰)"),
     ("instaauth", "인스타그램 연결 (최초 1회)"),
     ("instacode", "인스타그램 인증 코드 입력"),
+    ("instatoken", "인스타그램 연결: 개발자 화면에서 만든 토큰으로 (/instatoken 토큰)"),
     ("instatest", "인스타그램에 샘플 글 올려 보기 (번호 주면 그 글)"),
     ("help", "도움말"),
 ]
@@ -741,6 +744,16 @@ class AdminNotifier:
                 key="publisher_stuck", short="딜봇 발행 멈춤", urgent=True, ttl_h=6,
             )
 
+    async def notify_price_hold(self, queue_id: int, product: Product, check: PageCheck) -> int | None:
+        """제목 가격이 상품 페이지 가격과 안 맞아 보류함 (링크 요청 없음): 관리자 챗에 조용히 한 줄 + 상품."""
+        text = (
+            f"{html.escape(hold_line(queue_id, check), quote=False)}\n"
+            f"[{html.escape(self.shop_label(product.shop))}] {html.escape(truncate(product.name, 60))} · {html.escape(product.url)}"
+        )
+        # 알림 정책 (주인 결정 10/11): 보류는 주인이 할 일이 아니라 소식 — 텔레그램은 조용히, 카톡은 저녁 요약에만 (할 일 카톡 아님)
+        self.summary("held", truncate(product.name, 40))
+        return await self.send_with_id(text, silent=True, kind="price_hold", queue_id=queue_id)
+
     async def notify_error(self, kind: str, message: str) -> None:
         await self._escalate(kind, message)
         if not self.cfg.notify_on_error:
@@ -1180,9 +1193,13 @@ class BotController(Protocol):
 
     async def threads_submit_code(self, code: str) -> str: ...
 
+    async def threads_submit_token(self, token: str) -> str: ...
+
     async def instagram_auth_url(self) -> str: ...
 
     async def instagram_submit_code(self, code: str) -> str: ...
+
+    async def instagram_submit_token(self, token: str) -> str: ...
 
     async def instagram_test(self, queue_id: int | None = None) -> str: ...
 
@@ -1234,8 +1251,8 @@ HELP_TEXT = HELP_NL + (
     "/test — 샘플 딜로 채널에 올라갈 글 양식을 이 챗에 보여줍니다. 양식을 바꿨을 때 확인용이고 채널에는 안 올라갑니다.\n"
     "/threadstest — 샘플 딜을 스레드에 실제로 올려 어떻게 보이는지 확인합니다 (본 뒤 스레드 앱에서 삭제). /threadstest 번호 — 채널에 올렸던 그 글을 스레드에 다시 올립니다.\n"
     "/pushtest — 휴대폰 푸시(ntfy) 연결 확인.\n"
-    "/threadsauth — 스레드 자동 게시 연결. Threads 앱 ID·시크릿을 변수에 넣은 뒤 1회. Railway 도메인이 있으면 승인만 누르면 끝, 없으면 /threadscode 코드 로 인증 코드 입력.\n"
-    "/instaauth — 인스타그램 자동 게시 연결 (프로페셔널 계정, Instagram 앱 ID·시크릿을 변수에 넣은 뒤 1회). /instacode 코드 — 수동 연결 때 인증 코드 입력. /instatest — 샘플 딜을 인스타에 실제로 올려 카드·본문 확인.\n"
+    "/threadsauth — 스레드 자동 게시 연결. Threads 앱 ID·시크릿을 변수에 넣은 뒤 1회. Railway 도메인이 있으면 승인만 누르면 끝, 없으면 /threadscode 코드 로 인증 코드 입력. 승인 화면 로그인이 계속 돌면 /threadstoken 토큰 — 메타 앱 Threads API 설정의 사용자 토큰 생성기로 만든 토큰으로 연결(토큰 메시지는 봇이 지움).\n"
+    "/instaauth — 인스타그램 자동 게시 연결 (프로페셔널 계정, Instagram 앱 ID·시크릿을 변수에 넣은 뒤 1회). /instacode 코드 — 수동 연결 때 인증 코드 입력. /instatest — 샘플 딜을 인스타에 실제로 올려 카드·본문 확인. 승인 화면 로그인이 계속 돌면 /instatoken 토큰 — Instagram API 설정의 액세스 토큰 생성으로 만든 토큰으로 연결(토큰 메시지는 봇이 지움).\n"
     "/naverlogin — 네이버 쇼핑커넥트 링크를 봇이 대신 만들도록 서버 브라우저에 QR 로그인. 블로그 글쓰기가 아니라 링크 생성 자동화이고, 브라우저 자동화를 켰을 때만 됩니다.\n"
     "/naverlink 상품URL — 위 자동화로 링크 하나 만들어 보기.\n"
     "/shot URL — 서버 브라우저로 그 페이지 화면을 찍어 보냅니다. 봇이 게시판을 잘못 읽는 것 같을 때 확인용.\n"
@@ -1279,7 +1296,8 @@ def register_admin_handlers(
             return
         msg = getattr(update, "effective_message", None)
         if msg is not None and is_stale_message(getattr(msg, "date", None)):
-            log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), (getattr(msg, "text", "") or "")[:40])
+            # 명령 이름만 남긴다 (/threadstoken 처럼 뒤에 비밀 값이 붙는 명령이 있음)
+            log.info("ignoring stale command from %s: %s", getattr(msg, "date", None), ((getattr(msg, "text", "") or "").split() or [""])[0][:40])
             raise ApplicationHandlerStop
 
     async def cmd_status(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1368,6 +1386,30 @@ def register_admin_handlers(
 
     async def cmd_threadsauth(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, await controller.threads_auth_url())
+
+    async def _token_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE, usage: str, submit: Any) -> None:
+        """토큰을 받아 연결하고, 토큰이 든 주인 메시지는 지운다 (채팅에 남지 않게)."""
+        args = ctx.args or []
+        if not args:
+            await reply(update, usage)
+            return
+        msg = update.effective_message
+        if msg is not None:
+            try:
+                await msg.delete()
+            except Exception as e:  # noqa: BLE001 — 못 지워도 연결은 진행
+                log.warning("token command: could not delete the owner's message: %s", e)
+        text = await submit(args[0])
+        if msg is not None:
+            await msg.chat.send_message(text + "\n(토큰이 든 메시지는 지웠어요)", parse_mode="HTML")
+
+    async def cmd_threadstoken(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await _token_cmd(update, ctx, "이렇게 보내주세요: <code>/threadstoken 토큰값</code> (메타 앱 → Threads API → 설정 맨 아래 '사용자 토큰 생성기')",
+                         controller.threads_submit_token)
+
+    async def cmd_instatoken(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await _token_cmd(update, ctx, "이렇게 보내주세요: <code>/instatoken 토큰값</code> (메타 앱 → Instagram → API 설정의 '액세스 토큰 생성')",
+                         controller.instagram_submit_token)
 
     async def cmd_threadscode(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
@@ -1759,8 +1801,10 @@ def register_admin_handlers(
         ("pushtest", cmd_pushtest),
         ("threadsauth", cmd_threadsauth),
         ("threadscode", cmd_threadscode),
+        ("threadstoken", cmd_threadstoken),
         ("instaauth", cmd_instaauth),
         ("instacode", cmd_instacode),
+        ("instatoken", cmd_instatoken),
         ("instatest", cmd_instatest),
         ("copy", cmd_copy),
         ("ppstats", cmd_ppstats),

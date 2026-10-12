@@ -61,9 +61,16 @@ def run() -> list[str]:
     for name in names:
         if name.startswith("deal_"):
             plans.setdefault(name, False)
+    from dealbot.publisher import insta_style
+
+    # 인스타 후보 양식(A/B/C) 본문은 ig 변수가 따로 온다 (instagram.InstagramPublisher.render 와 같게)
+    ig_templates = set(insta_style.STYLE_TEMPLATES.values())
+    info = insta_style.card_info(deal, r, shop=shop, deal_no=1)
+    ig_extra = {"ig": insta_style.caption_context(deal, info, shop=shop)}
     for name, autoescape in plans.items():
         try:
-            text = r.render_deal(deal, link, shop=shop, template=name, autoescape=autoescape)
+            extra = ig_extra if name in ig_templates else None
+            text = r.render_deal(deal, link, shop=shop, template=name, autoescape=autoescape, extra=extra)
         except Exception as e:
             raise CheckFailed(f"{name}: {_reason(e)}") from e
         if not text.strip():

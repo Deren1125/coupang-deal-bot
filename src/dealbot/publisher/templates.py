@@ -284,6 +284,7 @@ class TemplateRenderer:
             "sale_pct": pct,
             "list_pct": list_pct,
             "comment": (p.extra or {}).get("comment"),
+            "option": (p.extra or {}).get("page_option"),  # 글 가격이 상품 페이지의 기본이 아닌 다른 옵션 값일 때 그 옵션 ('2L 12개')
             "rank": p.rank,
             "ref_price": ref_price,
             # 블로그 내보내기 줄에도 첫 줄 근거와 같은 기준 (믿을 수 없는 평균이면 None)
@@ -513,8 +514,10 @@ class TemplateRenderer:
         autoescape: bool = True,
         recent: Sequence[str] = (),
         single: bool = False,
+        extra: dict[str, Any] | None = None,
     ) -> str:
-        """recent: 최근 스레드 글에 쓴 문구(피해서 고름). single: 예전 템플릿 호환용 (스레드 링크는 이제 늘 본문에)."""
+        """recent: 최근 스레드 글에 쓴 문구(피해서 고름). single: 예전 템플릿 호환용 (스레드 링크는 이제 늘 본문에).
+        extra: 템플릿에 더 넘길 변수 (인스타 후보 양식의 ig 등)."""
         p = deal.product
         shop_ctx = {
             "key": shop.key if shop else p.shop,
@@ -551,4 +554,5 @@ class TemplateRenderer:
             ref_pct=round(ref_pct) if ref_price and ref_pct else None,
             single=single,
             facts=self.deal_facts(deal, recent=recent),
+            **(extra or {}),
         )

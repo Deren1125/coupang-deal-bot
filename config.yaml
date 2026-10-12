@@ -193,6 +193,16 @@ deal:
     check_page_before_publish: true
     recheck_awaiting_minutes: 5
     mark_published_hours: 24
+  # 상품 페이지 가격 대조 (주인 결정 10/12, 큐 #22: 제목 '24개 6,410원' 이 실제로는 12개 옵션 값이었음)
+  #  - 수집 때 읽는 상품 페이지의 가격·옵션을 제목 가격과 비교. ±tolerance_pct 안이면 진행(시중가 대조도 페이지 가격으로),
+  #    다른 옵션에 맞으면 옵션 이름을 남김. 그 옵션 수량이 제목과 다르거나 맞는 값이 없으면 보류 — 링크 요청·발행 없이
+  #    관리자 챗에 "⏸ #번호 보류: …" 한 줄 (조용히). 페이지를 못 읽었거나 가격이 없으면 지금처럼 진행
+  #  - 토스 웹 상품 페이지는 가격을 보여 주지 않아(앱에서만) 토스는 지금은 늘 '확인 못 함'. 네이버는 스토어 페이지를 읽었을 때만
+  page_check:
+    enabled: true
+    tolerance_pct: 10
+    discount_tolerance_pct: 25     # 제목에 카드·쿠폰·적립·멤버십 말이 있으면 글 가격이 페이지보다 25%까지 싸도 맞은 것으로 (페이지에 안 보이는 할인)
+    shops: [toss, naver]
   # 상품 페이지(OG/JSON-LD)에서 이미지·가격·별점·리뷰 수를 읽어 빈 칸 채우기 (토스 쉐어링크 페이지 등)
   enrich:
     enabled: true
@@ -313,7 +323,7 @@ publish:
 
 # 스레드 자동 발행 (THREADS_APP_ID/SECRET 필요, /threadsauth 로 최초 1회 연결)
 threads:
-  enabled: false   # 2026-10-09 주인 결정: 'API access blocked'(Meta 쪽 차단)가 풀릴 때까지 끔. 다시 켜려면 true + /threadsauth
+  enabled: true    # 2026-10-12 주인: 차단 풀림 확인(/threadstest 성공, @oneul_hot_deal) → 다시 켬. 웹 승인 로그인이 돌면 /threadstoken 으로 연결
   template: deal_threads.j2               # 한 글: 상황 첫 줄 → 이름·가격 → 비교 금액 → 한마디 → 제휴 고지 → 링크(본문)
   reply_template: null                    # 답글 안 담 (링크는 본문에). 채널 안내 답글을 달려면 deal_threads_reply.j2
   send_photo: true
@@ -326,8 +336,10 @@ instagram:
   template: deal_instagram.j2
   refresh_before_days: 7
   info_posts: false                       # 정보 글(이벤트류)은 안 올림 (상품 딜만)
+  style: B                                # 카드·본문 양식: current | A 사진+큰 가격 | B 저장각 정보 카드 | C 사진+가격 스티커 (주인 선택 10/12: B, 채널 딜 전부 올림)
+  no_photo: skip                          # 확인된 상품 사진이 없는 딜: skip(인스타엔 안 올림, 기록만) | text_card(글자 카드로 올림). 로고는 절대 안 씀
 
-# 딜 카드 이미지 (1080×1350). 인스타그램은 항상, 스레드는 상품 사진이 없거나 거절될 때
+# 딜 카드 이미지 (1080×1350). 인스타그램만 (사진은 텔레그램 글과 같은 확인된 상품 사진만)
 card:
   enabled: true
   footer: 오늘의 핫딜
