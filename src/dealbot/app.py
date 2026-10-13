@@ -1211,14 +1211,19 @@ class DealBot:
                     continue
                 check_price = self._wants_page_check(p)
                 page: list[PageRead] = []  # 이 딜의 가격 대조에 쓴 페이지 (보류할 때 같은 상품의 열린 글도 이 페이지로)
-                if (self._should_enrich(p) or check_price) and enriched < cfg.deal.enrich.max_per_run:
-                    enriched += 1
-                    await self._enrich(p, check_price=check_price, pages=pages, seen=page)
+                # 기억해 둔 페이지는 한도와 상관없이 (페이지를 읽지 않으니 이번 판 읽기 한도를 쓰지 않음).
+                # 단 그 페이지로 보류가 되는데 새로 읽어 보류로 나온 글이 아니면 안 씀 (stale: 새로 읽어야 함)
+                cached, stale = (
+                    self.page_reader.kept(p.product_id, self._page_claim(p), self._page_holds(p)) if check_price else (None, False)
+                )
+                room = enriched < cfg.deal.enrich.max_per_run
+                if (self._should_enrich(p) or check_price) and (room or cached is not None):
+                    if cached is None:
+                        enriched += 1
+                    await self._enrich(p, check_price=check_price, pages=pages, seen=page, photo_search=room)
                 elif check_price:
-                    # 기억해 둔 페이지는 한도와 상관없이. 단 그 페이지로 보류가 되는데 새로 읽어 보류로 나온 글이 아니면 안 씀 (확인 못 함 → 다음 판에 새로 읽음)
-                    cached, stale = self.page_reader.kept(p.product_id, self._page_claim(p), self._page_holds(p))
-                    why = "이번 판 페이지 읽기 한도" + (f" ({NEW_PRICE})" if stale else "")
-                    self._check_page_price(p, cached, why=why, source="cache" if cached else "")
+                    # 이번 판 페이지 읽기 한도: 확인 못 함으로 진행하고 다음 판에 새로 읽음
+                    self._check_page_price(p, None, why="이번 판 페이지 읽기 한도" + (f" ({NEW_PRICE})" if stale else ""))
                 if not p.has_price and not cfg.deal.accept_coupons_and_events:
                     # 가격 없는 글(쿠폰·이벤트)은 특가 판정을 못 하니 정보 글로만
                     if self._queue_info_post(p, now):
@@ -1416,9 +1421,16 @@ class DealBot:
         return not p.image_url or is_board_thumb(p.image_url) or p.rating is None or not p.has_price
 
     async def _enrich(
-        self, p: Product, *, check_price: bool = False, pages: RunBudget | None = None, seen: list[PageRead] | None = None
+        self,
+        p: Product,
+        *,
+        check_price: bool = False,
+        pages: RunBudget | None = None,
+        seen: list[PageRead] | None = None,
+        photo_search: bool = True,
     ) -> list[str]:
-        """빈 칸(사진·별점 등)을 상품 페이지로 채운다. check_price 면 그 전에 제목 가격을 페이지와 대조 (seen 에 읽은 페이지를 남김)."""
+        """빈 칸(사진·별점 등)을 상품 페이지로 채운다. check_price 면 그 전에 제목 가격을 페이지와 대조 (seen 에 읽은 페이지를 남김).
+        photo_search: 그래도 사진이 없을 때 네이버 쇼핑 검색까지 (이번 판 읽기 한도가 찬 뒤 기억해 둔 페이지로만 대조하는 딜은 안 함)."""
         if check_price:
             # 가격 대조: 기억해 둔 페이지 → 일반 요청 → 막힌 네이버 상품 페이지는 크롬 (이번 판·한 시간 한도 안에서)
             got = await self.page_reader.read(
@@ -1439,7 +1451,7 @@ class DealBot:
         filled = PageEnricher.apply(p, meta) if meta is not None else []
         if filled:
             log.info("enriched %s from page: %s", p.name[:40], ", ".join(filled))
-        if (not p.image_url or is_board_thumb(p.image_url)) and store_product_no(p.url):
+        if photo_search and (not p.image_url or is_board_thumb(p.image_url)) and store_product_no(p.url):
             # 스토어 페이지를 못 읽었거나(429) 사진이 없으면: 네이버 쇼핑 검색에서 같은 상품의 사진 (상품번호가 같을 때만)
             try:
                 img = await self.naver_shop.find_image(p)

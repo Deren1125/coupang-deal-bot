@@ -927,6 +927,32 @@ async def test_hold_checks_another_queued_post_at_the_same_price_with_its_own_wo
     assert [k for _, _, k, _ in bot.sent] == ["price_hold"]  # type: ignore[attr-defined]
 
 
+async def test_remembered_page_does_not_use_a_page_read_slot(bot: DealBot) -> None:
+    """기억해 둔 페이지로 대조만 하는 딜은 페이지를 읽지 않으니 이번 판 페이지 읽기 한도(enrich.max_per_run)를 쓰지 않는다:
+    뒤에 오는 새 상품이 '이번 판 페이지 읽기 한도'로 밀리지 않는다. 한도가 찬 뒤에도 기억해 둔 페이지로는 대조한다."""
+    clock = [1000.0]
+    _serve(bot, {})
+    opened = _chrome(bot, clock, _ok_page)
+    bot.store_browser.min_interval = 0
+    checks = _checks(bot)
+    bot.settings.deal.enrich.max_per_run = 1
+    FakePageCollector.products = [_naver("1")]
+    await bot.run_collector(bot.collectors[0])
+    assert checks["naver:1"]["status"] == "option" and len(opened) == 1
+
+    clock[0] += 5 * 60
+    FakePageCollector.products = [_naver("1"), _naver("2"), _naver("3")]
+    await bot.run_collector(bot.collectors[0])
+    assert checks["naver:1"]["status"] == "option" and checks["naver:2"]["status"] == "option" and len(opened) == 2
+    assert checks["naver:3"]["reason"] == "이번 판 페이지 읽기 한도"  # 읽는 한도는 그대로 (2 가 썼음)
+
+    clock[0] += 5 * 60
+    bot.settings.deal.enrich.max_per_run = 0
+    await bot.run_collector(bot.collectors[0])  # 한도가 없어도 기억해 둔 페이지(1·2)로는 맞음 확인
+    assert checks["naver:1"]["status"] == checks["naver:2"]["status"] == "option" and len(opened) == 2
+    assert checks["naver:3"]["reason"] == "이번 판 페이지 읽기 한도"
+
+
 async def test_browser_kept_page_only_confirms(bot: DealBot) -> None:
     """크롬이 발행 사진용으로 읽어 둔(30분) 페이지도 같다: 제목 가격이 맞으면 다시 안 열고, 보류가 될 값이면 지금 페이지를 새로 읽음."""
     clock = [1000.0]
