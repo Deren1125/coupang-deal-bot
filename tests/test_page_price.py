@@ -161,6 +161,8 @@ def bot(settings: Settings) -> DealBot:
     settings.collectors = [CollectorConfig(name="fake_page", type="fake_page", interval_minutes=1)]
     settings.publish.min_interval_seconds = 0
     settings.publish.dry_run = False  # 링크 요청이 실제로 나가는지 보려고
+    # 크롬 가격 대조 경로를 시험한다 (운영 config.yaml 은 10/13 부터 browser: false — 서버 IP 가 스토어에서 막혀 사진용으로 아낌)
+    settings.deal.page_check.browser = True
     FakePageCollector.products = []
     b = DealBot(settings)
     b.sent = []  # type: ignore[attr-defined]
