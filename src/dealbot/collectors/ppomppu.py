@@ -126,7 +126,9 @@ _APPROX_AFTER = re.compile(r"대(?![가-힣])(?:\s*[초중후]반)?")  # '1만�
 _ARROW_RE = re.compile(r"→|->|⇒|➡|▶")  # "29,900원→19,900원" 은 화살표 뒤가 지금 가격
 _COUPON_WORDS = ("쿠폰", "할인코드", "적립", "캐시백")
 _DATE_META = re.compile(r"^\s*~?\s*\d{1,2}\s*/\s*\d{1,2}")  # "(~9/13)", "(9/12~9/14)" 같은 기간 표기
-_NAME_PRICE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{3,})\s*원")
+# 이름 속 'N원' 의 수 자리: 뒤에 '원'이 오는 숫자·쉼표 줄. 줄 맨 앞에서만 시작하고 되돌려 주지 않아 글 길이에 비례한다
+# — 그 안에서 예전 정규식이 잡던 수는 _name_number 가 고른다
+_NAME_NUMBER_RUN = re.compile(r"(?<![\d,])[\d,]++(?=\s*+원)")
 _NOT_A_PRICE_WORDS = ("쿠폰", "할인", "적립", "캐시백", "페이백", "증정", "환급")
 _EVENT_WORDS = ("이벤트", "응모", "추첨", "무료체험", "증정")
 _SKIP_HOSTS = ("ppomppu.co.kr",)
@@ -523,14 +525,31 @@ def _price_in_name(name: str) -> int | None:
     """괄호에 가격이 없을 때 "9,900원 샴푸" 처럼 이름 앞쪽에 적힌 가격. 쿠폰·할인 금액과 헷갈리는 이름이면 안 쓴다."""
     if any(w in name for w in _NOT_A_PRICE_WORDS):
         return None
-    m = _NAME_PRICE.search(name)
-    if not m:
-        return None
-    try:
-        value = int(m.group(1).replace(",", ""))
-    except ValueError:
-        return None
-    return value if value >= 100 else None
+    for run in _NAME_NUMBER_RUN.finditer(name):
+        number = _name_number(run.group())
+        if number is not None:
+            try:
+                value = int(number.replace(",", ""))
+            except ValueError:
+                return None
+            return value if value >= 100 else None
+    return None
+
+
+def _name_number(run: str) -> str | None:
+    """'원' 바로 앞 숫자·쉼표 줄 run 에서 예전 정규식 (\\d{1,3}(?:,\\d{3})+|\\d{3,})\\s*원 이 잡던 수. 없으면 None.
+    그 정규식은 줄 끝까지 이어지는 수만 잡고(뒤에 '원'이 와야 한다), 가장 앞에서 시작하는 것을 고른다: 끝에서부터 세 자리
+    묶음이 이어지는 동안의 ',ddd' 들과 그 앞 1~3자리('1234,567' 이면 '234,567'), 그런 묶음이 없으면 마지막 쉼표 뒤의 세
+    자리 이상인 수('12,3456' 이면 '3456').
+    숫자 자리마다 다시 훑던 정규식은 긴 숫자 줄에서 제곱으로 느려졌다 (5천 자리에 0.25초)."""
+    parts = run.split(",")
+    j = len(parts)
+    while j and len(parts[j - 1]) == 3:  # 끝의 세 자리 묶음들
+        j -= 1
+    k = j - 1 if j and parts[j - 1] else j  # 그 앞 1~3자리가 있으면 거기서, 없으면 첫 세 자리 묶음에서 시작
+    if k < len(parts) - 1:
+        return ",".join([parts[k][-3:], *parts[k + 1 :]])
+    return parts[-1] if len(parts[-1]) >= 3 else None
 
 
 def guess_kind(name: str, price: int | None) -> str:

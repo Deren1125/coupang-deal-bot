@@ -15,6 +15,7 @@ from dealbot.collectors.ppomppu import (
     _candidate_title,
     _legacy_amount,
     _legacy_title_price,
+    _price_in_name,
     decode_html,
     find_shop_urls,
     guess_kind,
@@ -501,6 +502,21 @@ def test_parse_title_keeps_production_price_otherwise() -> None:
 
 
 _PRODUCTION_TITLE_RE = re.compile(r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*(?:\((?P<meta>[^()]*)\))?\s*$")  # 311a593 그대로
+_PRODUCTION_NAME_PRICE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{3,})\s*원")  # 311a593 그대로
+
+
+def _production_name_price(name: str) -> int | None:
+    """311a593 의 _price_in_name 그대로."""
+    if any(w in name for w in ("쿠폰", "할인", "적립", "캐시백", "페이백", "증정", "환급")):
+        return None
+    m = _PRODUCTION_NAME_PRICE.search(name)
+    if not m:
+        return None
+    try:
+        value = int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    return value if value >= 100 else None
 
 
 def test_legacy_title_price_is_production() -> None:
@@ -519,6 +535,11 @@ def test_legacy_title_price_is_production() -> None:
             assert a.group("name").strip() == b.group("name").strip(), repr(text)
         read = _legacy_amount(text) if text else None
         assert (read[0] if read else None) == parse_price(text), repr(text)
+    # 이름 속 'N원' (_price_in_name): 숫자·쉼표 줄을 한 번만 훑는 꼴이 311a593 정규식과 같은 수를 고른다
+    name_pieces = list("0123456789,,, 원원x가") + ["٣", "000", ",000", "1,234", "  원", "12,34", "할인"]
+    for _ in range(30000):
+        name = "".join(rnd.choice(name_pieces) for _ in range(rnd.randint(0, 14)))
+        assert _price_in_name(name) == _production_name_price(name), repr(name)
     for title, price in (("[쿠팡] 상품 (29,900원→19,900원/무료)", 29900), ("[쿠팡] 상품 (2개 12,900원/무료)", None),
                          ("[쿠팡] 9,900원 샴푸 (2개/무료)", 9900), ("[쿠팡] 상품 (5,000원 쿠폰 사용시 19,900원/무료)", 5000),
                          ("[쿠팡] 상품 (12,900원/무료) 카드할인", None), ("[쿠팡] 상품 (12,900원/무료) 와우", 12900),
@@ -553,7 +574,7 @@ def test_parse_title_repeated_wording_stays_fast() -> None:
 
 def test_parse_title_pathological_inputs_stay_fast() -> None:
     """예전 파서까지 읽어도 글 길이에 비례해 끝난다: 원래 예전 제목 정규식은 긴 공백 줄에서 세제곱(2,000칸에 13초), 예전
-    parse_price 는 긴 숫자 줄에서 제곱(2만 자리에 9초)으로 느려졌다."""
+    parse_price 와 이름 속 'N원' 정규식은 긴 숫자 줄에서 제곱(2만 자리에 9초, 5천 자리에 0.25초)으로 느려졌다."""
     for title in (
         "[쿠팡] 상품" + " " * 5000 + "x",
         "[쿠팡] 상품" + " " * 5000 + "(9,900원/무료)",
@@ -572,6 +593,11 @@ def test_parse_title_pathological_inputs_stay_fast() -> None:
         "[쿠팡] 상품 (" + "500ml" * 2000 + " 19,900원/무료)",
         "[쿠팡] 상품 (5,000원 쿠폰" + " " * 5000 + "적용시" + " " * 5000 + "19,900원/무료)",
         "[쿠팡] 상품 (개당" + " " * 5000 + "647원" + " " * 5000 + "25,900원/무료)",
+        # 이름 속 긴 숫자·쉼표 줄 — 이름 속 'N원' 을 찾던 정규식은 숫자 자리마다 줄 끝까지 다시 훑어 제곱(5천 자리에 0.25초)
+        "[쿠팡] " + "1" * 20000 + " x원 (2개/무료)",
+        "[쿠팡] " + "1,000" * 4000 + "x 원",
+        "[쿠팡] 상품 " + ",000" * 5000 + " (~9/13) 원",
+        "[쿠팡] " + "1" * 20000 + "원 (19,900원 → 개당 990원/무료)",
     ):
         started = time.perf_counter()
         parse_title(title)
