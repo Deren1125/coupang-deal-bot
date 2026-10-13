@@ -716,3 +716,82 @@ async def test_browser_price_check_off_keeps_the_old_way(bot: DealBot) -> None:
     await bot.run_collector(bot.collectors[0])
     assert opened == [] and bot.db.queue_counts() == {"pending": 1}
     assert bot.db.pending_items()[0].deal.product.extra["page_price"]["reason"] == "페이지를 못 읽음"
+
+
+def _price_drop(url: str) -> str:
+    """가게가 24개 옵션을 9,900원으로 내린 페이지 (12개 6,390 + 차액 3,510)."""
+    return _state_for(url).replace('"price":8075', '"price":3510')
+
+
+async def test_remembered_page_never_holds_a_new_title_price(bot: DealBot) -> None:
+    """기억해 둔 페이지(cache_minutes)는 맞음 확인에만: 그사이 가게가 값을 내리고 새 글이 새 가격을 적으면 옛 페이지로 보류하지
+    않는다. 새로 읽을 수 없으면 확인 못 함으로 진행하고, 읽을 수 있으면 지금 페이지(일반 요청·크롬이 기억해 둔 것도 버림)로 대조."""
+    clock = [1000.0]
+    _serve(bot, {})
+    page = {"html": _state_for}
+    opened = _chrome(bot, clock, lambda url: (200, url, page["html"](url)))
+    bot.store_browser.min_interval = 0
+    checks = _checks(bot)
+    FakePageCollector.products = [_naver(price=14500)]
+    await bot.run_collector(bot.collectors[0])  # 24개 14,465 에 맞음 (크롬)
+    assert checks["naver:11223344556"]["status"] == "option" and len(opened) == 1
+
+    page["html"] = _price_drop  # 10분 뒤 타임세일로 24개 9,900원, 새 글도 9,900원
+    clock[0] += 10 * 60
+    FakePageCollector.products = [_naver(price=9900)]
+    max_per_run = bot.settings.deal.enrich.max_per_run
+    bot.settings.deal.enrich.max_per_run = 0  # 이번 판 페이지 읽기 한도: 기억해 둔 페이지만 볼 수 있음
+    await bot.run_collector(bot.collectors[0])
+    assert checks["naver:11223344556"] == {**checks["naver:11223344556"], "status": "unverified",
+                                           "reason": "이번 판 페이지 읽기 한도 (옛 페이지와 안 맞는 새 가격)"}
+    bot.settings.deal.enrich.max_per_run = max_per_run
+    clock[0] += 5 * 60
+    bot.page_reader.per_run = 0  # 크롬 한도: 새로 못 읽음
+    await bot.run_collector(bot.collectors[0])
+    assert checks["naver:11223344556"]["reason"] == "페이지를 못 읽음 · 이번 판 크롬 한도 (옛 페이지와 안 맞는 새 가격)"
+    assert len(opened) == 1 and bot.store_browser.cached(NAVER_URL) is None  # 크롬이 기억해 둔 옛 페이지도 버림
+    assert bot.db.queue_counts() == {"pending": 1} and bot.sent == []  # type: ignore[attr-defined]  # 보류도 보류 메모도 없음
+
+    clock[0] += 5 * 60
+    bot.page_reader.per_run = 1
+    await bot.run_collector(bot.collectors[0])  # 새로 읽은 페이지로: 9,900 = 24개 옵션
+    assert len(opened) == 2 and checks["naver:11223344556"]["status"] == "option"
+    assert checks["naver:11223344556"]["matched_price"] == 9900
+    assert bot.db.queue_counts() == {"pending": 1} and bot.sent == []  # type: ignore[attr-defined]
+
+
+async def test_remembered_page_repeats_the_hold_for_the_same_title_price(bot: DealBot) -> None:
+    """같은 글(같은 제목 가격)을 5분마다 다시 수집하면 기억해 둔 페이지로 같은 판정 (다시 읽지 않고, 보류 메모도 한 번)."""
+    clock = [1000.0]
+    seen = _serve(bot, {})
+    opened = _chrome(bot, clock, _ok_page)
+    checks = _checks(bot)
+    FakePageCollector.products = [_naver(price=6410)]  # #22: 24개라는데 12개 값
+    for _ in range(3):
+        await bot.run_collector(bot.collectors[0])
+        assert checks["naver:11223344556"]["status"] == "hold"
+        clock[0] += 5 * 60
+    assert seen == [NAVER_URL] and opened == [NAVER_URL]
+    assert bot.db.queue_counts() == {"held": 1} and [k for _, _, k, _ in bot.sent] == ["price_hold"]  # type: ignore[attr-defined]
+
+
+async def test_browser_kept_page_only_confirms(bot: DealBot) -> None:
+    """크롬이 발행 사진용으로 읽어 둔(30분) 페이지도 같다: 제목 가격이 맞으면 다시 안 열고, 보류가 될 값이면 지금 페이지를 새로 읽음."""
+    clock = [1000.0]
+    _serve(bot, {})
+    page = {"html": _state_for}
+    opened = _chrome(bot, clock, lambda url: (200, url, page["html"](url)))
+    bot.store_browser.min_interval = 0
+    bot.page_reader.per_run = 0  # 맞음 확인은 한도와 상관없이 (크롬을 안 띄움)
+    url2 = "https://smartstore.naver.com/water/products/2"
+    assert await bot.store_browser.page_meta(NAVER_URL) is not None and await bot.store_browser.page_meta(url2) is not None
+    checks = _checks(bot)
+    page["html"] = _price_drop
+    FakePageCollector.products = [_naver("2", price=14500)]
+    await bot.run_collector(bot.collectors[0])
+    assert len(opened) == 2 and checks["naver:2"]["status"] == "option"  # 크롬이 기억해 둔 페이지로 맞음
+    bot.page_reader.per_run = 1
+    FakePageCollector.products = [_naver(price=9900)]
+    await bot.run_collector(bot.collectors[0])
+    assert len(opened) == 3 and checks["naver:11223344556"]["status"] == "option"  # 옛 페이지면 보류 → 새로 읽어 맞음
+    assert bot.db.queue_counts() == {"pending": 2}

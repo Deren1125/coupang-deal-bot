@@ -15,6 +15,7 @@ import re
 import secrets as pysecrets
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -72,7 +73,7 @@ from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.naver_shop import NaverShopSearch, store_name, store_product_no
 from dealbot.page_price import DISCOUNT_WORDS, PageCheck, check_page_price, hold_line
-from dealbot.page_reader import PageReader, RunBudget
+from dealbot.page_reader import NEW_PRICE, PageReader, RunBudget
 from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import CoupangMarketReference, MarketQuote
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
@@ -1213,8 +1214,10 @@ class DealBot:
                     enriched += 1
                     await self._enrich(p, check_price=check_price, pages=pages)
                 elif check_price:
-                    cached = self.page_reader.cached(p.product_id)  # 기억해 둔 페이지는 한도와 상관없이
-                    self._check_page_price(p, cached, why="이번 판 페이지 읽기 한도", source="cache" if cached else "")
+                    # 기억해 둔 페이지는 한도와 상관없이. 단 그 페이지로 보류가 되는 새 제목 가격이면 안 씀 (확인 못 함 → 다음 판에 새로 읽음)
+                    cached, stale = self.page_reader.kept(p.product_id, self._title_price(p), self._page_holds(p))
+                    why = "이번 판 페이지 읽기 한도" + (f" ({NEW_PRICE})" if stale else "")
+                    self._check_page_price(p, cached, why=why, source="cache" if cached else "")
                 if not p.has_price and not cfg.deal.accept_coupons_and_events:
                     # 가격 없는 글(쿠폰·이벤트)은 특가 판정을 못 하니 정보 글로만
                     if self._queue_info_post(p, now):
@@ -1415,7 +1418,13 @@ class DealBot:
         if check_price:
             # 가격 대조: 기억해 둔 페이지 → 일반 요청 → 막힌 네이버 상품 페이지는 크롬 (이번 판·한 시간 한도 안에서)
             got = await self.page_reader.read(
-                p.product_id, p.url, pages or self.page_reader.run_budget(), enricher=self.enricher, browser=self.store_browser
+                p.product_id,
+                p.url,
+                pages or self.page_reader.run_budget(),
+                enricher=self.enricher,
+                browser=self.store_browser,
+                title_price=self._title_price(p),
+                holds=self._page_holds(p),  # 기억해 둔 페이지로는 새 제목 가격을 보류하지 않게
             )
             meta = got.meta
             self._check_page_price(p, meta, why=got.why, source=got.source)  # 제목 가격 대조는 빈 칸 채우기 전에 (제목 가격 그대로)
@@ -1452,12 +1461,22 @@ class DealBot:
         said = f"{p.extra.get('title') or p.name} {p.shipping or ''}"
         return {"tolerance_pct": pc.tolerance_pct, "discount_tolerance_pct": pc.discount_tolerance_pct if DISCOUNT_WORDS.search(said) else 0}
 
+    @staticmethod
+    def _title_price(p: Product) -> int:
+        """글 제목의 가격 (페이지 가격으로 바꿔 둔 뒤에도 원래 값)."""
+        return int(p.extra.get("title_price") or p.price)
+
+    def _page_holds(self, p: Product) -> Callable[[PageMeta], bool]:
+        """그 페이지로 이 딜이 보류되는지 (page_reader 가 기억해 둔 옛 페이지로 새 제목 가격을 보류하지 않게)."""
+        title_price, tolerance = self._title_price(p), self._page_tolerance(p)
+        return lambda meta: check_page_price(p.name, title_price, meta.prices, page_title=meta.title, **tolerance).status == "hold"
+
     def _check_page_price(self, p: Product, meta: PageMeta | None, *, why: str | None = None, source: str = "") -> PageCheck:
         """상품 페이지 가격·옵션을 제목 가격과 대조해 p.extra['page_price'] 에 남긴다.
         맞으면(±tolerance_pct) 맞은 페이지 가격을 p.price 로 (시중가 대조·발행이 실제 값으로), 원래 제목 가격은 extra['title_price'].
         다른 옵션에 맞으면 extra['page_option'] 에 옵션 이름. 못 읽었으면 지금처럼 진행 (unverified — 절대 보류 안 함).
         '확인 못 함' 로그는 상품마다 하루 한 번 (unverified_log_hours), 기억해 둔 페이지(source=cache)로 맞은 건 debug 로만."""
-        title_price = int(p.extra.get("title_price") or p.price)
+        title_price = self._title_price(p)
         if meta is None:
             check = PageCheck("unverified", title_price, reason=why or "페이지를 못 읽음")
         else:

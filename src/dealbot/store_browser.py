@@ -138,6 +138,10 @@ class StoreBrowser:
         hit = self._cache.get(url)
         return hit[1] if hit is not None and hit[0] > self._clock() else None
 
+    def forget(self, url: str) -> None:
+        """잠시 기억해 둔 페이지를 버린다 (가격 대조가 지금 페이지를 다시 읽어야 할 때)."""
+        self._cache.pop(url, None)
+
     def cooling(self) -> float:
         """크롬도 막혀 쉬는 중이면 남은 초, 아니면 0."""
         return max(0.0, self._cool_until - self._clock())

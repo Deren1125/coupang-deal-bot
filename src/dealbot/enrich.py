@@ -297,6 +297,10 @@ class PageEnricher:
         # 못 읽은 페이지의 응답 코드 (가격 대조가 '없는 페이지(404·410)'에는 크롬을 띄우지 않게). 읽으면 지움
         self._failed: dict[str, int] = {}
 
+    def forget(self, url: str) -> None:
+        """잠깐 기억해 둔 스토어 페이지를 버린다 (가격 대조가 지금 페이지를 다시 읽어야 할 때)."""
+        self._store_cache.pop(url, None)
+
     def failed_status(self, url: str) -> int | None:
         """이 주소를 마지막으로 읽었을 때 받은 오류 코드 (400 이상). 모르거나 읽었으면 None. 한 번 보면 지운다."""
         return self._failed.pop(url, None)
