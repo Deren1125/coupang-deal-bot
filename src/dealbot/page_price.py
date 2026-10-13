@@ -15,10 +15,11 @@
 가격을 읽는 곳:
 - 네이버 스마트스토어·브랜드스토어: 페이지에 들어 있는 window.__PRELOADED_STATE__ 의 상품 데이터
   (salePrice·discountedSalePrice·benefitsView·optionCombinations[].price(기본가 대비 차액)·배송비 baseFee).
-  수집 때 일반 요청이 막히면(429) 확인 못 함이고, 발행 직전 사진 때문에 이미 여는 크롬 페이지(store_browser)가 있으면 그걸 다시 쓴다.
+  수집 때 일반 요청이 막히면(429) 같은 페이지를 사진용 크롬(store_browser)으로 읽는다 (page_reader: 한 판·한 시간 한도, 막히면 쉼).
+  그래도 못 읽으면 확인 못 함이고, 발행 직전 사진 때문에 이미 여는 크롬 페이지가 있으면 그걸 다시 쓴다.
   TODO: 이 구조는 10/12 기준 이 환경에서 실제 스토어 페이지를 열 수 없어(일반 요청·크롬 모두 429) 실물로 확인하지 못했다.
-  서버 로그에 'page price unverified … 페이지에 가격 없음' 이 네이버 딜에 계속 찍히면 구조가 바뀐 것이니 store_browser 가
-  받은 HTML 로 다시 맞출 것.
+  서버 로그에 'page price unverified … 페이지에 가격 없음' 이 네이버 딜에 찍히면(크롬이 연 페이지에 사진은 있는데 가격이 없음)
+  구조가 바뀐 것이니 store_browser 가 받은 HTML 로 다시 맞출 것.
 - 그 밖의 몰: JSON-LD Product.offers(옵션별 Offer 목록·AggregateOffer 포함), og/product:price 메타.
 - 토스쇼핑: 웹 상품 페이지(toss.shopping/t/…, toss.im/_m/… 리디렉션)는 가격을 아예 보여 주지 않는다
   (10/12 확인: SSR 데이터·JSON-LD 에 가격 칸이 없고 화면엔 'QR코드를 찍어 가격을 확인해보세요'). 그래서 토스는 늘 '확인 못 함'.

@@ -226,7 +226,8 @@ class PageCheckConfig(BaseModel):
     - 제목 가격 ±tolerance_pct 안의 페이지 가격(판매가·할인가·쿠폰가·정가·옵션가·배송비 포함가·2~4개 묶음가 중 아무거나)이
       있으면 그 값으로 진행 (시중가 대조도 그 값으로). 다른 옵션에 맞으면 옵션 이름을 남김
     - 맞는 값의 옵션 수량이 제목과 다르거나(24개 ↔ 12개) 맞는 값이 없으면 보류(held): 링크 요청·발행 없이 관리자 챗에 짧은 메모
-    - 페이지를 못 읽었거나 가격이 없으면(토스 웹 페이지는 늘 가격 없음) 지금처럼 진행하고 로그만"""
+    - 페이지를 못 읽었거나 가격이 없으면(토스 웹 페이지는 늘 가격 없음) 지금처럼 진행하고 로그만 (상품마다 하루 한 번)
+    - 일반 요청이 막힌 네이버 상품 페이지는 사진용 크롬으로 (browser, 한도·쉬는 시간은 아래 browser_*, page_reader 참고)"""
 
     enabled: bool = True
     tolerance_pct: float = 10
@@ -234,6 +235,18 @@ class PageCheckConfig(BaseModel):
     # 글 가격이 페이지 가격보다 이만큼(%)까지 싼 것도 맞은 것으로 본다 (한쪽만. 0 = 안 씀)
     discount_tolerance_pct: float = 25
     shops: list[str] = Field(default_factory=lambda: ["toss", "naver"])
+    # 일반 요청이 막힌(429·403·빈 페이지) 네이버 상품 페이지(스마트스토어·브랜드스토어·쇼핑 상품 페이지)를 사진용 크롬
+    # (enrich.store_browser 가 켜져 있어야 함)으로 읽어 대조. 꺼져 있으면 예전처럼 '확인 못 함'
+    browser: bool = False
+    browser_per_run: int = 1  # 수집 한 판에 크롬으로 읽는 페이지 수 (크롬이 바쁘거나 열기 간격 안이면 기다리지 않고 다음 판에)
+    browser_per_hour: int = 12  # 한 시간에 (모든 수집기 합)
+    browser_timeout_seconds: float = 40.0  # 한 번 읽기(크롬 띄우기~닫기) 시간 제한
+    # 크롬도 막히면(429·403·캡차·빈 페이지) 크롬 읽기를 쉬는 시간 (사진용도 같이). 또 막히면 두 배씩, 최대 max.
+    # 크롬으로 열었는데 못 읽은 상품(시간 초과 등)도 그 상품만 browser_cooldown_minutes 뒤에 다시
+    browser_cooldown_minutes: float = 30.0
+    browser_cooldown_max_minutes: float = 60.0
+    cache_minutes: float = 120.0  # 읽은 페이지 가격·옵션을 상품마다 기억 (그동안 일반 요청·크롬 다시 안 함. 0 = 안 씀)
+    unverified_log_hours: float = 24.0  # '확인 못 함' 로그는 상품마다 이 시간에 한 번
 
 
 class SourceRule(BaseModel):
