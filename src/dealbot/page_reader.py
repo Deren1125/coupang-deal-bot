@@ -10,7 +10,8 @@
   보통 크롬 한 번. 한 번 읽을 때 크롬 하나를 띄우고 다 읽으면 닫는다. 띄우기부터 닫기까지 timeout 초를 넘으면 끊는다.
 - 수집 한 판에 per_run 번, 한 시간에 per_hour 번까지. 크롬이 다른 페이지를 읽는 중이거나 열기 간격 안이면 기다리지 않는다
   (5분 수집이 오래 멈추지 않게). 이번에 못 읽은 딜은 '확인 못 함'으로 지금처럼 진행하고(올라감) 다음 판에 다시 본다.
-  크롬으로 열었는데 못 읽은 상품(시간 초과 등)은 retry_seconds 뒤에 다시 — 한 상품이 매번 한도를 먹지 않게.
+  크롬으로 열었는데 못 읽은 상품(시간 초과·로그인 같은 다른 페이지로 넘어감 등)은 retry_seconds 뒤에 다시, 또 못 읽으면 두 배씩
+  (최대 retry_max_seconds) — 한 상품이 매번 한도를 먹지 않게. 크롬도 막힌 상품은 한 번 더 길게: 크롬 쉬는 시간이 끝나면 다른 상품부터.
 - 크롬도 막히면(429·403·캡차·빈 페이지) store_browser 가 크롬 읽기를 쉰다 (로그는 쉬기 시작할 때 한 번).
 - '확인 못 함' 로그는 상품마다 log_every_seconds(하루)에 한 번, 이유와 함께.
 보류 규칙은 그대로다 (page_price): 읽은 페이지의 어느 가격·옵션에도 제목 가격이 안 맞을 때만 보류. 못 읽으면 절대 보류하지 않는다.
@@ -18,16 +19,14 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from dealbot.enrich import PageEnricher, PageMeta, is_naver_product_page, is_product_page
+from dealbot.enrich import PageEnricher, PageMeta, is_naver_product_page, same_product_page
 from dealbot.store_browser import StoreBrowser
 
-_PRODUCT_NO = re.compile(r"/products/(\d+)")
 # 기억해 둔 페이지로는 보류가 되는 새 제목 가격이라 새로 읽으려 했는데 못 읽음 ('확인 못 함' 이유 끝에 붙임)
 NEW_PRICE = "옛 페이지와 안 맞는 새 가격"
 
@@ -60,13 +59,7 @@ class _Kept:
 
 def same_page(url: str, meta: PageMeta) -> bool:
     """읽은 페이지가 그 상품 페이지인지. 다른 곳(스토어 첫 화면·로그인·다른 상품)으로 넘어갔으면 거기 가격은 이 상품 값이 아니다."""
-    final = meta.final_url
-    if not final or final == url:
-        return True
-    if not is_product_page(final):
-        return False
-    a, b = _PRODUCT_NO.search(url), _PRODUCT_NO.search(final)
-    return not (a and b and a.group(1) != b.group(1))
+    return same_product_page(url, meta.final_url)
 
 
 class PageReader:
@@ -79,6 +72,7 @@ class PageReader:
         timeout: float = 40.0,
         cache_seconds: float = 7200.0,
         retry_seconds: float = 1800.0,
+        retry_max_seconds: float = 6 * 3600.0,
         log_every_seconds: float = 86400.0,
     ) -> None:
         self.browser = browser  # 일반 요청이 막힌 네이버 상품 페이지를 크롬으로 (꺼져 있으면 예전처럼 일반 요청만)
@@ -87,9 +81,10 @@ class PageReader:
         self.timeout = timeout
         self.cache_seconds = cache_seconds
         self.retry_seconds = retry_seconds
+        self.retry_max = max(retry_seconds, retry_max_seconds)
         self.log_every = log_every_seconds
         self._cache: dict[str, _Kept] = {}  # 상품 → 읽은 페이지
-        self._retry_at: dict[str, float] = {}  # 상품 → 크롬으로 다시 읽어도 되는 시각
+        self._retry: dict[str, tuple[float, int]] = {}  # 상품 → (크롬으로 다시 읽어도 되는 시각, 연달아 못 읽은 횟수)
         self._opens: deque[float] = deque()  # 최근 한 시간 크롬을 띄운 시각
         self._logged: dict[str, float] = {}  # 상품 → '확인 못 함' 로그를 남긴 시각
         self._clock = time.monotonic  # 테스트에서 가짜로 바꿔 끼움
@@ -196,14 +191,28 @@ class PageReader:
         if got.meta is not None and same_page(url, got.meta):
             # 가격이 없어도 기억 (구조가 달라 못 읽은 페이지는 다시 열어도 같음). 크롬이 기억해 둔 페이지는 이번에 대조해 읽은 게 아님
             self._remember(key, got.meta, title_price if got.opened else None)
-            self._retry_at.pop(key, None)
+            self._retry.pop(key, None)
             return PageRead(got.meta, source="browser")
-        if got.opened and not got.blocked:
-            self._retry_at[key] = now + self.retry_seconds
+        if got.opened:
+            self._failed(key, now, blocked=got.blocked)
         why = got.why if got.meta is None else "다른 페이지로 넘어감"
         if not why.startswith("크롬"):
             why = f"크롬 {why}"
         return PageRead(plain, why=f"{head} · {why}", source="page")
+
+    def _failed(self, key: str, now: float, *, blocked: bool) -> None:
+        """크롬으로 열었는데 못 읽은 상품: retry_seconds 뒤에 다시, 또 못 읽으면 두 배씩 (최대 retry_max).
+        크롬도 막힌 상품(blocked)은 처음부터 두 배 — 크롬 쉬는 시간(cooldown)보다 길게 쉬어, 쉬는 시간이 끝나면 다른 상품을 먼저 읽는다
+        (한 상품이 열 때마다 막혀 크롬 전체를 계속 쉬게 하지 않게)."""
+        prev = self._retry.get(key)
+        strikes = prev[1] + 1 if prev is not None and now - prev[0] < self.retry_max else 1  # 오래전 일은 처음부터 셈
+        delay = min(self.retry_max, self.retry_seconds * 2 ** min(strikes - (0 if blocked else 1), 16))
+        if key not in self._retry and len(self._retry) >= 500:
+            # 오래전에 풀린 상품부터 버린다 (다시 못 읽어도 처음부터 셀 뿐)
+            self._retry = {k: v for k, v in self._retry.items() if v[0] + self.retry_max > now}
+            while len(self._retry) >= 500:
+                self._retry.pop(next(iter(self._retry)))
+        self._retry[key] = (now + delay, strikes)
 
     def _browser_skip(self, key: str, url: str, budget: RunBudget, browser: StoreBrowser) -> str:
         """지금 크롬으로 안 읽는 이유. 읽어도 되면 ''."""
@@ -216,7 +225,7 @@ class PageReader:
         if left := browser.cooling():
             return f"크롬도 막혀 쉬는 중 ({left / 60:.0f}분 남음)"
         now = self._clock()
-        retry = self._retry_at.get(key, 0.0) - now
+        retry = self._retry.get(key, (0.0, 0))[0] - now
         if retry > 0:
             return f"크롬으로 못 읽은 지 얼마 안 됨 ({retry / 60:.0f}분 뒤 다시)"
         if budget.browser_left <= 0:

@@ -31,6 +31,7 @@ from dealbot.page_price import (
     naver_state_prices,
     quantity_conflict,
 )
+from dealbot.page_reader import PageReader
 from dealbot.pricing.market import MarketQuote
 
 FIX = Path(__file__).parent / "fixtures"
@@ -555,7 +556,8 @@ async def test_unverified_deal_is_never_held(bot: DealBot) -> None:
 
 
 async def test_blocked_browser_cools_down_and_says_so_once(bot: DealBot, caplog: pytest.LogCaptureFixture) -> None:
-    """크롬도 막히면(429·캡차·빈 페이지) 30분 크롬을 안 띄우고(또 막히면 60분), 로그는 쉬기 시작할 때 한 번."""
+    """크롬도 막히면(429·캡차·빈 페이지) 30분 크롬을 안 띄우고(또 막히면 60분), 로그는 쉬기 시작할 때 한 번.
+    막힌 상품은 쉬는 시간보다 길게(60분) 기다려, 쉬는 시간이 끝나면 다른 상품부터 연다 (한 상품이 쉬는 시간을 계속 잇지 않게)."""
     clock = [1000.0]
     _serve(bot, {})
     captcha = (200, "https://ncpt.naver.com/captcha?x=1", "<html><title>보안 확인</title></html>")
@@ -572,8 +574,9 @@ async def test_blocked_browser_cools_down_and_says_so_once(bot: DealBot, caplog:
         await bot.run_collector(bot.collectors[0])  # 20분 뒤: 아직 쉼
         assert len(opened) == 1
         clock[0] += 11 * 60
-        await bot.run_collector(bot.collectors[0])  # 30분 지나 한 번 → 캡차 화면 → 이번엔 60분
-        assert len(opened) == 2 and checks["naver:1"]["reason"] == "페이지를 못 읽음 · 크롬도 막힘 (캡차)"
+        await bot.run_collector(bot.collectors[0])  # 30분 지나 한 번 (막혔던 1 이 아니라 2) → 캡차 화면 → 이번엔 60분
+        assert len(opened) == 2 and checks["naver:2"]["reason"] == "페이지를 못 읽음 · 크롬도 막힘 (캡차)"
+        assert checks["naver:1"]["reason"] == "페이지를 못 읽음 · 크롬으로 못 읽은 지 얼마 안 됨 (29분 뒤 다시)"
         clock[0] += 31 * 60
         await bot.run_collector(bot.collectors[0])
         assert len(opened) == 2  # 30분으로는 아직
@@ -596,7 +599,7 @@ async def test_empty_browser_page_counts_as_blocked(bot: DealBot) -> None:
     FakePageCollector.products = [_naver()]
     await bot.run_collector(bot.collectors[0])
     assert checks["naver:11223344556"]["reason"] == "페이지를 못 읽음 · 크롬도 막힘 (빈 페이지)" and bot.store_browser.cooling()
-    clock[0] += 31 * 60
+    clock[0] += 61 * 60  # 막힌 상품은 쉬는 시간(30분)보다 길게 60분 뒤에 다시
     await bot.run_collector(bot.collectors[0])
     assert len(opened) == 2 and not bot.store_browser.cooling()
     assert checks["naver:11223344556"] == {**checks["naver:11223344556"], "status": "unverified", "reason": "페이지에 가격 없음"}
@@ -795,3 +798,53 @@ async def test_browser_kept_page_only_confirms(bot: DealBot) -> None:
     await bot.run_collector(bot.collectors[0])
     assert len(opened) == 3 and checks["naver:11223344556"]["status"] == "option"  # 옛 페이지면 보류 → 새로 읽어 맞음
     assert bot.db.queue_counts() == {"pending": 2}
+
+
+async def test_browser_sent_elsewhere_fails_only_that_product(bot: DealBot, caplog: pytest.LogCaptureFixture) -> None:
+    """크롬이 로그인(19세 상품)·스토어 첫 화면 같은 다른 곳으로 넘어가면 그 상품만 못 읽은 것: 크롬 전체를 쉬지 않고(사진용도 그대로),
+    그 상품은 30분·60분… 뒤에 다시. 그사이 다른 상품은 크롬으로 읽는다."""
+    clock = [1000.0]
+    _serve(bot, {})
+    login = '<html><head><title>네이버 : 로그인</title><meta property="og:image" content="https://static.nid.naver.com/login.png"></head></html>'
+
+    def page(url: str) -> tuple[int, str, str]:
+        if url.endswith("/1"):
+            return 200, "https://nid.naver.com/nidlogin.login?mode=form&url=" + url, login
+        return _ok_page(url)
+
+    opened = _chrome(bot, clock, page)
+    bot.store_browser.min_interval = 0
+    checks = _checks(bot)
+    FakePageCollector.products = [_naver("1"), _naver("2")]
+    with caplog.at_level(logging.INFO):
+        await bot.run_collector(bot.collectors[0])
+        assert checks["naver:1"]["reason"] == "페이지를 못 읽음 · 크롬 다른 페이지로 넘어감" and not bot.store_browser.cooling()
+        assert checks["naver:2"]["reason"] == "페이지를 못 읽음 · 이번 판 크롬 한도"
+        clock[0] += 5 * 60
+        await bot.run_collector(bot.collectors[0])  # 1 은 쉬고 2 를 읽음
+        assert checks["naver:2"]["status"] == "option"
+        assert checks["naver:1"]["reason"] == "페이지를 못 읽음 · 크롬으로 못 읽은 지 얼마 안 됨 (25분 뒤 다시)"
+        clock[0] += 31 * 60
+        await bot.run_collector(bot.collectors[0])  # 30분 뒤 1 을 한 번 더 → 또 넘어감 → 이번엔 60분
+        clock[0] += 31 * 60
+        await bot.run_collector(bot.collectors[0])
+        assert checks["naver:1"]["reason"] == "페이지를 못 읽음 · 크롬으로 못 읽은 지 얼마 안 됨 (29분 뒤 다시)"
+    assert [u.rsplit("/", 1)[-1] for u in opened] == ["1", "2", "1"] and not bot.store_browser.cooling()
+    assert not any(r.name == "dealbot.store_browser" and r.levelno == logging.WARNING for r in caplog.records)  # '크롬도 막힘' 없음
+    assert bot.db.queue_counts() == {"pending": 2}
+
+
+def test_browser_retry_backs_off_per_product_and_stays_bounded() -> None:
+    """크롬으로 못 읽은 상품의 다시 읽기: 30분 → 60분 → … 최대 6시간. 막힌 상품은 처음부터 60분. 기억하는 상품 수는 500개까지."""
+    reader = PageReader(retry_seconds=1800, retry_max_seconds=6 * 3600)
+    reader._clock = lambda: 0.0  # type: ignore[assignment]
+    waits = []
+    for _ in range(6):
+        reader._failed("a", 0.0, blocked=False)
+        waits.append(reader._retry["a"][0] / 60)
+    assert waits == [30, 60, 120, 240, 360, 360]
+    reader._failed("b", 0.0, blocked=True)
+    assert reader._retry["b"][0] / 60 == 60
+    for i in range(1000):
+        reader._failed(f"x{i}", float(i), blocked=False)
+    assert len(reader._retry) <= 500 and "x999" in reader._retry

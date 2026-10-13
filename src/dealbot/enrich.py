@@ -232,6 +232,19 @@ def is_product_page(url: str | None) -> bool:
     return not _NOT_PRODUCT_PATH.search(path)
 
 
+_PRODUCT_NO = re.compile(r"/products/(\d+)")
+
+
+def same_product_page(url: str, final_url: str | None) -> bool:
+    """최종 주소(리디렉션 뒤)가 그 상품 페이지인지. 다른 곳(스토어 첫 화면·로그인·다른 상품)으로 넘어갔으면 거기 값은 이 상품 것이 아니다."""
+    if not final_url or final_url == url:
+        return True
+    if not is_product_page(final_url):
+        return False
+    a, b = _PRODUCT_NO.search(url), _PRODUCT_NO.search(final_url)
+    return not (a and b and a.group(1) != b.group(1))
+
+
 def page_meta_at(html: str, final_url: str) -> PageMeta:
     """페이지 HTML → PageMeta (최종 주소 기준). '//cdn…/a.jpg', '/upload/1.jpg' 같은 상대 사진 주소는 페이지 주소 기준으로
     (그대로 두면 사진을 못 받음)."""

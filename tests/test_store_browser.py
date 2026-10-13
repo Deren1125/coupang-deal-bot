@@ -99,9 +99,10 @@ async def test_unknown_memory_does_not_block() -> None:
 
 
 async def test_opens_are_spaced_from_when_the_last_one_closed() -> None:
-    sb, opened, sleeps = _browser((200, STORE_URL, HTML), min_interval=60)
+    other = STORE_URL.replace("13008954661", "1")
+    sb, opened, sleeps = _browser((200, STORE_URL, HTML), (200, other, HTML), min_interval=60)
     assert await sb.page_meta(STORE_URL) is not None
-    assert await sb.page_meta(STORE_URL.replace("13008954661", "1")) is not None
+    assert await sb.page_meta(other) is not None
     assert len(opened) == 2 and sleeps == [60.0]  # 앞 창을 닫은 뒤 60초
 
 
@@ -467,3 +468,13 @@ async def test_page_read_is_remembered_for_a_while() -> None:
     sb._clock = lambda: 10_000_000.0  # type: ignore[assignment]  # 한참 뒤
     await sb.page_meta(STORE_URL)
     assert opened == [STORE_URL, STORE_URL]
+
+
+async def test_sent_elsewhere_is_not_a_block() -> None:
+    """크롬이 그 상품이 아닌 곳(19세 상품의 로그인 등)으로 넘어가면 그 상품만 못 읽은 것 — 크롬 전체를 쉬지 않음. 캡차 주소면 막힘."""
+    login = (200, "https://nid.naver.com/nidlogin.login?mode=form&url=" + STORE_URL, "<html><title>네이버 : 로그인</title></html>")
+    sb, opened, _ = _browser(login, (200, "https://ncpt.naver.com/captcha?x=1", "<html></html>"), min_interval=0)
+    got = await sb.read(STORE_URL)
+    assert got.meta is None and got.opened and not got.blocked and got.why == "다른 페이지로 넘어감" and not sb.cooling()
+    got = await sb.read(STORE_URL)
+    assert got.blocked and got.why == "크롬도 막힘 (캡차)" and sb.cooling() and len(opened) == 2

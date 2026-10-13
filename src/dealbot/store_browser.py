@@ -14,7 +14,8 @@ playwright 나 크롬이 없으면 한 번 알리고 다시 시작할 때까지 
 수집 때 가격 대조(주인 결정 10/12 후속, page_reader)도 같은 크롬을 쓴다: 일반 요청이 막힌 네이버 상품 페이지를 같은 방식으로
 한 번 읽는다 (read). 그쪽은 차례를 기다리지 않고(wait=False) 띄우기부터 닫기까지 시간 제한을 짧게 준다.
 크롬도 막히면(429·403·캡차·빈 페이지) cooldown 초 동안 크롬으로 안 읽는다 (사진용도 같이. 또 막히면 두 배씩, 최대 cooldown_max).
-로그는 쉬기 시작할 때 한 번.
+로그는 쉬기 시작할 때 한 번. 크롬이 그 상품 페이지가 아닌 곳(19세 상품의 로그인·스토어 첫 화면·오류 페이지)으로 넘어간 건
+막힌 게 아니라 그 상품만 못 읽은 것 (캡차 주소는 막힘) — 크롬 전체를 쉬지 않는다.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from dealbot.enrich import (
     is_naver_store,
     page_images,
     page_meta_at,
+    same_product_page,
 )
 
 log = logging.getLogger(__name__)
@@ -197,8 +199,13 @@ class StoreBrowser:
             finally:
                 self._next = self._clock() + self.min_interval  # 간격은 닫은 뒤부터
         took = self._clock() - started
-        meta = page_meta_at(html, final_url or url) if status == 200 and html else None
-        blocked = blocked_reason(status, final_url or url, html, meta)
+        final = final_url or url
+        if status == 200 and not same_product_page(url, final) and not _CAPTCHA.search(final):
+            # 다른 곳(로그인·스토어 첫 화면·오류 페이지)으로 넘어감: 그 상품만 못 읽은 것 — 크롬 전체를 쉬지 않음
+            log.info("store browser: %s → 다른 페이지 %s (%.0f초)", url, final[:120], took)
+            return BrowserPage(status=status, opened=True, why="다른 페이지로 넘어감")
+        meta = page_meta_at(html, final) if status == 200 and html else None
+        blocked = blocked_reason(status, final, html, meta)
         if blocked:
             self._block(blocked, url)
             return BrowserPage(status=status, opened=True, blocked=True, why=f"크롬도 막힘 ({blocked})")
