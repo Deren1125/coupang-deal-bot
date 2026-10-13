@@ -174,6 +174,9 @@ _STORE_HOSTS = ("smartstore.naver.com", "brand.naver.com")
 # 네이버 쇼핑 상품 페이지 (스토어 상품을 쇼핑 창에서 보여 주는 주소)
 _SHOPPING_HOSTS = ("shopping.naver.com", "m.shopping.naver.com")
 _SHOPPING_PRODUCT = re.compile(r"/(?:window-)?products/", re.I)
+# 네이버 쇼핑 쪽 주소 (스토어·쇼핑·쇼핑라이브). 그 밖의 네이버 주소(블로그·카페·포스트·지식iN·로그인 등)는 읽지 않는다
+_NAVER_SHOP_HOSTS = (*_STORE_HOSTS, "shopping.naver.com", "shoppinglive.naver.com")
+_MAX_HOPS = 10  # 짧은 주소(naver.me)를 한 단계씩 따라갈 때 최대 몇 번
 
 
 def is_naver_store(url: str | None) -> bool:
@@ -182,6 +185,17 @@ def is_naver_store(url: str | None) -> bool:
         return False
     host = urlparse(url).netloc.lower().split(":")[0]
     return any(host == h or host.endswith("." + h) for h in _STORE_HOSTS)
+
+
+def is_naver_off_shop(url: str | None) -> bool:
+    """네이버 쇼핑이 아닌 네이버 주소인지 (blog·cafe·post·kin·nid 등). 남의 블로그·카페 글이라 일반 요청으로도 크롬으로도 읽지 않는다.
+    '[네이버]' 글의 첫 naver.com 링크가 블로그 후기일 수 있다 (쇼핑몰 주소 확인은 naver.com 이면 통과)."""
+    if not url:
+        return False
+    host = (urlparse(url).hostname or "").rstrip(".")
+    if host != "naver.com" and not host.endswith(".naver.com"):
+        return False
+    return not any(host == h or host.endswith("." + h) for h in _NAVER_SHOP_HOSTS)
 
 
 def is_naver_product_page(url: str | None) -> bool:
@@ -376,7 +390,25 @@ class PageEnricher:
             "enrich: naver store %d판 연속 막힘(HTTP %s) — %.0f분 동안 스토어 페이지를 읽지 않음", self._store_strikes, status, pause / 60
         )
 
+    async def _get(self, url: str) -> httpx.Response | None:
+        """일반 페이지 읽기 (리디렉션을 따라감). 짧은 주소(naver.me)는 한 단계씩 따라가다 네이버 블로그·카페 같은 곳으로 넘어가면
+        거기서 멈춘다 (None) — 남의 글은 읽지 않는다."""
+        if (urlparse(url).hostname or "") != "naver.me":
+            return await self.http.get(url, follow_redirects=True, timeout=self.timeout)
+        for _ in range(_MAX_HOPS):
+            resp = await self.http.get(url, follow_redirects=False, timeout=self.timeout)
+            if resp.next_request is None:
+                return resp
+            url = str(resp.next_request.url)
+            if is_naver_off_shop(url):
+                log.info("enrich: naver.me → 네이버 쇼핑이 아닌 곳 (블로그·카페 등은 안 읽음) %s", url[:120])
+                return None
+        return None
+
     async def fetch(self, url: str) -> PageMeta | None:
+        if is_naver_off_shop(url):
+            log.debug("enrich: 네이버 쇼핑 페이지가 아님 (블로그·카페 등은 안 읽음) — skip %s", url)
+            return None
         store = is_naver_store(url)
         if store:
             hit = self._store_cache.get(url)
@@ -388,7 +420,9 @@ class PageEnricher:
                 if resp is None:
                     return None
             else:
-                resp = await self.http.get(url, follow_redirects=True, timeout=self.timeout)
+                resp = await self._get(url)
+                if resp is None:
+                    return None
             if resp.status_code >= 400:
                 log.info("enrich: HTTP %s for %s", resp.status_code, url)
                 self._note_failed(url, resp.status_code)

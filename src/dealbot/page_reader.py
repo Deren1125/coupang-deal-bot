@@ -14,6 +14,7 @@
   (최대 retry_max_seconds) — 한 상품이 매번 한도를 먹지 않게. 크롬도 막힌 상품은 한 번 더 길게: 크롬 쉬는 시간이 끝나면 다른 상품부터.
 - 크롬도 막히면(429·403·캡차·빈 페이지) store_browser 가 크롬 읽기를 쉰다 (로그는 쉬기 시작할 때 한 번).
 - '확인 못 함' 로그는 상품마다 log_every_seconds(하루)에 한 번, 이유와 함께.
+- 네이버 블로그·카페 같은 쇼핑이 아닌 네이버 주소는 일반 요청으로도 크롬으로도 읽지 않는다 (남의 글, enrich.is_naver_off_shop).
 보류 규칙은 그대로다 (page_price): 읽은 페이지의 어느 가격·옵션에도 제목 가격이 안 맞을 때만 보류. 못 읽으면 절대 보류하지 않는다.
 """
 
@@ -24,7 +25,13 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from dealbot.enrich import PageEnricher, PageMeta, is_naver_product_page, same_product_page
+from dealbot.enrich import (
+    PageEnricher,
+    PageMeta,
+    is_naver_off_shop,
+    is_naver_product_page,
+    same_product_page,
+)
 from dealbot.store_browser import StoreBrowser
 
 # 기억해 둔 페이지로는 보류가 되는 새 제목 가격이라 새로 읽으려 했는데 못 읽음 ('확인 못 함' 이유 끝에 붙임)
@@ -146,6 +153,9 @@ class PageReader:
         """가격 대조용으로 상품 페이지를 읽는다: 기억해 둔 페이지 → 일반 요청 → (네이버 상품 페이지면) 크롬.
         title_price·holds 를 주면 기억해 둔 페이지(여기·일반 요청·크롬 것 모두)로는 새 제목 가격을 보류하지 않는다 (kept):
         그땐 새로 읽고(한도 안에서), 못 읽으면 '확인 못 함' — 절대 보류하지 않음."""
+        if is_naver_off_shop(url):
+            # 네이버 블로그·카페 등 (쇼핑 아님): 일반 요청으로도 크롬으로도 안 읽음 — 남의 글
+            return PageRead(why="네이버 쇼핑 페이지가 아님 (블로그·카페 등은 안 읽음)", source="page")
         hit, recheck = self.kept(key, title_price, holds)
         if hit is not None:
             return PageRead(hit, source="cache")

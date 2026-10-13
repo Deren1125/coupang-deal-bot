@@ -21,7 +21,13 @@ import pytest
 from dealbot.app import DealBot
 from dealbot.collectors import BaseCollector, register
 from dealbot.config import CollectorConfig, Settings
-from dealbot.enrich import PageEnricher, PageMeta, is_naver_product_page, page_meta_at
+from dealbot.enrich import (
+    PageEnricher,
+    PageMeta,
+    is_naver_off_shop,
+    is_naver_product_page,
+    page_meta_at,
+)
 from dealbot.models import Deal, Product
 from dealbot.page_price import (
     PageOption,
@@ -489,6 +495,18 @@ def test_only_naver_product_pages_go_to_the_browser() -> None:
         assert not is_naver_product_page(url), url
 
 
+def test_naver_pages_that_are_never_read() -> None:
+    """쇼핑이 아닌 네이버 주소(블로그·카페·포스트·로그인 등)는 읽지 않는다. 스토어·쇼핑·가격비교·쇼핑라이브와 다른 사이트는 읽음."""
+    for url in ("https://blog.naver.com/someone/223000000000", "https://m.blog.naver.com/someone/1", "https://cafe.naver.com/x/1",
+                "https://post.naver.com/viewer/1", "https://kin.naver.com/qna/1", "https://nid.naver.com/nidlogin.login",
+                "https://www.naver.com/", "https://BLOG.Naver.com:443/a/1"):
+        assert is_naver_off_shop(url), url
+    for url in (NAVER_URL, "https://m.smartstore.naver.com/water/products/1", "https://brand.naver.com/daekket/products/1",
+                "https://shopping.naver.com/window-products/style/1", "https://search.shopping.naver.com/catalog/1",
+                "https://view.shoppinglive.naver.com/lives/1", "https://naver.me/abc", TOSS_URL, "https://notnaver.com/blog", "", None):
+        assert not is_naver_off_shop(url), url
+
+
 async def test_store_429_is_verified_with_the_browser(bot: DealBot, caplog: pytest.LogCaptureFixture) -> None:
     """일반 요청이 429 → 같은 페이지를 크롬으로 읽어 가격·옵션 대조 (위장 없는 사진용 크롬 그대로). 사진도 그 페이지에서."""
     asked: list[str] = []
@@ -848,3 +866,47 @@ def test_browser_retry_backs_off_per_product_and_stays_bounded() -> None:
     for i in range(1000):
         reader._failed(f"x{i}", float(i), blocked=False)
     assert len(reader._retry) <= 500 and "x999" in reader._retry
+
+
+async def test_naver_blog_or_cafe_is_never_read(bot: DealBot) -> None:
+    """'[네이버]' 글의 첫 naver.com 링크가 블로그 후기면: 가격 대조·사진·품절 확인 모두 그 글을 읽지 않는다 (일반 요청도 크롬도).
+    딜은 확인 못 함으로 지금처럼 진행."""
+    asked: list[str] = []
+
+    def anything(req: httpx.Request) -> httpx.Response:
+        asked.append(str(req.url))
+        return httpx.Response(200, text=_state_for(str(req.url)))
+
+    bot.enricher = PageEnricher(httpx.AsyncClient(transport=httpx.MockTransport(anything)))
+    bot.enricher.fetch = types.MethodType(_REAL_FETCH, bot.enricher)  # type: ignore[method-assign]
+    opened = _chrome(bot, [1000.0], _ok_page)
+    checks = _checks(bot)
+    blog = "https://blog.naver.com/someone/223000000000"
+    FakePageCollector.products = [Product(source="ppomppu", product_id="naver:blogpost", shop="naver", name="삼다수 2L 24개",
+                                          price=14500, url=blog, recommend_count=9, extra={})]
+    await bot.run_collector(bot.collectors[0])
+    assert asked == [] and opened == []
+    assert checks["naver:blogpost"]["reason"] == "네이버 쇼핑 페이지가 아님 (블로그·카페 등은 안 읽음)"
+    for url in (blog, "https://m.blog.naver.com/someone/1", "https://cafe.naver.com/x/1", "https://post.naver.com/viewer/1"):
+        assert await bot.enricher.fetch(url) is None and await bot.enricher.check_available(url) is None
+        assert (await bot.store_browser.read(url)).why == "네이버 상품 페이지 아님"
+    assert asked == [] and opened == []
+
+
+@pytest.mark.real_fetch
+async def test_naver_short_link_stops_before_a_blog() -> None:
+    """naver.me 짧은 주소는 한 단계씩 따라가다 블로그·카페로 넘어가면 거기서 멈춘다. 스토어로 넘어가면 그대로 읽음."""
+    asked: list[str] = []
+    hops = {"https://naver.me/blog": "https://blog.naver.com/someone/223000000000", "https://naver.me/store": NAVER_URL}
+
+    def serve(req: httpx.Request) -> httpx.Response:
+        asked.append(str(req.url))
+        if str(req.url) in hops:
+            return httpx.Response(302, headers={"location": hops[str(req.url)]})
+        return httpx.Response(200, text=STATE_HTML)
+
+    enricher = PageEnricher(httpx.AsyncClient(transport=httpx.MockTransport(serve)))
+    assert await enricher.fetch("https://naver.me/blog") is None and asked == ["https://naver.me/blog"]
+    meta = await enricher.fetch("https://naver.me/store")
+    assert meta is not None and meta.final_url == NAVER_URL and meta.prices is not None
+    assert asked == ["https://naver.me/blog", "https://naver.me/store", NAVER_URL]
