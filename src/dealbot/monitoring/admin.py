@@ -258,6 +258,7 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("post", "직접 딜 올리기"),
     ("link", "링크 요청에 답: 만든 제휴 링크 붙이기 (/link 번호 링크)"),
     ("skip", "그 글은 올리지 않기 (/skip 번호)"),
+    ("posted", "올라갔는지 모르는 글이 채널에 있음 (/posted 번호 [채널 글 링크])"),
     ("ok", "확인 요청에 답: 정품 확인·정보 글 그대로 올리기 (/ok 번호)"),
     ("copy", "올린 글의 카카오·블로그 복붙 문구 (/copy 번호)"),
     ("blog", "블로그(demiyum) 글 미리보기 — 올리지 않음"),
@@ -601,17 +602,25 @@ class AdminNotifier:
 
     async def notify_publish_unsure(self, queue_id: int, deal: Deal, error: str) -> None:
         """채널에 보냈지만 텔레그램 답이 시간 안에 안 옴: 이미 올라갔을 수 있어 다시 보내지 않았다 (같은 딜 두 번 방지).
-        주인이 채널을 보고, 없으면 /link 로 다시 올린다."""
+        주인이 채널을 보고 할 일 — 있으면 /posted 로 올라간 글로 기록(블로그·스레드·인스타를 이어서), 없으면 /link 로 다시 올린다.
+        할 일이라 카톡으로 (주인 결정 10/11, 링크 요청과 같은 방식). 소리 없는 텔레그램 한 줄만으로는 7일 동안 묻혔다."""
         if not self.cfg.notify_on_failure:
             return
         p = deal.product
         link = deal.affiliate_url or p.url
-        await self.send(
+        text = (
             f"❓ <b>채널에 올라갔는지 모릅니다 #{queue_id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
             f"{html.escape(truncate(p.name, 80))}\n"
-            f"텔레그램 답이 늦어(시간 초과) 두 번 올라가지 않게 다시 보내지 않았어요. 채널에 없으면 "
-            f"<code>/link {queue_id} {html.escape(link)}</code> 로 다시 올려 주세요.\n"
+            f"텔레그램 답이 늦어(시간 초과) 두 번 올라가지 않게 다시 보내지 않았어요. 채널을 확인해 주세요.\n"
+            f"· 채널에 있으면 <code>/posted {queue_id}</code> (채널 글 링크를 붙이면 품절 표시도 돼요) — 블로그·스레드·인스타로 이어서 올려요\n"
+            f"· 채널에 없으면 <code>/link {queue_id} {html.escape(link)}</code> 로 다시 올려 주세요\n"
             f"이유: <code>{html.escape(error[:300])}</code>"
+        )
+        await self.alert(
+            "publish_unsure", text,
+            kakao_fit(f"🔔[할 일] 채널 확인 #{queue_id} {truncate(p.name, 60)}",
+                      f"→ 채널에 있으면 텔레그램 핫딜봇 /posted {queue_id} · 없으면 /link {queue_id}"),
+            key=f"unsure:{queue_id}", short=f"채널 확인 #{queue_id}", group="publish_unsure", queue_id=queue_id,
         )
 
     async def publish_failed_final(self, error: str) -> None:
@@ -1194,6 +1203,8 @@ class BotController(Protocol):
 
     def skip_item(self, queue_id: int) -> str: ...
 
+    async def mark_posted(self, queue_id: int, link: str = "") -> str: ...
+
     def approve_item(self, queue_id: int, text: str | None = None) -> str: ...
 
     async def refresh_pending_notice(self) -> None: ...
@@ -1261,6 +1272,7 @@ HELP_TEXT = HELP_NL + (
     "\n<b>글 올리기·다루기</b>\n"
     "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다.\n"
     "/skip 번호 — 그 글은 올리지 않고 건너뜁니다. 품절이거나 별로일 때. 번호는 링크 요청 메시지나 /queue 에 있습니다.\n"
+    "/posted 번호 [채널 글 링크] — 봇이 '채널에 올라갔는지 모릅니다 #번호' 를 보냈는데 채널에 그 글이 있으면 보냅니다. 올라간 글로 기록하고 블로그·스레드·인스타로 이어서 올립니다 (채널 글 링크를 붙이면 품절 표시도 됩니다). 채널에 없으면 /link 번호 링크 로 다시 올립니다.\n"
     "/ok 번호 — 봇이 '정품 확인 필요 #번호'(오픈마켓인데 공식 판매처 표시가 없음) 나 '정보 글 확인 #번호' 를 보내면, 확인했다는 뜻으로 보냅니다. 정품 확인이면 링크를 만들어 올리고, 정보 글이면 그대로 올립니다. 정보 글은 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
     "/post — 내가 찾은 딜을 직접 올립니다. 아래처럼 보내면 맨 앞 차례로 채널에 올라갑니다 (연습 모드에서는 미리보기만).\n"
     "<code>/post\n[머리글, 없으면 생략]\n상품: 상품명\n가격: 14,890원\nhttps://내가-만든-제휴-링크</code>\n"
@@ -1388,6 +1400,14 @@ def register_admin_handlers(
             return
         await reply(update, controller.skip_item(int(args[0].lstrip("#"))))
         await controller.refresh_pending_notice()
+
+    async def cmd_posted(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        args = ctx.args or []
+        if not args or not args[0].lstrip("#").isdigit():
+            await reply(update, "이렇게 보내주세요: <code>/posted 12</code> 또는 <code>/posted 12 https://t.me/채널/글번호</code> "
+                                "(번호는 '채널에 올라갔는지 모릅니다 #번호' 메시지의 번호)")
+            return
+        await reply(update, await controller.mark_posted(int(args[0].lstrip("#")), args[1] if len(args) > 1 else ""))
 
     async def cmd_ok(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
@@ -1840,6 +1860,7 @@ def register_admin_handlers(
         ("run", cmd_run),
         ("link", cmd_link),
         ("skip", cmd_skip),
+        ("posted", cmd_posted),
         ("ok", cmd_ok),
         ("post", cmd_post),
         ("test", cmd_test),

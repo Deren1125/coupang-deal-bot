@@ -156,6 +156,46 @@ async def test_timeout_after_send_is_not_published_twice(bot: DealBot) -> None:
     assert bot.db.queue_counts() == {"published": 1} and sent == ["coupang:1", "coupang:1"]
 
 
+async def test_posted_records_an_unsure_post_and_runs_what_was_skipped(bot: DealBot) -> None:
+    """올라갔는지 모르는 글이 채널에 있으면 주인이 /posted: 다시 보내지 않고 올라간 글로 기록한 뒤, 시간 초과 때 건너뛴 뒷일
+    (블로그 내보내기·스레드·인스타)을 이어서 한다. 채널 글 링크를 주면 그 번호로 품절 표시를 할 수 있다."""
+    import json
+
+    from dealbot.storage.db import MAYBE_POSTED
+
+    FakeCollector.products = [_p("1", 5000, discount_rate=50)]
+    await bot.run_collector(bot.collectors[0])
+    sent: list[str] = []
+
+    async def timed_out(deal, **_kw):  # type: ignore[no-untyped-def]
+        sent.append(deal.product.product_id)
+        return PublishResult(ok=False, error="TimedOut: Timed out", maybe_posted=True)
+
+    side: list[tuple[str, int | None]] = []
+
+    async def side_channels(deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
+        side.append((deal.product.product_id, deal_no))
+
+    bot.publisher.publish = timed_out  # type: ignore[method-assign]
+    bot._publish_side_channels = side_channels  # type: ignore[method-assign]
+    assert await bot.process_queue_once()
+    item = bot.db.items_for_product("coupang:1", ("failed",))[0]
+    assert item.last_error.startswith(MAYBE_POSTED) and side == [] and not bot.db.posted_within("coupang:1", 7)
+    export = bot.settings.data_dir / "published_deals.jsonl"
+    assert not export.exists()
+
+    assert "없습니다" in await bot.mark_posted(item.id + 1)  # 없는 번호
+    reply = await bot.mark_posted(item.id, "https://t.me/oneul_hotdeal/321")
+    assert reply.startswith(f"✅ #{item.id} 번을 채널에 올라간 글로 기록했어요")
+    assert bot.db.get_queue_item(item.id).status == "published" and sent == ["coupang:1"]  # 다시 보내지 않음
+    assert bot.db.latest_post("coupang:1")["message_id"] == 321
+    assert [json.loads(x)["product_id"] for x in export.read_text(encoding="utf-8").splitlines()] == ["coupang:1"]
+    assert side == [("coupang:1", item.id)]
+    assert "아닙니다" in await bot.mark_posted(item.id)  # 두 번 기록하지 않음
+    await bot.run_collector(bot.collectors[0])  # 게시판이 같은 딜을 또 돌려줘도
+    assert bot.db.queue_counts() == {"published": 1}
+
+
 async def test_manual_link_flow_for_toss(bot: DealBot) -> None:
     bot.settings.publish.dry_run = False  # 연습 모드에서는 링크 요청을 생략하므로 실제 모드로
     toss = Product(source="fake", product_id="toss:ABC", shop="toss", name="토스 핫도그", price=14890,

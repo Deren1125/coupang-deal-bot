@@ -117,6 +117,8 @@ KV_IG_OAUTH_STATE_AT = "instagram_oauth_state_at"
 IG_KV_USERNAME = "instagram_username"
 # 관리자가 넘겼거나 답하지 않은 글을 다시 묻기까지 (그사이 더 싸지면 바로 다시 물음)
 REASK_COOLDOWN = timedelta(days=3)
+# 텔레그램 채널 글 주소의 글 번호: https://t.me/채널이름/123, https://t.me/c/1234567890/123
+_CHANNEL_POST_RE = re.compile(r"t\.me/(?:c/\d+|[A-Za-z0-9_]+)/(\d+)")
 # 같은 상품을 다시 줄 세울 수 없는 열린 글 상태 (db 의 idx_queue_open_product_v3 와 같음)
 OPEN_STATUSES = ("pending", "awaiting_link", "awaiting_approval", autolink.STATUS)
 MARKET_NO_MATCH = "none"  # 쿠팡 검색에 맞는 상품이 없었음 (market_quotes 에 가격 0 으로 남김)
@@ -536,6 +538,8 @@ class DealBot:
             return problem or ""
         if item.status == autolink.STATUS:
             self._cancel_autolink(queue_id)  # 주인이 먼저 붙였으면 Blog-Auto 일은 거둔다
+        if (item.last_error or "").startswith(MAYBE_POSTED):
+            self.notifier.resolve(f"unsure:{queue_id}")  # 채널에 없어서 다시 올림 — 아직 안 보낸 '채널 확인' 카톡은 취소
         self.db.set_queue_link(queue_id, url.strip())
         # 상품 1개에 내 링크 1개 (네이버 쇼핑 커넥트·토스 쉐어링크는 만료 없음) → 같은 상품이 또 나오면 다시 묻지 않고 재사용
         self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
@@ -563,8 +567,40 @@ class DealBot:
         if item.status == autolink.STATUS:
             self._cancel_autolink(queue_id)
         self.db.update_queue_item(queue_id, status="skipped", error="skipped by admin")
-        self.notifier.resolve(f"link:{queue_id}", f"review:{queue_id}")  # 아직 안 보낸 카톡 알림은 취소
+        keys = [f"link:{queue_id}", f"review:{queue_id}"]
+        if (item.last_error or "").startswith(MAYBE_POSTED):
+            keys.append(f"unsure:{queue_id}")
+        self.notifier.resolve(*keys)  # 아직 안 보낸 카톡 알림은 취소
         return f"⏭ #{queue_id} 번은 건너뛰었습니다. 올리지 않습니다."
+
+    async def mark_posted(self, queue_id: int, link: str = "") -> str:
+        """'채널에 올라갔는지 모름'(보낸 뒤 시간 초과) 글이 채널에 있다고 주인이 알려 줌 (/posted): 다시 보내지 않고 올라간 글로
+        기록한 뒤, 그때 건너뛴 뒷일(블로그 내보내기·스레드·인스타·복붙 문구)을 이어서 한다. link: 채널 글 주소(있으면 품절 표시용 번호)."""
+        item = self.db.get_queue_item(queue_id)
+        if item is None:
+            return f"#{queue_id} 번 글이 없습니다."
+        if item.status != "failed" or not (item.last_error or "").startswith(MAYBE_POSTED):
+            return f"#{queue_id} 번은 '채널에 올라갔는지 모름' 글이 아닙니다 (지금 '{item.status}' 상태)."
+        deal = item.deal
+        m = _CHANNEL_POST_RE.search(link or "")
+        info = deal.product.deal_kind == "info"
+        # 사진은 보낼 때처럼 확인된 상품 사진 (블로그·인스타가 쓴다). 정보 글은 본문이 없어 기록만 한다
+        photo = None if info else await self.deal_photo(deal)
+        self.db.record_post(
+            deal,
+            channel_id=str(self.publisher.channel_id) if self.publisher.channel_id is not None else None,
+            message_id=int(m.group(1)) if m else None,
+            dry_run=self.publisher.dry_run,
+            now=utcnow(),
+        )
+        self.db.update_queue_item(queue_id, status="published", deal=deal)
+        self.notifier.resolve(f"unsure:{queue_id}")
+        self.db.log_event("INFO", "publish", f"{deal.product.product_id} 주인이 채널에서 확인 (/posted #{queue_id})")
+        if info:
+            return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요."
+        self.export_published(deal, photo)
+        await self._publish_side_channels(deal, photo=photo, deal_no=queue_id)
+        return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요. 블로그·스레드·인스타 차례도 이어서 처리했어요."
 
     def approve_item(self, queue_id: int, text: str | None = None) -> str:
         """정보 글 확인 요청에 대한 답: 그대로(또는 관리자가 고쳐 쓴 본문으로) 올릴 차례에 넣는다."""

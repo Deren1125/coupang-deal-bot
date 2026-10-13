@@ -73,6 +73,10 @@ class FakeController:
         self.calls.append(("skip_item", q))
         return f"⏭ #{q} 건너뜀"
 
+    async def mark_posted(self, q: int, link: str = "") -> str:
+        self.calls.append(("mark_posted", q, link))
+        return f"✅ #{q} 기록"
+
     def approve_item(self, q: int, text: str | None = None) -> str:
         self.calls.append(("approve_item", q, text))
         return f"✅ #{q} 올릴 차례"
@@ -766,6 +770,16 @@ def test_help_mentions_words_and_catalog_is_consistent() -> None:
     assert "blog" in s["properties"]["intent"]["enum"]
     for c in nlmod.DEAL_CATALOG:
         assert c.name in nlmod.SYSTEM
+
+
+async def test_posted_command_passes_the_number_and_channel_link(env: Env) -> None:
+    """'채널에 올라갔는지 모릅니다 #번호' 에 대한 답: /posted 번호 [채널 글 링크] — 딜봇 명령이라 Blog-Auto 로 넘기지 않는다."""
+    cmd = env.app.cb("cmd_posted")
+    await cmd(update(env.msg("/posted #12 https://t.me/oneul_hotdeal/321")), SimpleNamespace(args=["#12", "https://t.me/oneul_hotdeal/321"]))
+    await cmd(update(env.msg("/posted 13")), SimpleNamespace(args=["13"]))
+    await cmd(update(env.msg("/posted")), SimpleNamespace(args=[]))
+    assert env.ctrl.named("mark_posted") == [("mark_posted", 12, "https://t.me/oneul_hotdeal/321"), ("mark_posted", 13, "")]
+    assert env.texts[:2] == ["✅ #12 기록", "✅ #13 기록"] and "/posted 12" in env.texts[-1] and not env.relayed
 
 
 def test_every_catalog_command_has_a_registered_handler(env: Env) -> None:

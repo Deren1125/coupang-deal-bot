@@ -175,6 +175,35 @@ async def test_three_final_publish_failures_are_urgent(bot: DealBot, settings: S
     assert bot.notifier._final_fails == []  # 한 번 올라가면 처음부터
 
 
+async def test_unsure_publish_is_a_kakao_todo(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
+    """보낸 뒤 텔레그램 답만 시간 초과(올라갔는지 모름): 다시 보내지 않고 7일 동안 줄 세우지 않으니 주인이 채널을 확인해야 한다 —
+    링크 요청처럼 카톡 할 일 한 통 (소리 없는 텔레그램 한 줄만으로는 묻혔다). 채널에 있으면 /posted, 없으면 /link."""
+    _healthy(settings)
+    item = _queued(bot)
+    await bot._handle_publish_failure(item, "TimedOut: Timed out", maybe_posted=True)
+    assert bot.db.get_queue_item(item.id).last_error == "maybe posted: TimedOut: Timed out"
+    note = [n for n in _inbox(settings) if n.get("kind") == "publish_unsure"][-1]
+    assert note["v"] == 2 and note["key"] == f"unsure:{item.id}" and note["short"] == f"채널 확인 #{item.id}"
+    assert note["text"].startswith(f"🔔[할 일] 채널 확인 #{item.id} 데켓 주물") and len(note["text"]) <= 200
+    assert f"/posted {item.id}" in note["text"] and f"/link {item.id}" in note["text"]
+    text, loud = sent[-1]
+    assert text.startswith(f"❓ <b>채널에 올라갔는지 모릅니다 #{item.id}") and not loud  # 답할 자리는 텔레그램 (소리 없이)
+    assert f"/posted {item.id}" in text and f"/link {item.id} https://brand.naver.com/daekket" in text
+    bot.skip_item(item.id)  # 주인이 처리함 → 아직 안 보낸 카톡은 취소
+    assert _inbox(settings)[-1]["resolve"] == [f"link:{item.id}", f"review:{item.id}", f"unsure:{item.id}"]
+    other = _queued(bot, product_id="naver:1", url="https://brand.naver.com/daekket/products/1")
+    await bot._handle_publish_failure(other, "TimedOut: Timed out", maybe_posted=True)
+    await bot.attach_link(other.id, "https://naver.me/again")  # 채널에 없어서 다시 올림
+    assert {"resolve": [f"unsure:{other.id}"]}.items() <= _inbox(settings)[-3].items()
+
+
+async def test_unsure_publish_is_loud_when_kakao_is_down(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
+    item = _queued(bot)
+    await bot._handle_publish_failure(item, "TimedOut: Timed out", maybe_posted=True)
+    text, loud = sent[0]
+    assert text.startswith("❓") and loud and text.endswith("(카톡 알림이 안 돼서 텔레그램으로 알려요)")
+
+
 async def test_collector_failing_for_two_hours_is_an_alert(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
     from datetime import timedelta
 
