@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -125,14 +126,214 @@ _APPROX_AFTER = re.compile(r"대(?![가-힣])(?:\s*[초중후]반)?")  # '1만�
 _ARROW_RE = re.compile(r"→|->|⇒|➡|▶")  # "29,900원→19,900원" 은 화살표 뒤가 지금 가격
 _COUPON_WORDS = ("쿠폰", "할인코드", "적립", "캐시백")
 _DATE_META = re.compile(r"^\s*~?\s*\d{1,2}\s*/\s*\d{1,2}")  # "(~9/13)", "(9/12~9/14)" 같은 기간 표기
-_NAME_PRICE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{3,})\s*원")
+# 이름 속 'N원' 의 수 자리: 뒤에 '원'이 오는 숫자·쉼표 줄. 줄 맨 앞에서만 시작하고 되돌려 주지 않아 글 길이에 비례한다
+# — 그 안에서 예전 정규식이 잡던 수는 _name_number 가 고른다
+_NAME_NUMBER_RUN = re.compile(r"(?<![\d,])[\d,]++(?=\s*+원)")
 _NOT_A_PRICE_WORDS = ("쿠폰", "할인", "적립", "캐시백", "페이백", "증정", "환급")
 _EVENT_WORDS = ("이벤트", "응모", "추첨", "무료체험", "증정")
 _SKIP_HOSTS = ("ppomppu.co.kr",)
 
 
 def parse_title(title: str) -> dict[str, Any]:
-    """제목 → shop_tag / name / price / shipping."""
+    """제목 → shop_tag / name / price / shipping.
+
+    가격은 예전 파서(production 311a593, _legacy_title_price)와 지금 파서(_candidate_title)로 둘 다 읽는다. 둘이 같으면 그
+    값이고, 다르면 예전 값을 쓴다. 예전 파서가 틀린다고 증명된 꼴(_proven_price)이고 지금 파서도 그 꼴대로 읽었을 때만 지금
+    값을 쓴다 — 쿠폰·혜택·조건 말을 규칙으로 고칠 때마다 다른 꼴이 틀어져서, 예전보다 나빠지지 않는 것을 먼저 지킨다.
+    이름·배송비는 지금 파서 그대로 (괄호가 겹치거나 꼬리말이 붙은 제목도 나눈다)."""
+    item = _candidate_title(title)
+    old = _legacy_title_price(title)
+    if item["price"] != old and (item["price"] is None or item["price"] != _proven_price(title, old)):
+        item["price"] = old
+    return item
+
+
+# --- 예전(production 311a593) 파서가 읽던 가격 ----------------------------------------------------------------------
+# 예전 제목 정규식 r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*(?:\((?P<meta>[^()]*)\))?\s*$" 과 똑같이 나누되 이름이 공백
+# 아닌 글자로 끝나고 그 뒤 공백은 되돌려 주지 않는다(\S\s*+). 원래 꼴은 긴 공백 줄에서 세제곱으로 느려졌다(2,000칸에 13초).
+# 이름은 가장 짧게 잡히니 원래도 공백 아닌 글자로 끝나 나뉜 결과가 같다 (tests/test_ppomppu.py 가 원래 꼴과 맞춰 본다)
+_LEGACY_TITLE_RE = re.compile(r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.*?\S)\s*+(?:\((?P<meta>[^()]*)\))?\s*+$")
+# 예전 parse_price(dealbot.utils.text)의 정규식. '만' 앞 수는 숫자 줄 맨 앞에서만 찾는다((?<!\d)) — 첫 일치는 늘 숫자 줄
+# 맨 앞에서 시작해 결과는 같고, 숫자마다 줄 끝까지 다시 훑던 제곱 시간(숫자 2만 개에 9초)이 없어진다
+_LEGACY_MAN_RE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?)만")
+_LEGACY_NUM_RE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d+)")
+_LEGACY_MAN_TAIL = re.compile(r"(\d)천|(\d{1,4})(?!\d)")  # '3만5천' 의 '5천', '1만2000' 의 '2000'
+
+
+def _legacy_title_price(title: str) -> int | None:
+    """예전 parse_title 이 읽던 가격 그대로: 끝 괄호(안에 괄호가 없고 뒤에 말이 없을 때만)의 첫 '/' 앞 맨 앞 수.
+    없거나 100 미만이면 이름 속 'N원'(_price_in_name). 괄호가 기간("(~9/13)")이면 이름 속 'N원'."""
+    m = _LEGACY_TITLE_RE.match(title.strip())
+    if not m:
+        return None
+    meta = (m.group("meta") or "").strip()
+    name = m.group("name").strip()
+    if meta and (meta.startswith("~") or _DATE_META.match(meta)):
+        return _price_in_name(name)
+    read = _legacy_amount(meta.partition("/")[0])
+    if read is None or read[0] < 100:  # 가격일 리 없는 숫자 (날짜·개수 등)
+        return _price_in_name(name)
+    return read[0]
+
+
+def _legacy_amount(text: str) -> tuple[int, int] | None:
+    """예전 parse_price 가 읽던 값과, 공백을 지운 글에서 그 금액이 끝나는 자리. 수가 없으면 None.
+    ('12,900원' → 12900, '1.5만원' → 15000, '3만5천원' → 35000, '2개 12,900원' → 2, '5천원' → 5)"""
+    t = text.replace(" ", "")
+    m_man, m_num = _LEGACY_MAN_RE.search(t), _LEGACY_NUM_RE.search(t)
+    if m_man and (not m_num or m_num.start() >= m_man.start()):
+        man = float(m_man.group(1)) * 10000
+        if math.isinf(man):  # 수백 자리 수 — 예전 함수는 여기서 OverflowError 로 멈췄다
+            return None
+        tail = _LEGACY_MAN_TAIL.match(t, m_man.end())
+        extra = (int(tail.group(1)) * 1000 if tail.group(1) else int(tail.group(2))) if tail else 0
+        return int(man) + extra, (tail or m_man).end()
+    if not m_num:
+        return None
+    try:
+        return int(m_num.group(1).replace(",", "")), m_num.end()
+    except ValueError:  # int 로 바꿀 수 없을 만큼 긴 수
+        return None
+
+
+# --- 예전 파서가 틀린다고 증명된 꼴 (_proven_price) ------------------------------------------------------------------
+# 예전 파서가 읽은 맨 앞 수 바로 뒤에 붙은 개수·용량 단위나 곱하기 — 그 수는 가격이 아니다 ('500ml', '2개입', '10,000mAh',
+# '2Lx24', '100매', '180정', '180캡슐'). 예전 파서는 공백을 지우고 읽으니 지운 글에서 본다
+_GLUED_UNIT = re.compile(r"ml|mah|gb|kg|l|g|개|매|팩|입|롤|캔|병|봉|포|정|캡슐|%|[x*]", re.IGNORECASE)
+_AMOUNT_WON = r"\d[\d,.]*+\s*+(?:만\s*+(?:\d+\s*+천|\d{1,4})?|천)?\s*+원"  # '12,900원', '1.5만원', '3만5천원', '5천원'
+# 금액 하나만 든 가격 칸 ('12,900원', '1.5만원', '12900')
+_LONE_PRICE = re.compile(rf"\s*+(?:{_AMOUNT_WON}|\d{{1,3}}(?:,\d{{3}})+|\d+)\s*+")
+# 딱 'A원 [꾸밈말]쿠폰·할인·적립 [적용·사용] 시·후 B원' 이나 '쿠폰 A원 [적용·사용] 시·후 B원' 꼴 — 앞뒤에 다른 말이 붙으면 아니다
+_COUPON_WORD = r"(?:[가-힣A-Za-z]{1,6}\s?)?(?:쿠폰|할인|적립금?|캐시백|페이백)"
+_COUPON_THEN_PRICE = re.compile(
+    rf"\s*+(?:{_AMOUNT_WON}\s*+{_COUPON_WORD}|{_COUPON_WORD}\s*+{_AMOUNT_WON})\s*+(?:(?:적용|사용)\s*+)?[시후]\s*+"
+    rf"(?P<price>{_AMOUNT_WON})\s*+"
+)
+# 딱 'X당 A원 [,] [총] B원' 꼴 ('개당 647원 25,900원', '100g당 1,290원, 총 12,900원')
+_UNIT_THEN_TOTAL = re.compile(
+    rf"\s*+[가-힣A-Za-z0-9.]{{0,6}}당\s*+{_AMOUNT_WON}\s*+,?\s*+(?:총\s*+)?(?P<price>{_AMOUNT_WON})\s*+"
+)
+
+
+def _proven_price(title: str, old: int | None) -> int | None:
+    """예전 파서(맨 앞 수)가 틀린다고 증명된 꼴이면 그 꼴로 읽은 판매가, 아니면 None. 지금 파서도 이 값으로 읽어야
+    parse_title 이 예전 값(old) 대신 쓴다. 꼴마다 예전·지금·최종 값 표는 tests/fixtures/ppomppu_title_prices.tsv 에 있다.
+    (a) 화살표 → ➡ -> ⇒ ▶ ('29,900원→19,900원', '정가 49,900원 -> 29,900원'): 마지막 화살표 뒤 첫 금액. 예전은 화살표 앞
+        옛 가격. 그 금액이 판매가다울 때만(_price_like): 단위당 값('→ 개당 990원')이 아니고, 화살표 앞 금액보다 작으면 그
+        절반보다 커야 한다 ('→ 쿠폰 5,000원'·'→ 2,500원' 은 쿠폰·배송비 금액이다)
+    (b) 맨 앞이 개수·용량 ('500ml 24개 12,900원', '2개 12,900원', '180정 19,900원', '5천원'): 그 뒤 첫 금액
+        (_quantity_first). 예전은 개수·용량을 가격으로 읽거나 가격이 없었다. 그 금액이 판매가다울 때만(_price_like)
+    (c) 금액 하나만 든 가격 칸과 배송비 칸인데 예전 정규식이 괄호를 못 읽어 가격이 없던 제목 ('(25,900원/3,000원(3만↑무료))',
+        '(189,000원/무료) 카드할인'): 그 금액. 예전이 이름에서 값을 찾았으면 그 값을 둔다 ('진라면 19,900원 (3,000원/무료(제주))'
+        의 괄호 금액은 배송비다). 꼬리말에 다른 금액이 있거나 혜택 말 꼬리말 앞의 둥근 값('(5,000원/무료) 쿠폰')이면 아니다
+    (d) 딱 'A원 [꾸밈말]쿠폰·할인·적립 [적용·사용] 시·후 B원' 꼴 ('5,000원 쿠폰 사용시 19,900원', '2만원 할인 후 189,000원',
+        '쿠폰 3,000원 적용시 17,900원', 화살표 뒤에 와도): B. 예전은 쿠폰 금액 A
+    (e) 딱 'X당 A원 [,] [총] B원' 꼴에 배송비 칸 ('개당 647원 25,900원/무료'): B. 예전은 단위당 값 A
+    (a)·(b) 는 배송비 칸이 있거나 가격 칸에 쿠폰·할인 말이 없는 상품 딜일 때만이다."""
+    m = _TITLE_RE.match(title.strip())
+    meta = (m.group("meta") or "").strip() if m else ""
+    if not meta:
+        return None
+    price_text, shipping = _price_fields(meta)
+    parts = _ARROW_RE.split(price_text)
+    seg = parts[-1]
+    shipped = bool(_SHIPPING_WORDS.search(shipping))
+    shape = _COUPON_THEN_PRICE.fullmatch(seg) or (_UNIT_THEN_TOTAL.fullmatch(seg) if shipped else None)
+    if shape:
+        return _first_amount(seg, shape.start("price"))
+    if not shipped and any(w in price_text for w in _NOT_A_PRICE_WORDS):
+        return None  # 배송비 칸도 없이 쿠폰·할인 말이 든 칸은 쿠폰 안내일 수 있다 ('10% 할인쿠폰 최대 5,000원')
+    a = next((a for a in _AMOUNT_RE.finditer(seg) if _amount_value(seg, a) is not None), None)
+    if a is None:
+        return None
+    value = _amount_value(seg, a)
+    if len(parts) > 1:  # (a)
+        unit = seg[: a.start()].rstrip().endswith("당") or _UNIT_AFTER.match(seg, a.end())
+        was = _first_amount(parts[-2])
+        cut = was is not None and value * 2 <= was
+        return value if _price_like(seg, a, value) and not unit and not cut else None
+    if _quantity_first(price_text, old) and _price_like(seg, a, value):  # (b)
+        return value
+    # (c) 는 괄호 뒤 꼬리말에 다른 금액이 없을 때만 ('(12,900원/무료) 쿠폰가 9,900원'·'… 쿠폰가 9900' 은 꼬리말 쪽이
+    # 판매가일 수 있다. '10% 쿠폰'·'최대 7% 할인' 의 100 미만 수는 금액이 아니다). 꼬리말이 혜택 말이면 둥근 값은 혜택
+    # 금액일 수 있다 ('(5,000원/무료) 쿠폰', '(3,000원/무료) 적립')
+    note = m.group("note") or ""
+    lone = _LONE_PRICE.fullmatch(price_text) and _first_amount(note) is None
+    if old is None and shipped and lone and not (_coupon_like(value) and _BENEFIT_HINT.search(note)):
+        return value
+    return None
+
+
+# (a)·(b) 가 고른 금액 바로 앞에 오면 판매가가 아닌 말: 상한('최대 5,000원'), 어림('약 1만원'), 보상('캐시백 3,990원',
+# '적립 1,500원', '포인트 3,990원', 'N페이 5,000원', '상품권 1만원'), 정가('정가 49,900원', '기존가'), 배송비('배송비 2,500원'),
+# 빼는 값('-5,000원'). '정가' 같은 말은 낱말 끝일 때만 ('회원가 17,900원' 은 판매가)
+_NOT_PRICE_BEFORE = re.compile(
+    r"(?:최대|약|캐시백?|캐쉬백?|적립금?|페이백?|포인트|마일리지|리워드|상품권|머니|사은품|배송비?|택배비?|-"
+    r"|(?<![가-힣A-Za-z])(?:정가|원가|정상가|출고가|소비자가|시중가|판매가|기존가?))\s*$"
+)
+# (a)·(b) 가 고른 금액 뒤에 와도 되는 말 (_TAIL_OK 말고): 판매가라는 혜택 말('쿠폰가', '쿠폰적용', '할인가', '적립포함')만
+# 붙거나 아무 말 없이 가격 칸 끝·'~'·'/'·괄호 덧말('(카드할인)', '(와우)')·'와우'·'부터'가 온다. 이 밖의 말('절약', '이하',
+# '상당', '대', '쿠폰 사용시', '택배비 3,500원', '1만원 쿠폰')이 붙으면 판매가인지 모른다
+_PRICE_TAIL = re.compile(rf"\s*+(?:{_BENEFIT_PHRASE}\s*+(?:적용|포함)?\s*+가?)?(?=\s*+(?:$|[~/(]|와우|부터))")
+# 쿠폰 금액다운 둥근 값('5,000원', '1만원') 앞에 이런 말이 있으면 그 값은 혜택 금액일 수 있다 ('쿠폰 5,000원', '10% 1만원',
+# '카드 5,000원', '와우 3,000원')
+_BENEFIT_HINT = re.compile(r"%|할인|쿠폰|카드|적립|와우|페이|캐시|포인트|마일리지")
+
+
+def _price_like(seg: str, a: re.Match[str], value: int) -> bool:
+    """(a)·(b) 가 고른 금액 a(값 value)가 판매가다운지. 지금 파서는 배송비 칸이 있으면 혜택·상한·조건 금액도 판매가로
+    읽어서, 지금 파서와 같은지로는 걸러지지 않는다. 판매가다운 금액은
+    - 혜택·조건 말이 붙지 않았거나 판매가라는 말이 붙었다 ('5천원 할인', '3만원 이상', '3천원 추가할인', '1만원 쿠폰 미적용'
+      은 아니다). 앞에 혜택 말이나 '%'가 있으면('쿠폰 19,900원', '10% 할인 9,900원') 쿠폰 금액다운 둥근 값('쿠폰 5,000원',
+      '10% 1만원')이 아니다
+    - 바로 앞에 상한·보상·정가·배송비 말(_NOT_PRICE_BEFORE)이 없고, 뒤에는 판매가 꼬리말(_TAIL_OK, _PRICE_TAIL)만 온다
+    - 안쪽 괄호 속 덧말이 아니다 ('최대 30% (3만원)')"""
+    before = seg[: a.start()]
+    kind = _benefit_kind(seg, a, before)
+    return (
+        kind in ("plain", "said", "before")
+        and not (_coupon_like(value) and _BENEFIT_HINT.search(before))
+        and not _NOT_PRICE_BEFORE.search(before)
+        and bool(_TAIL_OK.match(seg, a.end()) or _PRICE_TAIL.match(seg, a.end()))
+        and before.count("(") <= before.count(")")
+    )
+
+
+def _quantity_first(price_text: str, old: int | None) -> bool:
+    """예전 파서가 가격 칸 맨 앞의 개수·용량을 가격으로 읽었거나('500ml 24개 12,900원' → 500, '10,000mAh 19,900원' →
+    10000) 맨 앞 수가 100 미만이라('2개 12,900원', '1+1 9,900원', '5천원') 가격을 못 찾았는지."""
+    read = _legacy_amount(price_text)
+    if read is None:
+        return False
+    value, end = read
+    if value < 100:
+        return old is None  # 이름 속 'N원' 을 읽었으면 그 값을 둔다
+    return old == value and bool(_GLUED_UNIT.match(price_text.replace(" ", ""), end))
+
+
+def _first_amount(text: str, pos: int = 0) -> int | None:
+    """text[pos:] 의 첫 금액. 개수·용량('2개', '500ml')과 100 미만의 수는 건너뛴다."""
+    for a in _AMOUNT_RE.finditer(text, pos):
+        value = _amount_value(text, a)
+        if value is not None:
+            return value
+    return None
+
+
+# --- 지금 파서 ---------------------------------------------------------------------------------------------------
+def _price_fields(meta: str) -> tuple[str, str]:
+    """끝 괄호 속 글 → (가격 칸, 배송비 칸). 안쪽 괄호 속 '/' 는 칸 나눔이 아니고('12,900원(1/2개)/무료'), '/100g/무료'
+    처럼 슬래시 사이에 단위만 있으면 배송비 칸이 아니라 앞 가격의 단위다."""
+    head = _BEFORE_SLASH.match(meta).end()
+    price_text, shipping = meta[:head], meta[head + 1 :]
+    unit, slash, rest = shipping.partition("/")
+    if slash and _UNIT_SEGMENT.match(unit):
+        return f"{price_text}/{unit}", rest
+    return price_text, shipping
+
+
+def _candidate_title(title: str) -> dict[str, Any]:
+    """지금 파서: 제목 → shop_tag / name / price / shipping. 가격은 parse_title 이 예전 파서 값과 맞춰 본다."""
     text = title.strip()
     m = _TITLE_RE.match(text)
     if not m:
@@ -140,11 +341,7 @@ def parse_title(title: str) -> dict[str, Any]:
     meta = (m.group("meta") or "").strip()
     name = m.group("name").strip()
     shop_tag = m.group("shop").strip()
-    head = _BEFORE_SLASH.match(meta).end()  # 안쪽 괄호 속 '/' 는 칸 나눔이 아니다 ('12,900원(1/2개)/무료')
-    price_text, shipping = meta[:head], meta[head + 1 :]
-    unit, slash, rest = shipping.partition("/")
-    if slash and _UNIT_SEGMENT.match(unit):
-        price_text, shipping = f"{price_text}/{unit}", rest
+    price_text, shipping = _price_fields(meta)
     price = _meta_price(price_text)
     if price is None and _SHIPPING_WORDS.search(shipping):
         # 배송비 칸까지 적힌 상품 딜("12,900원 할인/무료")이면 혜택 말이 붙은 금액도 판매가로 본다
@@ -379,14 +576,31 @@ def _price_in_name(name: str) -> int | None:
     """괄호에 가격이 없을 때 "9,900원 샴푸" 처럼 이름 앞쪽에 적힌 가격. 쿠폰·할인 금액과 헷갈리는 이름이면 안 쓴다."""
     if any(w in name for w in _NOT_A_PRICE_WORDS):
         return None
-    m = _NAME_PRICE.search(name)
-    if not m:
-        return None
-    try:
-        value = int(m.group(1).replace(",", ""))
-    except ValueError:
-        return None
-    return value if value >= 100 else None
+    for run in _NAME_NUMBER_RUN.finditer(name):
+        number = _name_number(run.group())
+        if number is not None:
+            try:
+                value = int(number.replace(",", ""))
+            except ValueError:
+                return None
+            return value if value >= 100 else None
+    return None
+
+
+def _name_number(run: str) -> str | None:
+    """'원' 바로 앞 숫자·쉼표 줄 run 에서 예전 정규식 (\\d{1,3}(?:,\\d{3})+|\\d{3,})\\s*원 이 잡던 수. 없으면 None.
+    그 정규식은 줄 끝까지 이어지는 수만 잡고(뒤에 '원'이 와야 한다), 가장 앞에서 시작하는 것을 고른다: 끝에서부터 세 자리
+    묶음이 이어지는 동안의 ',ddd' 들과 그 앞 1~3자리('1234,567' 이면 '234,567'), 그런 묶음이 없으면 마지막 쉼표 뒤의 세
+    자리 이상인 수('12,3456' 이면 '3456').
+    숫자 자리마다 다시 훑던 정규식은 긴 숫자 줄에서 제곱으로 느려졌다 (5천 자리에 0.25초)."""
+    parts = run.split(",")
+    j = len(parts)
+    while j and len(parts[j - 1]) == 3:  # 끝의 세 자리 묶음들
+        j -= 1
+    k = j - 1 if j and parts[j - 1] else j  # 그 앞 1~3자리가 있으면 거기서, 없으면 첫 세 자리 묶음에서 시작
+    if k < len(parts) - 1:
+        return ",".join([parts[k][-3:], *parts[k + 1 :]])
+    return parts[-1] if len(parts[-1]) >= 3 else None
 
 
 def guess_kind(name: str, price: int | None) -> str:

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import itertools
+import random
+import re
 import time
 from pathlib import Path
 
@@ -8,6 +11,11 @@ import pytest
 
 from dealbot.collectors import CollectorContext, build_collector
 from dealbot.collectors.ppomppu import (
+    _LEGACY_TITLE_RE,
+    _candidate_title,
+    _legacy_amount,
+    _legacy_title_price,
+    _price_in_name,
     decode_html,
     find_shop_urls,
     guess_kind,
@@ -41,48 +49,54 @@ def test_parse_title() -> None:
     assert guess_kind("상품", 1000) == "hotdeal"
 
 
-def test_parse_title_price_skips_quantities_and_benefit_amounts() -> None:
+# --- 지금 파서(_candidate_title)의 규칙 -------------------------------------------------------------------------------
+# 지금 파서가 개수·화살표·쿠폰·혜택·단위당 값 말을 읽는 규칙. parse_title 은 이 값을 예전(production 311a593) 파서 값과
+# 맞춰 보고, 예전이 틀린다고 증명된 꼴(_proven_price)에서 지금 파서도 그 꼴대로 읽었을 때만 쓴다. 이 제목들의 최종 값은
+# test_parse_title_price_table(표의 '지난 테스트' 칸)과 test_parse_title_proven_patterns 가 본다.
+
+
+def test_candidate_price_skips_quantities_and_benefit_amounts() -> None:
     """괄호 속 맨 앞 숫자가 아니라 판매가: 개수·용량·옛 가격(화살표 앞)·할인 금액은 가격이 아니다."""
-    assert parse_title("[쿠팡] 상품 (29,900원→19,900원/무료)")["price"] == 19900
-    assert parse_title("[쿠팡] 상품 (정가 29,900원 -> 19,900원 / 무료)")["price"] == 19900
-    assert parse_title("[쿠팡] 앤커 보조배터리 (10,000mAh 19,900원/무료)")["price"] == 19900
-    assert parse_title("[쿠팡] 비비고 왕교자 (2개 12,900원/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 비비고 왕교자 (1+1 12,900원/무료)")["price"] == 12900
-    assert parse_title("[네이버] 하림 닭가슴살 (2팩 25,800원/무료)")["price"] == 25800
-    assert parse_title("[쿠팡] 코카콜라 제로 (500ml 24개 12,900원/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 크리넥스 물티슈 (100매 9,900원/무료)")["price"] == 9900
-    assert parse_title("[쿠팡] 삼다수 (2Lx24개 12,900원/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 코카콜라 제로 (500mlx24개 12,900원/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 삼성 메모리 (128GBx2 59,000원/무료)")["price"] == 59000
-    assert parse_title("[쿠팡] 상품 (1만원 할인 후 19,900원/무료)")["price"] == 19900
-    assert parse_title("[쿠팡] 상품 (12,900원 쿠폰 후 9,900원/무료)")["price"] == 9900
-    t = parse_title("[쿠팡] 로켓프레시 첫구매 쿠폰 (10,000원 할인)")
+    assert _candidate_title("[쿠팡] 상품 (29,900원→19,900원/무료)")["price"] == 19900
+    assert _candidate_title("[쿠팡] 상품 (정가 29,900원 -> 19,900원 / 무료)")["price"] == 19900
+    assert _candidate_title("[쿠팡] 앤커 보조배터리 (10,000mAh 19,900원/무료)")["price"] == 19900
+    assert _candidate_title("[쿠팡] 비비고 왕교자 (2개 12,900원/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 비비고 왕교자 (1+1 12,900원/무료)")["price"] == 12900
+    assert _candidate_title("[네이버] 하림 닭가슴살 (2팩 25,800원/무료)")["price"] == 25800
+    assert _candidate_title("[쿠팡] 코카콜라 제로 (500ml 24개 12,900원/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 크리넥스 물티슈 (100매 9,900원/무료)")["price"] == 9900
+    assert _candidate_title("[쿠팡] 삼다수 (2Lx24개 12,900원/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 코카콜라 제로 (500mlx24개 12,900원/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 삼성 메모리 (128GBx2 59,000원/무료)")["price"] == 59000
+    assert _candidate_title("[쿠팡] 상품 (1만원 할인 후 19,900원/무료)")["price"] == 19900
+    assert _candidate_title("[쿠팡] 상품 (12,900원 쿠폰 후 9,900원/무료)")["price"] == 9900
+    t = _candidate_title("[쿠팡] 로켓프레시 첫구매 쿠폰 (10,000원 할인)")
     assert t["price"] is None and guess_kind(t["name"], t["price"]) == "coupon"  # 쿠폰 금액을 상품 가격으로 올리지 않음
-    assert parse_title("[쿠팡] 로켓프레시 (5,000원 쿠폰)")["price"] is None
-    assert parse_title("[쿠팡] 상품 (5만원 이상 구매시 1만원 할인)")["price"] is None
+    assert _candidate_title("[쿠팡] 로켓프레시 (5,000원 쿠폰)")["price"] is None
+    assert _candidate_title("[쿠팡] 상품 (5만원 이상 구매시 1만원 할인)")["price"] is None
     # 지금껏 읽던 모양은 그대로
-    assert parse_title("[쿠팡] 상품 (12900/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 상품 (12900x2/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 상품 (1만2000원/무료)")["price"] == 12000
-    assert parse_title("[쿠팡] 상품 (3만5천원/무료)")["price"] == 35000
-    assert parse_title("[쿠팡] 상품 (19,900원 쿠폰가/무료)")["price"] == 19900
-    assert parse_title("[쿠팡] 상품 (19,900원 쿠폰적용/무료)")["price"] == 19900
-    assert parse_title("[쿠팡] 상품 (현대카드 7,700원/무료)")["price"] == 7700
-    assert parse_title("[쿠팡] 상품 (12900 + 배송비 3,000원)")["price"] == 12900
-    assert parse_title("[쿠팡] 상품 (19,900원 + 3,000원 적립/무료)")["price"] == 19900
+    assert _candidate_title("[쿠팡] 상품 (12900/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 상품 (12900x2/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 상품 (1만2000원/무료)")["price"] == 12000
+    assert _candidate_title("[쿠팡] 상품 (3만5천원/무료)")["price"] == 35000
+    assert _candidate_title("[쿠팡] 상품 (19,900원 쿠폰가/무료)")["price"] == 19900
+    assert _candidate_title("[쿠팡] 상품 (19,900원 쿠폰적용/무료)")["price"] == 19900
+    assert _candidate_title("[쿠팡] 상품 (현대카드 7,700원/무료)")["price"] == 7700
+    assert _candidate_title("[쿠팡] 상품 (12900 + 배송비 3,000원)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 상품 (19,900원 + 3,000원 적립/무료)")["price"] == 19900
     # 혜택 말 뒤에 그 금액이 판매가라는 말이 이어지면 가격 (배송비 칸이 있든 없든)
     for said in ("쿠폰할인가", "쿠폰 할인가", "쿠폰 미적용", "쿠폰미적용", "적립포함", "적립 포함", "증정품 포함",
                  "쿠폰 사용시", "쿠폰사용가", "적립금 사용시", "캐시백 포함", "할인된 가격", "쿠폰 후", "할인 후"):
         for meta in (f"12,900원 {said}/무료", f"12,900원 {said}"):
-            t = parse_title(f"[쿠팡] 상품 ({meta})")
+            t = _candidate_title(f"[쿠팡] 상품 ({meta})")
             assert t["price"] == 12900 and guess_kind(t["name"], t["price"]) == "hotdeal", meta
     # 배송비 칸까지 적힌 상품 딜은 혜택 말만 붙은 금액도 가격 (예전처럼). 배송비 칸이 없으면 쿠폰·이벤트
-    assert parse_title("[쿠팡] 상품 (12,900원 할인/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 상품 (12,900원 쿠폰 할인/무료)")["price"] == 12900
-    assert parse_title("[쿠팡] 상품 (12,900원 할인)")["price"] is None
+    assert _candidate_title("[쿠팡] 상품 (12,900원 할인/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 상품 (12,900원 쿠폰 할인/무료)")["price"] == 12900
+    assert _candidate_title("[쿠팡] 상품 (12,900원 할인)")["price"] is None
 
 
-def test_parse_title_coupon_amount_before_the_price() -> None:
+def test_candidate_coupon_amount_before_the_price() -> None:
     """'쿠폰 사용시'·'적립 포함' 같은 말 바로 뒤에 판매가가 오면 앞 금액은 쿠폰·적립 금액이다."""
     for meta, price in (
         ("5,000원 쿠폰 사용시 19,900원/무료", 19900),
@@ -119,7 +133,7 @@ def test_parse_title_coupon_amount_before_the_price() -> None:
         ("2,000원 네이버페이 적립 포함 19,900원/무료", 19900),
         ("쿠폰 3,000원 적용시 19,900원/무료", 19900),
     ):
-        t = parse_title(f"[쿠팡] 상품 ({meta})")
+        t = _candidate_title(f"[쿠팡] 상품 ({meta})")
         assert t["price"] == price and guess_kind(t["name"], t["price"]) == "hotdeal", meta
     # 뒤에 오는 것이 개수·용량·개당 값·혜택 금액·배송비·쿠폰 없는 값이면 앞 금액이 그대로 판매가 (배송비 칸이 있든 없든)
     for meta in ("12,900원 쿠폰적용 2개/무료", "12,900원 쿠폰적용 2개", "12,900원 쿠폰적용 1+1", "12,900원 쿠폰 후 2개",
@@ -127,14 +141,14 @@ def test_parse_title_coupon_amount_before_the_price() -> None:
                  "12,900원 쿠폰적용 3,000원 적립/무료", "12,900원 쿠폰적용, 배송비 3,000원",
                  "12,900원 쿠폰 사용시 2,500원 배송", "12,900원 쿠폰 미적용 시 17,900원/무료",
                  "12,900원 쿠폰적용, 1만개 한정/무료", "12,900원 쿠폰 후 개당 6,450원/무료"):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == 12900, meta
-    assert parse_title("[쿠팡] 상품 (2개 25,800원 쿠폰적용 개당 12,900원/무료)")["price"] == 25800
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == 12900, meta
+    assert _candidate_title("[쿠팡] 상품 (2개 25,800원 쿠폰적용 개당 12,900원/무료)")["price"] == 25800
     # 꾸밈말 붙은 혜택 말만 있고 다른 금액이 없으면 예전처럼 그 금액이 판매가
     for meta in ("189,000원 카드할인", "19,900원 카드할인시", "12,900원 와우할인가", "9,900원 첫구매 할인/무료"):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == parse_price(meta.split()[0]), meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == parse_price(meta.split()[0]), meta
 
 
-def test_parse_title_later_reward_shipping_or_unit_amount_is_not_the_price() -> None:
+def test_candidate_later_reward_shipping_or_unit_amount_is_not_the_price() -> None:
     """판매가 뒤의 적립·추가할인 금액, 배송비, 단위당 값, 쿠폰 없는 값, 정가는 판매가를 밀어내지 않는다."""
     for meta in (
         # 적립·추가할인 금액 (꾸밈말이 붙어도)
@@ -151,26 +165,26 @@ def test_parse_title_later_reward_shipping_or_unit_amount_is_not_the_price() -> 
         "17,900원 쿠폰적용, 19,900원 일반/무료", "17,900원 쿠폰적용 시 9,900원 2개 구매시/무료",
         "17,900원 쿠폰 후, 배송비 3,000원", "17,900원 할인 후 가격, 정가 49,900원/무료",
     ):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == 17900, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == 17900, meta
     for meta in ("12,900원 쿠폰적용, 15,900원 미적용/무료", "12,900원 쿠폰적용, 15,900원 쿠폰미적용/무료",
                  "12,900원 쿠폰적용, 15,900원/무료"):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == 12900, meta
-    assert parse_title("[쿠팡] 상품 (9,900원 쿠폰적용 3,000원)")["price"] == 9900
-    t = parse_title("[쿠팡] 상품 (17,900원 쿠폰 적용 시 1,790원/100g/무료)")
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == 12900, meta
+    assert _candidate_title("[쿠팡] 상품 (9,900원 쿠폰적용 3,000원)")["price"] == 9900
+    t = _candidate_title("[쿠팡] 상품 (17,900원 쿠폰 적용 시 1,790원/100g/무료)")
     assert t["shipping"] == "무료"  # 슬래시 사이 '100g' 은 배송비 칸이 아니라 단위
     # 뒤 금액이 쿠폰으로 더 깎인 값이면 그 값 (혜택 금액을 건너뛰어도)
     for meta, price in (("17,900원 쿠폰가 3,000원 추가 할인시 14,900원", 14900),
                         ("12,900원 쿠폰 후 9,900원/무료", 9900), ("3,000원 쿠폰 적용시 17,900원 + 2,000원 적립/무료", 17900),
                         ("1,000원 쿠폰 적용시 12,900원 일반 13,900원/무료", 12900),
                         ("5,000원 쿠폰 사용시 19,900원 배송비 포함", 19900)):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
     # 와우·카드 회원값처럼 쉼표 뒤에 따로 붙은 더 낮은 값은 다른 조건의 값이라 예전(첫 금액)처럼 둔다
     for meta in ("17,900원 쿠폰적용, 와우 16,900원/무료", "17,900원 쿠폰적용 와우 16,900원/무료",
                  "17,900원 쿠폰가, 16,900원 와우쿠폰가/무료"):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == 17900, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == 17900, meta
 
 
-def test_parse_title_later_amount_needs_linking_words() -> None:
+def test_candidate_later_amount_needs_linking_words() -> None:
     """앞 금액에 혜택 말이 붙어 있어도 뒤 금액은 '사용시'·'후'·'적용가'·'최종' 같은 이어 주는 말만 사이에 있을 때 판매가다.
     '일반'·'판매가'·'정가'·'첫구매 적립금' 같은 다른 말이 끼거나, 뒤 금액에 사은품·할인액이라는 말이 붙거나, 쿠폰 금액답지
     않은 앞 금액보다 크기만 하면 예전(첫 금액)처럼 둔다."""
@@ -203,17 +217,17 @@ def test_parse_title_later_amount_needs_linking_words() -> None:
         ("19,900원 쿠폰적용시 9,900원 절약/무료", 19900),
         ("12,900원 할인 2,500원", 12900),  # 혜택 금액 뒤에 이어지지 않는 금액이 있으면 예전처럼 첫 금액
     ):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
 
 
-def test_parse_title_later_amount_needs_price_like_words_after_it() -> None:
+def test_candidate_later_amount_needs_price_like_words_after_it() -> None:
     """뒤 금액 바로 뒤에 붙은 말도 판매가다워야 앞 금액을 밀어낸다. 끝·'~'·'배송비 포함'·'최종'·'(개당 …)'·다른 금액으로
     이어지는 '+'·',' 만 되고, 적립·절약·정가 말('캐쉬백', '리워드', '저렴', 'DC', '출고가', '소비자가')이 붙으면 앞 금액을 둔다."""
     for word in ("캐쉬백", "OK캐쉬백", "리워드", "상품권", "N페이", "Npay", "페이", "머니", "토스머니", "지급", "기프티콘",
                  "선물", "돌려받음", "돌려받기", "보상", "반환", "저렴", "이득", "차이", "싸게", "아낌", "다운", "인하",
                  "낮음", "DC", "디씨", "세이브"):
-        assert parse_title(f"[쿠팡] 상품 (29,900원 쿠폰 적용 후 15,000원 {word}/무료)")["price"] == 29900, word
-    assert parse_title("[쿠팡] 상품 (19,900원 쿠폰적용 시 1만원 저렴/무료)")["price"] == 19900
+        assert _candidate_title(f"[쿠팡] 상품 (29,900원 쿠폰 적용 후 15,000원 {word}/무료)")["price"] == 29900, word
+    assert _candidate_title("[쿠팡] 상품 (19,900원 쿠폰적용 시 1만원 저렴/무료)")["price"] == 19900
     for meta, price in (
         ("250,000원 카드할인가, 299,000원 출고가/무료", 250000),
         ("1,500,000원 카드할인 적용가, 1,890,000원 출고가/무료", 1500000),
@@ -224,9 +238,9 @@ def test_parse_title_later_amount_needs_price_like_words_after_it() -> None:
         ("30,000원 카드할인가, 39,000원 비회원/무료", 30000),
         ("19,900원 쿠폰적용 시 10,950원 1개/무료", 19900),
     ):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
     for word in ("판매가", "정상판매가", "기존", "쿠팡가", "최저가", "타사", "비교"):
-        assert parse_title(f"[쿠팡] 상품 (30,000원 카드할인가 39,000원 {word}/무료)")["price"] == 30000, word
+        assert _candidate_title(f"[쿠팡] 상품 (30,000원 카드할인가 39,000원 {word}/무료)")["price"] == 30000, word
     # 판매가다운 꼬리말이면 뒤 금액이 판매가
     for meta, price in (
         ("5,000원 쿠폰 사용시 19,900원~/무료", 19900),
@@ -235,10 +249,10 @@ def test_parse_title_later_amount_needs_price_like_words_after_it() -> None:
         ("5,000원 쿠폰 사용시 19,900원 (개당 995원)/무료", 19900),
         ("5,000원 쿠폰 사용시 19,900원 + 2,000원 적립/무료", 19900),
     ):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
 
 
-def test_parse_title_coupon_amount_first_keeps_ordinary_tail_words() -> None:
+def test_candidate_coupon_amount_first_keeps_ordinary_tail_words() -> None:
     """앞 금액이 쿠폰 금액이 뻔하면('5,000원 쿠폰 적용시', '할인 후', 꾸밈말 없는 '10,000원 할인' 의 둥근 값) 더 큰 뒤 금액은
     '와우'·'선착순'·'!' 같은 흔한 꼬리말이 붙어도 판매가다. 정가·적립·배송·개수 말이 붙을 때만 앞 금액을 둔다."""
     for head in ("5,000원 쿠폰 적용시", "3,000원 쿠폰 적용 시", "1만원 쿠폰 사용시", "3,000원 할인 후", "쿠폰 3,000원 적용시",
@@ -246,16 +260,16 @@ def test_parse_title_coupon_amount_first_keeps_ordinary_tail_words() -> None:
         for tail in (" 와우", " (와우)", " 와우회원", "!", " 선착순", " 로켓배송", " (최저가)", " 역대가", " 특가", " 타임딜",
                      " 한정", " 정도", " 이하", " 핫딜", " (카드할인 별도)", " + 배송비", ", 무료배송", " 무료",
                      ", 일반 39,900원"):
-            assert parse_title(f"[쿠팡] 상품 ({head} 24,900원{tail}/무료)")["price"] == 24900, (head, tail)
-    assert parse_title("[쿠팡] 상품 (1만원 쿠폰 적용시 49,900원, 무료배송)")["price"] == 49900
-    assert parse_title("[쿠팡] 상품 (3,000원 쿠폰 적용 시 12,900원 (와우)/무료)")["price"] == 12900
+            assert _candidate_title(f"[쿠팡] 상품 ({head} 24,900원{tail}/무료)")["price"] == 24900, (head, tail)
+    assert _candidate_title("[쿠팡] 상품 (1만원 쿠폰 적용시 49,900원, 무료배송)")["price"] == 49900
+    assert _candidate_title("[쿠팡] 상품 (3,000원 쿠폰 적용 시 12,900원 (와우)/무료)")["price"] == 12900
     # 정가·쿠폰 없는 값·적립·배송·개수 말이 붙으면 뒤 금액은 판매가가 아니다 (앞 금액을 두던 예전 그대로)
     for tail in (" 정가", " 출고가", " 소비자가", " 정상가", " 일반", " 쿠폰 미적용", " 캐쉬백", " 적립", " 네이버페이 적립",
                  " 상당 사은품", " 저렴", " DC", " dc", " 배송비 별도", " 택배비", " 1개", " (1개)", " 1인 1개"):
-        assert parse_title(f"[쿠팡] 상품 (5,000원 쿠폰 적용시 24,900원{tail}/무료)")["price"] == 5000, tail
+        assert _candidate_title(f"[쿠팡] 상품 (5,000원 쿠폰 적용시 24,900원{tail}/무료)")["price"] == 5000, tail
 
 
-def test_parse_title_cheap_item_shipping_and_bundle_keep_the_first_price() -> None:
+def test_candidate_cheap_item_shipping_and_bundle_keep_the_first_price() -> None:
     """싼 상품 뒤의 배송비만 한 금액, '+' 로 따로 붙은 금액, 낱개 값 뒤의 묶음 값은 앞 금액(판매가)을 밀어내지 않는다.
     '쿠폰 적용 시'·'할인 후' 처럼 앞 금액이 쿠폰 금액이라는 말이 있으면 뒤 금액이 판매가다."""
     for meta, price in (
@@ -284,10 +298,10 @@ def test_parse_title_cheap_item_shipping_and_bundle_keep_the_first_price() -> No
         ("5,000원 쿠폰적용 개당 16,900원/무료", 16900),
         ("5,000원 쿠폰적용, 최종 16,900원/무료", 16900),
     ):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
 
 
-def test_parse_title_unit_price_first() -> None:
+def test_candidate_unit_price_first() -> None:
     """단위당 값이 먼저 오면('개당 990원') 띄어쓰기나 '총'만 사이에 두고 더 큰 판매가가 이어질 때만 그 값으로 넘어간다.
     배송비·정가·혜택·조건 금액이 이어지면 예전처럼 단위당 값이 판매가다."""
     for meta, price in (
@@ -323,10 +337,10 @@ def test_parse_title_unit_price_first() -> None:
         ("개당 647원 25,900원 쿠폰가/무료", 25900),
         ("개당 1,290원 38,700원 쿠폰 적용시/무료", 38700),
     ):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] == price, meta
 
 
-def test_parse_title_benefit_word_before_the_amount_and_chains() -> None:
+def test_candidate_benefit_word_before_the_amount_and_chains() -> None:
     """혜택 말이 금액 앞에 오거나('쿠폰 5,000원 다운 후', '적립금 3,000원 사용 후') 혜택 금액이 여럿 이어져도 판매가를 찾는다."""
     for meta, price in (
         ("적립금 3,000원 사용 후 24,900원/무료", 24900),
@@ -341,24 +355,269 @@ def test_parse_title_benefit_word_before_the_amount_and_chains() -> None:
         ("5천원 쿠폰적용 시 2만원대 초반 21,900원/무료", 21900),
         ("개당 647원 25,900원/무료", 25900),
     ):
-        t = parse_title(f"[쿠팡] 상품 ({meta})")
+        t = _candidate_title(f"[쿠팡] 상품 ({meta})")
         assert t["price"] == price and guess_kind(t["name"], t["price"]) == "hotdeal", meta
     # 혜택·조건 금액뿐이면 판매가가 없다
     for meta in ("1만원 할인 쿠폰 적용", "2만원 이상 구매시 1만원 할인", "1,000원 적립", "12,900원 이상 무료배송"):
-        assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] is None, meta
+        assert _candidate_title(f"[쿠팡] 상품 ({meta})")["price"] is None, meta
 
 
-def test_parse_title_price_corpus(fixtures_dir: Path) -> None:
-    """실제 꼴을 본뜬 뽐뿌 제목 수백 개의 판매가 (tests/fixtures/ppomppu_title_prices.tsv). 규칙을 고치면 여기서 어긋난
-    제목이 다 드러난다."""
-    rows = [
-        line.split("\t")
-        for line in (fixtures_dir / "ppomppu_title_prices.tsv").read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
-    assert len(rows) >= 300
-    wrong = [(title, want, parse_title(title)["price"]) for title, want in rows if str(parse_title(title)["price"]) != want]
-    assert not wrong
+# --- parse_title 의 최종 가격: 예전 파서보다 나빠지지 않는다 -----------------------------------------------------------
+
+
+def _table(fixtures_dir: Path) -> list[list[str]]:
+    lines = (fixtures_dir / "ppomppu_title_prices.tsv").read_text(encoding="utf-8").splitlines()
+    return [line.split("\t") for line in lines if line.strip() and not line.startswith("#")]
+
+
+def test_parse_title_price_table(fixtures_dir: Path) -> None:
+    """뽐뿌 제목 2천여 개의 예전(production 311a593)·지금·최종 가격 표 (tests/fixtures/ppomppu_title_prices.tsv): 지난 검토·
+    탐색·테스트의 제목과 새로 쓴 실제 꼴 제목, 네 번째 검토(r4)의 제목 346개. 최종이 예전과 다른 줄은 모두 증명된 꼴(까닭
+    칸)이고 사람이 읽은 값과 같다 — 예전보다 나빠진 줄이 없다. 검토에서 회귀로 보고된 제목(R, r4 의 67개 포함)은 모두 예전
+    값이다. 파서를 고치면 바뀐 줄이 여기서 다 드러난다."""
+    rows = _table(fixtures_dir)
+    assert len(rows) >= 2000 and all(len(row) == 7 for row in rows)
+    titles = [row[0] for row in rows]
+    assert len(set(titles)) == len(titles)
+    changed = []
+    for title, want, legacy, candidate, final, flag, why in rows:
+        got = (str(_legacy_title_price(title)), str(_candidate_title(title)["price"]), str(parse_title(title)["price"]))
+        if got != (legacy, candidate, final):
+            changed.append((title, (legacy, candidate, final), got))
+        assert (final != legacy) == bool(why), title  # 예전과 다른 최종 값에는 꼴과 까닭이 적혀 있다
+        assert final == legacy or want in ("?", final), title  # 예전과 달라지면 사람이 읽은 값이다
+        assert flag != "R" or final == legacy == want, title  # 보고된 회귀는 예전 값
+    assert not changed, changed[:20]
+    assert sum(row[5] == "R" for row in rows) >= 370
+    assert sum(row[2] != row[4] for row in rows) >= 300
+
+
+def test_parse_title_coupon_wording_sweep_keeps_production_price() -> None:
+    """쿠폰·할인·카드·적립 말 뒤에 정가·비회원·배송비·개수 같은 꼬리말이 붙은 금액이 이어지는 2만여 꼴(검토 r8 의 쓸기)은
+    지금 파서가 어떻게 읽든 최종은 예전 값이다 — 회귀가 되풀이되던 자리라 증명된 꼴에 들지 않는다."""
+    heads = ["{x} 쿠폰가", "{x} 쿠폰적용가", "{x} 카드할인가", "{x} 할인가", "{x} 쿠폰적용", "{x} 와우할인가", "{x} 카드할인",
+             "{x} 즉시할인", "{x} 와우할인", "카드할인 {x}", "와우할인 {x}", "즉시할인 {x}", "할인 {x}", "쿠폰할인 {x}", "쿠폰 {x}",
+             "적립금 {x}", "쿠폰가 {x}", "카드할인가 {x}", "최종 {x}", "{x} 쿠폰 적용시", "{x} 할인 후", "{x} 쿠폰 사용시",
+             "{x} 카드할인시", "{x} 쿠폰 받으면", "{x} 할인", "{x} 쿠폰", "{x} 즉시할인쿠폰"]
+    tails = ["정가", "정상가", "출고가", "소비자가", "판매가", "기존가", "원래", "원가", "평소", "평소가", "시중가", "타사",
+             "타사가", "쿠팡가", "네이버가", "최저가", "공홈", "공식몰", "백화점", "매장가", "오프라인", "마트", "비교", "대비",
+             "할인전", "쿠폰전", "쿠폰 전", "비회원", "비와우", "일반회원", "일반", "미적용", "비적용", "미사용", "쿠폰없이",
+             "쿠폰 없을때", "카드없이", "현금가", "현금", "일시불", "타카드", "정찰가", "리스트가", "권장가", "출시가", "(정가)",
+             "(타사)", "상당", "상당 사은품", "적립", "캐시백", "페이백", "포인트", "N페이 적립", "배송비", "택배비", "배송", "1개",
+             "단품", "낱개", "한정수량 정가", "그냥", "없을때"]
+    changed = []
+    for head, x, sep, tail in itertools.product(heads, (30000, 20000, 15000, 100000, 1000000, 19900, 5000), (" ", ", "), tails):
+        y = x * 13 // 10 // 100 * 100 + 900
+        title = f"[쿠팡] 상품 ({head.format(x=f'{x:,}원')}{sep}{y:,}원 {tail}/무료)"
+        if parse_title(title)["price"] != _legacy_title_price(title):
+            changed.append(title)
+    assert not changed, changed[:20]
+
+
+def test_parse_title_proven_patterns() -> None:
+    """예전 파서가 틀린다고 증명된 꼴에서만, 지금 파서도 그 꼴대로 읽었을 때 지금 값을 쓴다."""
+    for title, old, price in (
+        # (a) 화살표: 예전은 화살표 앞 옛 가격
+        ("[쿠팡] 상품 (29,900원→19,900원/무료)", 29900, 19900),
+        ("[쿠팡] 상품 (정가 29,900원 -> 19,900원 / 무료)", 29900, 19900),
+        ("[G마켓] 상품 (1,190,000원 ➡ 899,000원/무료)", 1190000, 899000),
+        ("[네이버] 상품 (89,000원⇒59,000원/무료)", 89000, 59000),
+        ("[쿠팡] 상품 (35,900원 ▶ 29,900원/무료)", 35900, 29900),
+        ("[G마켓] 상품 (19,900원→15,900원→12,900원/무료)", 19900, 12900),
+        ("[11번가] 상품 (199,000원 → 카드할인 179,000원/무료)", 199000, 179000),
+        ("[쿠팡] 상품 (19,900원 → 5,000원 쿠폰 사용시 14,900원/무료)", 19900, 14900),
+        # (b) 맨 앞이 개수·용량: 예전은 그 수를 가격으로 읽거나(단위가 붙음) 100 미만이라 가격이 없었다
+        ("[쿠팡] 상품 (500ml 24개 12,900원/무료)", 500, 12900),
+        ("[쿠팡] 상품 (10,000mAh 19,900원/무료)", 10000, 19900),
+        ("[쿠팡] 상품 (128GBx2 59,000원/무료)", 128, 59000),
+        ("[쿠팡] 상품 (100매 9,900원/무료)", 100, 9900),
+        ("[쿠팡] 상품 (180정 19,900원/무료)", 180, 19900),
+        ("[11번가] 상품 (KF94 100매 15,900원/무료)", 94100, 15900),
+        ("[쿠팡] 상품 (2개 12,900원/무료)", None, 12900),
+        ("[쿠팡] 상품 (1+1 12,900원/무료)", None, 12900),
+        ("[쿠팡] 상품 (5천원/무료)", None, 5000),
+        ("[쿠팡] 상품 (2개 12,900원 쿠폰가/무료)", None, 12900),  # 판매가라는 말이 붙은 금액
+        ("[쿠팡] 상품 (10% 쿠폰 19,900원/무료)", None, 19900),  # 혜택 말 뒤라도 둥근 값이 아니면 판매가
+        ("[11번가] 상품 (10% 카드할인 시 699,000원/무료)", None, 699000),
+        ("[11번가] 상품 (11pay 5% 적립 포함 189,000원/무료)", None, 189000),
+        ("[쿠팡] 상품 (2개 1만원/무료)", None, 10000),  # 개수 뒤 둥근 값은 판매가
+        ("[쿠팡] 상품 (19,900원 → 회원가 17,900원/무료)", 19900, 17900),  # '회원가' 는 정가 말이 아니다
+        # (c) 금액 하나뿐인 가격 칸 + 배송비 칸: 예전 정규식이 겹괄호·꼬리말 때문에 괄호를 못 읽었다
+        ("[11번가] 갤럭시 버즈3 프로 (189,000원/무료) 카드할인", None, 189000),
+        ("[네이버] 굽네 닭가슴살 30팩 (29,900원/무료) 적립포함", None, 29900),
+        ("[네이버] 리챔 쿠폰팩 (25,900원/3,000원(3만↑무료))", None, 25900),
+        # (d) 딱 'A원 [꾸밈말]쿠폰·할인·적립 [적용·사용] 시·후 B원': 예전은 쿠폰 금액 A
+        ("[쿠팡] 상품 (5,000원 쿠폰 사용시 19,900원/무료)", 5000, 19900),
+        ("[쿠팡] 상품 (2만원 쿠폰 사용시 39,900원/무료)", 20000, 39900),
+        ("[11번가] 상품 (2만원 할인 후 189,000원/무료)", 20000, 189000),
+        ("[쿠팡] 상품 (쿠폰 3,000원 적용시 19,900원/무료)", 3000, 19900),
+        ("[쿠팡] 상품 (19,900원 쿠폰 사용시 14,900원/무료)", 19900, 14900),
+        ("[네이버] 상품 (1만원 적립금 사용시 49,000원/무료)", 10000, 49000),
+        ("[11번가] 상품 (5만원 T멤버십 할인 시 449,000원/무료)", 50000, 449000),
+        # (e) 딱 'X당 A원 [,] [총] B원' + 배송비 칸: 예전은 단위당 값 A
+        ("[쿠팡] 상품 (개당 647원 25,900원/무료)", 647, 25900),
+        ("[쿠팡] 상품 (병당 330원, 총 7,920원/무료)", 330, 7920),
+    ):
+        assert (_legacy_title_price(title), parse_title(title)["price"]) == (old, price), title
+    # 꼴이 맞아도 지금 파서가 그 꼴대로 읽지 않으면 예전 값 ('100g당 1,290원' 의 100 은 틀렸지만 지금 파서의 12,900 도 틀렸다)
+    assert parse_title("[쿠팡] 두유 (100g당 1,290원 12,900원 상당 증정/무료)")["price"] == 100
+    assert parse_title("[쿠팡] 상품 (17,900원 쿠폰 적용 2,500원)")["price"] == 17900
+    # (a)·(b) 가 고른 금액이 판매가답지 않으면 꼴이 아니다 — 지금 파서는 배송비 칸이 있으면 이 금액도 판매가로 읽는다
+    for title, old in (
+        ("[쿠팡] 상품 (19,800원 → 개당 990원/무료)", 19800),  # (a) 단위당 값
+        ("[쿠팡] 상품 (39,900원 → 3,990원 포인트/무료)", 39900),  # (a) 혜택 금액
+        ("[쿠팡] 상품 (39,900원 → 1만원대/무료)", 39900),  # (a) 어림값
+        ("[쿠팡] 상품 (29,900원 → 쿠폰 5,000원/무료)", 29900),  # (a) 앞 금액의 절반 이하
+        ("[쿠팡] 상품 (39,900원 → 19,900원부터/무료)", 39900),  # (a) 절반 이하는 반값 넘는 할인이어도 예전 값
+        ("[쿠팡] 상품 (3천원 추가할인/무료)", None),  # (b) 혜택 금액
+        ("[쿠팡] 상품 (10% 할인쿠폰 최대 5,000원/무료)", None),  # (b) 상한 금액
+        ("[쿠팡] 상품 (3% 캐시백 3천원/무료)", None),  # (b) 보상 금액
+        ("[쿠팡] 상품 (최대 30% (3만원)/무료)", None),  # (b) 안쪽 괄호 속 금액
+        ("[쿠팡] 상품 (2개 1만원대/무료)", None),  # (b) 어림값
+        ("[쿠팡] 상품 (2개 5,000원 저렴/무료)", None),  # (b) 판매가 꼬리말이 아닌 말 ('저렴', '상당 사은품', '이하')
+        ("[쿠팡] 상품 (1+1 3만원 상당 사은품/무료)", None),
+        ("[쿠팡] 상품 (2개 1만원 이하/무료)", None),
+        ("[쿠팡] 상품 (2개 5,000원 쿠폰 사용시/무료)", None),  # (b) '쿠폰 사용시' 는 쿠폰 금액
+        ("[쿠팡] 상품 (2개 쿠폰 5,000원/무료)", None),  # (b) 혜택 말 뒤 둥근 값
+        ("[쿠팡] 상품 (10% 1만원/무료)", None),  # (b) '%' 뒤 둥근 값은 할인 상한일 수 있다
+        ("[쿠팡] 상품 (2개 약 19,900원/무료)", None),  # (b) 어림값
+        ("[쿠팡] 상품 (39,900원 → 정가 29,900원/무료)", 39900),  # (a) 정가 말 뒤
+        ("[쿠팡] 상품 (39,900원 → 29,900원 2개/무료)", 39900),  # (a) 뒤에 개수
+        ("[G마켓] 진라면 19,900원 (3,000원/무료(제주 추가))", 19900),  # (c) 예전이 이름에서 값을 찾았다
+        ("[쿠팡] 상품 (19,900원/무료) 쿠폰가 9900", None),  # (c) 꼬리말에 다른 금액
+        ("[쿠팡] 상품 (5,000원/무료) 쿠폰", None),  # (c) 혜택 말 꼬리말 앞의 둥근 값은 쿠폰 금액일 수 있다
+    ):
+        assert (_legacy_title_price(title), parse_title(title)["price"]) == (old, old), title
+
+
+def test_parse_title_keeps_production_price_otherwise() -> None:
+    """증명된 꼴 밖에서 예전과 지금이 다르면 예전 값이다. 쿠폰·혜택·조건 말에 꼬리말이 붙거나 꼴이 조금만 달라도 그렇다
+    (지금 파서가 맞게 읽는 제목도 예전 값을 둔다 — 예전보다 나빠지지 않는 것이 먼저)."""
+    for title, old, candidate in (
+        # 검토(r8)에서 지금 파서의 회귀로 보고된 꼴 가운데 지금 파서가 아직 틀리는 제목 21개: 모두 예전 값이 맞다
+        ("[11번가] 블루투스 스피커 (40,000원 카드할인가 45,000원/무료)", 40000, 45000),
+        ("[쿠팡] 에어프라이어 (20,000원 쿠폰가 25,000원/무료)", 20000, 25000),
+        ("[쿠팡] 에어프라이어 (10,000원 쿠폰가 12,900원/무료)", 10000, 12900),
+        ("[쿠팡] 샐러드 (15,000원 할인가 19,900원/무료)", 15000, 19900),
+        ("[G마켓] 전기포트 (50,000원 스마일카드 할인 59,000원/무료)", 50000, 59000),
+        ("[11번가] 전기포트 (100,000원 카드할인시 129,000원 없을때/무료)", 100000, 129000),
+        ("[쿠팡] 바나나 (와우할인 20,000원 25,000원 비와우/무료)", 20000, 25000),
+        ("[쿠팡] 바나나 (카드할인 100,000원 129,000원 비회원/무료)", 100000, 129000),
+        ("[쿠팡] 바나나 (카드할인 100,000원 129,000원 일시불/무료)", 100000, 129000),
+        ("[쿠팡] 바나나 (카드할인 100,000원 129,000원 타카드/무료)", 100000, 129000),
+        ("[쿠팡] 바나나 (카드할인 100,000원 129,000원 현금/무료)", 100000, 129000),
+        ("[쿠팡] 커피믹스 (10,000원 쿠폰 적용시 25,000원 비와우/무료)", 10000, 25000),
+        ("[쿠팡] 커피믹스 (10,000원 할인 25,000원 원래/무료)", 10000, 25000),
+        ("[쿠팡] 두유 (개당 990원 1,900원 쿠폰적용/무료)", 990, 1900),
+        ("[쿠팡] 두유 (개당 990원 12,900원 상당 증정/무료)", 990, 12900),
+        ("[쿠팡] 휴지 (8,900원 쿠폰적용 4,500원)", 8900, 4500),
+        ("[쿠팡] 상품 (1,000 포인트) 이벤트", None, 1000),
+        ("[쿠팡] 상품 (3,000 캐시) 적립", None, 3000),
+        ("[쿠팡] 상품 (와우쿠폰 20,000원 25,000원 비회원/무료)", 20000, 25000),
+        ("[쿠팡] 상품 (카드할인 1,000,000원, 1,190,000원/무료)", 1000000, 1190000),
+        ("[쿠팡] 상품 (카드할인 1,000,000원 1,190,000원 타카드/무료)", 1000000, 1190000),
+        # 지금 파서가 맞아도 증명된 꼴이 아니면 예전 값 (예전도 틀리는 꼴 — 나빠지지는 않는다)
+        ("[쿠팡] 상품 (5,000원 쿠폰 적용시 24,900원 와우/무료)", 5000, 24900),
+        ("[쿠팡] 상품 (5,000원 쿠폰적용가 24,900원/무료)", 5000, 24900),
+        ("[쿠팡] 상품 (3,000원 할인 24,900원/무료)", 3000, 24900),
+        ("[쿠팡] 상품 (개당 647원 40봉 25,900원/무료)", 647, 25900),
+        ("[쿠팡] 로켓프레시 첫구매 쿠폰 (10,000원 할인)", 10000, None),
+        ("[쿠팡] 상품 (19,900원(쿠폰적용)/무료)", None, 19900),
+        ("[11번가] 상품 (12,900) 카드할인", None, 12900),
+        # 배송비 칸도 없이 쿠폰·할인 말이 든 가격 칸은 맨 앞 수가 100 미만이어도 (b) 가 아니다 — 쿠폰 안내일 수 있다
+        ("[쿠팡] 로켓와우 장보기 (10% 할인쿠폰 최대 5,000원)", None, 5000),
+        ("[11번가] 십일절 (20% 카드할인 최대 1만원)", None, 10000),
+        # 괄호 뒤 꼬리말에 다른 금액이 있으면 (c) 가 아니다 — 꼬리말의 쿠폰가가 판매가일 수 있다
+        ("[쿠팡] 곰곰 샐러드 (12,900원/무료) 쿠폰가 9,900원", None, 12900),
+        # 검토(r4)에서 회귀로 보고된 꼴: 지금 파서는 배송비 칸이 있으면 화살표 뒤나 맨 앞 개수 뒤의 단위당 값·혜택·상한·조건·
+        # 배송비 금액도 판매가로 읽는다. 모두 예전 값이 맞다 (나머지는 표의 네 번째 검토 절, 표시 R)
+        ("[쿠팡] 다우니 섬유유연제 2개 (19,800원 → 개당 9,900원/무료)", 19800, 9900),
+        ("[쿠팡] 곰곰 한우 불고기 (11,900원 → 100g당 1,190원/무료)", 11900, 1190),
+        ("[쿠팡] 크리넥스 3겹 30롤 (24,900원 → 롤당 830원/무료)", 24900, 830),
+        ("[11번가] 햇반 210g 36개 (29,900원 → 개당 830원/무료)", 29900, 830),
+        ("[11번가] 닥터지 선크림 1+1 (39,800원 → 1개당 19,900원/무료)", 39800, 19900),
+        ("[쿠팡] 로지텍 마우스 (29,900원 → 카드할인 3,000원/무료)", 29900, 3000),
+        ("[쿠팡] 로지텍 마우스 (29,900원 → 쿠폰 5,000원/무료)", 29900, 5000),
+        ("[쿠팡] 로지텍 마우스 (29,900원 → 3,000원 추가할인/무료)", 29900, 3000),
+        ("[쿠팡] 로지텍 마우스 (39,900원 → 캐시백 3,990원/무료)", 39900, 3990),
+        ("[쿠팡] 로지텍 마우스 (39,900원 → 포인트 3,990원/무료)", 39900, 3990),
+        ("[쿠팡] 로지텍 마우스 (19,900원 → 2,500원/무료)", 19900, 2500),
+        ("[쿠팡] 로지텍 마우스 (19,900원 → 배송비 2,500원/무료)", 19900, 2500),
+        ("[쿠팡] 로지텍 마우스 (39,900원 → 1만원대/무료)", 39900, 10000),
+        ("[쿠팡] 로지텍 마우스 (39,900원 → 개당 19,950원 2개/무료)", 39900, 19950),
+        ("[쿠팡] 상품 (19,900원 ▶ 와우 회원 1,000원 추가 할인/무료)", 19900, 1000),
+        ("[쿠팡] 상품 (10% 할인쿠폰 최대 5,000원/무료)", None, 5000),
+        ("[쿠팡] 상품 (20% 카드할인 최대 3만원/무료)", None, 30000),
+        ("[쿠팡] 상품 (30% 쿠폰 최대 1만원/무료)", None, 10000),
+        ("[쿠팡] 상품 (5% 페이백 최대 5,000원/무료)", None, 5000),
+        ("[쿠팡] 상품 (10% 할인 (최대 5천원)/무료)", None, 5000),
+        ("[쿠팡] 상품 (최대 30% (3만원)/무료)", None, 30000),
+        ("[쿠팡] 상품 (1+1 3만원 이상 무료배송/무료)", None, 30000),
+        ("[쿠팡] 상품 (2개 3만원 이상 무료/2,500원)", None, 30000),
+        ("[쿠팡] 상품 (2개 구매시 1,000원 할인/무료)", None, 1000),
+        ("[쿠팡] 상품 (3개 이상 구매시 1만원 할인/무료)", None, 10000),
+        ("[쿠팡] 상품 (1+1 2,000원 적립/무료)", None, 2000),
+        ("[쿠팡] 상품 (2+1 1만원 페이백/무료)", None, 10000),
+        ("[쿠팡] 상품 (10% 쿠폰 + 3,000원 쿠폰/무료)", None, 3000),
+        ("[쿠팡] 상품 (3천원 추가할인/무료)", None, 3000),
+        ("[쿠팡] 상품 (5천원 캐시백/무료)", None, 5000),
+        ("[쿠팡] 상품 (3% 캐시백 3천원/무료)", None, 3000),
+        ("[G마켓] 오뚜기 진라면 40봉 19,900원 (2,500원/3만원 이상 무료) 와우", 19900, 2500),
+        ("[G마켓] 오뚜기 진라면 40봉 19,900원 (3,000원/무료(제주 추가))", 19900, 3000),
+        # 혜택 금액만 든 가격 칸은 사람마다 판매가로도('신라면 40봉 (5천원 할인/무료)' → 5,000) 혜택 금액으로도('(5천원
+        # 할인/무료)' → 없음) 읽어 증명된 꼴이 아니다 — 예전처럼 없음
+        ("[쿠팡] 신라면 40봉 (5천원 할인/무료)", None, 5000),
+        ("[쿠팡] 상품 (5천원 즉시할인/무료)", None, 5000),
+    ):
+        assert (_legacy_title_price(title), _candidate_title(title)["price"]) == (old, candidate), title
+        assert parse_title(title)["price"] == old, title
+
+
+_PRODUCTION_TITLE_RE = re.compile(r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*(?:\((?P<meta>[^()]*)\))?\s*$")  # 311a593 그대로
+_PRODUCTION_NAME_PRICE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{3,})\s*원")  # 311a593 그대로
+
+
+def _production_name_price(name: str) -> int | None:
+    """311a593 의 _price_in_name 그대로."""
+    if any(w in name for w in ("쿠폰", "할인", "적립", "캐시백", "페이백", "증정", "환급")):
+        return None
+    m = _PRODUCTION_NAME_PRICE.search(name)
+    if not m:
+        return None
+    try:
+        value = int(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    return value if value >= 100 else None
+
+
+def test_legacy_title_price_is_production() -> None:
+    """예전 파서는 production(311a593)과 같은 값을 낸다. 바꾼 곳은 둘뿐이라 둘 다 원래 꼴과 맞춰 본다: 제목 정규식(이름 뒤
+    공백을 되돌려 주지 않는 꼴)은 원래 정규식과 같은 shop·name·meta 로, 금액(_legacy_amount)은 parse_price 와 같은 값으로."""
+    rnd = random.Random(311)
+    pieces = list("[]()/~,.0123456789만천원개 \t\n쿠폰xA→-") + ["  ", "[쿠팡]", "12,900원", "1.5만", "3만5천", "(~9/13)", "9/12"]
+    for _ in range(30000):
+        text = "".join(rnd.choice(pieces) for _ in range(rnd.randint(0, 14)))
+        if rnd.random() < 0.5:
+            text = "[쿠팡]" + text
+        a, b = _PRODUCTION_TITLE_RE.match(text.strip()), _LEGACY_TITLE_RE.match(text.strip())
+        assert (a is None) == (b is None), repr(text)
+        if a and b:
+            assert a.group("shop") == b.group("shop") and a.group("meta") == b.group("meta"), repr(text)
+            assert a.group("name").strip() == b.group("name").strip(), repr(text)
+        read = _legacy_amount(text) if text else None
+        assert (read[0] if read else None) == parse_price(text), repr(text)
+    # 이름 속 'N원' (_price_in_name): 숫자·쉼표 줄을 한 번만 훑는 꼴이 311a593 정규식과 같은 수를 고른다
+    name_pieces = list("0123456789,,, 원원x가") + ["٣", "000", ",000", "1,234", "  원", "12,34", "할인"]
+    for _ in range(30000):
+        name = "".join(rnd.choice(name_pieces) for _ in range(rnd.randint(0, 14)))
+        assert _price_in_name(name) == _production_name_price(name), repr(name)
+    for title, price in (("[쿠팡] 상품 (29,900원→19,900원/무료)", 29900), ("[쿠팡] 상품 (2개 12,900원/무료)", None),
+                         ("[쿠팡] 9,900원 샴푸 (2개/무료)", 9900), ("[쿠팡] 상품 (5,000원 쿠폰 사용시 19,900원/무료)", 5000),
+                         ("[쿠팡] 상품 (12,900원/무료) 카드할인", None), ("[쿠팡] 상품 (12,900원/무료) 와우", 12900),
+                         ("[쿠팡] 상품 (1만2000원/무료)", 12000), ("[쿠팡] 상품 (3만5천원/무료)", 35000),
+                         ("[쿠팡] 상품 (" + "9" * 400 + "만원/무료)", None)):  # 수백 자리 '만' 금액에서 예전 함수는 멈췄다
+        assert _legacy_title_price(title) == price, title
 
 
 def test_parse_title_repeated_wording_stays_fast() -> None:
@@ -377,10 +636,48 @@ def test_parse_title_repeated_wording_stays_fast() -> None:
     started = time.perf_counter()
     assert parse_title("[쿠팡] 상품" + " " * 3000 + "x")["name"].endswith("x")
     assert time.perf_counter() - started < 0.05
-    # 혜택 말 뒤의 긴 공백 줄 — '쿠폰가' 의 '가' 를 찾던 정규식이 공백을 두 번 나눠 훑던 때는 8,000칸에 0.2초쯤 걸렸다
+    # 혜택 말 뒤의 긴 공백 줄 — '쿠폰가' 의 '가' 를 찾던 정규식이 공백을 두 번 나눠 훑던 때는 8,000칸에 0.2초쯤 걸렸다.
+    # 지금 파서는 19,900원으로 읽지만 증명된 꼴이 아니어서 최종은 예전 값(꼬리말 때문에 괄호를 못 읽어 없음)이다
+    title = "[쿠팡] 상품 (1,000원 쿠폰" + " " * 8000 + "적용시 19,900원 + 2,000원 적립/무료) 와우"
     started = time.perf_counter()
-    assert parse_title("[쿠팡] 상품 (1,000원 쿠폰" + " " * 8000 + "적용시 19,900원 + 2,000원 적립/무료) 와우")["price"] == 19900
+    assert _candidate_title(title)["price"] == 19900 and parse_title(title)["price"] is None
     assert time.perf_counter() - started < 0.05
+
+
+def test_parse_title_pathological_inputs_stay_fast() -> None:
+    """예전 파서까지 읽어도 글 길이에 비례해 끝난다: 원래 예전 제목 정규식은 긴 공백 줄에서 세제곱(2,000칸에 13초), 예전
+    parse_price 와 이름 속 'N원' 정규식은 긴 숫자 줄에서 제곱(2만 자리에 9초, 5천 자리에 0.25초)으로 느려졌다."""
+    for title in (
+        "[쿠팡] 상품" + " " * 5000 + "x",
+        "[쿠팡] 상품" + " " * 5000 + "(9,900원/무료)",
+        "[쿠팡] 상품 (" + " " * 8000 + "19,900원" + " " * 8000 + "/무료)",
+        "[쿠팡] 상품 (" + "1" * 20000 + "/무료)",
+        "[쿠팡] 상품 (" + "1" * 20000 + "x만원/무료)",
+        "[쿠팡] 상품 (1" + " " * 5000 + "만" + " " * 5000 + "원/무료)",
+        "[쿠팡] 상품 (" + "1 " * 2000 + "/무료)",
+        "[쿠팡] 상품 (" + "1," * 2000 + "/무료)",
+        "[쿠팡] 상품 (" + "19,900원→" * 1000 + "9,900원/무료)",
+        "[쿠팡] 상품 " + "(1)" * 2000 + " (9,900원/무료)",
+        "[쿠팡] 상품 " + "(" * 5000 + "9,900원/무료)",
+        "[쿠팡] 상품 (" + "1,000원 쿠폰 사용시 " * 300 + "19,900원/무료)",
+        "[쿠팡] 상품 (" + "5,000원 쿠폰 적용시 " * 300 + "x/무료)",
+        "[쿠팡] 상품 (" + "개당 1,000원 " * 500 + "/무료)",
+        "[쿠팡] 상품 (" + "500ml" * 2000 + " 19,900원/무료)",
+        "[쿠팡] 상품 (5,000원 쿠폰" + " " * 5000 + "적용시" + " " * 5000 + "19,900원/무료)",
+        "[쿠팡] 상품 (개당" + " " * 5000 + "647원" + " " * 5000 + "25,900원/무료)",
+        # 이름 속 긴 숫자·쉼표 줄 — 이름 속 'N원' 을 찾던 정규식은 숫자 자리마다 줄 끝까지 다시 훑어 제곱(5천 자리에 0.25초)
+        "[쿠팡] " + "1" * 20000 + " x원 (2개/무료)",
+        "[쿠팡] " + "1,000" * 4000 + "x 원",
+        "[쿠팡] 상품 " + ",000" * 5000 + " (~9/13) 원",
+        "[쿠팡] " + "1" * 20000 + "원 (19,900원 → 개당 990원/무료)",
+        # 증명된 꼴의 금액 앞뒤 말 — 앞 글 끝의 말(_NOT_PRICE_BEFORE)과 꼬리말(_PRICE_TAIL)을 한 번씩만 본다
+        "[쿠팡] 상품 (" + "최대 " * 5000 + "2개 19,900원/무료)",
+        "[쿠팡] 상품 (2개" + " " * 4000 + "19,900원" + " " * 4000 + "쿠폰" + " " * 4000 + "/무료)",
+        "[쿠팡] 상품 (19,900원 → " + "- " * 5000 + "29,900원" + " 쿠폰" * 3000 + "/무료)",
+    ):
+        started = time.perf_counter()
+        parse_title(title)
+        assert time.perf_counter() - started < 0.05, title[:40]
 
 
 def test_parse_title_nested_shipping_and_trailing_note() -> None:
@@ -394,18 +691,22 @@ def test_parse_title_nested_shipping_and_trailing_note() -> None:
     t = parse_title("[11번가] 갤럭시 버즈3 프로 (189,000원/무료) 카드할인")
     assert t["name"] == "갤럭시 버즈3 프로" and t["price"] == 189000 and guess_kind(t["name"], t["price"]) == "hotdeal"
     assert parse_title("[네이버] 굽네 닭가슴살 30팩 (29,900원/무료) 적립포함")["price"] == 29900
-    assert parse_title("[쿠팡] 상품 (19,900원(쿠폰적용)/무료)")["price"] == 19900
+    # 가격 칸에 괄호가 겹치면 예전 파서는 괄호를 못 읽고 이름의 '쿠폰' 때문에 가격을 비워 두었다 — 금액 하나뿐인 가격 칸에
+    # 배송비 칸이 있는 꼴이 아니라 최종은 그 값이다 (지금 파서는 19,900원)
+    t = parse_title("[쿠팡] 상품 (19,900원(쿠폰적용)/무료)")
+    assert t["name"] == "상품" and t["price"] is None and _candidate_title("[쿠팡] 상품 (19,900원(쿠폰적용)/무료)")["price"] == 19900
     # 가격 괄호가 아니면 예전처럼 통째로 이름. 꼬리말 앞 괄호에 '원'도 배송비 칸도 없는 숫자만 있으면 연식·용량·모델 번호다
     assert parse_title("[쿠팡] 에어팟 프로 2 (USB-C) 화이트")["name"] == "에어팟 프로 2 (USB-C) 화이트"
     for title in ("[쿠팡] 맥북 에어 M3 (2024) 실버", "[쿠팡] 아이폰 16 (256) 블랙", "[쿠팡] 레고 테크닉 (42115) 람보르기니"):
         t = parse_title(title)
         assert t["price"] is None and t["name"] == title.removeprefix("[쿠팡] "), title
     assert parse_title("[쿠팡] 상품 (12,900원) 와우") == {"shop_tag": "쿠팡", "name": "상품", "price": 12900, "shipping": None}
-    # 쉼표 찍은 수는 '원'이 없어도 값이다 (연식·용량·모델 번호에는 쉼표가 없다)
+    # 쉼표 찍은 수는 '원'이 없어도 지금 파서는 값으로 읽는다 (연식·용량·모델 번호에는 쉼표가 없다). 예전 파서는 꼬리말·겹괄호
+    # 때문에 괄호를 못 읽어 가격이 없었고, 배송비 칸도 없는 꼴이라 최종은 예전처럼 없다. 이름은 지금 파서대로 나눈다
     for title, price in (("[11번가] 상품 (12,900) 카드할인", 12900), ("[쿠팡] 상품 (12,900 쿠폰적용) 와우", 12900),
                          ("[쿠팡] 상품 (1,290,000) 카드", 1290000), ("[쿠팡] 상품 (12,900(쿠폰가))", 12900)):
         t = parse_title(title)
-        assert t["name"] == "상품" and t["price"] == price, title
+        assert t["name"] == "상품" and t["price"] is None and _candidate_title(title)["price"] == price, title
     # 쉼표 찍은 수라도 단위나 다른 말이 띄어 붙으면 개수·크기다
     for title in ("[쿠팡] 레고 (10,000피스) 세트", "[쿠팡] 상품 (1,000 매) 박스", "[쿠팡] 상품 (1,500 피스) 세트",
                   "[쿠팡] 4K 모니터 (3,840 x 2,160) 27인치"):
