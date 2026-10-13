@@ -40,6 +40,7 @@ from dealbot.monitoring import nl as nlmod
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState
 from dealbot.page_price import PageCheck, hold_line
+from dealbot.pricing.market import market_name
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import normalize_chat_id
 from dealbot.publisher.templates import TemplateRenderer
@@ -192,11 +193,14 @@ _REASON_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^interest:views>=(\d+)$"), "관심도 통과(조회 {0}회 이상)"),
     (re.compile(r"^interest:rank<=(\d+)$"), "관심도 통과(순위 {0}위 안)"),
     (re.compile(r"^below_coupang_price>=([\d.]+)%$"), "쿠팡 최저가보다 {0}% 이상 쌈"),
+    (re.compile(r"^below_naver_price>=([\d.]+)%$"), "네이버 최저가보다 {0}% 이상 쌈"),
     (re.compile(r"^below_(\w+)_price>=([\d.]+)%$"), "{0} 최저가보다 {1}% 이상 쌈"),
     (re.compile(r"^below_(\d+)d_avg>=([\d.]+)%$"), "최근 {0}일 평균가보다 {1}% 이상 쌈"),
+    (re.compile(r"^(\d+)d_low&below_avg>=([\d.]+)%$"), "최근 {0}일 중 제일 싸고 평균가보다 {1}% 이상 쌈"),
     (re.compile(r"^recommend>=(\d+)$"), "커뮤니티 추천 {0}개 이상"),
     (re.compile(r"^discount_rate>=([\d.]+)%$"), "표시 할인율 {0}% 이상"),
     (re.compile(r"^market_diff=([-\d.]+)%$"), "쿠팡보다 {0}% 쌈(기준 미만)"),
+    (re.compile(r"^naver_diff=([-\d.]+)%$"), "네이버 최저가보다 {0}% 쌈(기준 미만)"),
     (re.compile(r"^market_shipping_unknown$"), "배송비를 몰라 쿠팡 대조 보류"),
     (re.compile(r"^manual$"), "내가 직접 올림"),
     (re.compile(r"^discount_unconfirmed$"), "할인율만 있고 쿠팡 대조로 확인 안 됨"),
@@ -594,7 +598,8 @@ class AdminNotifier:
         where = f"어디서: {html.escape(self.source_label(p.source))} → {html.escape(self.shop_label(p.shop))}"
         why = f"고른 이유: {html.escape(humanize_reasons(deal.verdict.reasons))} · 점수 {deal.verdict.score:g}"
         if deal.verdict.market_title and deal.verdict.market_price:  # 같은 상품(같은 수량)과 비교했는지 눈으로 확인
-            why += f"\n비교한 쿠팡 상품: {html.escape(truncate(deal.verdict.market_title, 60))} {deal.verdict.market_price:,}원"
+            where_cmp = market_name(deal.verdict.market_source)
+            why += f"\n비교한 {where_cmp} 상품: {html.escape(truncate(deal.verdict.market_title, 60))} {deal.verdict.market_price:,}원"
         if result.dry_run and preview:
             photo = " · 🖼 사진 있음" if p.image_url else ""
             text = (

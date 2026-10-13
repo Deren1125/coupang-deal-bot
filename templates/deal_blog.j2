@@ -13,7 +13,7 @@
 판매가 {{ product.price | won }}{% if product.original_price %} (정가 {{ product.original_price | won }}){% endif %}{% if discount_rate %} · {{ discount_rate | pct }} 할인{% endif +%}
 {% endif %}
 {% if market_price and below_market_pct and below_market_pct > 0 %}
-쿠팡 최저가 {{ market_price | won }} 대비 {{ below_market_pct | pct }} 저렴합니다.
+{{ market_label }} {{ market_price | won }} 대비 {{ below_market_pct | pct }} 저렴합니다.
 {% endif %}
 {% if avg_price and below_avg_pct and below_avg_pct > 0 %}
 최근 30일 평균가 {{ avg_price | won }} 대비 {{ below_avg_pct | pct }} 저렴합니다.

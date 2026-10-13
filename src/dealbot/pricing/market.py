@@ -1,7 +1,9 @@
 """시중가 대조: 다른 몰의 딜 가격을 쿠팡 검색 API 에서 찾은 같은 상품 가격과 비교한다.
 
-- 네이버 쇼핑 검색 API 는 2026-07 종료되어 쓸 수 없고, 쿠팡 검색 API 는 시간당 호출 제한이 빡빡하므로
-  후보 딜(가격 조건/추천 조건을 통과한 것)에만, 시간당 max_checks_per_hour 번까지만 조회한다.
+- 쿠팡 검색 API 는 시간당 호출 제한이 빡빡하므로 후보 딜(가격 조건/추천 조건을 통과한 것)에만,
+  시간당 max_checks_per_hour 번까지만 조회한다.
+- 쿠팡 딜(골드박스·카테고리 베스트)은 반대로 네이버 쇼핑 검색(공식 Open API) 최저가와 비교한다 (naver_shop.NaverPriceReference,
+  같은 수량·낱말 규칙을 이 모듈에서 가져다 씀). 결과는 같은 MarketQuote 로, source 만 'naver'.
 - 상품명 매칭은 토큰 기반: 수량(8개입, 2세트, 500ml …)은 반드시 같아야 하고, 나머지 토큰은 비율로 판단.
   수량은 '총 몇 개인가'로 비교한다 (40병 = 40개, 24개 x 2박스 = 48개, 1+1 = 2개, 24캔+24캔 = 48개). 묶음·대용량 상품을
   '쿠팡 최저가'로 잡으면 '쿠팡보다 N%↓'가 부풀려지기 때문.
@@ -52,6 +54,15 @@ _BUNDLE_RE = re.compile(r"\+(?!\s*\d+(?:\.\d+)?\s*%)")  # 남은 '+' 는 다른 
 _STOP = {"무료", "무료배송", "배송", "특가", "핫딜", "할인", "쿠폰", "행사", "정품", "국내", "당일", "로켓", "로켓배송", "와우", "세일", "이벤트", "추가", "택배", "본품", "신상", "new", "the", "x"}
 
 
+NAVER_SOURCE = "naver"  # 쿠팡 딜과 비교한 네이버 쇼핑 최저가 (MarketQuote.source / DealVerdict.market_source)
+_SOURCE_NAMES = {NAVER_SOURCE: "네이버"}
+
+
+def market_name(source: str | None) -> str:
+    """비교한 곳의 이름 (글에 쓰는 말): 'naver' → '네이버', 그 밖(쿠팡 검색 시중가·예전 기록) → '쿠팡'."""
+    return _SOURCE_NAMES.get(source or "", "쿠팡")
+
+
 @dataclass(slots=True)
 class MarketQuote:
     price: int
@@ -59,7 +70,7 @@ class MarketQuote:
     title: str
     url: str | None = None
     checked_at: datetime | None = None
-    category: str | None = None  # 쿠팡 categoryName (식품 판정용, 캐시에서 꺼낸 값엔 없음)
+    category: str | None = None  # 쿠팡 categoryName·네이버 분류 (식품 판정용, 캐시에서 꺼낸 값엔 없음)
 
 
 def _num(text: str) -> str:

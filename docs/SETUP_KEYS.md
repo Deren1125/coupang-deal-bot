@@ -13,7 +13,7 @@
 | `DEALBOT_MODEL_SUMMARIZER` | 쓸 Claude API 모델 이름 | `ANTHROPIC_API_KEY` 로 요약·말 명령을 할 때 필수. 없으면 API 는 건너뛰고 서버 claude CLI 로 (저장소에는 모델 이름을 두지 않음) |
 | `DEALBOT_MODEL_COMMENTARY` | 쓸 claude CLI 모델 이름 | 한줄평과 CLI 로 도는 요약·말 명령의 `--model` (선택, 없으면 CLI 기본 모델) |
 | `ADPICK_AFFID` | 애드픽 | 애드픽 핫딜 API 수집 |
-| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | developers.naver.com → 애플리케이션 등록 → 검색 API (예전 개발자센터 키만 됨. 네이버 클라우드 API HUB 키는 쇼핑 검색이 없어 401) | 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜에 쇼핑 검색의 같은 상품(상품번호 일치) 사진을 씀 (선택, 없으면 건너뜀) |
+| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | developers.naver.com → 애플리케이션 등록 → 검색 API (예전 개발자센터 키만 됨. 네이버 클라우드 API HUB 키는 쇼핑 검색이 없어 401) | 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜에 쇼핑 검색의 같은 상품(상품번호 일치) 사진을 씀. 쿠팡 골드박스·카테고리 베스트 딜의 가격 근거로 같은 상품의 네이버 최저가와 비교 (`deal.naver_reference`, 확실한 같은 상품일 때만 — 네이버보다 비싸면 탈락). 선택: 없거나 401 이면 둘 다 건너뜀 (로그 한 번) |
 | `NTFY_TOPIC` 또는 `PUSHOVER_USER_KEY`+`PUSHOVER_APP_TOKEN` | ntfy 앱 / pushover.net | 휴대폰 푸시 알림 (선택) |
 | (계정만) 토스 쉐어링크, 네이버 쇼핑커넥트, 올리브영/컬리/무신사 큐레이터 | 각 앱/사이트 | 반자동 발행 |
 

@@ -98,6 +98,34 @@ class MarketCheckConfig(BaseModel):
     require_first_token: bool = True  # 상품명 첫 낱말(대개 브랜드)이 후보 이름에 있어야 같은 상품으로 봄
 
 
+class NaverReferenceConfig(BaseModel):
+    """쿠팡 딜(골드박스·카테고리 베스트)의 가격 근거: 네이버 쇼핑 검색(공식 Open API) 최저가와 비교 (주인 결정 10/13).
+    골드박스 응답엔 정가·할인율이 없어 표시 할인율 규칙으로는 통과할 수 없었다. 같은 상품이 확실할 때만 근거로 쓰고,
+    헷갈리면(수량·규격이 다름, 중고·렌탈·해외직구·옵션 목록·부속품, 판매글이 적음) 근거 없음으로 둔다 (할인을 지어내지 않음).
+    NAVER_CLIENT_ID/NAVER_CLIENT_SECRET(developers.naver.com 검색 API 키)이 없거나 401 이면 이 비교만 꺼짐 (로그 한 번)."""
+
+    enabled: bool = True
+    sources: list[str] = Field(default_factory=lambda: ["goldbox", "category_best"])  # 이 수집기의 쿠팡 상품만 (비우면 모든 쿠팡 상품)
+    min_below_pct: float = 12  # 네이버 최저가보다 N% 이상 싸면 특가
+    strict: bool = False  # True 면 0~N% 사이도 탈락 (False: 가격 이력 규칙으로 넘어감)
+    veto_if_not_cheaper: bool = True  # 네이버 최저가보다 싸지 않으면 다른 규칙으로 잡혀도 탈락
+    cache_hours: float = 24  # 같은 상품을 다시 찾지 않는 시간 (못 찾음 포함)
+    price_cache_hours: float = 6  # 찾은 최저가는 이만큼만 믿음 (가격이 자주 바뀜 — 글에 '네이버 최저가보다 N%' 를 쓰니까)
+    max_lookups_per_run: int = Field(15, ge=0)  # 수집 한 판에 검색 API 호출 수
+    max_lookups_per_hour: int = Field(40, ge=0)  # 한 시간에 (하루 25,000회 허용이지만 점잖게)
+    run_seconds: float = Field(45.0, ge=0)  # 수집 한 판에 네이버 조회에 쓰는 시간 상한 (5분 수집 루프를 오래 막지 않게)
+    timeout_seconds: float = Field(8.0, gt=0)  # 호출 한 번의 시간 제한
+    min_interval_seconds: float = Field(0.5, ge=0)  # 호출 사이 간격
+    min_token_match: float = 0.8  # 쿠팡 상품명 낱말이 네이버 상품명에 있는 비율 (수량·용량은 반드시 같아야 함)
+    require_first_token: bool = True  # 첫 낱말(대개 브랜드)이 있어야 같은 상품
+    # 가격비교(카탈로그) 상품이 없으면 같은 상품 일반 판매글이 이만큼은 있어야 최저가로 믿음 (판매글 하나만 보고 단정하지 않게)
+    min_listings: int = Field(2, ge=1)
+    # 네이버 값이 쿠팡 값의 이 배보다 싸면 낱개·옵션·부속 같은 다른 상품으로 보고 비교에서 뺌
+    min_price_ratio: float = 0.5
+    # 쿠팡이 네이버 최저가보다 이만큼 넘게 싸면 다른 상품(묶음 수 차이 등)일 가능성이 커서 근거로 안 씀
+    max_below_pct: float = 70
+
+
 class InterestConfig(BaseModel):
     """관심도 게이트: 모든 상품을 대조할 수 없으니 '사람들이 관심 있어 보이는' 딜만 판정 대상으로.
     아래 신호 중 하나라도 넘으면 통과. 값이 없는 신호는 무시."""
@@ -274,12 +302,15 @@ class DealConfig(BaseModel):
     per_source: dict[str, SourceRule] = Field(default_factory=dict)
     interest: InterestConfig = Field(default_factory=InterestConfig)
     market: MarketCheckConfig = Field(default_factory=MarketCheckConfig)
+    naver_reference: NaverReferenceConfig = Field(default_factory=NaverReferenceConfig)
     min_discount_rate: float = 50
     history_days: int = 30
     min_below_average_pct: float = 15
     min_history_samples: int = 3
     min_history_days: float = 0  # (b) 가격 이력이 최소 며칠에 걸쳐 쌓였을 때만 (하루치 기록으로 '평소 가격'을 단정하지 않게)
     near_low_pct: float | None = None  # (b) 최근 최저가 대비 이 % 이내(또는 더 쌈)일 때만 — 이력 최저보다 비싸면 특가 아님
+    # (b') 기록 최저가 이하(최근 history_days 일 중 제일 쌈)이면서 평균보다 이만큼 싸면 특가 (기록 조건은 (b)와 같음). None = 안 씀
+    new_low_below_avg_pct: float | None = None
     observation_min_gap_hours: float = 6  # 같은 상품 가격 기록은 이 간격으로만 (재판정 때 중복 기록 방지)
     min_price: int = 1000
     # (c) 추천 수만으로는 통과 못 하게: 가격 근거(평균 대비 support_below_avg_pct% 이상 또는 표시 할인율 (a))가 같이 있어야 함

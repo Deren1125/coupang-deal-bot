@@ -649,6 +649,24 @@ class Database:
         rows = self._q("SELECT status, COUNT(*) AS c FROM deal_queue GROUP BY status")
         return {r["status"]: int(r["c"]) for r in rows}
 
+    def closed_queue_reasons(self, since: datetime, until: datetime | None = None) -> list[tuple[str, str | None, str]]:
+        """since~until 에 발행 전에 빠진(skipped·expired) 상품 딜의 (상태, 이유, 상품 키). 정보 글은 뺀다 (상품 딜이 아님).
+        같은 상품이 같은 이유로 여러 번 줄 섰다 빠져도 한 번."""
+        rows = self._q(
+            "SELECT product_id, status, last_error, payload FROM deal_queue "
+            "WHERE status IN ('skipped', 'expired') AND updated_at >= ? AND updated_at <= ?",
+            (to_iso(since), to_iso(until or utcnow())),
+        )
+        out: dict[tuple[str, str | None, str], None] = {}
+        for r in rows:
+            try:
+                kind = (json.loads(r["payload"]).get("product") or {}).get("deal_kind")
+            except (ValueError, AttributeError):
+                kind = None
+            if kind != "info":
+                out[(r["status"], r["last_error"], r["product_id"])] = None
+        return list(out)
+
     # ------------------------------------------------------- source items
     def is_seen(self, source: str, external_id: str) -> bool:
         return self._one(

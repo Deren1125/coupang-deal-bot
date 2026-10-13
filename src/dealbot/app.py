@@ -73,11 +73,17 @@ from dealbot.monitoring.admin import (
 from dealbot.monitoring.nl import REGISTRY_DAYS, NLRouter
 from dealbot.monitoring.push import PushNotifier
 from dealbot.monitoring.state import BotState, CollectorStatus
-from dealbot.naver_shop import NaverShopSearch, store_name, store_product_no
+from dealbot.naver_shop import (
+    LookupRun,
+    NaverPriceReference,
+    NaverShopSearch,
+    store_name,
+    store_product_no,
+)
 from dealbot.page_price import DISCOUNT_WORDS, PageCheck, check_page_price, hold_line
 from dealbot.page_reader import NEW_PRICE, PageRead, PageReader, RunBudget
 from dealbot.pricing.evaluator import DealEvaluator
-from dealbot.pricing.market import CoupangMarketReference, MarketQuote
+from dealbot.pricing.market import NAVER_SOURCE, CoupangMarketReference, MarketQuote, market_name
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
 from dealbot.publisher.digest import BlogDigestBuilder
 from dealbot.publisher.instagram import InstagramClient, InstagramError, InstagramPublisher
@@ -122,6 +128,38 @@ REASK_COOLDOWN = timedelta(days=3)
 # 같은 상품을 다시 줄 세울 수 없는 열린 글 상태 (db 의 idx_queue_open_product_v3 와 같음)
 OPEN_STATUSES = ("pending", "awaiting_link", "awaiting_approval", autolink.STATUS)
 MARKET_NO_MATCH = "none"  # 쿠팡 검색에 맞는 상품이 없었음 (market_quotes 에 가격 0 으로 남김)
+# 쿠팡 딜의 네이버 최저가는 같은 market_quotes 표에 이 머리말을 붙인 키로 (다른 몰 딜의 쿠팡 시중가와 섞이지 않게)
+NAVER_QUOTE_KEY = "navershop:"
+# 특가로 판정했는데 줄 세우지 않은 딜: 이유별 상품 (저녁 요약용, kv 한 칸에 최근 하루치만)
+SKIP_KV = "deal_skips"
+SKIP_KEEP = timedelta(hours=36)
+SKIP_LABELS = {
+    "already_posted": "{days}일 안에 이미 올린 상품",
+    "declined": "최근 넘기거나 건너뛴 상품",
+    "held": "가격이 안 맞아 보류했던 상품",
+    "held_price": "상품 페이지 가격이 달라 보류",
+    "duplicate": "비슷한 상품이 이미 대기·발행",
+}
+
+
+def _closed_label(status: str, error: str | None, days: int) -> str:
+    """줄 섰다가 발행 전에 빠진 딜(대기열 skipped·expired)의 이유를 저녁 요약 말로 (수집 때 이유와 같은 말은 같은 줄로 셈)."""
+    e = (error or "").lower()
+    if "sold out" in e:
+        return "품절"
+    if status == "expired":
+        return "링크·확인 답 없음" if "unanswered" in e else "대기 시간 초과 (예산·발행 한도)"
+    if e.startswith("already posted"):
+        return SKIP_LABELS["already_posted"].format(days=days)
+    if e.startswith("not genuine"):
+        return "정품 의심"
+    if e.startswith("unverified seller"):
+        return "판매처 확인 안 됨"
+    if "backlog full" in e:
+        return "확인·링크 요청이 밀려 있음"
+    if e.startswith("skipped by admin"):
+        return "주인이 넘김"
+    return "기타 (링크를 못 만드는 몰 등)"
 
 
 class DealBot:
@@ -233,6 +271,9 @@ class DealBot:
             settings.secrets.naver_client_secret,
             timeout=settings.http.timeout_seconds,
         )
+        # 쿠팡 딜(골드박스·카테고리 베스트)의 가격 근거: 같은 키로 네이버 쇼핑 최저가 (키가 없거나 401 이면 이 비교만 꺼짐)
+        nr = settings.deal.naver_reference
+        self.naver_ref: NaverPriceReference | None = NaverPriceReference(self.naver_shop, nr) if nr.enabled else None
         self.renderer = TemplateRenderer(settings.templates_dir, settings.app.timezone, settings.channels.as_dict())
         self.renderer.emphasis = (settings.publish.emphasis_must_pct, settings.publish.emphasis_top_pct)
         self.info = InfoPostBuilder(
@@ -984,6 +1025,14 @@ class DealBot:
             out.append((True, f"시중가 대조: 쿠팡 검색 (시간당 {self.settings.deal.market.max_checks_per_hour}회)"))
         else:
             out.append((None, "시중가 대조: 꺼짐 (쿠팡 키 필요)"))
+        if self.naver_ref is None:
+            out.append((None, "쿠팡 딜 네이버 최저가 비교: 꺼짐 (설정)"))
+        elif not self.naver_shop.configured:
+            out.append((None, "쿠팡 딜 네이버 최저가 비교: 꺼짐 (NAVER_CLIENT_ID/SECRET 없음 — developers.naver.com 검색 API 키)"))
+        elif self.naver_shop.disabled_reason:
+            out.append((None, f"쿠팡 딜 네이버 최저가 비교: 꺼짐 ({self.naver_shop.disabled_reason} — 키 확인 후 재시작)"))
+        else:
+            out.append((True, f"쿠팡 딜 네이버 최저가 비교 (시간당 {self.settings.deal.naver_reference.max_lookups_per_hour}회까지)"))
         if self.settings.browser.enabled:
             if self.naver_connect is None:
                 out.append((False, "브라우저 자동화: 켜져 있으나 playwright/크로미움 없음"))
@@ -1270,6 +1319,8 @@ class DealBot:
             deals = queued = 0
             enriched = 0
             pages = self.page_reader.run_budget()  # 이번 판 크롬 한도 (가격 대조)
+            naver_run: LookupRun | None = None  # 이번 판 네이버 최저가 조회 한도 (쿠팡 딜이 있을 때 만듦)
+            skips: dict[str, set[str]] = {}  # 특가인데 줄 세우지 않은 이유 → 상품
             for p in products:
                 if cfg.deal.sold_out.enabled and looks_sold_out(str(p.extra.get("title") or p.name), cfg.deal.sold_out.words or None):
                     await self._on_sold_out(p, via="게시판에 품절/종료 표시")
@@ -1309,6 +1360,8 @@ class DealBot:
                 verdict = self.evaluator.evaluate(p, stats)
                 if (p.extra.get("page_price") or {}).get("status") == "hold":
                     # 제목 가격이 상품 페이지와 안 맞음: 시중가 대조·가격 기록·링크 요청 없이 보류 (주인 결정 10/12, #22)
+                    if verdict.is_deal:
+                        skips.setdefault("held_price", set()).add(p.product_id)
                     await self._hold_for_price(p, verdict, now, page[-1] if page else None)
                     continue
                 if p.has_price and self._should_record(p.product_id, now):
@@ -1316,31 +1369,37 @@ class DealBot:
                 if self._needs_market_check(p, verdict, now):
                     quote = await self._market_quote(p)
                     verdict = self.evaluator.evaluate(p, stats, quote, market_available=True)
+                elif self._needs_naver_check(p, verdict, now):
+                    # 쿠팡 딜: 네이버 최저가와 비교 (확실한 같은 상품일 때만 근거·탈락). 못 찾으면 가격 이력 판정 그대로
+                    if naver_run is None:
+                        assert self.naver_ref is not None
+                        naver_run = self.naver_ref.new_run()
+                    quote = await self._naver_quote(p, naver_run)
+                    if quote is not None:
+                        verdict = self.evaluator.evaluate(p, stats, quote)
                 if not verdict.is_deal:
                     continue
                 deals += 1
-                if self._posted_recently(p.product_id, now):
-                    log.debug("deal %s already posted within %dd — skip", p.product_id, cfg.publish.dedup_days)
-                    continue
-                if self._declined_recently(p, now):
-                    log.info("deal %s skipped — admin passed on it or did not answer recently", p.name[:40])
-                    continue
-                if self._held_recently(p, now):
-                    log.info("deal %s skipped — held recently for a page price mismatch at this title price", p.name[:40])
-                    continue
-                dup = self._duplicate_of_recent(p, now)
-                if dup:
-                    log.info("deal %s skipped as duplicate: %s", p.name[:40], dup)
-                    self.db.log_event("INFO", "dedupe", f"{p.product_id} {p.name[:50]} — {dup}")
-                    continue
-                deal = Deal(product=p, verdict=verdict, detected_at=now)
-                if self.db.enqueue(deal, score=verdict.score, now=now):
-                    queued += 1
-                    log.info("deal queued [%s/%s] %s %s원 (%s)", name, p.shop, p.name[:40], f"{p.price:,}", ", ".join(verdict.reasons))
+                why_not = self._not_queued_reason(p, now)
+                if why_not is None:
+                    deal = Deal(product=p, verdict=verdict, detected_at=now)
+                    if self.db.enqueue(deal, score=verdict.score, now=now):
+                        queued += 1
+                        log.info("deal queued [%s/%s] %s %s원 (%s)", name, p.shop, p.name[:40], f"{p.price:,}", ", ".join(verdict.reasons))
+                        continue
+                    why_not = "in_queue"  # 같은 상품이 이미 대기·링크 요청 중 (그 글이 올라감)
+                skips.setdefault(why_not, set()).add(p.product_id)
             result.update(collected=len(products), deals=deals, queued=queued)
             self.db.finish_run(run_id, status="ok", collected=len(products), deals=deals, queued=queued)
             self.notifier.error_cleared(f"collector:{name}")
             log.info("collector '%s' done: collected=%d deals=%d queued=%d", name, len(products), deals, queued)
+            if skips:
+                # 특가로 봤는데 안 줄 세운 이유를 한 줄로 (예전엔 '이미 올림'이 DEBUG 라 보이지 않았다)
+                log.info("collector '%s' deals not queued: %s", name,
+                         " ".join(f"{k}={len(v)}" for k, v in sorted(skips.items())))
+                self._remember_skips(skips, now)
+            if naver_run is not None and naver_run.summary():
+                log.info("collector '%s' naver price check: %s", name, naver_run.summary())
         except CoupangRateLimited as e:
             # 시간당 호출 예산이 찬 것은 고장이 아니다: 조용히 건너뛰고 다음 시간에 다시
             result.update(status="skipped", error=str(e))
@@ -1450,6 +1509,74 @@ class DealBot:
                 await self._on_sold_out(p, via="상품 페이지에 재고 없음")
                 dropped += 1
         return dropped
+
+    def _not_queued_reason(self, p: Product, now: Any) -> str | None:
+        """특가로 판정된 딜을 줄 세우지 않을 이유 (SKIP_LABELS 의 키). 줄 세워도 되면 None."""
+        if self._posted_recently(p.product_id, now):
+            log.debug("deal %s already posted within %dd — skip", p.product_id, self.settings.publish.dedup_days)
+            return "already_posted"
+        if self._declined_recently(p, now):
+            log.info("deal %s skipped — admin passed on it or did not answer recently", p.name[:40])
+            return "declined"
+        if self._held_recently(p, now):
+            log.info("deal %s skipped — held recently for a page price mismatch at this title price", p.name[:40])
+            return "held"
+        dup = self._duplicate_of_recent(p, now)
+        if dup:
+            log.info("deal %s skipped as duplicate: %s", p.name[:40], dup)
+            self.db.log_event("INFO", "dedupe", f"{p.product_id} {p.name[:50]} — {dup}")
+            return "duplicate"
+        return None
+
+    def _remember_skips(self, skips: dict[str, set[str]], now: Any) -> None:
+        """줄 세우지 않은 이유별 상품을 kv 에 하루 남짓 남긴다 (저녁 요약에서 상품 수로 셈 — 5분마다 같은 글을 다시 봐도 한 번).
+        이미 대기 중인 글(in_queue)은 그 글이 올라가니 '안 올린 딜'이 아니라 남기지 않는다."""
+        try:
+            data = json.loads(self.db.kv_get(SKIP_KV) or "{}")
+            if not isinstance(data, dict):
+                data = {}
+        except ValueError:
+            data = {}
+        cutoff = now - SKIP_KEEP
+        out: dict[str, dict[str, str]] = {}
+        for reason, seen in data.items():
+            if isinstance(seen, dict):
+                kept = {pid: at for pid, at in seen.items() if (t := from_iso(str(at))) is not None and t >= cutoff}
+                if kept:
+                    out[reason] = kept
+        for reason, pids in skips.items():
+            if reason == "in_queue":
+                continue
+            bucket = out.setdefault(reason, {})
+            for pid in pids:
+                bucket[pid] = to_iso(now)
+        try:
+            self.db.kv_set(SKIP_KV, json.dumps(out, ensure_ascii=False))
+        except Exception as e:  # noqa: BLE001 — 기록 실패가 수집을 막지 않게
+            log.warning("could not remember skipped deals: %s", e)
+
+    def skipped_deal_counts(self, since: Any, until: Any | None = None) -> dict[str, int]:
+        """since 이후 특가로 판정했지만 안 올린 딜의 이유별 상품 수: 수집 때 줄 세우지 않은 것 + 줄 섰다가 발행 전에 빠진 것.
+        같은 상품은 이유마다 한 번 (게시판이 같은 글을 5분마다 다시 돌려줘도). 많은 이유부터."""
+        until = until or utcnow()
+        by_label: dict[str, set[str]] = {}
+        try:
+            data = json.loads(self.db.kv_get(SKIP_KV) or "{}")
+        except ValueError:
+            data = {}
+        days = self.settings.publish.dedup_days
+        for reason, seen in (data.items() if isinstance(data, dict) else ()):
+            if not isinstance(seen, dict):
+                continue
+            label = SKIP_LABELS.get(reason, reason).format(days=days)
+            for pid, at in seen.items():
+                t = from_iso(str(at))
+                if t is not None and since <= t <= until:
+                    by_label.setdefault(label, set()).add(pid)
+        for status, error, pid in self.db.closed_queue_reasons(since, until):
+            label = _closed_label(status, error, days)
+            by_label.setdefault(label, set()).add(pid)
+        return dict(sorted(((k, len(v)) for k, v in by_label.items()), key=lambda kv: -kv[1]))
 
     def _declined_recently(self, p: Product, now: Any) -> bool:
         """관리자가 넘겼거나 답하지 않은 글은 REASK_COOLDOWN 동안 다시 묻지 않는다 (같은 질문 반복 방지).
@@ -1714,10 +1841,26 @@ class DealBot:
 
     def _needs_market_check(self, p: Product, verdict: DealVerdict, now: Any | None = None) -> bool:
         """시중가 대조는 쿠팡 검색 예산을 쓰므로 '후보'에만: 다른 몰 + 가격 있음 + (판정 통과 또는 표시 할인율 후보).
-        게시판이 5분마다 같은 글을 다시 돌려주므로, 대조 결과로 바뀔 게 없는 글은 예산을 쓰지 않는다:
-        대조 전에 이미 떨어진 글(최저가 미만·가격 없음·후기 적음), 이미 대기열에 있거나 최근에 넘겼거나 같은 값으로 보류한 글."""
+        게시판이 5분마다 같은 글을 다시 돌려주므로, 대조 결과로 바뀔 게 없는 글은 예산을 쓰지 않는다 (_reference_can_matter)."""
         if self.market is None or p.shop == "coupang" or not p.has_price:
             return False
+        return self._reference_can_matter(p, verdict, now)  # 관심도 게이트를 통과한 다른 몰의 딜은 (d) 대조가 기본
+
+    def _needs_naver_check(self, p: Product, verdict: DealVerdict, now: Any | None = None) -> bool:
+        """쿠팡 딜(설정한 수집기: 골드박스·카테고리 베스트)의 네이버 최저가 비교. 키가 없거나 401 로 꺼졌으면 안 함 (로그 한 번).
+        시중가 대조처럼 결과로 바뀔 게 없는 상품에는 호출을 쓰지 않는다."""
+        nr = self.naver_ref
+        if nr is None or p.shop != "coupang" or not p.has_price:
+            return False
+        sources = self.settings.deal.naver_reference.sources
+        if sources and p.source not in sources:
+            return False
+        return nr.usable and self._reference_can_matter(p, verdict, now)
+
+    def _reference_can_matter(self, p: Product, verdict: DealVerdict, now: Any | None = None) -> bool:
+        """가격 비교 결과로 판정·발행이 바뀔 수 있는 딜인가. 아니면 호출을 아낀다:
+        대조 전에 이미 떨어진 글(관심 없음·제외 낱말·최저가 미만·가격 없음·후기 적음), 최근에 올렸거나 이미 대기열에 있거나
+        최근에 넘겼거나 같은 값으로 보류한 글."""
         if self._posted_recently(p.product_id):
             return False
         if "low_interest" in verdict.reasons or any(r.startswith("excluded") for r in verdict.reasons):
@@ -1729,7 +1872,7 @@ class DealBot:
         now = now or utcnow()
         if self._declined_recently(p, now) or self._held_recently(p, now):
             return False  # 어차피 아래에서 건너뜀
-        return True  # 관심도 게이트를 통과한 다른 몰의 딜은 (d) 대조가 기본
+        return True
 
     async def _market_quote(self, p: Product) -> MarketQuote | None:
         """쿠팡 시중가. 맞은 값과 '검색했는데 맞는 상품 없음'을 cache_hours 동안 기억한다 (없음은 가격 0 으로).
@@ -1745,6 +1888,28 @@ class DealBot:
             self.db.set_market_quote(p.product_id, price=quote.price, source=quote.source, title=quote.title, url=quote.url)
         elif getattr(self.market, "last_no_match", False):
             self.db.set_market_quote(p.product_id, price=0, source=MARKET_NO_MATCH, title=None, url=None)
+        return quote
+
+    async def _naver_quote(self, p: Product, run: LookupRun) -> MarketQuote | None:
+        """쿠팡 상품의 네이버 최저가 (확실한 같은 상품일 때만). market_quotes 에 'navershop:상품키' 로 기억한다:
+        못 찾음은 cache_hours(24시간) 동안 다시 찾지 않고, 찾은 값은 price_cache_hours(6시간)까지만 근거로 쓴다 (글에 금액을 쓰니까).
+        한도·일시 오류로 못 찾아본 것은 기억하지 않는다 (다음 판에 다시)."""
+        assert self.naver_ref is not None
+        nc = self.settings.deal.naver_reference
+        key = NAVER_QUOTE_KEY + p.product_id
+        cached = self.db.get_market_quote(key, nc.cache_hours)  # type: ignore[arg-type]
+        if cached:
+            if int(cached["price"]) <= 0:
+                return None  # 확실한 같은 상품이 없었음
+            checked = from_iso(cached.get("checked_at"))
+            if checked is not None and utcnow() - checked <= timedelta(hours=nc.price_cache_hours):
+                return MarketQuote(price=int(cached["price"]), source=NAVER_SOURCE, title=cached.get("title") or "",
+                                   url=cached.get("url"))
+        quote = await self.naver_ref.lookup(p, run)
+        if quote is not None:
+            self.db.set_market_quote(key, price=quote.price, source=NAVER_SOURCE, title=quote.title, url=quote.url)
+        elif self.naver_ref.last_no_match:
+            self.db.set_market_quote(key, price=0, source=MARKET_NO_MATCH, title=None, url=None)
         return quote
 
     async def _ensure_link(self, item: QueueItem) -> tuple[str, str | None]:
@@ -2175,7 +2340,7 @@ class DealBot:
             v = deal.verdict
             # 채널 글 첫 줄과 같은 근거·같은 숫자 (배송비를 반영한 평가기 값, 믿을 만한 평균만)
             ref_price, ref_pct, is_market = ctx.reference(deal)
-            ref_label = ("쿠팡 최저가" if is_market else "평소 가격") if ref_price else ""
+            ref_label = (f"{market_name(v.market_source)} 최저가" if is_market else "평소 가격") if ref_price else ""
             row = {
                 "product_id": p.product_id, "posted_at": utcnow().isoformat(timespec="seconds"),
                 "name": clean_name(p.name), "raw_name": p.name, "headline": p.headline, "price": p.price,
@@ -2885,6 +3050,14 @@ class DealBot:
         if names and s.published:
             shown = "·".join(f"「{n}」" for n in names[:2])
             day = day[:-1] + f" — {shown}{' 등' if len(names) > 2 else ''}."
+        try:  # 특가로 봤는데 안 올린 딜과 그 이유 (주인 결정 10/13: 쿠팡 딜이 왜 안 올라오는지 보이게). 알림은 따로 안 보냄
+            skipped = self.skipped_deal_counts(now - timedelta(days=1), now + timedelta(seconds=1))
+        except Exception:  # noqa: BLE001 — 이유를 못 세도 요약은 보낸다
+            log.exception("skipped deal counts failed")
+            skipped = {}
+        if skipped:
+            parts = [f"{label} {n}개" for label, n in list(skipped.items())[:3]]
+            day += f" 특가로 봤지만 안 올린 딜은 {', '.join(parts)}{' 등이에요' if len(skipped) > 3 else '예요'}."
         if s.run_errors:
             day += f" 게시판 확인 중 오류가 {s.run_errors}번 있었지만 봇은 계속 돌았어요."
         if self.state.paused:

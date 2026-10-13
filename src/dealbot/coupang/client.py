@@ -86,6 +86,21 @@ class ApiBudget:
             return used < self.max_per_hour
         return pool_used < self.max_per_hour - reserved_total
 
+    def remaining(self, kind: str = "general", now: float | None = None) -> int | None:
+        """이 종류가 지금부터 이번 한 시간 창에서 더 부를 수 있는 횟수 (available 과 같은 셈). 무제한이면 None."""
+        if self.max_per_hour <= 0:
+            return None
+        used = self.used(now)
+        by_kind = self.usage()
+        if kind in self.reserve:
+            left = self.max_per_hour - used
+        else:
+            pool_used = used - sum(min(by_kind.get(k, 0), r) for k, r in self.reserve.items())
+            left = self.max_per_hour - sum(self.reserve.values()) - pool_used
+        if kind in self.caps:
+            left = min(left, self.caps[kind] - by_kind.get(kind, 0))
+        return max(0, left)
+
     def record(self, kind: str = "general", now: float | None = None) -> None:
         self._calls.append((now if now is not None else time.monotonic(), kind))
 

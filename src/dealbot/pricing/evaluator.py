@@ -3,8 +3,11 @@
 0) 관심도 게이트: 추천/댓글/조회수/순위 중 하나라도 기준을 넘는 딜만 판정 (전 상품 대조는 불가능하므로)
 1) (d) 시중가 대조가 기본: 쿠팡 검색으로 찾은 같은 상품보다 min_below_market_pct % 이상 싸면 특가,
    쿠팡보다 싸지 않으면 탈락 (veto). 딜 쪽은 배송비까지 더한 값으로 비교하고, 배송비를 모르면(착불·조건부) 대조로 통과시키지 않음
+   쿠팡 딜(골드박스·카테고리 베스트)은 네이버 쇼핑 최저가와 같은 방식으로 (기준은 deal.naver_reference: N% 이상 싸면 특가,
+   네이버보다 싸지 않으면 탈락, 0~N% 사이는 아래 보조 규칙으로)
 2) 대조 결과가 없을 때의 보조 규칙:
    (b) 최근 history_days 일 평균가 대비 min_below_average_pct % 이상 저렴
+   (b') 기록 최저가 이하(최근 history_days 일 중 제일 쌈)이면서 평균 대비 new_low_below_avg_pct % 이상 저렴
    (c) 커뮤니티 추천 수 >= community_min_recommend   (가격 없는 쿠폰/이벤트는 이 규칙으로만)
    (a) 표시 할인율 >= min_discount_rate — 서브 신호. 대조가 가능한 환경이면 (d) 확인 없이는 통과 못 함
 """
@@ -16,7 +19,7 @@ import re
 
 from dealbot.config import DealConfig, SourceRule
 from dealbot.models import DealVerdict, PriceStats, Product
-from dealbot.pricing.market import MarketQuote, same_quantity
+from dealbot.pricing.market import NAVER_SOURCE, MarketQuote, same_quantity
 
 # ---- 배송비: 뽐뿌 제목 '(6,900원/3,500원)' 의 뒤쪽 원문(Product.shipping)을 원 단위로
 _SHIP_FREE_WORDS = ("무료", "무배", "free")
@@ -129,6 +132,14 @@ class DealEvaluator:
     def _rule(self, product: Product) -> SourceRule:
         return self.cfg.per_source.get(product.source, SourceRule())
 
+    def _quote_rule(self, quote: MarketQuote) -> tuple[float, bool, bool]:
+        """(기준 %, strict, 싸지 않으면 탈락) — 비교한 곳마다. 쿠팡 딜의 네이버 최저가는 deal.naver_reference, 나머지는 deal.market."""
+        if quote.source == NAVER_SOURCE:
+            nc = self.cfg.naver_reference
+            return nc.min_below_pct, nc.strict, nc.veto_if_not_cheaper
+        mc = self.cfg.market
+        return mc.min_below_market_pct, mc.strict, mc.veto_if_not_cheaper
+
     def min_recommend_for(self, product: Product) -> int:
         """이 딜에 적용할 (c) 추천 수 기준.
         가격이 없는 글(쿠폰/이벤트)은 별도의 높은 기준 — 추천이 몰리는 '공짜 이벤트'를 걸러내기 위함."""
@@ -239,7 +250,6 @@ class DealEvaluator:
         market_available: bool = False,
     ) -> DealVerdict:
         cfg = self.cfg
-        mcfg = cfg.market
         reasons: list[str] = []
 
         excluded = self._excluded(product)
@@ -297,16 +307,18 @@ class DealEvaluator:
         below_market_pct: float | None = None
         market_title = (quote.title or None) if quote is not None else None
         if quote is not None and quote.price > 0:
+            min_pct, strict, veto = self._quote_rule(quote)
             # 딜은 배송비까지 낸 값으로 비교 (6,900원 + 배송비 3,500원은 쿠팡 9,900원보다 비쌈).
             # 쿠팡 쪽 배송비는 더하지 않음: 대부분 로켓·무료배송이고, 유료여도 우리 딜이 덜 싸 보일 뿐이라 안전한 쪽
+            # (네이버 최저가도 배송비를 뺀 값이라 같은 쪽으로 안전)
             fee = shipping_fee(product)
             below_market_pct = round((1 - (product.price + (fee or 0)) / quote.price) * 100, 1)
             # 배송비를 몰라(착불·조건부) 기준을 넘는지 확정할 수 없음 → 대조로는 통과 못 하고, 글에 '쿠팡보다 N%↓'도 안 씀
-            fee_unknown = fee is None and below_market_pct >= mcfg.min_below_market_pct
+            fee_unknown = fee is None and below_market_pct >= min_pct
             if fee_unknown:
                 reasons.append("market_shipping_unknown")
-            elif below_market_pct >= mcfg.min_below_market_pct:
-                reasons.append(f"below_{quote.source}_price>={mcfg.min_below_market_pct:g}%")
+            elif below_market_pct >= min_pct:
+                reasons.append(f"below_{quote.source}_price>={min_pct:g}%")
                 return DealVerdict(
                     is_deal=True, reasons=reasons, discount_rate=discount,
                     avg_price=round(stats.avg, 0) if stats.avg else None, below_avg_pct=below_avg_pct,
@@ -314,17 +326,17 @@ class DealEvaluator:
                     market_price=quote.price, market_source=quote.source, below_market_pct=below_market_pct,
                     market_title=market_title,
                 )
-            if mcfg.strict:
+            if strict:
                 # 대조 결과가 있으면 기준 미만은 무조건 탈락 (보조 규칙으로 안 넘어감)
                 if not fee_unknown:
-                    reasons.append("above_market_price" if below_market_pct <= 0 else f"below_{quote.source}_price<{mcfg.min_below_market_pct:g}%")
+                    reasons.append("above_market_price" if below_market_pct <= 0 else f"below_{quote.source}_price<{min_pct:g}%")
                 return DealVerdict(
                     is_deal=False, reasons=reasons, discount_rate=discount,
                     avg_price=round(stats.avg, 0) if stats.avg else None, below_avg_pct=below_avg_pct,
                     sample_count=stats.count, market_price=quote.price, market_source=quote.source,
                     below_market_pct=None if fee_unknown else below_market_pct, market_title=market_title,
                 )
-            if mcfg.veto_if_not_cheaper and below_market_pct <= 0:
+            if veto and below_market_pct <= 0:
                 reasons.append("above_market_price")
                 return DealVerdict(
                     is_deal=False, reasons=reasons, discount_rate=discount,
@@ -333,7 +345,8 @@ class DealEvaluator:
                     below_market_pct=below_market_pct, market_title=market_title,
                 )
             if not fee_unknown:
-                reasons.append(f"market_diff={below_market_pct:g}%")  # 0~N% 사이: 보조 규칙으로 넘어감
+                diff = "naver_diff" if quote.source == NAVER_SOURCE else "market_diff"
+                reasons.append(f"{diff}={below_market_pct:g}%")  # 0~N% 사이: 보조 규칙으로 넘어감
             if fee is None:
                 below_market_pct = None  # 배송비를 모르면 몇 % 싼지도 모름 → 글에 쿠팡 대비 % 를 쓰지 않게
 
@@ -345,6 +358,16 @@ class DealEvaluator:
                 reasons.append(f"above_{cfg.history_days}d_low+{cfg.near_low_pct:g}%")
         if rule_b:
             reasons.append(f"below_{cfg.history_days}d_avg>={cfg.min_below_average_pct:g}%")
+        elif (
+            cfg.new_low_below_avg_pct is not None
+            and below_avg_pct is not None
+            and below_avg_pct >= cfg.new_low_below_avg_pct
+            and stats.min
+            and product.price <= stats.min
+        ):
+            # (b') 기록(같은 조건의 이력) 중 제일 싼 값이면서 평균보다도 확실히 쌈 — 평균 대비 기준(b)엔 못 미쳐도 '지금이 최저'
+            rule_b = True
+            reasons.append(f"{cfg.history_days}d_low&below_avg>={cfg.new_low_below_avg_pct:g}%")
 
         rule_c = self._rule_c(product)
         if rule_c:
@@ -354,7 +377,7 @@ class DealEvaluator:
         min_disc = cfg.min_discount_rate if rule.min_discount_rate is None else rule.min_discount_rate
         discount_alone = cfg.discount_alone if rule.discount_alone is None else rule.discount_alone
         rule_a = discount is not None and discount >= min_disc
-        if rule_a and market_available and mcfg.require_for_discount_rule:
+        if rule_a and market_available and cfg.market.require_for_discount_rule:
             rule_a = False
             reasons.append("discount_unconfirmed")
         if rule_a:

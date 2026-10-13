@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from dealbot.models import Deal, Product
+from dealbot.pricing.market import market_name
 from dealbot.shops import Shop, deal_disclosure
 from dealbot.utils.text import clean_name, format_won, unit_price
 
@@ -126,13 +127,13 @@ _ACCESSORY = re.compile(
 _NOT_THE_WORD = ("휴지통", "마우스피스", "콜라겐")
 # 가격 없는 쿠폰·이벤트 글에 안 맞는 말 (AI 첫 줄에 있으면 쿠폰·이벤트용 문구로 바꿈)
 _PRICE_TALK = re.compile(r"가격|싸|쌈|\d\s*원|쟁여|장바구니")
-# 상품명(게시판 제목)에 붙은 할인 자랑('30% 저렴하게', '평소보다 20% 싸게', '쿠팡보다 10%')은 스레드 이름 줄에서 뺀다.
+# 상품명(게시판 제목)에 붙은 할인 자랑('30% 저렴하게', '평소보다 20% 싸게', '쿠팡보다 10%', '네이버보다 15%')은 스레드 이름 줄에서 뺀다.
 # 주인이 뺀 'N% 쌈' 꼴이고(TH-02, 발행 직전 검사에 걸려 글이 안 올라감), 비교는 바로 아랫줄 금액이 한다.
 # '드림카카오 72%'·'과즙 100%'·'10% 할인쿠폰' 같은 상품 정보는 둔다
 _PCT_CLAIM = re.compile(
-    r"(?:(?:평소|쿠팡|평균)\s*(?:가\s*)?(?:보다|대비)\s*)?\d+(?:\.\d+)?\s*%\s*(?:나|더|정도|가량|쯤)?\s*"
+    r"(?:(?:평소|쿠팡|네이버|평균)\s*(?:가\s*)?(?:보다|대비)\s*)?\d+(?:\.\d+)?\s*%\s*(?:나|더|정도|가량|쯤)?\s*"
     r"(?:싸\S*|쌈|저렴\S*|빠짐|빠졌\S*|낮음|내려\S*)"
-    r"|(?:평소|쿠팡|평균)\s*(?:가\s*)?(?:보다|대비)\s*\d+(?:\.\d+)?\s*%\S*"
+    r"|(?:평소|쿠팡|네이버|평균)\s*(?:가\s*)?(?:보다|대비)\s*\d+(?:\.\d+)?\s*%\S*"
 )
 
 
@@ -193,8 +194,9 @@ class TemplateRenderer:
         return p.price <= v.low_price * (1 + self.near_low_pct / 100)
 
     def reference(self, deal: Deal) -> tuple[int | None, float | None, bool]:
-        """글에 내세우는 '평소 가격' 근거: (기준가, 그보다 몇 % 싼지, 쿠팡 시중가인지).
-        쿠팡 시중가 대조가 먼저(배송비를 반영한 평가기 값), 없으면 믿을 만한 최근 평균. 10% 미만 차이는 내세우지 않음."""
+        """글에 내세우는 '평소 가격' 근거: (기준가, 그보다 몇 % 싼지, 시중가 대조 값인지).
+        시중가 대조가 먼저(배송비를 반영한 평가기 값 — 다른 몰 딜은 쿠팡 시중가, 쿠팡 딜은 확실히 같은 상품의 네이버 최저가),
+        없으면 믿을 만한 최근 평균. 10% 미만 차이는 내세우지 않음. 비교한 곳 이름은 market_word."""
         p, v = deal.product, deal.verdict
         if v.market_price and (v.below_market_pct or 0) >= 10:
             # 평가기 값은 배송비까지 더해 소수 첫째 자리로 반올림한 것 → 배송비가 붙으면 그쪽(더 작은 값)을 쓴다
@@ -204,6 +206,11 @@ class TemplateRenderer:
             ref = int(v.avg_price)
             return ref, (1 - p.price / ref) * 100, False
         return None, None, False
+
+    @staticmethod
+    def market_word(deal: Deal) -> str:
+        """시중가 대조를 한 곳 ('쿠팡' | '네이버') — 글에 '쿠팡 최저가'·'네이버 최저가' 로 쓴다."""
+        return market_name(deal.verdict.market_source)
 
     def deal_tier(self, deal: Deal) -> tuple[str, float]:
         """'normal' | 'must' | 'top' 과 그 근거 비율. 첫 줄에 보이는 근거(reference)와 같은 숫자로 정해서
@@ -262,8 +269,9 @@ class TemplateRenderer:
         kind_map = {"역대급": "초특가", "강력 추천": "강추"}
         kind_labels = [kind_map.get(x, x) for x in labels if "베스트" not in x]
         rank_label = next((x for x in labels if "베스트" in x and "위" in x), None)
+        where = self.market_word(deal)
         if ref_price and pct:
-            compare = f"쿠팡 최저가 {ref_price:,}원" if is_market else f"평소 {price_band(ref_price, p.price):,}원대"
+            compare = f"{where} 최저가 {ref_price:,}원" if is_market else f"평소 {price_band(ref_price, p.price):,}원대"
         else:
             compare = None
         auth = (p.extra or {}).get("auth") or {}
@@ -289,7 +297,7 @@ class TemplateRenderer:
             "ref_price": ref_price,
             # 블로그 내보내기 줄에도 첫 줄 근거와 같은 기준 (믿을 수 없는 평균이면 None)
             "ref_pct": pct,
-            "ref_label": ("쿠팡 최저가" if is_market else "평소 가격") if ref_price else "",
+            "ref_label": (f"{where} 최저가" if is_market else "평소 가격") if ref_price else "",
             **self.evidence(deal, days=days, ref_price=ref_price, pct=pct, labels=labels, tier=tier,
                             is_market=is_market, recent=recent),
         }
@@ -462,11 +470,11 @@ class TemplateRenderer:
         each = f"{unit.split(' (')[0]} 꼴" if unit else None
         low = next((x for x in labels if "최저가" in x), None)
         if ref_price and pct:
-            where = "쿠팡" if is_market else "평소"
+            where = self.market_word(deal) if is_market else "평소"
             short = f"{where}보다 {pct}%↓"
-            # 평균은 '원대'(대략 구간)로 말하니 끝자리를 내린다 ('41,233원대' → '41,000원대'). 쿠팡 최저가는 정확한 금액 그대로
+            # 평균은 '원대'(대략 구간)로 말하니 끝자리를 내린다 ('41,233원대' → '41,000원대'). 쿠팡·네이버 최저가는 정확한 금액 그대로
             if is_market:
-                casual, sentence = f"쿠팡 최저가는 {ref_price:,}원", f"쿠팡 최저가 {ref_price:,}원보다 {pct}% 싸요."
+                casual, sentence = f"{where} 최저가는 {ref_price:,}원", f"{where} 최저가 {ref_price:,}원보다 {pct}% 싸요."
             else:
                 band = price_band(ref_price, p.price)
                 casual, sentence = f"평소엔 {band:,}원대", f"평소 {band:,}원대인데 오늘 {p.price:,}원이에요."
@@ -526,10 +534,10 @@ class TemplateRenderer:
             "link_mode": shop.link_mode if shop else "raw",
         }
         tier, tier_pct = self.deal_tier(deal)
-        # 평소 가격 근거 (숫자로 확인된 것만): 쿠팡 시중가 대조가 있으면 그것, 없으면 믿을 만한 최근 평균
+        # 평소 가격 근거 (숫자로 확인된 것만): 시중가 대조(쿠팡 시중가·쿠팡 딜의 네이버 최저가)가 있으면 그것, 없으면 믿을 만한 최근 평균
         v = deal.verdict
         ref_price, ref_pct, is_market = self.reference(deal)
-        ref_label = ("쿠팡 최저가" if is_market else "평소 가격") if ref_price else ""
+        ref_label = (f"{self.market_word(deal)} 최저가" if is_market else "평소 가격") if ref_price else ""
         avg_ok = self.avg_trusted(deal)
         return self.render(
             template,
@@ -546,6 +554,7 @@ class TemplateRenderer:
             below_avg_pct=v.below_avg_pct if avg_ok else None,
             market_price=v.market_price,
             market_source=v.market_source,
+            market_label=f"{self.market_word(deal)} 최저가",
             below_market_pct=v.below_market_pct,
             detected_at=deal.detected_at,
             pname=clean_name(p.name),

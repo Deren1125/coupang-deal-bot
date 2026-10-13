@@ -80,8 +80,8 @@ def card_info(deal: Deal, renderer: TemplateRenderer, *, shop: Shop | None, deal
         price=price,
         short=(p.extra or {}).get("short_name") or short_name(p.name, limit=22),
         ref_price=ref_price,
-        ref_label=("쿠팡 최저가" if is_market else "평소 가격") if ref_price else "",
-        ref_text=(f"쿠팡 최저가 {ref_price:,}원" if is_market else f"평소 {price_band(ref_price, p.price):,}원대")
+        ref_label=(f"{renderer.market_word(deal)} 최저가" if is_market else "평소 가격") if ref_price else "",
+        ref_text=(f"{renderer.market_word(deal)} 최저가 {ref_price:,}원" if is_market else f"평소 {price_band(ref_price, p.price):,}원대")
         if ref_price and ref_pct else "",
         ref_pct=round(ref_pct) if ref_price and ref_pct else None,
         list_price=list_price,

@@ -61,7 +61,7 @@ class CardInfo:
     price: int | None = None
     short: str = ""  # 한 줄용 짧은 이름 (수량은 남김, templates.short_name) — C 양식 아래 띠
     ref_price: int | None = None
-    ref_label: str = ""  # '쿠팡 최저가' | '평소 가격'
+    ref_label: str = ""  # '쿠팡 최저가' | '네이버 최저가'(쿠팡 딜) | '평소 가격'
     ref_text: str = ""  # 비교 가격 글 — 채널 글과 같은 말: '쿠팡 최저가 22,900원' | '평소 40,000원대' (평균은 가격대로만)
     ref_pct: int | None = None
     list_price: int | None = None  # 표시 정가 (근거가 약해 비교 가격이 없을 때만 보조로)
