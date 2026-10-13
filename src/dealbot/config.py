@@ -17,6 +17,7 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from dealbot import __version__
 from dealbot.shops import DEFAULT_SHOPS, LINK_MODES, Shop, ShopRegistry
 
 
@@ -32,10 +33,8 @@ class HttpConfig(BaseModel):
     timeout_seconds: float = 20
     max_retries: int = 3
     retry_backoff_seconds: float = 2.0
-    user_agent: str = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    )
+    # 봇이라고 밝힌다: 브라우저 UA 로 꾸미지 않는다 (운영 원칙 — UA·지문 위장 없음)
+    user_agent: str = f"dealbot/{__version__}"
 
 
 class CollectorConfig(BaseModel):

@@ -50,7 +50,7 @@ http:
   timeout_seconds: 20
   max_retries: 3
   retry_backoff_seconds: 2
-  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+  # user_agent: 비우면 "dealbot/버전" — 봇이라고 밝힌다 (브라우저 UA 로 꾸미지 않음)
 
 # ----------------------------------------------------------------------------
 # 쇼핑몰별 링크 처리. 기본값(src/dealbot/shops.py)을 key 단위로 덮어씁니다.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ import pytest
 
 from dealbot.app import DealBot
 from dealbot.cli import sample_deal
-from dealbot.collectors import BaseCollector, register
+from dealbot.collectors import BaseCollector, CollectorContext, build_collector, register
 from dealbot.config import CollectorConfig, Settings
 from dealbot.models import Product
 from dealbot.publisher.telegram import TelegramPublisher
@@ -267,3 +268,35 @@ async def test_coupang_rate_limit_in_collector_is_not_an_error(bot: DealBot) -> 
     bot.notifier.notify_error = capture_error  # type: ignore[method-assign]
     result = await bot.run_collector(_Limited("fake", {}, bot.collectors[0].ctx))
     assert result["status"] == "skipped" and errors == [] and bot.state.last_error is None
+
+
+@pytest.mark.real_fetch
+async def test_http_requests_say_they_are_a_bot(settings: Settings, fixtures_dir: Path) -> None:
+    """운영 원칙(UA·지문 위장 없음): 공용 HTTP 클라이언트는 봇이라고 밝히고, 게시판 목록·상세·정보 글·사진 요청에 브라우저 탐색
+    헤더(Sec-Fetch-*·Upgrade-Insecure-Requests)를 꾸며 넣지 않는다. 실제 사이트에는 요청하지 않는다 (가짜 HTTP)."""
+    bot = DealBot(settings)
+    ua = bot.http.headers["User-Agent"]
+    assert ua.startswith("dealbot/") and not re.search(r"Mozilla|Chrome|Safari|Gecko|Windows|AppleWebKit", ua)
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        if req.url.path == "/zboard/zboard.php":
+            return httpx.Response(200, content=(fixtures_dir / "ppomppu_list.html").read_bytes(), headers={"content-type": "text/html; charset=utf-8"})
+        return httpx.Response(200, html="<html><body><td class='board-contents'>본문</td></body></html>")
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler), headers=bot.http.headers)  # app 과 같은 기본 헤더
+    try:
+        ctx = CollectorContext(settings=settings, http=http, db=bot.db, coupang=None, shops=settings.shop_registry())
+        await build_collector(CollectorConfig(name="ppomppu", type="ppomppu", options={"request_delay_seconds": 0}), ctx).collect()
+        bot.info.http = http
+        post = "https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=1"
+        await bot.info.fetch(post)
+        await bot.info.download_image("https://cdn.ppomppu.co.kr/zboard/data3/x.jpg", referer=post)
+        assert {"/", "/zboard/zboard.php", "/zboard/view.php"} <= {r.url.path for r in seen}
+        for r in seen:
+            assert r.headers["User-Agent"] == ua, r.url
+            assert not [k for k in r.headers if k.lower().startswith("sec-") or k.lower() == "upgrade-insecure-requests"], r.url
+    finally:
+        await http.aclose()
+        bot.db.close()

@@ -31,16 +31,11 @@ LIST_URL = BASE_URL + "/zboard/zboard.php"
 MOBILE_BASE_URL = "https://m.ppomppu.co.kr"
 MOBILE_LIST_URL = MOBILE_BASE_URL + "/new/bbs_list.php"
 
-# 뽐뿌는 평범한 크롤러 요청을 403 으로 막는다. 실제 브라우저가 보내는 헤더를 갖춰야 통과한다.
-BROWSER_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+# 게시판 HTML 을 받을 때 헤더: 받을 형식과 언어만. 브라우저 탐색 흉내(Sec-Fetch-*·Upgrade-Insecure-Requests·Cache-Control)는
+# 하지 않는다 — UA 도 봇이라고 밝힌다 (http.user_agent, 운영 원칙: UA·지문 위장 없음)
+HTML_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Cache-Control": "max-age=0",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
 }
 
 # "[쿠팡] 상품명 (12,900원/무료)" 형태. 끝 괄호 안의 괄호 한 겹("3,000원(3만↑무료)", "무료(와우)")과
@@ -729,18 +724,18 @@ class PpomppuCollector(BaseCollector):
         return reg if reg is not None else self.ctx.settings.shop_registry()
 
     async def _warm_up(self, base_url: str) -> None:
-        """목록을 읽기 전에 홈을 한 번 방문해 쿠키를 받는다 (봇 차단 회피)."""
+        """목록을 읽기 전에 홈을 한 번 열어 사이트가 주는 쿠키를 받는다 (같은 세션으로 목록을 읽게)."""
         if self._warmed:
             return
         self._warmed = True
         try:
-            await self.ctx.http.get(base_url + "/", headers=BROWSER_HEADERS, follow_redirects=True, timeout=15)
+            await self.ctx.http.get(base_url + "/", headers=HTML_HEADERS, follow_redirects=True, timeout=15)
         except Exception as e:  # noqa: BLE001 — 실패해도 본 요청은 시도한다
             self.log.debug("warm-up failed for %s: %s", base_url, e)
 
     async def _get(self, url: str, params: dict[str, Any] | None = None, *, referer: str | None = None) -> str:
         http_cfg = self.ctx.settings.http
-        headers = {**BROWSER_HEADERS}
+        headers = {**HTML_HEADERS}
         if referer:
             headers["Referer"] = referer
 

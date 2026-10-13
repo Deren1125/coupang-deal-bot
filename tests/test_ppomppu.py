@@ -834,12 +834,12 @@ def test_registry_plugin_path() -> None:
 
 
 async def test_403_falls_back_to_mobile(settings: Settings, db: Database, fixtures_dir: Path) -> None:
-    """데스크톱이 403 이면 모바일 주소로 재시도하고, 브라우저 헤더와 워밍업 요청이 들어간다."""
+    """데스크톱이 403 이면 모바일 주소로 재시도하고, 워밍업 요청이 들어간다. 브라우저 탐색 헤더는 꾸며 넣지 않는다 (위장 없음)."""
     seen: list[tuple[str, str]] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
         seen.append((req.url.host, req.url.path))
-        assert req.headers.get("upgrade-insecure-requests") == "1"
+        assert "upgrade-insecure-requests" not in req.headers and not any(k.lower().startswith("sec-") for k in req.headers)
         assert "ko-KR" in req.headers.get("accept-language", "")
         if req.url.host == "www.ppomppu.co.kr" and req.url.path == "/zboard/zboard.php":
             return httpx.Response(403, text="blocked")

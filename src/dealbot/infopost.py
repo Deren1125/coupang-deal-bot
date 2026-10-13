@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 import httpx
 from bs4 import BeautifulSoup, Tag
 
-from dealbot.collectors.ppomppu import BROWSER_HEADERS, decode_html
+from dealbot.collectors.ppomppu import HTML_HEADERS, decode_html
 from dealbot.models import Deal
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.utils.urls import is_affiliate_link, unwrap_redirect
@@ -299,7 +299,7 @@ class InfoPostBuilder:
 
     async def fetch(self, post_url: str) -> PostBody | None:
         try:
-            resp = await self.http.get(post_url, headers=BROWSER_HEADERS, follow_redirects=True, timeout=self.timeout)
+            resp = await self.http.get(post_url, headers=HTML_HEADERS, follow_redirects=True, timeout=self.timeout)
             resp.raise_for_status()
         except Exception as e:  # noqa: BLE001
             log.warning("info post fetch failed %s: %s", post_url, e)
@@ -308,7 +308,7 @@ class InfoPostBuilder:
 
     async def download_image(self, url: str, *, referer: str) -> bytes | None:
         """게시판 사진은 외부에서 바로 못 여는(핫링크 차단) 경우가 많아 봇이 받아서 올린다."""
-        headers = {**BROWSER_HEADERS, "Referer": referer}
+        headers = {**HTML_HEADERS, "Referer": referer}
         try:
             resp = await self.http.get(url, headers=headers, follow_redirects=True, timeout=self.timeout)
             resp.raise_for_status()
