@@ -188,7 +188,8 @@ def _chunk_price(chunk: str, benefit_ok: bool) -> int | None:
             return value
         if before.rstrip().endswith("당"):
             # '개당 647원 25,900원' — 단위당 값 바로 뒤의 더 큰 금액이 판매가. 다른 말·배송비·혜택 금액이 이어지면
-            # ('개당 990원, 배송비 3,000원', '개당 990원 + 2,500원', '개당 990원, 1,000원 쿠폰') 단위당 값을 둔다
+            # ('개당 990원, 배송비 3,000원', '개당 990원 + 2,500원', '개당 990원, 1,000원 쿠폰', '개당 990원 1만원 쿠폰
+            # 적용시') 단위당 값을 둔다
             if _after_unit(chunk, amounts, i, value):
                 continue
             return value
@@ -209,8 +210,10 @@ def _chunk_price(chunk: str, benefit_ok: bool) -> int | None:
 
 def _after_unit(chunk: str, amounts: list[tuple[re.Match[str], int | None]], i: int, unit: int) -> bool:
     """단위당 값 amounts[i] 다음 금액을 판매가로 이어 읽을지. 사이에 띄어쓰기·'총'(_UNIT_GAP)과 개수·용량만 있고, 그
-    금액이 단위당 값보다 크고 배송비로 흔한 값이 아니며, 혜택·조건 금액('1,000원 쿠폰', '3만원 이상')이 아니고, 뒤에 붙은
-    말도 판매가다워야(_TAIL_OK) 한다."""
+    금액이 단위당 값보다 크고 배송비로 흔한 값이 아니어야 한다. 혜택 말 없는 금액은 뒤에 붙은 말도 판매가다워야(_TAIL_OK)
+    하고, 혜택 말이 붙은 금액은 '25,900원 쿠폰가'·'38,700원 쿠폰 적용시' 처럼 쿠폰·적립 금액답지 않은 값일 때만 판매가다
+    ('1만원 쿠폰 적용시'·'1,500원 적립 포함'·'1,000원 추가할인' 은 쿠폰·적립 금액). 혜택·조건 금액('1,000원 쿠폰',
+    '3만원 이상')과 쿠폰 없는 값('1,500원 쿠폰 미적용')은 판매가가 아니다."""
     pos = amounts[i][0].end()
     for b, y in amounts[i + 1 :]:
         if not _UNIT_GAP.fullmatch(chunk, pos, b.start()):
@@ -220,9 +223,11 @@ def _after_unit(chunk: str, amounts: list[tuple[re.Match[str], int | None]], i: 
             pos = qty.end() if qty else b.end()
             continue
         kind = _benefit_kind(chunk, b)
-        if y <= unit or y in _SHIPPING_FEES or kind == "benefit":
+        if y <= unit or y in _SHIPPING_FEES or kind in ("benefit", "unapplied"):
             return False
-        return kind != "plain" or bool(_TAIL_OK.match(chunk, b.end()))
+        if kind != "plain":  # 'said'·'loose' — 혜택 말이 붙은 금액
+            return not _coupon_like(y)
+        return bool(_TAIL_OK.match(chunk, b.end()))
     return False
 
 
