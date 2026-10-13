@@ -219,11 +219,13 @@ def _proven_price(title: str, old: int | None) -> int | None:
     """예전 파서(맨 앞 수)가 틀린다고 증명된 꼴이면 그 꼴로 읽은 판매가, 아니면 None. 지금 파서도 이 값으로 읽어야
     parse_title 이 예전 값(old) 대신 쓴다. 꼴마다 예전·지금·최종 값 표는 tests/fixtures/ppomppu_title_prices.tsv 에 있다.
     (a) 화살표 → ➡ -> ⇒ ▶ ('29,900원→19,900원', '정가 49,900원 -> 29,900원'): 마지막 화살표 뒤 첫 금액. 예전은 화살표 앞
-        옛 가격
+        옛 가격. 그 금액이 판매가다울 때만(_price_like): 단위당 값('→ 개당 990원')이 아니고, 화살표 앞 금액보다 작으면 그
+        절반보다 커야 한다 ('→ 쿠폰 5,000원'·'→ 2,500원' 은 쿠폰·배송비 금액이다)
     (b) 맨 앞이 개수·용량 ('500ml 24개 12,900원', '2개 12,900원', '180정 19,900원', '5천원'): 그 뒤 첫 금액
-        (_quantity_first). 예전은 개수·용량을 가격으로 읽거나 가격이 없었다
-    (c) 금액 하나만 든 가격 칸과 배송비 칸인데 예전 정규식이 괄호를 못 읽은 제목 ('(25,900원/3,000원(3만↑무료))',
-        '(189,000원/무료) 카드할인'): 그 금액. 예전은 이름에서 찾다 없거나 다른 수를 읽었다
+        (_quantity_first). 예전은 개수·용량을 가격으로 읽거나 가격이 없었다. 그 금액이 판매가다울 때만(_price_like)
+    (c) 금액 하나만 든 가격 칸과 배송비 칸인데 예전 정규식이 괄호를 못 읽어 가격이 없던 제목 ('(25,900원/3,000원(3만↑무료))',
+        '(189,000원/무료) 카드할인'): 그 금액. 예전이 이름에서 값을 찾았으면 그 값을 둔다 ('진라면 19,900원 (3,000원/무료(제주))'
+        의 괄호 금액은 배송비다). 꼬리말에 다른 금액이 있거나 혜택 말 꼬리말 앞의 둥근 값('(5,000원/무료) 쿠폰')이면 아니다
     (d) 딱 'A원 [꾸밈말]쿠폰·할인·적립 [적용·사용] 시·후 B원' 꼴 ('5,000원 쿠폰 사용시 19,900원', '2만원 할인 후 189,000원',
         '쿠폰 3,000원 적용시 17,900원', 화살표 뒤에 와도): B. 예전은 쿠폰 금액 A
     (e) 딱 'X당 A원 [,] [총] B원' 꼴에 배송비 칸 ('개당 647원 25,900원/무료'): B. 예전은 단위당 값 A
@@ -241,11 +243,60 @@ def _proven_price(title: str, old: int | None) -> int | None:
         return _first_amount(seg, shape.start("price"))
     if not shipped and any(w in price_text for w in _NOT_A_PRICE_WORDS):
         return None  # 배송비 칸도 없이 쿠폰·할인 말이 든 칸은 쿠폰 안내일 수 있다 ('10% 할인쿠폰 최대 5,000원')
-    # (c) 는 괄호 뒤 꼬리말에 다른 금액이 없을 때만 ('(12,900원/무료) 쿠폰가 9,900원' 은 꼬리말 쪽이 판매가일 수 있다)
-    lone = shipped and _LONE_PRICE.fullmatch(price_text) and not _WON_RE.search(m.group("note") or "")
-    if len(parts) > 1 or lone or _quantity_first(price_text, old):
-        return _first_amount(seg)
+    a = next((a for a in _AMOUNT_RE.finditer(seg) if _amount_value(seg, a) is not None), None)
+    if a is None:
+        return None
+    value = _amount_value(seg, a)
+    if len(parts) > 1:  # (a)
+        unit = seg[: a.start()].rstrip().endswith("당") or _UNIT_AFTER.match(seg, a.end())
+        was = _first_amount(parts[-2])
+        cut = was is not None and value * 2 <= was
+        return value if _price_like(seg, a, value) and not unit and not cut else None
+    if _quantity_first(price_text, old) and _price_like(seg, a, value):  # (b)
+        return value
+    # (c) 는 괄호 뒤 꼬리말에 다른 금액이 없을 때만 ('(12,900원/무료) 쿠폰가 9,900원'·'… 쿠폰가 9900' 은 꼬리말 쪽이
+    # 판매가일 수 있다. '10% 쿠폰'·'최대 7% 할인' 의 100 미만 수는 금액이 아니다). 꼬리말이 혜택 말이면 둥근 값은 혜택
+    # 금액일 수 있다 ('(5,000원/무료) 쿠폰', '(3,000원/무료) 적립')
+    note = m.group("note") or ""
+    lone = _LONE_PRICE.fullmatch(price_text) and _first_amount(note) is None
+    if old is None and shipped and lone and not (_coupon_like(value) and _BENEFIT_HINT.search(note)):
+        return value
     return None
+
+
+# (a)·(b) 가 고른 금액 바로 앞에 오면 판매가가 아닌 말: 상한('최대 5,000원'), 어림('약 1만원'), 보상('캐시백 3,990원',
+# '적립 1,500원', '포인트 3,990원', 'N페이 5,000원', '상품권 1만원'), 정가('정가 49,900원', '기존가'), 배송비('배송비 2,500원'),
+# 빼는 값('-5,000원'). '정가' 같은 말은 낱말 끝일 때만 ('회원가 17,900원' 은 판매가)
+_NOT_PRICE_BEFORE = re.compile(
+    r"(?:최대|약|캐시백?|캐쉬백?|적립금?|페이백?|포인트|마일리지|리워드|상품권|머니|사은품|배송비?|택배비?|-"
+    r"|(?<![가-힣A-Za-z])(?:정가|원가|정상가|출고가|소비자가|시중가|판매가|기존가?))\s*$"
+)
+# (a)·(b) 가 고른 금액 뒤에 와도 되는 말 (_TAIL_OK 말고): 판매가라는 혜택 말('쿠폰가', '쿠폰적용', '할인가', '적립포함')만
+# 붙거나 아무 말 없이 가격 칸 끝·'~'·'/'·괄호 덧말('(카드할인)', '(와우)')·'와우'·'부터'가 온다. 이 밖의 말('절약', '이하',
+# '상당', '대', '쿠폰 사용시', '택배비 3,500원', '1만원 쿠폰')이 붙으면 판매가인지 모른다
+_PRICE_TAIL = re.compile(rf"\s*+(?:{_BENEFIT_PHRASE}\s*+(?:적용|포함)?\s*+가?)?(?=\s*+(?:$|[~/(]|와우|부터))")
+# 쿠폰 금액다운 둥근 값('5,000원', '1만원') 앞에 이런 말이 있으면 그 값은 혜택 금액일 수 있다 ('쿠폰 5,000원', '10% 1만원',
+# '카드 5,000원', '와우 3,000원')
+_BENEFIT_HINT = re.compile(r"%|할인|쿠폰|카드|적립|와우|페이|캐시|포인트|마일리지")
+
+
+def _price_like(seg: str, a: re.Match[str], value: int) -> bool:
+    """(a)·(b) 가 고른 금액 a(값 value)가 판매가다운지. 지금 파서는 배송비 칸이 있으면 혜택·상한·조건 금액도 판매가로
+    읽어서, 지금 파서와 같은지로는 걸러지지 않는다. 판매가다운 금액은
+    - 혜택·조건 말이 붙지 않았거나 판매가라는 말이 붙었다 ('5천원 할인', '3만원 이상', '3천원 추가할인', '1만원 쿠폰 미적용'
+      은 아니다). 앞에 혜택 말이나 '%'가 있으면('쿠폰 19,900원', '10% 할인 9,900원') 쿠폰 금액다운 둥근 값('쿠폰 5,000원',
+      '10% 1만원')이 아니다
+    - 바로 앞에 상한·보상·정가·배송비 말(_NOT_PRICE_BEFORE)이 없고, 뒤에는 판매가 꼬리말(_TAIL_OK, _PRICE_TAIL)만 온다
+    - 안쪽 괄호 속 덧말이 아니다 ('최대 30% (3만원)')"""
+    before = seg[: a.start()]
+    kind = _benefit_kind(seg, a, before)
+    return (
+        kind in ("plain", "said", "before")
+        and not (_coupon_like(value) and _BENEFIT_HINT.search(before))
+        and not _NOT_PRICE_BEFORE.search(before)
+        and bool(_TAIL_OK.match(seg, a.end()) or _PRICE_TAIL.match(seg, a.end()))
+        and before.count("(") <= before.count(")")
+    )
 
 
 def _quantity_first(price_text: str, old: int | None) -> bool:
