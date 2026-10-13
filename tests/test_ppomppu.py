@@ -406,7 +406,11 @@ def test_parse_title_nested_shipping_and_trailing_note() -> None:
                          ("[쿠팡] 상품 (1,290,000) 카드", 1290000), ("[쿠팡] 상품 (12,900(쿠폰가))", 12900)):
         t = parse_title(title)
         assert t["name"] == "상품" and t["price"] == price, title
-    assert parse_title("[쿠팡] 레고 (10,000피스) 세트")["name"] == "레고 (10,000피스) 세트"
+    # 쉼표 찍은 수라도 단위나 다른 말이 띄어 붙으면 개수·크기다
+    for title in ("[쿠팡] 레고 (10,000피스) 세트", "[쿠팡] 상품 (1,000 매) 박스", "[쿠팡] 상품 (1,500 피스) 세트",
+                  "[쿠팡] 4K 모니터 (3,840 x 2,160) 27인치"):
+        t = parse_title(title)
+        assert t["price"] is None and t["name"] == title.removeprefix("[쿠팡] "), title
     assert parse_title("[쿠팡] 상품 (옵션) 블랙 (12,900원/무료)")["name"] == "상품 (옵션) 블랙"
     t = parse_title("[토스] 9,900원 샴푸 (~9/13) 선착순")
     assert t["name"] == "9,900원 샴푸 (~9/13) 선착순" and t["price"] == 9900 and t["shipping"] is None

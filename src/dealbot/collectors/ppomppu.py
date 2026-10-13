@@ -56,7 +56,10 @@ _AMOUNT_RE = re.compile(
 )
 _WON_RE = re.compile(r"\d\s*(?:[만천]\s*)?원")
 # '12,900' 처럼 세 자리마다 쉼표를 찍고 단위가 붙지 않은 수는 연식·모델 번호가 아니라 값 ('10,000피스' 는 아니다)
-_GROUPED_NUM = re.compile(r"\d{1,3}(?:,\d{3})+(?![\d가-힣A-Za-z])")
+_GROUPED_NUM = re.compile(r"(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d가-힣A-Za-z])")
+# 쉼표 찍은 수 뒤에 띄어 쓴 말. 혜택 말('12,900 쿠폰적용')이나 값에 붙는 말('와우', '카드', '최저가')이 아니면 그 수는
+# 개수·크기다 ('1,000 매', '1,500 피스', '3,840 x 2,160')
+_WORD_AFTER = re.compile(r"\s++(?!와우|카드|최저|특가|역대|최종|실구매|실결제)[가-힣A-Za-z]")
 _BEFORE_SLASH = re.compile(r"(?:[^/()]|\([^()]*\))*+")  # 가격 칸: 괄호 밖 첫 '/' 앞까지
 # 단위 없는 숫자 바로 뒤에 붙은 개수·용량 단위 — 가격이 아니다 ("100매 9,900원", "10,000mAh", "500ml 24개").
 # 곱하기 x 가 붙어 있어도 단위다 ("500mlx24개")
@@ -149,10 +152,10 @@ def parse_title(title: str) -> dict[str, Any]:
     if (
         (m.group("note") or "(" in meta)
         and not _SHIPPING_WORDS.search(shipping)
-        and (price is None or not (_WON_RE.search(price_text) or _GROUPED_NUM.search(price_text)))
+        and (price is None or not (_WON_RE.search(price_text) or _grouped_price(price_text, price)))
     ):
         # 가격 괄호가 아닌데 뒤에 말이 더 있거나 괄호가 겹친 제목("에어팟 프로 2 (USB-C) 화이트", "맥북 에어 (2024) 실버")은
-        # 통째로 이름. '원'도 쉼표 찍은 수('12,900')도 배송비 칸도 없는 숫자 괄호는 연식·용량·모델 번호다
+        # 통째로 이름. '원'도 쉼표 찍은 값('12,900')도 배송비 칸도 없는 숫자 괄호는 연식·용량·모델 번호·개수·크기다
         whole = text[m.start("name"):].strip()
         return {"shop_tag": shop_tag, "name": whole, "price": _price_in_name(whole), "shipping": None}
     if meta and (meta.startswith("~") or _DATE_META.match(meta)):
@@ -164,6 +167,17 @@ def parse_title(title: str) -> dict[str, Any]:
 
 
 _SHIPPING_WORDS = re.compile(r"무료|무배|배송|착불|\d\s*원")
+
+
+def _grouped_price(text: str, price: int) -> bool:
+    """판매가 price 가 '12,900' 처럼 쉼표 찍은 단위 없는 수로 적혔는지. 그 수 뒤에 띄어 쓴 말이 붙었으면 혜택 말이나
+    값에 붙는 말일 때만 ('12,900 쿠폰적용') — '1,000 매'·'1,500 피스'·'3,840 x 2,160' 은 개수·크기다."""
+    digits = str(price)  # 수를 int 로 바꾸지 않는다 (아주 긴 수는 int 변환이 막힌다)
+    return any(
+        g.group().replace(",", "") == digits
+        and (not _WORD_AFTER.match(text, g.end()) or _BENEFIT_AFTER.match(text, g.end()))
+        for g in _GROUPED_NUM.finditer(text)
+    )
 
 
 def _meta_price(text: str, *, benefit_ok: bool = False) -> int | None:
