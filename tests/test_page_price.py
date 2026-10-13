@@ -801,6 +801,35 @@ async def test_remembered_page_repeats_the_hold_for_the_same_title_price(bot: De
     assert bot.db.queue_counts() == {"held": 1} and [k for _, _, k, _ in bot.sent] == ["price_hold"]  # type: ignore[attr-defined]
 
 
+async def test_remembered_page_holds_only_the_post_it_held(bot: DealBot) -> None:
+    """기억해 둔 페이지는 새로 읽었을 때 보류로 나온 글만 되풀이한다. 같은 제목 가격이라도 그때 맞았던 글(카드 말이 있어 25% 까지)과
+    말이 다른 글은 옛 페이지로 보류하지 않고 새로 읽는다 (그사이 가게가 그 값으로 내렸을 수도 있다)."""
+    clock = [1000.0]
+    _serve(bot, {})
+    opened = _chrome(bot, clock, _ok_page)
+    bot.store_browser.min_interval = 0
+    checks = _checks(bot)
+    FakePageCollector.products = [_naver(price=11200, title="[네이버] 풀무원 샘물 2L 24개 (현대카드 11,200원/무료)")]
+    await bot.run_collector(bot.collectors[0])  # 24개 14,465 보다 22.6% 싸지만 카드가라 맞음
+    assert checks["naver:11223344556"]["status"] == "option" and len(opened) == 1
+
+    clock[0] += 10 * 60
+    bot.page_reader.per_run = 0  # 크롬 한도: 새로 못 읽음
+    FakePageCollector.products = [_naver(price=11200, title="[네이버] 풀무원 샘물 2L 24개 (11,200원/무료)")]
+    await bot.run_collector(bot.collectors[0])
+    assert checks["naver:11223344556"] == {**checks["naver:11223344556"], "status": "unverified",
+                                           "reason": "페이지를 못 읽음 · 이번 판 크롬 한도 (옛 페이지와 안 맞는 새 가격)"}
+    assert len(opened) == 1 and bot.sent == []  # type: ignore[attr-defined]
+
+    clock[0] += 5 * 60
+    bot.page_reader.per_run = 1
+    await bot.run_collector(bot.collectors[0])  # 지금 페이지를 새로 읽고서야 보류 (카드 말 없는 22.6% 차이)
+    assert len(opened) == 2 and checks["naver:11223344556"]["status"] == "hold"
+    clock[0] += 5 * 60
+    await bot.run_collector(bot.collectors[0])  # 새로 읽어 보류로 나온 글이니 이제는 기억해 둔 페이지로 되풀이
+    assert len(opened) == 2 and checks["naver:11223344556"]["status"] == "hold"
+
+
 async def test_browser_kept_page_only_confirms(bot: DealBot) -> None:
     """크롬이 발행 사진용으로 읽어 둔(30분) 페이지도 같다: 제목 가격이 맞으면 다시 안 열고, 보류가 될 값이면 지금 페이지를 새로 읽음."""
     clock = [1000.0]

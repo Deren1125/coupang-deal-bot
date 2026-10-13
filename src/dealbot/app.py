@@ -1214,8 +1214,8 @@ class DealBot:
                     enriched += 1
                     await self._enrich(p, check_price=check_price, pages=pages)
                 elif check_price:
-                    # 기억해 둔 페이지는 한도와 상관없이. 단 그 페이지로 보류가 되는 새 제목 가격이면 안 씀 (확인 못 함 → 다음 판에 새로 읽음)
-                    cached, stale = self.page_reader.kept(p.product_id, self._title_price(p), self._page_holds(p))
+                    # 기억해 둔 페이지는 한도와 상관없이. 단 그 페이지로 보류가 되는데 새로 읽어 보류로 나온 글이 아니면 안 씀 (확인 못 함 → 다음 판에 새로 읽음)
+                    cached, stale = self.page_reader.kept(p.product_id, self._page_claim(p), self._page_holds(p))
                     why = "이번 판 페이지 읽기 한도" + (f" ({NEW_PRICE})" if stale else "")
                     self._check_page_price(p, cached, why=why, source="cache" if cached else "")
                 if not p.has_price and not cfg.deal.accept_coupons_and_events:
@@ -1423,8 +1423,8 @@ class DealBot:
                 pages or self.page_reader.run_budget(),
                 enricher=self.enricher,
                 browser=self.store_browser,
-                title_price=self._title_price(p),
-                holds=self._page_holds(p),  # 기억해 둔 페이지로는 새 제목 가격을 보류하지 않게
+                claim=self._page_claim(p),
+                holds=self._page_holds(p),  # 기억해 둔 페이지로는 새로 읽어 보류로 나온 적 없는 글을 보류하지 않게
             )
             meta = got.meta
             self._check_page_price(p, meta, why=got.why, source=got.source)  # 제목 가격 대조는 빈 칸 채우기 전에 (제목 가격 그대로)
@@ -1466,10 +1466,18 @@ class DealBot:
         """글 제목의 가격 (페이지 가격으로 바꿔 둔 뒤에도 원래 값)."""
         return int(p.extra.get("title_price") or p.price)
 
+    def _page_claim(self, p: Product) -> tuple[int, str, float, float]:
+        """가격 대조 판정을 정하는 글 쪽 값: 제목 가격·상품명(수량 말)·허용 폭(카드·쿠폰 말). 같은 페이지에 이 값이 같으면 판정도 같다
+        (page_reader 가 기억해 둔 페이지로 되풀이하는 보류는 새로 읽어 보류로 나온 이 값뿐)."""
+        tolerance = self._page_tolerance(p)
+        return self._title_price(p), p.name, tolerance["tolerance_pct"], tolerance["discount_tolerance_pct"]
+
     def _page_holds(self, p: Product) -> Callable[[PageMeta], bool]:
-        """그 페이지로 이 딜이 보류되는지 (page_reader 가 기억해 둔 옛 페이지로 새 제목 가격을 보류하지 않게)."""
-        title_price, tolerance = self._title_price(p), self._page_tolerance(p)
-        return lambda meta: check_page_price(p.name, title_price, meta.prices, page_title=meta.title, **tolerance).status == "hold"
+        """그 페이지로 이 딜이 보류되는지 (page_reader 가 기억해 둔 옛 페이지로 새 글을 보류하지 않게). _page_claim 과 같은 값으로 대조."""
+        title_price, name, tolerance_pct, discount_pct = self._page_claim(p)
+        return lambda meta: check_page_price(
+            name, title_price, meta.prices, page_title=meta.title, tolerance_pct=tolerance_pct, discount_tolerance_pct=discount_pct
+        ).status == "hold"
 
     def _check_page_price(self, p: Product, meta: PageMeta | None, *, why: str | None = None, source: str = "") -> PageCheck:
         """상품 페이지 가격·옵션을 제목 가격과 대조해 p.extra['page_price'] 에 남긴다.
