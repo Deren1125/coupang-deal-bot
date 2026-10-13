@@ -377,6 +377,10 @@ def test_parse_title_repeated_wording_stays_fast() -> None:
     started = time.perf_counter()
     assert parse_title("[쿠팡] 상품" + " " * 3000 + "x")["name"].endswith("x")
     assert time.perf_counter() - started < 0.05
+    # 혜택 말 뒤의 긴 공백 줄 — '쿠폰가' 의 '가' 를 찾던 정규식이 공백을 두 번 나눠 훑던 때는 8,000칸에 0.2초쯤 걸렸다
+    started = time.perf_counter()
+    assert parse_title("[쿠팡] 상품 (1,000원 쿠폰" + " " * 8000 + "적용시 19,900원 + 2,000원 적립/무료) 와우")["price"] == 19900
+    assert time.perf_counter() - started < 0.05
 
 
 def test_parse_title_nested_shipping_and_trailing_note() -> None:
