@@ -228,6 +228,19 @@ def test_parse_title_benefit_word_before_the_amount_and_chains() -> None:
         assert parse_title(f"[쿠팡] 상품 ({meta})")["price"] is None, meta
 
 
+def test_parse_title_price_corpus(fixtures_dir: Path) -> None:
+    """실제 꼴을 본뜬 뽐뿌 제목 수백 개의 판매가 (tests/fixtures/ppomppu_title_prices.tsv). 규칙을 고치면 여기서 어긋난
+    제목이 다 드러난다."""
+    rows = [
+        line.split("\t")
+        for line in (fixtures_dir / "ppomppu_title_prices.tsv").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert len(rows) >= 300
+    wrong = [(title, want, parse_title(title)["price"]) for title, want in rows if str(parse_title(title)["price"]) != want]
+    assert not wrong
+
+
 def test_parse_title_repeated_wording_stays_fast() -> None:
     """같은 말이 서른 번 되풀이된 제목도 곧바로 읽는다 (재귀가 있던 판은 2^n 으로 느려져 스무 번에 몇 초씩 걸렸다).
     금액마다 앞뒤 글만 보고 뒤로 한 번 훑으니 글 길이에 비례한다."""
