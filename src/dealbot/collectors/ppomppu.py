@@ -43,16 +43,20 @@ BROWSER_HEADERS = {
 }
 
 # "[쿠팡] 상품명 (12,900원/무료)" 형태. 끝 괄호 안의 괄호 한 겹("3,000원(3만↑무료)", "무료(와우)")과
-# 괄호 뒤의 짧은 꼬리말("와우", "카드할인")도 받는다 — 꼬리말은 가격 괄호 뒤일 때만 이름에서 뺀다
+# 괄호 뒤의 짧은 꼬리말("와우", "카드할인")도 받는다 — 꼬리말은 가격 괄호 뒤일 때만 이름에서 뺀다.
+# 이름은 공백 아닌 글자로 끝나고 그 뒤 공백은 되돌려 주지 않는다(\S\s*+) — 긴 공백 줄 뒤에 다른 글자가 오면
+# 공백마다 다시 훑어 세제곱으로 느려졌다 (공백 1,000칸에 약 2초)
 _TITLE_RE = re.compile(
-    r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.+?)\s*"
-    r"(?:\((?P<meta>(?:[^()]|\([^()]*\))*)\)\s*(?P<note>[^()]{0,15}?))?\s*$"
+    r"^\s*\[(?P<shop>[^\]]+)\]\s*(?P<name>.*?\S)\s*+"
+    r"(?:\((?P<meta>(?:[^()]|\([^()]*\))*)\)\s*+(?P<note>[^()]{0,15}?))?\s*+$"
 )
 # 괄호 속 금액 후보: "12,900원", "1.5만원", "3만5천원", "1만2000원", "12900"
 _AMOUNT_RE = re.compile(
     r"(?P<num>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?P<man>\s*만(?:\s*\d+\s*천|\d{1,4}(?![\d,]))?|\s*천)?(?P<won>\s*원)?"
 )
 _WON_RE = re.compile(r"\d\s*(?:[만천]\s*)?원")
+# '12,900' 처럼 세 자리마다 쉼표를 찍고 단위가 붙지 않은 수는 연식·모델 번호가 아니라 값 ('10,000피스' 는 아니다)
+_GROUPED_NUM = re.compile(r"\d{1,3}(?:,\d{3})+(?![\d가-힣A-Za-z])")
 _BEFORE_SLASH = re.compile(r"(?:[^/()]|\([^()]*\))*+")  # 가격 칸: 괄호 밖 첫 '/' 앞까지
 # 단위 없는 숫자 바로 뒤에 붙은 개수·용량 단위 — 가격이 아니다 ("100매 9,900원", "10,000mAh", "500ml 24개").
 # 곱하기 x 가 붙어 있어도 단위다 ("500mlx24개")
@@ -136,10 +140,10 @@ def parse_title(title: str) -> dict[str, Any]:
     if (
         (m.group("note") or "(" in meta)
         and not _SHIPPING_WORDS.search(shipping)
-        and (price is None or not _WON_RE.search(price_text))
+        and (price is None or not (_WON_RE.search(price_text) or _GROUPED_NUM.search(price_text)))
     ):
         # 가격 괄호가 아닌데 뒤에 말이 더 있거나 괄호가 겹친 제목("에어팟 프로 2 (USB-C) 화이트", "맥북 에어 (2024) 실버")은
-        # 통째로 이름. '원'도 배송비 칸도 없는 숫자 괄호는 연식·용량·모델 번호다
+        # 통째로 이름. '원'도 쉼표 찍은 수('12,900')도 배송비 칸도 없는 숫자 괄호는 연식·용량·모델 번호다
         whole = text[m.start("name"):].strip()
         return {"shop_tag": shop_tag, "name": whole, "price": _price_in_name(whole), "shipping": None}
     if meta and (meta.startswith("~") or _DATE_META.match(meta)):

@@ -341,6 +341,10 @@ def test_parse_title_repeated_wording_stays_fast() -> None:
             started = time.perf_counter()
             parse_title(title)
             assert time.perf_counter() - started < 0.05, unit
+    # 이름 뒤의 긴 공백 줄 — 이름 정규식이 공백마다 다시 훑던 때는 1,000칸에 2초쯤 걸렸다
+    started = time.perf_counter()
+    assert parse_title("[쿠팡] 상품" + " " * 3000 + "x")["name"].endswith("x")
+    assert time.perf_counter() - started < 0.05
 
 
 def test_parse_title_nested_shipping_and_trailing_note() -> None:
@@ -361,6 +365,12 @@ def test_parse_title_nested_shipping_and_trailing_note() -> None:
         t = parse_title(title)
         assert t["price"] is None and t["name"] == title.removeprefix("[쿠팡] "), title
     assert parse_title("[쿠팡] 상품 (12,900원) 와우") == {"shop_tag": "쿠팡", "name": "상품", "price": 12900, "shipping": None}
+    # 쉼표 찍은 수는 '원'이 없어도 값이다 (연식·용량·모델 번호에는 쉼표가 없다)
+    for title, price in (("[11번가] 상품 (12,900) 카드할인", 12900), ("[쿠팡] 상품 (12,900 쿠폰적용) 와우", 12900),
+                         ("[쿠팡] 상품 (1,290,000) 카드", 1290000), ("[쿠팡] 상품 (12,900(쿠폰가))", 12900)):
+        t = parse_title(title)
+        assert t["name"] == "상품" and t["price"] == price, title
+    assert parse_title("[쿠팡] 레고 (10,000피스) 세트")["name"] == "레고 (10,000피스) 세트"
     assert parse_title("[쿠팡] 상품 (옵션) 블랙 (12,900원/무료)")["name"] == "상품 (옵션) 블랙"
     t = parse_title("[토스] 9,900원 샴푸 (~9/13) 선착순")
     assert t["name"] == "9,900원 샴푸 (~9/13) 선착순" and t["price"] == 9900 and t["shipping"] is None
