@@ -442,13 +442,18 @@ class Database:
             )
             return int(cur.lastrowid or 0)
 
-    def held_since(self, product_id: str, since: datetime) -> Deal | None:
-        """since 이후 가격 대조로 보류한 같은 상품의 마지막 글 (같은 글을 다시 볼 때 메모를 또 보내지 않으려고)."""
-        row = self._one(
-            "SELECT payload FROM deal_queue WHERE product_id = ? AND status = 'held' AND updated_at >= ? ORDER BY id DESC LIMIT 1",
+    def held_since(self, product_id: str, since: datetime, *, price: int | None = None) -> Deal | None:
+        """since 이후 가격 대조로 보류한 같은 상품의 마지막 글 (같은 글을 다시 볼 때 메모를 또 보내지 않으려고).
+        price 를 주면 그 값(제목 가격)으로 보류한 글만 — 같은 상품의 값이 다른 두 글이 번갈아 보류돼도 같은 글을 또 알리지 않게."""
+        rows = self._q(
+            "SELECT payload FROM deal_queue WHERE product_id = ? AND status = 'held' AND updated_at >= ? ORDER BY id DESC",
             (product_id, to_iso(since)),
         )
-        return Deal.from_dict(json.loads(row["payload"])) if row else None
+        for row in rows:
+            deal = Deal.from_dict(json.loads(row["payload"]))
+            if price is None or deal.product.price == price:
+                return deal
+        return None
 
     def _row_to_queue_item(self, r: sqlite3.Row) -> QueueItem:
         return QueueItem(

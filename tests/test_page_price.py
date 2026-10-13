@@ -830,6 +830,103 @@ async def test_remembered_page_holds_only_the_post_it_held(bot: DealBot) -> None
     assert len(opened) == 2 and checks["naver:11223344556"]["status"] == "hold"
 
 
+def _items(bot: DealBot) -> list[tuple[str, int, str]]:
+    """그 상품의 대기열 글 (상태, 글 값, 가격 대조 결과)."""
+    items = bot.db.items_for_product("naver:11223344556", ("pending", "awaiting_link", "awaiting_autolink", "held"))
+    return sorted((it.status, it.deal.product.price, it.deal.product.extra["page_price"]["status"]) for it in items)
+
+
+async def test_hold_of_one_post_leaves_the_other_posts_of_the_product(bot: DealBot) -> None:
+    """같은 상품의 두 글: A '24개 6,410원'(#22 처럼 틀림)은 보류, B 14,000원은 24개 14,465원에 맞음. 5분마다 둘 다 다시 수집해
+    A 의 보류가 기억해 둔 페이지로 되풀이돼도 B 를 보류하거나 B 의 링크 요청을 보류 안내로 고치지 않는다. 메모는 A 한 번, 크롬도 한 번."""
+    clock = [1000.0]
+    _serve(bot, {})
+    opened = _chrome(bot, clock, _ok_page)
+    bot.store_browser.min_interval = 0
+    edits: list[int] = []
+
+    async def edit(message_id: int, text: str) -> bool:
+        edits.append(message_id)
+        return True
+
+    bot.notifier.edit = edit  # type: ignore[method-assign]
+    FakePageCollector.products = [_naver(price=6410), _naver(price=14000)]
+    await bot.run_collector(bot.collectors[0])
+    assert _items(bot) == [("held", 6410, "hold"), ("pending", 14465, "option")]
+    assert await bot.process_queue_once()  # B: 링크 요청
+    assert _items(bot) == [("awaiting_link", 14465, "option"), ("held", 6410, "hold")] and len(bot.link_requests) == 1  # type: ignore[attr-defined]
+    for _ in range(5):
+        clock[0] += 5 * 60
+        await bot.run_collector(bot.collectors[0])
+    assert _items(bot) == [("awaiting_link", 14465, "option"), ("held", 6410, "hold")]
+    assert [k for _, _, k, _ in bot.sent] == ["price_hold"] and edits == [] and len(opened) == 1  # type: ignore[attr-defined]
+
+
+async def test_old_hold_does_not_hold_a_new_cheaper_post(bot: DealBot) -> None:
+    """가게가 24개를 6,400원으로 내렸는데 크롬 한도로 새 글 B(6,400원)를 새로 못 읽으면 B 는 확인 못 함으로 진행한다.
+    A(6,410원, 내리기 전 페이지로 보류)의 보류가 기억해 둔 페이지로 되풀이돼도 B 를 보류·메모하지 않는다. B 를 새로 읽으면 맞음."""
+    clock = [1000.0]
+    _serve(bot, {})
+    page = {"html": _state_for}
+    opened = _chrome(bot, clock, lambda url: (200, url, page["html"](url)))
+    bot.store_browser.min_interval = 0
+    checks = _checks(bot)
+    FakePageCollector.products = [_naver(price=6410)]
+    await bot.run_collector(bot.collectors[0])
+    assert _items(bot) == [("held", 6410, "hold")]
+
+    page["html"] = lambda url: _state_for(url).replace('"price":8075', '"price":10')  # 24개 = 12개 6,390 + 차액 10
+    bot.page_reader.per_run = 0
+    FakePageCollector.products = [_naver(price=6410), _naver(price=6400)]
+    for _ in range(3):
+        clock[0] += 5 * 60
+        await bot.run_collector(bot.collectors[0])
+    assert _items(bot) == [("held", 6410, "hold"), ("pending", 6400, "unverified")]
+    assert [k for _, _, k, _ in bot.sent] == ["price_hold"] and len(opened) == 1  # type: ignore[attr-defined]
+
+    bot.page_reader.per_run = 1
+    clock[0] += 5 * 60
+    await bot.run_collector(bot.collectors[0])  # B 를 새로 읽음: 6,400 = 24개 옵션
+    assert len(opened) == 2 and checks["naver:11223344556"]["status"] == "option"
+    assert _items(bot) == [("held", 6410, "hold"), ("pending", 6400, "unverified")]  # 줄 선 B 는 그대로 (발행 직전 다시 봄)
+    assert len(bot.sent) == 1  # type: ignore[attr-defined]
+
+
+async def test_two_wrong_posts_of_one_product_are_held_once_each(bot: DealBot) -> None:
+    """같은 상품의 틀린 글 둘(6,410원·8,900원): 한 번씩 보류하고 메모도 한 번씩. 5분마다 다시 수집해도 번갈아 새 보류·메모를 만들지
+    않고(같은 제목 가격으로 보류한 글이 있으면 마지막 보류가 다른 값이어도 조용히), 크롬도 글마다 한 번만 연다."""
+    clock = [1000.0]
+    _serve(bot, {})
+    opened = _chrome(bot, clock, _ok_page)
+    bot.store_browser.min_interval = 0
+    FakePageCollector.products = [_naver(price=6410), _naver(price=8900)]
+    for _ in range(6):
+        await bot.run_collector(bot.collectors[0])
+        clock[0] += 5 * 60
+    assert _items(bot) == [("held", 6410, "hold"), ("held", 8900, "hold")]
+    assert [k for _, _, k, _ in bot.sent] == ["price_hold", "price_hold"] and len(opened) == 2  # type: ignore[attr-defined]
+
+
+async def test_hold_checks_another_queued_post_at_the_same_price_with_its_own_words(bot: DealBot) -> None:
+    """같은 제목 가격의 다른 글: 페이지를 못 읽어 줄 선 X(현대카드 11,200원)는, 카드 말 없는 Y(11,200원)가 새로 읽은 페이지로
+    보류돼도 X 의 말(카드가는 25% 까지)로 다시 대조하면 맞으니 그대로 둔다. Y 만 따로 보류하고 메모."""
+    clock = [1000.0]
+    _serve(bot, {})
+    opened = _chrome(bot, clock, _ok_page)
+    bot.store_browser.min_interval = 0
+    bot.page_reader.per_run = 0
+    FakePageCollector.products = [_naver(price=11200, title="[네이버] 풀무원 샘물 2L 24개 (현대카드 11,200원/무료)")]
+    await bot.run_collector(bot.collectors[0])  # 크롬 한도: 확인 못 함으로 줄 섬
+    assert _items(bot) == [("pending", 11200, "unverified")]
+
+    bot.page_reader.per_run = 1
+    clock[0] += 5 * 60
+    FakePageCollector.products = [_naver(price=11200, title="[네이버] 풀무원 샘물 2L 24개 (11,200원/무료)")]
+    await bot.run_collector(bot.collectors[0])
+    assert len(opened) == 1 and _items(bot) == [("held", 11200, "hold"), ("pending", 11200, "unverified")]
+    assert [k for _, _, k, _ in bot.sent] == ["price_hold"]  # type: ignore[attr-defined]
+
+
 async def test_browser_kept_page_only_confirms(bot: DealBot) -> None:
     """크롬이 발행 사진용으로 읽어 둔(30분) 페이지도 같다: 제목 가격이 맞으면 다시 안 열고, 보류가 될 값이면 지금 페이지를 새로 읽음."""
     clock = [1000.0]
