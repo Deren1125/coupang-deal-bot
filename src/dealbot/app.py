@@ -65,6 +65,8 @@ from dealbot.monitoring.admin import (
     AdminNotifier,
     StatusReporter,
     channel_post_base,
+    channel_post_ref,
+    is_telegram_url,
     kakao_fit,
     register_admin_handlers,
 )
@@ -117,8 +119,6 @@ KV_IG_OAUTH_STATE_AT = "instagram_oauth_state_at"
 IG_KV_USERNAME = "instagram_username"
 # 관리자가 넘겼거나 답하지 않은 글을 다시 묻기까지 (그사이 더 싸지면 바로 다시 물음)
 REASK_COOLDOWN = timedelta(days=3)
-# 텔레그램 채널 글 주소의 글 번호: https://t.me/채널이름/123, https://t.me/c/1234567890/123
-_CHANNEL_POST_RE = re.compile(r"t\.me/(?:c/\d+|[A-Za-z0-9_]+)/(\d+)")
 # 같은 상품을 다시 줄 세울 수 없는 열린 글 상태 (db 의 idx_queue_open_product_v3 와 같음)
 OPEN_STATUSES = ("pending", "awaiting_link", "awaiting_approval", autolink.STATUS)
 MARKET_NO_MATCH = "none"  # 쿠팡 검색에 맞는 상품이 없었음 (market_quotes 에 가격 0 으로 남김)
@@ -519,7 +519,12 @@ class DealBot:
         return f"🔄 곧 확인할게요: {', '.join(targets)} (1분 안에 시작)"
 
     @staticmethod
-    def _link_problem(item: QueueItem | None, queue_id: int, url: str) -> str | None:
+    def _maybe_posted(item: QueueItem | None) -> bool:
+        """보낸 뒤 텔레그램 답만 시간 초과 — 채널에 올라갔는지 모르는 글 ('❓ 채널에 올라갔는지 모릅니다' 알림)."""
+        return item is not None and item.status == "failed" and (item.last_error or "").startswith(MAYBE_POSTED)
+
+    @classmethod
+    def _link_problem(cls, item: QueueItem | None, queue_id: int, url: str) -> str | None:
         """링크를 붙일 수 없는 이유 (주인 답장·쇼핑커넥트 자동 링크 같은 기준). 붙일 수 있으면 None."""
         if item is None:
             return f"#{queue_id} 번 글이 없습니다. /queue 나 /pending 에서 번호를 확인해 주세요."
@@ -529,10 +534,22 @@ class DealBot:
             return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없습니다."
         if not url.startswith("http"):
             return "링크는 http:// 또는 https:// 로 시작해야 합니다."
+        if is_telegram_url(url):
+            # 채널 글·채널·초대 주소는 제휴·상품 링크가 아니다. 붙이면 같은 딜이 그 주소를 링크로 다시 올라가고,
+            # 그 상품의 '내 링크'(mylink)로 남아 다음 딜에도 쓰인다 (리뷰 지적 10/13)
+            if cls._maybe_posted(item):
+                return (f"텔레그램 주소는 상품 링크가 아니라 붙이지 않았어요. 채널에 그 글이 있으면 "
+                        f"<code>/posted {queue_id}</code> (채널 글 링크를 붙이면 품절 표시도 돼요), "
+                        f"없으면 <code>/link {queue_id} 상품 링크</code> 로 다시 올려 주세요.")
+            return "텔레그램 주소(t.me)는 제휴·상품 링크가 아니라 붙일 수 없어요. 그 몰 앱에서 만든 제휴 링크를 보내 주세요."
         return None
 
     async def attach_link(self, queue_id: int, url: str) -> str:
         item = self.db.get_queue_item(queue_id)
+        if self._maybe_posted(item) and channel_post_ref(url) is not None:
+            # '채널에 올라갔는지 모름' 글에 채널 글 링크로 답함(답장·/link·일괄 줄) = 채널에 있다는 뜻
+            # → 그 주소를 링크로 붙여 다시 올리지 않고 /posted 처럼 올라간 글로 기록한다 (그 글 번호로 품절 표시도)
+            return await self.mark_posted(queue_id, url)
         problem = self._link_problem(item, queue_id, url)
         if problem or item is None:
             return problem or ""
@@ -579,28 +596,51 @@ class DealBot:
         item = self.db.get_queue_item(queue_id)
         if item is None:
             return f"#{queue_id} 번 글이 없습니다."
-        if item.status != "failed" or not (item.last_error or "").startswith(MAYBE_POSTED):
+        if not self._maybe_posted(item):
             return f"#{queue_id} 번은 '채널에 올라갔는지 모름' 글이 아닙니다 (지금 '{item.status}' 상태)."
         deal = item.deal
-        m = _CHANNEL_POST_RE.search(link or "")
+        message_id, note = self._own_post_number(link)
+        note = f"\n{note}" if note else ""
         info = deal.product.deal_kind == "info"
         # 사진은 보낼 때처럼 확인된 상품 사진 (블로그·인스타가 쓴다). 정보 글은 본문이 없어 기록만 한다
         photo = None if info else await self.deal_photo(deal)
         self.db.record_post(
             deal,
             channel_id=str(self.publisher.channel_id) if self.publisher.channel_id is not None else None,
-            message_id=int(m.group(1)) if m else None,
+            message_id=message_id,
             dry_run=self.publisher.dry_run,
             now=utcnow(),
         )
         self.db.update_queue_item(queue_id, status="published", deal=deal)
         self.notifier.resolve(f"unsure:{queue_id}")
-        self.db.log_event("INFO", "publish", f"{deal.product.product_id} 주인이 채널에서 확인 (/posted #{queue_id})")
+        self.db.log_event("INFO", "publish", f"{deal.product.product_id} 주인이 채널에서 확인 (/posted #{queue_id})"
+                          + (f" 채널 글 {message_id}" if message_id else ""))
         if info:
-            return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요."
+            return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요.{note}"
         self.export_published(deal, photo)
         await self._publish_side_channels(deal, photo=photo, deal_no=queue_id)
-        return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요. 블로그·스레드·인스타 차례도 이어서 처리했어요."
+        return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요. 블로그·스레드·인스타 차례도 이어서 처리했어요.{note}"
+
+    def _own_post_number(self, link: str) -> tuple[int | None, str]:
+        """주인이 준 채널 글 링크 → (우리 채널의 글 번호, 번호를 쓰지 않은 까닭). 품절 표시는 이 번호의 우리 채널 글을 고쳐 쓰므로
+        다른 채널의 글 번호를 쓰면 우리 채널의 엉뚱한 글을 덮어쓴다 → 우리 채널이 아닌 게 분명하면 번호를 쓰지 않는다
+        (공개 채널은 이름, 비공개 채널은 -100 뒤 숫자로 비교. 우리 채널을 알 수 없으면 링크를 믿음)."""
+        link = (link or "").strip()
+        if not link:
+            return None, ""
+        ref = channel_post_ref(link)
+        if ref is None:
+            return None, "(채널 글 링크가 아니라 글 번호는 기록하지 않았어요 — 이 글은 품절 표시가 안 돼요)"
+        where, number = ref
+        cid = str(self.publisher.channel_id or "")
+        if where.startswith("c/"):
+            theirs, ours = where[2:], (cid[4:] if cid.startswith("-100") else None)
+        else:
+            base = self.notifier.channel_post_base
+            theirs, ours = where.lower(), (base.rsplit("/", 1)[-1].lower() if base else None)
+        if ours is not None and theirs != ours:
+            return None, "(우리 채널 글 링크가 아니라 글 번호는 기록하지 않았어요 — 이 글은 품절 표시가 안 돼요)"
+        return number, ""
 
     def approve_item(self, queue_id: int, text: str | None = None) -> str:
         """정보 글 확인 요청에 대한 답: 그대로(또는 관리자가 고쳐 쓴 본문으로) 올릴 차례에 넣는다."""
@@ -1725,7 +1765,7 @@ class DealBot:
             return "ok", None
         except ManualLinkRequired as e:
             saved = self.db.kv_get(f"mylink:{deal.product.product_id}")
-            if saved:  # 전에 관리자가 만들어 준 같은 상품의 내 링크
+            if saved and not is_telegram_url(saved):  # 전에 관리자가 만들어 준 같은 상품의 내 링크 (예전에 잘못 남은 채널 글 주소는 안 씀)
                 deal.affiliate_url = saved
                 return "ok", None
             if self.settings.publish.dry_run:

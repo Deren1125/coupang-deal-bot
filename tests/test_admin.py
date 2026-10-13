@@ -445,3 +445,20 @@ def test_batch_reply_lines_parse() -> None:
     assert _BATCH_LINE_RE.match("#677 ok").group(2).lower() in _BATCH_OK
     for line in ("https://toss.im/share/abc", "675", "그냥 메시지", "675 이거 괜찮네"):
         assert _BATCH_LINE_RE.match(line) is None, line
+
+
+def test_telegram_address_helpers() -> None:
+    """채널 글 링크(품절 표시용 글 번호)와 텔레그램 주소 가리기: t.me 주소는 제휴·상품 링크로 붙지 않는다 (리뷰 지적 10/13)."""
+    from dealbot.monitoring.admin import channel_post_ref, is_telegram_url
+
+    assert channel_post_ref("https://t.me/hot_deal_and_info/321") == ("hot_deal_and_info", 321)
+    assert channel_post_ref("https://t.me/c/1234567890/55?single") == ("c/1234567890", 55)
+    assert channel_post_ref("https://t.me/s/hot_deal_and_info/7") == ("hot_deal_and_info", 7)
+    assert channel_post_ref("http://TELEGRAM.ME/hot_deal_and_info/8/") == ("hot_deal_and_info", 8)
+    for url in ("https://t.me/hot_deal_and_info", "https://t.me/s/hot_deal_and_info", "https://t.me/+AbCdEf123",
+                "https://example.com/t.me/x/1", "https://www.coupang.com/vp/products/1", "https://web.telegram.org/k/1/2"):
+        assert channel_post_ref(url) is None, url
+    for url in ("https://t.me/+AbCdEf123", "https://web.telegram.org/k/#@x", "http://TELEGRAM.ME/x", "https://www.t.me/x/1"):
+        assert is_telegram_url(url), url
+    for url in ("https://www.coupang.com/vp/products/1", "https://example.com/?u=https://t.me/x/1", "https://nott.me/x/1", "not a url"):
+        assert not is_telegram_url(url), url

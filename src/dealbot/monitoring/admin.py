@@ -16,6 +16,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -348,6 +349,35 @@ def channel_post_base(channel_id: str | int | None, telegram_url: str = "") -> s
     return None
 
 
+# 텔레그램 주소 (채널 글·채널·초대 링크·웹 텔레그램)는 제휴·상품 링크가 아니다 (리뷰 지적 10/13: 채널 글 링크가 제휴 링크로 붙었다)
+_TELEGRAM_HOSTS = ("t.me", "telegram.me", "telegram.dog", "telegram.org")
+_POST_HOSTS = ("t.me", "telegram.me", "telegram.dog")
+# 채널 글 주소의 경로: /채널이름/123 · /c/1234567890/123 (비공개 채널) · /s/채널이름/123 (웹 미리보기)
+_CHANNEL_POST_PATH_RE = re.compile(r"^/(?:s/)?(c/\d+|[A-Za-z]\w*)/(\d+)/?$")
+
+
+def _url_host(url: str) -> str:
+    try:
+        host = (urlparse((url or "").strip()).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def is_telegram_url(url: str) -> bool:
+    """텔레그램 주소인지 (t.me·telegram.me·telegram.org 와 그 하위 주소)."""
+    host = _url_host(url)
+    return any(host == h or host.endswith("." + h) for h in _TELEGRAM_HOSTS)
+
+
+def channel_post_ref(url: str) -> tuple[str, int] | None:
+    """텔레그램 채널 글 주소 → (채널 이름 또는 'c/내부번호', 글 번호). 채널 글 주소가 아니면 None."""
+    if _url_host(url) not in _POST_HOSTS:
+        return None
+    m = _CHANNEL_POST_PATH_RE.match(urlparse(url.strip()).path)
+    return (m.group(1), int(m.group(2))) if m else None
+
+
 class AdminNotifier:
     def __init__(
         self,
@@ -612,7 +642,8 @@ class AdminNotifier:
             f"❓ <b>채널에 올라갔는지 모릅니다 #{queue_id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
             f"{html.escape(truncate(p.name, 80))}\n"
             f"텔레그램 답이 늦어(시간 초과) 두 번 올라가지 않게 다시 보내지 않았어요. 채널을 확인해 주세요.\n"
-            f"· 채널에 있으면 <code>/posted {queue_id}</code> (채널 글 링크를 붙이면 품절 표시도 돼요) — 블로그·스레드·인스타로 이어서 올려요\n"
+            f"· 채널에 있으면 <code>/posted {queue_id}</code> 또는 이 메시지에 채널 글 링크(t.me)로 답장 (링크가 있으면 품절 표시도 돼요)"
+            f" — 블로그·스레드·인스타로 이어서 올려요\n"
             f"· 채널에 없으면 <code>/link {queue_id} {html.escape(link)}</code> 로 다시 올려 주세요\n"
             f"이유: <code>{html.escape(error[:300])}</code>"
         )
@@ -1272,7 +1303,7 @@ HELP_TEXT = HELP_NL + (
     "\n<b>글 올리기·다루기</b>\n"
     "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다.\n"
     "/skip 번호 — 그 글은 올리지 않고 건너뜁니다. 품절이거나 별로일 때. 번호는 링크 요청 메시지나 /queue 에 있습니다.\n"
-    "/posted 번호 [채널 글 링크] — 봇이 '채널에 올라갔는지 모릅니다 #번호' 를 보냈는데 채널에 그 글이 있으면 보냅니다. 올라간 글로 기록하고 블로그·스레드·인스타로 이어서 올립니다 (채널 글 링크를 붙이면 품절 표시도 됩니다). 채널에 없으면 /link 번호 링크 로 다시 올립니다.\n"
+    "/posted 번호 [채널 글 링크] — 봇이 '채널에 올라갔는지 모릅니다 #번호' 를 보냈는데 채널에 그 글이 있으면 보냅니다. 올라간 글로 기록하고 블로그·스레드·인스타로 이어서 올립니다 (채널 글 링크를 붙이면 품절 표시도 됩니다). 그 메시지에 답장으로 채널 글 링크(t.me)만 보내도 됩니다. 채널에 없으면 /link 번호 상품 링크 로 다시 올립니다 (텔레그램 주소는 상품 링크로 붙지 않습니다).\n"
     "/ok 번호 — 봇이 '정품 확인 필요 #번호'(오픈마켓인데 공식 판매처 표시가 없음) 나 '정보 글 확인 #번호' 를 보내면, 확인했다는 뜻으로 보냅니다. 정품 확인이면 링크를 만들어 올리고, 정보 글이면 그대로 올립니다. 정보 글은 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
     "/post — 내가 찾은 딜을 직접 올립니다. 아래처럼 보내면 맨 앞 차례로 채널에 올라갑니다 (연습 모드에서는 미리보기만).\n"
     "<code>/post\n[머리글, 없으면 생략]\n상품: 상품명\n가격: 14,890원\nhttps://내가-만든-제휴-링크</code>\n"

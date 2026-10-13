@@ -782,6 +782,118 @@ async def test_posted_command_passes_the_number_and_channel_link(env: Env) -> No
     assert env.texts[:2] == ["✅ #12 기록", "✅ #13 기록"] and "/posted 12" in env.texts[-1] and not env.relayed
 
 
+async def test_words_that_an_unsure_deal_is_in_the_channel_become_posted(env: Env) -> None:
+    """'❓ 채널에 올라갔는지 모릅니다 #번호' 에 '채널에 올라가 있어' 처럼 말로 답해도 /posted 로 (되돌리기 어려우니 확인 버튼).
+    채널 글 링크는 메시지에 그대로 있는 주소만 쓴다. AI 가 안 될 때도 /posted 를 알려 준다."""
+    q = add_item(env.db, "데켓 주물", shop="coupang", status="failed", url="https://www.coupang.com/vp/products/1")
+    note = env.bot_msg(f"❓ <b>채널에 올라갔는지 모릅니다 #{q}</b> [쿠팡]\n· 채널에 있으면 /posted {q} · 없으면 /link {q} …", q=q)
+    assert env.db.admin_msg(note.message_id)["kind"] == "unsure"
+    with_llm(env, ans("/posted", q))
+    await env.text("채널에 올라가 있어", reply_to=note)
+    assert env.ctrl.named("mark_posted") == [] and f"/posted {q}" in env.texts[-1]
+    await env.press(env.press_data("실행"))
+    assert env.ctrl.named("mark_posted") == [("mark_posted", q, "")]
+    with_llm(env, ans("/posted", q, "https://t.me/hot_deal_and_info/999"))  # AI 가 만든 주소는 쓰지 않음
+    await env.text(f"{q}번 채널에 있어 https://t.me/hot_deal_and_info/321")
+    assert "/posted" in env.texts[-1] and "https://t.me/hot_deal_and_info/321" in env.texts[-1]
+    await env.press(env.press_data("실행"))
+    assert env.ctrl.named("mark_posted")[-1] == ("mark_posted", q, "https://t.me/hot_deal_and_info/321")
+    with_llm(env, ans("/posted", q, "https://www.coupang.com/vp/products/1"))  # 상품 링크는 채널 글 링크가 아님 → 번호만
+    await env.text(f"{q}번 채널에 있어 https://www.coupang.com/vp/products/1")
+    await env.press(env.press_data("실행"))
+    assert env.ctrl.named("mark_posted")[-1] == ("mark_posted", q, "")
+    with_llm(env, LLMError("x"))
+    await env.text("채널에 올라가 있어", reply_to=note)
+    assert f"/posted {q}" in env.texts[-1] and len(env.ctrl.named("mark_posted")) == 3
+    assert env.ctrl.named("attach_link") == []
+
+
+async def test_channel_post_link_reply_to_unsure_notice_is_recorded_not_attached(settings: Settings) -> None:
+    """리뷰 지적 (7f8ef13): '❓ 채널에 올라갔는지 모릅니다 #번호' 에 채널 글 링크(t.me)로 답장하면 on_text 가 그 주소를 그대로
+    attach_link 에 넘겨 failed → pending, 같은 딜이 t.me 링크로 또 올라가고 그 상품의 '내 링크'로도 남았다.
+    진짜 딜봇을 컨트롤러로 끝까지: 답장·/link·/posted 의 채널 글 링크는 모두 '올라간 글로 기록'(다시 안 올림),
+    채널 글이 아닌 텔레그램 주소는 붙이지 않고 안내, 진짜 상품 링크는 (❓ 답장이든 🔗 링크 요청 답장이든) 그대로 붙는다."""
+    from dealbot.app import DealBot
+    from dealbot.storage.db import MAYBE_POSTED
+
+    settings.collectors = []
+    bot = DealBot(settings)
+    try:
+        env = Env(settings, bot.db, FakeLLM(ans("none")))
+        env.nl = bot.nl  # 알림 기록·답장 대상 판단을 진짜 딜봇의 것으로
+        bot.nl.asker, bot.nl.bot_id = env.llm, BOT_ID  # 진짜 AI 는 부르지 않음
+        env.app = FakeApp()
+        register_admin_handlers(env.app, admin_chat_id=ADMIN, reporter=bot.reporter, controller=bot, nl=bot.nl)  # type: ignore[arg-type]
+        notices: list[Msg] = []
+
+        async def send_with_id(text: str, *, silent: bool = False, loud: bool = False, kind: str = "",
+                               queue_id: int | None = None) -> int:
+            m = env.bot_msg(text, kind=kind, q=queue_id)  # 진짜처럼 보낸 메시지를 기록
+            notices.append(m)
+            return m.message_id
+
+        bot.notifier.send_with_id = send_with_id  # type: ignore[method-assign]
+        side: list[int | None] = []
+
+        async def side_channels(deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
+            side.append(deal_no)
+
+        bot._publish_side_channels = side_channels  # type: ignore[method-assign]
+
+        async def unsure(n: int) -> tuple[int, Msg]:
+            qid = add_item(bot.db, f"주물팬 {n}", shop="coupang", status="pending", url=f"https://www.coupang.com/vp/products/{n}")
+            await bot._handle_publish_failure(bot.db.get_queue_item(qid), "TimedOut: Timed out", maybe_posted=True)
+            assert bot.db.get_queue_item(qid).last_error.startswith(MAYBE_POSTED)
+            return qid, next(m for m in reversed(notices) if (m.text or "").startswith(f"❓ <b>채널에 올라갔는지 모릅니다 #{qid}</b>"))
+
+        def post_link(n: int) -> str:
+            return f"{bot.notifier.channel_post_base}/{n}"
+
+        def check_recorded(qid: int, n: int, message_id: int) -> None:
+            it = bot.db.get_queue_item(qid)
+            assert it.status == "published" and it.deal.affiliate_url is None  # t.me 가 딜 링크로 붙지 않음
+            assert bot.db.kv_get(f"mylink:coupang:주물팬 {n}") is None  # 다음 딜에 쓰일 '내 링크'로도 남지 않음
+            assert bot.db.latest_post(f"coupang:주물팬 {n}")["message_id"] == message_id
+
+        # (1) ❓ 알림에 채널 글 링크로 답장
+        a, note_a = await unsure(1)
+        await env.text(post_link(321), reply_to=note_a)
+        assert env.texts[-1].startswith(f"✅ #{a} 번을 채널에 올라간 글로 기록했어요"), env.texts[-1]
+        check_recorded(a, 1, 321)
+        # (2) /link 번호 채널 글 링크
+        b, _ = await unsure(2)
+        await env.app.cb("cmd_link")(update(env.msg(f"/link {b} {post_link(322)}")), SimpleNamespace(args=[str(b), post_link(322)]))
+        assert env.texts[-1].startswith(f"✅ #{b} 번을 채널에 올라간 글로 기록했어요"), env.texts[-1]
+        check_recorded(b, 2, 322)
+        # (3) /posted 번호 채널 글 링크
+        c, _ = await unsure(3)
+        await env.app.cb("cmd_posted")(update(env.msg(f"/posted {c} {post_link(323)}")), SimpleNamespace(args=[str(c), post_link(323)]))
+        assert env.texts[-1].startswith(f"✅ #{c} 번을 채널에 올라간 글로 기록했어요"), env.texts[-1]
+        check_recorded(c, 3, 323)
+        assert side == [a, b, c]
+        # (4) 채널 글이 아닌 텔레그램 주소(채널 주소)는 붙이지 않고 /posted·/link 안내 → 진짜 상품 링크면 다시 올릴 차례로
+        d, note_d = await unsure(4)
+        await env.text(bot.notifier.channel_post_base or "https://t.me/x", reply_to=note_d)
+        assert "상품 링크가 아니라" in env.texts[-1] and f"/posted {d}" in env.texts[-1]
+        assert bot.db.get_queue_item(d).status == "failed"
+        await env.text("https://www.coupang.com/vp/products/4?src=me", reply_to=note_d)
+        assert "상품 링크 완료" in env.texts[-1]
+        it = bot.db.get_queue_item(d)
+        assert it.status == "pending" and it.deal.affiliate_url == "https://www.coupang.com/vp/products/4?src=me"
+        # (5) 링크 요청(🔗)에 t.me 답장 → 거절, 진짜 링크 답장 → 붙음
+        e = add_item(bot.db, "핫도그", shop="toss", status="awaiting_link")
+        req = env.bot_msg(f"🔗 <b>내 링크가 필요합니다 #{e}</b> [토스쇼핑]", kind="link", q=e)
+        await env.text(post_link(324), reply_to=req)
+        assert "텔레그램 주소(t.me)는 제휴·상품 링크가 아니라" in env.texts[-1]
+        assert bot.db.get_queue_item(e).status == "awaiting_link" and bot.db.kv_get("mylink:toss:핫도그") is None
+        await env.text("https://toss.im/_m/MYLINK", reply_to=req)
+        assert "상품 링크 완료" in env.texts[-1] and bot.db.get_queue_item(e).status == "pending"
+        assert bot.db.kv_get("mylink:toss:핫도그") == "https://toss.im/_m/MYLINK"
+        assert env.llm is not None and env.llm.calls == []  # 모두 정해진 흐름 (AI 없이)
+    finally:
+        bot.db.close()
+
+
 def test_every_catalog_command_has_a_registered_handler(env: Env) -> None:
     """목록에 넣은 명령은 모두 딜봇의 실제 명령 처리 함수로 실행된다 (/post 는 주인의 원래 글로 submit_manual)."""
     registered = {c for h, _ in env.app.handlers for c in getattr(h, "commands", ())}

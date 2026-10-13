@@ -43,7 +43,7 @@ MAX_ALSO = 3
 ASK_GRACE = 5  # AI 호출 상한 = timeout_seconds + 이만큼 (API 는 시간 초과 뒤 한 번 더 시도해서 더 걸릴 수 있음)
 REGISTRY_DAYS = 30  # 보낸 메시지 기록을 이만큼 남긴다 (매일 정리). 이보다 오래된 메시지는 기록이 없어도 블로그 것이라 단정하지 않음
 # 한 딜에 대해 보낸 메시지 (보낼 때 정한 번호를 믿음). 그 밖의 것(📌 고정 공지처럼 고쳐 쓰는 메시지)은 지금 글의 #번호로 본다
-_ITEM_KINDS = frozenset({"link", "review_auth", "review_info", "link_done", "soldout"})
+_ITEM_KINDS = frozenset({"link", "review_auth", "review_info", "link_done", "soldout", "unsure"})
 
 # ---------------------------------------------------------------- 주인에게 보이는 말
 ECHO = "이렇게 이해했어요: {plain} ({canonical})"
@@ -113,6 +113,8 @@ DEAL_CATALOG: tuple[Cmd, ...] = (
         examples=("677 정품 맞아 올려", "이대로 올려")),
     Cmd("/link", "/link {post} {args}", "#{post} 딜에 이 링크 붙여 채널에 올리기", "irreversible", needs_post=True,
         args="URL", url_arg=True, examples=("토스 링크 이거야 https://…",)),
+    Cmd("/posted", "/posted {post} {args}", "#{post} 딜을 채널에 올라간 글로 기록 (다시 올리지 않음)", "irreversible", needs_post=True,
+        args="채널 글 링크 https://t.me/… (없으면 빈칸)", examples=("채널에 올라가 있어", "채널에 있어 https://t.me/…")),
     Cmd("/post", "/post", "이 딜을 채널에 직접 올리기", "irreversible",
         examples=("이거 올려줘 상품 ○○ 14,890원 https://…",)),
     Cmd("/threadstest", "/threadstest {post}", "스레드에 샘플(또는 #{post}) 글 실제로 올려 보기", "irreversible", post_optional=True),
@@ -146,6 +148,7 @@ _CONNECT_WORDS = re.compile(r"쇼핑|커넥트|링크")
 _TYPED_ID = re.compile(r"#(\d{1,7})\b|(?<![\d,.])(\d{1,7})\s*번|^\s*(\d{1,7})(?=\s|$)")  # "#675" "675번" 맨 앞 "675 …"
 _CHIT_SYMBOLS = re.compile(r"^[\sㅋㅎㅠㅜ~!?.👍🙏❤️]+$")
 _CHIT_WORDS = re.compile(r"고마워|감사|수고|ㄱㅅ|굿|좋아요?")
+_TELEGRAM_POST_HOSTS = ("t.me", "telegram.me", "telegram.dog")  # 채널 글 링크 (/posted 의 인자)
 _SEARCH_JUNK = re.compile(r"\s*(?:찾아\s*줘|찾아|검색해?\s*줘?|있어\??|들어온\s*적)\s*$")
 
 
@@ -158,7 +161,8 @@ def msg_kind(text: str) -> str:
     t = strip_html(text).lstrip()
     if t.startswith("📌"):
         return "pending"
-    for mark, kind in (("🔗", "link"), ("🔎", "review_auth"), ("📝", "review_info"), ("⛔", "soldout"), ("🗂", "queue")):
+    for mark, kind in (("🔗", "link"), ("🔎", "review_auth"), ("📝", "review_info"), ("⛔", "soldout"), ("🗂", "queue"),
+                       ("❓", "unsure")):  # ❓ 채널에 올라갔는지 모릅니다 #번호
         if t.startswith(mark):
             return kind
     if t.startswith("✅ 상품 링크 완료"):
@@ -279,6 +283,8 @@ SYSTEM = f"""당신은 핫딜 텔레그램 봇 '딜봇' 관리자 챗의 말 명
 - '멈춰'·'재개' 가 딜봇인지 블로그인지 애매하면 /pause·/resume 으로 둡니다 (코드가 다시 물어봅니다).
 - '올리지 마'·'패스'·'품절이야' 는 /skip, '정품 맞아'·'이대로 올려'·'좋아 올려' 는 확인 요청 딜의 /ok 입니다.
 - 링크 요청(🔗) 딜에 만든 링크를 주면 /link (args 는 그 URL). 상품 이름·가격과 링크를 같이 보내며 올려 달라면 직접 올리기 /post.
+- '채널에 올라갔는지 모릅니다(❓)' 딜이 채널에 있다는 말('채널에 올라가 있어'·'채널에 있어')이나 채널 글 링크(t.me)는 /posted
+  (args 는 그 t.me 주소, 없으면 ""). 텔레그램 주소(t.me)는 /link 의 링크가 아닙니다.
 - 정보 글 확인(📝) 에 '제목 짧게' 처럼 짧게 고쳐 달라는 말은 ask, question 은 "{INFO_BODY_ASK}".
 - 사진·파일로 할 수 있는 딜봇 명령은 없습니다 (블로그 글 사진이면 blog).
 - URL·인증 코드는 메시지에서 그대로 복사합니다. 절대 만들어 내지 않습니다.
@@ -565,6 +571,10 @@ class NLRouter:
             if not url:
                 return Decision("ask", reply=NEED_URL)
             act.args = url
+        elif cmd.name == "/posted":  # 채널 글 링크(텔레그램 주소)는 메시지에 그대로 있을 때만. 없으면 번호만 (상품 링크는 넣지 않음)
+            tg = [u for u in urls if url_host(u).lower().removeprefix("www.") in _TELEGRAM_POST_HOSTS]
+            given = [u for u in find_urls(act.args) if u in tg]
+            act.args = given[0] if given else (tg[0] if len(tg) == 1 else "")
         elif cmd.name in ("/threadscode", "/instacode"):
             code = act.args.split()[0] if act.args.split() else ""
             if not code or code not in text:
@@ -617,6 +627,7 @@ class NLRouter:
         out: list[str] = []
         rules: list[tuple[str, str]] = [
             (r"올리지\s*마|패스|품절|건너뛰", f"/skip {n}"),
+            (r"올라가\s*있|채널에\s*있", f"/posted {n}"),
             (r"올려|정품\s*맞", f"/ok {n}"),
             (r"링크", f"/link {n} 링크"),
             (r"대기", "/queue"),

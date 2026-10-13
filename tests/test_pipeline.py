@@ -185,7 +185,8 @@ async def test_posted_records_an_unsure_post_and_runs_what_was_skipped(bot: Deal
     assert not export.exists()
 
     assert "없습니다" in await bot.mark_posted(item.id + 1)  # 없는 번호
-    reply = await bot.mark_posted(item.id, "https://t.me/oneul_hotdeal/321")
+    # 우리 채널의 글 링크 (다른 채널 글 번호는 품절 표시에 쓰지 않음 — 아래 test_posted_link_from_another_channel_…)
+    reply = await bot.mark_posted(item.id, f"{bot.notifier.channel_post_base}/321")
     assert reply.startswith(f"✅ #{item.id} 번을 채널에 올라간 글로 기록했어요")
     assert bot.db.get_queue_item(item.id).status == "published" and sent == ["coupang:1"]  # 다시 보내지 않음
     assert bot.db.latest_post("coupang:1")["message_id"] == 321
@@ -194,6 +195,97 @@ async def test_posted_records_an_unsure_post_and_runs_what_was_skipped(bot: Deal
     assert "아닙니다" in await bot.mark_posted(item.id)  # 두 번 기록하지 않음
     await bot.run_collector(bot.collectors[0])  # 게시판이 같은 딜을 또 돌려줘도
     assert bot.db.queue_counts() == {"published": 1}
+
+
+async def _unsure_items(bot: DealBot, *pids: str) -> tuple[list, list[str], list[int | None]]:  # type: ignore[type-arg]
+    """보낸 뒤 텔레그램 답만 시간 초과 → '채널에 올라갔는지 모름'(failed · maybe posted) 글들. (글들, 채널에 보낸 상품, 뒷일 번호)."""
+    FakeCollector.products = [_p(pid, 5000, discount_rate=50) for pid in pids]
+    await bot.run_collector(bot.collectors[0])
+    sent: list[str] = []
+    side: list[int | None] = []
+
+    async def timed_out(deal, **_kw):  # type: ignore[no-untyped-def]
+        sent.append(deal.product.product_id)
+        return PublishResult(ok=False, error="TimedOut: Timed out", maybe_posted=True)
+
+    async def side_channels(deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
+        side.append(deal_no)
+
+    bot.publisher.publish = timed_out  # type: ignore[method-assign]
+    bot._publish_side_channels = side_channels  # type: ignore[method-assign]
+    bot.settings.publish.max_per_hour = 10
+    while await bot.process_queue_once():
+        pass
+    items = [bot.db.items_for_product(f"coupang:{pid}", ("failed",))[0] for pid in pids]
+    return items, sent, side
+
+
+async def test_channel_post_link_on_an_unsure_post_records_it_instead_of_reposting(bot: DealBot) -> None:
+    """리뷰 지적 (7f8ef13): '채널에 올라갔는지 모릅니다' 글에 채널 글 링크(t.me)를 붙이면(/link·답장·일괄 줄 모두 attach_link)
+    그 주소가 제휴 링크가 되어 failed → pending, 다음 차례에 같은 딜이 t.me 링크로 또 올라가고 그 상품의 '내 링크'로도 남았다.
+    채널 글 링크 = 채널에 있다는 뜻 → /posted 처럼 다시 보내지 않고 올라간 글로 기록한다 (그 글 번호로 품절 표시)."""
+    (item,), sent, side = await _unsure_items(bot, "1")
+    post_link = f"{bot.notifier.channel_post_base}/321"
+    reply = await bot.attach_link(item.id, post_link)
+    assert reply.startswith(f"✅ #{item.id} 번을 채널에 올라간 글로 기록했어요"), reply
+    after = bot.db.get_queue_item(item.id)
+    assert after.status == "published" and after.deal.affiliate_url == item.deal.affiliate_url  # t.me 가 링크로 붙지 않음
+    assert bot.db.kv_get("mylink:coupang:1") is None  # 다음 딜에 다시 쓰일 '내 링크'로도 남지 않음
+    assert bot.db.latest_post("coupang:1")["message_id"] == 321 and side == [item.id]
+    assert not await bot.process_queue_once() and sent == ["coupang:1"]  # 다시 올리지 않음
+
+
+async def test_telegram_address_is_never_attached_as_a_deal_link(bot: DealBot, settings: Settings) -> None:
+    """t.me·telegram.me·telegram.org 주소는 어느 글에도 제휴·상품 링크로 붙지 않는다 (주인에게 까닭을 알림).
+    '채널에 올라갔는지 모름' 글에 채널 글이 아닌 텔레그램 주소(채널·초대 링크)를 주면 /posted·/link 를 안내한다.
+    예전에 잘못 남은 t.me '내 링크'는 같은 상품이 다시 나와도 쓰지 않고 링크를 다시 묻는다. 진짜 상품 링크는 그대로 붙는다."""
+    settings.publish.dry_run = False  # 연습 모드에서는 링크 요청을 생략하므로 실제 모드로
+    toss = Product(source="fake", product_id="toss:ABC", shop="toss", name="토스 핫도그", price=14890,
+                   url="https://toss.im/_m/ABC", recommend_count=9)
+    FakeCollector.products = [toss]
+    bot.db.kv_set("mylink:toss:ABC", "https://t.me/hot_deal_and_info/321")  # 고치기 전 버전이 남긴 잘못된 '내 링크'
+    await bot.run_collector(bot.collectors[0])
+    assert await bot.process_queue_once()
+    assert bot.db.queue_counts() == {"awaiting_link": 1}  # t.me 를 재사용해 올리지 않고 링크를 다시 물음
+    item = bot.db.awaiting_items()[0]
+    for url in ("https://t.me/hot_deal_and_info/321", "https://telegram.me/hot_deal_and_info", "https://t.me/+AbCdEf123",
+                "https://web.telegram.org/k/#@hot_deal_and_info", "http://T.ME/hot_deal_and_info/9?single"):
+        msg = await bot.attach_link(item.id, url)
+        assert "텔레그램 주소" in msg and "제휴" in msg, (url, msg)
+        assert bot.attach_auto_link(item.id, url) is not None
+    now = bot.db.get_queue_item(item.id)
+    assert now.status == "awaiting_link" and now.deal.affiliate_url is None
+    assert bot.db.kv_get("mylink:toss:ABC") == "https://t.me/hot_deal_and_info/321"  # 그대로 (덮어쓰지도 않음)
+
+    msg = await bot.attach_link(item.id, "https://toss.im/_m/MYLINK")  # 진짜 상품 링크는 그대로 붙는다
+    assert "상품 링크 완료" in msg and bot.db.queue_counts() == {"pending": 1}
+    assert bot.db.kv_get("mylink:toss:ABC") == "https://toss.im/_m/MYLINK"
+
+    settings.publish.dry_run = True
+    (unsure,), sent, _side = await _unsure_items(bot, "7")
+    for url in ("https://t.me/hot_deal_and_info", "https://t.me/+AbCdEf123"):  # 채널 글이 아닌 텔레그램 주소
+        msg = await bot.attach_link(unsure.id, url)
+        assert "상품 링크가 아니라" in msg and f"/posted {unsure.id}" in msg and f"/link {unsure.id}" in msg, msg
+    assert bot.db.get_queue_item(unsure.id).status == "failed" and bot.db.kv_get("mylink:coupang:7") is None
+    msg = await bot.attach_link(unsure.id, "https://www.coupang.com/vp/products/7")  # 채널에 없음 → 상품 링크로 다시 올림
+    assert "상품 링크 완료" in msg and bot.db.get_queue_item(unsure.id).status == "pending"
+
+
+async def test_posted_link_from_another_channel_records_no_post_number(bot: DealBot) -> None:
+    """품절 표시는 기록한 글 번호의 '우리 채널' 글을 고쳐 쓴다 → 다른 채널 글 링크(또는 채널 글이 아닌 링크)의 번호를 쓰면
+    우리 채널의 엉뚱한 글을 덮어쓴다. 그런 링크면 올라간 글로는 기록하되 번호는 남기지 않고 주인에게 알린다."""
+    (a, b, c, d), sent, side = await _unsure_items(bot, "1", "2", "3", "4")
+    reply = await bot.mark_posted(a.id, "https://t.me/some_other_channel/321")
+    assert "우리 채널 글 링크가 아니라" in reply and bot.db.latest_post("coupang:1")["message_id"] is None
+    reply = await bot.mark_posted(b.id, "https://www.coupang.com/vp/products/2")
+    assert "채널 글 링크가 아니라" in reply and bot.db.latest_post("coupang:2")["message_id"] is None
+    bot.publisher.channel_id = -1001234567890  # 비공개 채널: t.me/c/<-100 뒤 숫자>/글번호
+    assert "아니라" in await bot.mark_posted(c.id, "https://t.me/c/999/55")
+    assert bot.db.latest_post("coupang:3")["message_id"] is None
+    assert "아니라" not in await bot.mark_posted(d.id, "https://t.me/c/1234567890/56")
+    assert bot.db.latest_post("coupang:4")["message_id"] == 56
+    assert bot.db.queue_counts() == {"published": 4} and sent == ["coupang:1", "coupang:2", "coupang:3", "coupang:4"]
+    assert sorted(side) == sorted([a.id, b.id, c.id, d.id])
 
 
 async def test_manual_link_flow_for_toss(bot: DealBot) -> None:
