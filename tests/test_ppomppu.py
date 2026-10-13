@@ -336,8 +336,8 @@ def test_parse_title_repeated_wording_stays_fast() -> None:
              "1,000원 할인쿠폰 ", "쿠폰 1,000원 적용 ", "1만원대 ", "개당 1,000원 ", "1+", "(1)", "1,000원→",
              "1,900원 쿠폰가 2개 ", "3,000원 쿠폰가 1+1 ", "1,000원 쿠폰가, ", "1,000원 쿠폰가 + ", "(개당 1,000원) ")
     for unit in units:
-        for title in (f"[쿠팡] 상품 ({unit * 30}19,900원/무료)", f"[쿠팡] 상품 (1,000원 쿠폰가 {unit * 30}1,900원)",
-                      f"[쿠팡] 상품{unit * 30}x"):
+        for title in (f"[쿠팡] 상품 ({unit * 30}19,900원/무료)", f"[쿠팡] 상품 (1,000원 쿠폰 {unit * 30}19,900원)",
+                      f"[쿠팡] 상품 (1,000원 쿠폰가 {unit * 30}1,900원)", f"[쿠팡] 상품{unit * 30}x"):
             started = time.perf_counter()
             parse_title(title)
             assert time.perf_counter() - started < 0.05, unit
