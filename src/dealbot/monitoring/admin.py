@@ -402,6 +402,12 @@ class AdminNotifier:
             return False
         return bool(data.get("kakao_ok"))
 
+    def blogauto_reads_v2(self) -> bool:
+        """Blog-Auto 가 요약·해결 줄(v2)을 알아듣는 판인가 — 생존 신호 파일(blogauto_status.json)은 v2 를 읽는 판만 쓴다.
+        예전 판은 글이 든 owner_notice 를 모두 바로 카톡으로 보내서, 요약 줄이 상품 이름 한 줄짜리 카톡으로 따로 간다
+        (두 저장소가 따로 자동 업데이트되니 딜봇이 먼저 바뀌는 사이). 오래된 파일이어도 v2 판이 있던 것이라 줄은 남긴다."""
+        return self.status_path is not None and self.status_path.exists()
+
     def owner_line(self, note: dict[str, Any]) -> bool:
         """Blog-Auto 받은편지함에 owner_notice v2 한 줄 (카톡 알림·해결·저녁 요약). 실패해도 텔레그램은 그대로.
         한 줄을 남겼으면 True — 못 남겼으면(카톡 넘기기 꺼짐·파일 오류) 할 일 알림은 텔레그램으로 소리 내서 (alert)."""
@@ -415,12 +421,13 @@ class AdminNotifier:
 
     def resolve(self, *keys: str) -> None:
         """주인이 처리함 (링크 붙임·/skip·/ok·품절) — Blog-Auto 가 아직 안 보낸 카톡은 보내지 않게."""
-        if self.silent_policy and keys:
+        if self.silent_policy and keys and self.blogauto_reads_v2():  # 예전 Blog-Auto 는 해결 줄을 모른다
             self.owner_line({"resolve": list(keys)})
 
     def summary(self, cat: str, text: str, *, replace: bool = False) -> None:
         """저녁 요약(카톡)에 넣을 한 줄 — 딜봇 몫 (Blog-Auto 가 21~22시에 문장으로 보냄)."""
-        if self.silent_policy and (text or replace):  # replace 에 빈 글이면 그 줄을 비움 (기다리는 일이 없어짐)
+        # replace 에 빈 글이면 그 줄을 비움 (기다리는 일이 없어짐). 예전 Blog-Auto 는 요약 줄을 바로 카톡으로 보내서 남기지 않는다
+        if self.silent_policy and (text or replace) and self.blogauto_reads_v2():
             self.owner_line({"kind": "summary", "cat": cat, "text": text, "replace": replace})
 
     async def alert(self, kind: str, tg_text: str | None, kakao_text: str, *, key: str, short: str, group: str = "",

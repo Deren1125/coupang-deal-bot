@@ -377,6 +377,8 @@ def test_job_queries() -> None:
 
 
 async def test_resume_from_blogauto_lets_the_bot_ask_again(bot: DealBot, settings: Settings) -> None:
+    # 해결 줄은 v2 를 읽는 Blog-Auto 가 있을 때만 (그 판만 생존 신호 파일을 쓴다)
+    (settings.data_dir / "blogauto_status.json").write_text(json.dumps({"at": int(time.time()), "kakao_ok": True}), encoding="utf-8")
     bot._note_autolink_stop({"reason": "login", "retry_at": time.time() + 3600})
     qid = _enqueue(bot)
     assert await bot.process_queue_once()

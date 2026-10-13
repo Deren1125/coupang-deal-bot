@@ -95,6 +95,7 @@ async def test_kakao_down_means_loud_telegram_once_per_key(bot: DealBot, setting
 
 
 async def test_link_done_is_summary_only_and_cancels_the_kakao(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
+    _healthy(settings)
     item = _queued(bot)
     bot.db.update_queue_item(item.id, status="awaiting_link", error="manual")
     msg = await bot.attach_link(item.id, "https://naver.me/abc")
@@ -107,6 +108,7 @@ async def test_link_done_is_summary_only_and_cancels_the_kakao(bot: DealBot, set
 
 
 async def test_owner_linked_publish_goes_to_summary_not_telegram(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
+    _healthy(settings)
     bot.notifier.cfg.notify_on_publish = False
     await bot.notifier.notify_published(Deal(_product(), DealVerdict(is_deal=True)), PublishResult(ok=True, message_id=1, dry_run=False))
     mine = Deal(_product(extra={"owner_link": True}), DealVerdict(is_deal=True))
@@ -117,9 +119,37 @@ async def test_owner_linked_publish_goes_to_summary_not_telegram(bot: DealBot, s
 
 
 async def test_skip_resolves_pending_kakao(bot: DealBot, settings: Settings) -> None:
+    _healthy(settings)
     item = _queued(bot)
     bot.skip_item(item.id)
     assert _inbox(settings)[-1]["resolve"] == [f"link:{item.id}", f"review:{item.id}"]
+
+
+async def test_summary_and_resolve_lines_wait_for_a_blogauto_that_reads_them(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
+    """두 저장소는 따로 자동 업데이트된다: 딜봇이 먼저 바뀌고 예전 Blog-Auto(생존 신호 파일을 안 씀)가 돌면, 예전 판은 글이 든
+    owner_notice 를 모두 바로 카톡으로 보내서 요약 줄이 상품 이름 한 줄짜리 카톡이 된다. 그 사이에는 요약·해결 줄을 남기지
+    않는다 — 할 일 알림은 글 전체가 한 통이라 예전 판에도 그대로 남긴다 (텔레그램은 소리 내서)."""
+    from dealbot.page_price import PageCheck
+
+    item = _queued(bot)
+    await bot.notifier.notify_price_hold(22, _product(price=9900), PageCheck(status="hold", title_price=9900, reason="price"))
+    await bot.notifier.notify_manual_link(item, bot.registry.get("naver"))
+    bot.db.update_queue_item(item.id, status="awaiting_link", error="manual")
+    assert "상품 링크 완료" in await bot.attach_link(item.id, "https://naver.me/abc")
+    await bot.notifier.notify_published(Deal(_product(extra={"owner_link": True}), DealVerdict(is_deal=True)),
+                                        PublishResult(ok=True, message_id=2, dry_run=False))
+    await bot.owner_summary()
+    bot.skip_item(item.id)
+    notes = _inbox(settings)
+    assert [n["kind"] for n in notes] == ["link_request"] and notes[0]["text"].startswith("🔔[할 일] 링크 필요")
+    assert not [n for n in notes if "resolve" in n or n.get("kind") == "summary"]
+    assert [loud for text, loud in sent if text.startswith("🔗")] == [True]  # 카톡이 될지 몰라 텔레그램은 소리 내서
+
+    _healthy(settings)  # 새 Blog-Auto 가 돌기 시작함 → 요약·해결 줄을 남긴다
+    await bot.notifier.notify_price_hold(23, _product(price=9900), PageCheck(status="hold", title_price=9900, reason="price"))
+    bot.notifier.resolve("link:99")
+    tail = _inbox(settings)[len(notes):]
+    assert [(n.get("cat"), n.get("resolve")) for n in tail] == [("held", None), (None, ["link:99"])]
 
 
 async def test_reviews_are_kakao_alerts(bot: DealBot, settings: Settings, sent) -> None:  # type: ignore[no-untyped-def]
@@ -165,6 +195,7 @@ async def test_collector_failing_for_two_hours_is_an_alert(bot: DealBot, setting
 
 
 async def test_owner_summary_lines_are_sentences(bot: DealBot, settings: Settings) -> None:
+    _healthy(settings)
     item = _queued(bot)
     bot.db.update_queue_item(item.id, status="awaiting_link", error="manual")
     text = await bot.owner_summary()
@@ -179,6 +210,7 @@ async def test_owner_summary_lines_are_sentences(bot: DealBot, settings: Setting
 
 async def test_owner_summary_names_what_was_posted(bot: DealBot, settings: Settings) -> None:
     """숫자만이 아니라 무엇을 올렸는지 이름으로 (주인 결정 10/11)."""
+    _healthy(settings)
     item = _queued(bot)
     bot.db.update_queue_item(item.id, status="published")
     bot.db.record_post(item.deal, channel_id="@c", message_id=1, dry_run=bot.state.dry_run)
