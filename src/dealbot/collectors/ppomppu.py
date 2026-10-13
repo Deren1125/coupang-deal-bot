@@ -216,7 +216,8 @@ _UNIT_THEN_TOTAL = re.compile(
 def _proven_price(title: str, old: int | None) -> int | None:
     """예전 파서(맨 앞 수)가 틀린다고 증명된 꼴이면 그 꼴로 읽은 판매가, 아니면 None. 지금 파서도 이 값으로 읽어야
     parse_title 이 예전 값(old) 대신 쓴다. 꼴마다 예전·지금·최종 값 표는 tests/fixtures/ppomppu_title_prices.tsv 에 있다.
-    (a) 화살표 ('29,900원→19,900원', '정가 49,900원 -> 29,900원'): 마지막 화살표 뒤 첫 금액. 예전은 화살표 앞 옛 가격
+    (a) 화살표 → ➡ -> ⇒ ▶ ('29,900원→19,900원', '정가 49,900원 -> 29,900원'): 마지막 화살표 뒤 첫 금액. 예전은 화살표 앞
+        옛 가격
     (b) 맨 앞이 개수·용량 ('500ml 24개 12,900원', '2개 12,900원', '180정 19,900원', '5천원'): 그 뒤 첫 금액
         (_quantity_first). 예전은 개수·용량을 가격으로 읽거나 가격이 없었다
     (c) 금액 하나만 든 가격 칸과 배송비 칸인데 예전 정규식이 괄호를 못 읽은 제목 ('(25,900원/3,000원(3만↑무료))',
@@ -232,12 +233,10 @@ def _proven_price(title: str, old: int | None) -> int | None:
     price_text, shipping = _price_fields(meta)
     parts = _ARROW_RE.split(price_text)
     seg = parts[-1]
-    shape = _COUPON_THEN_PRICE.fullmatch(seg)
-    if shape is None and _SHIPPING_WORDS.search(shipping):
-        shape = _UNIT_THEN_TOTAL.fullmatch(seg)
+    shipped = bool(_SHIPPING_WORDS.search(shipping))
+    shape = _COUPON_THEN_PRICE.fullmatch(seg) or (_UNIT_THEN_TOTAL.fullmatch(seg) if shipped else None)
     if shape:
         return _first_amount(seg, shape.start("price"))
-    shipped = bool(_SHIPPING_WORDS.search(shipping))
     if not shipped and any(w in price_text for w in _NOT_A_PRICE_WORDS):
         return None  # 배송비 칸도 없이 쿠폰·할인 말이 든 칸은 쿠폰 안내일 수 있다 ('10% 할인쿠폰 최대 5,000원')
     # (c) 는 괄호 뒤 꼬리말에 다른 금액이 없을 때만 ('(12,900원/무료) 쿠폰가 9,900원' 은 꼬리말 쪽이 판매가일 수 있다)
