@@ -109,18 +109,29 @@ class NaverReferenceConfig(BaseModel):
     min_below_pct: float = 12  # 네이버 최저가보다 N% 이상 싸면 특가
     strict: bool = False  # True 면 0~N% 사이도 탈락 (False: 가격 이력 규칙으로 넘어감)
     veto_if_not_cheaper: bool = True  # 네이버 최저가보다 싸지 않으면 다른 규칙으로 잡혀도 탈락
-    cache_hours: float = 24  # 같은 상품을 다시 찾지 않는 시간 (못 찾음 포함)
-    price_cache_hours: float = 6  # 찾은 최저가는 이만큼만 믿음 (가격이 자주 바뀜 — 글에 '네이버 최저가보다 N%' 를 쓰니까)
-    max_lookups_per_run: int = Field(15, ge=0)  # 수집 한 판에 검색 API 호출 수
-    max_lookups_per_hour: int = Field(40, ge=0)  # 한 시간에 (하루 25,000회 허용이지만 점잖게)
-    run_seconds: float = Field(45.0, ge=0)  # 수집 한 판에 네이버 조회에 쓰는 시간 상한 (5분 수집 루프를 오래 막지 않게)
+    # 같은 상품을 다시 찾지 않는 시간 (못 찾음 포함). 찾은 값은 price_cache_hours 가 지나면 다시 찾되, 그때 한도·오류로 못 찾으면
+    # 이 시간 안의 지난 값으로 '네이버가 더 쌈' 탈락만 지킨다 ('N% 싸요' 근거로는 안 씀 — 지난 금액이니까)
+    cache_hours: float = 24
+    price_cache_hours: float = 6  # 찾은 최저가는 이만큼만 근거로 (가격이 자주 바뀜 — 글에 '네이버 최저가보다 N%' 를 쓰니까)
+    # 한도: 카테고리 베스트 한 판(3개 x 30 = 90개)도 고르게 보게 (리뷰 10/13: 15회로는 첫 카테고리만 봄).
+    # 골드박스 2시간마다 ~28개 + 카테고리 3시간마다 45회 → 시간당 평균 30회쯤, 하루 700회쯤 (네이버 허용 25,000회)
+    max_lookups_per_run: int = Field(45, ge=0)  # 수집 한 판에 검색 API 호출 수
+    max_lookups_per_hour: int = Field(90, ge=0)  # 한 시간에 (하루 25,000회 허용이지만 점잖게)
+    run_seconds: float = Field(60.0, ge=0)  # 수집 한 판에 네이버 조회에 쓰는 시간 상한 (5분 수집 루프를 오래 막지 않게)
     timeout_seconds: float = Field(8.0, gt=0)  # 호출 한 번의 시간 제한
     min_interval_seconds: float = Field(0.5, ge=0)  # 호출 사이 간격
     min_token_match: float = 0.8  # 쿠팡 상품명 낱말이 네이버 상품명에 있는 비율 (수량·용량은 반드시 같아야 함)
     require_first_token: bool = True  # 첫 낱말(대개 브랜드)이 있어야 같은 상품
-    # 가격비교(카탈로그) 상품이 없으면 같은 상품 일반 판매글이 이만큼은 있어야 최저가로 믿음 (판매글 하나만 보고 단정하지 않게)
+    # 가격비교(카탈로그) 상품 없이 일반 판매글만 맞았을 때: 서로 다른 판매처가 이만큼은 돼야
+    # 탈락(이만큼이 쿠팡 값 이하)·근거(낮은 가격순 확인과 함께)로 씀. 판매글 한 곳의 값으로는 둘 다 안 함
     min_listings: int = Field(2, ge=1)
-    # 네이버 값이 쿠팡 값의 이 배보다 싸면 낱개·옵션·부속 같은 다른 상품으로 보고 비교에서 뺌
+    # 일반 판매글 값(lprice)은 배송비를 뺀 값이라, 탈락 판단 때만 이만큼 더해 본다 (쿠팡은 대개 로켓·무료배송).
+    # 예: 진라면 11,500원 + 배송비 3,500원 판매글은 쿠팡 11,900원 로켓배송보다 싸다고 보지 않음
+    general_shipping_allowance: int = Field(3000, ge=0)
+    # 가격비교 상품 없이 판매글만 맞았는데 쿠팡이 기준 넘게 싸 보이면, 낮은 가격순으로 한 번 더 찾아 정말 최저가인지 확인
+    # (관련도순 40개 밖에 더 싼 같은 상품이 있을 수 있음). 끄거나 확인을 못 하면 판매글만으로는 'N% 싸요' 근거로 안 씀
+    confirm_lowest: bool = True
+    # 같은 상품 판매글이 쿠팡 값의 이 배보다 싸면 낱개·옵션·부속 같은 다른 상품일 수 있어 근거도 탈락도 없음 (확실하지 않음)
     min_price_ratio: float = 0.5
     # 쿠팡이 네이버 최저가보다 이만큼 넘게 싸면 다른 상품(묶음 수 차이 등)일 가능성이 커서 근거로 안 씀
     max_below_pct: float = 70

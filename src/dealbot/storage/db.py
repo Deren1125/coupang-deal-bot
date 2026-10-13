@@ -128,7 +128,8 @@ CREATE TABLE IF NOT EXISTS market_quotes (
     source         TEXT NOT NULL,
     title          TEXT,
     url            TEXT,
-    checked_at     TEXT NOT NULL
+    checked_at     TEXT NOT NULL,
+    meta           TEXT
 );
 """
 
@@ -207,11 +208,19 @@ class Database:
             self._seed_admin_msgs()
 
     def _migrate(self) -> None:
-        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(source_items)").fetchall()}
-        for col, typ in (("url", "TEXT"), ("title", "TEXT"), ("recommend", "INTEGER"), ("views", "INTEGER"), ("updated_at", "TEXT"), ("comments", "INTEGER")):
-            if col not in cols:
+        adds = (
+            ("source_items", (("url", "TEXT"), ("title", "TEXT"), ("recommend", "INTEGER"), ("views", "INTEGER"),
+                              ("updated_at", "TEXT"), ("comments", "INTEGER"))),
+            # 대조한 상품의 분류(식품 판정 — 기억한 값도 처음 찾은 값과 같게)·네이버 탈락 기준 등 (JSON)
+            ("market_quotes", (("meta", "TEXT"),)),
+        )
+        for table, columns in adds:
+            cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            for col, typ in columns:
+                if col in cols:
+                    continue
                 try:
-                    self._conn.execute(f"ALTER TABLE source_items ADD COLUMN {col} {typ}")
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
                 except sqlite3.OperationalError as e:
                     # 봇 서비스와 check 명령이 동시에 처음 열면 다른 쪽이 먼저 칸을 만들 수 있음
                     if "duplicate column" not in str(e).lower():
@@ -859,16 +868,20 @@ class Database:
             return None
         return dict(row)
 
-    def set_market_quote(self, product_id: str, *, price: int, source: str, title: str | None, url: str | None, now: datetime | None = None) -> None:
+    def set_market_quote(
+        self, product_id: str, *, price: int, source: str, title: str | None, url: str | None,
+        now: datetime | None = None, meta: str | None = None,
+    ) -> None:
+        """meta: 대조한 상품의 분류 등 (JSON 글자). 기억한 값을 꺼낼 때도 처음 찾은 값과 같은 판정이 나오게."""
         now = now or utcnow()
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO market_quotes (product_id, price, source, title, url, checked_at) VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO market_quotes (product_id, price, source, title, url, checked_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(product_id) DO UPDATE SET price = excluded.price, source = excluded.source,
-                    title = excluded.title, url = excluded.url, checked_at = excluded.checked_at
+                    title = excluded.title, url = excluded.url, checked_at = excluded.checked_at, meta = excluded.meta
                 """,
-                (product_id, price, source, title, url, to_iso(now)),
+                (product_id, price, source, title, url, to_iso(now), meta),
             )
 
     # ----------------------------------------------------------------- kv

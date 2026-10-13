@@ -76,7 +76,9 @@ from dealbot.monitoring.state import BotState, CollectorStatus
 from dealbot.naver_shop import (
     LookupRun,
     NaverPriceReference,
+    NaverPrices,
     NaverShopSearch,
+    naver_quote,
     store_name,
     store_product_no,
 )
@@ -133,33 +135,59 @@ NAVER_QUOTE_KEY = "navershop:"
 # 특가로 판정했는데 줄 세우지 않은 딜: 이유별 상품 (저녁 요약용, kv 한 칸에 최근 하루치만)
 SKIP_KV = "deal_skips"
 SKIP_KEEP = timedelta(hours=36)
+# 저녁 요약의 이유 이름은 짧게 (Blog-Auto 가 딜봇 하루 줄을 카톡 200자에서 자름 — 리뷰 10/13)
+ALREADY_POSTED = "이미 올린 상품"
 SKIP_LABELS = {
-    "already_posted": "{days}일 안에 이미 올린 상품",
-    "declined": "최근 넘기거나 건너뛴 상품",
-    "held": "가격이 안 맞아 보류했던 상품",
-    "held_price": "상품 페이지 가격이 달라 보류",
-    "duplicate": "비슷한 상품이 이미 대기·발행",
+    "already_posted": ALREADY_POSTED,
+    "declined": "넘긴 상품",
+    "held": "보류",
+    "held_price": "보류",
+    "duplicate": "비슷한 딜 있음",
 }
+# 보류는 Blog-Auto 가 따로 요약에 넣으니 '안 올린 딜' 문장에서는 뺀다 (수집 로그 한 줄에는 그대로)
+SKIP_NOT_SUMMARIZED = frozenset({"held", "held_price"})
+# Blog-Auto 카톡 한 줄 200자 = 머리말('🌙 딜봇 10/14') + 빈칸 + 딜봇 하루 줄. 딜봇 하루 줄은 이 길이 안에서만 늘린다
+DAY_LINE_MAX = 180
 
 
-def _closed_label(status: str, error: str | None, days: int) -> str:
+def _closed_label(status: str, error: str | None) -> str:
     """줄 섰다가 발행 전에 빠진 딜(대기열 skipped·expired)의 이유를 저녁 요약 말로 (수집 때 이유와 같은 말은 같은 줄로 셈)."""
     e = (error or "").lower()
     if "sold out" in e:
         return "품절"
     if status == "expired":
-        return "링크·확인 답 없음" if "unanswered" in e else "대기 시간 초과 (예산·발행 한도)"
+        return "답 없음" if "unanswered" in e else "대기 초과"
     if e.startswith("already posted"):
-        return SKIP_LABELS["already_posted"].format(days=days)
+        return ALREADY_POSTED
     if e.startswith("not genuine"):
         return "정품 의심"
     if e.startswith("unverified seller"):
-        return "판매처 확인 안 됨"
+        return "판매처 미확인"
     if "backlog full" in e:
-        return "확인·링크 요청이 밀려 있음"
+        return "요청 밀림"
     if e.startswith("skipped by admin"):
         return "주인이 넘김"
-    return "기타 (링크를 못 만드는 몰 등)"
+    return "기타"
+
+
+def _skip_sentence(counts: dict[str, int], room: int) -> str:
+    """저녁 요약 끝에 붙일 '안 올린 딜' 문장 (많은 이유 두 개까지). room 글자 안에 안 들어가면 이유를 줄이고, 그래도 넘으면 안 붙임."""
+    items = list(counts.items())
+    for n in (2, 1):
+        parts = ", ".join(f"{label} {c}개" for label, c in items[:n])
+        text = f" 특가인데 안 올린 딜은 {parts}{' 등이에요' if len(items) > n else '예요'}."
+        if items and len(text) <= room:
+            return text
+    return ""
+
+
+def _meta(row: dict[str, Any]) -> dict[str, Any]:
+    """market_quotes 한 줄의 meta(JSON). 없거나 깨졌으면 빈 dict."""
+    try:
+        data = json.loads(row.get("meta") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 class DealBot:
@@ -1031,6 +1059,9 @@ class DealBot:
             out.append((None, "쿠팡 딜 네이버 최저가 비교: 꺼짐 (NAVER_CLIENT_ID/SECRET 없음 — developers.naver.com 검색 API 키)"))
         elif self.naver_shop.disabled_reason:
             out.append((None, f"쿠팡 딜 네이버 최저가 비교: 꺼짐 ({self.naver_shop.disabled_reason} — 키 확인 후 재시작)"))
+        elif not self.naver_shop.verified:
+            # 키가 맞는지는 첫 검색 때야 안다 (10/14 서버 키는 401): 그전엔 켜졌다고 하지 않음. 401 이면 꺼짐 줄로 바뀜
+            out.append((None, "쿠팡 딜 네이버 최저가 비교: 키 있음 — 첫 조회 때 확인 (401 이면 꺼짐, /status)"))
         else:
             out.append((True, f"쿠팡 딜 네이버 최저가 비교 (시간당 {self.settings.deal.naver_reference.max_lookups_per_hour}회까지)"))
         if self.settings.browser.enabled:
@@ -1316,6 +1347,7 @@ class DealBot:
             collector.check_available()
             products = await collector.collect()
             now = utcnow()
+            products = self._naver_order(products, now)  # 네이버 조회 한도 안에서 중요한 것부터 (비교 대상이 없으면 그대로)
             deals = queued = 0
             enriched = 0
             pages = self.page_reader.run_budget()  # 이번 판 크롬 한도 (가격 대조)
@@ -1557,25 +1589,33 @@ class DealBot:
 
     def skipped_deal_counts(self, since: Any, until: Any | None = None) -> dict[str, int]:
         """since 이후 특가로 판정했지만 안 올린 딜의 이유별 상품 수: 수집 때 줄 세우지 않은 것 + 줄 섰다가 발행 전에 빠진 것.
-        같은 상품은 이유마다 한 번 (게시판이 같은 글을 5분마다 다시 돌려줘도). 많은 이유부터."""
+        같은 상품은 이유마다 한 번 (게시판이 같은 글을 5분마다 다시 돌려줘도). 많은 이유부터.
+        - '이미 올린 상품'은 이 기간보다 앞서 올린 것만 (오늘 올린 딜을 다시 모아 와도 '안 올린 딜'로 세지 않음 — 리뷰 10/13)
+        - 보류는 Blog-Auto 가 따로 알리니 뺀다"""
         until = until or utcnow()
         by_label: dict[str, set[str]] = {}
         try:
             data = json.loads(self.db.kv_get(SKIP_KV) or "{}")
         except ValueError:
             data = {}
-        days = self.settings.publish.dedup_days
         for reason, seen in (data.items() if isinstance(data, dict) else ()):
-            if not isinstance(seen, dict):
+            if not isinstance(seen, dict) or reason in SKIP_NOT_SUMMARIZED:
                 continue
-            label = SKIP_LABELS.get(reason, reason).format(days=days)
+            label = SKIP_LABELS.get(reason, reason)
             for pid, at in seen.items():
                 t = from_iso(str(at))
                 if t is not None and since <= t <= until:
                     by_label.setdefault(label, set()).add(pid)
         for status, error, pid in self.db.closed_queue_reasons(since, until):
-            label = _closed_label(status, error, days)
-            by_label.setdefault(label, set()).add(pid)
+            by_label.setdefault(_closed_label(status, error), set()).add(pid)
+        posted = by_label.get(ALREADY_POSTED)
+        if posted:
+            for pid in list(posted):
+                last = self.db.last_posted_at(pid, include_dry_run=self.state.dry_run)
+                if last is not None and since <= last:
+                    posted.discard(pid)  # 이 기간에 올린 상품: 그 글이 올라갔음
+            if not posted:
+                del by_label[ALREADY_POSTED]
         return dict(sorted(((k, len(v)) for k, v in by_label.items()), key=lambda kv: -kv[1]))
 
     def _declined_recently(self, p: Product, now: Any) -> bool:
@@ -1849,13 +1889,10 @@ class DealBot:
     def _needs_naver_check(self, p: Product, verdict: DealVerdict, now: Any | None = None) -> bool:
         """쿠팡 딜(설정한 수집기: 골드박스·카테고리 베스트)의 네이버 최저가 비교. 키가 없거나 401 로 꺼졌으면 안 함 (로그 한 번).
         시중가 대조처럼 결과로 바뀔 게 없는 상품에는 호출을 쓰지 않는다."""
-        nr = self.naver_ref
-        if nr is None or p.shop != "coupang" or not p.has_price:
+        if not self._naver_source(p):
             return False
-        sources = self.settings.deal.naver_reference.sources
-        if sources and p.source not in sources:
-            return False
-        return nr.usable and self._reference_can_matter(p, verdict, now)
+        assert self.naver_ref is not None
+        return self.naver_ref.usable and self._reference_can_matter(p, verdict, now)
 
     def _reference_can_matter(self, p: Product, verdict: DealVerdict, now: Any | None = None) -> bool:
         """가격 비교 결과로 판정·발행이 바뀔 수 있는 딜인가. 아니면 호출을 아낀다:
@@ -1876,41 +1913,95 @@ class DealBot:
 
     async def _market_quote(self, p: Product) -> MarketQuote | None:
         """쿠팡 시중가. 맞은 값과 '검색했는데 맞는 상품 없음'을 cache_hours 동안 기억한다 (없음은 가격 0 으로).
-        예산·한도·오류로 검색을 못 한 것은 기억하지 않는다 (다음 판에 다시)."""
+        예산·한도·오류로 검색을 못 한 것은 기억하지 않는다 (다음 판에 다시).
+        대조한 쿠팡 상품의 분류도 같이 기억한다: 기억한 값으로 판정할 때도 식품 기준이 처음과 같게 (리뷰 10/13)."""
         assert self.market is not None
         cached = self.db.get_market_quote(p.product_id, self.settings.deal.market.cache_hours)
         if cached:
             if int(cached["price"]) <= 0:
                 return None
-            return MarketQuote(price=int(cached["price"]), source=cached["source"], title=cached.get("title") or "", url=cached.get("url"))
+            return MarketQuote(price=int(cached["price"]), source=cached["source"], title=cached.get("title") or "",
+                               url=cached.get("url"), category=_meta(cached).get("category"))
         quote = await self.market.lookup(p)
         if quote is not None:
-            self.db.set_market_quote(p.product_id, price=quote.price, source=quote.source, title=quote.title, url=quote.url)
+            self.db.set_market_quote(p.product_id, price=quote.price, source=quote.source, title=quote.title, url=quote.url,
+                                     meta=json.dumps({"category": quote.category}, ensure_ascii=False))
         elif getattr(self.market, "last_no_match", False):
             self.db.set_market_quote(p.product_id, price=0, source=MARKET_NO_MATCH, title=None, url=None)
         return quote
 
     async def _naver_quote(self, p: Product, run: LookupRun) -> MarketQuote | None:
-        """쿠팡 상품의 네이버 최저가 (확실한 같은 상품일 때만). market_quotes 에 'navershop:상품키' 로 기억한다:
+        """쿠팡 상품의 네이버 최저가 근거 (확실한 같은 상품일 때만). market_quotes 에 'navershop:상품키' 로 기억한다:
         못 찾음은 cache_hours(24시간) 동안 다시 찾지 않고, 찾은 값은 price_cache_hours(6시간)까지만 근거로 쓴다 (글에 금액을 쓰니까).
-        한도·일시 오류로 못 찾아본 것은 기억하지 않는다 (다음 판에 다시)."""
+        기억하는 것은 네이버 쪽 사실(같은 상품 최저가·탈락 기준·최저가 확인 여부·분류)뿐이고, 판정은 판마다 지금 쿠팡 값으로
+        다시 한다 (naver_quote — 값이 바뀌어도 절반 값·70% 넘는 차이 같은 거름이 그대로 걸림).
+        한도·일시 오류로 못 찾아본 것은 기억하지 않는다 (다음 판에 다시). 그때 cache_hours 안의 지난 값이 '네이버가 더 쌈'이면
+        그 탈락은 지킨다 — 다시 못 찾았다고 이미 아는 '네이버보다 비싼 상품'을 특가로 올리지 않게 (리뷰 10/13).
+        지난 값으로 'N% 싸요' 근거는 만들지 않는다."""
         assert self.naver_ref is not None
         nc = self.settings.deal.naver_reference
         key = NAVER_QUOTE_KEY + p.product_id
         cached = self.db.get_market_quote(key, nc.cache_hours)  # type: ignore[arg-type]
+        known: NaverPrices | None = None
         if cached:
             if int(cached["price"]) <= 0:
                 return None  # 확실한 같은 상품이 없었음
+            known = NaverPrices.from_row(cached)
             checked = from_iso(cached.get("checked_at"))
-            if checked is not None and utcnow() - checked <= timedelta(hours=nc.price_cache_hours):
-                return MarketQuote(price=int(cached["price"]), source=NAVER_SOURCE, title=cached.get("title") or "",
-                                   url=cached.get("url"))
-        quote = await self.naver_ref.lookup(p, run)
-        if quote is not None:
-            self.db.set_market_quote(key, price=quote.price, source=NAVER_SOURCE, title=quote.title, url=quote.url)
-        elif self.naver_ref.last_no_match:
+            if known is not None and checked is not None and utcnow() - checked <= timedelta(hours=nc.price_cache_hours):
+                return naver_quote(known, p.price, nc)[0]
+        ref = await self.naver_ref.lookup(p, run)
+        if ref is not None:
+            if self.naver_ref.last_complete:
+                self.db.set_market_quote(key, price=ref.lowest, source=NAVER_SOURCE, title=ref.title, url=ref.url, meta=ref.to_meta())
+            quote, why = naver_quote(ref, p.price, nc)
+            log.info("naver ref verdict for '%s' %s원: %s", p.name[:40], f"{p.price:,}",
+                     f"네이버 {quote.price:,}원 ({why})" if quote else why)
+            return quote
+        if self.naver_ref.last_no_match:
             self.db.set_market_quote(key, price=0, source=MARKET_NO_MATCH, title=None, url=None)
-        return quote
+            return None
+        if known is not None:
+            quote, _why = naver_quote(known, p.price, nc)
+            if quote is not None and quote.price <= p.price:
+                run.kept_veto += 1
+                log.info("naver ref: 다시 못 찾아 지난 값으로 탈락 유지 — '%s' %s원 ≥ 네이버 %s원", p.name[:40],
+                         f"{p.price:,}", f"{quote.price:,}")
+                return quote
+        return None
+
+    def _naver_source(self, p: Product) -> bool:
+        """네이버 최저가와 비교하는 쿠팡 상품인가 (설정한 수집기의 가격 있는 쿠팡 상품)."""
+        if self.naver_ref is None or p.shop != "coupang" or not p.has_price:
+            return False
+        sources = self.settings.deal.naver_reference.sources
+        return not sources or p.source in sources
+
+    def _naver_order(self, products: list[Product], now: Any) -> list[Product]:
+        """네이버 조회 차례 (한 판 한도 안에서 중요한 것부터, 리뷰 10/13). 비교 대상이 아닌 상품은 앞에 원래 순서대로.
+        1) 가격 이력·할인율로 이미 특가인 상품 — 네이버가 더 싸면 탈락시켜야 하니 확인 없이 올라가지 않게 먼저
+        2) 아직 찾아본 적 없는 상품 3) 지난 값이 있는 상품 (기억한 값이 아직 쓸 만하면 호출을 안 씀)
+        같은 차례 안에서는 카테고리를 순위대로 번갈아 — 카테고리 베스트 한 판(3개 x 30)에서 첫 카테고리가 한도를 다 쓰지 않게."""
+        nr = self.naver_ref
+        if nr is None or not any(self._naver_source(p) for p in products) or not nr.usable:
+            return products
+        rest = [p for p in products if not self._naver_source(p)]
+        groups: dict[Any, list[Product]] = {}
+        for p in products:
+            if self._naver_source(p):
+                groups.setdefault(p.extra.get("category_id"), []).append(p)
+        mixed = [g[i] for i in range(max(len(g) for g in groups.values())) for g in groups.values() if i < len(g)]
+        cfg = self.settings.deal
+
+        def turn(p: Product) -> int:
+            try:
+                if self.evaluator.evaluate(p, self.db.price_stats(p.product_id, cfg.history_days, now)).is_deal:
+                    return 0
+                return 1 if self.db.get_market_quote(NAVER_QUOTE_KEY + p.product_id, cfg.naver_reference.cache_hours) is None else 2  # type: ignore[arg-type]
+            except Exception:  # noqa: BLE001 — 차례를 못 정해도 수집은 계속
+                return 1
+
+        return rest + sorted(mixed, key=turn)
 
     async def _ensure_link(self, item: QueueItem) -> tuple[str, str | None]:
         """returns (state, error): state ∈ ok | manual | skip | fail"""
@@ -3050,18 +3141,16 @@ class DealBot:
         if names and s.published:
             shown = "·".join(f"「{n}」" for n in names[:2])
             day = day[:-1] + f" — {shown}{' 등' if len(names) > 2 else ''}."
+        if s.run_errors:
+            day += f" 게시판 확인 중 오류가 {s.run_errors}번 있었지만 봇은 계속 돌았어요."
+        if self.state.paused:
+            day += " 지금은 발행이 멈춰 있어요 (/resume)."
         try:  # 특가로 봤는데 안 올린 딜과 그 이유 (주인 결정 10/13: 쿠팡 딜이 왜 안 올라오는지 보이게). 알림은 따로 안 보냄
             skipped = self.skipped_deal_counts(now - timedelta(days=1), now + timedelta(seconds=1))
         except Exception:  # noqa: BLE001 — 이유를 못 세도 요약은 보낸다
             log.exception("skipped deal counts failed")
             skipped = {}
-        if skipped:
-            parts = [f"{label} {n}개" for label, n in list(skipped.items())[:3]]
-            day += f" 특가로 봤지만 안 올린 딜은 {', '.join(parts)}{' 등이에요' if len(skipped) > 3 else '예요'}."
-        if s.run_errors:
-            day += f" 게시판 확인 중 오류가 {s.run_errors}번 있었지만 봇은 계속 돌았어요."
-        if self.state.paused:
-            day += " 지금은 발행이 멈춰 있어요 (/resume)."
+        day += _skip_sentence(skipped, room=DAY_LINE_MAX - len(day))  # 맨 끝에, 남는 자리만큼만 (오류·/resume 이 잘리지 않게)
         self.notifier.summary("day", day, replace=True)
         waiting = []
         links = self.db.awaiting_items(50)

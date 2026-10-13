@@ -201,6 +201,25 @@ def tokens(text: str) -> list[str]:
     return seen
 
 
+# 낱말 뒤에 띄어 쓴 숫자만 ('에어팟 4', '아이폰 15'). 숫자 바로 뒤에 글자가 붙으면('30m', '4세대') 그 낱말은 tokens() 가 따로 셈
+_MODEL_NO_RE = re.compile(r"(?<![0-9a-z가-힣])([a-z가-힣][0-9a-z가-힣]*)\s+(\d{1,4})(?![0-9a-z가-힣.,%])")
+
+
+def model_numbers(text: str) -> list[str]:
+    """낱말 뒤에 띄어 쓴 세대·모델 번호 ('애플 에어팟 4' → ['에어팟4']). tokens() 는 숫자만 있는 낱말을 버려서
+    '에어팟 4' 와 '에어팟 2세대' 를 가르지 못한다. 수량·용량(500ml·12개·1+1·x 2)은 빼고 본다."""
+    t = _num(text)
+    t = re.sub(r"\[[^\]]*\]", " ", t)
+    t = _PLUS_RE.sub(" ", t)
+    t = _QTY_RE.sub(" ", t)
+    t = _TIMES_RE.sub(" ", t)
+    out: list[str] = []
+    for word, n in _MODEL_NO_RE.findall(t):
+        if word not in _STOP and f"{word}{n}" not in out:
+            out.append(f"{word}{n}")
+    return out
+
+
 def build_keyword(name: str, max_tokens: int = 5) -> str:
     qty = sorted(normalize_qty(name))
     core = tokens(name)[:max_tokens]

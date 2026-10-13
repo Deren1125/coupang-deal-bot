@@ -5,8 +5,9 @@
    상품명으로 검색해서 '같은 상품'(검색 결과의 링크·productId 에 딜 주소와 같은 스토어 상품번호가 있고,
    스토어·몰 이름이 둘 다 있으면 서로 같은 것)일 때만 그 사진을 쓴다. 비슷한 다른 상품의 사진은 쓰지 않는다.
 2. 쿠팡 딜(골드박스·카테고리 베스트)의 가격 근거: 같은 상품의 네이버 최저가 (NaverPriceReference, 주인 결정 10/13)
-   같은 수량·규격, 낱말 대부분 일치, 중고·렌탈·해외직구·옵션 목록·부속품이 아닌 새 상품, 가격비교(카탈로그) 상품이 있거나
-   일반 판매글이 여럿일 때만 믿는다. 헷갈리면 근거 없음 (할인을 지어내지 않음).
+   같은 수량·규격, 낱말 대부분 일치(양쪽 갈래 말·모델 번호까지), 중고·렌탈·해외직구·옵션 목록·부속품이 아닌 새 상품만 본다.
+   'N% 싸요' 근거는 최저가가 확인될 때만(가격비교 상품, 또는 낮은 가격순 검색에도 같은 상품), 탈락은 가격비교 상품이나
+   판매처 여럿이 더 쌀 때만 (판매글 한 곳의 싼 값으로는 안 함). 헷갈리면 근거 없음 (할인을 지어내지 않음).
 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 없으면 건너뛴다 (쓰임마다 로그 한 번). 키 값은 로그에 남기지 않는다.
 쇼핑 검색은 developers.naver.com(예전 개발자센터) 키로만 된다. 네이버 클라우드 API HUB 에는 쇼핑 검색이 없다
 (10/10 확인: HUB /search/v1/shop → 404, 같은 키로 openapi.naver.com → 401). 그런 키면 첫 호출의 401 뒤로 둘 다 끈다.
@@ -16,11 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -29,7 +32,14 @@ import httpx
 from dealbot.enrich import is_naver_store
 from dealbot.media.imagecheck import is_generic_image
 from dealbot.models import Product
-from dealbot.pricing.market import NAVER_SOURCE, MarketQuote, same_quantity, tokens
+from dealbot.pricing.market import (
+    NAVER_SOURCE,
+    MarketQuote,
+    model_numbers,
+    parse_quantity,
+    same_quantity,
+    tokens,
+)
 from dealbot.utils.text import clean_name
 
 if TYPE_CHECKING:
@@ -128,6 +138,7 @@ class NaverShopSearch:
         self.timeout = timeout
         self.display = max(1, min(100, display))
         self.disabled_reason: str | None = None
+        self.verified = False  # 검색이 한 번이라도 200 으로 됐나 (키가 맞는지는 첫 호출 때야 앎 — 자기 점검 표시용)
         self._told_missing = False
         self._cache: dict[str, str | None] = {}  # 상품번호 → 찾은 사진 (못 찾았으면 None)
 
@@ -173,8 +184,10 @@ class NaverShopSearch:
         self._remember(no, None)
         return None
 
-    async def _search(self, query: str, *, exclude: str | None = None, timeout: float | None = None) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"query": query, "display": self.display, "sort": "sim"}
+    async def _search(
+        self, query: str, *, exclude: str | None = None, timeout: float | None = None, sort: str = "sim"
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"query": query, "display": self.display, "sort": sort}
         if exclude:
             params["exclude"] = exclude
         resp = await self.http.get(
@@ -193,6 +206,7 @@ class NaverShopSearch:
             self.disabled_reason = f"HTTP {resp.status_code}"
             raise _Unavailable
         resp.raise_for_status()
+        self.verified = True
         data = resp.json()
         items = data.get("items") if isinstance(data, dict) else None
         return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
@@ -212,18 +226,32 @@ _NEW_TYPES = frozenset({"1", "2", "3"})
 PRICE_EXCLUDE = "used:rental:cbshop"
 # 네이버 상품명에 있는데 쿠팡 상품명엔 없으면 같은 상품으로 안 본다 (그 값이 '네이버 최저가'로 잡히면 비교가 틀어짐)
 _NOT_SAME_WORDS = (
-    # 중고·리퍼·전시·하자
-    "중고", "리퍼", "refurb", "전시", "반품", "s급", "a급", "b급", "스크래치", "박스훼손", "하자",
-    # 렌탈·약정
-    "렌탈", "렌털", "대여", "약정",
-    # 해외직구·구매대행·병행수입
-    "해외", "직구", "구매대행", "병행", "관부가세",
+    # 중고·리퍼·전시·하자·개봉품
+    "중고", "리퍼", "refurb", "전시", "반품", "s급", "a급", "b급", "스크래치", "박스훼손", "하자", "단순개봉", "개봉",
+    # 렌탈·약정·정기배송·구독 (월 값·회차 값이 상품값으로 잡힘)
+    "렌탈", "렌털", "대여", "약정", "정기배송", "구독",
+    # 해외직구·구매대행·병행수입·해외판
+    "해외", "직구", "구매대행", "병행", "관부가세", "직수입", "글로벌", "global",
     # 옵션 목록 (가장 싼 옵션 값이 최저가로 잡힘)
     "택1", "택일", "골라", "모음", "옵션", "균일가", "선택",
-    # 부속품
+    # 부속품·소모품 (본품 이름이 다 들어 있어도 훨씬 쌈)
     "케이스", "커버", "필름", "거치대", "호환", "리필", "교체용", "부품", "액세서리", "악세사리", "악세서리", "스트랩", "파우치",
+    "필터", "배터리", "충전기", "어댑터", "케이블", "칫솔모", "브러시", "헤드",
 )
+# 위 낱말이 들어 있지만 그 뜻이 아닌 말 (검사 전에 지움): 미개봉 새 상품, 헤드폰·헤드셋, 브러시리스 모터
+_NOT_SAME_OK = re.compile(r"미개봉|헤드폰|헤드셋|브러시리스")
+# 같은 이름 줄기의 다른 상품(윗급·아랫급·맛·색·기획 묶음·사은품)을 가르는 말: 한쪽 상품명에만 있으면 다른 상품
+# (버즈3 ≠ 버즈3 프로, 신라면 ≠ 신라면블랙, 바나나맛우유 ≠ 바나나맛우유 라이트, 햇반 24개 ≠ 햇반 24개 스팸 증정).
+# 붙여 쓴 말('신라면블랙', '기획세트', '더블팩')도 보되, '프로바이오틱스'·'라이트닝'·'맥스웰' 처럼 앞에 오는 말은 뒤에 붙을 때만 셈
+_VARIANT_ANY = ("기획", "세트", "증정", "사은품", "더블", "트윈", "듀오", "제로", "울트라", "플러스")
+_VARIANT_END = ("프로", "맥스", "라이트", "미니", "블랙", "pro", "plus", "max", "ultra", "lite", "mini")
+# 쿠팡 수량 규칙(pricing.market)이 못 읽는 묶음 단위 ('60정 3통', '30 롤', '2box'): 양쪽 숫자가 같아야 같은 상품 (1은 안 셈)
+_PACK_RE = re.compile(r"(\d+)\s*(통|롤|묶음|켤레|box|set)(?![a-z])")
+# 괄호 안 개수 ('(2박스)', '(스팸 1개 증정)'): 바깥 개수와 다르면 묶음·사은품 — 같은 상품으로 단정하지 않음
+_PAREN_RE = re.compile(r"\(([^()]*)\)")
+_COUNT_WORD_RE = re.compile(r"\d\s*(?:개입|개(?!월)|입|팩|세트|박스|병|캔|봉지|봉|포|정|매|ea(?![a-z]))|x\s*\d")
 _TAG_RE = re.compile(r"<[^>]+>")
+_THOUSANDS_RE = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")  # '1,000ml' → '1000ml'
 _HAS_DIGIT = re.compile(r"\d")
 _HAS_NON_DIGIT = re.compile(r"\D")
 _PAUSE_ON_429 = 600.0  # 검색 API 가 429 를 주면 이만큼 쉼 (초)
@@ -247,16 +275,53 @@ def _category(item: dict[str, Any]) -> str | None:
     return ">".join(c for c in cats if c) or None
 
 
+def _spaced(text: str) -> str:
+    """낱말 경계를 남긴 소문자 ('갤럭시 버즈 3 실버' → '갤럭시 버즈3 실버'): 글자 뒤 띄어 쓴 숫자는 붙이고, 천 단위 쉼표만 지운다."""
+    s = re.sub(r"[^0-9a-z가-힣]+", " ", _THOUSANDS_RE.sub("", text.lower()))
+    return re.sub(r"(?<=[a-z가-힣]) (?=\d)", "", s).strip()
+
+
+def _variants(text: str) -> frozenset[str]:
+    out: set[str] = set()
+    for w in tokens(text):
+        out.update(v for v in _VARIANT_ANY if v in w)
+        out.update(v for v in _VARIANT_END if w.endswith(v))
+    return frozenset(out)
+
+
+def _packs(text: str) -> list[tuple[str, str]]:
+    return sorted((n, u) for n, u in _PACK_RE.findall(text.lower()) if n.lstrip("0") != "1")
+
+
+def _paren_count_differs(title: str, name: str) -> bool:
+    """네이버 상품명의 괄호 안에 개수가 있는데 상품명 전체의 낱개 수와 다른가 ('24캔 (2박스)', '24개 (스팸 1개 증정)').
+    '(총 48개)'·'(6병x2)' 는 풀어 쓴 것, 쿠팡 상품명에도 있는 괄호('1kg(5~7입)')는 같은 설명이라 안 봄."""
+    total = parse_quantity(title).count
+    mine = _norm(name)
+    for m in _PAREN_RE.finditer(title.lower()):
+        inner = m.group(1).strip()
+        if inner.startswith("총") or not _COUNT_WORD_RE.search(inner) or (_norm(inner) and _norm(inner) in mine):
+            continue
+        if parse_quantity(inner).count != total:
+            return True
+    return False
+
+
 def same_item(name: str, title: str, cfg: NaverReferenceConfig) -> bool:
-    """쿠팡 상품명(name)과 네이버 상품명(title)이 같은 상품인가 (보수적으로).
-    - 수량·용량·묶음이 같아야 함 (pricing.market.same_quantity — 2팩·1+1·'+ 증정' 묶음은 다른 상품)
+    """쿠팡 상품명(name)과 네이버 상품명(title)이 같은 상품인가 (보수적으로, 양쪽에서).
+    - 수량·용량·묶음이 같아야 함 (pricing.market.same_quantity — 2팩·1+1·'+ 증정' 묶음은 다른 상품). 수량 규칙이 못 읽는
+      묶음 단위('3통', '30롤')와 괄호 안 개수('(2박스)')도 같아야 함
     - 쿠팡 상품명 낱말의 min_token_match 이상이 네이버 상품명에 있어야 함 (띄어쓰기는 무시: '대추 방울토마토' = '대추방울토마토')
-    - 첫 낱말(대개 브랜드)과 숫자가 섞인 낱말(버즈3·10세대·128gb 같은 모델·세대·용량)은 모두 있어야 함
+    - 첫 낱말(대개 브랜드)은 있어야 하고, 숫자가 섞인 낱말(버즈3·10세대·128gb)은 통째로 있어야 함 ('버즈3' 은 '버즈3프로' 에 없음).
+      띄어 쓴 세대·모델 번호('에어팟 4')도 같은 낱말 뒤에 있어야 함 ('에어팟 2세대' 는 다른 상품)
+    - 프로·라이트·블랙·기획세트·증정 같은 갈래 말은 양쪽이 같아야 함 (한쪽에만 있으면 다른 상품)
     - 쿠팡 상품명에 없는 중고·렌탈·해외직구·옵션 목록·부속품 말이 네이버 상품명에 있으면 다른 상품"""
-    lowered, mine = title.lower(), name.lower()
+    lowered, mine = _NOT_SAME_OK.sub(" ", title.lower()), _NOT_SAME_OK.sub(" ", name.lower())
     if any(w in lowered and w not in mine for w in _NOT_SAME_WORDS):
         return False
-    if not same_quantity(name, title):
+    if not same_quantity(name, title) or _packs(name) != _packs(title):
+        return False
+    if _paren_count_differs(title, name):
         return False
     words = tokens(name)
     if not words:
@@ -267,39 +332,124 @@ def same_item(name: str, title: str, cfg: NaverReferenceConfig) -> bool:
         return False
     if cfg.require_first_token and _norm(words[0]) not in flat:
         return False
-    return all(_norm(w) in flat for w in words if _HAS_DIGIT.search(w) and _HAS_NON_DIGIT.search(w))
+    if _variants(name) != _variants(title):
+        return False
+    spaced = _spaced(title)
+    models = [w for w in words if _HAS_DIGIT.search(w) and _HAS_NON_DIGIT.search(w)]
+    if not all(re.search(rf"{re.escape(w)}(?![0-9a-z가-힣])", spaced) for w in models):
+        return False
+    return all(re.search(rf"{re.escape(m)}(?!\d)", spaced) for m in model_numbers(name))
 
 
-def naver_lowest(name: str, price: int, items: list[dict[str, Any]], cfg: NaverReferenceConfig) -> tuple[MarketQuote | None, str]:
-    """검색 결과에서 쿠팡 상품(name, price)과 확실히 같은 새 상품들의 최저가. (근거, 이유). 확실하지 않으면 (None, 이유).
-    가격비교(카탈로그) 상품이 하나 있거나, 일반 판매글이 서로 다른 판매처 min_listings 곳 이상일 때만 믿는다.
-    최저가는 맞은 것 전부 중 가장 싼 값 ('네이버 최저가보다 N% 싸요' 가 부풀려지지 않게 — 근거로는 가장 보수적인 값)."""
-    catalog: list[MarketQuote] = []
-    general: dict[str, MarketQuote] = {}
-    for it in items:
-        if str(it.get("productType") or "").strip() not in _NEW_TYPES:
-            continue  # 중고·단종·판매예정
-        lp, title = _won(it.get("lprice")), item_title(it)
-        if lp is None or not title or not same_item(name, title, cfg):
-            continue
-        if lp < price * cfg.min_price_ratio:
-            continue  # 쿠팡 값의 절반도 안 됨: 낱개·옵션·부속일 가능성이 커서 최저가로 안 씀
-        q = MarketQuote(price=lp, source=NAVER_SOURCE, title=title, url=str(it.get("link") or "") or None, category=_category(it))
-        if str(it.get("productType")).strip() == _CATALOG_TYPE:
-            catalog.append(q)
-        else:
-            seller = _norm(it.get("mallName")) or str(it.get("link") or title)
-            if seller not in general or lp < general[seller].price:
-                general[seller] = q
+@dataclass(slots=True)
+class NaverPrices:
+    """검색 결과에서 읽은, 쿠팡 상품과 확실히 같은 새 상품들의 네이버 값. 쿠팡 값과 상관없는 사실만 담는다 —
+    그대로 기억해 두고 판마다 지금의 쿠팡 값과 맞춰 본다 (naver_quote). 쿠팡이 네이버에 낸 판매글은 뺀다."""
+
+    lowest: int  # 같은 상품 전부(가격비교 상품·일반 판매글) 중 가장 싼 값 — '네이버 최저가보다 N% 싸요' 의 기준 (부풀리지 않게)
+    title: str
+    url: str | None = None
+    category: str | None = None  # 네이버 분류 (식품 판정용 — 기억한 값에도 같이 남김)
+    # 탈락 기준 값: 가격비교 상품의 최저가, 또는 서로 다른 판매처 min_listings 곳이 (값 + 배송비 여유) 이 값 이하.
+    # 판매글 한 곳의 싼 값(싼 옵션·누락된 부속품·개봉품일 수 있음)만으로는 탈락시키지 않는다
+    floor: int | None = None
+    floor_title: str | None = None
+    # lowest 가 정말 네이버 최저가인가: 가격비교 상품이 맞았거나, 낮은 가격순 검색에도 같은 상품이 나왔음.
+    # 관련도순 40개만 본 일반 판매글의 최솟값은 최저가가 아닐 수 있어 'N% 싸요' 근거로 안 씀
+    confirmed: bool = False
+    catalog: bool = False
+    sellers: int = 0  # 같은 상품 일반 판매글의 서로 다른 판매처 수
+
+    def to_meta(self) -> str:
+        return json.dumps({"category": self.category, "floor": self.floor, "floor_title": self.floor_title,
+                           "confirmed": self.confirmed, "catalog": self.catalog, "sellers": self.sellers}, ensure_ascii=False)
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> NaverPrices | None:
+        """기억해 둔 값 (market_quotes 한 줄). 예전 꼴이라 탈락·확인 정보가 없으면 None (다시 찾음)."""
+        try:
+            meta = json.loads(row.get("meta") or "")
+            price = int(row["price"])
+        except (ValueError, TypeError, KeyError):
+            return None
+        if not isinstance(meta, dict) or price <= 0:
+            return None
+        floor = meta.get("floor")
+        return cls(lowest=price, title=str(row.get("title") or ""), url=row.get("url"), category=meta.get("category"),
+                   floor=int(floor) if isinstance(floor, int) and floor > 0 else None, floor_title=meta.get("floor_title"),
+                   confirmed=bool(meta.get("confirmed")), catalog=bool(meta.get("catalog")), sellers=int(meta.get("sellers") or 0))
+
+
+def naver_prices(name: str, items: list[dict[str, Any]], cfg: NaverReferenceConfig,
+                 asc_items: list[dict[str, Any]] | None = None) -> NaverPrices | None:
+    """검색 결과(관련도순 items, 있으면 낮은 가격순 asc_items 도)에서 쿠팡 상품(name)과 확실히 같은 새 상품들의 값. 없으면 None."""
+    catalog: list[tuple[int, str, str | None, str | None]] = []
+    general: dict[str, tuple[int, str, str | None, str | None]] = {}
+    in_asc = False
+    for page, its in ((False, items), (True, asc_items or [])):
+        for it in its:
+            if str(it.get("productType") or "").strip() not in _NEW_TYPES:
+                continue  # 중고·단종·판매예정
+            if "쿠팡" in str(it.get("mallName") or "") or "coupang" in str(it.get("mallName") or "").lower():
+                continue  # 쿠팡이 네이버에 낸 같은 판매글은 '다른 곳 값'이 아님
+            lp, title = _won(it.get("lprice")), item_title(it)
+            if lp is None or not title or not same_item(name, title, cfg):
+                continue
+            in_asc = in_asc or page
+            row = (lp, title, str(it.get("link") or "") or None, _category(it))
+            if str(it.get("productType")).strip() == _CATALOG_TYPE:
+                catalog.append(row)
+            else:
+                seller = _norm(it.get("mallName")) or str(it.get("link") or title)
+                if seller not in general or lp < general[seller][0]:
+                    general[seller] = row
     found = catalog + list(general.values())
     if not found:
+        return None
+    low = min(found, key=lambda r: r[0])
+    floors: list[tuple[int, str]] = []
+    if catalog:
+        c = min(catalog, key=lambda r: r[0])
+        floors.append((c[0], c[1]))
+    by_price = sorted(general.values(), key=lambda r: r[0])
+    if len(by_price) >= cfg.min_listings:
+        r = by_price[cfg.min_listings - 1]
+        floors.append((r[0] + cfg.general_shipping_allowance, r[1]))
+    floor = min(floors) if floors else None
+    cat = next((r[3] for r in (*catalog, low, *by_price) if r[3]), None)
+    confirmed = bool(catalog) or (in_asc and len(general) >= cfg.min_listings)
+    return NaverPrices(lowest=low[0], title=low[1], url=low[2], category=cat, floor=floor[0] if floor else None,
+                       floor_title=floor[1] if floor else None, confirmed=confirmed, catalog=bool(catalog), sellers=len(general))
+
+
+def naver_quote(ref: NaverPrices, price: int, cfg: NaverReferenceConfig) -> tuple[MarketQuote | None, str]:
+    """기억한(또는 방금 찾은) 네이버 값과 지금 쿠팡 값(price)으로 평가기에 넘길 근거. (근거, 이유). 확실하지 않으면 (None, 이유).
+    - 같은 상품 판매글이 쿠팡 값의 min_price_ratio 배보다 싸면: 낱개·옵션·다른 상품일 수 있어 근거도 탈락도 없음
+    - 탈락 기준 값(floor)이 쿠팡 값 이하: 그 값으로 (평가기가 '네이버보다 싸지 않음'으로 탈락)
+    - 탈락 기준엔 못 미치는 판매글(한 곳뿐이거나 배송비를 더하면 비쌈)만 쿠팡 값 이하: 확실하지 않음 (가격 이력으로 판정)
+    - 모두 쿠팡보다 비쌈: 최저가가 확인된 것(confirmed)만 'N% 싸요' 근거로 — 너무 큰 차이(max_below_pct)는 다른 상품일 수 있어 안 씀"""
+    if ref.lowest < price * cfg.min_price_ratio:
+        return None, f"쿠팡 값의 {cfg.min_price_ratio:g}배도 안 되는 같은 상품 판매글 있음 — 확실하지 않음"
+    if ref.floor is not None and ref.floor <= price:
+        q = MarketQuote(price=ref.floor, source=NAVER_SOURCE, title=ref.floor_title or ref.title, category=ref.category)
+        return q, "네이버가 더 쌈" + (" (가격비교 상품)" if ref.catalog else f" (판매처 {cfg.min_listings}곳↑)")
+    if ref.lowest <= price:
+        return None, f"더 싼 판매글({ref.lowest:,}원)이 있지만 탈락 기준엔 못 미침 — 확실하지 않음"
+    if not ref.confirmed:
+        return None, f"가격비교 상품 없이 판매글 {ref.sellers}곳 — 최저가로 단정 안 함"
+    if (1 - price / ref.lowest) * 100 > cfg.max_below_pct:
+        return None, f"네이버 {ref.lowest:,}원보다 {cfg.max_below_pct:g}% 넘게 쌈 — 다른 상품일 수 있음"
+    q = MarketQuote(price=ref.lowest, source=NAVER_SOURCE, title=ref.title, url=ref.url, category=ref.category)
+    return q, "가격비교 상품" if ref.catalog else "낮은 가격순 확인"
+
+
+def naver_lowest(name: str, price: int, items: list[dict[str, Any]], cfg: NaverReferenceConfig,
+                 asc_items: list[dict[str, Any]] | None = None) -> tuple[MarketQuote | None, str]:
+    """검색 결과와 쿠팡 값으로 바로 근거 (naver_prices + naver_quote)."""
+    ref = naver_prices(name, items, cfg, asc_items)
+    if ref is None:
         return None, "같은 상품 없음"
-    if not catalog and len(general) < cfg.min_listings:
-        return None, f"가격비교 상품 없이 판매글 {len(general)}곳뿐"
-    best = min(found, key=lambda q: q.price)
-    if (1 - price / best.price) * 100 > cfg.max_below_pct:
-        return None, f"네이버 {best.price:,}원보다 {cfg.max_below_pct:g}% 넘게 쌈 — 다른 상품일 수 있음"
-    return best, "카탈로그" if any(q is best for q in catalog) else f"판매글 {len(general)}곳"
+    return naver_quote(ref, price, cfg)
 
 
 class LookupRun:
@@ -311,10 +461,11 @@ class LookupRun:
         self._clock = clock
         self.started = clock()
         self.calls = 0
-        self.matched = 0  # 같은 상품의 최저가를 찾음
+        self.matched = 0  # 같은 상품의 네이버 값을 찾음
         self.no_match = 0  # 검색했는데 확실한 같은 상품이 없음
         self.skipped = 0  # 한도·시간·쉬는 중이라 이번 판엔 못 찾아봄 (다음 판에)
         self.failed = 0  # 일시 오류 (기억하지 않음)
+        self.kept_veto = 0  # 다시 못 찾아서 지난 값의 '네이버가 더 쌈' 탈락을 그대로 씀
 
     def time_left(self) -> float:
         return self.seconds - (self._clock() - self.started)
@@ -324,14 +475,16 @@ class LookupRun:
 
     def summary(self) -> str:
         parts = [f"{k}={v}" for k, v in (("calls", self.calls), ("matched", self.matched), ("no_match", self.no_match),
-                                          ("skipped", self.skipped), ("failed", self.failed)) if v]
+                                          ("skipped", self.skipped), ("failed", self.failed), ("kept_veto", self.kept_veto)) if v]
         return " ".join(parts)
 
 
 class NaverPriceReference:
-    """쿠팡 상품의 네이버 쇼핑 최저가 (가격 근거). 검색은 NaverShopSearch 와 같은 키·같은 401 처리(꺼지면 사진 찾기도 같이).
+    """쿠팡 상품의 네이버 쇼핑 값 (가격 근거). 검색은 NaverShopSearch 와 같은 키·같은 401 처리(꺼지면 사진 찾기도 같이).
     한 판(LookupRun)·한 시간 호출 수를 넘지 않고, 호출 사이엔 간격을 둔다. 429 면 잠깐 쉰다.
-    일시 오류(429·5xx·시간 초과)와 한도로 못 찾은 것은 '없음'으로 기억하지 않는다 (last_no_match 가 False — 부르는 쪽이 다음 판에 다시)."""
+    일시 오류(429·5xx·시간 초과)와 한도로 못 찾은 것은 '없음'으로 기억하지 않는다 (last_no_match 가 False — 부르는 쪽이 다음 판에 다시).
+    가격비교 상품 없이 일반 판매글만 맞았는데 쿠팡이 기준 넘게 싸 보이면, 낮은 가격순으로 한 번 더 찾아 최저가를 확인한다
+    (못 하면 그 값은 'N% 싸요' 근거로 안 쓰고 last_complete 가 False — 부르는 쪽이 기억하지 않고 다음 판에 다시)."""
 
     source = NAVER_SOURCE
 
@@ -352,6 +505,7 @@ class NaverPriceReference:
         self._pause_until = 0.0
         self._told_missing = False
         self.last_no_match = False  # 마지막 lookup 이 실제로 검색했는데 확실한 같은 상품이 없었나
+        self.last_complete = True  # 마지막 lookup 결과를 그대로 기억해도 되나 (최저가 확인 검색을 못 했으면 False)
 
     @property
     def usable(self) -> bool:
@@ -392,43 +546,72 @@ class NaverPriceReference:
         self._next_at = now + self.cfg.min_interval_seconds
         return True
 
-    async def lookup(self, product: Product, run: LookupRun) -> MarketQuote | None:
-        """같은 상품의 네이버 최저가 (확실할 때만). 검색어는 꾸밈을 뺀 상품명, 결과가 하나도 없을 때만 앞 네 낱말로 한 번 더."""
+    async def _fetch(self, product: Product, run: LookupRun, query: str, sort: str) -> list[dict[str, Any]] | None:
+        """검색 한 번. 한도·쉬는 중이면 run.skipped, 일시 오류면 run.failed 를 올리고 None (꺼짐은 _Unavailable 그대로)."""
+        if not await self._turn(run):
+            run.skipped += 1
+            log.debug("naver ref skipped (run/hour limit or pause): %s", product.name[:40])
+            return None
+        timeout = self.cfg.timeout_seconds
+        try:
+            return await asyncio.wait_for(
+                self.search._search(query, exclude=PRICE_EXCLUDE, timeout=timeout, sort=sort), timeout + 2)
+        except httpx.HTTPStatusError as e:
+            run.failed += 1
+            if e.response.status_code == 429:
+                self._pause_until = self._clock() + _PAUSE_ON_429
+                log.info("naver ref: HTTP 429 — 네이버 최저가 비교를 %d분 쉼", int(_PAUSE_ON_429 // 60))
+            else:
+                log.info("naver ref failed for %s: HTTP %s", product.name[:40], e.response.status_code)
+        except (httpx.HTTPError, ValueError, TimeoutError) as e:
+            run.failed += 1
+            log.info("naver ref failed for %s: %s", product.name[:40], type(e).__name__)
+        return None
+
+    async def lookup(self, product: Product, run: LookupRun) -> NaverPrices | None:
+        """같은 상품의 네이버 값 (확실할 때만). 검색어는 꾸밈을 뺀 상품명, 결과가 하나도 없을 때만 앞 네 낱말로 한 번 더.
+        판정(근거·탈락)은 부르는 쪽이 naver_quote 로 지금 쿠팡 값과 맞춰 본다."""
         self.last_no_match = False
+        self.last_complete = True
         if not product.has_price or not self.usable:
             return None
         items: list[dict[str, Any]] = []
+        used = ""
         for query in search_queries(product.name)[:2]:
-            if not await self._turn(run):
-                run.skipped += 1
-                log.debug("naver ref skipped (run/hour limit or pause): %s", product.name[:40])
-                return None
-            timeout = self.cfg.timeout_seconds
             try:
-                items = await asyncio.wait_for(self.search._search(query, exclude=PRICE_EXCLUDE, timeout=timeout), timeout + 2)
+                got = await self._fetch(product, run, query, "sim")
             except _Unavailable:
                 return None  # 키가 틀렸거나 API 가 닫힘: _search 가 한 번 경고하고 껐다
-            except httpx.HTTPStatusError as e:
-                run.failed += 1
-                if e.response.status_code == 429:
-                    self._pause_until = self._clock() + _PAUSE_ON_429
-                    log.info("naver ref: HTTP 429 — 네이버 최저가 비교를 %d분 쉼", int(_PAUSE_ON_429 // 60))
-                else:
-                    log.info("naver ref failed for %s: HTTP %s", product.name[:40], e.response.status_code)
+            if got is None:
                 return None
-            except (httpx.HTTPError, ValueError, TimeoutError) as e:
-                run.failed += 1
-                log.info("naver ref failed for %s: %s", product.name[:40], type(e).__name__)
-                return None
+            items, used = got, query
             if items:
                 break
-        quote, why = naver_lowest(product.name, product.price, items, self.cfg)
-        if quote is None:
+        ref = naver_prices(product.name, items, self.cfg)
+        if ref is None:
             run.no_match += 1
             self.last_no_match = True
-            log.info("naver ref: no confident match for '%s' — %s (%d results)", product.name[:40], why, len(items))
+            log.info("naver ref: no confident match for '%s' — 같은 상품 없음 (%d results)", product.name[:40], len(items))
             return None
+        if self._needs_confirm(ref, product.price):
+            # 일반 판매글만 맞았고 쿠팡이 기준 넘게 싸 보임: 관련도순 40개 밖에 더 싼 같은 상품이 있는지 낮은 가격순으로 확인
+            try:
+                asc = await self._fetch(product, run, used, "asc")
+            except _Unavailable:
+                asc = None
+            if asc is None:
+                self.last_complete = False
+            else:
+                ref = naver_prices(product.name, items, self.cfg, asc_items=asc) or ref
         run.matched += 1
-        log.info("naver ref for '%s' %s원 → 네이버 %s원 (%s, %s)", product.name[:40], f"{product.price:,}",
-                 f"{quote.price:,}", why, quote.title[:40])
-        return quote
+        log.info("naver ref for '%s' %s원 → 네이버 같은 상품 최저 %s원 (%s, 판매처 %d곳%s)%s · 탈락 기준 %s",
+                 product.name[:40], f"{product.price:,}", f"{ref.lowest:,}", "가격비교 상품" if ref.catalog else "판매글만",
+                 ref.sellers, ", 최저가 확인" if ref.confirmed else "", "" if self.last_complete else " (최저가 확인 못 함 — 기억 안 함)",
+                 f"{ref.floor:,}원" if ref.floor else "없음")
+        return ref
+
+    def _needs_confirm(self, ref: NaverPrices, price: int) -> bool:
+        """낮은 가격순 확인 검색이 판정을 바꿀 수 있나: 확인 안 된 판매글 값이고, 그대로라면 'N% 싸요' 근거가 될 만큼 쌈."""
+        if ref.confirmed or not self.cfg.confirm_lowest or ref.sellers < self.cfg.min_listings or ref.lowest <= price:
+            return False
+        return (1 - price / ref.lowest) * 100 >= self.cfg.min_below_pct
