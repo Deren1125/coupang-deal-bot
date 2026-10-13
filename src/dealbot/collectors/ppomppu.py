@@ -80,15 +80,26 @@ _TIGHT_LINK = (
     r"|실구매가?|실결제가?|실질|결제(?:금액|가)?|최저가?|기준|개당|당|[:=]"
 )
 _LOOSE_LINK = re.compile(r"[,+]|와우|회원")  # 다른 조건을 붙이는 말 — 뒤 금액이 더 작으면 따로 붙은 값이다
+# 앞 금액을 조건으로 받거나('쿠폰 적용 시', '할인 후', '적용하면', '받으면', '할인된') 뒤 금액이 치르는 값이라는 말
+# ('최종', '실구매가'). 이런 말 없이 '쿠폰가'·'쿠폰적용'으로만 이어지면 앞 금액도 판매가로 적힌 것이다
+_IF_LINK = re.compile(r"시|후|하[면여]|해서|으로|받|된|최종|실구매|실결제")
+_PRICE_GA = re.compile(r"\s*(?:적용|사용|할인)?\s*가(?!격)")  # '쿠폰가'·'쿠폰적용가'·'카드할인가' 의 '가'
+_COUNT_PLUS = re.compile(r"\s*\+\s*(?=\d)")  # '1+1'·'2+1' 의 '+' 는 금액을 나누는 '+' 가 아니다
 _GAP_PIECE = re.compile(rf"\s*+(?P<lead>{_BENEFIT_PHRASE}[금품]?)?(?P<rest>(?:\s+|{_TIGHT_LINK}|{_LOOSE_LINK.pattern})*+)")
-# 뒤 금액 바로 뒤에 이런 말이 오면 판매가가 아니다: 배송비('2,500원 배송'), 쿠폰 없는 값('15,900원 미적용', '19,900원 일반'),
-# 몇 개 살 때의 값('9,900원 2개 구매시'), 사은품·할인액('9,000원 상당', '3,000원↓', '5,000원 OFF', '9,900원 절약').
-# '12,900원 일반 13,900원' 의 '일반' 은 다음 금액에 붙은 말이고, '19,900원 배송비 포함' 은 판매가다
-_TAIL_BLOCK = re.compile(
-    r"\s*+\(?\s*+(?:(?:쿠폰\s*)?(?:미적용|일반|정가|원가|정상가)(?!\s*(?:시|가)?\s*[:=]?\s*\d)"
-    r"|(?:배송|택배)(?!비?\s*(?:포함|무료))|\d+\s*(?:개|팩|세트|박스)\s*(?:이상\s*)?구매"
-    r"|상당|사은|[Oo][Ff][Ff]|↓|▼|절약|혜택|차감)"
+# 뒤 금액 바로 뒤에 와도 되는 말. 이 밖의 말이 붙으면 판매가가 아니다: 배송비('2,500원 배송'), 쿠폰 없는 값·정가
+# ('19,900원 일반', '299,000원 출고가', '69,000원 소비자가'), 적립·절약액('15,000원 캐쉬백', '1만원 저렴', '16,000원 DC'),
+# 몇 개 값('10,950원 1개'), 조건('3,000원 (3만원 이상 무료)'). 끝이거나 '~'·'부터'·'배송비 포함'·'무료배송'·'(개당 1,295원)',
+# '최종', 다른 금액으로 이어지는 '+'·','·'일반'('+ 2,000원 적립', ', 2개 이상 구매시', '일반 13,900원')만 된다
+_TAIL_OK = re.compile(
+    r"\s*+(?:$|[~/]|부터|\(?\s*(?:배송비|택배비)\s*포함|무료\s*배송|무배|(?:최종|실구매|실결제)가?\s*$"
+    r"|\(\s*\S{0,6}?당\s*\d|(?:[,+]|일반)\s*\d)"
 )
+# 단위당 값과 판매가 사이에 와도 되는 말: 띄어쓰기, '총'·'합계'·'최종' ('개당 647원, 총 25,900원')
+_UNIT_GAP = re.compile(r"\s*+(?:,?\s*(?:총|합계|최종가?)\s*)?")
+# 배송비로 흔한 값 — 싼 상품 값보다 작은 뒤 금액이 이 값이면 배송비일 수 있다 ('3,900원 쿠폰적용 2,500원')
+_SHIPPING_FEES = frozenset((2000, 2500, 3000, 3500, 4000, 5000, 6000))
+# 묶음 개수: '2개', '3팩', '2+1'(3개). '개당'·'1개입' 처럼 단위당이거나 묶음 안 낱개 수는 아니다
+_BUNDLE_COUNT = re.compile(r"(\d{1,4})\s*(?:\+\s*(\d{1,4})(?!\d)|(?:개|팩|세트|박스|봉|병|캔|통)(?![당입]))")
 _UNIT_WORDS = r"g|kg|ml|l|개|팩|봉|매|롤|입|캔|병|구|ea"
 # 단위당 값: '개당 9,900원', '100g당 1,790원', '1,790원 꼴', '1,790원/100g'
 _UNIT_AFTER = re.compile(rf"\s*+(?:꼴|당|/\s*(?:\d+(?:\.\d+)?\s*)?(?:{_UNIT_WORDS})(?![a-z]))", re.IGNORECASE)
@@ -145,9 +156,10 @@ _SHIPPING_WORDS = re.compile(r"무료|무배|배송|착불|\d\s*원")
 def _meta_price(text: str, *, benefit_ok: bool = False) -> int | None:
     """괄호 속 가격 칸("12,900원", "2개 12,900원", "29,900원→19,900원")의 판매가. 없으면 None.
 
-    예전(맨 앞 숫자)처럼 첫 금액이 판매가다. 다만 개수·용량("2개", "500ml", "10,000mAh")과 100 미만의 수, 단위당 값
-    ("개당 647원 25,900원")은 건너뛰고, 첫 금액에 혜택 말이 붙었으면('5,000원 쿠폰 사용시', '19,900원 쿠폰가',
-    '쿠폰 3,000원 적용시', '10,000원 할인') _later_price 가 뒤 금액으로 바꿀 수 있다. 혜택 금액만 있으면 판매가가
+    예전(맨 앞 숫자)처럼 첫 금액이 판매가다. 다만 개수·용량("2개", "500ml", "10,000mAh")과 100 미만의 수는 건너뛰고,
+    단위당 값 바로 뒤에 더 큰 금액만 있으면("개당 647원 25,900원") 그 금액으로 넘어가며, 첫 금액에 혜택 말이
+    붙었으면('5,000원 쿠폰 사용시', '19,900원 쿠폰가', '쿠폰 3,000원 적용시', '10,000원 할인') _later_price 가 뒤 금액으로
+    바꿀 수 있다. 혜택 금액만 있으면 판매가가
     없다(benefit_ok 면 혜택 말이 붙은 첫 금액도 판매가). 화살표가 있으면 그 뒤에서 먼저 찾는다.
     금액마다 바로 앞뒤 글만 보고 뒤로 한 번만 훑으니(되부르기 없음) 글 길이에 비례해 끝난다."""
     if not text:
@@ -163,20 +175,23 @@ def _meta_price(text: str, *, benefit_ok: bool = False) -> int | None:
 def _chunk_price(chunk: str, benefit_ok: bool) -> int | None:
     """화살표로 나눈 한 토막의 판매가 (_meta_price)."""
     amounts = [(a, _amount_value(chunk, a)) for a in _AMOUNT_RE.finditer(chunk)]
-    prev_end, unit_price = 0, None
+    prev_end = 0
     for i, (a, value) in enumerate(amounts):
         before, prev_end = chunk[prev_end : a.start()], a.end()
         if value is None:
             continue
         if benefit_ok:
             return value
-        if before.rstrip().endswith("당"):  # '개당 647원 25,900원' — 단위당 값 뒤에 금액이 더 있으면 그쪽이 판매가
-            unit_price = unit_price or value
-            continue
+        if before.rstrip().endswith("당"):
+            # '개당 647원 25,900원' — 단위당 값 바로 뒤의 더 큰 금액이 판매가. 다른 말·배송비·혜택 금액이 이어지면
+            # ('개당 990원, 배송비 3,000원', '개당 990원 + 2,500원', '개당 990원, 1,000원 쿠폰') 단위당 값을 둔다
+            if _after_unit(chunk, amounts, i, value):
+                continue
+            return value
         kind = _benefit_kind(chunk, a, before)
         if kind in ("plain", "unapplied"):
             return value
-        later = _later_price(chunk, amounts, i, value)
+        later = _later_price(chunk, amounts, i, value, kind)
         if later is not None:
             return later
         if kind != "benefit":
@@ -185,7 +200,26 @@ def _chunk_price(chunk: str, benefit_ok: bool) -> int | None:
         # 판매가가 없고, 아니면 예전처럼 첫 금액을 둔다 ('12,900원 할인 2,500원')
         rest = [b for b, v in amounts[i + 1 :] if v is not None]
         return value if any(_benefit_kind(chunk, b) != "benefit" for b in rest) else None
-    return unit_price
+    return None
+
+
+def _after_unit(chunk: str, amounts: list[tuple[re.Match[str], int | None]], i: int, unit: int) -> bool:
+    """단위당 값 amounts[i] 다음 금액을 판매가로 이어 읽을지. 사이에 띄어쓰기·'총'(_UNIT_GAP)과 개수·용량만 있고, 그
+    금액이 단위당 값보다 크고 배송비로 흔한 값이 아니며, 혜택·조건 금액('1,000원 쿠폰', '3만원 이상')이 아니고, 뒤에 붙은
+    말도 판매가다워야(_TAIL_OK) 한다."""
+    pos = amounts[i][0].end()
+    for b, y in amounts[i + 1 :]:
+        if not _UNIT_GAP.fullmatch(chunk, pos, b.start()):
+            return False
+        if y is None:
+            qty = _QTY_AFTER.match(chunk, b.end())
+            pos = qty.end() if qty else b.end()
+            continue
+        kind = _benefit_kind(chunk, b)
+        if y <= unit or y in _SHIPPING_FEES or kind == "benefit":
+            return False
+        return kind != "plain" or bool(_TAIL_OK.match(chunk, b.end()))
+    return False
 
 
 def _amount_value(chunk: str, a: re.Match[str]) -> int | None:
@@ -233,28 +267,44 @@ def _coupon_like(value: int) -> bool:
     return value % 500 == 0 and (digits < 10 or (digits < 100 and digits % 10 == 5))
 
 
-def _later_price(chunk: str, amounts: list[tuple[re.Match[str], int | None]], i: int, x: int) -> int | None:
-    """혜택 말이 붙은 금액 amounts[i] (값 x) 대신 판매가로 볼 뒤 금액 y. 없으면 None (x 가 판매가).
+def _later_price(
+    chunk: str, amounts: list[tuple[re.Match[str], int | None]], i: int, x: int, x_kind: str
+) -> int | None:
+    """혜택 말이 붙은 금액 amounts[i] (값 x, 성격 x_kind) 대신 판매가로 볼 뒤 금액 y. 없으면 None (x 가 판매가).
 
     뒤로 한 번 훑으며 개수·용량('2개', '1+1'), 어림값('1만원대'), 혜택 금액('2,000원 추가적립')은 건너뛰고 처음 만나는
     금액을 y 로 본다(혜택 말이 붙은 y 가 판매가가 못 되면 그것도 건너뛴다). 쿠폰 없는 값('15,900원 미적용')을 만나면
     그만둔다. y 는 이럴 때만 판매가다.
     - 금액 사이의 말이 모두 _GAP_PIECE 로 읽힌다. 모르는 말('일반', '판매가', '첫구매 적립금')이 끼면 x 를 둔다
-    - y 바로 뒤에 쿠폰 없는 값·정가·배송비·사은품·할인액이라는 말이 없다 (_TAIL_BLOCK)
-    - y 가 x 보다 크면 x 가 쿠폰·적립 금액다운 둥근 값이고, 개수 뒤의 y 가 x 의 배수(묶음 값)가 아니다
+    - y 바로 뒤의 말도 판매가답다 (_TAIL_OK). '캐쉬백'·'저렴'·'출고가'·'(3만원 이상 무료)' 같은 말이 붙으면 x 를 둔다
+    - y 가 x 보다 크면 x 가 쿠폰·적립 금액다운 둥근 값이고, 개수 뒤의 y 가 x 의 배수(묶음 값)가 아니다. x 가 조건 말
+      없이 '쿠폰가'·'쿠폰적용'으로 적혔으면(판매가로 적힘) '+' 뒤의 y('1,000원 쿠폰적용 + 2,500원'), '쿠폰가'·배송비
+      값일 때 쉼표 뒤의 y('1,000원 쿠폰적용, 3,500원 배송비포함'), x 의 N 개 묶음 값쯤 되는 y('20,000원 쿠폰가, 2개
+      38,000원')도 판매가가 아니다
     - y 가 x 보다 작으면 쿠폰으로 깎인 값이다: 혜택 말 다음에 '사용시'·'후'·'가' 같은 이어 주는 말이 있고, 쉼표·'와우'·
-      개수 같은 다른 조건이 끼지 않았고, y 에 따로 혜택 말이 붙지 않았으며, x 의 절반보다 크다. 혜택 말만 사이에
-      있으면('19,900원 카드할인 9,000원') 그 말이 y 에 붙은 것일 수 있어 x 를 둔다
-    - 단위당 값('개당', '꼴', '/100g')은 x 가 쿠폰 금액일 때만 ('1만원 할인 후 개당 9,900원'), 그리고 x 의 절반보다 클 때만"""
-    pos, loose, counted = amounts[i][0].end(), False, False
+      개수 같은 다른 조건이 끼지 않았고, y 에 따로 혜택 말이 붙지 않았으며, x 의 절반보다 크고, 배송비로 흔한 값
+      ('3,900원 쿠폰적용 2,500원')이 아니다. 혜택 말만 사이에 있으면('19,900원 카드할인 9,000원') 그 말이 y 에 붙은
+      것일 수 있어 x 를 둔다
+    - 단위당 값('개당', '꼴', '/100g')은 x 가 쿠폰 금액일 때만 ('1만원 할인 후 개당 9,900원'), 그리고 x 의 절반보다 클
+      때만. '10,000원 쿠폰가 개당 5,500원' 처럼 x 가 판매가로 적혔고 단위당 값이 더 작으면 x 를 둔다"""
+    pos = amounts[i][0].end()
+    first = _GAP_PIECE.match(chunk, pos)
+    ga = bool(first and _PRICE_GA.match(first.group("rest")))
+    loose = counted = plus = comma = cond = False
+    n = 0  # 사이에 적힌 마지막 묶음 개수
     for b, y in amounts[i + 1 :]:
         piece = _GAP_PIECE.fullmatch(chunk, pos, b.start())
         if not piece:
             return None
-        loose = loose or bool(_LOOSE_LINK.search(piece.group("rest")))
-        if y is None:  # 개수·용량은 단위까지 건너뛴다
-            qty = _QTY_AFTER.match(chunk, b.end())
+        rest = piece.group("rest")
+        loose = loose or bool(_LOOSE_LINK.search(rest))
+        plus, comma = plus or "+" in rest, comma or "," in rest
+        cond = cond or bool(_IF_LINK.search(rest))
+        if y is None:  # 개수·용량은 단위까지 건너뛴다 ('1+1' 의 '+' 까지)
+            qty = _QTY_AFTER.match(chunk, b.end()) or _COUNT_PLUS.match(chunk, b.end())
             pos, loose, counted = (qty.end() if qty else b.end()), True, True
+            bundle = _BUNDLE_COUNT.match(chunk, b.start())
+            n = int(bundle.group(1)) + int(bundle.group(2) or 0) if bundle else n
             continue
         approx = _APPROX_AFTER.match(chunk, b.end())
         if approx:
@@ -266,16 +316,21 @@ def _later_price(chunk: str, amounts: list[tuple[re.Match[str], int | None]], i:
         if kind in ("benefit", "loose"):
             pos = b.end()
             continue
-        if _TAIL_BLOCK.match(chunk, b.end()):
+        unit_after = _UNIT_AFTER.match(chunk, b.end())
+        if kind != "said" and not unit_after and not _TAIL_OK.match(chunk, b.end()):
             return None
-        if piece.group(0).rstrip().endswith("당") or _UNIT_AFTER.match(chunk, b.end()):
-            price = y if _coupon_like(x) and y * 2 > x else None
+        x_as_price = x_kind == "said" and not cond  # '쿠폰가'·'쿠폰적용' — '쿠폰 적용 시'·'할인 후' 면 x 는 쿠폰 금액
+        if unit_after or piece.group(0).rstrip().endswith("당"):
+            price = y if _coupon_like(x) and y * 2 > x and not (x_as_price and y < x) else None
         elif y > x:
-            price = y if _coupon_like(x) and not (counted and y % x == 0) else None
-        elif loose or kind == "said" or not piece.group("rest").strip():
+            # 개수 뒤의 x 배수나, x 가 판매가로 적혔을 때 x 의 N 개 묶음 값쯤(0.7·N·x ~ N·x) 되는 y 는 묶음 값이다
+            bundle = counted and (y % x == 0 or (x_as_price and n >= 2 and 7 * n * x <= 10 * y <= 10 * n * x))
+            apart = x_as_price and (plus or (comma and (ga or y in _SHIPPING_FEES)))  # 따로 붙은 배송비·다른 값
+            price = y if _coupon_like(x) and not bundle and not apart else None
+        elif loose or kind == "said" or not rest.strip():
             price = None
         else:
-            price = y if y * 2 > x else None
+            price = y if y * 2 > x and y not in _SHIPPING_FEES else None
         if price is not None or kind != "said":
             return price
         pos = b.end()  # 판매가가 못 되는 '1만원 쿠폰 적용 시' 같은 금액은 혜택 금액처럼 넘어간다
