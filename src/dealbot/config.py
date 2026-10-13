@@ -238,16 +238,16 @@ class PageCheckConfig(BaseModel):
     # 일반 요청이 막힌(429·403·빈 페이지) 네이버 상품 페이지(스마트스토어·브랜드스토어·쇼핑 상품 페이지)를 사진용 크롬
     # (enrich.store_browser 가 켜져 있어야 함)으로 읽어 대조. 꺼져 있으면 예전처럼 '확인 못 함'
     browser: bool = False
-    browser_per_run: int = 1  # 수집 한 판에 크롬으로 읽는 페이지 수 (크롬이 바쁘거나 열기 간격 안이면 기다리지 않고 다음 판에)
-    browser_per_hour: int = 12  # 한 시간에 (모든 수집기 합)
-    browser_timeout_seconds: float = 40.0  # 한 번 읽기(크롬 띄우기~닫기) 시간 제한
+    browser_per_run: int = Field(1, ge=0)  # 수집 한 판에 크롬으로 읽는 페이지 수 (크롬이 바쁘거나 열기 간격 안이면 기다리지 않고 다음 판에)
+    browser_per_hour: int = Field(12, ge=0)  # 한 시간에 (모든 수집기 합)
+    browser_timeout_seconds: float = Field(40.0, gt=0)  # 한 번 읽기(크롬 띄우기~닫기) 시간 제한
     # 크롬도 막히면(429·403·캡차·빈 페이지) 크롬 읽기를 쉬는 시간 (사진용도 같이). 또 막히면 두 배씩, 최대 max.
     # 크롬으로 열었는데 못 읽은 상품(시간 초과·로그인 등 다른 페이지로 넘어감)은 그 상품만 browser_cooldown_minutes 뒤에 다시,
     # 또 못 읽으면 두 배씩 (최대 6시간). 크롬도 막힌 상품은 처음부터 두 배 — 쉬는 시간이 끝나면 다른 상품부터 읽게
-    browser_cooldown_minutes: float = 30.0
-    browser_cooldown_max_minutes: float = 60.0
-    cache_minutes: float = 120.0  # 읽은 페이지 가격·옵션을 상품마다 기억 (그동안 일반 요청·크롬 다시 안 함. 0 = 안 씀)
-    unverified_log_hours: float = 24.0  # '확인 못 함' 로그는 상품마다 이 시간에 한 번
+    browser_cooldown_minutes: float = Field(30.0, ge=0)
+    browser_cooldown_max_minutes: float = Field(60.0, ge=0)
+    cache_minutes: float = Field(120.0, ge=0)  # 읽은 페이지 가격·옵션을 상품마다 기억 (그동안 일반 요청·크롬 다시 안 함. 0 = 안 씀)
+    unverified_log_hours: float = Field(24.0, ge=0)  # '확인 못 함' 로그는 상품마다 이 시간에 한 번
 
 
 class SourceRule(BaseModel):

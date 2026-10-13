@@ -126,11 +126,13 @@ def naver_state_prices(html: str, url: str | None = None) -> PagePrices | None:
     _walk(state, nodes)
     if not nodes:
         return None
-    # 같은 페이지에 다른 상품(추천·함께 본 상품)이 있을 수 있어 주소의 상품번호와 같은 것을 먼저, 없으면 옵션이 있는 것
+    # 같은 페이지에 다른 상품(추천·함께 본 상품)이 있을 수 있어 주소의 상품번호와 같은 것만. 주소에 상품번호가 있는데 같은 상품이
+    # 없으면 None (확인 못 함) — 구조가 달라 못 찾은 것일 수 있고, 다른 상품 가격으로 보류하면 안 된다. 번호가 없는 주소면 옵션이 있는 것
     no = (_STORE_NO_RE.search(url or "") or [None, None])[1]
     if no:
-        same = [n for n in nodes if str(n.get("productNo") or "") == no or str(n.get("id") or "") == no]
-        nodes = same or nodes
+        nodes = [n for n in nodes if str(n.get("productNo") or "") == no or str(n.get("id") or "") == no]
+        if not nodes:
+            return None
     nodes.sort(key=lambda n: (0 if n.get("optionCombinations") else 1, 0 if n.get("productNo") or n.get("name") else 1))
     node = nodes[0]
     benefits = node.get("benefitsView") if isinstance(node.get("benefitsView"), dict) else {}

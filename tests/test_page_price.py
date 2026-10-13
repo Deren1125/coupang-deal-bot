@@ -17,10 +17,11 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from dealbot.app import DealBot
 from dealbot.collectors import BaseCollector, register
-from dealbot.config import CollectorConfig, Settings
+from dealbot.config import CollectorConfig, PageCheckConfig, Settings
 from dealbot.enrich import (
     PageEnricher,
     PageMeta,
@@ -80,6 +81,10 @@ def test_naver_state_prices_options_and_discounts() -> None:
     assert [(o.label, o.prices, o.lead) for o in opts] == [("2L 12개", (6390, 7100), True), ("2L 24개", (14465, 15175), False)]
     # 같은 페이지의 다른 상품(추천 상품) 가격은 안 씀: 주소 상품번호와 같은 상품만
     assert naver_state_prices("<script>window.__PRELOADED_STATE__={\"x\":1}</script>") is None
+    # 주소 상품번호와 같은 상품이 없으면(구조가 다르거나 추천 상품만 보임) 다른 상품 값으로 대조하지 않음 → 확인 못 함
+    html = (FIX / "naver_store_state.html").read_text(encoding="utf-8")
+    assert naver_state_prices(html, "https://smartstore.naver.com/water/products/123") is None
+    assert naver_state_prices(html, "https://shopping.naver.com/window-products/style/123") is not None  # 번호 없는 주소는 전처럼
 
 
 # ---------------------------------------------------------------- 대조 규칙
@@ -910,3 +915,15 @@ async def test_naver_short_link_stops_before_a_blog() -> None:
     meta = await enricher.fetch("https://naver.me/store")
     assert meta is not None and meta.final_url == NAVER_URL and meta.prices is not None
     assert asked == ["https://naver.me/blog", "https://naver.me/store", NAVER_URL]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"browser_timeout_seconds": 0}, {"browser_per_run": -1}, {"browser_per_hour": -1}, {"browser_cooldown_minutes": -5},
+     {"cache_minutes": -1}, {"unverified_log_hours": -1}],
+)
+def test_page_check_browser_settings_are_bounded(bad: dict[str, float]) -> None:
+    """크롬 시간 제한 0(예전엔 몰래 75초가 됨)·음수 한도·음수 시간은 설정을 읽을 때 거절."""
+    with pytest.raises(ValidationError):
+        PageCheckConfig(**bad)
+    assert PageCheckConfig(browser_per_run=0, cache_minutes=0, browser_cooldown_minutes=0).browser_per_run == 0  # 0 = 안 씀은 그대로

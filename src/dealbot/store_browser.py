@@ -188,7 +188,8 @@ class StoreBrowser:
             started = self._clock()
             try:
                 # 페이지 안 시간 제한(goto)이 먼저 걸리고, 이건 크롬이 멈췄을 때의 마지막 안전장치 (가격 대조는 더 짧게)
-                status, final_url, html = await asyncio.wait_for(self._open_page(url), timeout or self.timeout + 30)
+                limit = self.timeout + 30 if timeout is None else timeout
+                status, final_url, html = await asyncio.wait_for(self._open_page(url), limit)
             except _Unavailable as e:
                 self.disabled_reason = str(e)
                 log.warning("store browser: 쓸 수 없음 — %s (다시 시작할 때까지 끔)", e)
