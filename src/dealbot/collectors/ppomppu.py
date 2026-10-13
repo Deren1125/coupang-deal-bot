@@ -222,7 +222,8 @@ def _proven_price(title: str, old: int | None) -> int | None:
         옛 가격. 그 금액이 판매가다울 때만(_price_like): 단위당 값('→ 개당 990원')이 아니고, 화살표 앞 금액보다 작으면 그
         절반보다 커야 한다 ('→ 쿠폰 5,000원'·'→ 2,500원' 은 쿠폰·배송비 금액이다)
     (b) 맨 앞이 개수·용량 ('500ml 24개 12,900원', '2개 12,900원', '180정 19,900원', '5천원'): 그 뒤 첫 금액
-        (_quantity_first). 예전은 개수·용량을 가격으로 읽거나 가격이 없었다. 그 금액이 판매가다울 때만(_price_like)
+        (_quantity_first). 예전은 개수·용량을 가격으로 읽거나 가격이 없었다. 그 금액이 판매가다울 때만(_price_like):
+        (a) 처럼 단위당 값('4개 개당 7,475원', '24캔 캔당 621원', '100g당 990원')이 아닐 때
     (c) 금액 하나만 든 가격 칸과 배송비 칸인데 예전 정규식이 괄호를 못 읽어 가격이 없던 제목 ('(25,900원/3,000원(3만↑무료))',
         '(189,000원/무료) 카드할인'): 그 금액. 예전이 이름에서 값을 찾았으면 그 값을 둔다 ('진라면 19,900원 (3,000원/무료(제주))'
         의 괄호 금액은 배송비다). 꼬리말에 다른 금액이 있거나 혜택 말 꼬리말 앞의 둥근 값('(5,000원/무료) 쿠폰')이면 아니다
@@ -247,12 +248,14 @@ def _proven_price(title: str, old: int | None) -> int | None:
     if a is None:
         return None
     value = _amount_value(seg, a)
+    # 단위당 값('개당 990원', '4개 개당 7,475원', '100g당 990원', '990원/100g')은 (a)·(b) 모두 판매가가 아니다 — 묶음 값이 따로 없으면
+    # 예전 값을 둔다 (단위당 값이 글 가격이 되면 4개 묶음이 7,475원으로 올라간다)
+    unit = seg[: a.start()].rstrip().endswith("당") or _UNIT_AFTER.match(seg, a.end())
     if len(parts) > 1:  # (a)
-        unit = seg[: a.start()].rstrip().endswith("당") or _UNIT_AFTER.match(seg, a.end())
         was = _first_amount(parts[-2])
         cut = was is not None and value * 2 <= was
         return value if _price_like(seg, a, value) and not unit and not cut else None
-    if _quantity_first(price_text, old) and _price_like(seg, a, value):  # (b)
+    if _quantity_first(price_text, old) and _price_like(seg, a, value) and not unit:  # (b)
         return value
     # (c) 는 괄호 뒤 꼬리말에 다른 금액이 없을 때만 ('(12,900원/무료) 쿠폰가 9,900원'·'… 쿠폰가 9900' 은 꼬리말 쪽이
     # 판매가일 수 있다. '10% 쿠폰'·'최대 7% 할인' 의 100 미만 수는 금액이 아니다). 꼬리말이 혜택 말이면 둥근 값은 혜택
