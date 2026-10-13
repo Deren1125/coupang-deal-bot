@@ -171,6 +171,9 @@ _PRODUCT_MARK = re.compile(r"/(?:products?|goods)/", re.I)
 _NOT_PRODUCT_HOST = re.compile(r"^(?:login|nid|accounts?|auth|member|signin|search|event|events|promotion|sale|campaign)\.", re.I)
 # 스마트스토어·브랜드스토어는 '/{스토어}' 가 스토어 첫 화면(og:image = 스토어 프로필·로고) — '/products/' 가 있어야 상품
 _STORE_HOSTS = ("smartstore.naver.com", "brand.naver.com")
+# 네이버 쇼핑 상품 페이지 (스토어 상품을 쇼핑 창에서 보여 주는 주소)
+_SHOPPING_HOSTS = ("shopping.naver.com", "m.shopping.naver.com")
+_SHOPPING_PRODUCT = re.compile(r"/(?:window-)?products/", re.I)
 
 
 def is_naver_store(url: str | None) -> bool:
@@ -179,6 +182,22 @@ def is_naver_store(url: str | None) -> bool:
         return False
     host = urlparse(url).netloc.lower().split(":")[0]
     return any(host == h or host.endswith("." + h) for h in _STORE_HOSTS)
+
+
+def is_naver_product_page(url: str | None) -> bool:
+    """네이버 상품 한 개의 페이지인지: 스마트스토어·브랜드스토어 '/products/번호', 네이버 쇼핑 상품 페이지
+    (shopping.naver.com '/window-products/…'·'/products/…'). 가격비교 카탈로그(search.shopping, 여러 판매처 묶음)·
+    스토어 첫 화면·블로그·카페 같은 다른 네이버 주소는 아니다."""
+    if not url:
+        return False
+    u = urlparse(url)
+    if u.scheme not in ("http", "https"):
+        return False
+    host = u.netloc.lower().split(":")[0]
+    path = u.path or ""
+    if is_naver_store(url):
+        return "/products/" in path
+    return host in _SHOPPING_HOSTS and bool(_SHOPPING_PRODUCT.search(path))
 
 
 def retry_after_seconds(value: str | None, *, now: float | None = None) -> float | None:
@@ -275,6 +294,17 @@ class PageEnricher:
         self._store_cache: dict[str, tuple[float, PageMeta]] = {}
         self._sleep = asyncio.sleep  # 테스트에서 가짜로 바꿔 끼움 (실제로 안 잠)
         self._clock = time.monotonic
+        # 못 읽은 페이지의 응답 코드 (가격 대조가 '없는 페이지(404·410)'에는 크롬을 띄우지 않게). 읽으면 지움
+        self._failed: dict[str, int] = {}
+
+    def failed_status(self, url: str) -> int | None:
+        """이 주소를 마지막으로 읽었을 때 받은 오류 코드 (400 이상). 모르거나 읽었으면 None. 한 번 보면 지운다."""
+        return self._failed.pop(url, None)
+
+    def _note_failed(self, url: str, status: int) -> None:
+        if len(self._failed) >= 200:
+            self._failed.pop(next(iter(self._failed)))
+        self._failed[url] = status
 
     async def _store_turn(self) -> bool:
         """스토어에 요청할 차례를 기다린다. 남은 시간이 store_max_wait 보다 길면(긴 Retry-After) 기다리지 않고 False."""
@@ -344,7 +374,9 @@ class PageEnricher:
                 resp = await self.http.get(url, follow_redirects=True, timeout=self.timeout)
             if resp.status_code >= 400:
                 log.info("enrich: HTTP %s for %s", resp.status_code, url)
+                self._note_failed(url, resp.status_code)
                 return None
+            self._failed.pop(url, None)
             meta = page_meta_at(resp.text, str(resp.url))
             if store and self.store_cache > 0:
                 if len(self._store_cache) >= 200:

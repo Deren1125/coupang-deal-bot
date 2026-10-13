@@ -126,6 +126,45 @@ async def test_blocked_or_empty_page_gives_nothing(status: int) -> None:
     assert await sb.page_meta(STORE_URL) is None
 
 
+async def test_blocked_browser_rests_before_opening_again(caplog: pytest.LogCaptureFixture) -> None:
+    """크롬도 막히면(429) 사진용으로도 한동안 안 띄운다 (가격 대조와 같은 쉬는 시간). 로그는 쉬기 시작할 때 한 번."""
+    sb, opened, _ = _browser((429, STORE_URL, ""), (200, STORE_URL, HTML), min_interval=0, cooldown_seconds=1800)
+    with caplog.at_level(logging.INFO, logger="dealbot.store_browser"):
+        assert await sb.page_meta(STORE_URL) is None
+        assert await sb.page_meta(STORE_URL) is None and len(opened) == 1  # 쉬는 중: 띄우지 않음
+    assert sum(r.levelno == logging.WARNING for r in caplog.records) == 1 and "30분" in caplog.text
+    sb._clock = lambda: 10_000_000.0  # type: ignore[assignment]  # 쉬는 시간이 지나면 다시
+    assert await sb.page_meta(STORE_URL) is not None and len(opened) == 2 and not sb.cooling()
+
+
+async def test_blog_and_other_pages_never_open_the_browser() -> None:
+    sb, opened, _ = _browser((200, STORE_URL, HTML))
+    for url in ("https://blog.naver.com/someone/223000000000", "https://search.shopping.naver.com/catalog/1", "https://toss.shopping/t/1"):
+        got = await sb.read(url, wait=False)
+        assert got.meta is None and not got.opened and got.why == "네이버 상품 페이지 아님"
+    assert opened == []
+
+
+async def test_cut_off_read_still_closes_the_browser() -> None:
+    """시간 제한으로 끊겨도 띄운 크롬은 닫는다 (창을 닫으면 그 안의 페이지도 닫힘)."""
+    import asyncio
+
+    pw = _FakePlaywright()
+    closed: list[bool] = []
+
+    async def hang(url: str, **_kw: object) -> object:
+        await asyncio.Event().wait()
+
+    async def close() -> None:
+        closed.append(True)
+
+    pw.goto = hang  # type: ignore[method-assign]
+    pw.close = close  # type: ignore[method-assign]
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(StoreBrowser()._load(pw, STORE_URL, headless=True), 0.05)
+    assert closed == [True]
+
+
 class _FakeLoads:
     """_visit 가 부르는 _load 가짜: 모드별 (코드, 주소, HTML)."""
 
