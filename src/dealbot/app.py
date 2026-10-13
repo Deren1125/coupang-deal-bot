@@ -1563,22 +1563,29 @@ class DealBot:
         return queue_id
 
     async def _open_hold(self, item: QueueItem, p: Product, page: PageRead | None) -> bool:
-        """보류가 나온 딜(p)과 같은 상품의 열린 글을 보류할지 보고, 보류하면 True.
-        같은 제목 가격이고 페이지 가격을 확인 못 한 글만, 그 글의 이름·카드 말로도 이 페이지에서 안 맞을 때 (그 글 자체는 그대로 두고
-        page_price 만 고침). 맞은 글(ok·option)·제목 가격이 다른 글(같은 상품의 다른 글)은 건드리지 않는다 — 기억해 둔 페이지로
-        5분마다 되풀이되는 보류가 다른 글을 매번 보류·메모하지 않게. 기억해 둔 페이지(cache)로는 새로 읽어 보류로 나온 그 글
-        (_page_claim 이 같은 글)만: page_reader 와 같은 규칙."""
+        """보류가 나온 딜(p)과 같은 상품의 열린 글(아직 안 올림)을 보류할지 보고, 보류하면 True. 그 글 자체는 그대로 두고 page_price 만
+        고친다 (맞았을 때 페이지 가격으로 바꿔 둔 글 값은 제목 가격으로 되돌림).
+        - 제목 가격이 다른 글(같은 상품의 다른 글)은 건드리지 않는다. 그 글을 다시 수집할 때 그 글 값으로 새로 읽어 따로 본다.
+        - 방금 새로 읽은 페이지(cache 아님): 그 글의 이름·카드 말로 대조해 안 맞으면 보류 (같은 글이면 판정도 같다). 전에 맞았던
+          글(ok·option)도 — 지금 페이지가 가장 새 값이다 (그사이 가게가 값을 올렸으면 옛 확인대로 올라가지 않게).
+        - 기억해 둔 페이지(cache): 그 페이지를 새로 읽어 보류로 나온 그 글(_page_claim 이 같은 글)의 보류 되풀이만, 그 글이 맞은 적
+          없을 때만. 새로 읽어 나온 적 없는 보류는 만들지 않고(page_reader 와 같은 규칙), 맞은 글의 확인은 이 페이지보다 새 것일 수
+          있다 (발행 전 크롬 대조 등) — 5분마다 되풀이되는 보류가 맞은 글을 뒤집거나 다른 글을 매번 보류·메모하지 않게."""
         q = item.deal.product
-        if (q.extra.get("page_price") or {}).get("status") in ("ok", "option") or self._title_price(q) != self._title_price(p):
+        if self._title_price(q) != self._title_price(p):
             return False
-        if self._page_claim(q) == self._page_claim(p):
-            check = PageCheck(**p.extra["page_price"])  # 같은 글: 판정도 같다
-        elif page is not None and page.meta is not None and page.source != "cache":
-            check = self._price_check(q, page.meta)  # 같은 값의 다른 글: 방금 읽은 페이지로 그 글 그대로 대조
+        if page is not None and page.meta is not None and page.source != "cache":
+            check = self._price_check(q, page.meta)  # 새로 읽은 페이지로 그 글 그대로 대조
+        elif self._page_claim(q) == self._page_claim(p) and (q.extra.get("page_price") or {}).get("status") not in ("ok", "option"):
+            check = PageCheck(**p.extra["page_price"])  # 같은 글: 판정도 같다 (새로 읽어 보류로 나온 판정의 되풀이)
         else:
             return False
         if check.status != "hold":
             return False
+        # 맞았을 때 바꿔 둔 페이지 가격·옵션은 거둔다: 보류 글 값은 제목 가격 (held_since 가 같은 제목 가격의 보류로 알아보게)
+        q.price = check.title_price
+        q.extra.pop("title_price", None)
+        q.extra.pop("page_option", None)
         q.extra["page_price"] = check.to_dict()
         await self._hold_item(item, item.deal, when="re-collected")
         return True
