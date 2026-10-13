@@ -315,8 +315,9 @@ deal:
   #   - 탈락: 가격비교 상품 최저가, 또는 판매처 min_listings 곳이 (값 + 배송비 여유) 쿠팡 값 이하일 때만.
   #     판매글 한 곳의 싼 값(싼 옵션·개봉품일 수 있음)으로는 이력 특가를 막지 않음
   #   키가 없거나 401 이면 이 비교만 꺼짐 (로그 한 번, 가격 이력으로만 판정)
+  #   10/13 주인 결정: 지금은 끔 (네이버 검색이 API HUB 로 옮겨져 딜봇 키로 쇼핑 검색이 안 됨 — 401). 되면 true 로.
   naver_reference:
-    enabled: true
+    enabled: false
     sources: [goldbox, category_best]
     min_below_pct: 12              # 네이버 최저가보다 12% 이상 싸면 특가
     veto_if_not_cheaper: true      # 네이버 최저가보다 싸지 않으면 탈락

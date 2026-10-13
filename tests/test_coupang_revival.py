@@ -112,6 +112,8 @@ def _nref_cfg(**kw: Any) -> NaverReferenceConfig:
 @pytest.fixture
 def bot(settings: Settings) -> DealBot:
     settings.collectors = [CollectorConfig(name="goldbox", type="fake_coupang_revival", interval_minutes=1)]
+    # 네이버 최저가 비교 경로를 시험한다 (운영 config.yaml 은 10/13 주인 결정으로 enabled: false — 딜봇 키로 쇼핑 검색이 안 됨)
+    settings.deal.naver_reference.enabled = True
     settings.deal.naver_reference.min_interval_seconds = 0
     _RUNS.clear()
     b = DealBot(settings)
@@ -514,7 +516,8 @@ def test_config_keeps_coupang_calls_under_the_hourly_budget() -> None:
     avg = 60 / gold.interval_minutes + per_run * 60 / cat.interval_minutes + s.deal.market.max_checks_per_hour
     assert avg <= s.coupang.max_calls_per_hour / 2  # 평균은 한도의 절반 이하
     nr = s.deal.naver_reference
-    assert nr.enabled and set(nr.sources) == {"goldbox", "category_best"} and 10 <= nr.min_below_pct <= 15
+    assert not nr.enabled  # 10/13 주인 결정: 네이버 쇼핑 검색이 될 때까지 끔
+    assert set(nr.sources) == {"goldbox", "category_best"} and 10 <= nr.min_below_pct <= 15  # 켜면 이 값으로
 
 
 def test_goldbox_items_without_a_rank_still_get_judged_on_price() -> None:
