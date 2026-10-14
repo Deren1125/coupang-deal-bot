@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -87,13 +88,11 @@ class GoalRow:
 
     @property
     def ratio(self) -> float:
-        """막대 길이 (0~1)."""
+        """막대 길이 (0~1). 적을수록 좋은 줄은 늘 꽉 찬 막대 — 충족이면 초록, 넘치면 주황 (render._row)."""
         if self.value is None:
             return 0.0
         if self.lower_is_better:
-            if self.met:
-                return 1.0
-            return max(0.0, min(1.0, self.goal / self.value)) if self.value else 1.0
+            return 1.0
         if self.goal <= 0:
             return 1.0
         return max(0.0, min(1.0, self.value / self.goal))
@@ -118,7 +117,8 @@ class CardView:
     read_label: str = "읽은 시각"
     refreshable: bool = False
     manual: list[ManualField] = field(default_factory=list)
-    manual_values: dict[str, float | None] = field(default_factory=dict)
+    manual_values: dict[str, float | None] = field(default_factory=dict)  # 지표 → 마지막으로 넣은 값
+    manual_days: dict[str, str | None] = field(default_factory=dict)  # 지표 → 그 값의 날짜
     fetch_status: str | None = None
     summary: dict[str, float] = field(default_factory=dict)  # 맨 위 요약 줄에 더할 값
 
@@ -139,8 +139,8 @@ def chip_status(rows: list[GoalRow], fetch_status: str | None = None) -> str:
 
 # ---------------------------------------------------------------- 숫자·날짜 글자
 def fmt_num(v: float | None, *, missing: str = "-") -> str:
-    """1234 → '1,234', 12.5 → '12.5' (소수는 한 자리)."""
-    if v is None:
+    """1234 → '1,234', 12.5 → '12.5' (소수는 한 자리). 무한·NaN 은 값이 없는 것처럼."""
+    if v is None or not math.isfinite(v):
         return missing
     if abs(v - round(v)) < 1e-9:
         return f"{int(round(v)):,}"
@@ -149,6 +149,8 @@ def fmt_num(v: float | None, *, missing: str = "-") -> str:
 
 def fmt_signed(v: float) -> str:
     """+3 / -2 / 0."""
+    if not math.isfinite(v):
+        return "-"
     if v < 0:
         return "-" + fmt_num(-v)
     return ("+" if v > 0 else "") + fmt_num(v)

@@ -23,6 +23,7 @@ from dealbot.web import WebServer
 
 NOW = datetime(2026, 10, 14, 9, 5, tzinfo=UTC)
 USER, PASSWORD = "owner", "pw-Ω-123"
+STRONG = "plum-river-cactus-42"  # setenv.sh 가 받는 모양 (12자 이상, 영문·숫자·-_.)
 
 
 def basic(user: str, password: str) -> str:
@@ -40,11 +41,11 @@ class BadBot:
         raise RuntimeError(self.message)
 
 
-def make_dash(db: Database, tmp_path: Path, cards: list[dict[str, Any]], **ctx: Any) -> Dashboard:
+def make_dash(db: Database, tmp_path: Path, cards: list[dict[str, Any]], *, password: str = PASSWORD, **ctx: Any) -> Dashboard:
     cfg = DashboardConfig(cards=[DashboardCardConfig(**c) for c in cards], blogauto_metrics_path=str(tmp_path / "blogauto.json"))
     sctx = SourceContext(db=db, tz="Asia/Seoul", config=cfg, now=lambda: NOW,
                          blogauto=BlogAutoReader(cfg.blogauto_metrics_path, tz="Asia/Seoul", stale_hours=3, now=lambda: NOW), **ctx)
-    return Dashboard(cfg, sctx, user=USER, password=PASSWORD, public_base_url="https://1-2-3-4.sslip.io")
+    return Dashboard(cfg, sctx, user=USER, password=password, public_base_url="https://1-2-3-4.sslip.io")
 
 
 # ---------------------------------------------------------------- 인증
@@ -99,7 +100,9 @@ async def test_dashboard_routes_require_auth_over_http(db: Database, tmp_path: P
             assert r.status_code == 302 and r.headers["location"] == "/dashboard?msg=saved&src=kakao#card-kakao"
             assert db.metric_latest("kakao", "members")["value"] == 57
             r = await c.get(r.headers["location"], auth=(USER, PASSWORD))
-            assert "카카오 오픈채팅: 저장했어요." in r.text
+            # 돌아가면 그 카드로 내려가므로 안내는 그 카드 안(머리 밑)에
+            card = r.text.split('id="card-kakao"', 1)[1].split("</article>", 1)[0]
+            assert '<div class="notice" role="status">저장했어요.</div>' in card
     finally:
         await srv.stop()
 
@@ -127,16 +130,16 @@ async def test_dealbot_wires_dashboard_routes_and_self_check(settings: Settings,
     finally:
         await bot.close()
 
-    settings.secrets.dashboard_user, settings.secrets.dashboard_password = USER, PASSWORD
+    settings.secrets.dashboard_user, settings.secrets.dashboard_password = USER, STRONG
     settings.secrets.public_domain = "52-79-136-64.sslip.io"
     bot = DealBot(settings)
     try:
         assert (await bot.web.dispatch("GET", "/dashboard"))[0] == 401
-        res = await bot.web.dispatch("GET", "/dashboard", GOOD)
+        res = await bot.web.dispatch("GET", "/dashboard", {"authorization": basic(USER, STRONG)})
         assert res[0] == 200 and "텔레그램 채널" in res[1] and "Deren의 아카이브" in res[1]  # type: ignore[operator]
         lines = await bot.self_check()
         assert (True, "채널 대시보드 https://52-79-136-64.sslip.io/dashboard (카드 9개, 비밀번호 보호)") in lines
-        assert not any(PASSWORD in text for _, text in lines)
+        assert not any(STRONG in text for _, text in lines)
         # 다른 경로는 그대로 (인증 없이)
         assert (await bot.web.dispatch("GET", "/health"))[:2] == (200, "ok")
     finally:
@@ -182,9 +185,11 @@ async def test_every_value_is_escaped_and_no_tokens_leak(db: Database, tmp_path:
     parsed = json.loads(data)
     assert parsed["cards"][0]["title"] == evil  # JSON 은 값 그대로 (application/json + nosniff 로만 나감)
     assert "IG-SECRET-TOKEN-XYZ" not in json.dumps({k: db.kv_get(k) for k in ("dash:status:telegram",)})
-    # 주소의 msg·src 는 정해진 문구·카드 키만 화면에 나옴
+    # 주소의 msg·src 는 정해진 문구·카드 키만 화면에 나옴 (안내는 그 카드 안)
     _, body, _, _ = await dash._page({"msg": "saved", "src": "kakao"})
-    assert "&lt;img src=x onerror=alert(3)&gt;: 저장했어요." in body
+    card = body.split('id="card-kakao"', 1)[1].split("</article>", 1)[0]
+    assert "<h2>&lt;img src=x onerror=alert(3)&gt;</h2>" in card and "저장했어요." in card
+    assert 'aria-label="&lt;script&gt;alert(1)&lt;/script&gt; 다시 읽기"' in body  # 버튼 이름표도 이스케이프
 
 
 async def test_refresh_and_input_need_the_form_token_and_redirect_safely(db: Database, tmp_path: Path) -> None:
@@ -236,9 +241,157 @@ def test_page_renders_reference_layout(db: Database, tmp_path: Path) -> None:
     html_text = dash.page_html()
     assert '<span class="chip unmet">조건 미충족</span>' in html_text
     assert '<span class="chip unknown">판단 불가</span>' in html_text
-    assert html_text.count("다시 읽기</a>") == 2 and "읽은 시각 10. 14. 18:00" in html_text
+    assert html_text.count('<span class="btn-text">다시 읽기</span></a>') == 2 and "읽은 시각 10. 14. 18:00" in html_text
     assert 'stroke="#5b4fd6"' in html_text and "<h3>네이버 애드포스트</h3>" in html_text
     assert "14 / 1,000 명" in html_text and 'style="width:1.5%"' in html_text
     assert 'action="/dashboard/input"' in html_text and 'name="neighbors"' in html_text and 'name="visitors"' in html_text
     assert 'max="2026-10-14" min="2026-08-15"' in html_text  # 미래·60일보다 전 날짜는 고를 수 없음
     assert "@media (max-width:699px)" in html_text and "repeat(3,minmax(0,1fr))" in html_text
+
+
+# ---------------------------------------------------------------- 마구 넣어 보기 막기·경로 앞부분 인증·비밀번호 점검
+class Tick:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _from(ip: str, auth: str | None = None) -> dict[str, str]:
+    """Caddy 뒤: 접속은 늘 127.0.0.1, 실제 주소는 X-Forwarded-For 마지막 값."""
+    h = {":peer": "127.0.0.1", "x-forwarded-for": ip}
+    if auth is not None:
+        h["authorization"] = auth
+    return h
+
+
+async def test_wrong_passwords_are_throttled_per_client_and_overall(db: Database, tmp_path: Path,
+                                                                  caplog: pytest.LogCaptureFixture) -> None:
+    dash = make_dash(db, tmp_path, [{"key": "kakao", "type": "kakao_openchat"}])
+    clock = Tick()
+    dash.limiter = dash_auth.FailureLimiter(per_client=10, global_cap=25, window=600, clock=clock)
+    srv = WebServer(0)
+    dash.register(srv)
+    bad, good = basic(USER, "guess"), basic(USER, PASSWORD)
+    caplog.set_level("INFO", logger="dealbot.dashboard.service")
+    for _ in range(10):
+        assert (await srv.dispatch("GET", "/dashboard", _from("203.0.113.7", bad)))[0] == 401
+    res = await srv.dispatch("GET", "/dashboard", _from("203.0.113.7", good))
+    assert res[0] == 429 and 1 <= int(res[3]["Retry-After"]) <= 601  # type: ignore[misc]  # 막힌 동안은 맞는 비밀번호도 확인 안 함
+    assert (await srv.dispatch("GET", "/dashboard/data.json", _from("203.0.113.7", bad)))[0] == 429
+    # 다른 곳(주인)은 그대로, 비밀번호 없이 온 첫 요청(브라우저가 묻기 전)은 틀린 시도로 안 셈
+    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.2", good)))[0] == 200
+    for _ in range(30):
+        assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.3")))[0] == 401
+    # X-Forwarded-For 는 접속이 이 서버 안(Caddy)에서 왔을 때만 믿는다 — 바깥에서 바로 오면 접속 주소로 셈
+    direct = {":peer": "192.0.2.50", "x-forwarded-for": "198.51.100.2", "authorization": bad}
+    assert dash_auth.client_key(direct) == "192.0.2.50" and dash_auth.client_key(_from("1.2.3.4, 203.0.113.9")) == "203.0.113.9"
+    # 창(10분)이 지나면 풀림
+    clock.t += 601
+    assert (await srv.dispatch("GET", "/dashboard", _from("203.0.113.7", good)))[0] == 200
+    # 주소를 바꿔 가며 넣어 보면 전체 한도(여기선 25)에서 모두 막힘
+    for i in range(25):
+        assert (await srv.dispatch("GET", "/dashboard", _from(f"10.0.0.{i}", bad)))[0] == 401
+    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.2", good)))[0] == 429
+    # 실패 로그는 1분에 한 줄 (값은 남기지 않음)
+    fails = [r for r in caplog.records if "인증 실패" in r.getMessage()]
+    assert len(fails) == 2 and "guess" not in caplog.text and PASSWORD not in caplog.text
+    clock.t += 601
+    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.2", good)))[0] == 200
+
+
+async def test_throttle_over_real_http_uses_the_peer_address(db: Database, tmp_path: Path) -> None:
+    dash = make_dash(db, tmp_path, [{"key": "kakao", "type": "kakao_openchat"}])
+    dash.limiter = dash_auth.FailureLimiter(per_client=3, global_cap=100)
+    srv = WebServer(0, host="127.0.0.1")
+    dash.register(srv)
+    await srv.start()
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{srv.port}") as c:
+            for _ in range(3):
+                assert (await c.get("/dashboard", auth=(USER, "nope"), headers={"X-Forwarded-For": "203.0.113.1"})).status_code == 401
+            r = await c.get("/dashboard", auth=(USER, PASSWORD), headers={"X-Forwarded-For": "203.0.113.1"})
+            assert r.status_code == 429 and r.headers["retry-after"].isdigit()
+            r = await c.get("/dashboard", auth=(USER, PASSWORD), headers={"X-Forwarded-For": "203.0.113.2"})
+            assert r.status_code == 200
+    finally:
+        await srv.stop()
+
+
+async def test_every_path_under_dashboard_needs_auth_even_if_added_later(db: Database, tmp_path: Path) -> None:
+    dash = make_dash(db, tmp_path, [{"key": "kakao", "type": "kakao_openchat"}])
+    srv = WebServer(0)
+    assert dash.register(srv)
+
+    async def export(query: dict[str, str]) -> Any:
+        return 200, "secret numbers"
+
+    srv.route("/dashboard/export.csv", export)  # 나중에 누가 auth 없이 붙인 경로
+    srv.route("/dashboard", dash._page)  # 같은 경로를 auth 없이 다시 붙여도
+    for path in ("/dashboard/export.csv", "/dashboard", "/dashboard/nope", "/dashboard/"):
+        res = await srv.dispatch("GET", path, {})
+        assert res[0] == 401 and "secret numbers" not in str(res[1]), path
+    assert (await srv.dispatch("GET", "/dashboard/export.csv", GOOD))[:2] == (200, "secret numbers")
+    assert (await srv.dispatch("GET", "/dashboard/nope", GOOD))[0] == 404
+    assert (await srv.dispatch("GET", "/dashboardx", {}))[0] == 404  # 앞부분만 같은 다른 경로는 상관없음
+    assert (await srv.dispatch("GET", "/health", {}))[:2] == (200, "ok")
+
+    # 아이디·비밀번호가 없으면 /dashboard 아래는 나중에 붙인 경로까지 모두 404
+    off = Dashboard(dash.cfg, dash.ctx, user=None, password=None)
+    srv2 = WebServer(0)
+    assert not off.register(srv2)
+    srv2.route("/dashboard/export.csv", export)
+    assert (await srv2.dispatch("GET", "/dashboard/export.csv", GOOD))[0] == 404
+
+
+def test_weak_or_mangled_password_is_flagged_in_self_check(db: Database, tmp_path: Path) -> None:
+    card = [{"key": "kakao", "type": "kakao_openchat"}]
+    assert make_dash(db, tmp_path, card, password=STRONG).self_check()[-1] == \
+        (True, "채널 대시보드 https://1-2-3-4.sslip.io/dashboard (카드 1개, 비밀번호 보호)")
+    ok, text = make_dash(db, tmp_path, card, password="1234").self_check()[-1]
+    assert ok is None and "12자보다 짧음" in text and "setenv.sh DASHBOARD_PASSWORD" in text and "1234" not in text
+    ok, text = make_dash(db, tmp_path, card, password='long-enough-but-"quoted"').self_check()[-1]
+    assert ok is None and "따옴표" in text and "짧음" not in text
+    assert dash_auth.password_problems(STRONG) == [] and dash_auth.password_problems(None) == []
+
+
+async def test_redirects_refuse_backslash_and_control_characters() -> None:
+    srv = WebServer(0, host="127.0.0.1")
+
+    async def go(query: dict[str, str]) -> Any:
+        return 302, query.get("to", "/x")
+
+    srv.route("/go", go)
+    await srv.start()
+    try:
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{srv.port}") as c:
+            for bad in ("/\\evil.example", "/x\\y", "/\t/evil.example", "\\\\evil.example", "httpx://a", "javascript:alert(1)"):
+                r = await c.get("/go", params={"to": bad})
+                assert r.status_code == 302 and "location" not in r.headers, bad
+            for good in ("/dashboard?msg=saved#card-x", "https://link.coupang.com/a/abc", "http://example.com/p?q=1"):
+                r = await c.get("/go", params={"to": good})
+                assert r.headers["location"] == good
+    finally:
+        await srv.stop()
+
+
+def test_setenv_dashboard_password_rules(tmp_path: Path) -> None:
+    import subprocess
+
+    script = Path(__file__).resolve().parents[1] / "deploy" / "lightsail" / "setenv.sh"
+    (tmp_path / "deploy" / "lightsail").mkdir(parents=True)
+    (tmp_path / "deploy" / "lightsail" / "setenv.sh").write_text(script.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / ".env").write_text("PORT=8080\n", encoding="utf-8")
+
+    def run(value: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["bash", str(tmp_path / "deploy" / "lightsail" / "setenv.sh"), "DASHBOARD_PASSWORD"], cwd=tmp_path,
+                              input=value + "\n", capture_output=True, text=True, timeout=30)
+
+    for bad in ("short-pw", "has\"quote-in-it", "back\\slash-12345", "dollar$sign-12345", "space in it 12345"):
+        r = run(bad)
+        assert r.returncode != 0 and "저장하지 않았어요" in r.stdout, bad
+        assert "DASHBOARD_PASSWORD" not in (tmp_path / ".env").read_text(encoding="utf-8")
+    r = run(STRONG)
+    assert r.returncode == 0 and "12자 이상" in r.stdout and STRONG not in r.stdout
+    assert f"DASHBOARD_PASSWORD={STRONG}\n" in (tmp_path / ".env").read_text(encoding="utf-8")

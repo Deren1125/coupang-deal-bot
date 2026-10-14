@@ -27,7 +27,9 @@ class DealBotSource(Source):
 
     def live(self) -> FetchResult:
         today = self.ctx.today()
-        n_days = self.ctx.config.spark_days
+        # 그래프(spark_days)와 7일 합계에 쓰는 날만 다시 센다. 단 봇 DB 가 딜 기록을 지운 날(history_days 보다 오래)은
+        # 세면 0 이 되므로 다시 쓰지 않고, 그때 저장해 둔 값을 그대로 둔다
+        n_days = max(1, min(self.ctx.config.spark_days + 6, self.ctx.history_days - 1))
         since = self.ctx.day_start_utc(today - timedelta(days=n_days - 1))
         counts: dict[str, float] = {(today - timedelta(days=i)).isoformat(): 0.0 for i in range(n_days)}
         for t in self.ctx.db.published_deal_times(since, include_dry_run=self.ctx.include_dry_run()):
@@ -57,8 +59,8 @@ class DealBotSource(Source):
         if (g := self.goal("links_waiting_max")) is not None:
             rows.append(GoalRow("링크 기다리는 딜", live.get("links_waiting"), g, "개", lower_is_better=True))
         queue = " · ".join(f"{label} {fmt_num(live.get(f'queue_{k}'))}" for k, label in QUEUE_LABELS)
-        return self.view(
-            data, stats=stats, spark=data.series("deals"), spark_label="하루 올린 딜", rows=rows,
+        return self.view(  # 하루 딜 수는 날마다 오르내려 '최근 7일 합계' 로 부드럽게 (숫자 칸의 '최근 7일' 과 같은 셈)
+            data, stats=stats, spark=data.rolling("deals", 7), spark_label="올린 딜 7일 합계", rows=rows,
             activity=[f"대기열: {queue}"] if live else [], read_at=data.live.read_at if data.live else None,
             read_label="읽은 시각", summary={"posts_today": deals_today} if deals_today is not None else {},
         )

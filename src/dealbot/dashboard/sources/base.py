@@ -52,6 +52,7 @@ class SourceContext:
     budget: Any = None  # 쿠팡 ApiBudget (딥링크 몫은 건드리지 않음)
     include_dry_run: Callable[[], bool] = lambda: False
     blogauto: Any = None  # BlogAutoReader
+    history_days: int = 30  # 봇 DB 가 딜 기록을 지우는 기간 (app.prune_events_days) — 그보다 오래된 날은 다시 세지 않음
     extra: dict[str, Any] = field(default_factory=dict)
 
     def local_now(self) -> datetime:
@@ -77,7 +78,7 @@ class CardData:
         self.key = key
         self.today = ctx.today()
         self.spark_days = ctx.config.spark_days
-        self.window = max(self.spark_days, 62)
+        self.window = max(self.spark_days + 7, 62)  # 그래프 기간 + 7일 합계용 앞 6일
         self.status = status or {}
         self.live = live
         self._series: dict[str, list[tuple[str, float]]] = {}
@@ -103,6 +104,12 @@ class CardData:
     def latest_value(self, metric: str) -> float | None:
         got = self.latest(metric)
         return got[1] if got else None
+
+    def value_on_or_before(self, metric: str, day: date | str) -> float | None:
+        """그날(또는 그 전 가장 가까운 날)의 값."""
+        d = day.isoformat() if isinstance(day, date) else day
+        row = self.ctx.db.metric_latest(self.key, metric, until_day=d)
+        return row["value"] if row else None
 
     def delta(self, metric: str, *, max_gap_days: int = 7) -> tuple[float, str] | None:
         """가장 최근 값 − 그 앞의 값 (최대 max_gap_days 전까지). 바로 전날과 비교면 '오늘'/'10. 13.', 아니면 'N. N. 대비'."""
@@ -142,10 +149,30 @@ class CardData:
         vals = [v for d, v in self._rows(metric) if start <= d <= end.isoformat()]
         return sum(vals) / len(vals) if vals else None
 
-    def month_sum(self, metric: str) -> float | None:
+    def month_sum(self, metric: str, *, end: date | None = None) -> float | None:
+        """이번 달(오늘이 속한 달) 1일부터 end(기본 오늘)까지 합."""
         start = self.today.replace(day=1).isoformat()
-        vals = [v for d, v in self._rows(metric) if d >= start]
+        last = (end or self.today).isoformat()
+        vals = [v for d, v in self._rows(metric) if start <= d <= last]
         return sum(vals) if vals else None
+
+    def rolling(self, metric: str, days: int = 7, *, how: str = "sum", end: date | None = None) -> list[tuple[str, float]]:
+        """그래프용: 그래프 기간의 날마다 '그날까지 days 일' 합계(sum) 또는 평균(avg) — 날마다 오르내리는 값을 부드럽게.
+        sum 은 그 days 일이 모두 기록 안에 있을 때만 (기록이 시작된 첫 며칠이 낮게 그려지지 않게), avg 는 있는 값만으로."""
+        rows = self._rows(metric)
+        if not rows:
+            return []
+        vals = dict(rows)
+        first = date.fromisoformat(rows[0][0])
+        end = end or self.today
+        out: list[tuple[str, float]] = []
+        for i in range(self.spark_days - 1, -1, -1):
+            d = end - timedelta(days=i)
+            win = [vals[k] for k in ((d - timedelta(days=j)).isoformat() for j in range(days)) if k in vals]
+            if not win or (how == "sum" and d - timedelta(days=days - 1) < first):
+                continue
+            out.append((d.isoformat(), sum(win) if how == "sum" else sum(win) / len(win)))
+        return out
 
     # ---- 읽기 상태
     @property
@@ -249,8 +276,10 @@ class Source:
         )
         if not v.note:
             v.note = explain(v.program, rows)
-        if self.manual_fields:
-            v.manual_values = {f.metric: data.latest_value(f.metric) for f in self.manual_fields}
+        for f in self.manual_fields:
+            last = data.latest(f.metric)
+            v.manual_values[f.metric] = last[1] if last else None
+            v.manual_days[f.metric] = last[0] if last else None
         return v
 
     @staticmethod

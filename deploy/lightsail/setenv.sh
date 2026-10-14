@@ -49,6 +49,9 @@ fi
 
 KEY="${1:?사용법: bash deploy/lightsail/setenv.sh 이름   (예: COUPANG_ACCESS_KEY)}"
 case "$KEY" in *[!A-Z0-9_]*) echo "⛔ 이름은 영어 대문자·숫자·_ 만: $KEY"; exit 1;; esac
+if [ "$KEY" = "DASHBOARD_PASSWORD" ]; then
+  echo "대시보드 비밀번호: 12자 이상, 영문·숫자·-_. 만 (예: 단어 서너 개를 - 로 이어 붙이기)"
+fi
 read -r -s -p "$KEY 값 붙여넣기 (화면에 안 보임) → Enter: " VALUE
 echo
 VALUE="$(printf '%s' "$VALUE" | tr -d '\r\n' | sed 's/^ *//; s/ *$//')"
@@ -65,6 +68,8 @@ esac
 # 모양이 정해진 값은 한 번 더 확인
 bad() { echo "⛔ $KEY: $1 — 저장하지 않았어요"; exit 1; }
 case "$KEY" in
+  # 공개 주소라 짧으면 맞혀 볼 수 있고, 따옴표·역슬래시·$ 는 서버(.env·systemd)에서 바뀌어 로그인이 안 될 수 있음
+  DASHBOARD_PASSWORD) [[ $VALUE =~ ^[A-Za-z0-9._-]{12,}$ ]] || bad "12자 이상, 영문·숫자·-_. 만 써 주세요 (따옴표·역슬래시·\$ 같은 기호는 서버에서 바뀌어 로그인이 안 될 수 있어요)" ;;
   PUBLIC_DOMAIN) [[ $VALUE =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || bad "주소 이름만 넣어 주세요 (예: 52-79-136-64.sslip.io, https:// 와 / 는 빼고)" ;;
   PORT) [[ $VALUE =~ ^[0-9]+$ ]] || bad "숫자만 넣어 주세요 (예: 8080)" ;;
   TELEGRAM_ADMIN_CHAT_ID) [[ $VALUE =~ ^-?[0-9]+$ ]] || bad "숫자만 넣어 주세요 (@userinfobot 이 알려준 숫자)" ;;

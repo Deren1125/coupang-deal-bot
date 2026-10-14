@@ -1,6 +1,7 @@
 """채널 대시보드 본체: 카드(소스) 목록, 정해진 시각에 읽기, '다시 읽기', 직접 입력, 웹 경로.
 
-경로 (모두 기본 인증 — DASHBOARD_USER / DASHBOARD_PASSWORD 가 둘 다 있을 때만 열림, 아니면 404):
+경로 (/dashboard 아래 전부 기본 인증 — DASHBOARD_USER / DASHBOARD_PASSWORD 가 둘 다 있을 때만 열림, 아니면 404.
+너무 많이 틀리면 잠시 429 — auth.FailureLimiter):
   /dashboard                    페이지
   /dashboard/refresh?src=키      그 카드를 지금 다시 읽고 돌아감 (카드마다 refresh_min_minutes 에 한 번)
   /dashboard/input?src=키&지표=값&date=YYYY-MM-DD   직접 입력 저장 후 돌아감 (숫자만, 날짜는 오늘~manual_max_days_back)
@@ -14,6 +15,7 @@ import asyncio
 import hmac
 import json
 import logging
+import math
 import re
 import secrets
 from datetime import date, datetime, timedelta
@@ -21,7 +23,7 @@ from typing import Any
 
 from dealbot.config import DashboardConfig
 from dealbot.dashboard import render
-from dealbot.dashboard.auth import check_basic
+from dealbot.dashboard.auth import FailureLimiter, check_basic, client_key, password_problems
 from dealbot.dashboard.model import (
     ERROR,
     GOOD,
@@ -39,7 +41,7 @@ from dealbot.dashboard.model import (
 )
 from dealbot.dashboard.sources import CardData, Source, SourceContext, load_all
 from dealbot.utils.timeutil import from_iso, to_iso
-from dealbot.web import WebServer, page
+from dealbot.web import Throttled, WebServer, page
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +64,8 @@ SECURITY_HEADERS = {
     "X-Robots-Tag": "noindex, nofollow",
 }
 
-# 돌아간 뒤 페이지 위에 보일 안내 (주소의 msg=코드 → 고정 문구. 주소의 글자를 그대로 보여 주지 않음)
+# 돌아간 뒤 보일 안내 (주소의 msg=코드 → 고정 문구. 주소의 글자를 그대로 보여 주지 않음).
+# 카드에서 누른 것(src=카드 키)은 그 카드 안 머리 밑에 — 돌아가면 그 카드로 바로 내려가므로 맨 위에 두면 안 보인다
 NOTICES: dict[str, tuple[str, str]] = {
     "saved": ("저장했어요.", "ok"),
     "refreshed": ("다시 읽었어요.", "ok"),
@@ -104,6 +107,7 @@ class Dashboard:
         self.by_key = {s.key: s for s in self.sources}
         self._locks: dict[str, asyncio.Lock] = {}
         self._token: str | None = None
+        self.limiter = FailureLimiter()
 
     # ------------------------------------------------------------ 상태
     @property
@@ -114,11 +118,22 @@ class Dashboard:
     def served(self) -> bool:
         return self.cfg.enabled and bool(self._user and self._password)
 
-    def check_auth(self, headers: dict[str, str]) -> bool:
-        ok = check_basic(headers.get("authorization"), self._user, self._password)
-        if not ok and headers.get("authorization"):
-            log.info("dashboard: 인증 실패 (값은 기록하지 않음)")
-        return ok
+    def check_auth(self, headers: dict[str, str]) -> bool | Throttled:
+        """기본 인증. 너무 많이 틀린 손님(또는 전체)은 확인하지 않고 Throttled → 429.
+        Authorization 없이 온 요청(브라우저가 처음 물어보기 전)은 틀린 시도로 세지 않는다."""
+        client = client_key(headers)
+        wait = self.limiter.blocked(client)
+        if wait is not None:
+            return Throttled(wait)
+        header = headers.get("authorization")
+        if check_basic(header, self._user, self._password):
+            self.limiter.success(client)
+            return True
+        if header:
+            self.limiter.failure(client)
+            if n := self.limiter.log_due():  # 1분에 한 줄만 (마구 넣어 봐도 로그가 밀려나지 않게)
+                log.warning("dashboard: 인증 실패 %d번 (값은 기록하지 않음)", n)
+        return False
 
     @property
     def form_token(self) -> str:
@@ -143,12 +158,26 @@ class Dashboard:
 
     # ------------------------------------------------------------ 읽기·저장
     def _store(self, source: Source, res: FetchResult, *, origin: str = "auto") -> int:
+        """읽은 값을 metrics 표에. 숫자가 아닌 값·무한·NaN 은 그 줄만 버린다 (나머지는 저장, 화면이 깨지지 않게)."""
         today = self.ctx.today().isoformat()
-        rows: list[tuple[str, str, str, float]] = []
+        items: list[tuple[str, str, Any]] = []
         for day, values in res.days.items():
             if _DAY_RE.match(day):
-                rows.extend((source.key, m, day, float(v)) for m, v in values.items())
-        rows.extend((source.key, m, today, float(v)) for m, v in res.values.items())
+                items.extend((m, day, v) for m, v in values.items())
+        items.extend((m, today, v) for m, v in res.values.items())
+        rows: list[tuple[str, str, str, float]] = []
+        dropped = 0
+        for metric, day, value in items:
+            try:
+                f = float(value)
+            except (TypeError, ValueError):
+                f = math.nan
+            if math.isfinite(f):
+                rows.append((source.key, metric, day, f))
+            else:
+                dropped += 1
+        if dropped:
+            log.warning("dashboard %s: 숫자가 아닌 값 %d개는 저장하지 않음", source.key, dropped)
         return self.db.metric_put_many(rows, origin=origin, now=self.ctx.now())
 
     def _lock(self, key: str) -> asyncio.Lock:
@@ -309,6 +338,11 @@ class Dashboard:
         return out
 
     @staticmethod
+    def chip_counts(views: list[CardView]) -> dict[str, int]:
+        """맨 위 줄의 칩 개수 (조건 충족·미충족·판단 불가)."""
+        return {k: sum(1 for v in views if v.status == k) for k in (MET, UNMET, UNKNOWN)}
+
+    @staticmethod
     def summary(views: list[CardView]) -> list[tuple[str, str, str]]:
         """맨 위 요약 줄: (이름, 값, 작은 글)."""
         def total(name: str) -> tuple[float | None, int]:
@@ -319,7 +353,7 @@ class Dashboard:
         posts, _ = total("posts_today")
         visitors, n_vis = total("visitors_yesterday")
         revenue, _ = total("revenue_7d")
-        counts = {k: sum(1 for v in views if v.status == k) for k in (MET, UNMET, UNKNOWN)}
+        orders, _ = total("orders_7d")
         return [
             ("오늘 늘어난 팔로워", fmt_signed(aud) if aud is not None else "-",
              f"구독자·팔로워·이웃, 어제와 비교한 카드 {n_aud}개" if n_aud else "어제·오늘 값이 다 있으면 보여요"),
@@ -327,7 +361,8 @@ class Dashboard:
             ("어제 블로그 방문자", f"{fmt_num(visitors)}명" if visitors is not None else "-",
              f"직접 넣은 블로그 {n_vis}개" if n_vis else "블로그 카드에서 직접 넣어 주세요"),
             ("쿠팡 수익 · 최근 7일", f"{fmt_num(revenue)}원" if revenue is not None else "-",
-             f"조건 충족 {counts[MET]} · 미충족 {counts[UNMET]} · 판단 불가 {counts[UNKNOWN]}"),
+             (f"주문 {fmt_num(orders)}건 · 어제까지" if orders is not None else "어제까지") if revenue is not None
+             else "실적을 읽으면 보여요"),
         ]
 
     @staticmethod
@@ -336,15 +371,17 @@ class Dashboard:
         times = [v.read_at for v in views if v.read_at is not None and v.kind != "internal"]
         return max(times) if times else None
 
-    def page_html(self, notice: tuple[str, str] | None = None) -> str:
+    def page_html(self, notice: tuple[str, str] | None = None, *, notice_src: str | None = None) -> str:
+        """notice_src 가 카드 키면 안내를 그 카드 안에, 아니면 맨 위에."""
         views = self.views()
         times = ", ".join(self.cfg.collect_times) or "-"
         footer = (f"API 로 읽는 카드는 매일 {times} 에 자동으로 읽어요 ('다시 읽기'는 카드마다 {self.cfg.refresh_min_minutes}분에 한 번). "
-                  "네이버 블로그 이웃 수·방문자와 오픈채팅 참여자는 카드에서 직접 넣어요.")
+                  "네이버 블로그 이웃 수·방문자·게시글 수와 오픈채팅 참여자는 카드에서 직접 넣어요.")
         return render.render_page(
             title=self.cfg.title, views=views, summary=self.summary(views), updated_at=self._updated_at(views),
             token=self.form_token, today=self.ctx.today(), tz=self.ctx.tz, spark_days=self.cfg.spark_days,
-            notice=notice, footer=footer, min_day=self.ctx.today() - timedelta(days=self.cfg.manual_max_days_back),
+            notice=notice, notice_src=notice_src if notice_src in self.by_key else None, footer=footer,
+            min_day=self.ctx.today() - timedelta(days=self.cfg.manual_max_days_back), counts=self.chip_counts(views),
         )
 
     def json_text(self) -> str:
@@ -354,9 +391,12 @@ class Dashboard:
 
     # ------------------------------------------------------------ 웹
     def register(self, web: WebServer) -> bool:
-        """아이디·비밀번호가 둘 다 있을 때만 경로를 연다 (없으면 404 그대로)."""
+        """아이디·비밀번호가 둘 다 있을 때만 경로를 연다 (없으면 /dashboard 아래는 모두 404).
+        인증은 경로마다가 아니라 /dashboard 앞부분 전체에 건다 — 나중에 이 아래 경로를 auth 없이 붙여도 열리지 않게."""
         if not self.served:
+            web.guard_prefix("/dashboard", None)
             return False
+        web.guard_prefix("/dashboard", self.check_auth)
         for path, handler in (
             ("/dashboard", self._page),
             ("/dashboard/", self._page),
@@ -364,17 +404,18 @@ class Dashboard:
             ("/dashboard/input", self._input),
             ("/dashboard/data.json", self._data),
         ):
-            web.route(path, handler, auth=self.check_auth)
+            web.route(path, handler)
         return True
 
-    def _notice(self, query: dict[str, str]) -> tuple[str, str] | None:
+    def _notice(self, query: dict[str, str]) -> tuple[tuple[str, str] | None, str | None]:
+        """((문구, 종류), 안내를 넣을 카드 키 | None)."""
         code = query.get("msg", "")
         if code not in NOTICES:
-            return None
+            return None, None
         text, kind = NOTICES[code]
         text = text.format(minutes=self.cfg.refresh_min_minutes, days=self.cfg.manual_max_days_back)
-        source = self.by_key.get(query.get("src", ""))
-        return (f"{source.title}: {text}" if source else text), kind
+        key = query.get("src", "")
+        return (text, kind), (key if key in self.by_key else None)
 
     def _back(self, code: str, key: str | None = None) -> tuple[int, str]:
         if key and key in self.by_key:
@@ -382,7 +423,8 @@ class Dashboard:
         return 302, f"/dashboard?msg={code}"
 
     async def _page(self, query: dict[str, str]) -> Any:
-        return 200, self.page_html(self._notice(query)), "text/html; charset=utf-8", SECURITY_HEADERS
+        notice, src = self._notice(query)
+        return 200, self.page_html(notice, notice_src=src), "text/html; charset=utf-8", SECURITY_HEADERS
 
     async def _data(self, query: dict[str, str]) -> Any:
         return 200, self.json_text(), "application/json; charset=utf-8", SECURITY_HEADERS
@@ -406,10 +448,14 @@ class Dashboard:
 
     # ------------------------------------------------------------ 자기 점검
     def self_check(self) -> list[tuple[bool | None, str]]:
-        out: list[tuple[bool | None, str]] = [(False, p) for p in self.problems]
+        """대시보드는 덤이라 문제가 있어도 ⚠️(None) — ❌ 는 '딜봇 멈춤' 카톡이 가므로 쓰지 않는다."""
+        out: list[tuple[bool | None, str]] = [(None, p) for p in self.problems]
         if not self.cfg.enabled:
             return [*out, (None, "채널 대시보드: 꺼짐 (설정 dashboard.enabled)")]
         if not self.served:
             return [*out, (None, "채널 대시보드 페이지: 꺼짐 (DASHBOARD_USER·DASHBOARD_PASSWORD 미설정 — 숫자는 계속 모음)")]
         where = f"{self.public_base_url}/dashboard" if self.public_base_url else "/dashboard"
+        if weak := password_problems(self._password):
+            return [*out, (None, f"채널 대시보드 {where}: 비밀번호를 바꿔 주세요 ({'; '.join(weak)}) — "
+                                 "bash deploy/lightsail/setenv.sh DASHBOARD_PASSWORD")]
         return [*out, (True, f"채널 대시보드 {where} (카드 {len(self.sources)}개, 비밀번호 보호)")]

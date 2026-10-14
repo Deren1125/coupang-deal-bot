@@ -67,7 +67,7 @@ def cards(*items: dict[str, Any]) -> list[DashboardCardConfig]:
 
 
 def make_dash(db: Database, tmp_path: Path, *, card_list: list[DashboardCardConfig] | None = None, clock: Clock | None = None,
-              user: str | None = "owner", password: str | None = "pw-123", **ctx: Any) -> Dashboard:
+              user: str | None = "owner", password: str | None = "plum-river-cactus-42", **ctx: Any) -> Dashboard:
     clock = clock or Clock()
     cfg = DashboardConfig(cards=card_list if card_list is not None else load_settings(ROOT / "config.yaml", load_env=False).dashboard.cards,
                           blogauto_metrics_path=str(tmp_path / "blogauto.json"))
@@ -105,7 +105,8 @@ def test_disabled_and_unknown_cards(db: Database, tmp_path: Path) -> None:
     ))
     assert [s.key for s in dash.sources] == ["kakao", "dealbot"]
     lines = dash.self_check()
-    assert lines[0][0] is False and "모르는 종류 'tiktok'" in lines[0][1]
+    # 대시보드는 덤이라 ⚠️(None) — ❌ 면 '딜봇 멈춤' 카톡이 감
+    assert lines[0][0] is None and "모르는 종류 'tiktok'" in lines[0][1]
     assert lines[-1] == (True, "채널 대시보드 /dashboard (카드 2개, 비밀번호 보호)")
 
 
@@ -199,12 +200,15 @@ def test_delta_and_sparkline_math(db: Database, tmp_path: Path) -> None:
 
     pts = step_points([("2026-09-01", 1), ("2026-10-13", 2), (TODAY, 5)], days=28, today=date(2026, 10, 14))
     assert pts == [(26, 2.0), (27, 5.0)]  # 기간 밖(9/1)은 뺌
-    assert step_path(pts, days=28, width=240, height=46, pad=3) == "M228.3 43.0 H237.0 V3.0"
-    assert step_path([(0, 3.0)], days=28) == "M3.0 23.0 H237.0"  # 값이 하나면 평평하게
-    assert step_path([(27, 3.0)], days=28) == "M213.0 23.0 H237.0"
+    # 첫 값은 왼쪽 끝부터, 바뀐 날은 전날→그날을 비스듬히 (참고 화면처럼)
+    assert step_path(pts, days=28, width=240, height=46, pad=3) == "M3.0 43.0 L228.3 43.0 L237.0 3.0"
+    assert step_path([(0, 3.0)], days=28) == "M3.0 23.0 L237.0 23.0"  # 값이 하나면 가운데 높이로 끝까지 평평하게
+    assert step_path([(27, 3.0)], days=28) == "M3.0 23.0 L237.0 23.0"  # 오늘 값 하나도 짧은 토막이 아니라 가로 전체
     assert step_path([], days=28) == ""
     flat = step_path([(0, 4.0), (5, 4.0)], days=28)
-    assert flat.startswith("M3.0 23.0") and "V23.0" in flat
+    assert flat == "M3.0 23.0 L237.0 23.0"
+    steps = step_path([(0, 1.0), (3, 1.0), (4, 2.0), (10, 3.0)], days=11, width=106, height=23, pad=3)
+    assert steps == "M3.0 20.0 L33.0 20.0 L43.0 11.5 L93.0 11.5 L103.0 3.0"  # 값이 그대로면 수평, 바뀐 날만 비스듬히
 
 
 def test_chip_rules_and_explanation() -> None:
@@ -356,6 +360,7 @@ async def test_threads_insights_happy_permission_and_network(db: Database, tmp_p
     assert await dash.refresh("threads") == "refreshed"
     v = card_of(dash, "threads")
     assert [s.value for s in v.stats] == [77, 30] and v.status == model.MET
+    assert v.stats[1].label == "프로필 조회 · 최근 28일"  # 사용자 단위 views 는 프로필 조회수 (글 조회수가 아님)
     assert asked[0] == {"metric": "followers_count"}  # 팔로워는 기간 없이
     assert asked[1]["metric"] == "views" and int(asked[1]["until"]) - int(asked[1]["since"]) == 28 * 86400
 
@@ -367,7 +372,7 @@ async def test_threads_insights_happy_permission_and_network(db: Database, tmp_p
     dash = make_dash(db, tmp_path, card_list=cards({"key": "th1", "type": "threads"}), threads=_th(db, views_down))
     assert await dash.refresh("th1") == "refreshed"  # 팔로워만이라도
     v = card_of(dash, "th1")
-    assert v.stats[0].value == 80 and v.stats[1].value is None and any("조회수를 못 읽음" in h for h in v.hints)
+    assert v.stats[0].value == 80 and v.stats[1].value is None and any("프로필 조회를 못 읽음" in h for h in v.hints)
 
     def no_scope(req: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"error": {"message": "Application does not have permission for this action", "code": 10}})
@@ -400,7 +405,7 @@ async def test_coupang_reports_respect_daily_cap_and_deeplink_reserve(db: Databa
         calls.append(name)
         assert req.url.path.startswith("/v2/providers/affiliate_open_api/apis/openapi/v1/reports/")
         assert req.headers["Authorization"].startswith("CEA algorithm=HmacSHA256")
-        assert req.url.params["startDate"] == "20261001" and req.url.params["endDate"] == "20261014"
+        assert req.url.params["startDate"] == "20261001" and req.url.params["endDate"] == "20261013"  # 어제까지
         rows = {
             "clicks": [{"date": "20261013", "click": 30}, {"date": "20261014", "click": 5}, {"date": "20261013", "click": 2}],
             "orders": [{"date": "20261013", "orderId": "A", "commission": 300}, {"date": "20261013", "orderId": "A"},
@@ -418,10 +423,14 @@ async def test_coupang_reports_respect_daily_cap_and_deeplink_reserve(db: Databa
     assert calls == ["clicks", "orders", "commission"]
     assert budget.usage() == {"report": 3} and budget.available("deeplink")  # 딥링크 예약 몫은 그대로
     v = card_of(dash, "coupang")
-    assert v.stats[0].value == 37 and v.stats[1].value == 3500 and v.stats[1].sub == "주문 2건"
-    assert v.rows[0].value == 3500 and v.status == model.UNMET
+    # 하루치는 다음 날 모이므로 어제까지만: 오늘 행(클릭 5·주문 B)은 응답에 있어도 쓰지 않고, 오늘을 0 으로 채우지도 않음
+    assert v.stats[0].value == 32 and v.stats[0].sub == "어제까지"
+    assert v.stats[1].value == 3500 and v.stats[1].sub == "주문 1건 · 어제까지"
+    assert v.rows[0].label == "이번 달 수익 (어제까지)" and v.rows[0].value == 3500 and v.status == model.UNMET
     assert v.activity == ["어제 클릭 32회 · 주문 1건 · 수익 1,500원"]
-    assert db.metric_series("coupang", "clicks", "2026-10-12", TODAY) == [("2026-10-12", 0.0), (YESTERDAY, 32.0), (TODAY, 5.0)]
+    assert db.metric_series("coupang", "clicks", "2026-10-12", TODAY) == [("2026-10-12", 0.0), (YESTERDAY, 32.0)]
+    assert v.summary == {"revenue_7d": 3500.0, "orders_7d": 1.0}
+    assert v.spark[-1] == (YESTERDAY, 3500.0) and v.spark_label == "수익 7일 합계"  # 하루 수익 대신 7일 합계
 
     dash.ctx.now = Clock(NOW + timedelta(hours=2))  # 간격(3시간) 안: 조용히 건너뜀
     assert await dash.refresh("coupang") == "skipped" and len(calls) == 3
@@ -487,7 +496,9 @@ async def test_dealbot_operations_card(db: Database, tmp_path: Path) -> None:
     assert v.stats[1].value == 1
     assert [(r.label, r.value, r.met) for r in v.rows] == [("오늘 올린 딜", 1, False), ("링크 기다리는 딜", 1, False)]
     assert v.activity == ["대기열: 발행 대기 1 · 내 링크 기다림 1 · 확인(/ok) 기다림 0 · 자동 링크 중 0"]
-    assert v.spark[-1] == (TODAY, 1.0) and len(v.spark) == 28
+    # 그래프는 하루 딜 수의 '최근 7일 합계' — 다시 센 29일(딜 기록을 지우는 30일 안) 가운데 7일이 다 찬 날부터
+    assert v.spark[-1] == (TODAY, 1.0) and len(v.spark) == 23 and v.spark_label == "올린 딜 7일 합계"
+    assert v.rows[1].lower_is_better and v.rows[1].ratio == 1.0  # 넘친 줄은 꽉 찬 주황 막대 (render)
 
 
 # ---------------------------------------------------------------- 네이버 블로그 (직접 입력 + Blog-Auto 기록)
@@ -512,7 +523,7 @@ def test_blog_card_reads_blogauto_export_and_manual_entries(db: Database, tmp_pa
     db.metric_put("blog_finance", "neighbors", TODAY, 127, origin="manual")
     v = card_of(dash, "blog_finance")
     assert v.stats[0].value == 127 and v.stats[0].delta == 7 and v.stats[0].delta_label == "오늘"
-    assert v.stats[1].label == "방문자 · 2026. 10. 13." and v.stats[1].value == 120
+    assert v.stats[1].label == "방문자 · 10.\u00a013." and v.stats[1].value == 120  # 짧게, 날짜 가운데서 줄이 안 바뀌게
     assert [(r.label, r.value, r.met) for r in v.rows] == [("개설 기간", 105, True), ("게시글 수", 55, True), ("일평균 방문자", 110, True)]
     assert v.status == model.MET and v.program == "네이버 애드포스트"
     assert v.activity == ["오늘 발행 1 · 임시저장 2 · 서로이웃 신청 10 (7일 55) · 댓글 3 · 답글 2"]
@@ -652,3 +663,232 @@ async def test_one_broken_source_does_not_break_the_page(db: Database, tmp_path:
     dash = make_dash(db, tmp_path, card_list=cards({"key": "kakao", "type": "kakao_openchat"}, {"key": "dealbot", "type": "dealbot"}))
     html_text = dash.page_html()
     assert "카드를 그리지 못함" in html_text and "핫딜 봇 운영" in html_text
+
+
+# ---------------------------------------------------------------- 쿠팡: 실패하면 더 두드리지 않기
+@pytest.mark.parametrize("status", [429, 500, 503])
+async def test_coupang_throttled_or_down_makes_exactly_one_http_call(db: Database, tmp_path: Path, status: int) -> None:
+    hits: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        hits.append(req.url.path)
+        return httpx.Response(status, text="Too Many Requests" if status == 429 else "oops")
+
+    budget = ApiBudget(10, reserve={"deeplink": 3})
+    client = CoupangClient("AK", "SK", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), max_retries=3,
+                           retry_backoff=0.01, budget=budget)  # 발행용 기본 재시도(3번)가 있어도 리포트는 한 번만
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "coupang", "type": "coupang_partners"}), coupang=client, budget=budget)
+    res = await dash.collect_one(dash.sources[0])
+    assert res.status == model.ERROR and "다음 시각에 다시" in (res.note or "")
+    assert len(hits) == 1 and budget.used() == 1  # 실제 호출 수 = 예산에 센 수
+    assert db.kv_get(f"dash:coupang_calls:coupang:{TODAY}") == "1"  # 하루 한도에도 1번
+    assert card_of(dash, "coupang").status == model.UNKNOWN
+
+
+async def test_coupang_later_report_failing_stops_the_rest(db: Database, tmp_path: Path) -> None:
+    hits: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        name = req.url.path.rsplit("/", 1)[-1]
+        hits.append(name)
+        if name == "clicks":
+            return httpx.Response(200, json={"rCode": "0", "data": [{"date": "20261013", "click": 4}]})
+        return httpx.Response(429, text="slow down")
+
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "coupang", "type": "coupang_partners"}), coupang=_coupang(handler))
+    res = await dash.collect_one(dash.sources[0])
+    assert hits == ["clicks", "orders"]  # 429 를 받으면 수익 리포트는 부르지 않음
+    assert res.status == model.PARTIAL and db.metric_latest("coupang", "clicks")["value"] == 4
+
+
+def test_coupang_report_client_is_single_attempt_by_default() -> None:
+    hits: list[int] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        hits.append(1)
+        return httpx.Response(502)
+
+    client = CoupangClient("AK", "SK", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), max_retries=3, retry_backoff=0.01)
+    with pytest.raises(Exception):  # noqa: B017
+        asyncio.run(client.report("clicks", "20261001", "20261013"))
+    assert len(hits) == 1
+    with pytest.raises(Exception):  # noqa: B017
+        asyncio.run(client.report("clicks", "20261001", "20261013", attempts=2))
+    assert len(hits) == 3
+
+
+# ---------------------------------------------------------------- 무한·NaN 값이 페이지를 깨지 않게
+async def test_non_finite_values_are_dropped_and_never_break_the_page(db: Database, tmp_path: Path) -> None:
+    from dealbot.dashboard.sources._meta import insight_value
+    from dealbot.dashboard.sources.coupang import parse_report
+
+    per_day, _ = parse_report("commission", [{"date": "20261013", "commission": "Infinity"},
+                                             {"date": "20261013", "commission": "1e400"},
+                                             {"date": "20261013", "commission": "NaN"},
+                                             {"date": "20261013", "commission": 100}], date(2026, 10, 14))
+    assert per_day == {YESTERDAY: 100.0}
+    body = json.loads('{"data": [{"name": "views", "total_value": {"value": 1e400}}, '
+                      '{"name": "reach", "values": [{"value": NaN}, {"value": 7}]}]}')
+    assert insight_value(body, "views") is None and insight_value(body, "reach") == 7.0
+    assert model.fmt_num(float("inf")) == "-" and model.fmt_signed(float("nan")) == "-"
+
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "kakao", "type": "kakao_openchat"},
+                                                   {"key": "coupang", "type": "coupang_partners"}))
+    # 숫자가 아닌 값은 그 줄만 버리고 나머지는 저장 (배치째 잃지 않음)
+    stored = dash._store(dash.sources[1], model.FetchResult(model.OK, values={"commission": float("nan"), "clicks": 3.0},
+                                                            days={YESTERDAY: {"orders": float("inf"), "clicks": 2.0}}))
+    assert stored == 2 and db.metric_latest("coupang", "orders") is None and db.metric_latest("coupang", "clicks")["value"] == 3
+    # 예전 코드가 넣어 둔 무한 값이 DB 에 있어도 페이지는 뜬다 (그 값만 '-')
+    db.metric_put("coupang", "commission", YESTERDAY, float("inf"))
+    db.metric_put("kakao", "members", TODAY, float("inf"), origin="manual")
+    page_text = dash.page_html()
+    assert "쿠팡 파트너스" in page_text and "카카오 오픈채팅" in page_text
+
+
+def test_one_card_failing_to_render_only_breaks_that_card(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dealbot.dashboard import render
+
+    real = render._stat
+
+    def flaky(s: model.Stat) -> str:
+        if s.label == "참여자":
+            raise OverflowError("cannot convert float infinity to integer")
+        return real(s)
+
+    monkeypatch.setattr(render, "_stat", flaky)
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "kakao", "type": "kakao_openchat"}, {"key": "dealbot", "type": "dealbot"}))
+    page_text = dash.page_html()
+    kakao = page_text.split('id="card-kakao"', 1)[1].split("</article>", 1)[0]
+    assert "카드를 그리지 못함 (OverflowError" in kakao and "판단 불가" in kakao
+    assert "핫딜 봇 운영" in page_text and 'id="card-dealbot"' in page_text
+
+
+# ---------------------------------------------------------------- 블로그: 자정 직후·게시글 수 직접 입력
+def test_blog_activity_after_midnight_is_labelled_yesterday_and_not_counted_today(db: Database, tmp_path: Path) -> None:
+    clock = Clock(datetime(2026, 10, 14, 15, 40, tzinfo=UTC))  # 10/15 00:40 (한국시간)
+    _write_export(tmp_path, "2026-10-14T23:58:00+09:00", {"finance": {
+        "posts_published_today": 3, "posts_published_total": 60, "drafts_saved_today": 1, "neighbor_requests_today": 20,
+        "neighbor_requests_7d": 90, "comments_today": 4, "replies_today": 2}})
+    dash = make_dash(db, tmp_path, clock=clock, card_list=cards(
+        {"key": "blog", "type": "naver_blog", "goals": {"posts": 50}, "options": {"blog": "finance"}}))
+    v = card_of(dash, "blog")
+    assert v.activity == ["어제 발행 3 · 임시저장 1 · 서로이웃 신청 20 (7일 90) · 댓글 4 · 답글 2"]
+    assert "posts_today" not in v.summary  # 맨 위 '오늘 올린 글' 에 어제 글을 더하지 않음
+    posts = next(r for r in v.rows if r.label == "게시글 수")
+    assert posts.value == 60 and posts.met  # 발행 합계는 날짜와 상관없어 그대로 씀
+    assert dash.summary([v])[1][1] == "-"
+
+
+def _posts_row(v: model.CardView) -> GoalRow:
+    return next(r for r in v.rows if r.label == "게시글 수")
+
+
+def test_blog_post_count_uses_owner_entry_plus_later_bot_posts(db: Database, tmp_path: Path) -> None:
+    clock = Clock()
+    card = cards({"key": "blog", "type": "naver_blog", "goals": {"posts": 50}, "options": {"blog": "finance"}})
+    _write_export(tmp_path, "2026-10-14T18:00:00+09:00", {"finance": {"posts_published_total": 23}})
+    dash = make_dash(db, tmp_path, clock=clock, card_list=card)
+    v = card_of(dash, "blog")
+    assert _posts_row(v).value == 23 and v.status == model.UNMET  # 넣은 적이 없으면 Blog-Auto 발행 합계 (손으로 쓴 글은 모름)
+    assert [f.metric for f in v.manual] == ["neighbors", "visitors", "posts"]
+    # 주인이 블로그에 보이는 글 수(손으로 쓴 예전 글까지)를 넣음
+    assert dash.save_manual("blog", {"posts": "63"}) == "saved"
+    v = card_of(dash, "blog")
+    assert _posts_row(v).value == 63 and _posts_row(v).met and v.manual_values["posts"] == 63 and v.manual_days["posts"] == TODAY
+    # 다음 날 봇이 2개 더 발행 → 63 + 2
+    clock.t += timedelta(days=1)
+    _write_export(tmp_path, "2026-10-15T18:00:00+09:00", {"finance": {"posts_published_total": 25}})
+    assert _posts_row(card_of(dash, "blog")).value == 65
+    # 넣은 수가 Blog-Auto 합계보다 작으면(잘못 넣음) 합계를 씀
+    assert dash.save_manual("blog", {"posts": "10"}) == "saved"
+    assert _posts_row(card_of(dash, "blog")).value == 25
+
+
+def test_manual_form_is_empty_with_last_value_caption_and_clear_date_label(db: Database, tmp_path: Path) -> None:
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "blog", "type": "naver_blog", "options": {"blog": "finance"}}))
+    db.metric_put("blog", "neighbors", YESTERDAY, 257, origin="manual")
+    page_text = dash.page_html()
+    form = page_text.split('<form class="manual"', 1)[1].split("</form>", 1)[0]
+    assert 'placeholder="257"' not in form and form.count('placeholder="숫자"') == 3  # 칸은 비어 보이게
+    assert "지난 값 257 · 10.\u00a013." in form and "아직 없음" in form
+    assert "입력하는 날<input" in form and "어제 방문자는 입력하는 날의 전날 값으로 저장돼요." in form
+
+
+# ---------------------------------------------------------------- 봇 운영: 지운 날의 기록은 0 으로 덮지 않음
+def test_dealbot_does_not_overwrite_history_older_than_the_queue_keeps(db: Database, tmp_path: Path) -> None:
+    db.metric_put("dealbot", "deals", "2026-09-20", 9)  # 24일 전에 저장해 둔 값 (그 딜 기록은 이미 지워짐)
+    db.metric_put("dealbot", "deals", "2026-10-12", 4)
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "dealbot", "type": "dealbot"}), history_days=10)
+    card_of(dash, "dealbot")
+    assert db.metric_series("dealbot", "deals", "2026-09-20", "2026-09-20") == [("2026-09-20", 9.0)]
+    assert db.metric_latest("dealbot", "deals", until_day="2026-10-12")["value"] == 0  # 기록이 남아 있는 9일 안은 다시 셈
+    assert db.metric_series("dealbot", "deals", "2026-10-01", "2026-10-05") == []  # 9일보다 전은 건드리지 않음
+
+
+# ---------------------------------------------------------------- 그래프: 짧은 기록·날마다 오르내리는 값
+def test_sparkline_fills_the_width_for_short_histories() -> None:
+    from dealbot.dashboard.render import spark_window, sparkline
+
+    today = date(2026, 10, 14)
+    one = sparkline([(TODAY, 412)], days=28, today=today)
+    assert 'd="M3.0 23.0 L237.0 23.0"' in one  # 첫날: 짧은 토막이 아니라 가운데 높이의 가로 전체 선
+    two = sparkline([(YESTERDAY, 35), (TODAY, 41)], days=28, today=today)
+    assert 'd="M3.0 43.0 L198.0 43.0 L237.0 3.0"' in two  # 이틀: 7일 폭에 그려 오른쪽 끝의 세로 막대가 아니게
+    assert spark_window([(26, 1.0), (27, 2.0)], days=28) == ([(5, 1.0), (6, 2.0)], 7)
+    assert spark_window([(3, 1.0), (27, 2.0)], days=28) == ([(0, 1.0), (24, 2.0)], 25)  # 기록이 길면 첫 기록부터
+    assert spark_window([(0, 1.0)], days=28) == ([(0, 1.0)], 28)
+    assert 'stroke-dasharray="3 4"' in sparkline([], days=28, today=today)  # 기록 없음은 그대로 점선
+
+
+def test_rolling_sum_and_average(db: Database, tmp_path: Path) -> None:
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "kakao", "type": "kakao_openchat"}))
+    for i in range(10):  # 10/5~10/14 매일 1~10
+        db.metric_put("kakao", "x", (date(2026, 10, 5) + timedelta(days=i)).isoformat(), i + 1)
+    data = CardData(dash.ctx, "kakao")
+    sums = data.rolling("x", 7)
+    assert sums[0] == ("2026-10-11", 28.0) and sums[-1] == (TODAY, 4 + 5 + 6 + 7 + 8 + 9 + 10)  # 7일이 다 찬 날부터
+    assert len(sums) == 4
+    db.metric_put("kakao", "v", "2026-10-10", 100)
+    db.metric_put("kakao", "v", "2026-10-12", 50)
+    avgs = CardData(dash.ctx, "kakao").rolling("v", 7, how="avg")
+    assert avgs[0] == ("2026-10-10", 100.0) and avgs[-1] == (TODAY, 75.0)  # 평균은 넣은 값만으로
+
+
+# ---------------------------------------------------------------- 화면 다듬기 (참고 화면)
+def test_page_design_details(db: Database, tmp_path: Path) -> None:
+    from dealbot.dashboard.render import CSS
+
+    dash = make_dash(db, tmp_path, card_list=cards(
+        {"key": "dealbot", "type": "dealbot", "goals": {"deals_per_day": 10, "links_waiting_max": 0}},
+        {"key": "coupang", "type": "coupang_partners"},
+        {"key": "blog_finance", "type": "naver_blog", "title": "Deren의 아카이브", "options": {"blog": "finance"}},
+    ))
+    db.metric_put("coupang", "commission", YESTERDAY, 12345678)
+    db.metric_put("coupang", "orders", YESTERDAY, 3)
+    db.metric_put("coupang", "clicks", YESTERDAY, 1234567)
+    page_text = dash.page_html(("저장했어요.", "ok"), notice_src="blog_finance")
+    # 안내는 누른 카드 안에, 맨 위에는 없음
+    blog = page_text.split('id="card-blog_finance"', 1)[1].split("</article>", 1)[0]
+    assert '<div class="notice" role="status">저장했어요.</div>' in blog and page_text.count("저장했어요.") == 1
+    # 카드 이름은 잘리지 않고(줄바꿈 허용), 좁은 폰에서는 다시 읽기 글자를 숨기고 ↻ 만
+    assert ".head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap" in CSS
+    assert "text-overflow:ellipsis" not in CSS and "white-space:nowrap;overflow:hidden" not in CSS
+    assert "@media (max-width:420px){.btn .btn-text{position:absolute" in CSS
+    # 숫자 칸은 옅은 회색 바탕·둥근 모서리, 카드는 옅은 그림자 (참고 화면)
+    assert ".stat{background:var(--tile);border:1px solid var(--line);border-radius:10px" in CSS and "--tile:#f8f9fb" in CSS
+    assert ".card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 16px 18px;min-width:0;\nbox-shadow" in CSS
+    # 큰 숫자는 숫자 가운데서 줄이 바뀌지 않음
+    assert '<span class="num">12,345,678</span><span class="unit">원</span>' in page_text and ".num{white-space:nowrap}" in CSS
+    # 칩 개수는 맨 위 줄에, 쿠팡 요약 칸에는 주문 수
+    top = page_text.split('<header class="top">', 1)[1].split("</header>", 1)[0]
+    assert '<span class="chip met">조건 충족 1</span><span class="chip unmet">조건 미충족 1</span>' in top
+    assert '<span class="chip unknown">판단 불가 1</span>' in top
+    assert dash.summary(dash.views())[3] == ("쿠팡 수익 · 최근 7일", "12,345,678원", "주문 3건 · 어제까지")
+    # '최대 N' 줄이 넘치면 꽉 찬 주황 막대 (줄어들수록 길어지는 보라 막대가 아님)
+    dealbot = page_text  # 기다리는 딜 0개 ≤ 최대 0 → 충족(꽉 찬 초록).split('id="card-dealbot"', 1)[1].split("</article>", 1)[0]
+    assert '<div class="bar met"><i style="width:100.0%"></i></div>' in dealbot
+    from dealbot.dashboard.render import _row
+
+    assert _row(GoalRow("링크 기다리는 딜", 5, 3, "개", lower_is_better=True)).endswith(
+        '<div class="bar over"><i style="width:100.0%"></i></div></div>')
+    assert ".bar.over i{background:var(--orange)}" in CSS

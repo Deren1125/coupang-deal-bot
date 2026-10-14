@@ -145,7 +145,9 @@ class CoupangClient:
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         kind: str = "general",
+        attempts: int | None = None,
     ) -> Any:
+        """attempts: 재시도까지 합친 HTTP 호출 수 (기본 max_retries). 예산(ApiBudget)은 이 함수 한 번에 1회로 센다."""
         if self.budget is not None and not self.budget.available(kind):
             raise CoupangRateLimited(f"coupang api hourly budget exhausted (kind={kind}, used={self.budget.usage()})")
         clean = {k: v for k, v in (params or {}).items() if v is not None}
@@ -178,7 +180,8 @@ class CoupangClient:
             return body.get("data")
 
         return await retry_async(
-            _do, attempts=self._retries, backoff=self._backoff, label=f"coupang {method} {path}"
+            _do, attempts=self._retries if attempts is None else attempts, backoff=self._backoff,
+            label=f"coupang {method} {path}",
         )
 
     # ------------------------------------------------------------- endpoints
@@ -226,11 +229,13 @@ class CoupangClient:
             )
         return results
 
-    async def report(self, name: str, start: str, end: str) -> list[dict[str, Any]]:
-        """실적 리포트 (대시보드). start·end 는 yyyyMMdd. 시간당 예산의 일반 몫을 쓰므로 딥링크 예약 몫은 그대로 남는다."""
+    async def report(self, name: str, start: str, end: str, *, attempts: int = 1) -> list[dict[str, Any]]:
+        """실적 리포트 (대시보드). start·end 는 yyyyMMdd. 시간당 예산의 일반 몫을 쓰므로 딥링크 예약 몫은 그대로 남는다.
+        기본은 재시도 없이 한 번만 — 실패하면 다음 읽는 시각에 (HTTP 호출 수 = 예산·하루 한도에 센 수)."""
         if name not in REPORT_NAMES:
             raise ValueError(f"unknown report: {name}")
-        data = await self._request("GET", PATH_REPORT.format(name=name), params={"startDate": start, "endDate": end}, kind="report")
+        data = await self._request("GET", PATH_REPORT.format(name=name), params={"startDate": start, "endDate": end},
+                                   kind="report", attempts=attempts)
         if isinstance(data, dict):  # 목록이 한 겹 더 싸여 올 때
             data = next((v for v in data.values() if isinstance(v, list)), [])
         return [row for row in (data or []) if isinstance(row, dict)]

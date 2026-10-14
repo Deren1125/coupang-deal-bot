@@ -486,6 +486,7 @@ class DealBot:
             self.dashboard.register(self.web)
         except Exception as e:  # noqa: BLE001
             log.exception("dashboard disabled: %s", e)
+            self.web.guard_prefix("/dashboard", None)  # 만들다 실패하면 /dashboard 아래는 닫아 둠 (404)
 
         # ---- 수집기
         ctx = CollectorContext(settings=settings, http=self.http, db=self.db, coupang=self.coupang, shops=self.registry)
@@ -528,6 +529,7 @@ class DealBot:
             coupang=self.coupang,
             budget=self.budget,
             include_dry_run=lambda: self.state.dry_run,
+            history_days=s.app.prune_events_days,  # 딜 기록을 지운 날은 다시 세지 않음
             blogauto=BlogAutoReader(dc.blogauto_metrics_path, tz=s.app.timezone, stale_hours=dc.blogauto_stale_hours, now=utcnow),
         )
         return Dashboard(dc, ctx, user=s.secrets.dashboard_user, password=s.secrets.dashboard_password,
@@ -1108,7 +1110,8 @@ class DealBot:
         else:
             out.append((None, "링크프라이스: 미설정 (11번가/G마켓/알리 등은 원본 링크)"))
         if self.dashboard is None:
-            out.append((False, "채널 대시보드: 만들지 못함 (로그 확인)") if self.settings.dashboard.enabled else (None, "채널 대시보드: 꺼짐"))
+            # 대시보드는 덤 — ❌ 면 '딜봇 멈춤' 카톡이 가므로 ⚠️ 로
+            out.append((None, "채널 대시보드: 만들지 못함 (로그 확인)" if self.settings.dashboard.enabled else "채널 대시보드: 꺼짐"))
         else:
             out.extend(self.dashboard.self_check())
         return out

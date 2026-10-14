@@ -20,7 +20,12 @@ from dealbot.dashboard.model import (
     Stat,
     safe_error,
 )
-from dealbot.dashboard.sources._meta import insight_value, is_permission, is_token_problem
+from dealbot.dashboard.sources._meta import (
+    finite_number,
+    insight_value,
+    is_permission,
+    is_token_problem,
+)
 from dealbot.dashboard.sources.base import CardData, Source, register
 
 INSIGHT_DAYS = 28
@@ -53,9 +58,8 @@ class InstagramSource(Source):
             return FetchResult(ERROR, note=f"인스타그램을 못 읽음 ({safe_error(e)})")
         values: dict[str, float] = {}
         for field, metric in (("followers_count", "followers"), ("media_count", "posts")):
-            v = acc.get(field)
-            if isinstance(v, int | float) and not isinstance(v, bool):
-                values[metric] = float(v)
+            if (v := finite_number(acc.get(field))) is not None:
+                values[metric] = v
         now = self.ctx.now()
         try:
             body = await pub.client.account_insights(

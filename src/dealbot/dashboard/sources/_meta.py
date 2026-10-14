@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+
+def finite_number(v: Any) -> float | None:
+    """JSON 숫자 → float. 참/거짓·무한·NaN(json 이 'Infinity'·1e400 을 그렇게 읽음)은 None."""
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        return None
+    f = float(v)
+    return f if math.isfinite(f) else None
 
 
 def is_token_problem(e: BaseException) -> bool:
@@ -29,11 +38,10 @@ def insight_value(body: Any, name: str) -> float | None:
         if not isinstance(item, dict) or item.get("name") != name:
             continue
         total = item.get("total_value")
-        if isinstance(total, dict) and isinstance(total.get("value"), int | float) and not isinstance(total.get("value"), bool):
-            return float(total["value"])
+        if isinstance(total, dict) and (n := finite_number(total.get("value"))) is not None:
+            return n
         values = item.get("values")
         if isinstance(values, list):
-            nums = [float(v["value"]) for v in values
-                    if isinstance(v, dict) and isinstance(v.get("value"), int | float) and not isinstance(v.get("value"), bool)]
+            nums = [n for v in values if isinstance(v, dict) and (n := finite_number(v.get("value"))) is not None]
             return sum(nums) if nums else None
     return None
