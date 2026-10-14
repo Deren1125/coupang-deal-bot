@@ -814,6 +814,57 @@ def test_manual_form_is_empty_with_last_value_caption_and_clear_date_label(db: D
     assert "입력하는 날<input" in form and "어제 방문자는 입력하는 날의 전날 값으로 저장돼요." in form
 
 
+def _card_html(page_text: str, key: str) -> str:
+    return page_text.split(f'id="card-{key}"', 1)[1].split("</article>", 1)[0]
+
+
+def test_manual_form_folds_behind_a_summary_like_the_reference_cards(db: Database, tmp_path: Path) -> None:
+    from dealbot.dashboard.render import CSS
+
+    dash = make_dash(db, tmp_path, card_list=cards(
+        {"key": "blog", "type": "naver_blog", "options": {"blog": "finance"}},
+        {"key": "kakao", "type": "kakao_openchat"},
+    ))
+    # 처음 쓸 때(넣은 값이 하나도 없음)는 펼쳐 둔다
+    blog = _card_html(dash.page_html(), "blog")
+    assert '<details class="manual-box" open><summary>직접 넣기<span class="what">이웃 수·어제 방문자·게시글 수</span></summary>' \
+        '<form class="manual"' in blog and blog.endswith("</form></details>")
+    # 한 번이라도 넣었으면 접어 둔다 (카드가 참고 화면처럼 숫자·그래프·목표로 끝나 보이게) — 칸·지난 값은 그대로 안에
+    db.metric_put("blog", "neighbors", TODAY, 128, origin="manual")
+    db.metric_put("kakao", "members", TODAY, 14, origin="manual")
+    page_text = dash.page_html()
+    blog, kakao = _card_html(page_text, "blog"), _card_html(page_text, "kakao")
+    assert '<details class="manual-box"><summary>' in blog and "지난 값 128 · 10. 14." in blog
+    assert '<details class="manual-box"><summary>직접 넣기<span class="what">참여자 수</span></summary>' in kakao
+    # 입력이 잘못돼 돌아오면 그 카드만 펼쳐서 바로 고칠 수 있게
+    page_text = dash.page_html(("숫자만 넣어 주세요 (예: 1,234).", "bad"), notice_src="blog")
+    assert '<details class="manual-box" open>' in _card_html(page_text, "blog")
+    assert '<details class="manual-box"><summary>' in _card_html(page_text, "kakao")
+    assert '<details class="manual-box"><summary>' in _card_html(dash.page_html(("저장했어요.", "ok"), notice_src="blog"), "blog")
+    # 스크립트 없이 열고 닫힘 (CSP 그대로), 화살표는 펼치면 아래로
+    assert "<script" not in page_text and "details.manual-box[open] summary::before{transform:rotate(45deg)" in CSS
+
+
+def test_activity_items_stay_whole_when_the_line_wraps() -> None:
+    from dealbot.dashboard.render import CSS, _activity
+
+    out = _activity("오늘 발행 3 · 임시저장 0 · 댓글 5 · 답글 4")
+    assert out == ('<p class="activity"><span class="it">오늘 발행 3 ·</span> <span class="it">임시저장 0 ·</span> '
+                   '<span class="it">댓글 5 ·</span> <span class="it">답글 4</span></p>')  # '·' 는 앞 항목 덩어리 안에
+    assert _activity("<b>&") == '<p class="activity"><span class="it">&lt;b&gt;&amp;</span></p>'  # 값은 그대로 escape
+    assert ".activity .it{display:inline-block;max-width:100%}" in CSS  # 너무 긴 항목만 안에서 줄바꿈 (가로 넘침 없음)
+
+
+def test_josa_looks_past_a_trailing_parenthetical() -> None:
+    assert model.josa("이번 달 수익 (어제까지)", "이", "가") == "이"
+    assert model.josa("이번 달 주문(어제까지)", "은", "는") == "은"
+    assert model.josa("일평균 방문자 (7일)", "이", "가") == "가"
+    assert model.josa_ro("수익 (어제까지)") == "으로" and model.josa_ro("서울 (본점)") == "로"
+    assert model.josa("(어제까지)", "이", "가") == "이(가)"  # 괄호뿐이면 고를 수 없어 둘 다
+    row = GoalRow("이번 달 수익 (어제까지)", 6740, 10000, "원")
+    assert explain("쿠팡 파트너스 수익", [row]) == "이번 달 수익 (어제까지)이 6,740원으로 목표 10,000원까지 3,260원 남았습니다."
+
+
 # ---------------------------------------------------------------- 봇 운영: 지운 날의 기록은 0 으로 덮지 않음
 def test_dealbot_does_not_overwrite_history_older_than_the_queue_keeps(db: Database, tmp_path: Path) -> None:
     db.metric_put("dealbot", "deals", "2026-09-20", 9)  # 24일 전에 저장해 둔 값 (그 딜 기록은 이미 지워짐)

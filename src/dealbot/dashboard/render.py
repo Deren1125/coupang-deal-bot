@@ -100,9 +100,18 @@ h3{font-size:13px;color:#4e5968;margin:14px 0 8px;font-weight:600}
 .bar.met i{background:var(--green)}
 .bar.over i{background:var(--orange)}
 .activity{font-size:12px;color:#4e5968;background:var(--tile);border-radius:8px;padding:8px 10px;margin:10px 0 0}
+.activity .it{display:inline-block;max-width:100%}
 .note{color:var(--sub);font-size:12.5px;margin:10px 0 0;line-height:1.6}
 .hint{color:var(--orange);font-size:12px;margin:8px 0 0;overflow-wrap:anywhere}
-form.manual{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin:12px 0 0;border-top:1px dashed var(--line);padding-top:12px}
+details.manual-box{margin:12px 0 0;border-top:1px dashed var(--line);padding-top:10px}
+details.manual-box summary{display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;cursor:pointer;list-style:none;
+font-size:13px;font-weight:600;color:var(--purple);min-height:28px}
+details.manual-box summary::-webkit-details-marker{display:none}
+details.manual-box summary::before{content:"";flex:none;width:6px;height:6px;margin:0 3px 2px 1px;border:solid currentColor;
+border-width:0 1.5px 1.5px 0;transform:rotate(-45deg)}
+details.manual-box[open] summary::before{transform:rotate(45deg);margin-bottom:4px}
+details.manual-box summary .what{font-size:12px;font-weight:400;color:var(--muted)}
+form.manual{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin:8px 0 0}
 form.manual label{display:flex;flex-direction:column;font-size:11px;color:var(--sub);gap:2px;flex:1 1 84px;min-width:0}
 form.manual label.date{flex:1 1 118px}
 form.manual input{font:inherit;font-size:13px;padding:6px 8px;border:1px solid #d1d6db;border-radius:6px;width:100%;min-width:0;
@@ -230,10 +239,22 @@ def _row(r: GoalRow) -> str:
     )
 
 
-def _form(v: CardView, token: str, today: date, min_day: date | None = None) -> str:
-    """직접 입력 칸. 칸은 비워 두고(지난 값이 들어 있는 것처럼 보이지 않게) 지난 값은 칸 아래 작은 글로."""
+def _activity(line: str) -> str:
+    """활동 줄 ('오늘 발행 1 · 임시저장 2 · 댓글 3'). 칸이 좁아 줄이 바뀔 때 '댓글 / 3' 처럼 이름과 숫자가 갈라지거나
+    '·' 가 다음 줄 맨 앞에 오지 않게, 항목마다 한 덩어리(넘치게 긴 항목만 안에서 줄바꿈)로 두고 '·' 는 앞 항목 덩어리 안에 넣는다
+    (덩어리 바깥에 두면 브라우저가 덩어리와 '·' 사이에서도 줄을 바꾼다)."""
+    items = line.split(" · ")
+    spans = [f'<span class="it">{e(item)}{NBSP + "·" if i < len(items) - 1 else ""}</span>' for i, item in enumerate(items)]
+    return f'<p class="activity">{" ".join(spans)}</p>'
+
+
+def _form(v: CardView, token: str, today: date, min_day: date | None = None, *, open_: bool = False) -> str:
+    """직접 입력 칸. 칸은 비워 두고(지난 값이 들어 있는 것처럼 보이지 않게) 지난 값은 칸 아래 작은 글로.
+    참고 화면처럼 카드가 숫자·그래프·목표로 끝나 보이게 '직접 넣기' 를 눌러야 펼쳐진다 (스크립트 없이 details).
+    넣은 값이 하나도 없을 때(처음 쓸 때)와 open_(이 카드의 입력이 잘못돼 돌아왔을 때)은 펼쳐 둔다."""
     if not v.manual:
         return ""
+    is_open = open_ or all(v.manual_values.get(f.metric) is None for f in v.manual)
     fields = []
     for f in v.manual:
         cur, day = v.manual_values.get(f.metric), v.manual_days.get(f.metric)
@@ -248,13 +269,15 @@ def _form(v: CardView, token: str, today: date, min_day: date | None = None) -> 
     if any(f.day_offset for f in v.manual):
         names = "·".join(f.label for f in v.manual if f.day_offset)
         note = f'<p class="form-note">{e(names)}{e(josa(names, "은", "는"))} 입력하는 날의 전날 값으로 저장돼요.</p>'
+    what = "·".join(f.label for f in v.manual)
     return (
+        f'<details class="manual-box"{" open" if is_open else ""}><summary>직접 넣기<span class="what">{e(what)}</span></summary>'
         '<form class="manual" method="get" action="/dashboard/input">'
         f'<input type="hidden" name="src" value="{e(v.key)}"><input type="hidden" name="t" value="{e(token)}">'
         + "".join(fields)
         + f'<label class="date">입력하는 날<input type="date" name="date" value="{e(today.isoformat())}" max="{e(today.isoformat())}"'
         + (f' min="{e(min_day.isoformat())}"' if min_day else "") + '><span class="last">오늘이 아니면 바꿔 주세요</span></label>'
-        '<button type="submit">저장</button>' + note + "</form>"
+        '<button type="submit">저장</button>' + note + "</form></details>"
     )
 
 
@@ -286,11 +309,11 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
     if v.rows:
         parts.append(f"<h3>{e(v.program or '목표')}</h3>")
         parts.extend(_row(r) for r in v.rows)
-    parts.extend(f'<p class="activity">{e(line)}</p>' for line in v.activity)
+    parts.extend(_activity(line) for line in v.activity)
     if v.note:
         parts.append(f'<p class="note">{e(v.note)}</p>')
     parts.extend(f'<p class="hint">{e(h)}</p>' for h in v.hints)
-    parts.append(_form(v, token, today, min_day))
+    parts.append(_form(v, token, today, min_day, open_=bool(notice and notice[1] == "bad")))
     parts.append("</article>")
     return "".join(parts)
 

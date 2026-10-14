@@ -175,9 +175,20 @@ def fmt_time(dt: datetime | None) -> str:
 
 
 # ---------------------------------------------------------------- 문장
+_TRAILING_PAREN = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _last_char(word: str) -> str:
+    """조사를 고를 글자. 끝의 괄호 덧말은 빼고 본다 — '이번 달 수익 (어제까지)' → '익' (괄호 앞 낱말에 붙는 조사)."""
+    base = word.rstrip()
+    while (stripped := _TRAILING_PAREN.sub("", base)) != base and stripped:
+        base = stripped
+    return base[-1:]
+
+
 def _has_batchim(word: str) -> bool | None:
     """마지막 글자에 받침이 있는지 (한글이 아니면 None)."""
-    ch = word.rstrip()[-1:] if word.strip() else ""
+    ch = _last_char(word)
     if not ch or not ("가" <= ch <= "힣"):
         return None
     return (ord(ch) - 0xAC00) % 28 != 0
@@ -192,7 +203,7 @@ def josa(word: str, with_batchim: str, without: str) -> str:
 
 def josa_ro(word: str) -> str:
     """으로/로 (받침 ㄹ 은 '로')."""
-    ch = word.rstrip()[-1:] if word.strip() else ""
+    ch = _last_char(word)
     if ch and "가" <= ch <= "힣":
         jong = (ord(ch) - 0xAC00) % 28
         return "로" if jong in (0, 8) else "으로"
