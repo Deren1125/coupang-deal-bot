@@ -114,6 +114,9 @@ color:#fff;cursor:pointer;align-self:flex-end;margin-bottom:17px}
 form.manual .form-note{flex:1 1 100%;margin:0;font-size:11px;color:var(--muted)}
 .empty{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:24px;color:var(--sub)}
 .foot{color:var(--muted);font-size:12px;margin:18px 0 0}
+.card{container-type:inline-size}
+@container (max-width:344px){.btn .btn-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
+clip-path:inset(50%);white-space:nowrap}.btn{padding:4px 8px}}
 @media (max-width:420px){.btn .btn-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
 clip-path:inset(50%);white-space:nowrap}.btn{padding:4px 8px}}
 @media (max-width:399px){.stat .value{font-size:18px}.sum .value{font-size:17px}}
