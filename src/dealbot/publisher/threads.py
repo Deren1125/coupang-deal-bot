@@ -252,6 +252,14 @@ class ThreadsClient:
             "GET", f"{GRAPH_BASE}/{API_VERSION}/me", params={"fields": "id,username", "access_token": token}
         )
 
+    async def user_insights(self, token: ThreadsToken, metrics: str, *, since: int | None = None,
+                            until: int | None = None) -> dict[str, Any]:
+        """대시보드용 계정 인사이트 (views·followers_count). threads_manage_insights 권한이 없으면 ThreadsError."""
+        params: dict[str, Any] = {"metric": metrics, "access_token": token.access_token}
+        if since is not None and until is not None:
+            params.update(since=since, until=until)
+        return await self._request("GET", f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/threads_insights", params=params, step="insights")
+
     async def permalink(self, token: ThreadsToken, post_id: str) -> str | None:
         body = await self._request(
             "GET", f"{GRAPH_BASE}/{API_VERSION}/{post_id}", params={"fields": "permalink", "access_token": token.access_token}, step="permalink"

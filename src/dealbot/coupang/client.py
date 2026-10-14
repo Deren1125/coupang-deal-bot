@@ -30,6 +30,8 @@ PATH_GOLDBOX = f"{_API_PREFIX}/products/goldbox"
 PATH_BEST_CATEGORY = f"{_API_PREFIX}/products/bestcategories/{{category_id}}"
 PATH_SEARCH = f"{_API_PREFIX}/products/search"
 PATH_DEEPLINK = f"{_API_PREFIX}/deeplink"
+PATH_REPORT = f"{_API_PREFIX}/reports/{{name}}"  # clicks | orders | cancels | commission (startDate·endDate = yyyyMMdd)
+REPORT_NAMES = ("clicks", "orders", "cancels", "commission")
 
 
 class CoupangApiError(Exception):
@@ -223,6 +225,15 @@ class CoupangClient:
                 )
             )
         return results
+
+    async def report(self, name: str, start: str, end: str) -> list[dict[str, Any]]:
+        """실적 리포트 (대시보드). start·end 는 yyyyMMdd. 시간당 예산의 일반 몫을 쓰므로 딥링크 예약 몫은 그대로 남는다."""
+        if name not in REPORT_NAMES:
+            raise ValueError(f"unknown report: {name}")
+        data = await self._request("GET", PATH_REPORT.format(name=name), params={"startDate": start, "endDate": end}, kind="report")
+        if isinstance(data, dict):  # 목록이 한 겹 더 싸여 올 때
+            data = next((v for v in data.values() if isinstance(v, list)), [])
+        return [row for row in (data or []) if isinstance(row, dict)]
 
     async def ping(self) -> int:
         """자격 증명 확인용: 골드박스 1건 조회."""

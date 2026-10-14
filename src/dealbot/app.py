@@ -36,6 +36,9 @@ from dealbot.collectors import (
 from dealbot.commentary import Commentator
 from dealbot.config import ENV_MODEL_COMMENTARY, ENV_MODEL_SUMMARIZER, Settings
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
+from dealbot.dashboard.blogauto import BlogAutoReader
+from dealbot.dashboard.service import Dashboard
+from dealbot.dashboard.sources import SourceContext
 from dealbot.dedupe import find_duplicate
 from dealbot.enrich import PageEnricher, PageMeta, page_images
 from dealbot.infopost import InfoPostBuilder, PostBody
@@ -476,6 +479,13 @@ class DealBot:
         if settings.web.public_page:
             self.web.route("/", self._deals_page)  # 인스타 프로필 링크용 핫딜 목록
             self.web.route_prefix("/d/", self._deal_redirect)  # /d/번호 → 구매 링크
+        # ---- 채널 대시보드 (/dashboard, 기본 인증 — 주인 요청 10/14). 만들다 실패해도 봇은 계속 돈다
+        self.dashboard: Dashboard | None = None
+        try:
+            self.dashboard = self._build_dashboard()
+            self.dashboard.register(self.web)
+        except Exception as e:  # noqa: BLE001
+            log.exception("dashboard disabled: %s", e)
 
         # ---- 수집기
         ctx = CollectorContext(settings=settings, http=self.http, db=self.db, coupang=self.coupang, shops=self.registry)
@@ -502,6 +512,26 @@ class DealBot:
                 controller=self,
                 nl=self.nl,
             )
+
+    def _build_dashboard(self) -> Dashboard:
+        s = self.settings
+        dc = s.dashboard
+        ctx = SourceContext(
+            db=self.db,
+            tz=s.app.timezone,
+            config=dc,
+            now=utcnow,
+            telegram_bot=lambda: self.bot,  # 시작 중 텔레그램 연결이 실패하면 None 으로 바뀜
+            channel_id=s.secrets.telegram_channel_id,
+            instagram=self.instagram,  # 토큰 저장·갱신은 게시기 그대로 (/instatoken)
+            threads=self.threads,
+            coupang=self.coupang,
+            budget=self.budget,
+            include_dry_run=lambda: self.state.dry_run,
+            blogauto=BlogAutoReader(dc.blogauto_metrics_path, tz=s.app.timezone, stale_hours=dc.blogauto_stale_hours, now=utcnow),
+        )
+        return Dashboard(dc, ctx, user=s.secrets.dashboard_user, password=s.secrets.dashboard_password,
+                         public_base_url=s.secrets.public_base_url)
 
     # ------------------------------------------------------------ lifecycle
     async def start_telegram(self, *, polling: bool = True) -> None:
@@ -1077,6 +1107,10 @@ class DealBot:
             out.append((True, "링크프라이스 ID 설정됨"))
         else:
             out.append((None, "링크프라이스: 미설정 (11번가/G마켓/알리 등은 원본 링크)"))
+        if self.dashboard is None:
+            out.append((False, "채널 대시보드: 만들지 못함 (로그 확인)") if self.settings.dashboard.enabled else (None, "채널 대시보드: 꺼짐"))
+        else:
+            out.extend(self.dashboard.self_check())
         return out
 
     # ------------------------------------------------------------- pipeline

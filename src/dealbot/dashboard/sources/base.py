@@ -1,0 +1,259 @@
+"""대시보드 소스(카드)의 뼈대.
+
+새 SNS 를 붙이는 법 (docs/DASHBOARD.md):
+  1) 이 폴더에 모듈 하나: `@register` 를 붙인 Source 하위 클래스 (type·kind·icon, fetch() 또는 live(), card())
+  2) config.yaml 의 dashboard.cards 에 한 줄 ({key, type, title, goals, options})
+폴더 안의 모듈은 자동으로 읽히므로 다른 곳을 고칠 필요가 없다.
+
+kind:
+  api      — 바깥 API 로 읽음. 정해진 시각(collect_times)과 '다시 읽기' 버튼에서만 fetch() (한도 아끼기)
+  export   — 다른 프로그램이 쓴 파일 등 로컬 기록. 페이지를 열 때마다 live() 로 다시 읽음
+  internal — 봇 DB. 페이지를 열 때마다 live()
+  manual   — 주인이 카드에서 직접 입력
+api 소스도 live() 로 싼 값(예: 봇 DB 의 채널 글 수)을 함께 낼 수 있다.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from typing import Any, ClassVar
+from zoneinfo import ZoneInfo
+
+from dealbot.config import DashboardCardConfig, DashboardConfig
+from dealbot.dashboard import icons
+from dealbot.dashboard.model import (
+    SKIPPED,
+    CardView,
+    FetchResult,
+    GoalRow,
+    ManualField,
+    Stat,
+    explain,
+    fmt_short_day,
+)
+from dealbot.utils.timeutil import from_iso
+
+
+@dataclass
+class SourceContext:
+    """소스가 쓰는 봇 자원. 테스트는 가짜를 넣는다 (네트워크 없음)."""
+
+    db: Any
+    tz: str
+    config: DashboardConfig
+    now: Callable[[], datetime]
+    telegram_bot: Callable[[], Any] = lambda: None  # 지금 쓰는 텔레그램 Bot (없으면 None)
+    channel_id: str | None = None
+    instagram: Any = None  # InstagramPublisher (토큰 저장·갱신은 게시기가 하던 그대로)
+    threads: Any = None  # ThreadsPublisher
+    coupang: Any = None  # CoupangClient | None
+    budget: Any = None  # 쿠팡 ApiBudget (딥링크 몫은 건드리지 않음)
+    include_dry_run: Callable[[], bool] = lambda: False
+    blogauto: Any = None  # BlogAutoReader
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def local_now(self) -> datetime:
+        return self.now().astimezone(ZoneInfo(self.tz))
+
+    def today(self) -> date:
+        return self.local_now().date()
+
+    def day_start_utc(self, day: date) -> datetime:
+        """그날 0시(app.timezone)를 UTC 로."""
+        return datetime(day.year, day.month, day.day, tzinfo=ZoneInfo(self.tz)).astimezone(ZoneInfo("UTC"))
+
+    def local_day(self, dt: datetime) -> date:
+        return dt.astimezone(ZoneInfo(self.tz)).date()
+
+
+class CardData:
+    """카드를 그릴 때 보는 저장된 값들 (metrics 표). 한 번 읽은 지표는 기억해 둔다."""
+
+    def __init__(self, ctx: SourceContext, key: str, *, status: dict[str, Any] | None = None,
+                 live: FetchResult | None = None) -> None:
+        self.ctx = ctx
+        self.key = key
+        self.today = ctx.today()
+        self.spark_days = ctx.config.spark_days
+        self.window = max(self.spark_days, 62)
+        self.status = status or {}
+        self.live = live
+        self._series: dict[str, list[tuple[str, float]]] = {}
+
+    def _rows(self, metric: str) -> list[tuple[str, float]]:
+        if metric not in self._series:
+            since = (self.today - timedelta(days=self.window)).isoformat()
+            self._series[metric] = self.ctx.db.metric_series(self.key, metric, since, self.today.isoformat())
+        return self._series[metric]
+
+    def value(self, metric: str, day: date | str | None = None) -> float | None:
+        d = (day or self.today)
+        d = d.isoformat() if isinstance(d, date) else d
+        return next((v for k, v in self._rows(metric) if k == d), None)
+
+    def latest(self, metric: str) -> tuple[str, float] | None:
+        rows = self._rows(metric)
+        if rows:
+            return rows[-1]
+        row = self.ctx.db.metric_latest(self.key, metric, until_day=self.today.isoformat())
+        return (row["day"], row["value"]) if row else None
+
+    def latest_value(self, metric: str) -> float | None:
+        got = self.latest(metric)
+        return got[1] if got else None
+
+    def delta(self, metric: str, *, max_gap_days: int = 7) -> tuple[float, str] | None:
+        """가장 최근 값 − 그 앞의 값 (최대 max_gap_days 전까지). 바로 전날과 비교면 '오늘'/'10. 13.', 아니면 'N. N. 대비'."""
+        rows = self._rows(metric)
+        if len(rows) < 2:
+            return None
+        (d1, v1), (d0, v0) = rows[-1], rows[-2]
+        last, prev = date.fromisoformat(d1), date.fromisoformat(d0)
+        gap = (last - prev).days
+        if gap > max_gap_days:
+            return None
+        if gap == 1:
+            label = "오늘" if last == self.today else fmt_short_day(last)
+        else:
+            label = f"{fmt_short_day(prev)} 대비"
+        return v1 - v0, label
+
+    def today_delta(self, metric: str) -> float | None:
+        """오늘 값 − 어제 값 (둘 다 있을 때만) — 맨 위 '오늘 늘어난' 합계용."""
+        t = self.value(metric, self.today)
+        y = self.value(metric, self.today - timedelta(days=1))
+        return t - y if t is not None and y is not None else None
+
+    def series(self, metric: str) -> list[tuple[str, float]]:
+        since = (self.today - timedelta(days=self.spark_days - 1)).isoformat()
+        return [(d, v) for d, v in self._rows(metric) if d >= since]
+
+    def window_sum(self, metric: str, days: int, *, end: date | None = None) -> float | None:
+        end = end or self.today
+        start = (end - timedelta(days=days - 1)).isoformat()
+        vals = [v for d, v in self._rows(metric) if start <= d <= end.isoformat()]
+        return sum(vals) if vals else None
+
+    def window_avg(self, metric: str, days: int, *, end: date | None = None) -> float | None:
+        end = end or self.today
+        start = (end - timedelta(days=days - 1)).isoformat()
+        vals = [v for d, v in self._rows(metric) if start <= d <= end.isoformat()]
+        return sum(vals) / len(vals) if vals else None
+
+    def month_sum(self, metric: str) -> float | None:
+        start = self.today.replace(day=1).isoformat()
+        vals = [v for d, v in self._rows(metric) if d >= start]
+        return sum(vals) if vals else None
+
+    # ---- 읽기 상태
+    @property
+    def fetch_status(self) -> str | None:
+        if self.live is not None and not self.status:
+            return self.live.status
+        return self.status.get("status")
+
+    @property
+    def read_at(self) -> datetime | None:
+        return from_iso(self.status.get("read_at"))
+
+    @property
+    def note(self) -> str | None:
+        return self.status.get("note")
+
+
+SOURCE_TYPES: dict[str, type[Source]] = {}
+
+
+def register(cls: type[Source]) -> type[Source]:
+    """`@register` — config 의 type 이름으로 찾을 수 있게 등록."""
+    if not cls.type:
+        raise ValueError(f"{cls.__name__}: type 이 비어 있음")
+    SOURCE_TYPES[cls.type] = cls
+    return cls
+
+
+class Source:
+    type: ClassVar[str] = ""
+    kind: ClassVar[str] = "api"
+    default_title: ClassVar[str] = ""
+    icon: ClassVar[str] = icons.GENERIC
+    program: ClassVar[str | None] = None  # 목표 줄 묶음의 제목 (예: '네이버 애드포스트')
+    manual_fields: ClassVar[tuple[ManualField, ...]] = ()
+    default_goals: ClassVar[dict[str, float]] = {}
+
+    def __init__(self, cfg: DashboardCardConfig, ctx: SourceContext) -> None:
+        self.cfg = cfg
+        self.ctx = ctx
+
+    @property
+    def key(self) -> str:
+        return self.cfg.key
+
+    @property
+    def title(self) -> str:
+        return self.cfg.title or self.default_title or self.cfg.key
+
+    @property
+    def options(self) -> dict[str, Any]:
+        return self.cfg.options
+
+    def goal(self, name: str) -> float | None:
+        v = self.cfg.goals.get(name, self.default_goals.get(name))
+        return float(v) if v is not None else None
+
+    @property
+    def refreshable(self) -> bool:
+        return self.kind in ("api", "export")
+
+    @property
+    def has_live(self) -> bool:
+        return type(self).live is not Source.live
+
+    async def fetch(self) -> FetchResult:
+        """바깥에서 읽기 (api 소스). 예외를 던지지 말고 FetchResult 로 상태를 돌려준다."""
+        return FetchResult(SKIPPED)
+
+    def live(self) -> FetchResult | None:
+        """페이지를 열 때마다 읽는 싼 값 (DB·로컬 파일)."""
+        return None
+
+    def card(self, data: CardData) -> CardView:
+        raise NotImplementedError
+
+    # ---- 카드 만들 때 쓰는 도우미
+    def view(self, data: CardData, **kw: Any) -> CardView:
+        """공통 칸을 채운 CardView. 목표 줄 설명·안내 줄·읽은 시각을 기본으로 넣는다."""
+        rows: list[GoalRow] = kw.pop("rows", [])
+        hints: list[str] = kw.pop("hints", [])
+        note = data.note
+        if data.live is not None and data.live.note:
+            hints = [data.live.note, *hints]
+        if note and note not in hints:
+            hints = [*hints, note]
+        v = CardView(
+            key=self.key,
+            title=self.title,
+            type=self.type,
+            kind=self.kind,
+            icon=self.icon,
+            program=kw.pop("program", self.program),
+            rows=rows,
+            hints=[h for h in hints if h],
+            read_at=kw.pop("read_at", data.read_at),
+            refreshable=self.refreshable,
+            manual=list(self.manual_fields),
+            fetch_status=data.fetch_status,
+            **kw,
+        )
+        if not v.note:
+            v.note = explain(v.program, rows)
+        if self.manual_fields:
+            v.manual_values = {f.metric: data.latest_value(f.metric) for f in self.manual_fields}
+        return v
+
+    @staticmethod
+    def stat_with_delta(data: CardData, metric: str, label: str, unit: str = "", **kw: Any) -> Stat:
+        d = data.delta(metric)
+        return Stat(label, data.latest_value(metric), unit, delta=d[0] if d else None, delta_label=d[1] if d else "", **kw)

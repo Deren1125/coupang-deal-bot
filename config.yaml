@@ -502,3 +502,74 @@ monitoring:
     timeout_seconds: 30
     confidence: 0.75               # 확신이 이보다 낮으면 실행하지 않고 물어봄
   heartbeat_minutes: 0             # 0 = '정상 가동 중' 생존 보고 끔 (에러·요청만 받음). N 이면 관리자 챗이 N분 조용할 때 보고
+
+# ----------------------------------------------------------------------------
+# 채널 대시보드 (주인 요청 10/14): https://<공개 도메인>/dashboard 에서 구독자·이웃·조회수·목표를 한 화면에
+# 비밀번호: 서버 .env 의 DASHBOARD_USER / DASHBOARD_PASSWORD (bash deploy/lightsail/setenv.sh DASHBOARD_PASSWORD).
+#   둘 중 하나라도 없으면 페이지는 꺼짐(404) — 숫자 모으기는 enabled 면 계속.
+# 카드 추가(새 SNS): src/dealbot/dashboard/sources/ 에 모듈 하나 + 아래 cards 에 한 줄 (docs/DASHBOARD.md)
+# 카드 순서 = 아래 적은 순서. goals 는 목표 줄의 목표값 (바꿔도 됨), 빼면 그 줄이 없어짐
+# 네이버 블로그 이웃 수·방문자는 robots.txt 가 막은 통계 페이지를 읽지 않고, 카드의 입력 칸으로 직접 넣는다
+# ----------------------------------------------------------------------------
+dashboard:
+  enabled: true
+  title: 채널 대시보드
+  collect_times: ["09:00", "13:00", "18:00", "22:00"]   # API 카드(텔레그램·인스타·스레드·쿠팡)를 읽는 시각 (한국시간)
+  export_interval_minutes: 60      # Blog-Auto 활동 기록·봇 DB 카드를 다시 저장하는 간격 (페이지를 열 때도 읽음)
+  refresh_min_minutes: 10          # '다시 읽기' 버튼은 카드마다 10분에 한 번
+  spark_days: 28                   # 작은 추이 그래프 기간
+  manual_max_days_back: 60         # 직접 입력 날짜는 오늘부터 60일 전까지
+  blogauto_metrics_path: /home/ubuntu/Blog-Auto/var/metrics/blogauto.json   # Blog-Auto 가 한 시간마다 쓰는 활동 기록
+  blogauto_stale_hours: 3          # 이보다 오래된 기록이면 블로그 활동은 '판단 불가'
+  cards:
+    - key: telegram
+      type: telegram
+      title: 텔레그램 채널
+      goals: { subscribers: 1000 }          # 구독자 목표
+    - key: instagram
+      type: instagram
+      title: 인스타그램
+      goals: { followers: 1000, posts: 100 }  # 팔로워·게시물 목표. 조회수는 인사이트 권한이 있는 토큰일 때만 보임
+    - key: threads
+      type: threads
+      title: 스레드
+      goals: { followers: 1000 }            # 팔로워·조회수는 인사이트 권한(threads_manage_insights)이 있을 때만 보임
+    - key: blog_finance
+      type: naver_blog
+      title: Deren의 아카이브
+      goals: { open_days: 90, posts: 50, avg_visitors: 100 }   # 네이버 애드포스트 권장 기준 (개설 90일·글 50개·일평균 방문자 100명)
+      options:
+        blog: finance                       # Blog-Auto 블로그 이름
+        blog_id: derenlog
+        open_date: null                     # 블로그 개설일 (예: 2026-09-01) — 블로그 관리에서 확인해 적으면 '개설 기간' 이 채워짐
+    - key: blog_issue
+      type: naver_blog
+      title: Deren's Pick
+      goals: { open_days: 90, posts: 50, avg_visitors: 100 }
+      options:
+        blog: issue
+        blog_id: derenpick
+        open_date: null
+    - key: blog_hotdeal
+      type: naver_blog
+      title: 오늘의 핫딜 블로그
+      goals: { open_days: 90, posts: 50, avg_visitors: 100 }
+      options:
+        blog: hotdeal
+        blog_id: demiyum
+        open_date: null
+    - key: kakao
+      type: kakao_openchat
+      title: 카카오 오픈채팅
+      goals: { members: 300 }               # 참여자 목표 (직접 입력)
+    - key: coupang
+      type: coupang_partners
+      title: 쿠팡 파트너스
+      goals: { commission_month: 10000 }    # 이번 달 수익 목표 (원). 파트너스 지급 기준을 확인해 바꿔도 됨
+      options:
+        max_calls_per_day: 6                # 리포트 API 는 하루 이만큼만 (한 번 읽을 때 3회: 클릭·주문·수익)
+        min_interval_hours: 8               # 읽는 시각이 와도 이 간격 안이면 건너뜀 (09시·18시쯤 하루 두 번)
+    - key: dealbot
+      type: dealbot
+      title: 핫딜 봇 운영
+      goals: { deals_per_day: 10, links_waiting_max: 3 }   # 하루 올린 딜 목표, 내 링크를 기다리는 딜은 3개 이하

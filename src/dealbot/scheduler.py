@@ -294,6 +294,23 @@ async def maintenance_loop(bot: DealBot, stop: asyncio.Event) -> None:
             bot.state.set_error(f"[maintenance] {e}")
 
 
+async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """채널 대시보드 숫자 모으기: 1분마다 확인해서 정해진 시각(dashboard.collect_times)이 지났으면 API 카드를 읽고,
+    Blog-Auto 기록·봇 DB 카드는 export_interval_minutes 마다. 딜 수집·발행 루프와 따로 돌아 그쪽을 막지 않는다."""
+    dash = getattr(bot, "dashboard", None)
+    if dash is None or not dash.enabled:
+        return
+    await _sleep_or_stop(stop, 30)  # 시작 직후의 자기 점검·첫 수집이 먼저
+    while not stop.is_set():
+        try:
+            ran = await dash.tick()
+            if ran:
+                log.info("dashboard collected: %s", ", ".join(ran))
+        except Exception as e:  # noqa: BLE001
+            log.warning("dashboard collect failed: %s", e)
+        await _sleep_or_stop(stop, 60)
+
+
 def _install_signal_handlers(stop: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -353,6 +370,7 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(maintenance_loop(bot, stop), name="maintenance_loop"),
         asyncio.create_task(heartbeat_loop(bot, stop), name="heartbeat_loop"),
         asyncio.create_task(soldout_loop(bot, stop), name="soldout_loop"),
+        asyncio.create_task(dashboard_loop(bot, stop), name="dashboard_loop"),
     ]
     try:
         await stop.wait()

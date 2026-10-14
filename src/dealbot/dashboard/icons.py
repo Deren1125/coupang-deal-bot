@@ -1,0 +1,55 @@
+"""카드 머리의 작은 표시 (인라인 SVG, 브랜드 색 단순 도형). 외부 이미지·이모지 없이 페이지 안에서만 그린다.
+새 SNS 를 붙일 때는 여기 한 줄을 더하거나 모듈 안에 직접 적는다 (코드에 박은 값만 — 설정 값은 넣지 않음)."""
+
+from __future__ import annotations
+
+
+def _mark(body: str) -> str:
+    return f'<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">{body}</svg>'
+
+
+def _letter(bg: str, fg: str, letter: str, *, size: int = 14, stroke: str | None = None) -> str:
+    border = f' stroke="{stroke}" stroke-width="1"' if stroke else ""
+    return _mark(
+        f'<rect x="0.5" y="0.5" width="23" height="23" rx="6" fill="{bg}"{border}/>'
+        f'<text x="12" y="16.6" text-anchor="middle" font-size="{size}" font-weight="800" '
+        f'font-family="Arial,Helvetica,sans-serif" fill="{fg}">{letter}</text>'
+    )
+
+
+TELEGRAM = _mark(
+    '<circle cx="12" cy="12" r="12" fill="#229ED9"/>'
+    '<path d="M5.4 11.7l11.2-4.3c.5-.2 1 .1.8.9l-1.9 9c-.1.6-.5.8-1 .5l-2.9-2.1-1.4 1.3c-.2.2-.3.3-.6.3l.2-2.9'
+    ' 5.3-4.8c.2-.2 0-.3-.4-.1l-6.5 4.1-2.8-.9c-.6-.2-.6-.6.1-.9z" fill="#fff"/>'
+)
+INSTAGRAM = _mark(
+    '<rect width="24" height="24" rx="6" fill="#E1306C"/>'
+    '<rect x="5.5" y="5.5" width="13" height="13" rx="4" fill="none" stroke="#fff" stroke-width="1.8"/>'
+    '<circle cx="12" cy="12" r="3.1" fill="none" stroke="#fff" stroke-width="1.8"/>'
+    '<circle cx="15.9" cy="8.1" r="1" fill="#fff"/>'
+)
+THREADS = _letter("#000000", "#ffffff", "@", size=15)
+COUPANG = _letter("#ffffff", "#E4252A", "c", size=17, stroke="#e6e8eb")
+DEALBOT = _mark(
+    '<rect width="24" height="24" rx="6" fill="#FF6B00"/>'
+    '<path d="M13.2 4.5L6.8 13h4.4l-1 6.5 6.6-8.6h-4.5z" fill="#fff"/>'
+)
+NAVER_BLOG = _letter("#03C75A", "#ffffff", "b", size=15)
+KAKAO = _mark(
+    '<rect width="24" height="24" rx="6" fill="#FEE500"/>'
+    '<path d="M12 6c-4 0-7.3 2.6-7.3 5.7 0 2 1.4 3.8 3.4 4.8l-.7 2.6c-.1.3.2.5.4.3l3.1-2.1h1.1c4 0 7.3-2.6'
+    ' 7.3-5.7S16 6 12 6z" fill="#3C1E1E"/>'
+)
+GENERIC = _mark('<rect width="24" height="24" rx="6" fill="#8b95a1"/><circle cx="12" cy="12" r="4" fill="#fff"/>')
+
+REFRESH = (
+    '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">'
+    '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'
+    '<path d="M19.6 4.2v4.6H15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
+    'stroke-linejoin="round"/></svg>'
+)
+CHECK = (
+    '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">'
+    '<path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="#1a8a4a" stroke-width="2.6" stroke-linecap="round" '
+    'stroke-linejoin="round"/></svg>'
+)

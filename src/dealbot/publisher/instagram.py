@@ -210,6 +210,28 @@ class InstagramClient:
             "GET", f"{GRAPH_BASE}/{API_VERSION}/me", params={"fields": "user_id,username", "access_token": token}, step="me"
         )
 
+    # ------------------------------------------------------------ 대시보드 (읽기만, 공식 Graph API)
+    async def account_stats(self, token: InstagramToken) -> dict[str, Any]:
+        """팔로워 수·게시물 수 (instagram_business_basic 권한으로 읽힘)."""
+        return await self._request(
+            "GET",
+            f"{GRAPH_BASE}/{API_VERSION}/me",
+            params={"fields": "user_id,username,followers_count,media_count", "access_token": token.access_token},
+            step="account_stats",
+        )
+
+    async def account_insights(self, token: InstagramToken, metrics: str, *, since: int, until: int) -> dict[str, Any]:
+        """계정 인사이트 합계 (views·reach 등). instagram_business_manage_insights 권한이 없으면 InstagramError."""
+        return await self._request(
+            "GET",
+            f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/insights",
+            params={
+                "metric": metrics, "period": "day", "metric_type": "total_value", "since": since, "until": until,
+                "access_token": token.access_token,
+            },
+            step="insights",
+        )
+
     async def permalink(self, token: InstagramToken, media_id: str) -> str | None:
         body = await self._request(
             "GET", f"{GRAPH_BASE}/{API_VERSION}/{media_id}", params={"fields": "permalink", "access_token": token.access_token}, step="permalink"

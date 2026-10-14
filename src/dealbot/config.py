@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -535,6 +536,67 @@ class BlogDigestConfig(BaseModel):
         return v
 
 
+_CARD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+
+class DashboardCardConfig(BaseModel):
+    """대시보드 카드 하나 = 데이터 소스 하나. 화면에는 config 에 적은 순서대로 나온다.
+    type 은 src/dealbot/dashboard/sources/ 의 모듈이 정한 이름 (telegram, instagram, threads, coupang_partners, dealbot,
+    naver_blog, kakao_openchat). key 는 주소(?src=)·DB 에 쓰는 이름이라 카드마다 달라야 한다."""
+
+    key: str
+    type: str
+    title: str | None = None  # 없으면 모듈의 기본 이름
+    enabled: bool = True
+    goals: dict[str, float] = Field(default_factory=dict)  # 목표 줄의 목표값 (모듈마다 이름이 다름, docs/DASHBOARD.md)
+    options: dict[str, Any] = Field(default_factory=dict)  # 모듈별 설정 (블로그 이름·개설일 등)
+
+    @field_validator("key")
+    @classmethod
+    def _key(cls, v: str) -> str:
+        if not _CARD_KEY_RE.fullmatch(v):
+            raise ValueError("dashboard card key 는 영문 소문자로 시작하는 영문 소문자·숫자·_ (32자까지)")
+        return v
+
+
+class DashboardConfig(BaseModel):
+    """채널 대시보드 (주인 요청 10/14): /dashboard 에 채널별 구독자·이웃·조회수와 목표를 한 화면에.
+    페이지는 DASHBOARD_USER / DASHBOARD_PASSWORD 가 모두 있을 때만 열린다 (없으면 404)."""
+
+    enabled: bool = True  # false 면 숫자 모으기도 페이지도 끔
+    title: str = "채널 대시보드"
+    # API 로 읽는 카드(텔레그램·인스타·스레드·쿠팡)를 읽는 시각 (app.timezone). 재시작해도 같은 시각을 두 번 읽지 않음
+    collect_times: list[str] = Field(default_factory=lambda: ["09:00", "13:00", "18:00", "22:00"])
+    export_interval_minutes: int = Field(60, ge=5)  # Blog-Auto 기록 파일·봇 DB 로 채우는 카드를 다시 읽는 간격
+    refresh_min_minutes: int = Field(10, ge=1)  # '다시 읽기' 버튼은 카드마다 이 간격에 한 번
+    fetch_timeout_seconds: float = Field(45.0, gt=0)  # 카드 하나 읽기에 쓰는 시간 상한 (딜 루프와 따로 돌지만 오래 붙잡지 않게)
+    spark_days: int = Field(28, ge=7, le=90)  # 작은 추이 그래프의 기간
+    manual_max_days_back: int = Field(60, ge=1, le=400)  # 직접 입력 날짜는 오늘부터 이만큼 전까지
+    blogauto_metrics_path: str = "/home/ubuntu/Blog-Auto/var/metrics/blogauto.json"  # Blog-Auto 가 한 시간마다 쓰는 활동 기록
+    blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
+    cards: list[DashboardCardConfig] = Field(default_factory=list)
+
+    @field_validator("collect_times")
+    @classmethod
+    def _times(cls, v: list[str]) -> list[str]:
+        out = []
+        for t in v:
+            hh, _, mm = str(t).partition(":")
+            if not (hh.isdigit() and mm.isdigit() and 0 <= int(hh) < 24 and 0 <= int(mm) < 60):
+                raise ValueError("dashboard.collect_times 는 HH:MM 목록")
+            out.append(f"{int(hh):02d}:{int(mm):02d}")
+        return sorted(set(out))
+
+    @field_validator("cards")
+    @classmethod
+    def _unique(cls, v: list[DashboardCardConfig]) -> list[DashboardCardConfig]:
+        keys = [c.key for c in v]
+        dupes = sorted({k for k in keys if keys.count(k) > 1})
+        if dupes:
+            raise ValueError(f"dashboard card key 가 겹침: {dupes}")
+        return v
+
+
 class ChannelsConfig(BaseModel):
     """내 채널 주소. 비워 두면 템플릿에서 해당 줄이 빠진다."""
 
@@ -656,6 +718,12 @@ class Secrets(BaseModel):
     anthropic_api_key: str | None = None  # 정보 글 요약 (Claude API)
     naver_client_id: str | None = None  # 네이버 쇼핑 검색 API (스토어 딜의 큰 사진 찾기, 선택)
     naver_client_secret: str | None = None
+    dashboard_user: str | None = None  # DASHBOARD_USER / DASHBOARD_PASSWORD — /dashboard 기본 인증 (둘 다 있어야 페이지가 열림)
+    dashboard_password: str | None = None
+
+    @property
+    def has_dashboard_auth(self) -> bool:
+        return bool(self.dashboard_user and self.dashboard_password)
 
     @property
     def has_anthropic(self) -> bool:
@@ -754,6 +822,7 @@ class Settings(BaseModel):
     info_posts: InfoPostsConfig = Field(default_factory=InfoPostsConfig)
     blog_digest: BlogDigestConfig = Field(default_factory=BlogDigestConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     secrets: Secrets = Field(default_factory=Secrets)
 
     # 파생 경로
@@ -885,6 +954,8 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         anthropic_api_key=_env_str("ANTHROPIC_API_KEY"),
         naver_client_id=_env_str("NAVER_CLIENT_ID"),
         naver_client_secret=_env_str("NAVER_CLIENT_SECRET"),
+        dashboard_user=_env_str("DASHBOARD_USER"),
+        dashboard_password=_env_str("DASHBOARD_PASSWORD"),
     )
 
     settings = Settings(

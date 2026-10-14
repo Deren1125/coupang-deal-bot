@@ -131,6 +131,18 @@ CREATE TABLE IF NOT EXISTS market_quotes (
     checked_at     TEXT NOT NULL,
     meta           TEXT
 );
+
+-- 채널 대시보드 숫자 (구독자·이웃·조회수 등). 소스·지표·날짜마다 한 값 — 같은 날 다시 읽으면 나중 값이 이긴다.
+-- day 는 app.timezone 기준 YYYY-MM-DD, origin 은 auto(봇이 읽음) | manual(주인이 입력)
+CREATE TABLE IF NOT EXISTS metrics (
+    source         TEXT NOT NULL,
+    metric         TEXT NOT NULL,
+    day            TEXT NOT NULL,
+    value          REAL NOT NULL,
+    read_at        TEXT NOT NULL,
+    origin         TEXT NOT NULL DEFAULT 'auto',
+    PRIMARY KEY (source, metric, day)
+);
 """
 
 
@@ -913,6 +925,76 @@ class Database:
             for k in gone:
                 self._conn.execute("DELETE FROM kv WHERE key = ?", (k,))
         return len(gone)
+
+    # ------------------------------------------------------------ metrics
+    def metric_put_many(
+        self, rows: list[tuple[str, str, str, float]], *, origin: str = "auto", now: datetime | None = None
+    ) -> int:
+        """(source, metric, day, value) 들을 한 번에 저장. 같은 소스·지표·날짜는 덮어쓴다 (나중 값이 이김)."""
+        if not rows:
+            return 0
+        ts = to_iso(now or utcnow())
+        with self._tx() as c:
+            c.executemany(
+                "INSERT INTO metrics (source, metric, day, value, read_at, origin) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(source, metric, day) DO UPDATE SET value = excluded.value, read_at = excluded.read_at, "
+                "origin = excluded.origin",
+                [(src, metric, day, float(value), ts, origin) for src, metric, day, value in rows],
+            )
+        return len(rows)
+
+    def metric_put(self, source: str, metric: str, day: str, value: float, *, origin: str = "auto",
+                   now: datetime | None = None) -> None:
+        self.metric_put_many([(source, metric, day, value)], origin=origin, now=now)
+
+    def metric_series(self, source: str, metric: str, since_day: str, until_day: str) -> list[tuple[str, float]]:
+        """since_day ~ until_day (둘 다 포함, YYYY-MM-DD) 의 (날짜, 값), 날짜 순."""
+        rows = self._q(
+            "SELECT day, value FROM metrics WHERE source = ? AND metric = ? AND day >= ? AND day <= ? ORDER BY day",
+            (source, metric, since_day, until_day),
+        )
+        return [(r["day"], float(r["value"])) for r in rows]
+
+    def metric_latest(self, source: str, metric: str, *, until_day: str | None = None) -> dict[str, Any] | None:
+        """가장 최근 날짜의 값 {day, value, read_at, origin}. until_day 를 주면 그날까지만 본다."""
+        sql = "SELECT day, value, read_at, origin FROM metrics WHERE source = ? AND metric = ?"
+        params: list[Any] = [source, metric]
+        if until_day:
+            sql += " AND day <= ?"
+            params.append(until_day)
+        row = self._one(sql + " ORDER BY day DESC LIMIT 1", tuple(params))
+        return {"day": row["day"], "value": float(row["value"]), "read_at": row["read_at"], "origin": row["origin"]} if row else None
+
+    def metric_last_read(self, source: str, *, origin: str | None = None) -> datetime | None:
+        """그 소스의 값이 마지막으로 저장된 시각 (origin 을 주면 그 종류만)."""
+        sql = "SELECT MAX(read_at) AS t FROM metrics WHERE source = ?"
+        params: tuple[Any, ...] = (source,)
+        if origin:
+            sql += " AND origin = ?"
+            params = (source, origin)
+        row = self._one(sql, params)
+        return from_iso(row["t"]) if row and row["t"] else None
+
+    def channel_post_times(self, since: datetime, *, include_dry_run: bool = False) -> list[datetime]:
+        """그 뒤로 채널에 올린 글(딜·정보 글)의 시각. 기본은 실제 발행만 (대시보드의 하루 글 수)."""
+        sql = "SELECT posted_at FROM posts WHERE posted_at >= ?"
+        if not include_dry_run:
+            sql += " AND dry_run = 0"
+        return [t for r in self._q(sql, (to_iso(since),)) if (t := from_iso(r["posted_at"])) is not None]
+
+    def published_deal_times(self, since: datetime, *, include_dry_run: bool = False) -> list[datetime]:
+        """그 뒤로 채널에 올라간 상품 딜(정보 글 제외)의 발행 시각 (대시보드 '올린 딜')."""
+        # payload 는 봇이 json.dumps 기본 구분자로 쓴 것 — SQLite JSON 함수 없이 찾는다 (오래된 SQLite 에도 되게)
+        sql = (
+            "SELECT q.updated_at FROM deal_queue q WHERE q.status = 'published' AND q.updated_at >= ? "
+            "AND q.payload NOT LIKE '%\"deal_kind\": \"info\"%'"
+        )
+        if not include_dry_run:
+            sql += " AND EXISTS (SELECT 1 FROM posts p WHERE p.product_id = q.product_id AND p.dry_run = 0 AND p.posted_at >= ?)"
+            params: tuple[Any, ...] = (to_iso(since), to_iso(since))
+        else:
+            params = (to_iso(since),)
+        return [t for r in self._q(sql, params) if (t := from_iso(r["updated_at"])) is not None]
 
     # ------------------------------------------------------- admin_msgs
     def _seed_admin_msgs(self) -> None:

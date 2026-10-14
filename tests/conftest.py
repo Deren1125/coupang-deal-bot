@@ -31,6 +31,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LOG_LEVEL",
         "DEALBOT_MODEL_COMMENTARY",  # 모델 이름은 서버 .env 에서만 (테스트는 필요할 때 직접 넣음)
         "DEALBOT_MODEL_SUMMARIZER",
+        "DASHBOARD_USER",  # 대시보드 기본 인증 (테스트는 필요할 때 직접 넣음)
+        "DASHBOARD_PASSWORD",
     ):
         monkeypatch.delenv(k, raising=False)
 
