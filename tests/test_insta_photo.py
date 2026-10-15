@@ -133,11 +133,6 @@ async def test_naver_store_browser_photo_is_the_card_photo(bot) -> None:  # type
         return page_meta_at(STORE_HTML, STORE_URL)
 
     bot.store_browser.page_meta = page_meta
-
-    async def no_api(p: Product) -> str | None:
-        return None
-
-    bot.naver_shop.find_image = no_api
     seen: list[str] = []
     store_photo = _jpeg(1000, 1000, (120, 80, 60))
     bot._fetch_image = _fetcher({OG: store_photo}, seen, once=True)

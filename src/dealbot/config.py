@@ -103,7 +103,8 @@ class NaverReferenceConfig(BaseModel):
     """쿠팡 딜(골드박스·카테고리 베스트)의 가격 근거: 네이버 쇼핑 검색(공식 Open API) 최저가와 비교 (주인 결정 10/13).
     골드박스 응답엔 정가·할인율이 없어 표시 할인율 규칙으로는 통과할 수 없었다. 같은 상품이 확실할 때만 근거로 쓰고,
     헷갈리면(수량·규격이 다름, 중고·렌탈·해외직구·옵션 목록·부속품, 판매글이 적음) 근거 없음으로 둔다 (할인을 지어내지 않음).
-    NAVER_CLIENT_ID/NAVER_CLIENT_SECRET(developers.naver.com 검색 API 키)이 없거나 401 이면 이 비교만 꺼짐 (로그 한 번)."""
+    NAVER_CLIENT_ID/NAVER_CLIENT_SECRET(developers.naver.com 검색 API 키)이 없거나 401 이면 이 비교만 꺼짐 (로그 한 번).
+    네이버 쇼핑 검색 Open API 는 2026-07-31 종료 (대신할 API 없음) — 운영 config.yaml 은 꺼 둠."""
 
     enabled: bool = True
     sources: list[str] = Field(default_factory=lambda: ["goldbox", "category_best"])  # 이 수집기의 쿠팡 상품만 (비우면 모든 쿠팡 상품)
@@ -716,7 +717,7 @@ class Secrets(BaseModel):
     pushover_user_key: str | None = None
     pushover_app_token: str | None = None
     anthropic_api_key: str | None = None  # 정보 글 요약 (Claude API)
-    naver_client_id: str | None = None  # 네이버 쇼핑 검색 API (스토어 딜의 큰 사진 찾기, 선택)
+    naver_client_id: str | None = None  # 네이버 쇼핑 검색 API (쿠팡 딜 네이버 최저가 비교를 켤 때만, 선택 — API 는 2026-07-31 종료)
     naver_client_secret: str | None = None
     dashboard_user: str | None = None  # DASHBOARD_USER / DASHBOARD_PASSWORD — /dashboard 기본 인증 (둘 다 있어야 페이지가 열림)
     dashboard_password: str | None = None

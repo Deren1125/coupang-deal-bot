@@ -1,16 +1,16 @@
-"""네이버 쇼핑 검색 API(공식 Open API, openapi.naver.com/v1/search/shop.json) 두 가지 쓰임.
+"""네이버 쇼핑 검색 API(공식 Open API, openapi.naver.com/v1/search/shop.json)와 네이버 스토어 주소 도구.
 
-1. 스마트스토어·브랜드스토어 딜의 큰 상품 사진 찾기 (NaverShopSearch.find_image)
-   뽐뿌의 네이버 딜은 게시판 목록 썸네일(120px)뿐이고, 스토어 페이지는 429 로 자주 막힌다.
-   상품명으로 검색해서 '같은 상품'(검색 결과의 링크·productId 에 딜 주소와 같은 스토어 상품번호가 있고,
-   스토어·몰 이름이 둘 다 있으면 서로 같은 것)일 때만 그 사진을 쓴다. 비슷한 다른 상품의 사진은 쓰지 않는다.
+네이버 쇼핑 검색 Open API 는 2026-07-31 에 끝났다 (대신할 API 없음 — 이 서버 키는 401, 네이버 클라우드 API HUB 에는 쇼핑 경로가 없음).
+그래서 스토어 딜의 큰 사진 찾기(예전 NaverShopSearch.find_image)는 지웠다 (주인 결정 10/15): 네이버 딜 사진은 주인이 링크와 같이
+보낸 사진이다. 남은 것:
+1. 스토어 주소 도구 (store_product_no·store_name·search_queries) — 쇼핑커넥트 자동 링크(autolink)가 쓴다
 2. 쿠팡 딜(골드박스·카테고리 베스트)의 가격 근거: 같은 상품의 네이버 최저가 (NaverPriceReference, 주인 결정 10/13)
    같은 수량·규격, 낱말 대부분 일치(양쪽 갈래 말·모델 번호까지), 중고·렌탈·해외직구·옵션 목록·부속품이 아닌 새 상품만 본다.
    'N% 싸요' 근거는 최저가가 확인될 때만(가격비교 상품, 또는 낮은 가격순 검색에도 같은 상품), 탈락은 가격비교 상품이나
    판매처 여럿이 더 쌀 때만 (판매글 한 곳의 싼 값으로는 안 함). 헷갈리면 근거 없음 (할인을 지어내지 않음).
-NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 없으면 건너뛴다 (쓰임마다 로그 한 번). 키 값은 로그에 남기지 않는다.
-쇼핑 검색은 developers.naver.com(예전 개발자센터) 키로만 된다. 네이버 클라우드 API HUB 에는 쇼핑 검색이 없다
-(10/10 확인: HUB /search/v1/shop → 404, 같은 키로 openapi.naver.com → 401). 그런 키면 첫 호출의 401 뒤로 둘 다 끈다.
+   설정(deal.naver_reference.enabled)으로만 켜지고 운영은 꺼 둠 — 꺼져 있으면 검색 API 를 한 번도 부르지 않는다.
+NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 없으면 건너뛴다 (로그 한 번). 키 값은 로그에 남기지 않는다.
+켜 둔 상태에서 401·404 등이 오면 첫 호출 뒤로 다시 시작할 때까지 끈다.
 """
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ from urllib.parse import urlparse
 import httpx
 
 from dealbot.enrich import is_naver_store
-from dealbot.media.imagecheck import is_generic_image
 from dealbot.models import Product
 from dealbot.pricing.market import (
     NAVER_SOURCE,
@@ -51,7 +50,6 @@ SEARCH_URL = "https://openapi.naver.com/v1/search/shop.json"
 _PRODUCT_NO = re.compile(r"/products/(\d+)")
 # 키가 틀렸거나 API 를 더 쓸 수 없음 (401·403 키/권한, 404·410 종료) → 다시 시작할 때까지 안 부름
 _DEAD = (401, 403, 404, 410)
-_CACHE_MAX = 500
 
 
 class _Unavailable(Exception):
@@ -92,36 +90,6 @@ def search_queries(name: str) -> list[str]:
     return out
 
 
-def same_product(item: dict[str, Any], deal_url: str, mall: str | None = None) -> bool:
-    """검색 결과가 딜과 같은 상품인지: 링크(스토어 주소)의 상품번호 또는 productId 가 딜 주소의 상품번호와 같아야 하고,
-    가게 이름(주소)·몰 이름이 양쪽에 다 있으면 서로 같아야 한다. 이름만 비슷한 상품은 안 됨."""
-    no = store_product_no(deal_url)
-    if not no:
-        return False
-    link = str(item.get("link") or "").strip()
-    link_no = store_product_no(link)
-    if link_no:
-        if link_no != no:
-            return False
-    else:
-        host = urlparse(link).netloc.lower().split(":")[0]
-        pid = str(item.get("productId") or "").strip()
-        if pid != no or not (host == "naver.com" or host.endswith(".naver.com")):
-            return False  # 다른 몰 링크의 productId 는 스토어 상품번호와 다른 번호 체계
-    a, b = store_name(link), store_name(deal_url)
-    if a and b and a != b:
-        return False
-    their, ours = _norm(item.get("mallName")), _norm(mall)
-    return not (their and ours and their not in ours and ours not in their)
-
-
-def _deal_mall(p: Product) -> str | None:
-    """딜에서 알고 있는 판매처 이름 (스토어 페이지 JSON-LD 판매자, 정품 확인 때 남김)."""
-    auth = p.extra.get("auth")
-    seller = auth.get("seller") if isinstance(auth, dict) else None
-    return str(seller) if seller else None
-
-
 class NaverShopSearch:
     def __init__(
         self,
@@ -139,50 +107,10 @@ class NaverShopSearch:
         self.display = max(1, min(100, display))
         self.disabled_reason: str | None = None
         self.verified = False  # 검색이 한 번이라도 200 으로 됐나 (키가 맞는지는 첫 호출 때야 앎 — 자기 점검 표시용)
-        self._told_missing = False
-        self._cache: dict[str, str | None] = {}  # 상품번호 → 찾은 사진 (못 찾았으면 None)
 
     @property
     def configured(self) -> bool:
         return bool(self._id and self._secret)
-
-    async def find_image(self, product: Product) -> str | None:
-        """같은 상품(상품번호 일치)의 검색 결과 사진 주소. 스토어 딜이 아니거나, 키가 없거나, 같은 상품이 없으면 None."""
-        no = store_product_no(product.url)
-        if not no:
-            return None
-        if not self.configured:
-            if not self._told_missing:
-                self._told_missing = True
-                log.info("NAVER_CLIENT_ID/NAVER_CLIENT_SECRET not set — 네이버 쇼핑 검색으로 큰 사진 찾기는 건너뜀")
-            return None
-        if self.disabled_reason:
-            return None
-        if no in self._cache:
-            return self._cache[no]
-        mall = _deal_mall(product)
-        for q in search_queries(product.name):
-            try:
-                items = await self._search(q)
-            except _Unavailable:
-                return None
-            except (httpx.HTTPError, ValueError) as e:  # 일시 오류(429·5xx·연결): 기억하지 않고 다음에 다시
-                log.info("naver shop search failed for %s: %s", product.name[:40], type(e).__name__)
-                return None
-            for item in items:
-                if not same_product(item, product.url, mall):
-                    continue
-                img = str(item.get("image") or "").strip()
-                if img.startswith("//"):
-                    img = "https:" + img
-                found = img if img.startswith("http") and not is_generic_image(img) else None
-                log.info("naver shop search: %s → 같은 상품(상품번호 %s, %s)%s", product.name[:40], no,
-                         item.get("mallName") or "-", "" if found else " 이지만 사진 없음")
-                self._remember(no, found)
-                return found
-        log.info("naver shop search: %s — 상품번호 %s 와 같은 상품 없음", product.name[:40], no)
-        self._remember(no, None)
-        return None
 
     async def _search(
         self, query: str, *, exclude: str | None = None, timeout: float | None = None, sort: str = "sim"
@@ -197,10 +125,10 @@ class NaverShopSearch:
             timeout=self.timeout if timeout is None else timeout,
         )
         if resp.status_code in _DEAD:
-            if self.disabled_reason is None:  # 사진 찾기와 최저가 비교가 동시에 맞아도 경고는 한 번
+            if self.disabled_reason is None:  # 한 판에 여러 번 맞아도 경고는 한 번
                 log.warning(
-                    "naver shop search: HTTP %s — 키가 틀렸거나 API 를 쓸 수 없음 (네이버 클라우드 API HUB 키는 쇼핑 검색이 없어 안 됨, "
-                    "developers.naver.com 의 검색 API 키만 됨). 다시 시작할 때까지 끔 (큰 사진 찾기·쿠팡 딜 네이버 최저가 비교 모두)",
+                    "naver shop search: HTTP %s — 키가 틀렸거나 API 를 쓸 수 없음 (네이버 쇼핑 검색 Open API 는 2026-07-31 종료, "
+                    "대신할 API 없음). 다시 시작할 때까지 쿠팡 딜 네이버 최저가 비교를 끔",
                     resp.status_code,
                 )
             self.disabled_reason = f"HTTP {resp.status_code}"
@@ -210,11 +138,6 @@ class NaverShopSearch:
         data = resp.json()
         items = data.get("items") if isinstance(data, dict) else None
         return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
-
-    def _remember(self, no: str, image: str | None) -> None:
-        if len(self._cache) >= _CACHE_MAX:
-            self._cache.pop(next(iter(self._cache)))
-        self._cache[no] = image
 
 
 # ---------------------------------------------------------------- 2. 쿠팡 딜의 네이버 최저가 (가격 근거)
@@ -480,7 +403,7 @@ class LookupRun:
 
 
 class NaverPriceReference:
-    """쿠팡 상품의 네이버 쇼핑 값 (가격 근거). 검색은 NaverShopSearch 와 같은 키·같은 401 처리(꺼지면 사진 찾기도 같이).
+    """쿠팡 상품의 네이버 쇼핑 값 (가격 근거). 검색은 NaverShopSearch (키가 없거나 401 이면 꺼짐).
     한 판(LookupRun)·한 시간 호출 수를 넘지 않고, 호출 사이엔 간격을 둔다. 429 면 잠깐 쉰다.
     일시 오류(429·5xx·시간 초과)와 한도로 못 찾은 것은 '없음'으로 기억하지 않는다 (last_no_match 가 False — 부르는 쪽이 다음 판에 다시).
     가격비교 상품 없이 일반 판매글만 맞았는데 쿠팡이 기준 넘게 싸 보이면, 낮은 가격순으로 한 번 더 찾아 최저가를 확인한다

@@ -1,9 +1,11 @@
-"""뽐뿌의 네이버 스토어 딜 큰 사진 (주인 결정 '큰 사진 찾기').
+"""뽐뿌의 네이버 스토어 딜 큰 사진 (주인 결정 '큰 사진 찾기' → 10/15 바뀜).
 
 1. 스마트스토어·브랜드스토어 페이지는 점잖게: 요청 사이 간격, 429·5xx 는 Retry-After(없으면 지수 백오프+지터) 지키며 몇 번만 다시
-2. 그래도 사진이 없으면 네이버 쇼핑 검색 API — 링크·productId 의 스토어 상품번호가 딜 주소와 같은 '같은 상품'일 때만 (비슷한 상품은 안 씀)
-3. 못 찾으면 지금처럼 사진 없이 (블로그는 링크 카드)
-키(NAVER_CLIENT_ID/SECRET)가 없으면 2단계는 조용히 건너뛴다. 테스트는 가짜 HTTP 만 쓰고 실제로 자지 않는다.
+2. (10/15 지움) 예전엔 그래도 사진이 없으면 네이버 쇼핑 검색 API 의 같은 상품 사진을 썼다. 그 API 는 2026-07-31 종료 (대신할 API 없음,
+   서버 키는 401) — 이제 키가 있어도 openapi.naver.com 에 사진을 찾으러 가지 않는다 (아래 2. 묶음은 '안 부름'을 확인).
+   네이버 딜 사진은 주인이 링크와 같이 보낸 사진 (test_naver_owner_photo.py)
+3. 못 찾으면 지금처럼 사진 없이 (채널엔 글만, 블로그는 링크 카드, 인스타는 글자 카드)
+테스트는 가짜 HTTP 만 쓰고 실제로 자지 않는다.
 """
 
 from __future__ import annotations
@@ -19,13 +21,13 @@ import httpx
 import pytest
 from PIL import Image
 
+import dealbot.naver_shop as naver_shop_mod
 from dealbot.config import Settings, load_settings
 from dealbot.enrich import PageEnricher, is_naver_store, retry_after_seconds
 from dealbot.media.imagecheck import naver_image_url
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.naver_shop import (
     NaverShopSearch,
-    same_product,
     search_queries,
     store_name,
     store_product_no,
@@ -218,7 +220,7 @@ def test_naver_cdn_thumbnail_is_upsized() -> None:
     assert naver_image_url(API_IMAGE) == API_IMAGE and naver_image_url("https://img.example/a.jpg?type=m510") == "https://img.example/a.jpg?type=m510"
 
 
-# ---------------------------------------------------------------- 2. 쇼핑 검색 API: 같은 상품(상품번호)만
+# ---------------------------------------------------------------- 2. 쇼핑 검색 API: 사진 찾기에는 안 부름 (10/15, API 종료)
 def _item(link: str, *, image: str = API_IMAGE, mall: str = "마이스토어", pid: str = "88123456789") -> dict:
     return {"title": "<b>샴푸</b> 1000ml", "link": link, "image": image, "lprice": "12900", "mallName": mall, "productId": pid}
 
@@ -243,32 +245,19 @@ def _deal_product(**kw: object) -> Product:
     return Product(**base)
 
 
-async def test_api_item_with_the_same_product_number_is_used(caplog: pytest.LogCaptureFixture) -> None:
-    http, reqs = _api([
-        _item("https://smartstore.naver.com/main/products/1234567899", image="https://shopping-phinf.pstatic.net/lookalike.jpg"),
-        _item("https://smartstore.naver.com/main/products/1234567890"),
-    ])
-    search = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
-    with caplog.at_level(logging.DEBUG):
-        assert await search.find_image(_deal_product()) == API_IMAGE
-    req = reqs[0]
-    assert req.headers["X-Naver-Client-Id"] == CLIENT_ID and req.headers["X-Naver-Client-Secret"] == CLIENT_SECRET
-    assert req.url.params["query"] == "마이 샴푸 1000ml 2개"  # 꾸밈 낱말·기호는 빼고 검색
-    assert CLIENT_SECRET not in caplog.text and CLIENT_ID not in caplog.text  # 키 값은 로그에 안 남김
-    # 같은 상품번호는 다시 묻지 않음
-    assert await search.find_image(_deal_product()) == API_IMAGE and len(reqs) == 1
+def test_photo_lookup_by_shop_search_is_gone() -> None:
+    """예전 test_api_item_with_the_same_product_number_is_used: 같은 상품번호의 검색 결과 사진을 썼다.
+    10/15: 쇼핑 검색 API 종료 → 사진 찾기(find_image)·같은 상품 판정(same_product)·사진 기억(_cache)을 지웠다."""
+    search = NaverShopSearch(_api()[0], CLIENT_ID, CLIENT_SECRET)
+    assert not hasattr(search, "find_image") and not hasattr(search, "_cache") and not hasattr(search, "_remember")
+    assert not hasattr(naver_shop_mod, "same_product") and not hasattr(naver_shop_mod, "_deal_mall")
+    assert search.configured and search.disabled_reason is None  # 최저가 비교(설정으로만 켬)가 쓰는 부분은 그대로
 
 
-def test_same_product_rules() -> None:
-    assert same_product(_item("https://smartstore.naver.com/main/products/1234567890"), STORE_URL)
-    assert same_product(_item("https://m.smartstore.naver.com/mystore/products/1234567890"), STORE_URL)
-    # productId 가 스토어 상품번호와 같은 네이버 링크
-    assert same_product(_item("https://search.shopping.naver.com/gate.nhn?id=1234567890", pid="1234567890"), STORE_URL)
-    # 브랜드스토어 딜도 같은 번호면 같은 상품
-    assert same_product(_item("https://smartstore.naver.com/main/products/55"), "https://brand.naver.com/brand/products/55")
-    # 판매처 이름을 알면 몰 이름도 맞아야 함
-    assert same_product(_item("https://smartstore.naver.com/main/products/1234567890", mall="마이 스토어"), STORE_URL, mall="마이스토어")
+def test_store_product_number_rules() -> None:
+    """예전 test_same_product_rules 의 스토어 주소 도구 부분 (쇼핑커넥트 자동 링크가 아직 씀). same_product 판정은 지움."""
     assert store_product_no("https://smartstore.naver.com/mystore/products/1234567890?NaPm=x") == "1234567890"
+    assert store_product_no("https://brand.naver.com/brand/products/55") == "55"
     assert store_name(STORE_URL) == "mystore" and store_name("https://smartstore.naver.com/main/products/1") is None
     assert store_product_no("https://www.11st.co.kr/products/1234567890") is None
     assert search_queries("[무배] 마이 샴푸 1000ml 2개 (~9/13)") == ["마이 샴푸 1000ml 2개"]
@@ -277,6 +266,7 @@ def test_same_product_rules() -> None:
 @pytest.mark.parametrize(
     ("item", "mall"),
     [
+        (_item("https://smartstore.naver.com/main/products/1234567890"), None),  # 예전엔 쓰던 같은 상품번호
         (_item("https://smartstore.naver.com/main/products/1234567899"), None),  # 다른 상품번호 (비슷한 상품)
         (_item("https://smartstore.naver.com/otherstore/products/1234567890"), None),  # 번호는 같아도 다른 가게 주소
         (_item("https://www.11st.co.kr/products/1234567890", pid="1234567890"), None),  # 다른 몰 링크의 같은 숫자
@@ -285,56 +275,64 @@ def test_same_product_rules() -> None:
         (_item("https://smartstore.naver.com/main/products/1234567890", mall="다른가게"), "마이스토어"),  # 몰 이름이 다름
     ],
 )
-def test_lookalike_items_are_rejected(item: dict, mall: str | None) -> None:
-    assert not same_product(item, STORE_URL, mall)
-
-
-async def test_api_without_the_same_product_gives_no_photo() -> None:
-    http, reqs = _api([
-        _item("https://smartstore.naver.com/main/products/1234567899"),
-        _item("https://smartstore.naver.com/otherstore/products/1234567890"),
-        _item("https://www.11st.co.kr/products/1234567890", pid="1234567890"),
-    ])
-    search = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
-    assert await search.find_image(_deal_product(name="마이 샴푸 1000ml 2개 + 트리트먼트 증정")) is None
-    # 짧은 검색어로 한 번 더, 그래도 없으면 끝
-    assert [r.url.params["query"] for r in reqs] == ["마이 샴푸 1000ml 2개 + 트리트먼트 증정", "마이 샴푸 1000ml 2개"]
+async def test_search_results_never_become_the_deal_photo(bot, item: dict, mall: str | None) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_lookalike_items_are_rejected: 비슷한 상품은 거르고 같은 상품만 썼다. 이제는 어떤 검색 결과도 사진이 되지 않고,
+    키가 있어도 발행 사진(deal_photo)·수집 빈 칸 채우기(_enrich) 모두 검색 API 를 부르지 않는다."""
+    http, reqs = _api([item])
+    bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
+    seen: list[str] = []
+    bot._fetch_image = _images({API_IMAGE: _jpeg(1200, 1200)}, seen)
     p = _deal_product()
-    p.extra["auth"] = {"status": "ok", "reason": "", "seller": "다른가게"}
-    http2, _ = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
-    assert await NaverShopSearch(http2, CLIENT_ID, CLIENT_SECRET).find_image(p) is None  # 판매처(마이스토어≠다른가게)가 다름
+    if mall:
+        p.extra["auth"] = {"status": "ok", "reason": "", "seller": mall}
+    assert await bot._enrich(p) == [] and p.image_url == BOARD_THUMB
+    assert await bot.deal_photo(Deal(p, DealVerdict(is_deal=True))) is None
+    assert reqs == [] and API_IMAGE not in seen
 
 
-async def test_missing_keys_skip_quietly_and_log_once(caplog: pytest.LogCaptureFixture) -> None:
+async def test_no_photo_search_even_for_a_long_name(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_api_without_the_same_product_gives_no_photo: 긴 이름이면 짧은 검색어로 한 번 더 찾았다. 이제는 한 번도 안 찾음."""
     http, reqs = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
-    search = NaverShopSearch(http, None, None)
-    with caplog.at_level(logging.INFO, logger="dealbot.naver_shop"):
-        assert await search.find_image(_deal_product()) is None
-        assert await search.find_image(_deal_product(url="https://smartstore.naver.com/mystore/products/2")) is None
-    assert reqs == []
-    assert caplog.text.count("NAVER_CLIENT_ID") == 1
-    # 스토어 딜이 아니면 묻지도 않음
-    assert await NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET).find_image(_deal_product(url="https://naver.me/abc")) is None
-    assert reqs == []
+    bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
+    d = Deal(_deal_product(name="마이 샴푸 1000ml 2개 + 트리트먼트 증정"), DealVerdict(is_deal=True))
+    assert await bot.deal_photo(d) is None and d.product.image_url is None and reqs == []
+
+
+async def test_missing_keys_say_nothing_about_photos(bot, caplog: pytest.LogCaptureFixture) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_missing_keys_skip_quietly_and_log_once: 키가 없으면 '큰 사진 찾기 건너뜀' 을 한 번 남겼다. 이제 사진 때문에 키를
+    찾지 않으니 그 로그도 없다 (키 조치 필요 없음)."""
+    assert not bot.naver_shop.configured  # 테스트 환경엔 NAVER_CLIENT_ID/SECRET 이 없다
+    bot._fetch_image = _images({}, [])
+    with caplog.at_level(logging.INFO):
+        assert await bot.deal_photo(Deal(_deal_product(), DealVerdict(is_deal=True))) is None
+        await bot._enrich(_deal_product(url="https://smartstore.naver.com/mystore/products/2"))
+    assert "NAVER_CLIENT_ID" not in caplog.text and "큰 사진" not in caplog.text
 
 
 @pytest.mark.parametrize("status", [401, 404])
-async def test_dead_keys_or_closed_api_turn_the_lookup_off(status: int, caplog: pytest.LogCaptureFixture) -> None:
+async def test_dead_api_is_never_hit_so_no_warning_after_restart(bot, status: int, caplog: pytest.LogCaptureFixture) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_dead_keys_or_closed_api_turn_the_lookup_off: 첫 사진 찾기가 401·404 를 맞고 경고를 남긴 뒤 껐다 — 다시 시작할
+    때마다 'naver shop search: HTTP 401' 경고가 한 번씩 남았다. 이제 사진·자기 점검 어디서도 부르지 않아 경고가 없다."""
     http, reqs = _api(status=status)
-    search = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
+    bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
+    bot._fetch_image = _images({}, [])
     with caplog.at_level(logging.INFO):
-        assert await search.find_image(_deal_product()) is None
-        assert await search.find_image(_deal_product(url="https://smartstore.naver.com/mystore/products/2")) is None
-    assert len(reqs) == 1 and search.disabled_reason == f"HTTP {status}"
-    assert CLIENT_SECRET not in caplog.text
+        assert await bot.deal_photo(Deal(_deal_product(), DealVerdict(is_deal=True))) is None
+        await bot._enrich(_deal_product())
+        lines = await bot.self_check()
+    assert reqs == [] and bot.naver_shop.disabled_reason is None
+    assert "HTTP 401" not in caplog.text and "HTTP 404" not in caplog.text and CLIENT_SECRET not in caplog.text
+    line = next(text for _ok, text in lines if text.startswith("네이버 쇼핑 검색"))
+    assert "2026-07-31 종료" in line and "키 조치 필요 없음" in line
 
 
-async def test_api_rate_limit_is_not_remembered() -> None:
+async def test_rate_limited_api_is_not_touched_for_photos(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_api_rate_limit_is_not_remembered: 429 는 기억하지 않고 다음에 다시 물었다. 이제 사진 때문에는 묻지 않는다."""
     http, reqs = _api(status=429)
-    search = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
-    assert await search.find_image(_deal_product()) is None
-    assert await search.find_image(_deal_product()) is None
-    assert len(reqs) == 2 and search.disabled_reason is None  # 잠깐 막힌 것: 끄지 않고 다음에 다시
+    bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
+    assert await bot.deal_photo(Deal(_deal_product(), DealVerdict(is_deal=True))) is None
+    assert await bot._enrich(_deal_product()) == []
+    assert reqs == [] and bot.naver_shop.disabled_reason is None
 
 
 def test_keys_come_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -369,37 +367,37 @@ def _rows(settings: Settings, name: str) -> list[dict]:
     return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines()] if p.exists() else []
 
 
-async def test_blocked_store_deal_gets_the_api_photo_and_exports_it(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
-    http, _ = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
+async def test_blocked_store_deal_without_owner_photo_posts_without_photo(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_blocked_store_deal_gets_the_api_photo_and_exports_it: 스토어가 막히면 쇼핑 검색 사진을 써서 내보냈다.
+    10/15: 주인 사진이 없으면 사진 없이 (뽐뿌 글·목록 사진도 안 씀) — 블로그 내보내기는 photo_kind 'none'."""
+    http, reqs = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
     bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
     seen: list[str] = []
-    bot._fetch_image = _images({API_IMAGE: _jpeg(1200, 1200), BOARD_THUMB: _jpeg(120, 120)}, seen)
+    bot._fetch_image = _images({API_IMAGE: _jpeg(1200, 1200), BOARD_THUMB: _jpeg(1200, 1200)}, seen)
     d = Deal(_deal_product(), DealVerdict(is_deal=True), affiliate_url="https://naver.me/aff")
     photo = await bot.deal_photo(d)  # 스토어 페이지는 못 읽음 (conftest: fetch → None)
-    assert photo is not None and d.product.image_url == API_IMAGE
-    assert min(Image.open(io.BytesIO(photo)).size) >= 600 and max(Image.open(io.BytesIO(photo)).size) <= 1280  # 같은 사진 검사·변환
-    assert BOARD_THUMB not in seen  # 게시판 썸네일은 받아 보지도 않음
+    assert photo is None and d.product.image_url is None and reqs == []
+    assert seen == []  # 게시판 사진(뽐뿌)은 커도 받아 보지도 않음
     bot.export_published(d, photo)
     row = _rows(settings, "published_deals.jsonl")[-1]
-    assert row["photo_kind"] == "product" and Path(row["photo_file"]).exists() and row["photo_src"] == API_IMAGE
-    assert row["image_url"] == API_IMAGE
+    assert row["photo_kind"] == "none" and row["photo_file"] == "" and row["photo_src"] is None and row["image_url"] is None
 
 
-async def test_small_api_photo_still_goes_through_the_size_check(bot) -> None:  # type: ignore[no-untyped-def]
-    http, _ = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
-    bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
-    bot._fetch_image = _images({API_IMAGE: _jpeg(300, 300)}, [])
-    d = Deal(_deal_product(), DealVerdict(is_deal=True))
+async def test_small_photo_still_goes_through_the_size_check(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전엔 작은 검색 API 사진을 크기 검사로 걸렀다. 이제 그 사진은 없고, 딜의 작은 사진은 그대로 크기 검사(600px)로 거른다."""
+    small = "https://shop-phinf.pstatic.net/20260901_1/abc_JPEG/small.jpg"
+    bot._fetch_image = _images({small: _jpeg(300, 300)}, [])
+    d = Deal(_deal_product(image_url=small), DealVerdict(is_deal=True))
     assert await bot.deal_photo(d) is None and d.product.image_url is None
 
 
 async def test_no_matching_product_keeps_posting_without_photo(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
-    http, _ = _api([_item("https://smartstore.naver.com/main/products/1234567899")])  # 비슷한 다른 상품뿐
+    http, reqs = _api([_item("https://smartstore.naver.com/main/products/1234567899")])  # 비슷한 다른 상품뿐
     bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
     seen: list[str] = []
     bot._fetch_image = _images({API_IMAGE: _jpeg(1200, 1200)}, seen)
     d = Deal(_deal_product(), DealVerdict(is_deal=True), affiliate_url="https://naver.me/aff")
-    assert await bot.deal_photo(d) is None and d.product.image_url is None and seen == []
+    assert await bot.deal_photo(d) is None and d.product.image_url is None and seen == [] and reqs == []
     bot.export_published(d, None)
     row = _rows(settings, "published_deals.jsonl")[-1]
     assert row["photo_kind"] == "none" and row["photo_file"] == "" and row["image_url"] is None
@@ -412,14 +410,17 @@ async def test_bot_without_keys_skips_the_api(bot) -> None:  # type: ignore[no-u
     assert await bot.deal_photo(d) is None and d.product.image_url is None
 
 
-async def test_collect_time_enrich_swaps_the_board_thumb_for_the_api_photo(bot) -> None:  # type: ignore[no-untyped-def]
-    http, _ = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
+async def test_collect_time_enrich_keeps_the_board_thumb_and_asks_no_api(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_collect_time_enrich_swaps_the_board_thumb_for_the_api_photo: 수집 때 썸네일을 검색 API 사진으로 바꿨다.
+    10/15: 검색 API 를 안 부른다 — 썸네일은 그대로 두고 발행 때 걸러진다 (뽐뿌 사진은 안 씀)."""
+    http, reqs = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
     bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
     p = _deal_product()
     assert bot._should_enrich(p)
-    assert await bot._enrich(p) == ["image_url"] and p.image_url == API_IMAGE
-    other = _deal_product(url="https://smartstore.naver.com/mystore/products/7")  # 같은 번호가 없음 → 썸네일 그대로 (발행 때 걸러짐)
+    assert await bot._enrich(p) == [] and p.image_url == BOARD_THUMB
+    other = _deal_product(url="https://smartstore.naver.com/mystore/products/7")
     assert await bot._enrich(other) == [] and other.image_url == BOARD_THUMB
+    assert reqs == []
 
 
 @pytest.mark.real_fetch

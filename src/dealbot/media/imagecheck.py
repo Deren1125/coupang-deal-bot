@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import warnings
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 log = logging.getLogger(__name__)
@@ -107,3 +108,45 @@ def clean_image(data: bytes | None, *, min_side: int = 600, max_aspect: float = 
     out = io.BytesIO()
     img.save(out, "JPEG", quality=90)
     return out.getvalue()
+
+
+# ---------------------------------------------------------------- 주인이 링크와 같이 보낸 네이버 딜 상품 사진 (주인 결정 10/15)
+OWNER_PHOTO_MAX_BYTES = 10_000_000  # 텔레그램에서 받는 파일 한도 (받기 전 크기·받은 뒤 길이 둘 다)
+OWNER_PHOTO_MAX_PIXELS = 40_000_000  # 디코딩 폭탄 방지 (휴대폰 사진은 1,200만~5,000만 화소 안팎이라 넉넉히 4,000만까지)
+OWNER_PHOTO_FORMATS = ("JPEG", "PNG", "WEBP")
+OWNER_PHOTO_TOO_BIG = "사진 파일이 너무 커요 (10MB 이하로 보내 주세요)"
+OWNER_PHOTO_NOT_IMAGE = "사진으로 열리지 않아요 — JPG·PNG·WEBP 사진만 받아요 (HEIC·GIF·동영상은 안 돼요)"
+
+
+def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 2.2) -> tuple[bytes | None, str]:
+    """주인이 보낸 상품 사진을 검사해 (JPEG 바이트, "") 또는 (None, 주인에게 보일 이유).
+    상품 사진 규칙은 clean_image 와 같다 (짧은 변 min_side 이상, 비율 max_aspect 이하, 긴 변 1280 이하로 줄임, EXIF 방향 반영).
+    다시 저장하므로 EXIF(위치·기기 정보)는 남지 않는다. 열기 전에 파일 크기·형식·화소 수를 먼저 본다 (큰 그림으로 서버가 멈추지 않게)."""
+    if not data:
+        return None, OWNER_PHOTO_NOT_IMAGE
+    if len(data) > OWNER_PHOTO_MAX_BYTES:
+        return None, OWNER_PHOTO_TOO_BIG
+    try:
+        from PIL import Image
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as img:  # 머리글만 읽음 (그림은 아직 안 풂)
+                fmt, (w, h) = img.format, img.size
+    except Exception as e:  # noqa: BLE001 — HEIC(플러그인 없음)·깨진 파일·화소 폭탄 경고 모두 '못 씀'
+        if "DecompressionBomb" in type(e).__name__:
+            return None, "사진 해상도가 너무 커요"
+        log.info("owner photo not an image: %s", type(e).__name__)
+        return None, OWNER_PHOTO_NOT_IMAGE
+    if fmt not in OWNER_PHOTO_FORMATS:
+        return None, OWNER_PHOTO_NOT_IMAGE
+    if w * h > OWNER_PHOTO_MAX_PIXELS:
+        return None, f"사진 해상도가 너무 커요 ({w}×{h})"
+    if min(w, h) < min_side:
+        return None, f"사진이 너무 작아요 ({w}×{h}) — 짧은 변이 {min_side}px 이상이어야 해요"
+    if max(w, h) / max(1, min(w, h)) > max_aspect:
+        return None, f"사진이 너무 길쭉해요 ({w}×{h}) — 가로세로 {max_aspect:g}배 이하로 (화면 캡처면 상품 부분만 잘라서)"
+    out = clean_image(data, min_side=min_side, max_aspect=max_aspect)
+    if out is None:
+        return None, OWNER_PHOTO_NOT_IMAGE
+    return out, ""

@@ -286,7 +286,8 @@ SYSTEM = f"""당신은 핫딜 텔레그램 봇 '딜봇' 관리자 챗의 말 명
 - '채널에 올라갔는지 모릅니다(❓)' 딜이 채널에 있다는 말('채널에 올라가 있어'·'채널에 있어')이나 채널 글 링크(t.me)는 /posted
   (args 는 그 t.me 주소, 없으면 ""). 텔레그램 주소(t.me)는 /link 의 링크가 아닙니다.
 - 정보 글 확인(📝) 에 '제목 짧게' 처럼 짧게 고쳐 달라는 말은 ask, question 은 "{INFO_BODY_ASK}".
-- 사진·파일로 할 수 있는 딜봇 명령은 없습니다 (블로그 글 사진이면 blog).
+- 사진·파일로 할 수 있는 딜봇 명령은 /link 하나입니다: 링크 요청(🔗) 딜에 만든 링크와 상품 사진을 같이 보내면 /link
+  (사진은 그 딜의 상품 사진). 그 밖의 딜봇 명령은 사진으로 할 수 없고, 블로그 글 사진이면 blog.
 - URL·인증 코드는 메시지에서 그대로 복사합니다. 절대 만들어 내지 않습니다.
 - args 에는 번호를 빼고 명령의 인자만 씁니다 (없으면 ""). /find 는 검색어만.
 - 확신이 없으면 intent "ask" 와 question 에 한 줄 질문. 고마움·잡담은 "chat" (echo 에 30자 이내 짧은 답). 할 일이 없으면 "none".
@@ -519,7 +520,7 @@ class NLRouter:
             if (i == 0 and len(typed) == 1 and typed[0] != post and typed[0] not in also_posts
                     and (post is None or post == ref.queue_id)):
                 post = typed[0]  # 주인이 적은 번호가 답장 대상보다 우선
-            if photos and cmd.name not in ("/help", "/status"):
+            if photos and cmd.name not in ("/help", "/status", "/link"):  # 링크 + 상품 사진은 /link (네이버 딜, 주인 결정 10/15)
                 return Decision("fail", reply=DEAL_PHOTO, blog_text=blog_text, **base)
             act = Action(cmd, post if (cmd.needs_post or cmd.post_optional) else None, str(a.get("args") or "").strip())
             problem = self._fix_args(act, text)

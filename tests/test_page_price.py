@@ -356,10 +356,12 @@ async def test_naver_store_page_match_uses_page_price(bot: DealBot) -> None:
     assert deal.product.price == 14465 and deal.product.extra["page_option"] == "2L 24개"
 
 
-async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> None:
-    """수집 때 스토어가 막혀(429) 확인 못 한 딜: 발행 직전 사진 때문에 이미 여는 크롬 페이지로 가격을 보고, 안 맞으면 올리지 않는다.
-    크롬을 따로 더 열지는 않는다 (사진이 있으면 크롬도 안 엶)."""
-    _serve(bot, {})
+def _naver_22(no: str = "11223344556") -> Product:
+    return Product(source="ppomppu", product_id=f"naver:{no}", shop="naver", name="풀무원 샘물 2L 24개", price=6410,
+                   url=f"https://smartstore.naver.com/water/products/{no}", recommend_count=9, affiliate_url=None)
+
+
+def _browser_pages(bot: DealBot) -> list[str]:
     opened: list[str] = []
 
     async def page_meta(url: str) -> PageMeta:
@@ -367,17 +369,69 @@ async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> No
         return _meta("naver_store_state.html", url)
 
     bot.store_browser.page_meta = page_meta  # type: ignore[method-assign]
-    p = Product(source="ppomppu", product_id="naver:11223344556", shop="naver", name="풀무원 샘물 2L 24개", price=6410, url=NAVER_URL,
-                recommend_count=9, affiliate_url=None)
-    FakePageCollector.products = [p]
+    return opened
+
+
+async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> None:
+    """수집 때 스토어가 막혀(429) 확인 못 한 딜: 발행 직전 사진 때문에 이미 여는 크롬 페이지로 가격을 보고, 안 맞으면 올리지 않는다.
+    크롬을 따로 더 열지는 않는다 (사진이 있으면 크롬도 안 엶).
+    주인 결정 10/15 로 바뀐 점: 주인이 휴대폰으로 보고 링크를 붙인 네이버 딜은 이 대조로 보류하지 않는다 (아래 테스트) —
+    보류는 예전에 만든 링크(mylink)를 다시 써서 이번엔 주인이 보지 않은 딜만."""
+    _serve(bot, {})
+    opened = _browser_pages(bot)
+    FakePageCollector.products = [_naver_22()]
     await bot.run_collector(bot.collectors[0])
     assert bot.db.queue_counts() == {"pending": 1}
-    item = bot.db.pending_items()[0]
-    await bot.attach_link(item.id, "https://naver.me/MINE")  # 주인이 링크를 만들어 줌
+    bot.db.kv_set("mylink:naver:11223344556", "https://naver.me/MINE")  # 전에 주인이 만든 같은 상품의 링크를 다시 씀
     assert await bot.process_queue_once()
     assert opened == [NAVER_URL]  # 사진이 없어 원래 여는 그 한 번
     assert bot.db.queue_counts() == {"held": 1} and bot.db.recent_posts() == []
     assert bot.sent[-1][2] == "price_hold"  # type: ignore[attr-defined]
+
+
+async def test_owner_linked_naver_deal_is_not_held_by_the_browser_page(bot: DealBot) -> None:
+    """주인 결정 10/15: 주인이 휴대폰으로 가격·옵션을 보고 링크를 붙인 네이버 딜은 그 확인이 가격 확인 — 발행 직전 크롬 페이지
+    값이 제목 가격과 달라도 보류하지 않고 올린다. 사진이 없으니 크롬은 사진 때문에 그대로 한 번 연다 (가격은 안 봄)."""
+    _serve(bot, {})
+    opened = _browser_pages(bot)
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    item = bot.db.pending_items()[0]
+    reply = await bot.attach_link(item.id, "https://naver.me/MINE")  # 주인이 링크를 만들어 줌 (사진 없이)
+    assert "사진 없이 받았어요" in reply
+    assert await bot.process_queue_once()
+    assert opened == [NAVER_URL]
+    assert bot.db.queue_counts() == {"published": 1} and len(bot.db.recent_posts()) == 1
+    published = bot.db.get_queue_item(item.id)
+    assert published is not None and published.deal.product.extra["page_price"]["status"] == "unverified"  # 크롬 값으로 다시 판정 안 함
+    assert not any(kind == "price_hold" for _t, _s, kind, _q in bot.sent)  # type: ignore[attr-defined]
+
+
+async def test_recollected_owner_linked_naver_deal_is_not_held(bot: DealBot) -> None:
+    """주인이 링크를 붙여 올릴 차례를 기다리는 네이버 글을 게시판이 다시 돌려주고, 이번엔 페이지를 읽었더니 값이 다름:
+    예전엔 그 글을 보류했지만(_open_hold) 주인 확인을 믿고 그대로 둔다. 따로 보류 글·보류 메모도 만들지 않는다."""
+    _serve(bot, {})
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    item = bot.db.pending_items()[0]
+    await bot.attach_link(item.id, "https://naver.me/MINE")
+    bot.settings.publish.enabled = False  # 아직 안 올라감
+    _serve(bot, {NAVER_URL: _meta("naver_store_state.html", NAVER_URL)})  # 다시 수집: 페이지 값이 제목 가격과 다름
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"pending": 1}
+    assert bot.db.get_queue_item(item.id).status == "pending"  # type: ignore[union-attr]
+    assert bot.sent == []  # type: ignore[attr-defined]  # 보류 메모 없음
+
+
+async def test_recollected_naver_deal_without_owner_link_is_still_held(bot: DealBot) -> None:
+    """같은 상황이라도 주인이 링크를 붙이기 전(링크 요청 전 대기 글)이면 예전처럼 그 글을 보류한다 (주인이 아직 안 봄)."""
+    _serve(bot, {})
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    item = bot.db.pending_items()[0]
+    _serve(bot, {NAVER_URL: _meta("naver_store_state.html", NAVER_URL)})
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.get_queue_item(item.id).status == "held"  # type: ignore[union-attr]
 
 
 async def test_page_check_off_keeps_old_behaviour(bot: DealBot) -> None:

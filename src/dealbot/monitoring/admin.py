@@ -35,6 +35,11 @@ from telegram.ext import (
 from dealbot import __version__
 from dealbot.config import MonitoringConfig, Settings
 from dealbot.links import LinkRouter
+from dealbot.media.imagecheck import (
+    OWNER_PHOTO_MAX_BYTES,
+    OWNER_PHOTO_NOT_IMAGE,
+    OWNER_PHOTO_TOO_BIG,
+)
 from dealbot.models import Deal, Product, PublishResult
 from dealbot.monitoring import nl as nlmod
 from dealbot.monitoring.push import PushNotifier
@@ -53,6 +58,9 @@ from dealbot.utils.timeutil import fmt_local, from_iso, humanize_delta, utcnow
 log = logging.getLogger(__name__)
 _QUEUE_REF_RE = re.compile(r"#(\d+)")
 REVIEW_MARK = "📝"  # 정보 글 확인 요청 메시지의 첫 글자 (답장 판별용)
+LINK_USAGE = "이렇게 보내주세요: <code>/link 12 https://...</code> (번호는 링크 요청 메시지의 #번호)"
+PHOTO_NOT_RECEIVED = "사진을 받지 못했어요 (텔레그램 오류) — 잠시 뒤 다시 보내 주세요"
+OWNER_PHOTO_MIMES = ("image/jpeg", "image/png", "image/webp")  # 파일로 보낸 사진 (HEIC·GIF·동영상은 안 받음)
 # 고정 공지에 한 번에 답할 때 한 줄 형식: "675 https://링크" / "677 ok" / "673 skip"
 _BATCH_LINE_RE = re.compile(r"^\s*#?(\d+)\s*[:：.)]?\s+(https?://\S+|ok|okay|확인|승인|ㅇㅋ|skip|스킵|패스|건너뛰기|x)\s*$", re.I)
 _BATCH_OK = {"ok", "okay", "확인", "승인", "ㅇㅋ"}
@@ -308,6 +316,25 @@ def naver_search_help(name: str, url: str, shop_key: str) -> str:
             f"<code>{html.escape(query)}</code>\n"
             + (f"스토어: <code>{html.escape(store.group(1))}</code>\n" if store else "")
             + "바로가기: https://brandconnect.naver.com/\n")
+
+
+def photo_ask(p: Product) -> str:
+    """네이버 딜 링크 요청의 한 줄 (주인 결정 10/15): 휴대폰으로 가격·옵션을 본 김에 상품 사진도 같이 — 그 사진이 이 딜의 상품 사진.
+    가격은 글 제목의 가격 (페이지 가격으로 바꿔 둔 뒤에도 제목 값, app._title_price 와 같음)."""
+    price = f" — 제목 가격 {int(p.extra.get('title_price') or p.price):,}원" if p.has_price else ""
+    return f"📸 가격·옵션 확인 후 사진도 같이 보내 주세요{price}"
+
+
+def wants_owner_photo(shop_key: str, p: Product) -> bool:
+    """링크와 같이 보낸 사진을 상품 사진으로 쓰는 딜: 네이버 상품 딜만 (쿠팡·토스 등은 지금처럼)."""
+    return shop_key == "naver" and p.deal_kind != "info"
+
+
+def photo_refused(queue_id: int, why: str) -> str:
+    """주인이 링크와 같이 보낸 사진을 못 씀: 링크도 붙이지 않고 이유와 다시 보내는 법 (주인 결정 10/15)."""
+    return (f"⚠️ #{queue_id} 사진을 쓸 수 없어 링크도 아직 안 붙였어요: {html.escape(why, quote=False)}\n"
+            f"다른 사진과 함께 다시 보내 주세요 (사진 설명 칸에 <code>/link {queue_id} 링크</code>). "
+            "사진 없이 올리려면 링크만 보내 주세요.")
 
 
 def is_stale_message(sent_at: datetime | None, now: datetime | None = None, max_age: timedelta = STALE_COMMAND_MAX_AGE) -> bool:
@@ -682,6 +709,13 @@ class AdminNotifier:
         p = item.deal.product
         price = f" — {p.price:,}원" if p.has_price else ""
         hint = shop.manual_hint or "앱/사이트에서 내 제휴 링크를 만들어 보내주세요"
+        # 네이버 딜 (주인 결정 10/15): 가격·옵션을 휴대폰으로 확인하고 상품 사진도 같이 — 그 사진이 채널·블로그·인스타 상품 사진
+        ask = photo_ask(p) if wants_owner_photo(shop.key, p) else ""
+        how_photo = (
+            f"{ask}\n"
+            f"사진을 <b>이 메시지에 답장</b>으로 보내며 설명 칸에 링크를 넣거나, 사진 설명 칸에 <code>/link {item.id} https://...</code>\n"
+            "(사진 없이 링크만 보내도 올라가요 — 상품 사진을 못 찾으면 채널엔 글만, 인스타는 글자 카드)\n"
+        ) if ask else ""
         text = (
             f"🔗 <b>내 링크가 필요합니다 #{item.id}</b> [{html.escape(shop.name)}]\n"
             f"{html.escape(truncate(p.name, 80))}{price}\n"
@@ -690,45 +724,56 @@ class AdminNotifier:
             + (f"{html.escape(auth_note)}\n" if auth_note else "")
             + naver_search_help(p.name, p.url, shop.key)
             + f"\n👉 {html.escape(hint)}\n"
-            f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
+            + how_photo
+            + f"만든 링크를 <b>이 메시지에 답장</b>으로 보내면 바로 올라갑니다. 또는 <code>/link {item.id} https://...</code>\n"
             f"안 올리려면 <code>/skip {item.id}</code>"
         )
         if self.silent_policy:  # 주인 결정 10/11: 할 일은 카톡 (주소 줄 없이 한 통), 텔레그램은 답장할 자리
+            # 사진 부탁은 둘째 줄(잘리지 않는 쪽)에 — 긴 상품명이 잘려도 부탁은 남게
             message_id = await self.alert(
                 "link_request", text,
                 kakao_fit(f"🔔[할 일] 링크 필요 #{item.id} [{shop.name}] {truncate(p.name, 60)}{price}",
-                          f"→ 텔레그램 핫딜봇 #{item.id} 에 답장"),
+                          (f"{ask}\n" if ask else "") + f"→ 텔레그램 핫딜봇 #{item.id} 에 답장"),
                 key=f"link:{item.id}", short=f"핫딜 링크 #{item.id}", group="link_request", msg_kind="link", queue_id=item.id,
             )
         else:
             message_id = await self.send_with_id(text, kind="link", queue_id=item.id)
-            self._relay(
-                "link_request",
-                f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}\n{_short_url(p.url)}\n"
-                "→ 텔레그램 딜봇의 링크 요청 메시지에 답장으로 링크를 보내 주세요",
-            )
+            if ask:  # 200자 한 통: 주소·사진 부탁은 잘리지 않는 쪽에, 넘치면 상품명이 줄어든다
+                v1 = kakao_fit(f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}",
+                               f"{_short_url(p.url)}\n{ask}\n→ 텔레그램 딜봇 링크 요청에 링크·사진을 답장해 주세요")
+            else:
+                v1 = (f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}\n{_short_url(p.url)}\n"
+                      "→ 텔레그램 딜봇의 링크 요청 메시지에 답장으로 링크를 보내 주세요")
+            self._relay("link_request", v1)
         await self._push(
             "manual_link",
             f"내 링크가 필요합니다 #{item.id} [{shop.name}]",
-            f"{truncate(p.name, 70)}{price}\n{p.url}\n\n{hint}",
+            f"{truncate(p.name, 70)}{price}\n{p.url}\n\n{hint}" + (f"\n{ask}" if ask else ""),
             priority="high",
             tags=["link"],
         )
         return message_id
 
-    def link_done_text(self, item: QueueItem) -> str:
-        """주인이 링크를 붙였을 때 답장 (주인 요청 10/10: '○○ 상품 링크 완료' 알림)."""
+    def link_done_text(self, item: QueueItem, *, photo: str | None = None) -> str:
+        """주인이 링크를 붙였을 때 답장 (주인 요청 10/10: '○○ 상품 링크 완료' 알림).
+        photo (네이버 딜, 주인 결정 10/15): 'ok' 같이 보낸 사진을 받음 · 'kept' 전에 받은 사진을 그대로 · 'none' 사진 없이 ·
+        'unused' 사진은 왔지만 네이버 상품 딜이 아니라 안 씀 · None 사진과 상관없는 딜."""
         p = item.deal.product
         price = f" · {p.price:,}원" if p.has_price else ""
         shop = self.shop_label(p.shop)
+        note = {
+            "ok": "📸 상품 사진도 받았어요 (채널·블로그·인스타에 씀)\n",
+            "kept": "📸 전에 받은 상품 사진을 그대로 써요\n",
+            "none": "사진 없이 받았어요 — 상품 사진을 못 찾으면 채널엔 글만, 인스타는 글자 카드로 올라가요\n",
+            "unused": "사진은 네이버 딜에만 써요 — 링크만 붙였어요\n",
+        }.get(photo or "", "")
+        head = f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n{note}"
         if self.silent_policy:  # 주인 결정 10/11: '상품 링크 완료' 카톡은 없이 저녁 요약에만 · 아직 안 보낸 링크 요청 카톡은 취소
             self.resolve(f"link:{item.id}")
             self.summary("link_done", truncate(p.name, 40))
-            return (f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n"
-                    "올릴 차례가 되면 바로 채널에 올라가요")
+            return head + "올릴 차례가 되면 바로 채널에 올라가요"
         # '상품 링크 완료' 카톡은 없앰 (주인 결정 10/11 — 알림 정책 스위치와 상관없이)
-        return (f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n"
-                "올릴 차례가 되면 바로 채널에 올라가요 (올라가면 한 번 더 알려 드려요)")
+        return head + "올릴 차례가 되면 바로 채널에 올라가요 (올라가면 한 번 더 알려 드려요)"
 
     async def notify_deal_review(self, item: QueueItem, shop_name: str, reason: str) -> int | None:
         """오픈마켓 딜의 공식 판매처가 확인되지 않음: 관리자가 보고 /ok 하면 링크를 만들어 올린다."""
@@ -1235,7 +1280,7 @@ class BotController(Protocol):
 
     def collector_names(self) -> list[str]: ...
 
-    async def attach_link(self, queue_id: int, url: str) -> str: ...
+    async def attach_link(self, queue_id: int, url: str, *, photo: bytes | None = None) -> str: ...
 
     def skip_item(self, queue_id: int) -> str: ...
 
@@ -1287,6 +1332,7 @@ class BotController(Protocol):
 HELP_NL = (
     "💬 <b>이제 말로 하셔도 돼요</b>\n"
     "· 링크 요청(🔗 #번호)에 답장으로 링크만 보내면 지금처럼 바로 붙여서 올려요\n"
+    "· 네이버 딜은 가격·옵션을 확인한 뒤 상품 사진을 링크 요청에 답장으로 보내며 설명 칸에 링크를 넣으면 그 사진도 같이 써요\n"
     "· \"675번 올리지 마\", \"677 정품 맞아 올려\", \"대기열 보여줘\", \"딜봇 잠깐 멈춰\"\n"
     "· 블로그(demiyum) 일도 여기서: \"블로그 12번 발행해\", \"블로그 상태 어때?\" — 블로그 프로그램이 받아서 처리해요\n"
     "· 채널에 올라가거나 건너뛰는 일은 버튼으로 한 번 물어봐요. 조회는 바로 해요\n"
@@ -1306,7 +1352,8 @@ HELP_TEXT = HELP_NL + (
     "/errors — 최근 에러.\n"
     "/ppstats — 게시판별 추천 수 분포. 판정 기준이 너무 높거나 낮은지 볼 때.\n"
     "\n<b>글 올리기·다루기</b>\n"
-    "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다.\n"
+    "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다. "
+    "네이버 딜은 휴대폰으로 가격·옵션을 확인한 뒤 상품 사진의 설명 칸에 이 명령을 적어 보내면(또는 링크 요청 메시지에 사진을 답장하며 설명 칸에 링크) 그 사진이 채널·블로그·인스타 상품 사진이 됩니다 (JPG·PNG·WEBP, 10MB 이하, 짧은 변 600px 이상). 앨범이면 첫 사진만 씁니다.\n"
     "/skip 번호 — 그 글은 올리지 않고 건너뜁니다. 품절이거나 별로일 때. 번호는 링크 요청 메시지나 /queue 에 있습니다.\n"
     "/posted 번호 [채널 글 링크] — 봇이 '채널에 올라갔는지 모릅니다 #번호' 를 보냈는데 채널에 그 글이 있으면 보냅니다. 올라간 글로 기록하고 블로그·스레드·인스타로 이어서 올립니다 (채널 글 링크를 붙이면 품절 표시도 됩니다). 그 메시지에 답장으로 채널 글 링크(t.me)만 보내도 됩니다. 채널에 없으면 /link 번호 상품 링크 로 다시 올립니다 (텔레그램 주소는 상품 링크로 붙지 않습니다).\n"
     "/ok 번호 — 봇이 '정품 확인 필요 #번호'(오픈마켓인데 공식 판매처 표시가 없음) 나 '정보 글 확인 #번호' 를 보내면, 확인했다는 뜻으로 보냅니다. 정품 확인이면 링크를 만들어 올리고, 정보 글이면 그대로 올립니다. 정보 글은 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
@@ -1424,9 +1471,59 @@ def register_admin_handlers(
     async def cmd_link(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
         if len(args) < 2 or not args[0].lstrip("#").isdigit():
-            await reply(update, "이렇게 보내주세요: <code>/link 12 https://...</code> (번호는 링크 요청 메시지의 #번호)")
+            await reply(update, LINK_USAGE)
+            return
+        photo = getattr(ctx, "photo", None)
+        if photo is not None:  # 사진과 같이 보낸 말 명령을 버튼으로 확인한 뒤 (사진은 file_id 로 넘어옴)
+            await link_with_photo(update, ctx, int(args[0].lstrip("#")), args[1], photo)
             return
         await reply(update, await controller.attach_link(int(args[0].lstrip("#")), args[1]))
+        await controller.refresh_pending_notice()
+
+    # ---------------------------------------------------------------- 링크와 같이 보낸 상품 사진 (네이버 딜, 주인 결정 10/15)
+    def photo_of(md: dict[str, Any]) -> dict[str, Any]:
+        """메시지(to_dict)의 사진: {id, size} — 사진이 아니거나 안 받는 형식(HEIC·GIF·동영상 파일)이면 {problem: 이유}."""
+        sizes = md.get("photo") or []
+        if sizes:
+            best = sizes[-1]  # 텔레그램은 작은 크기부터 준다 — 마지막이 가장 큰 사진
+            return {"id": best.get("file_id"), "size": best.get("file_size")}
+        doc = md.get("document") or {}
+        if str(doc.get("mime_type") or "").lower() in OWNER_PHOTO_MIMES:
+            return {"id": doc.get("file_id"), "size": doc.get("file_size")}
+        return {"problem": OWNER_PHOTO_NOT_IMAGE}
+
+    def first_photo(group: dict[str, Any] | None, md: dict[str, Any]) -> dict[str, Any]:
+        """앨범이면 첫 사진 (설명 없이 먼저 온 사진이 있으면 그것), 아니면 이 메시지의 사진."""
+        held = (group or {}).get("held") or []
+        return photo_of(held[0] if held else md)
+
+    async def download_photo(bot: Any, ref: dict[str, Any]) -> tuple[bytes | None, str]:
+        """주인이 보낸 사진 받기: 받기 전에 크기(10MB), 받은 뒤 길이를 다시 본다. 못 받으면 (None, 이유)."""
+        if ref.get("problem"):
+            return None, str(ref["problem"])
+        size = ref.get("size")
+        if isinstance(size, int) and size > OWNER_PHOTO_MAX_BYTES:
+            return None, OWNER_PHOTO_TOO_BIG
+        if bot is None or not ref.get("id"):
+            return None, PHOTO_NOT_RECEIVED
+        try:
+            f = await bot.get_file(str(ref["id"]))
+            data = bytes(await f.download_as_bytearray())
+        except Exception as e:  # noqa: BLE001 — 텔레그램 오류·시간 초과: 링크도 안 붙이고 다시 보내 달라고
+            log.warning("owner photo download failed: %s", type(e).__name__)
+            return None, PHOTO_NOT_RECEIVED
+        if len(data) > OWNER_PHOTO_MAX_BYTES:
+            return None, OWNER_PHOTO_TOO_BIG
+        return data, ""
+
+    async def link_with_photo(update: Update, ctx: Any, queue_id: int, url: str, ref: dict[str, Any]) -> None:
+        """링크 + 상품 사진. 사진을 못 쓰면 링크도 붙이지 않고 이유를 알린다 (다시 보내면 됨)."""
+        data, why = await download_photo(getattr(ctx, "bot", None), ref)
+        if data is None:
+            log.info("owner photo refused for #%d: %s", queue_id, why)
+            await reply(update, photo_refused(queue_id, why))
+            return
+        await reply(update, await controller.attach_link(queue_id, url, photo=data))
         await controller.refresh_pending_notice()
 
     async def cmd_skip(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1639,12 +1736,14 @@ def register_admin_handlers(
 
     # ---------------------------------------------------------------- 말 명령 (주인 요청 10/11)
     class _NLCtx:
-        """말에서 바꾼 기존 명령을 기존 처리 함수에 넣을 때 쓰는 ctx (ctx.args 만 바꿔 끼움)."""
+        """말에서 바꾼 기존 명령을 기존 처리 함수에 넣을 때 쓰는 ctx (ctx.args 만 바꿔 끼움).
+        photo: 말과 같이 보낸 상품 사진 ({id, size} 또는 {problem}) — /link 만 쓴다."""
 
-        def __init__(self, ctx: Any, args: list[str]) -> None:
+        def __init__(self, ctx: Any, args: list[str], photo: dict[str, Any] | None = None) -> None:
             self.args = args
             self.application = getattr(ctx, "application", None)
             self.bot = getattr(ctx, "bot", None)
+            self.photo = photo
 
     def _slash_name(text: str) -> str:
         head = (text or "").strip().split(maxsplit=1)
@@ -1662,8 +1761,9 @@ def register_admin_handlers(
         return {"chat": {"id": getattr(getattr(msg, "chat", None), "id", chat_id), "type": "private"},
                 "from": user.to_dict() if user is not None and hasattr(user, "to_dict") else None}
 
-    async def nl_exec(update: Update, ctx: Any, cmds: list[str], text: str) -> None:
-        """바꾼 명령을 기존 처리 함수로 실행 (명령어로 보낸 것과 똑같이). /post 는 주인의 원래 글로 올린다."""
+    async def nl_exec(update: Update, ctx: Any, cmds: list[str], text: str, *, photo: dict[str, Any] | None = None) -> None:
+        """바꾼 명령을 기존 처리 함수로 실행 (명령어로 보낸 것과 똑같이). /post 는 주인의 원래 글로 올린다.
+        photo: 말과 같이 보낸 사진 — 첫 /link 에만 (그 딜의 상품 사진)."""
         for canonical in cmds:
             name, _, rest = canonical.partition(" ")
             if name == "/post":
@@ -1673,13 +1773,19 @@ def register_admin_handlers(
             if fn is None:
                 log.warning("nl: no handler for %s", name)
                 continue
-            await fn(update, _NLCtx(ctx, rest.split()))
+            mine = photo if name == "/link" else None
+            if mine is not None:
+                photo = None
+            await fn(update, _NLCtx(ctx, rest.split(), mine))
 
     def _buttons(rows: list[tuple[str, str]]) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data)] for label, data in rows])
 
-    async def nl_apply(update: Update, ctx: Any, d: nlmod.Decision, text: str, msg: Any, ref: nlmod.Ref, *, why: str = "router") -> None:
+    async def nl_apply(update: Update, ctx: Any, d: nlmod.Decision, text: str, msg: Any, ref: nlmod.Ref, *, why: str = "router",
+                       photo: dict[str, Any] | None = None) -> None:
+        """photo: 사진과 같이 온 말 (설명 칸) — 버튼을 누를 때까지 file_id 로 들고 있다가 /link 에 쓴다."""
         assert nl is not None
+        keep = {"photo": photo} if photo is not None else {}
         if d.blog_text and d.act != "blog":  # 섞인 메시지: 블로그 부분은 바로 넘김 (Blog-Auto 가 자기 일은 자기가 확인)
             nl.relay_nl(msg.to_dict(), why, text=d.blog_text, partial=True)
         if d.act == "blog":
@@ -1698,18 +1804,18 @@ def register_admin_handlers(
                 await say(update, d.reply)
                 return
             opts = [{"label": o.label, "cmds": o.cmds, "relay": o.relay} for o in d.options[: nlmod.MAX_BUTTONS]]
-            token = nl.put_pending({"options": opts, "text": text, **_base(msg)})
+            token = nl.put_pending({"options": opts, "text": text, **_base(msg), **keep})
             rows = [(o["label"], f"dnl:pick:{token}:{i}") for i, o in enumerate(opts)] + [("취소", f"dnl:no:{token}")]
             await say(update, d.reply, _buttons(rows))
         elif d.act == "confirm":
-            token = nl.put_pending({"cmds": d.canonicals, "text": text, **_base(msg)})
+            token = nl.put_pending({"cmds": d.canonicals, "text": text, **_base(msg), **keep})
             ok = "올리기" if d.post_preview else "실행"
             kb = InlineKeyboardMarkup([[InlineKeyboardButton(ok, callback_data=f"dnl:ok:{token}"),
                                         InlineKeyboardButton("취소", callback_data=f"dnl:no:{token}")]])
             await say(update, d.confirm_text(), kb)
         elif d.act == "exec":
             await say(update, d.echo())
-            await nl_exec(update, ctx, d.canonicals, text)
+            await nl_exec(update, ctx, d.canonicals, text, photo=photo)
 
     async def passthrough(update: Update, msg: Any, text: str) -> None:
         """딜봇에 없는 명령: 블로그 명령이면 Blog-Auto 로 그대로, 아니면 모른다고."""
@@ -1767,7 +1873,9 @@ def register_admin_handlers(
 
     async def on_media(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """사진·파일. 블로그 글 사진(블로그 메시지에 답장·/photo 설명·말로 블로그 글)이면 Blog-Auto 로 통째로 넘긴다.
-        앨범은 설명이나 답장이 있는 첫 사진이 정한 대로 나머지도 따라간다 (Blog-Auto 가 묶음으로 받게)."""
+        앨범은 설명이나 답장이 있는 첫 사진이 정한 대로 나머지도 따라간다 (Blog-Auto 가 묶음으로 받게).
+        네이버 딜 상품 사진 (주인 결정 10/15): 설명 칸이 '/link 번호 링크'·'번호 링크' 이거나 링크 요청(🔗)에 답장하며 설명 칸에 링크
+        → 링크와 그 사진(앨범이면 첫 사진)을 같이 붙인다. 앨범의 나머지 사진은 블로그로 넘기지 않고 버린다 (state 'deal')."""
         msg = update.effective_message
         if msg is None or nl is None or not nl.enabled or _from_bot(msg):
             return
@@ -1779,14 +1887,33 @@ def register_admin_handlers(
             return
         caption = msg.caption or ""
         ref = nl.reply_ref(msg)
+        urls = find_urls(caption)
+        # 블로그 메시지에 단 답장은 지금처럼 Blog-Auto 로 (거기서 '12 https://…' 는 블로그 글 번호일 수 있음)
+        line = _BATCH_LINE_RE.match(caption.strip()) if "\n" not in caption.strip() and ref.kind != "blog" else None
         state, why, text = "ignore", "media", None
-        if caption.lstrip().startswith("/"):
+        if _slash_name(caption) == "link" or (line and line.group(2).lower().startswith("http")):
+            # '/link 12 https://…' (사진 설명은 텔레그램이 명령으로 보지 않아 여기로 옴) · 고정 공지처럼 '12 https://…'
+            if group is not None:
+                group["state"] = "deal"  # 사진을 받는 동안 온 같은 앨범의 사진도 블로그로 안 감
+            state = "deal"
+            parts = caption.split() if line is None else ["/link", line.group(1), line.group(2)]
+            if len(parts) < 3 or not parts[1].lstrip("#").isdigit():
+                await reply(update, LINK_USAGE)
+            else:
+                await link_with_photo(update, ctx, int(parts[1].lstrip("#")), parts[2], first_photo(group, md))
+        elif caption.lstrip().startswith("/"):
             if _slash_name(caption) in nlmod.BLOG_MEDIA_COMMANDS:
                 state, why = "relay", "passthrough"
             else:
                 await say(update, nlmod.UNKNOWN_COMMAND)
         elif ref.kind == "blog":
             state, why = "relay", "reply_blog"
+        elif ref.kind == "deal" and ref.queue_id and urls:
+            # 링크 요청(🔗 #번호)에 사진을 답장하며 설명 칸에 링크 → 글자 답장(on_text)처럼 바로 붙임 + 그 사진
+            if group is not None:
+                group["state"] = "deal"
+            state = "deal"
+            await link_with_photo(update, ctx, ref.queue_id, urls[0], first_photo(group, md))
         elif not caption.strip():
             if group is not None:
                 group["held"].append(md)  # 설명 없는 앞 사진: 설명 있는 사진이 오면 같이 처리
@@ -1806,7 +1933,8 @@ def register_admin_handlers(
             if d.act == "blog" or (d.act == "fail" and not d.reply and nl.wants_blog_anyway(caption)):
                 state, text = "relay", None if d.blog_text in ("", caption) else d.blog_text
             else:
-                await nl_apply(update, ctx, d, caption, msg, ref, why="media")
+                # 말로 보낸 링크 + 사진 (/link 로 알아들으면 확인 버튼 뒤 그 사진도 같이 붙임)
+                await nl_apply(update, ctx, d, caption, msg, ref, why="media", photo=first_photo(group, md))
         if group is not None:
             group["state"] = state
         if state == "relay":
@@ -1861,7 +1989,8 @@ def register_admin_handlers(
             cmds = list(opt.get("cmds") or [])
         log.info('nl confirm token=%s %s cmds="%s" age=%ds', token, kind, nlmod.log_text(" · ".join(cmds)),
                  int(time.time() - float(p.get("at") or time.time())))
-        await nl_exec(update, ctx, cmds, str(p.get("text") or ""))
+        photo = p.get("photo")
+        await nl_exec(update, ctx, cmds, str(p.get("text") or ""), photo=photo if isinstance(photo, dict) else None)
 
     async def cmd_unknown_chat(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if update.effective_chat and update.effective_message:

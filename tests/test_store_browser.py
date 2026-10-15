@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import logging
 
+import httpx
 import pytest
 from PIL import Image
 
@@ -248,7 +249,7 @@ class _FakePlaywright:
 @pytest.mark.parametrize("headless", [True, False])
 async def test_browser_is_not_disguised(headless: bool) -> None:
     """위장 금지: 브라우저 이름(user agent)을 바꾸지 않고 (창 없는 크롬은 HeadlessChrome 그대로),
-    탐지를 피하려는 채널·플래그도 주지 않는다. 막히면 가상 화면의 보통 크롬 → 쇼핑 검색 API 사진으로."""
+    탐지를 피하려는 채널·플래그도 주지 않는다. 막히면 가상 화면의 보통 크롬 → 그래도 막히면 사진 없이 (쇼핑 검색 API 는 종료)."""
     pw = _FakePlaywright()
     got = await StoreBrowser()._load(pw, STORE_URL, headless=headless)
     assert got == (200, STORE_URL, HTML)
@@ -354,23 +355,17 @@ def _images(images: dict[str, bytes], seen: list[str]):  # type: ignore[no-untyp
 
 async def test_blocked_store_deal_gets_the_browser_photo_at_publish(bot) -> None:  # type: ignore[no-untyped-def]
     """일반 요청은 막힘(conftest: 상품 페이지 못 읽음) → 크롬으로 연 페이지의 og:image(?type=o1000, 이미 1000px 라 그대로) 가
-    600px 검사 통과. 크롬에서 찾았으면 쇼핑 검색 API 는 부르지 않는다."""
+    600px 검사 통과 (주인 사진이 없는 네이버 딜도 스토어 자기 사진은 씀 — 10/10 결정 그대로)."""
     assert bot.settings.deal.enrich.store_browser  # config.yaml 에서 켬
     sb, opened, _ = _browser((200, STORE_URL, HTML))
     bot.store_browser = sb
-    api_calls: list[str] = []
-
-    async def no_api(p: Product) -> str | None:
-        api_calls.append(p.url)
-        return None
-
-    bot.naver_shop.find_image = no_api  # type: ignore[method-assign]
     got: list[str] = []
     bot._fetch_image = _images({OG: _jpeg(1000, 1000)}, got)
     d = Deal(_product(), DealVerdict(is_deal=True))
     photo = await bot.deal_photo(d)
     assert photo is not None and d.product.image_url == OG
-    assert opened == [STORE_URL] and got == [OG] and api_calls == []
+    assert opened == [STORE_URL] and got == [OG]
+    assert not hasattr(bot.naver_shop, "find_image")  # 쇼핑 검색 사진 찾기는 없음 (10/15)
 
 
 async def test_small_browser_photo_is_upsized(bot) -> None:  # type: ignore[no-untyped-def]
@@ -393,23 +388,29 @@ async def test_browser_is_not_used_when_the_deal_already_has_a_photo(bot) -> Non
     assert await bot.deal_photo(d) is not None and opened == []
 
 
-async def test_browser_without_a_usable_photo_falls_through_to_the_api(bot) -> None:  # type: ignore[no-untyped-def]
+async def test_browser_without_a_usable_photo_posts_without_photo(bot) -> None:  # type: ignore[no-untyped-def]
+    """크롬 페이지에도 쓸 사진이 없으면 사진 없이 (예전엔 쇼핑 검색 API 사진으로 넘어갔지만 그 API 는 2026-07-31 종료 — 주인 결정 10/15:
+    채널엔 글만, 인스타는 글자 카드). 키가 있어도 검색 API 를 부르지 않는다."""
     sb, opened, _ = _browser((200, STORE_URL, "<html><title>x</title></html>"))
     bot.store_browser = sb
     api_img = "https://shopping-phinf.pstatic.net/main_1/1.jpg"
+    asked: list[str] = []
 
-    async def api(p: Product) -> str | None:
-        return api_img
+    def api(req: httpx.Request) -> httpx.Response:
+        asked.append(str(req.url))
+        return httpx.Response(200, json={"items": [{"link": STORE_URL, "image": api_img, "productId": "13008954661"}]})
 
-    bot.naver_shop = NaverShopSearch(bot.http, None, None)
-    bot.naver_shop.find_image = api  # type: ignore[method-assign]
-    bot._fetch_image = _images({api_img: _jpeg(700, 700)}, [])
+    bot.naver_shop = NaverShopSearch(httpx.AsyncClient(transport=httpx.MockTransport(api)), "id", "secret")
+    seen: list[str] = []
+    bot._fetch_image = _images({api_img: _jpeg(700, 700)}, seen)
     d = Deal(_product(), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is not None and d.product.image_url == api_img and opened == [STORE_URL]
+    assert await bot.deal_photo(d) is None and d.product.image_url is None and opened == [STORE_URL]
+    assert asked == [] and seen == []
 
 
 async def test_browser_is_not_opened_when_the_page_was_read_but_its_photo_is_unusable(bot) -> None:  # type: ignore[no-untyped-def]
-    """일반 요청으로 페이지를 읽었는데 사진이 600px 미만이면, 크롬도 같은 사진을 주므로 열지 않고 쇼핑 검색으로 넘어간다 (검토 지적)."""
+    """일반 요청으로 페이지를 읽었는데 사진이 600px 미만이면, 크롬도 같은 사진을 주므로 열지 않고 사진 없이 (검토 지적).
+    예전엔 쇼핑 검색으로 넘어갔지만 그 API 는 끝났다 (주인 결정 10/15)."""
     from dealbot.enrich import page_meta_at
 
     async def read_page(url: str) -> object:
@@ -418,17 +419,10 @@ async def test_browser_is_not_opened_when_the_page_was_read_but_its_photo_is_unu
     bot.enricher.fetch = read_page  # type: ignore[method-assign]
     sb, opened, _ = _browser((200, STORE_URL, HTML))
     bot.store_browser = sb
-    api_calls: list[str] = []
-
-    async def api(p: Product) -> str | None:
-        api_calls.append(p.url)
-        return None
-
-    bot.naver_shop.find_image = api  # type: ignore[method-assign]
     bot._fetch_image = _images({OG: _jpeg(500, 500)}, [])
     d = Deal(_product(), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is None
-    assert opened == [] and api_calls == [STORE_URL]
+    assert await bot.deal_photo(d) is None and d.product.image_url is None
+    assert opened == []
 
 
 async def test_browser_is_opened_when_the_read_page_had_no_photo(bot) -> None:  # type: ignore[no-untyped-def]

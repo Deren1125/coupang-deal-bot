@@ -65,8 +65,9 @@ class FakeController:
     def resume(self) -> None:
         self.calls.append(("resume",))
 
-    async def attach_link(self, q: int, url: str) -> str:
-        self.calls.append(("attach_link", q, url))
+    async def attach_link(self, q: int, url: str, *, photo: bytes | None = None) -> str:
+        # 사진 없이 붙인 링크는 예전 모양 그대로 ('attach_link', 번호, 주소) — 사진이 있을 때만 바이트를 덧붙여 기록
+        self.calls.append(("attach_link", q, url) if photo is None else ("attach_link", q, url, photo))
         return f"✅ 상품 링크 완료 #{q}"
 
     def skip_item(self, q: int) -> str:
@@ -147,7 +148,7 @@ class Msg:
         self.message_id = mid or next(_ids)
         self.text, self.caption = text, caption
         self.reply_to_message = reply_to
-        self.photo = [SimpleNamespace(file_id=f"F{self.message_id}")] if photo else []
+        self.photo = [SimpleNamespace(file_id=f"F{self.message_id}", file_size=None)] if photo else []
         self.document = SimpleNamespace(**document) if document else None
         self.media_group_id = group
         self.from_user = user(BOT_ID, is_bot=True) if bot else user(OWNER, is_bot=False)
@@ -167,7 +168,9 @@ class Msg:
         if self.caption is not None:
             d["caption"] = self.caption
         if self.photo:
-            d["photo"] = [{"file_id": p.file_id} for p in self.photo]
+            d["photo"] = [{"file_id": p.file_id} | ({"file_size": p.file_size} if p.file_size else {}) for p in self.photo]
+        if self.document is not None:
+            d["document"] = vars(self.document)
         if self.media_group_id:
             d["media_group_id"] = self.media_group_id
         if self.reply_to_message is not None:
@@ -175,9 +178,30 @@ class Msg:
         return d
 
 
+class FakeFiles:
+    """가짜 텔레그램 파일 받기 (get_file → download_as_bytearray). 받은 file_id 를 기록한다."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.asked: list[str] = []
+        self.fail = False
+
+    async def get_file(self, file_id: str) -> SimpleNamespace:
+        self.asked.append(file_id)
+        if self.fail:
+            raise TimeoutError("telegram")
+        data = self.files.get(file_id, b"")
+
+        async def download_as_bytearray() -> bytearray:
+            return bytearray(data)
+
+        return SimpleNamespace(download_as_bytearray=download_as_bytearray)
+
+
 class Env:
     def __init__(self, settings: Settings, db: Database, llm: FakeLLM | None, *, enabled: bool = True) -> None:
         self.out: list[tuple[str, Any]] = []
+        self.bot = FakeFiles()
         self.relayed: list[dict[str, Any]] = []
         self.db = db
         registry = settings.shop_registry()
@@ -210,7 +234,7 @@ class Env:
 
     async def media(self, **kw: Any) -> Msg:
         m = self.msg(**kw)
-        await self.app.cb("on_media")(update(m), SimpleNamespace(args=[], application=None))
+        await self.app.cb("on_media")(update(m), SimpleNamespace(args=[], application=None, bot=self.bot))
         return m
 
     async def command(self, text: str) -> None:
@@ -230,7 +254,7 @@ class Env:
         u = SimpleNamespace(effective_message=target, effective_chat=target.chat, callback_query=q,
                             to_dict=lambda: {"callback_query": {"data": data, "message": target.to_dict()}})
         if data.startswith("dnl:"):
-            await self.app.cb("on_nl_callback")(u, SimpleNamespace(args=[], application=None))
+            await self.app.cb("on_nl_callback")(u, SimpleNamespace(args=[], application=None, bot=self.bot))
         else:
             await self.app.cb("relay")(u, SimpleNamespace())
 
@@ -670,6 +694,115 @@ async def test_photo_reply_to_blog_message_and_slash_caption_relayed_without_ai(
     assert [r["nl"]["why"] for r in env.relayed] == ["reply_blog", "passthrough"] and llm.calls == []
 
 
+# ------------------------------------------------------------------ 네이버 딜: 링크 + 상품 사진 (주인 결정 10/15)
+OWNER_JPEG = b"owner-photo-bytes"  # 가짜 컨트롤러라 내용은 보지 않음 (사진 검사는 test_naver_owner_photo.py, 끝까지는 아래 진짜 딜봇 테스트)
+NAVER_LINK = "https://naver.me/xMINE"
+
+
+def _naver_request(env: Env, q: int) -> Msg:
+    return env.bot_msg(f"🔗 <b>내 링크가 필요합니다 #{q}</b> [네이버]\n📸 가격·옵션 확인 후 사진도 같이 보내 주세요", kind="link", q=q)
+
+
+async def test_photo_with_link_command_caption_attaches_link_and_photo(env: Env) -> None:
+    """사진 설명 칸의 '/link 번호 링크' 는 텔레그램이 명령으로 보지 않아 on_media 로 온다 (예전엔 '모르는 명령입니다').
+    이제 링크와 그 사진을 같이 붙인다 — AI 없이, 블로그로 넘기지 않고."""
+    llm = with_llm(env, ans("/status"))
+    env.bot.files["F9001"] = OWNER_JPEG
+    await env.media(caption=f"/link 675 {NAVER_LINK}", photo=True, mid=9001)
+    assert env.ctrl.named("attach_link") == [("attach_link", 675, NAVER_LINK, OWNER_JPEG)]
+    assert ("refresh",) in env.ctrl.calls and env.texts[-1] == "✅ 상품 링크 완료 #675"
+    assert llm.calls == [] and env.relayed == [] and env.bot.asked == ["F9001"]
+    # 고정 공지처럼 '번호 링크' 한 줄을 사진 설명에 적어도 같음
+    env.bot.files["F9002"] = b"second"
+    await env.media(caption=f"677 {NAVER_LINK}", photo=True, mid=9002)
+    assert env.ctrl.named("attach_link")[-1] == ("attach_link", 677, NAVER_LINK, b"second")
+    # 번호가 없으면 쓰는 법 안내 (링크는 안 붙임)
+    await env.media(caption="/link https://naver.me/x", photo=True)
+    assert env.texts[-1].startswith("이렇게 보내주세요: <code>/link 12") and len(env.ctrl.named("attach_link")) == 2
+
+
+async def test_photo_reply_to_link_request_with_link_caption_attaches_both(env: Env) -> None:
+    """링크 요청(🔗 #번호)에 사진을 답장하며 설명 칸에 링크 → 글 답장처럼 바로 붙임 + 그 사진 (예전엔 AI 가 '사진만으로는…')."""
+    llm = with_llm(env, ans("/ok", 676))
+    req = _naver_request(env, 676)
+    env.bot.files["F9011"] = OWNER_JPEG
+    await env.media(caption=f"이거요 {NAVER_LINK}", photo=True, reply_to=req, mid=9011)
+    assert env.ctrl.named("attach_link") == [("attach_link", 676, NAVER_LINK, OWNER_JPEG)]
+    assert llm.calls == [] and env.relayed == []
+    # 링크 없이 사진만 답장하면 예전처럼 무시 (붙일 링크가 없음)
+    env.out.clear()
+    await env.media(photo=True, reply_to=req)
+    assert env.out == [] and len(env.ctrl.named("attach_link")) == 1
+
+
+async def test_album_with_link_uses_the_first_photo_and_never_relays_the_rest(env: Env) -> None:
+    """앨범: 설명이 달린 사진이 정하고, 쓰는 사진은 앨범의 첫 사진. 나머지는 블로그로 넘기지 않는다 (앞서 잡아 둔 사진도)."""
+    llm = with_llm(env, ans("blog"))
+    env.bot.files.update({"F9101": b"first", "F9102": b"second", "F9103": b"third"})
+    await env.media(caption=f"/link 675 {NAVER_LINK}", photo=True, group="ga", mid=9101)  # 보통은 첫 사진에 설명
+    await env.media(photo=True, group="ga", mid=9102)
+    await env.media(photo=True, group="ga", mid=9103)
+    assert env.ctrl.named("attach_link") == [("attach_link", 675, NAVER_LINK, b"first")]
+    assert env.relayed == [] and llm.calls == [] and env.bot.asked == ["F9101"]
+    # 설명 없는 사진이 먼저 와 잡혀 있었으면 그게 앨범의 첫 사진
+    await env.media(photo=True, group="gb", mid=9201)
+    env.bot.files.update({"F9201": b"held-first", "F9202": b"captioned"})
+    await env.media(caption=f"/link 676 {NAVER_LINK}", photo=True, group="gb", mid=9202)
+    assert env.ctrl.named("attach_link")[-1] == ("attach_link", 676, NAVER_LINK, b"held-first")
+    assert env.relayed == []
+
+
+async def test_unusable_photo_is_refused_and_the_link_is_not_attached(env: Env) -> None:
+    """HEIC·GIF·동영상 파일, 10MB 넘는 사진, 못 받은 사진: 링크도 붙이지 않고 이유와 다시 보내는 법을 한국어로."""
+    with_llm(env, ans("/status"))
+    cmd = f"/link 675 {NAVER_LINK}"
+    await env.media(caption=cmd, document={"file_id": "D1", "mime_type": "image/heic", "file_name": "IMG_1.HEIC"})
+    assert "링크도 아직 안 붙였어요" in env.texts[-1] and "HEIC" in env.texts[-1] and "/link 675 링크" in env.texts[-1]
+    await env.media(caption=cmd, document={"file_id": "D2", "mime_type": "video/mp4", "file_name": "a.mp4"})
+    assert "동영상" in env.texts[-1]
+    big = env.msg(caption=cmd, photo=True)
+    big.photo[0].file_size = 11_000_000  # 받기 전에 크기로 거름
+    await env.app.cb("on_media")(update(big), SimpleNamespace(args=[], application=None, bot=env.bot))
+    assert "10MB" in env.texts[-1]
+    assert env.bot.asked == []  # 셋 다 받아 보지도 않음
+    env.bot.fail = True
+    await env.media(caption=cmd, photo=True)
+    assert "사진을 받지 못했어요" in env.texts[-1]
+    env.bot.fail = False
+    env.bot.files["F9301"] = b"x" * 10_000_001  # 크기를 안 알려 준 파일: 받은 뒤 길이로 거름
+    await env.media(caption=cmd, photo=True, mid=9301)
+    assert "10MB" in env.texts[-1]
+    assert env.ctrl.named("attach_link") == [] and ("refresh",) not in env.ctrl.calls and env.relayed == []
+    # PNG 파일(문서)로 보낸 사진은 받는다
+    env.bot.files["D3"] = OWNER_JPEG
+    await env.media(caption=cmd, document={"file_id": "D3", "mime_type": "image/png", "file_name": "a.png"})
+    assert env.ctrl.named("attach_link") == [("attach_link", 675, NAVER_LINK, OWNER_JPEG)]
+
+
+async def test_words_with_a_photo_and_link_confirm_then_attach_with_that_photo(env: Env) -> None:
+    """말로 보낸 링크 + 사진 (답장 아님): AI 가 /link 로 알아들으면 확인 버튼 → 누를 때 그 사진(file_id 로 들고 있던)을 받아 같이 붙임."""
+    q = add_item(env.db, "데켓 주물팬", shop="naver", url="https://smartstore.naver.com/d/products/1")
+    llm = with_llm(env, ans("/link", q, NAVER_LINK))
+    env.bot.files["F9401"] = OWNER_JPEG
+    await env.media(caption=f"{q}번 링크 이거야 {NAVER_LINK}", photo=True, mid=9401)
+    assert len(llm.calls) == 1 and env.ctrl.named("attach_link") == [] and env.bot.asked == []
+    assert '"사진": 1' in llm.calls[0][1]
+    await env.press(env.press_data("실행"))
+    assert env.ctrl.named("attach_link") == [("attach_link", q, NAVER_LINK, OWNER_JPEG)] and env.bot.asked == ["F9401"]
+    # 사진으로 할 수 없는 다른 딜 명령은 예전처럼 안내 (/ok + 사진)
+    with_llm(env, ans("/ok", q))
+    await env.media(caption="이 딜 올려줘", photo=True)
+    assert env.texts[-1] == nlmod.DEAL_PHOTO
+
+
+async def test_blog_reply_with_a_number_and_link_caption_still_goes_to_blog(env: Env) -> None:
+    """블로그 메시지에 단 사진 답장은 '12 https://…' 처럼 보여도 지금처럼 Blog-Auto 로 (12 는 블로그 글 번호일 수 있음)."""
+    llm = with_llm(env, ans("none"))
+    blog = env.bot_msg("📸 #12 사진 요청", record=False)
+    await env.media(caption="12 https://example.com/x", photo=True, reply_to=blog)
+    assert [r["nl"]["why"] for r in env.relayed] == ["reply_blog"] and env.ctrl.named("attach_link") == [] and llm.calls == []
+
+
 async def test_unregistered_commands_pass_through(env: Env) -> None:
     await env.command("/fix 12 제목 짧게")
     await env.command("/drop 12")
@@ -890,6 +1023,55 @@ async def test_channel_post_link_reply_to_unsure_notice_is_recorded_not_attached
         assert "상품 링크 완료" in env.texts[-1] and bot.db.get_queue_item(e).status == "pending"
         assert bot.db.kv_get("mylink:toss:핫도그") == "https://toss.im/_m/MYLINK"
         assert env.llm is not None and env.llm.calls == []  # 모두 정해진 흐름 (AI 없이)
+    finally:
+        bot.db.close()
+
+
+async def test_naver_link_and_photo_reply_end_to_end_with_the_real_bot(settings: Settings) -> None:
+    """진짜 딜봇을 컨트롤러로 끝까지 (주인 결정 10/15): 네이버 링크 요청에 '사진도 같이' 부탁이 있고, 그 메시지에 사진을 답장하며
+    설명 칸에 링크 → 사진을 받아 검사·저장하고 링크를 붙여 올릴 차례로. 못 쓰는 사진(작음)이면 링크도 안 붙이고 이유를 알린다."""
+    import io
+
+    from PIL import Image
+
+    from dealbot.app import DealBot
+
+    def jpeg(w: int, h: int) -> bytes:
+        out = io.BytesIO()
+        Image.new("RGB", (w, h), (90, 140, 200)).save(out, "JPEG")
+        return out.getvalue()
+
+    settings.collectors = []
+    bot = DealBot(settings)
+    try:
+        env = Env(settings, bot.db, FakeLLM(ans("none")))
+        env.nl = bot.nl
+        bot.nl.asker, bot.nl.bot_id = env.llm, BOT_ID  # 진짜 AI 는 부르지 않음
+        env.app = FakeApp()
+        register_admin_handlers(env.app, admin_chat_id=ADMIN, reporter=bot.reporter, controller=bot, nl=bot.nl)  # type: ignore[arg-type]
+        notices: list[Msg] = []
+
+        async def send_with_id(text: str, *, silent: bool = False, loud: bool = False, kind: str = "",
+                               queue_id: int | None = None) -> int:
+            m = env.bot_msg(text, kind=kind, q=queue_id)
+            notices.append(m)
+            return m.message_id
+
+        bot.notifier.send_with_id = send_with_id  # type: ignore[method-assign]
+        q = add_item(bot.db, "데켓 주물팬", shop="naver", url="https://brand.naver.com/daekket/products/1")
+        await bot.notifier.notify_manual_link(bot.db.get_queue_item(q), bot.registry.get("naver"))
+        req = notices[-1]
+        assert "📸 가격·옵션 확인 후 사진도 같이 보내 주세요 — 제목 가격 14,890원" in (req.text or "")
+        env.bot.files["F9501"] = jpeg(300, 300)
+        await env.media(caption=NAVER_LINK, photo=True, reply_to=req, mid=9501)
+        assert "링크도 아직 안 붙였어요" in env.texts[-1] and "사진이 너무 작아요 (300×300)" in env.texts[-1]
+        assert bot.db.get_queue_item(q).status == "awaiting_link"
+        env.bot.files["F9502"] = jpeg(1200, 900)
+        await env.media(caption=NAVER_LINK, photo=True, reply_to=req, mid=9502)
+        assert "📸 상품 사진도 받았어요" in env.texts[-1] and env.relayed == []
+        it = bot.db.get_queue_item(q)
+        assert it.status == "pending" and it.deal.affiliate_url == NAVER_LINK and it.deal.product.extra["owner_link"] is True
+        assert (settings.data_dir / "owner_photos" / it.deal.product.extra["owner_photo"]["file"]).exists()
     finally:
         bot.db.close()
 

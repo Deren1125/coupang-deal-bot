@@ -245,7 +245,7 @@ deal:
     exclude_shops: [coupang]   # 쿠팡은 페이지를 못 읽음 → 파트너스 API 사진 사용
     max_per_run: 10
     # 네이버 스마트스토어·브랜드스토어는 몰아서 읽으면 429: 요청 사이 간격, 429·5xx 는 Retry-After(없으면 2→4초 백오프+지터)로 몇 번만 다시.
-    # 그래도 사진이 없으면 NAVER_CLIENT_ID/NAVER_CLIENT_SECRET(선택)이 있을 때 쇼핑 검색 API 에서 상품번호가 같은 상품의 사진을 씀
+    # 사진을 찾으러 검색하지 않음 (네이버 쇼핑 검색 API 는 2026-07-31 종료). 네이버 딜 사진은 주인이 링크와 같이 보낸 사진 (주인 결정 10/15)
     store_min_interval_seconds: 3
     store_retry_attempts: 3
     store_retry_backoff_seconds: 2
@@ -315,7 +315,8 @@ deal:
   #   - 탈락: 가격비교 상품 최저가, 또는 판매처 min_listings 곳이 (값 + 배송비 여유) 쿠팡 값 이하일 때만.
   #     판매글 한 곳의 싼 값(싼 옵션·개봉품일 수 있음)으로는 이력 특가를 막지 않음
   #   키가 없거나 401 이면 이 비교만 꺼짐 (로그 한 번, 가격 이력으로만 판정)
-  #   10/13 주인 결정: 지금은 끔 (네이버 검색이 API HUB 로 옮겨져 딜봇 키로 쇼핑 검색이 안 됨 — 401). 되면 true 로.
+  #   10/13 주인 결정: 지금은 끔 (네이버 검색이 API HUB 로 옮겨져 딜봇 키로 쇼핑 검색이 안 됨 — 401).
+  #   10/15: 네이버 쇼핑 검색 Open API 는 2026-07-31 종료, 대신할 API 없음 → 계속 끔 (켜도 401). 자기 점검 줄도 '종료'로 나옴
   naver_reference:
     enabled: false
     sources: [goldbox, category_best]
