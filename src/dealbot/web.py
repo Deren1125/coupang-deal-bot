@@ -38,7 +38,8 @@ class Throttled:
 AuthCheck = Callable[[dict[str, str]], "bool | Throttled"]  # 요청 헤더(이름은 소문자) → 들여보낼지
 # 요청 헤더 사전에 넣어 주는 접속 주소 (진짜 헤더 이름은 ':' 로 시작할 수 없어 손님이 보낸 값과 겹치지 않음)
 PEER_HEADER = ":peer"
-_STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+# 카드 이미지 + 인스타 릴스 영상(메타가 video_url 로 받아 감)
+_STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".mp4": "video/mp4"}
 
 _STATUS_TEXT = {
     200: "OK", 302: "Found", 303: "See Other", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
@@ -303,7 +304,7 @@ class WebServer:
 
     @staticmethod
     def _static(directory: Path, name: str) -> Response:
-        """폴더 안의 파일 하나만. 하위 경로·숨김 파일·이미지 아닌 확장자는 거절."""
+        """폴더 안의 파일 하나만. 하위 경로·숨김 파일·이미지(와 릴스 mp4)가 아닌 확장자는 거절."""
         if not name or "/" in name or name.startswith(".") or Path(name).suffix.lower() not in _STATIC_TYPES:
             return 404, page("없는 파일", "이 주소는 쓰지 않습니다.")
         path = directory / name

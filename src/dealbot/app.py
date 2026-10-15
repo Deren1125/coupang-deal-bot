@@ -55,6 +55,7 @@ from dealbot.links import (
 )
 from dealbot.llm_json import JsonAsker
 from dealbot.manual import parse_manual_post
+from dealbot.media import reel as reel_tools
 from dealbot.media.card import CardStyle, DealCard
 from dealbot.media.imagecheck import (
     clean_image,
@@ -98,6 +99,7 @@ from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import NAVER_SOURCE, CoupangMarketReference, MarketQuote, market_name
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
 from dealbot.publisher.digest import BlogDigestBuilder
+from dealbot.publisher.ig_scheduler import InstagramScheduler
 from dealbot.publisher.instagram import InstagramClient, InstagramError, InstagramPublisher
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
@@ -431,6 +433,8 @@ class DealBot:
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("deal card disabled: %s", e)
+        # 인스타 대기열·시간표 (주인 결정 10/15): 채널에 올린 딜은 여기 줄 서서 하루 3개만, 점심 릴스·저녁 TOP5·화금 단가표는 따로
+        self.ig = InstagramScheduler(self)
         self.copy_blocks = CopyBlockBuilder(settings.copy_cfg, self.renderer, self.registry)
         self.digest = BlogDigestBuilder(settings.blog_digest, self.renderer, self.registry)
 
@@ -1142,6 +1146,8 @@ class DealBot:
             out.append((False, "인스타그램: 공개 도메인이 없어 카드 이미지를 못 올림 (Railway → Networking → Generate Domain)"))
         else:
             out.append((True, f"인스타그램 @{self.db.kv_get(IG_KV_USERNAME) or '?'} (카드 이미지 {self.settings.secrets.public_base_url}/media/…)"))
+            if self.settings.instagram.reels.enabled and reel_tools.find_ffmpeg() is None:
+                out.append((None, "인스타 점심 릴스: 서버에 ffmpeg 없음 — sudo apt-get install -y ffmpeg (그 전엔 릴스만 건너뜀)"))
         if self.copy_blocks.enabled:
             out.append((True, "복붙 문구: " + ", ".join(t.name for t in self.settings.copy_cfg.targets if t.enabled)))
         if self.market is not None:
@@ -2843,7 +2849,7 @@ class DealBot:
         """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None.
         photo: deal_photo 가 확인한 상품 사진 바이트 (텔레그램 글에 쓴 그 사진). 여기서 사진을 다시 받지 않는다 —
         예전엔 image_url 을 날것으로 다시 받아 쿠팡 로고가 카드에 크게 들어가거나(/instatest), 외부 반출을 막는 스토어 사진이 빠졌다.
-        사진이 없으면 instagram.no_photo 가 text_card 이거나 네이버 딜일 때 글자 카드, 아니면(skip 기본) None."""
+        사진이 없으면 instagram.no_photo 가 text_card(기본, 주인 결정 10/15)이거나 네이버 딜일 때 글자 카드, 아니면(skip) None."""
         if self.card is None:
             return None
         base = self.settings.secrets.public_base_url
@@ -2887,8 +2893,10 @@ class DealBot:
         return None
 
     async def _publish_side_channels(self, deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
-        """텔레그램 채널 발행 후: 카드 이미지 → 스레드·인스타그램 자동 게시 + 복붙 문구를 관리자 챗으로.
-        photo: 텔레그램 글에 쓴 확인된 상품 사진(deal_photo) — 인스타 카드도 이 사진만 쓴다. deal_no: 핫딜 페이지 번호."""
+        """텔레그램 채널 발행 후: 스레드 자동 게시 + 인스타 대기열에 넣기 + 복붙 문구를 관리자 챗으로.
+        인스타는 바로 올리지 않는다 (주인 결정 10/15): 인스타 대기열(ig_queue)에 줄 서고, 인스타 시간표(instagram_tick)가 하루 3개까지
+        점수 순으로 07~23시·2시간 간격으로, 올리기 직전 품절·가격을 다시 보고 올린다. 점심 릴스·저녁 TOP5·화금 단가표도 같은 시간표.
+        photo: 텔레그램 글에 쓴 확인된 상품 사진(deal_photo) — 인스타 카드도 이 사진만 쓴다 (사본을 대기열에 남김). deal_no: 대기열 번호."""
         want_ig = (
             self.settings.instagram.enabled
             and (self.instagram.configured or self.instagram.dry_run)
@@ -2897,19 +2905,15 @@ class DealBot:
         want_threads = self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run)
         ig_skip = self._ig_skip_reason(photo, deal=deal) if want_ig else None
         if ig_skip:
-            # 사진 없는 딜은 인스타에 안 올림 (실패가 아니라 규칙이라 관리자 알림 없이 기록만)
+            # 사진 없는 딜은 인스타에 안 올림 (no_photo: skip 일 때만 — 실패가 아니라 규칙이라 관리자 알림 없이 기록만)
             want_ig = False
             self.db.log_event("INFO", "instagram", f"{deal.product.product_id} skipped: {ig_skip}")
             log.info("instagram skipped (%s): %s", ig_skip, deal.product.name[:40])
-        if want_ig:
-            deal_no = self._page_deal_no(deal_no)  # 카드·본문의 '#번호' 는 핫딜 페이지에 있는 글만
-        # 카드는 인스타만. 사진은 텔레그램 글과 같은 확인된 상품 사진 (없으면 네이버 딜·text_card 설정만 글자 카드)
-        card_url = await self.make_card(deal, photo, deal_no=deal_no) if want_ig else None
         if want_threads:
             # 스레드는 deal_photo 가 확인한 상품 사진만 (못 쓰면 글만). 글자 카드는 상품 사진 대신 쓰지 않는다
             try:
                 result = await self.threads.publish(deal)
-            except Exception as e:  # noqa: BLE001 — 재시도 뒤에도 남은 5xx·429·시간 초과: 실패로 알리고 인스타는 그대로 올린다
+            except Exception as e:  # noqa: BLE001 — 재시도 뒤에도 남은 5xx·429·시간 초과: 실패로 알리고 인스타는 그대로 줄 세운다
                 result = PublishResult(ok=False, error=f"{type(e).__name__}: {e}")
             if result.ok:
                 self.db.log_event("INFO", "threads", f"{deal.product.product_id} {'dry-run' if result.dry_run else result.message_id}")
@@ -2926,19 +2930,16 @@ class DealBot:
                                        result.error or "")
         if want_ig:
             try:
-                ig = await self.instagram.publish(deal, card_url, deal_no=deal_no)
-            except Exception as e:  # noqa: BLE001 — 스레드와 같음: 실패로 알리고 복붙 문구는 그대로 보낸다
-                ig = PublishResult(ok=False, error=f"{type(e).__name__}: {e}")
-            if ig.ok:
-                self.db.log_event("INFO", "instagram", f"{deal.product.product_id} {'dry-run' if ig.dry_run else ig.message_id}")
-                log.info("instagram posted: %s", deal.product.name[:40])
-            else:
-                self.db.log_event("WARNING", "instagram", f"{deal.product.product_id}: {ig.error}")
-                log.warning("instagram post failed: %s", ig.error)
-                await self._sns_failed("인스타그램", "instaauth", f"⚠️ <b>인스타그램 발행 실패</b>\n<code>{html.escape(ig.error or '')}</code>",
-                                       ig.error or "")
+                self.ig.enqueue(deal, photo=photo, queue_id=deal_no)
+            except Exception as e:  # noqa: BLE001 — 대기열에 못 넣어도 채널 글·복붙 문구는 그대로
+                log.warning("instagram queue failed: %s", e)
+                self.db.log_event("WARNING", "instagram", f"{deal.product.product_id}: queue failed: {e}")
         for block in self.copy_blocks.build(deal):
             await self.notifier.send(block.as_telegram_html(), silent=True)
+
+    async def instagram_tick(self) -> str | None:
+        """인스타 시간표 한 번 보기 (scheduler.instagram_loop 가 1분마다): 차례가 된 글 하나를 올리거나 건너뛴다."""
+        return await self.ig.tick()
 
     async def _sns_failed(self, sns: str, cmd: str, tg_text: str, error: str) -> None:
         """스레드·인스타 발행 실패: 연결(토큰·권한)이 끊긴 것이면 주인 카톡 (다시 연결해야 풀림), 아니면 텔레그램만 (소리 없이)."""

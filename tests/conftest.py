@@ -122,3 +122,23 @@ def repo_root() -> Path:
 
 def env_true(name: str) -> bool:
     return os.getenv(name, "").lower() in {"1", "true"}
+
+
+@pytest.fixture
+def ig_post_now():  # type: ignore[no-untyped-def]
+    """인스타 대기열(주인 결정 10/15)의 다음 딜을 지금 올린다 — 테스트가 도는 시각과 상관없이 (시간대 07~23시·그날 캐러셀·릴스
+    시각표는 비움). 텔레그램 발행 뒤 인스타는 바로가 아니라 대기열 → 시간표(instagram_tick)로 올라간다."""
+
+    async def run(bot, *, gap: bool = False):  # type: ignore[no-untyped-def]
+        from zoneinfo import ZoneInfo
+
+        from dealbot.utils.timeutil import utcnow
+
+        bot.settings.instagram.hours = "00:00-24:00"
+        if not gap:
+            bot.settings.instagram.min_gap_minutes = 0
+        day = utcnow().astimezone(ZoneInfo(bot.settings.app.timezone)).date().isoformat()
+        bot.db.kv_set(f"ig_plan:{day}", "{}")
+        return await bot.ig.tick()
+
+    return run

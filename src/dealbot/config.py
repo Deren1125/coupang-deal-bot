@@ -401,6 +401,65 @@ class ThreadsConfig(BaseModel):
     refresh_before_days: int = 7
 
 
+def _window(v: str) -> str:
+    """'HH:MM-HH:MM' (자정을 넘지 않는 구간) 확인."""
+    try:
+        start, end = (s.strip() for s in str(v).split("-"))
+        sh, sm = (int(x) for x in start.split(":"))
+        eh, em = (int(x) for x in end.split(":"))
+    except ValueError as e:
+        raise ValueError(f"시간 구간 형식이 잘못됐습니다: {v!r} (예: 20:00-21:00)") from e
+    if not (0 <= sh < 24 and 0 <= eh <= 24 and 0 <= sm < 60 and 0 <= em < 60) or sh * 60 + sm >= eh * 60 + em:
+        raise ValueError(f"시간 구간은 같은 날 안에서 시작이 끝보다 빨라야 합니다: {v!r} (예: 20:00-21:00)")
+    return f"{sh:02d}:{sm:02d}-{eh:02d}:{em:02d}"
+
+
+class InstagramCarouselConfig(BaseModel):
+    """저녁 '오늘 가격 내려간 딜 TOP5' 캐러셀 (하루 1개). 그날 텔레그램에 올린 딜 중 비교 근거가 있고 아직 품절이 아닌 것만."""
+
+    enabled: bool = True
+    window: str = "20:00-21:00"  # 이 구간 안의 아무 분에 (날마다 무작위)
+    max_deals: int = Field(5, ge=1, le=8)  # 딜 장 수 (표지·마지막 장 빼고. 인스타 캐러셀은 10장까지)
+    min_deals: int = Field(2, ge=1)  # 이보다 적으면 그날은 건너뜀
+
+    @field_validator("window")
+    @classmethod
+    def _win(cls, v: str) -> str:
+        return _window(v)
+
+
+class InstagramReelsConfig(BaseModel):
+    """점심 'TOP3' 릴스 (하루 1개, 주인 결정 10/15). 그날 지금까지 텔레그램에 올린 딜 중 위에서 3개를 10~15초 영상으로.
+    서버에 ffmpeg 가 있어야 한다 (없으면 그날은 건너뛰고 설치 방법을 할 일로 한 번 알림)."""
+
+    enabled: bool = True
+    window: str = "12:00-13:00"
+    max_deals: int = Field(3, ge=1, le=4)
+    min_deals: int = Field(2, ge=1)
+    processing_timeout_seconds: float = Field(300, gt=0)  # 인스타가 영상을 처리하는 동안 기다리는 최대 시간 (넘으면 조용히 포기)
+
+    @field_validator("window")
+    @classmethod
+    def _win(cls, v: str) -> str:
+        return _window(v)
+
+
+class InstagramUnitConfig(BaseModel):
+    """'이번 주 생필품 1개당 가격' 캐러셀 (화·금, 2단계). 휴지·물티슈·생수·세제·기저귀 중 봇이 가격 기록을 충분히 가진 딜만."""
+
+    enabled: bool = True
+    days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]] = Field(default_factory=lambda: ["tue", "fri"])
+    window: str = "19:00-20:00"  # TOP5 캐러셀과 같은 시간대(한 시간 안)에 겹치지 않게 고른다
+    lookback_days: int = Field(7, ge=1)  # 이번 주 = 최근 이만큼 텔레그램에 올린 딜
+    baseline_days: int = Field(30, ge=1)  # 마지막 장 '기준선'은 최근 이만큼 올린 딜의 1개당 가격 가운데 값
+    min_slides: int = Field(2, ge=1)  # 분류 장이 이보다 적으면 그날은 건너뜀
+
+    @field_validator("window")
+    @classmethod
+    def _win(cls, v: str) -> str:
+        return _window(v)
+
+
 class InstagramConfig(BaseModel):
     """인스타그램 자동 게시 (Instagram API with Instagram Login). 인증은 /instaauth 로 한 번만.
     사진 없는 글은 못 올리므로 봇이 만든 카드 이미지를 올린다. 본문 링크는 눌리지 않아 프로필 링크(핫딜 페이지)로 유도."""
@@ -412,14 +471,27 @@ class InstagramConfig(BaseModel):
     # 카드·본문 양식. current = 지금 쓰는 카드 + template. A/B/C 는 후보 양식(주인이 고르기 전까지 current 유지):
     # A 사진 크게 + 큰 가격, B 저장각 정보 카드, C 사진 꽉 채움 + 가격 스티커 (본문은 deal_instagram_a/b/c.j2)
     style: Literal["current", "A", "B", "C"] = "current"
-    # 확인된 상품 사진(deal_photo — 텔레그램에 올린 그 사진)이 없을 때: skip = 인스타엔 안 올리고 기록만 (기본),
-    # text_card = 사진 없는 글자 카드로 올림. 로고·기본 이미지·게시판 썸네일은 어느 쪽이든 카드에 안 넣는다
-    no_photo: Literal["skip", "text_card"] = "skip"
+    # 확인된 상품 사진(deal_photo — 텔레그램에 올린 그 사진)이 없을 때: text_card = 사진 없는 글자 카드로 올림 (기본, 주인 결정 10/15),
+    # skip = 인스타엔 안 올리고 기록만. 로고·기본 이미지·게시판 썸네일은 어느 쪽이든 카드에 안 넣는다
+    no_photo: Literal["skip", "text_card"] = "text_card"
+    # ---- 인스타 전용 대기열 (주인 결정 10/15): 텔레그램에 올린 딜을 바로 올리지 않고 줄 세워 하루 몇 개만 골라 올린다
+    daily_singles: int = Field(3, ge=0)  # 딜 하나짜리 글 하루 최대 (점수 높은 순). 캐러셀·릴스·단가표는 따로 셈
+    hours: str = "07:00-23:00"  # 인스타에 올리는 시간 (app.timezone)
+    min_gap_minutes: int = Field(120, ge=0)  # 인스타 글 사이 간격. 딜 하나짜리 글은 캐러셀·릴스·단가표와도 이만큼 띄운다
+    queue_expire_hours: float = Field(12, gt=0)  # 대기열에서 이보다 오래 기다린 딜은 안 올림 (가격이 바뀌었을 가능성)
+    carousel: InstagramCarouselConfig = Field(default_factory=lambda: InstagramCarouselConfig())
+    reels: InstagramReelsConfig = Field(default_factory=lambda: InstagramReelsConfig())
+    unit_carousel: InstagramUnitConfig = Field(default_factory=lambda: InstagramUnitConfig())
 
     @field_validator("style", mode="before")
     @classmethod
     def _style_upper(cls, v: Any) -> Any:
         return v.upper() if isinstance(v, str) and v.lower() in ("a", "b", "c") else v
+
+    @field_validator("hours")
+    @classmethod
+    def _hours(cls, v: str) -> str:
+        return _window(v)
 
 
 class CardConfig(BaseModel):
