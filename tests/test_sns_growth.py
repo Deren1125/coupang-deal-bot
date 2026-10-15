@@ -898,3 +898,23 @@ async def test_auth_links_offer_a_basic_scope_fallback(bot) -> None:  # type: ig
         assert scopes == [full, basic]
         assert set(basic.split(",")) < set(full.split(","))
         assert "insights" not in basic and "read_replies" not in basic
+
+
+async def test_auth_links_are_given_even_when_already_connected(bot) -> None:  # type: ignore[no-untyped-def]
+    """주인 10/15: 이미 연결된 상태에서 /instaauth·/threadsauth 를 보내면 '이미 연결'만 와서 새 권한을 받을 수 없었다 —
+    연결돼 있어도 다시 승인할 링크를 같이 준다."""
+    from types import SimpleNamespace
+
+    sec = bot.settings.secrets
+    sec.threads_app_id, sec.threads_app_secret = "TAPP", "TS"
+    sec.instagram_app_id, sec.instagram_app_secret = "IAPP", "IS"
+
+    async def me(_token: str) -> dict:
+        return {"username": "oneul_hot_deal"}
+
+    for svc in (bot.threads, bot.instagram):
+        svc.stored_token = lambda: SimpleNamespace(access_token="tok")  # type: ignore[method-assign]
+        svc.client.me = me  # type: ignore[method-assign]
+    for msg in (await bot.threads_auth_url(), await bot.instagram_auth_url()):
+        assert msg.startswith("이미 연결되어 있어요: @oneul_hot_deal") and "한 번 더 승인" in msg
+        assert sum(1 for ln in msg.splitlines() if ln.startswith("https://") and "oauth/authorize" in ln) == 2

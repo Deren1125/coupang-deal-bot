@@ -3149,10 +3149,13 @@ class DealBot:
         if not self.settings.secrets.has_threads_app:
             return "THREADS_APP_ID / THREADS_APP_SECRET 이 설정되어 있지 않습니다."
         token = self.threads.stored_token()
+        lead = ""
         if token is not None:
             try:
                 me = await self.threads.client.me(token.access_token)
-                return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 /threadsauth 링크를 다시 승인하거나 /threadscode 로 새 code 를 넣으세요)"
+                # 이미 연결돼 있어도 링크는 준다 — 새 권한(통계·답글)을 받으려면 다시 승인해야 함 (주인 10/15: '이미 연결'만 와서 못 함)
+                lead = (f"이미 연결되어 있어요: @{me.get('username')}. 통계·답글 권한을 받으려면 아래 링크로 한 번 더 승인해 주세요 "
+                        "(승인해도 지금 연결은 끊기지 않아요).\n\n")
             except ThreadsError:
                 pass
         sec = self.settings.secrets
@@ -3180,7 +3183,7 @@ class DealBot:
         )
         if sec.threads_callback_served:
             return (
-                "<b>스레드 연결 (자동)</b>\n"
+                lead + "<b>스레드 연결 (자동)</b>\n"
                 + register
                 + "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요. 그냥 누르면 스레드 앱이 열려 승인 화면이 안 뜹니다.\n"
                 f"{url}\n"
@@ -3188,7 +3191,7 @@ class DealBot:
                 + check
             )
         return (
-            "<b>스레드 연결 (수동)</b>\n"
+            lead + "<b>스레드 연결 (수동)</b>\n"
             + register
             + "   Railway 에서 서비스 도메인을 만들면(Settings → Networking → Generate Domain, 포트 8080) 봇이 콜백을 직접 받아 승인만으로 연결됩니다. docs/SETUP_KEYS.md 7-1 참고.\n"
             "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요.\n"
@@ -3241,10 +3244,13 @@ class DealBot:
         if not sec.has_instagram_app:
             return "INSTAGRAM_APP_ID / INSTAGRAM_APP_SECRET 이 설정되어 있지 않습니다. (메타 앱 → 인스타그램 → 비즈니스 로그인 설정의 '인스타그램 앱 ID/시크릿')"
         token = self.instagram.stored_token()
+        lead = ""
         if token is not None:
             try:
                 me = await self.instagram.client.me(token.access_token)
-                return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 아래처럼 /instaauth 링크를 다시 승인하세요)"
+                # 이미 연결돼 있어도 링크는 준다 — 새 권한(통계)을 받으려면 다시 승인해야 함 (주인 10/15)
+                lead = (f"이미 연결되어 있어요: @{me.get('username')}. 통계 권한을 받으려면 아래 링크로 한 번 더 승인해 주세요 "
+                        "(승인해도 지금 연결은 끊기지 않아요).\n\n")
             except InstagramError:
                 pass
         from dealbot.publisher.instagram import BASIC_SCOPES as IG_BASIC_SCOPES
@@ -3273,7 +3279,7 @@ class DealBot:
         )
         if sec.instagram_callback_served:
             return (
-                "<b>인스타그램 연결 (자동)</b>\n"
+                lead + "<b>인스타그램 연결 (자동)</b>\n"
                 + register
                 + "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요.\n"
                 f"{url}\n"
@@ -3281,7 +3287,7 @@ class DealBot:
                 + check
             )
         return (
-            "<b>인스타그램 연결 (수동)</b>\n"
+            lead + "<b>인스타그램 연결 (수동)</b>\n"
             + register
             + "2) 아래 링크를 <b>길게 눌러 복사</b>한 뒤 브라우저 주소창에 붙여넣어 열고 승인을 누르세요.\n"
             f"{url}\n"
