@@ -496,7 +496,8 @@ async def test_standalone_link_with_two_waiting_gives_candidates(env: Env) -> No
     await env.text("토스 링크 https://toss.im/_m/xyz")
     assert env.texts[-1] == nlmod.WHICH
     labels = [t for t, _ in env.buttons()]
-    assert labels[0].startswith(f"#{a} ") and labels[1].startswith(f"#{b} ") and labels[-1] == "취소"
+    # 새 링크 요청부터 (버튼은 5개뿐 — 방금 온 링크 요청이 잘리지 않게, 리뷰 10/15)
+    assert labels[0].startswith(f"#{b} ") and labels[1].startswith(f"#{a} ") and labels[-1] == "취소"
     await env.press(env.press_data(f"#{b} "))  # 버튼이 곧 확인 (다시 묻지 않음)
     assert env.ctrl.named("attach_link") == [("attach_link", b, "https://toss.im/_m/xyz")]
 

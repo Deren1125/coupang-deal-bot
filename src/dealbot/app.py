@@ -458,6 +458,7 @@ class DealBot:
             collectors=self.collector_names,
             paused=lambda: self.state.paused,
             tz=settings.app.timezone,
+            publish=settings.publish,  # 링크·확인 요청 자리 수만큼 후보를 읽게
         )
         self.notifier.msg_log = self.nl.record
         # 모델 이름은 저장소에 없고 서버 .env 에서 받는다. 없으면 한 번 알리고 안전하게: CLI 는 기본 모델, API 는 건너뜀
@@ -634,15 +635,21 @@ class DealBot:
         return item is not None and item.status == "failed" and (item.last_error or "").startswith(MAYBE_POSTED)
 
     @classmethod
-    def _link_problem(cls, item: QueueItem | None, queue_id: int, url: str) -> str | None:
-        """링크를 붙일 수 없는 이유 (주인 답장·쇼핑커넥트 자동 링크 같은 기준). 붙일 수 있으면 None."""
+    def _link_problem(cls, item: QueueItem | None, queue_id: int, url: str, *, link_ttl: timedelta) -> str | None:
+        """링크를 붙일 수 없는 이유 (주인 답장·대시보드 '링크 넣기'·쇼핑커넥트 자동 링크 같은 기준). 붙일 수 있으면 None.
+        link_ttl: 링크 요청 유효 시간 (publish.manual_link_ttl_hours) — 자리를 내준 글은 여기서 직접 시간을 보고 이유를 말한다
+        (부르는 쪽이 _replaced_target 으로 먼저 열었는지와 상관없이, 유효 시간 안의 글을 '시간이 지났다'고 하지 않게 — 리뷰 10/15)."""
         if item is None:
             return f"#{queue_id} 번 글이 없습니다. /queue 나 /pending 에서 번호를 확인해 주세요."
         if item.status == "awaiting_approval":
             return f"#{queue_id} 번은 확인을 기다리는 글이라 링크가 아니라 답이 필요합니다: <code>/ok {queue_id}</code> 또는 <code>/skip {queue_id}</code>"
-        if item.status == "skipped" and (item.last_error or "").startswith(REPLACED):  # 유효 시간 안이면 attach_link 가 이미 받음
-            return (f"#{queue_id} 번은 더 좋은 딜에 자리를 내준 뒤 유효 시간이 지나 링크를 붙이지 않았어요. "
-                    "아직 싸게 팔고 있으면 <code>/post</code> 로 직접 올려 주세요.")
+        if item.link_replaced:
+            if utcnow() - item.created_at >= link_ttl:
+                return (f"#{queue_id} 번은 더 좋은 딜에 자리를 내준 뒤 유효 시간이 지나 링크를 붙이지 않았어요. "
+                        "아직 싸게 팔고 있으면 <code>/post</code> 로 직접 올려 주세요.")
+            # 유효 시간 안: 주인 링크(답장·/link·대시보드)는 _replaced_target 이 열어서 여기까지 오지 않는다 — 그 밖의 길(자동 링크 등)
+            return (f"#{queue_id} 번은 더 좋은 딜에 자리를 내준 글이라 이 링크는 붙이지 않았어요. "
+                    f"그래도 올리려면 링크 요청 유효 시간 안에 <code>/link {queue_id} 링크</code> 로 보내 주세요.")
         if item.status not in ("awaiting_link", "pending", "failed", autolink.STATUS):
             return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없습니다."
         if not url.startswith("http"):
@@ -657,10 +664,20 @@ class DealBot:
             return "텔레그램 주소(t.me)는 제휴·상품 링크가 아니라 붙일 수 없어요. 그 몰 앱에서 만든 제휴 링크를 보내 주세요."
         return None
 
+    def _link_ttl(self) -> timedelta:
+        return timedelta(hours=self.settings.publish.manual_link_ttl_hours)
+
+    def owner_link_target(self, queue_id: int) -> QueueItem | None:
+        """주인이 queue_id 에 링크를 보내면 붙을 글 — attach_link 와 같은 _replaced_target (알림·기록 없이 보기만).
+        자리를 내준 글이면 다시 줄 선 같은 상품 글, 유효 시간 안이면 링크를 기다리는 글처럼(status awaiting_link 로 본 사본),
+        지났으면 그 글 그대로. 대시보드 '링크 넣기' 가 화면을 연 뒤 자리를 내준 글도 텔레그램 답장처럼 받으려고 쓴다."""
+        return self._replaced_target(self.db.get_queue_item(queue_id), queue_id)[0]
+
     def owner_link_problem(self, queue_id: int, url: str) -> str | None:
-        """주인이 준 링크를 붙일 수 없는 이유 — attach_link 가 붙이기 전에 보는 것과 같은 _link_problem (같은 기준).
+        """주인이 준 링크를 붙일 수 없는 이유 — attach_link 가 붙이기 전에 보는 것과 같은 _replaced_target → _link_problem (같은 기준).
         대시보드 '링크 넣기' 는 이걸로 먼저 거른 뒤에만 attach_link 를 부른다. 붙일 수 있으면 None."""
-        return self._link_problem(self.db.get_queue_item(queue_id), queue_id, url)
+        item, qid, _moved = self._replaced_target(self.db.get_queue_item(queue_id), queue_id)
+        return self._link_problem(item, qid, url, link_ttl=self._link_ttl())
 
     async def attach_link(self, queue_id: int, url: str) -> str:
         item = self.db.get_queue_item(queue_id)
@@ -669,7 +686,7 @@ class DealBot:
             # '채널에 올라갔는지 모름' 글에 채널 글 링크로 답함(답장·/link·일괄 줄) = 채널에 있다는 뜻
             # → 그 주소를 링크로 붙여 다시 올리지 않고 /posted 처럼 올라간 글로 기록한다 (그 글 번호로 품절 표시도)
             return await self.mark_posted(queue_id, url)
-        problem = self._link_problem(item, queue_id, url)
+        problem = self._link_problem(item, queue_id, url, link_ttl=self._link_ttl())
         if problem or item is None:
             return problem or ""
         if item.status == autolink.STATUS:
@@ -682,29 +699,38 @@ class DealBot:
         self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
         return self.notifier.link_done_text(item)
 
-    async def _replaced_for_link(self, item: QueueItem | None, queue_id: int) -> tuple[QueueItem | None, int]:
-        """더 좋은 딜에 자리를 내준 글에 주인이 링크를 보냄 → (링크를 붙일 글, 그 번호). 주인이 이긴다 (주인 결정 10/15):
-        - 그사이 같은 상품이 새 글로 다시 줄 섰으면 그 글로 (한 상품에 열린 글은 하나). 그 번호로 받는다고 한 줄 따로 알리고,
-          붙일 수 있는지(확인 대기·잘못된 주소)는 attach_link 가 그 글 기준으로 그대로 말한다 (같은 함수 안에서 이어서 — 사진 같은 인자도 그대로)
+    def _replaced_target(self, item: QueueItem | None, queue_id: int) -> tuple[QueueItem | None, int, bool]:
+        """더 좋은 딜에 자리를 내준 글에 주인이 링크를 보냄 → (링크를 붙일 글, 그 번호, 다른 글로 옮겼는지). 주인이 이긴다 (주인 결정 10/15):
+        - 그사이 같은 상품이 새 글로 다시 줄 섰으면 그 글로 (한 상품에 열린 글은 하나). 붙일 수 있는지(확인 대기·잘못된 주소)는
+          _link_problem 이 그 글 기준으로 그대로 말한다
         - 링크 요청 유효 시간(manual_link_ttl_hours) 안이면 링크를 기다리는 글처럼 받아 다시 올린다 (발행 전 품절·이미 올림 확인은 그대로)
-        - 지났으면 그대로 (_link_problem 이 이유를 말함). 자리를 내준 글이 아니면 그대로."""
-        if item is None or item.status != "skipped" or not (item.last_error or "").startswith(REPLACED):
-            return item, queue_id
+        - 지났으면 그대로 (_link_problem 이 이유를 말함). 자리를 내준 글이 아니면 그대로.
+        보기만 한다 (알림·기록 없음) — 텔레그램 답장·/link(_replaced_for_link)와 대시보드 '링크 넣기'(owner_link_target·
+        owner_link_problem)가 같은 판단을 쓰게."""
+        if item is None or not item.link_replaced:
+            return item, queue_id, False
         twin = next(iter(self.db.items_for_product(item.product_id, OPEN_STATUSES)), None)
         if twin is not None:
-            self.db.log_event("INFO", "manual_link", f"#{queue_id} was replaced — link goes to #{twin.id} (same product queued again)")
-            await self.notifier.send(f"↪️ #{queue_id} 번과 같은 상품이 지금 #{twin.id} 번으로 다시 줄 서 있어 #{twin.id} 번으로 받아요.",
+            return twin, twin.id, True
+        if utcnow() - item.created_at >= self._link_ttl():
+            return item, queue_id, False
+        return replace(item, status="awaiting_link"), queue_id, False
+
+    async def _replaced_for_link(self, item: QueueItem | None, queue_id: int) -> tuple[QueueItem | None, int]:
+        """_replaced_target 그대로 + 같은 상품의 새 글로 옮겼으면 그 번호로 받는다고 한 줄 따로 알린다
+        (attach_link 안에서 이어서 — 사진 같은 인자도 그대로)."""
+        target, target_id, moved = self._replaced_target(item, queue_id)
+        if moved:
+            self.db.log_event("INFO", "manual_link", f"#{queue_id} was replaced — link goes to #{target_id} (same product queued again)")
+            await self.notifier.send(f"↪️ #{queue_id} 번과 같은 상품이 지금 #{target_id} 번으로 다시 줄 서 있어 #{target_id} 번으로 받아요.",
                                      silent=True)
-            return twin, twin.id
-        if utcnow() - item.created_at >= timedelta(hours=self.settings.publish.manual_link_ttl_hours):
-            return item, queue_id
-        return replace(item, status="awaiting_link"), queue_id
+        return target, target_id
 
     def attach_auto_link(self, queue_id: int, url: str) -> str | None:
         """쇼핑커넥트 자동 링크를 주인이 답장한 것처럼 붙인다 (같은 확인·같은 재사용 기억). 주인 알림은 없음 (주인 결정 10/11).
         붙였으면 None, 못 붙였으면 이유."""
         item = self.db.get_queue_item(queue_id)
-        problem = self._link_problem(item, queue_id, url)
+        problem = self._link_problem(item, queue_id, url, link_ttl=self._link_ttl())
         if problem or item is None:
             return problem or "no item"
         self.db.set_queue_link(queue_id, url.strip(), auto=True)
@@ -1560,10 +1586,10 @@ class DealBot:
                 notice = self.db.kv_get(f"link_notice:{item.id}")
                 await self.notifier.notify_sold_out_cancel(item, via, int(notice) if notice else None)
             log.info("sold out (%s): queue #%d dropped — %s", via, item.id, product.name[:40])
-        ttl = timedelta(hours=self.settings.publish.manual_link_ttl_hours)
+        ttl = self._link_ttl()
         for item in self.db.items_for_product(pid, ("skipped",)):
             # 더 좋은 딜에 자리를 내준 글 (유효 시간 안): 품절이면 나중에 주인이 /link 해도 다시 올리지 않게 내려 둔다
-            if (item.last_error or "").startswith(REPLACED) and utcnow() - item.created_at < ttl:
+            if item.link_replaced and utcnow() - item.created_at < ttl:
                 self.db.update_queue_item(item.id, status="expired", error=f"sold out ({via})")
                 out["cancelled"].append(item.id)
         post = self.db.latest_post(pid)
