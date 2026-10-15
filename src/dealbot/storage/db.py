@@ -1140,6 +1140,18 @@ class Database(SnsStoreMixin):
         row = self._one("SELECT posted_at FROM ig_posts ORDER BY posted_at DESC, id DESC LIMIT 1")
         return from_iso(row["posted_at"]) if row else None
 
+    def price_before(self, product_id: str, before: datetime, since: datetime) -> tuple[int, datetime] | None:
+        """그 시각 바로 앞에 우리가 본 이 상품의 가격과 본 시각 (since 뒤 기록만, 없으면 None) — 릴스 '전 → 지금' 취소선의 근거."""
+        row = self._one(
+            "SELECT price, observed_at FROM price_history WHERE product_id = ? AND observed_at < ? AND observed_at >= ? "
+            "ORDER BY observed_at DESC, id DESC LIMIT 1",
+            (product_id, to_iso(before), to_iso(since)),
+        )
+        seen = from_iso(row["observed_at"]) if row else None
+        if row is None or row["price"] is None or seen is None:
+            return None
+        return int(row["price"]), seen
+
     def price_observed_since(self, product_id: str, since: datetime) -> int | None:
         """그 시각 뒤로 수집기가 본 가장 최근 가격 (없으면 None) — 인스타에 늦게 올리기 전 가격이 올랐는지 본다."""
         row = self._one(

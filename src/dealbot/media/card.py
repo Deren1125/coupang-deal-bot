@@ -70,6 +70,10 @@ class CardInfo:
     list_price: int | None = None  # 표시 정가 (근거가 약해 비교 가격이 없을 때만 보조로)
     list_pct: int | None = None
     low_label: str | None = None  # '우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)' 처럼 기록으로 확인된 것만 (insta_style.low_text)
+    # 이 상품의 바로 앞 가격 — 우리 가격 기록에서 (ig_scheduler.own_before). 취소선 '전 → 지금' 은 이 값이 있을 때만 쓴다
+    # (표시광고법: 다른 판매처의 최저가·표시 정가를 취소선으로 그리면 이 상품의 종전 가격처럼 읽힌다)
+    own_was: int | None = None
+    own_was_label: str = ""  # 근거 '우리가 본 10/08 가격'
     ship: str = ""
     unit: str | None = None
     rating: float | None = None
@@ -203,13 +207,12 @@ class DealCard:
             px = MARGIN + self._width(draw, price, price_font) + 28
             rate = p.effective_discount_rate()
             if p.original_price and p.original_price > p.price:
-                orig = f"{p.original_price:,}원"
+                # 표시 정가는 취소선 없이 '정가 N원' (우리 가격 기록이 아닌 값을 이 상품의 종전 가격처럼 그리지 않는다 — 표시광고법)
+                orig = f"정가 {p.original_price:,}원"
                 of = self.font(40)
                 oy = y + 48
                 draw.text((px, oy), orig, font=of, fill=st.muted)
-                ow = self._width(draw, orig, of)
-                draw.line((px, oy + 24, px + ow, oy + 24), fill=st.muted, width=4)
-                px += ow + 24
+                px += self._width(draw, orig, of) + 24
             if rate:
                 draw.text((px, y + 36), f"{rate:.0f}%↓", font=self.font(52), fill=st.accent)
             y += 130

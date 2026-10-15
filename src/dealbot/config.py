@@ -572,7 +572,7 @@ class InstagramUnitConfig(BaseModel):
     days: list[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]] = Field(default_factory=lambda: ["tue", "fri"])
     window: str = "19:00-20:00"  # TOP5 캐러셀과 같은 시간대(한 시간 안)에 겹치지 않게 고른다
     lookback_days: int = Field(7, ge=1)  # 이번 주 = 최근 이만큼 텔레그램에 올린 딜
-    baseline_days: int = Field(30, ge=1)  # 마지막 장 '기준선'은 최근 이만큼 올린 딜의 1개당 가격 가운데 값
+    baseline_days: int = Field(30, ge=1)  # 단위 장마다 '기준선' = 최근 이만큼 올린 그 단위 딜의 1개당 가격 가운데 값 (3건 이상일 때만)
     min_slides: int = Field(2, ge=1)  # 분류 장이 이보다 적으면 그날은 건너뜀
 
     @field_validator("window")

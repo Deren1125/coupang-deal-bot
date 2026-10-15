@@ -495,6 +495,121 @@ async def test_reel_without_ffmpeg_skips_and_asks_the_owner_once(bot, clock, mon
     assert any(t.startswith("인스타 점심 릴스: 서버에 ffmpeg 없음") for t in lines)
 
 
+def _reel_pick(bot: Any, pid: str, name: str, price: int, *, market: int | None = None, no: int = 1) -> insta_style.Pick:
+    """점심 릴스 후보 하나 (쿠팡 딜, 네이버 최저가 대조). own_before 로 우리 가격 기록의 바로 앞 가격을 붙인다."""
+    d = Deal(Product(source="goldbox", product_id=pid, shop="coupang", name=name, price=price, url="https://x"),
+             DealVerdict(is_deal=True, market_price=market, market_source="naver" if market else None,
+                         below_market_pct=round((1 - price / market) * 100, 1) if market else None), detected_at=at(9))
+    info = bot.ig.own_before(d, insta_style.card_info(d, bot.renderer, shop=bot.registry.get("coupang"), deal_no=no))
+    return insta_style.Pick(deal=d, info=info, deal_no=no)
+
+
+def _observe(bot: Any, pid: str, price: int, when: datetime) -> None:
+    bot.db.record_observation(Product(source="goldbox", product_id=pid, name="x", price=price, url="https://x"), now=when)
+
+
+def test_reel_hook_strikes_only_our_own_earlier_price(bot) -> None:  # type: ignore[no-untyped-def]
+    """표시광고법: 첫 장 '19,900원 → 15,900원' 취소선은 19,900원이 이 상품의 바로 앞 가격(우리 가격 기록)일 때만, 근거 '우리가 본 10/08 가격'
+    과 함께. 네이버 최저가(다른 판매처일 수 있음)만 있으면 지금 가격을 크게 + 따로 '네이버 최저가 19,900원보다 4,000원 ↓' (취소선 없음)."""
+    local = DAY.replace(hour=12, minute=20)
+    market_only = _reel_pick(bot, "coupang:m", "크리넥스 3겹 30m 30롤", 15900, market=19900)
+    hook = bot.ig.reel_specs([market_only], local)[0]
+    assert hook.kind == "reel_hook" and hook.big == "15,900원"
+    assert hook.was == "" and hook.was_note == ""  # 시중가는 취소선으로 안 그림
+    assert hook.big_note == "네이버 최저가 19,900원보다 4,000원 ↓"
+    assert not insta_style.validate("광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다", slides=[hook], allowed=["네이버 최저가"])
+
+    # 이 상품을 10/08 에 19,900원으로 봤고(우리 기록), 그 뒤 딜을 본 때(09시) 15,900원 — 그 관측은 '바로 앞 가격'이 아님
+    _observe(bot, "coupang:o", 21900, at(9, day=DAY - timedelta(days=9)))
+    _observe(bot, "coupang:o", 19900, at(9, day=DAY - timedelta(days=5)))
+    _observe(bot, "coupang:o", 15900, at(9))
+    own = _reel_pick(bot, "coupang:o", "도브 샴푸 680ml 2개", 15900, no=2)
+    assert (own.info.own_was, own.info.own_was_label) == (19900, "우리가 본 10/08 가격")
+    hook = bot.ig.reel_specs([market_only, own], local)[0]  # 우리 기록이 있는 딜이 첫 장으로
+    assert hook.title == "도브 샴푸 680ml 2개" and hook.was == "19,900원" and hook.was_note == "우리가 본 10/08 가격"
+    assert hook.big == "15,900원" and hook.big_note == "4,000원 내려갔어요 (20%↓)"
+
+    # 바로 앞 가격이 이미 지금 값이면(어제부터 15,900원) 취소선 없음 — 그보다 앞의 비쌌던 때를 골라 쓰지 않는다
+    _observe(bot, "coupang:s", 19900, at(9, day=DAY - timedelta(days=5)))
+    _observe(bot, "coupang:s", 15900, at(9, day=DAY - timedelta(days=1)))
+    same = _reel_pick(bot, "coupang:s", "삼다수 2L 12병", 15900, market=19900, no=3)
+    assert same.info.own_was is None
+    hook = bot.ig.reel_specs([same], local)[0]
+    assert hook.was == "" and hook.big_note == "네이버 최저가 19,900원보다 4,000원 ↓"
+    # 10% 미만으로 내린 값·30일보다 오래된 기록도 취소선 근거로 안 씀
+    _observe(bot, "coupang:n", 16900, at(9, day=DAY - timedelta(days=2)))
+    assert _reel_pick(bot, "coupang:n", "상품", 15900, no=4).info.own_was is None
+    _observe(bot, "coupang:q", 19900, at(9, day=DAY - timedelta(days=40)))
+    assert _reel_pick(bot, "coupang:q", "상품", 15900, no=5).info.own_was is None
+
+
+def _bg(img: Image.Image, box: tuple[int, int, int, int]) -> int:
+    """box 안의 색 수 (1 이면 배경만)."""
+    return len(img.crop(box).getcolors(1_000_000) or [])
+
+
+def test_reel_frames_keep_text_inside_the_instagram_safe_zones(bot) -> None:  # type: ignore[no-untyped-def]
+    """1080×1920 릴스: 위 250px·아래 420px 는 인스타 단추·본문이 덮는다 — 고지 띠와 글이 모두 그 사이에 있고, 고지는 모든 장에서
+    위 안전 영역 바로 아래에 보인다."""
+    from dealbot.media import card_slides
+
+    local = DAY.replace(hour=12, minute=20)
+    _observe(bot, "coupang:o", 19900, at(9, day=DAY - timedelta(days=5)))
+    long = "[1+1] 크리넥스 3겹 데코앤소프트 화이트 천연펄프 두루마리 화장지 30m 30롤 x 2팩 (총 60롤) 대용량 생활필수품 특가"
+    picks = [_reel_pick(bot, "coupang:o", long, 15900, market=22900, no=12),
+             _reel_pick(bot, "coupang:m", long, 1299000, market=1590000, no=13),
+             _reel_pick(bot, "coupang:p", "삼다수 2L 12병", 9980, no=14)]
+    picks[0].photo = _jpeg()
+    plain = bot.ig.reel_specs(picks[1:], local)  # 첫 장: 시중가 비교만 (취소선 없음)
+    struck = bot.ig.reel_specs(picks, local)  # 첫 장: 우리 기록의 바로 앞 가격 (취소선)
+    assert struck[0].was and not plain[0].was
+    for spec in [*struck, plain[0]]:
+        img = card_slides.render(bot.card, spec)
+        assert img.size == (1080, 1920)
+        assert _bg(img, (0, 0, 1080, 250)) == 1, spec.kind  # 위 안전 영역: 아무것도 안 그림
+        assert _bg(img, (0, 1500, 1080, 1920)) == 1, spec.kind  # 아래 안전 영역
+        assert _bg(img, (0, 250, 1080, 340)) > 1, spec.kind  # 고지 띠: 위 안전 영역 바로 아래
+        assert spec.ad.startswith("광고 · ")
+
+
+def test_unit_lists_keep_one_unit_per_list() -> None:
+    """휴지 1롤당과 물티슈 1매당(또는 액체 세제 100mL당과 가루 세제 100g당)을 한 목록에 세우지 않는다 — 한 장엔 한 단위."""
+    from dealbot.publisher.insta_style import UnitRow
+
+    def row(kind: str, label: str, value: int, title: str = "휴지·물티슈") -> UnitRow:
+        return UnitRow(title=title, kind=kind, label=label, value=value, name=f"{kind} {value}", price=value * 30, deal_no=None)
+
+    rows = [row("휴지", "1롤당", 530), row("물티슈", "1매당", 14), row("휴지", "1롤당", 430), row("물티슈", "1매당", 12),
+            row("액체 세제", "100mL당", 367, "세제"), row("가루 세제", "100g당", 210, "세제"), row("기저귀", "1매당", 418, "기저귀")]
+    lists = insta_style.unit_lists(rows, 4)
+    assert list(lists) == ["물티슈 1매당", "휴지 1롤당", "액체 세제 100mL당", "가루 세제 100g당", "기저귀 1매당"]
+    for name, got in lists.items():
+        assert {insta_style.unit_list_name(r.kind, r.label) for r in got} == {name}
+    assert [r.value for r in lists["휴지 1롤당"]] == [430, 530]  # 낮은 순
+    assert len(insta_style.unit_lists(rows * 3, 4)["휴지 1롤당"]) == 4
+
+
+def test_unit_slides_show_a_baseline_only_with_three_deals_of_that_unit(bot) -> None:  # type: ignore[no-untyped-def]
+    from dealbot.media import card_slides
+    from dealbot.publisher.insta_style import UnitRow
+
+    def row(kind: str, label: str, value: int, no: int) -> UnitRow:
+        return UnitRow(title="휴지·물티슈", kind=kind, label=label, value=value, name=f"상품 {no}", price=15900, deal_no=no,
+                       posted=at(9), product_id=f"coupang:{no}")
+
+    local = DAY.replace(hour=19)
+    week = insta_style.unit_lists([row("휴지", "1롤당", 530, 1), row("물티슈", "1매당", 14, 2)], 4)
+    specs = bot.ig.unit_specs(week, [("휴지", "1롤당", 480, 3)], [], local, local - timedelta(days=7))
+    assert [s.kind for s in specs] == ["cover", "list", "list"]  # 기준선만 모은 섞인 장은 없음
+    wipes, tissue = specs[1], specs[2]
+    assert wipes.title == "물티슈 1매당 가격" and wipes.rows == []  # 물티슈 기준선 없음 (3건 미만 → 줄 자체를 뺌)
+    assert tissue.title == "휴지 1롤당 가격" and tissue.rows[0] == ("사도 되는 기준선", "1롤당 480원")
+    assert "3건" in tissue.rows[1][1]
+    assert all(s.ad.startswith("광고 · ") for s in specs)
+    for s in specs:
+        assert card_slides.render(bot.card, s).size == (1080, 1350)
+
+
 def test_reel_timing_and_command() -> None:
     for n in (2, 3, 4):
         lengths = reel.durations(n)
@@ -532,20 +647,29 @@ async def test_weekly_unit_price_carousel_uses_only_our_recorded_prices(bot, clo
         when = at(9, i, day=DAY - timedelta(days=1))
         history(pid, name, price, n, when)
         published(bot, pid, name, price, when=when)
-    old = at(9, day=DAY - timedelta(days=12))  # 지난달 딜: 기준선에만
-    history("coupang:t0", "깨끗한나라 화장지 27m 30롤", 12900, 3, old)
-    published(bot, "coupang:t0", "깨끗한나라 화장지 27m 30롤", 12900, when=old)
+    for pid, name, price, days in (("coupang:t0", "깨끗한나라 화장지 27m 30롤", 12900, 12),  # 지난 딜: 기준선에만
+                                   ("coupang:t9", "잘풀리는집 화장지 30m 30롤", 14400, 20)):
+        old = at(9, day=DAY - timedelta(days=days))
+        history(pid, name, price, 3, old)
+        published(bot, pid, name, price, when=old)
     done = await tick(bot, clock, at(19, 6))
     assert done == "unit: posted 4242 (3 deals)"
     creates = [r for r in seen if r.url.path == "/v25.0/UID/media"]
-    assert len(creates) == 5  # 표지 + 휴지·물티슈 + 생수 + 기준선 (+ 캐러셀)
+    assert len(creates) == 5  # 표지 + 물티슈 1매당 + 휴지 1롤당 + 생수 100mL당 (+ 캐러셀) — 한 장엔 한 단위만
+    alts = [r.url.params["alt_text"] for r in creates[1:-1]]
+    assert alts[0].startswith("물티슈 1매당 가격 — ") and "롤" not in alts[0] and "기준선" not in alts[0]  # 물티슈 딜 1건: 기준선 없음
+    assert alts[1].startswith("휴지 1롤당 가격 — ") and "물티슈" not in alts[1] and alts[1].endswith("사도 되는 기준선 1롤당 480원")
+    assert alts[2].startswith("생수 100mL당 가격 — ") and "기준선" not in alts[2]
     caption = creates[-1].url.params["caption"]
     lines = caption.splitlines()
     assert lines[0] == "광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다" and lines[1].startswith("이번 주 생필품 1개당 가격")
     assert any(ln.endswith("크리넥스 3겹 30m 30롤 15,900원 → 휴지 1롤당 530원") for ln in lines)
     assert any(ln.endswith("삼다수 2L 12병 9,980원 → 생수 100mL당 42원") for ln in lines)
     assert "아이시스" not in caption and "샴푸" not in caption and "깨끗한나라" not in caption  # 이번 주 목록엔 없음
-    assert "· 휴지 1롤당 480원 (딜 2건)" in lines  # 기준선: 530·430 의 가운데 값 (우리가 기록한 딜만)
+    assert "[휴지 1롤당]" in lines and "[물티슈 1매당]" in lines and "[휴지·물티슈]" not in lines  # 단위마다 따로
+    # 기준선: 휴지 530·430·480 의 가운데 값 (우리가 기록한 딜 3건). 물티슈·생수는 1건뿐이라 기준선 줄이 없다
+    assert "사도 되는 기준선: 휴지 1롤당 480원 (최근 우리가 올린 딜 3건의 가운데 값)" in lines
+    assert sum("기준선" in ln for ln in lines) == 1
     assert "최저가" not in caption and "역대" not in caption
     assert bot.db.kv_get(f"ig_done:unit:{DAY.date().isoformat()}").startswith("posted")
 
@@ -575,6 +699,7 @@ def test_unit_kinds_read_units_from_names() -> None:
     assert kind("도브 샴푸 680ml 2개", 15900) is None
     assert kind("코디 키친타월 3겹 150매 6롤", 9900) is None  # 키친타월은 휴지가 아님
     assert insta_style.baseline([530]) is None and insta_style.baseline([530, 430, 610]) == 530
+    assert insta_style.baseline([530, 430]) is None  # 2건의 가운데 값은 기준선으로 안 씀 (3건 이상)
 
 
 # ---------------------------------------------------------------- 올리기 전 검사

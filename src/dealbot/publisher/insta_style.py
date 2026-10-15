@@ -342,9 +342,33 @@ class UnitRow:
     product_id: str = ""
 
 
+BASELINE_MIN_DEALS = 3  # 기준선은 그 단위의 우리가 올린 딜이 이만큼 있을 때만 (2건의 가운데 값은 두 값의 평균일 뿐)
+
+
+def unit_lists(rows: Iterable[UnitRow], limit: int) -> dict[str, list[UnitRow]]:
+    """단가 줄을 단위 목록으로: '휴지 1롤당'·'물티슈 1매당'·'액체 세제 100mL당'… 마다 1개당 가격 낮은 순 limit 개.
+    목록 하나엔 한 단위만 — 휴지 1롤당과 물티슈 1매당처럼 단위가 다른 값을 한 줄에 세우지 않는다. 순서는 UNIT_GROUPS 대로."""
+    rows = list(rows)
+    out: dict[str, list[UnitRow]] = {}
+    for title, kinds in UNIT_GROUPS:
+        for kind in kinds:
+            name = unit_list_name(kind.name, kind.label)
+            if name in out:  # 이름·단위가 같은 종류 (기저귀 1매당·1개당 → 1매당) 는 한 목록
+                continue
+            got = sorted((r for r in rows if r.title == title and r.kind == kind.name and r.label == kind.label), key=lambda r: r.value)
+            if got:
+                out[name] = got[:limit]
+    return out
+
+
 def baseline(values: Sequence[int]) -> int | None:
-    """기준선 = 우리가 올린 딜의 1개당 가격 가운데 값 (2건 이상일 때만)."""
-    return round(statistics.median(values)) if len(values) >= 2 else None
+    """기준선 = 우리가 올린 딜의 1개당 가격 가운데 값 (한 단위 종류에서 BASELINE_MIN_DEALS 건 이상일 때만)."""
+    return round(statistics.median(values)) if len(values) >= BASELINE_MIN_DEALS else None
+
+
+def unit_list_name(kind: str, label: str) -> str:
+    """단가 목록 하나의 이름 '휴지 1롤당' — 목록 하나엔 한 단위만 (휴지 1롤당과 물티슈 1매당을 한 줄 세우지 않는다)."""
+    return f"{kind} {label}"
 
 
 UNIT_FIND = "구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로"
@@ -353,7 +377,9 @@ UNIT_FIND_OLD = "구매 링크: #번호 딜은 프로필 링크 → 핫딜 페�
 
 def unit_caption(rows_by_title: dict[str, list[UnitRow]], baselines: list[tuple[str, str, int, int]], deals: Sequence[Deal],
                  registry: Any, *, since: datetime, until: datetime) -> str:
-    """단가표 본문: 첫 줄 고지, 제목(기간), 종류마다 낮은 순, 기준선, 몰 고지 원문, 해시태그."""
+    """단가표 본문: 첫 줄 고지, 제목(기간), 단위 목록마다('휴지 1롤당' — 한 목록엔 한 단위) 낮은 순과 그 단위의 기준선(있으면),
+    몰 고지 원문, 해시태그. rows_by_title: 목록 이름(unit_list_name) → 줄."""
+    base = {unit_list_name(kind, label): (value, n) for kind, label, value, n in baselines}
     lines = [
         ad_line(deal_disclosure(registry.get(d.product.shop), d.product.extra) for d in deals),
         f"이번 주 생필품 1개당 가격 ({since:%m/%d}~{until:%m/%d} 우리가 올린 딜, 우리가 기록한 가격 기준)",
@@ -365,10 +391,9 @@ def unit_caption(rows_by_title: dict[str, list[UnitRow]], baselines: list[tuple[
             head = f"#{r.deal_no} " if r.deal_no else "· "
             tail = "" if r.deal_no else " (지난 딜)"
             lines.append(f"{head}{r.name} {r.price:,}원 → {r.kind} {r.label} {r.value:,}원{tail}")
-        lines.append("")
-    if baselines:
-        lines.append("이 가격 밑이면 사도 되는 기준선 (최근 우리가 올린 딜의 가운데 값)")
-        lines += [f"· {kind} {label} {value:,}원 (딜 {n}건)" for kind, label, value, n in baselines]
+        if title in base:
+            value, n = base[title]
+            lines.append(f"사도 되는 기준선: {title} {value:,}원 (최근 우리가 올린 딜 {n}건의 가운데 값)")
         lines.append("")
     old = any(r.deal_no is None for rows in rows_by_title.values() for r in rows)
     find = ("구매 링크: 프로필 링크 → 핫딜 페이지에서 #번호로 찾아 주세요 (번호 없는 지난 딜은 핫딜 페이지에서 내려갔어요)" if old

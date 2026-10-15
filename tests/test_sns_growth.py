@@ -781,10 +781,14 @@ async def test_blog_export_and_threads_cards_use_a_channel_neutral_footer(bot, m
     assert bot.fake.posts()[-1]["media_type"] == "IMAGE"
     th = specs[-1]
     assert th.footer == NEUTRAL_CTA and not any("프로필" in t for t in th.texts()) and th.ad.startswith("광고 · ")
+    # 스레드 글자 카드 위 띠엔 고지만 — 핫딜 페이지 번호 '#5' 는 안 그림 (스레드 독자는 본문의 링크로 감)
+    assert th.tag == "" and not any(t.startswith("#") for t in th.texts())
+    await bot.make_card(_deal("coupang:th2"), None, deal_no=6, text_card=True, cta=NEUTRAL_CTA)  # 번호를 넘겨도 채널 중립 카드엔 없음
+    assert specs[-1].tag == "" and specs[-1].ad.startswith("광고 · ")
     await bot.make_card(_deal("coupang:ig"), None, deal_no=7)  # 인스타 카드
-    assert specs[-1].footer == "구매 링크: 프로필 링크 → 핫딜 페이지 #7"
+    assert specs[-1].footer == "구매 링크: 프로필 링크 → 핫딜 페이지 #7" and specs[-1].tag == "#7"
     paths = {p.name for p in (bot.settings.data_dir / "media").glob("*.jpg")}
-    assert len(paths) == 2  # 스레드·인스타 카드는 파일도 따로 (같은 상품이어도 덮어쓰지 않음)
+    assert len(paths) == 3  # 스레드·인스타 카드는 파일도 따로 (같은 상품이어도 덮어쓰지 않음)
 
 
 def test_current_layout_card_takes_the_neutral_footer(tmp_path: Path) -> None:

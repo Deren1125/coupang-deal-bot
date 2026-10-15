@@ -212,8 +212,9 @@ class ThreadsFlow:
         card_url = None
         if not job.payload.get("has_photo") or not p.image_url:
             # 확인된 상품 사진이 없는 딜: 글만 올리지 않고 봇이 만든 4:5 글자 카드 (상품명·가격 같은 사실만, 주인 결정 10/15)
-            # 바닥 안내는 채널 중립 — 스레드 본문에 구매 링크가 있어 인스타용 '프로필 링크 → 핫딜 페이지' 는 맞지 않음
-            card_url = await bot.make_card(deal, None, deal_no=bot._page_deal_no(job.queue_id), text_card=True, cta=NEUTRAL_CTA)
+            # 바닥 안내는 채널 중립 — 스레드 본문에 구매 링크가 있어 인스타용 '프로필 링크 → 핫딜 페이지' 는 맞지 않음.
+            # 같은 까닭으로 위 띠에 핫딜 페이지 번호 '#N' 도 안 그린다 (번호를 안 넘김). 고지 띠는 그대로
+            card_url = await bot.make_card(deal, None, text_card=True, cta=NEUTRAL_CTA)
         return await bot.threads.publish(deal, fallback_image_url=card_url, topic_tag=topic_tag(self.cfg, p))
 
     async def _post_poll(self, job: ThreadsJob, now: datetime) -> PublishResult:
