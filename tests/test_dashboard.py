@@ -588,7 +588,7 @@ def test_blog_cards_link_to_the_owners_own_naver_stats_and_keep_day_over_day_del
         # 링크·안내는 숫자 칸 바로 밑 (그래프보다 위)
         assert card.index('<div class="stats">') < card.index('<div class="links">') < card.index('class="stats-note"') \
             < card.index('<svg class="spark"')
-        assert ('<p class="stats-note">이웃·방문자는 네이버가 봇 접근을 막아 자동으로 못 읽어요 — 통계 열기로 바로 확인</p>'
+        assert ('<p class="stats-note">이웃·방문자는 직접 넣은 값이에요 — 지금 숫자는 통계 열기로 확인</p>'
                 in card)
         for other in set(BLOG_IDS.values()) - {blog_id}:
             assert other not in card  # 카드마다 자기 블로그만
@@ -605,7 +605,7 @@ def test_blog_cards_link_to_the_owners_own_naver_stats_and_keep_day_over_day_del
     blog = next(c for c in data["cards"] if c["key"] == "blog_hotdeal")
     assert blog["links"] == [{"label": "네이버 통계 열기", "url": "https://admin.blog.naver.com/demiyum/stat/today"},
                              {"label": "내 블로그", "url": "https://m.blog.naver.com/demiyum"}]
-    assert blog["stats_note"].startswith("이웃·방문자는 네이버가 봇 접근을 막아")
+    assert blog["stats_note"].startswith("이웃·방문자는 직접 넣은 값이에요")
     # 실제 config.yaml 의 세 블로그 카드도 그 블로그 아이디로
     real = make_dash(db, tmp_path)
     real_page = real.page_html()
@@ -639,10 +639,10 @@ def test_blog_stats_link_is_configurable_but_only_safe_https(db: Database, tmp_p
     assert 'href="https://example.com/s/derenlog?x=1&amp;y=2" target="_blank" rel="noopener noreferrer"' in b1
     # 이상한 blog_id → 링크 없음 (안내 한 줄)
     assert '<div class="links">' not in b2 and "<a class=\"ext" not in b2 and "options.blog_id 는 영문·숫자·_- 만" in b2
-    assert "통계 열기로 바로 확인" not in b2 and "자동으로 못 읽어요" in b2
+    assert "통계 열기로 확인" not in b2 and "직접 넣은 값이에요" in b2
     # https 가 아닌 통계 주소 → 통계 링크만 빠지고 내 블로그는 남음
     assert "javascript:" not in b3 and "네이버 통계 열기" not in b3 and 'href="https://m.blog.naver.com/demiyum"' in b3
-    assert "options.stats_url 은 https 주소여야 해요" in b3
+    assert "options.stats_url 을 못 써요 — https 주소" in b3
     # blog_id 가 없으면 링크도 안내도 없음 (Blog-Auto 이름만 쓰는 카드)
     assert "<a class=\"ext" not in b4 and "options.blog_id" not in b4 and "options.stats_url" not in b4
     # 렌더러도 https 가 아닌 주소는 그리지 않는다 (소스를 거치지 않은 값이어도)

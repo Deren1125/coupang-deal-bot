@@ -131,7 +131,7 @@ class CardView:
     fetch_status: str | None = None
     summary: dict[str, float] = field(default_factory=dict)  # 맨 위 요약 줄에 더할 값
     links: list[CardLink] = field(default_factory=list)  # 숫자 칸 바로 밑 링크 (네이버 통계 열기 등)
-    stats_note: str = ""  # 숫자 칸 밑 회색 작은 안내 (자동으로 못 읽는 까닭 등)
+    stats_note: str = ""  # 숫자 칸 밑 회색 작은 안내 (숫자가 어디서 왔는지 등)
 
     @property
     def status(self) -> str:

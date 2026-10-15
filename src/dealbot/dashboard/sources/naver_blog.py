@@ -43,7 +43,7 @@ AUTO_METRICS = ("posts_today", "posts_total", "drafts_today", "neighbor_req_toda
 STATS_URL = "https://admin.blog.naver.com/{blog_id}/stat/today"
 BLOG_URL = "https://m.blog.naver.com/{blog_id}"
 BLOG_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
-STATS_NOTE = "이웃·방문자는 네이버가 봇 접근을 막아 자동으로 못 읽어요"
+STATS_NOTE = "이웃·방문자는 직접 넣은 값이에요"
 
 
 def owner_url(template: Any, blog_id: str) -> str | None:
@@ -116,7 +116,7 @@ class NaverBlogSource(Source):
         if stats:
             links.append(CardLink("네이버 통계 열기", stats, primary=True))
         else:
-            hints.append("options.stats_url 은 https 주소여야 해요 (통계 열기 링크를 숨김)")
+            hints.append("options.stats_url 을 못 써요 — https 주소, 공백·따옴표·괄호 없이 (통계 열기 링크를 숨김)")
         if blog := owner_url(BLOG_URL, blog_id):
             links.append(CardLink("내 블로그", blog))
         return links, hints
@@ -180,7 +180,7 @@ class NaverBlogSource(Source):
         return self.view(
             data, stats=[neighbors, visitors],
             links=links, hints=link_hints,
-            stats_note=STATS_NOTE + (" — 통계 열기로 바로 확인" if has_stats else ""),
+            stats_note=STATS_NOTE + (" — 지금 숫자는 통계 열기로 확인" if has_stats else ""),
             # 방문자는 날마다 오르내려 '7일 평균'(애드포스트 기준과 같은 셈)으로, 이웃 수는 쌓이는 수라 그대로
             spark=data.rolling("visitors", 7, how="avg") if use_visitors else data.series("neighbors"),
             spark_label="방문자 7일 평균" if use_visitors else "이웃 수", rows=rows, activity=activity,

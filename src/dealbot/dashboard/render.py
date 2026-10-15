@@ -92,7 +92,7 @@ padding:4px 10px;min-height:28px;text-decoration:none;background:#fff;white-spac
 .delta.up{color:var(--green)}.delta.down{color:#d93025}.delta.flat{color:var(--muted)}
 .spark{display:block;width:100%;max-width:240px;height:46px;margin:14px auto 4px}
 .links{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin:10px 0 0}
-.ext{color:var(--sub);font-size:12px;text-decoration:none;white-space:nowrap;padding:4px 0}
+.ext{color:var(--sub);font-size:12px;text-decoration:none;white-space:nowrap;padding:10px 4px}
 .ext:hover{text-decoration:underline}
 .ext.primary{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:38px;padding:7px 14px;
 border-radius:8px;background:#eef0ff;border:1px solid #dcdffc;color:#3f35a8;font-size:13px;font-weight:600}
