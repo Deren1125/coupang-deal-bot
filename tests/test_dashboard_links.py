@@ -22,7 +22,7 @@ from dealbot.dashboard.service import LINK_BODY_MAX, LINK_RATE, SECURITY_HEADERS
 from dealbot.dashboard.sources import SourceContext
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.shops import find_urls
-from dealbot.storage.db import LINK_WAITING, Database
+from dealbot.storage.db import LINK_WAITING, Database, QueueItem
 from dealbot.web import WebServer
 
 NOW = datetime(2026, 10, 14, 9, 5, tzinfo=UTC)  # 한국시간 18:05
@@ -51,15 +51,19 @@ class Clock:
 
 
 class Desk:
-    """봇(app.DealBot) 대신: 거르기는 진짜 DealBot._link_problem, 붙이기는 DB 에 직접 (호출을 센다)."""
+    """봇(app.DealBot) 대신: 거르기는 진짜 DealBot._link_problem, 붙이기는 DB 에 직접 (호출을 센다).
+    붙일 글은 그 번호의 글 그대로 (자리를 내준 글을 여는 길은 진짜 DealBot 으로 보는 테스트에서)."""
 
     def __init__(self, db: Database) -> None:
         self.db = db
         self.calls: list[tuple[int, str]] = []
         self.refreshed = 0
 
+    def owner_link_target(self, queue_id: int) -> QueueItem | None:
+        return self.db.get_queue_item(queue_id)
+
     def owner_link_problem(self, queue_id: int, url: str) -> str | None:
-        return DealBot._link_problem(self.db.get_queue_item(queue_id), queue_id, url)
+        return DealBot._link_problem(self.db.get_queue_item(queue_id), queue_id, url, link_ttl=timedelta(hours=24))
 
     async def attach_link(self, queue_id: int, url: str) -> str:
         self.calls.append((queue_id, url))
@@ -375,7 +379,7 @@ async def test_link_post_uses_the_same_guard_as_the_telegram_reply(settings: Set
         assert (await post("x" * 2001 + " https://naver.me/a"))[1].startswith("/dashboard?msg=link_bad")
         assert calls == [] and bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
         # 거르는 함수가 정말 같은 것인지: _link_problem 이 막으면 좋은 링크도 막힘
-        monkeypatch.setattr(DealBot, "_link_problem", classmethod(lambda cls, item, q, url: "막힘"))
+        monkeypatch.setattr(DealBot, "_link_problem", classmethod(lambda cls, item, q, url, **_kw: "막힘"))
         assert (await post("https://naver.me/good"))[1].startswith("/dashboard?msg=link_bad")
         assert calls == []
         monkeypatch.undo()

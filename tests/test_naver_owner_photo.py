@@ -610,3 +610,15 @@ async def test_long_caption_keeps_the_owner_photo_as_the_preview(bot, settings: 
     os.utime(copy, (past, past))
     bot.maintenance()
     assert not copy.exists()
+
+
+async def test_photo_with_a_link_for_a_replaced_naver_deal_is_kept(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
+    """두 갈래를 합친 뒤 (링크 대기 교체 + 주인 사진): 더 좋은 딜에 자리를 내준 네이버 딜에 유효 시간 안에 링크와 사진을 같이
+    보내면, 사진을 검사한 뒤 다시 읽을 때도 '자리를 내준 글'로 보고 받아야 한다 (DB 엔 skipped 로 남아 있음)."""
+    qid = _waiting(bot)
+    bot.db.update_queue_item(qid, status="skipped", error="replaced by #99 (score 1→9)")
+    reply = await bot.attach_link(qid, LINK, photo=_jpeg(900, 900))
+    assert f"상품 링크 완료 #{qid}" in reply and "📸 상품 사진도 받았어요" in reply
+    item = bot.db.get_queue_item(qid)
+    assert item.status == "pending" and item.deal.affiliate_url == LINK and item.deal.product.extra["owner_photo"]["file"]
+    assert len(_owner_files(settings)) == 1

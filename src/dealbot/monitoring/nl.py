@@ -39,7 +39,11 @@ TEXT_CAP = 1500
 REPLY_CAP = 600
 # AI 에게 보여 줄 후보 딜 수: 답장·적은 번호 → 방금 올린 글 → 링크·확인을 기다리는 글 모두(링크 15칸 + 확인 6칸, 주인 결정 10/15)
 # → 대기 글 10개가 다 들어가게. 15 였을 땐 링크 15칸이 차면 새 링크 요청·방금 올린 글·대기 글이 빠져 엉뚱한 딜을 골랐다 (리뷰 10/15)
+# 기다리는 글을 읽는 수는 설정의 두 자리 수를 합친 것 + AWAITING_MARGIN 과 이것 중 큰 값 (자리를 늘려도 다시 잘리지 않게 — NLRouter.awaiting_limit)
 MAX_CANDIDATES = 40
+AWAITING_MARGIN = 5  # 자리 수보다 조금 더 (자리를 줄인 직후처럼 잠깐 자리보다 많이 기다리는 때)
+PENDING_CANDIDATES = 10  # 차례를 기다리는 글
+OTHER_CANDIDATES = 5  # 답장 대상·적은 번호·방금 올린 글
 MAX_BUTTONS = 5
 MAX_ALSO = 3
 ASK_GRACE = 5  # AI 호출 상한 = timeout_seconds + 이만큼 (API 는 시간 초과 뒤 한 번 더 시도해서 더 걸릴 수 있음)
@@ -347,6 +351,7 @@ class NLRouter:
         collectors: Callable[[], list[str]] | None = None,
         paused: Callable[[], bool] | None = None,
         tz: str = "Asia/Seoul",
+        publish: Any | None = None,
     ) -> None:
         self.cfg = cfg
         self.db = db
@@ -358,6 +363,7 @@ class NLRouter:
         self.collectors = collectors or (lambda: [])
         self.paused = paused or (lambda: False)
         self.tz = tz
+        self.publish = publish  # PublishConfig — 링크·확인 요청 자리 수 (max_awaiting_links·max_awaiting_reviews, 지금 값을 그때그때 읽음)
         self.bot_id: int | None = None  # 이 봇의 텔레그램 id (켜질 때 get_me 로). 모르면 봇 계정이면 모두 이 봇으로 봄
         self._recent: deque[float] = deque()
         self._groups: dict[str, dict[str, Any]] = {}
@@ -428,11 +434,20 @@ class NLRouter:
                 out.append(n)
         return out
 
+    def awaiting_limit(self) -> int:
+        """링크·확인을 기다리는 글을 몇 개까지 후보로 읽을지: max(MAX_CANDIDATES, 링크 자리 + 확인 자리 + AWAITING_MARGIN).
+        자리 수(publish.max_awaiting_links·max_awaiting_reviews)를 나중에 늘려도 새 링크 요청이 다시 잘리지 않게 (리뷰 10/15).
+        0(제한 없음)이나 설정이 없으면 MAX_CANDIDATES."""
+        slots = sum(max(0, int(getattr(self.publish, k, 0) or 0)) for k in ("max_awaiting_links", "max_awaiting_reviews"))
+        return max(MAX_CANDIDATES, slots + AWAITING_MARGIN)
+
     def candidates(self, text: str, ref: Ref) -> dict[int, QueueItem]:
         items: dict[int, QueueItem] = {}
+        waiting = self.awaiting_limit()
+        cap = waiting + PENDING_CANDIDATES + OTHER_CANDIDATES
 
         def add(it: QueueItem | None) -> None:
-            if it is not None and it.id not in items and len(items) < MAX_CANDIDATES:
+            if it is not None and it.id not in items and len(items) < cap:
                 items[it.id] = it
 
         if ref.queue_id:
@@ -440,9 +455,9 @@ class NLRouter:
         for n in self.typed_ids(text):
             add(self.db.get_queue_item(n))
         add(self.db.last_published_item())  # '방금 올린 거 품절이야' — 기다리는 글이 아무리 많아도 빠지지 않게 먼저
-        for it in self.db.awaiting_items(MAX_CANDIDATES, statuses=("awaiting_link", "awaiting_approval")):
+        for it in self.db.awaiting_items(waiting, statuses=("awaiting_link", "awaiting_approval")):
             add(it)
-        for it in self.db.pending_items(10):
+        for it in self.db.pending_items(PENDING_CANDIDATES):
             add(it)
         return items
 
@@ -601,7 +616,9 @@ class NLRouter:
         ids = [c for c in (data.get("candidates") or []) if isinstance(c, int) and c in cands]
         if not ids:
             if act.cmd.name == "/link":
-                waiting = [it for it in cands.values() if it.status == "awaiting_link"]
+                # 새 링크 요청부터 (버튼은 MAX_BUTTONS 개뿐 — 링크 15칸이 차 있어도 방금 온 링크 요청이 잘리지 않게, 리뷰 10/15)
+                waiting = sorted((it for it in cands.values() if it.status == "awaiting_link"),
+                                 key=lambda it: (it.created_at, it.id), reverse=True)
                 shop = self.shop_of(act.args) if act.args else None
                 same = [it for it in waiting if shop and it.deal.product.shop == shop]
                 ids = [it.id for it in (same or waiting)]

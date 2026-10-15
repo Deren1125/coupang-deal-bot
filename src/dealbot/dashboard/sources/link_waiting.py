@@ -2,6 +2,8 @@
 
 봇 DB 만 본다. 목록은 링크 요청 카톡·텔레그램 링크 요청·고정 공지(/pending)와 **같은 묶음** — db.awaiting_items() 의 기본
 상태 묶음 LINK_WAITING ('awaiting_link'). 새것부터 최대 SHOW 개 + 모두 몇 개인지.
+진짜 기다리는 글만 — 링크 요청 자리가 차서 더 좋은 딜에 자리를 내준 글(skipped / replaced by)은 /pending 처럼 빠진다.
+그래도 화면을 연 뒤 자리를 내준 글의 '링크 넣기' 칸은 텔레그램 답장처럼 받는다 (service.Dashboard.attach_owner_link → DealBot.owner_link_target).
 줄마다 상품명·가격·딜 점수·기다린 시간, '상품 열기 ↗'(그 상품 페이지 — https 만, 주인 브라우저가 새 탭으로 엶) 와
 '링크 넣기' 칸 (POST /dashboard/link → 텔레그램 답장과 같은 attach_link, service.Dashboard.attach_owner_link).
 """

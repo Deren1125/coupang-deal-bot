@@ -165,6 +165,12 @@ class QueueItem:
     last_error: str | None
     created_at: datetime
 
+    @property
+    def link_replaced(self) -> bool:
+        """링크 요청 자리가 다 차서 더 좋은 딜에 자리를 내준 글 (skipped / 'replaced by …'). LINK_WAITING 이 아니라
+        링크 요청 목록(/pending·고정 공지·대시보드 카드)에는 없지만, 유효 시간 안이면 주인 링크는 받는다 (app.DealBot._replaced_target)."""
+        return self.status == "skipped" and (self.last_error or "").startswith(REPLACED)
+
 
 @dataclass(slots=True)
 class RunRecord:

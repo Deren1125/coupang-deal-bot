@@ -44,7 +44,7 @@ from dealbot.dashboard.model import (
 from dealbot.dashboard.sources import CardData, Source, SourceContext, load_all
 from dealbot.dashboard.sources.link_waiting import LinkWaitingSource
 from dealbot.shops import find_urls
-from dealbot.storage.db import LINK_WAITING
+from dealbot.storage.db import LINK_WAITING, QueueItem
 from dealbot.utils.timeutil import from_iso, to_iso
 from dealbot.web import Throttled, WebServer, page
 
@@ -90,6 +90,13 @@ NOTICES: dict[str, tuple[str, str]] = {
     "not_manual": ("이 카드는 직접 넣는 값이 없어요.", "bad"),
     # '링크 넣기' ({qid} 는 주소의 q 가 숫자일 때만 '#12 ', 아니면 빈칸 — 넣은 링크 글자는 화면에 다시 보이지 않음)
     "linked": ("{qid}링크를 넣었어요 — 올릴 차례가 되면 채널에 올라가요.", "ok"),
+    # 화면을 연 뒤 더 좋은 딜에 자리를 내준 글 (텔레그램 답장과 같은 길 — 주인 결정 10/15)
+    "linked_twin": ("{qid}같은 상품이 새 번호로 다시 줄 서 있어 그 딜에 링크를 넣었어요 (텔레그램에 새 번호를 알렸어요) — "
+                    "올릴 차례가 되면 채널에 올라가요.", "ok"),
+    "link_replaced_late": ("{qid}더 좋은 딜에 자리를 내준 뒤 링크 유효 시간이 지나 넣지 않았어요 — "
+                           "아직 싸게 팔고 있으면 텔레그램에서 /post 로 직접 올려 주세요.", "bad"),
+    "link_twin_review": ("{qid}같은 상품이 새 번호로 다시 줄 섰는데 확인(/ok)을 기다리는 글이라 링크를 넣지 않았어요 — "
+                         "텔레그램에서 /ok 나 /skip 으로 답해 주세요.", "bad"),
     "link_not_waiting": ("{qid}지금은 링크를 기다리는 딜이 아니에요 (이미 넣었거나 내려간 딜) — 아무것도 바꾸지 않았어요.", "bad"),
     "link_bad": ("{qid}이 링크는 붙일 수 없어요 — 그 몰 앱에서 만든 상품·제휴 링크(https://…)를 넣어 주세요. "
                  "텔레그램 주소(t.me)는 안 돼요.", "bad"),
@@ -101,6 +108,8 @@ NOTICES: dict[str, tuple[str, str]] = {
 
 class LinkDesk(Protocol):
     """'링크 넣기' 가 부르는 봇 쪽 (app.DealBot). 텔레그램 링크 요청에 답장했을 때와 같은 함수들."""
+
+    def owner_link_target(self, queue_id: int) -> QueueItem | None: ...
 
     def owner_link_problem(self, queue_id: int, url: str) -> str | None: ...
 
@@ -366,15 +375,28 @@ class Dashboard:
         return True
 
     async def attach_owner_link(self, queue_id: int, text: str) -> str:
-        """'링크 넣기' 결과 코드 (linked|link_not_waiting|link_bad|link_failed|link_off).
-        텔레그램 링크 요청에 링크로 답장했을 때와 같은 길: 글에서 주소 찾기(shops.find_urls 의 첫 주소) →
-        attach_link 와 같은 기준(DealBot.owner_link_problem = _link_problem)으로 거르기 → attach_link 한 번 → 고정 공지 고치기.
-        지금 링크를 기다리는 글(LINK_WAITING)이 아니면 아무것도 부르지 않는다 (두 번 눌러도 한 번만 붙음)."""
+        """'링크 넣기' 결과 코드 (linked|linked_twin|link_not_waiting|link_replaced_late|link_twin_review|link_bad|link_failed|link_off).
+        텔레그램 링크 요청에 링크로 답장했을 때와 같은 길: 링크를 붙일 글 찾기(DealBot.owner_link_target — 화면을 연 뒤 더 좋은
+        딜에 자리를 내준 글도 attach_link 와 같은 _replaced_target 으로: 유효 시간 안이면 받고, 같은 상품이 다시 줄 섰으면 그 글로,
+        지났으면 그 이유) → 글에서 주소 찾기(shops.find_urls 의 첫 주소) → attach_link 와 같은 기준(DealBot.owner_link_problem)
+        으로 거르기 → attach_link 한 번 → 고정 공지 고치기.
+        링크를 기다리는 글(LINK_WAITING·유효 시간 안의 자리를 내준 글)이 아니거나 이미 링크가 붙은 글이면 아무것도 부르지 않는다
+        (두 번 눌러도 한 번만 붙음)."""
         if self.links is None:
             return "link_off"
         item = self.db.get_queue_item(queue_id)
-        if item is None or item.status not in LINK_WAITING:
+        target = self.links.owner_link_target(queue_id) if item is not None else None
+        if item is None or target is None:
             return "link_not_waiting"
+        moved = target.id != queue_id  # 자리를 내준 글 → 다시 줄 선 같은 상품 글 (텔레그램 답장도 그 글로 받음)
+        if moved:
+            if target.status == "awaiting_approval":
+                return "link_twin_review"
+            if target.deal.affiliate_url:
+                return "link_not_waiting"  # 그 글엔 이미 링크가 있음 (한 번 넣은 뒤 같은 칸을 또 누름)
+        elif target.status not in LINK_WAITING:
+            # 유효 시간 안의 자리를 내준 글은 target 이 링크를 기다리는 글처럼 열려 여기 오지 않는다 — 지났으면 그 이유를
+            return "link_replaced_late" if target.link_replaced else "link_not_waiting"
         if len(text) > LINK_TEXT_MAX:
             return "link_bad"
         urls = find_urls(text)
@@ -384,13 +406,16 @@ class Dashboard:
         if self.links.owner_link_problem(queue_id, url) is not None:
             return "link_bad"
         await self.links.attach_link(queue_id, url)
-        after = self.db.get_queue_item(queue_id)
+        after = self.db.get_queue_item(target.id)
         try:
             await self.links.refresh_pending_notice()  # 텔레그램 고정 공지('내 링크 기다리는 글')도 답장했을 때처럼 고침
         except Exception as e:  # noqa: BLE001 — 공지를 못 고쳐도 링크는 붙었다
             log.warning("dashboard link: pending notice refresh failed: %s", safe_error(e))
-        if after is None or after.status in LINK_WAITING:
+        if after is None or after.status in (*LINK_WAITING, "skipped") or not after.deal.affiliate_url:
             return "link_failed"
+        if moved:
+            log.info("dashboard: #%d 링크를 대시보드에서 넣음 (자리를 내준 #%d 와 같은 상품)", target.id, queue_id)
+            return "linked_twin"
         log.info("dashboard: #%d 링크를 대시보드에서 넣음", queue_id)
         return "linked"
 
