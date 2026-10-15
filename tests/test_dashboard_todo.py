@@ -245,8 +245,25 @@ def test_order_stop_then_urgent_then_expiring_then_todo_then_info() -> None:
         TodoRow(key="no_time", marker=todo_mod.TODO, short="no_time"),
     ]
     got = [x.key for x in todo_mod.merge(rows, None)]
-    assert got == ["stop_old", "stop_new", "hot", "warn", "urgent_todo", "links_1h", "review_9h", "todo_old", "todo_new",
+    assert got == ["stop_old", "stop_new", "urgent_todo", "hot", "warn", "links_1h", "review_9h", "todo_old", "todo_new",
                    "no_time", "info"]
+
+
+def test_urgent_rows_come_before_non_urgent_hot_and_warn() -> None:
+    """급함 표시가 붙은 줄은 급하지 않은 🔥·⚠️ 보다 위 — 더 새로운 급한 ⚠️ 도 오래된 급하지 않은 ⚠️ 보다 위."""
+    def r(key: str, marker: str, hours: float, urgent: bool = False) -> TodoRow:
+        return TodoRow(key=key, marker=marker, short=key, since=NOW - timedelta(hours=hours), urgent=urgent)
+
+    rows = [
+        r("old warn", todo_mod.WARN, hours=30),
+        r("urgent bell", todo_mod.TODO, hours=2, urgent=True),
+        r("hot", todo_mod.HOT, hours=5),
+        r("urgent warn", todo_mod.WARN, hours=1, urgent=True),
+        r("urgent hot", todo_mod.HOT, hours=1, urgent=True),
+        r("stop", todo_mod.STOP, hours=1),
+    ]
+    got = [x.key for x in todo_mod.merge(rows, None)]
+    assert got == ["stop", "urgent hot", "urgent warn", "urgent bell", "hot", "old warn"]
 
 
 def test_expiry_and_age_text(db: Database, tmp_path: Path) -> None:

@@ -226,13 +226,14 @@ def _severity(r: TodoRow) -> tuple[int, int]:
 
 
 def sort_key(r: TodoRow) -> tuple[int, int, datetime]:
-    """⛔ > 급함·🔥·⚠️ > 끝나는 시간이 가까운 것 > 🔔 > ℹ️. 같은 칸은 오래 기다린 것(끝나는 칸은 먼저 끝나는 것)부터."""
+    """⛔ > 급함·🔥·⚠️ > 끝나는 시간이 가까운 것 > 🔔 > ℹ️. 같은 칸은 오래 기다린 것(끝나는 칸은 먼저 끝나는 것)부터.
+    급함·🔥·⚠️ 칸 안에서는 급함 표시가 먼저 (급한 🔔 도 급하지 않은 🔥 보다 위), 그다음 표시 순서(🔥 > ⚠️ > 🔔)."""
     since = r.since or _FAR
     sev = _severity(r)[0]
     if r.marker == STOP:
         return 0, 0, since
     if r.urgent or r.marker in (HOT, WARN):
-        return 1, sev, since
+        return 1, (0 if r.urgent else 1) * len(SEVERITY) + sev, since
     if r.expires_at is not None:
         return 2, 0, r.expires_at
     if r.marker == INFO:

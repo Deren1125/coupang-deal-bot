@@ -299,6 +299,9 @@ async def test_wrong_passwords_are_throttled_per_client_and_overall(db: Database
     for _ in range(30):
         assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.3")))[:2] == (302, "/dashboard/login")
         assert (await srv.dispatch("GET", "/dashboard/data.json", _from("198.51.100.3")))[0] == 401
+    # 60번 왔어도 셈에 안 들어갔으니 같은 곳에서 맞는 비밀번호로 바로 열림 (셌다면 막혀서 429)
+    assert dash.limiter.blocked("198.51.100.3") is None
+    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.3", good)))[0] == 200
     # X-Forwarded-For 는 접속이 이 서버 안(Caddy)에서 왔을 때만 믿는다 — 바깥에서 바로 오면 접속 주소로 셈
     direct = {":peer": "192.0.2.50", "x-forwarded-for": "198.51.100.2", "authorization": bad}
     assert dash_auth.client_key(direct) == "192.0.2.50" and dash_auth.client_key(_from("1.2.3.4, 203.0.113.9")) == "203.0.113.9"
