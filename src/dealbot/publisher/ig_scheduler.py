@@ -11,7 +11,8 @@
 - 점심 릴스(12~13시 아무 분): 그날 텔레그램에 올린 딜 중 점수 위 3개 → 10~15초 세로 영상 (서버 ffmpeg).
 - 저녁 캐러셀(20~21시 아무 분): '오늘 가격 내려간 딜 TOP5' — 비교 근거(쿠팡 최저가·평소 가격·우리 기록 최저)가 있는 딜만.
 - 화·금 단가표(19~20시 아무 분, TOP5 와 min_gap_minutes(2시간) 넘게 — 구간이 붙어 있어 안 되면 적어도 한 시간 떨어지게.
-  되는 분 중에서 바로 고른다): '이번 주 생필품 1개당 가격' — 봇이 기록한 가격만.
+  되는 분 중에서 바로 고른다): '이번 주 생필품 1개당 가격' — 봇이 기록한 가격만. 장(목록) 하나엔 한 단위만('휴지 1롤당'·'물티슈 1매당'은
+  따로), 그 단위의 기준선은 우리가 올린 딜이 3건 이상일 때만 그 장에.
 릴스·캐러셀·단가표는 날마다 한 번 (kv ig_done:종류:날짜). 딜이 모자라면 그날은 건너뛴다. 하루 시각표는 kv ig_plan:날짜 (재시작해도 같은 시각).
 올리기 전엔 insta_style.validate 로 본문 첫 줄 고지·모든 장의 고지·근거 없는 '최저가'·'역대'를 검사한다 (실패하면 안 올리고 기록).
 """
@@ -27,12 +28,14 @@ import random
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from dealbot.media import card_slides, reel
+from dealbot.media.card import CardInfo
 from dealbot.media.card_slides import GENERIC_AD, SlideSpec, ad_of, deal_rows
 from dealbot.models import Deal, PublishResult
 from dealbot.monitoring.admin import kakao_fit
@@ -55,7 +58,9 @@ QUEUE_LOOK = 50  # 한 번 볼 때 살펴보는 대기열 줄 (사진 기다리�
 HOLD_MARGIN = timedelta(minutes=30)  # 사진을 기다리다 대기열 시간(12시간)이 끝나지 않게 이만큼 앞에서 기다림을 멈춤
 PHOTO_KEEP_SECONDS = 36 * 3600  # 상품 사진 사본: 그날 캐러셀·릴스가 쓰고 나면 지움
 REEL_KEEP_SECONDS = 2 * 86400
-UNIT_LISTING = 4  # 단가표 한 장에 넣는 딜 수
+UNIT_LISTING = 4  # 단가표 한 장(한 단위)에 넣는 딜 수
+OWN_DROP_DAYS = 30  # 릴스 취소선의 '바로 앞 가격'은 우리 가격 기록에서 이 안의 것만
+OWN_DROP_MIN_PCT = 10  # 바로 앞 가격보다 이만큼 이상 내렸을 때만 '전 → 지금' (비교 근거와 같은 10% 기준)
 SCHEDULED_GAP_MINUTES = 60  # 단가표와 TOP5 캐러셀은 적어도 이만큼 떨어지게 (되면 min_gap_minutes 만큼)
 KV_BACKOFF = "ig_backoff_until"
 KV_FFMPEG = "ig_ffmpeg_alerted"
@@ -494,6 +499,7 @@ class InstagramScheduler:
         for it in self._published(day_start, now):
             shop = bot.registry.get(it.deal.product.shop)
             info = insta_style.card_info(it.deal, bot.renderer, shop=shop, deal_no=bot._page_deal_no(it.id))
+            info = self.own_before(it.deal, info)
             if need_drop and not ((info.ref_price and info.ref_pct) or info.low_label):
                 continue
             cands.append((it, info))
@@ -515,6 +521,22 @@ class InstagramScheduler:
                 continue
             picks.append(Pick(deal=it.deal, info=info, deal_no=info.deal_no, photo=self._photo_for(it.id), queue_id=it.id))
         return picks, dropped
+
+    def own_before(self, deal: Deal, info: CardInfo) -> CardInfo:
+        """이 상품의 바로 앞 가격 (우리 가격 기록 — 딜을 본 시각 바로 앞 관측)이 지금보다 OWN_DROP_MIN_PCT 이상 비쌌으면
+        info.own_was·own_was_label('우리가 본 10/08 가격')을 채운다. 릴스 첫 장 취소선 '전 → 지금' 은 이것만 쓴다
+        (다른 판매처 최저가·표시 정가는 이 상품의 종전 가격이 아님 — 표시광고법)."""
+        p = deal.product
+        at = deal.detected_at
+        if not (info.price and p.product_id and at):
+            return info
+        got = self.db.price_before(p.product_id, at, at - timedelta(days=OWN_DROP_DAYS))
+        if got is None:
+            return info
+        before, seen = got
+        if before <= info.price or (1 - info.price / before) * 100 < OWN_DROP_MIN_PCT:
+            return info
+        return replace(info, own_was=before, own_was_label=f"우리가 본 {seen.astimezone(self.tz):%m/%d} 가격")
 
     def _save_slides(self, specs: list[SlideSpec], stamp: str) -> list[str] | None:
         """장들을 JPEG 로 그려 공개 폴더(media)에 두고 공개 주소를 돌려준다. 공개 도메인·카드가 없으면 None."""
@@ -581,16 +603,21 @@ class InstagramScheduler:
     def reel_specs(self, picks: list[Pick], local: datetime) -> list[SlideSpec]:
         k = len(picks)
         head = f"점심 TOP{k}"
-        # 첫 1초: 가격이 내려간 폭 — 데이터 근거(시중가·평소 가격)가 있는 딜이 있을 때만 '19,800원 → 15,900원'
-        lead = next((pk for pk in picks if pk.info.ref_price and pk.info.ref_pct and pk.info.ref_text), picks[0])
+        # 첫 1초: 가격이 내려간 폭. 취소선 '19,900원 → 15,900원' 은 19,900원이 이 상품의 바로 앞 가격(우리 가격 기록)일 때만,
+        # 근거 '우리가 본 10/08 가격' 과 함께. 시중가 비교만 있으면 지금 가격을 크게 + 따로 한 줄 '네이버 최저가 19,900원보다 4,000원 ↓'
+        # (다른 판매처의 최저가를 취소선으로 그리면 이 상품의 종전 가격처럼 읽힘 — 표시광고법)
+        lead = next((pk for pk in picks if pk.info.own_was and pk.info.own_was_label), None)
+        lead = lead or next((pk for pk in picks if card_slides.compare_line(pk.info)), picks[0])
         info = lead.info
-        was = note = ""
-        if info.ref_price and info.ref_pct and info.ref_text:
-            was = info.ref_text.rpartition(" ")[2]
-            note = f"{info.ref_label} 대비 {info.ref_pct}%↓"
+        was = was_note = note = ""
+        if info.own_was and info.own_was_label and info.price:
+            was, was_note = f"{info.own_was:,}원", info.own_was_label
+            note = f"{info.own_was - info.price:,}원 내려갔어요 ({round((1 - info.price / info.own_was) * 100)}%↓)"
+        else:
+            note = card_slides.compare_line(info)
         hook = SlideSpec(
             kind="reel_hook", ad=GENERIC_AD, head=head, tag=f"{local:%m/%d}", title=info.name,
-            big=f"{info.price:,}원" if info.price else "", was=was, big_note=note,
+            big=f"{info.price:,}원" if info.price else "", was=was, was_note=was_note, big_note=note,
             note=f"오늘 텔레그램에 올린 딜 중 {k}개 · 가격은 올린 시점 기준",
         )
         frames = [hook]
@@ -685,9 +712,12 @@ class InstagramScheduler:
 
     def unit_specs(self, week: dict[str, list[UnitRow]], baselines: list[tuple[str, str, int, int]], deals: list[Deal],
                    local: datetime, since: datetime) -> list[SlideSpec]:
+        """표지 + 단위 목록마다 한 장 (week: 목록 이름 '휴지 1롤당' → 줄 — 한 장엔 한 단위만). 그 단위의 기준선(우리가 올린 딜
+        3건 이상의 가운데 값)이 있으면 그 장 아래에 한 줄. 단위가 다른 값을 한 목록에 세우지 않는다."""
         uc = self.cfg.unit_carousel
-        n = 1 + len(week) + (1 if baselines else 0)
+        n = 1 + len(week)
         need = self.bot.renderer.low_min_samples
+        base = {insta_style.unit_list_name(kind, label): (value, cnt) for kind, label, value, cnt in baselines}
         period = f"{since:%m/%d}~{local:%m/%d}"
         # 핫딜 페이지(최근 page_hours)에서 내려간 지난 딜은 번호가 없다 — '번호로 찾아 주세요' 라고만 하면 못 찾는 딜이 섞임
         old = any(r.deal_no is None for rows in week.values() for r in rows)
@@ -695,7 +725,7 @@ class InstagramScheduler:
         cover = SlideSpec(
             kind="cover", ad=GENERIC_AD, head=insta_style.date_kr(local), tag=f"1/{n}", title="이번 주 생필품 1개당 가격",
             big_note=f"{period} 텔레그램에 올린 딜 · 우리가 기록한 가격으로 계산했어요",
-            items=[(title, f"{len(rows)}개", " · ".join(dict.fromkeys(f"{r.kind} {r.label}" for r in rows))) for title, rows in week.items()],
+            items=[(title, f"{len(rows)}개", f"{rows[0].title} · {rows[0].label} 가격 낮은 순") for title, rows in week.items()],
             note="가격·재고는 올린 시점 기준이에요", footer=footer,
             alt="이번 주 생필품 1개당 가격 표지 — " + ", ".join(week),
         )
@@ -706,37 +736,32 @@ class InstagramScheduler:
                 deal_disclosure(self.bot.registry.get(by_id[r.product_id].product.shop), by_id[r.product_id].product.extra)
                 for r in rows if r.product_id in by_id
             )
+            label = rows[0].label
             items = [(f"#{r.deal_no} {r.name}" if r.deal_no else f"{r.name} (지난 딜)", f"{r.value:,}원",
-                      f"{r.kind} {r.label} · 판매가 {r.price:,}원") for r in rows]
+                      f"판매가 {r.price:,}원") for r in rows]  # 단위는 장 제목에 (한 장엔 한 단위)
+            line: list[tuple[str, str]] = []
+            if title in base:  # 그 단위 딜이 3건 이상일 때만 (insta_style.baseline)
+                value, cnt = base[title]
+                line = [("사도 되는 기준선", f"{label} {value:,}원"),
+                        ("근거", f"최근 {uc.baseline_days}일 우리가 올린 {rows[0].kind} 딜 {cnt}건의 가운데 값 · 이보다 낮으면 그 절반보다 싸요")]
             specs.append(SlideSpec(
-                kind="list", ad=ad, head="이번 주 생필품 1개당 가격", tag=f"{i}/{n}", title=title,
-                big_note="1개당 가격 낮은 순 · 우리가 기록한 가격", items=items,
+                kind="list", ad=ad, head=f"이번 주 생필품 · {rows[0].title}", tag=f"{i}/{n}", title=f"{title} 가격",
+                big_note=f"{label} 가격 낮은 순 · 우리가 기록한 가격", items=items, rows=line,
                 note=f"가격 기록이 {need}번 이상인 상품만 · {period} 텔레그램에 올린 딜",
                 footer=footer,
-                alt=f"{title} 1개당 가격 — " + ", ".join(f"{a} {b}" for a, b, _ in items),
-            ))
-        if baselines:
-            items = [(f"{kind} {label}", f"{value:,}원", f"최근 {uc.baseline_days}일 우리가 올린 딜 {cnt}건의 가운데 값")
-                     for kind, label, value, cnt in baselines]
-            specs.append(SlideSpec(
-                kind="list", ad=GENERIC_AD, head="우리 가격 기록으로 본", tag=f"{n}/{n}", title="이 가격 밑이면 사도 되는 기준선",
-                big_note=f"1개당 가격이 이보다 낮으면 우리가 최근 {uc.baseline_days}일 동안 올린 딜의 절반보다 싸요",
-                items=items, note=f"{local:%m/%d %H}시 기준 · 우리가 기록한 가격만 썼어요", footer=card_slides.BRAND,
-                alt="생필품 1개당 가격 기준선 — " + ", ".join(f"{a} {b}" for a, b, _ in items),
+                alt=f"{title} 가격 — " + ", ".join(f"{a} {b}" for a, b, _ in items)
+                + (f" · 사도 되는 기준선 {line[0][1]}" if line else ""),
             ))
         return specs
 
     async def _post_unit(self, now: datetime, local: datetime) -> str:
         uc = self.cfg.unit_carousel
         week_rows = self.unit_rows(now, uc.lookback_days, skip_sold_out=True)
-        order = [title for title, _ in insta_style.UNIT_GROUPS]
-        week: dict[str, list[UnitRow]] = {}
-        for title in order:
-            rows = sorted((r for r in week_rows if r.title == title), key=lambda r: (r.kind, r.value))
-            if rows:
-                week[title] = rows[:UNIT_LISTING]
-        if len(week) < uc.min_slides:
-            return f"skipped: {len(week)} category slide(s) with our price data (need {uc.min_slides})"
+        # 목록(장) 하나엔 한 단위만: '휴지 1롤당'·'물티슈 1매당'·'액체 세제 100mL당'… 은 따로 세운다 (다른 단위끼리 순위를 매기지 않음)
+        week = insta_style.unit_lists(week_rows, UNIT_LISTING)
+        categories = {rows[0].title for rows in week.values()}
+        if len(categories) < uc.min_slides:
+            return f"skipped: {len(categories)} category slide(s) with our price data (need {uc.min_slides})"
         values: dict[tuple[str, str], list[int]] = {}
         for r in self.unit_rows(now, uc.baseline_days, skip_sold_out=False):
             values.setdefault((r.kind, r.label), []).append(r.value)

@@ -6,9 +6,12 @@
 - 장마다 그릴 글은 SlideSpec 에 모두 들어 있고, 그리는 함수는 그 글만 쓴다 → 올리기 전 검사(insta_style.validate)가
   spec.texts() 로 '장 안 고지가 있나'·'근거 없는 말이 없나'를 본다.
 - 4:5(1080×1350): deal(딜 하나 — 딜 하나짜리 글의 B 카드와 캐러셀 딜 장), cover(표지), end(마지막 장), list(단가표·기준선).
-- 9:16(1080×1920): reel_hook(첫 1초 — 가격이 내려간 폭), reel_deal(딜 하나), reel_end(마지막 장). 릴스 화면 위·아래는 인스타 단추·본문이
-  덮으므로 글은 가운데(y 250~1500)에만 둔다.
+- 9:16(1080×1920): reel_hook(첫 1초 — 가격이 내려간 폭), reel_deal(딜 하나), reel_end(마지막 장). 릴스 화면 위 250px·아래 420px 는
+  인스타 단추·본문이 덮으므로(안전 영역) 고지·글은 모두 그 사이(y 250~1500)에만 둔다. 고지 띠는 위 안전 영역 바로 아래.
 - 모든 장 맨 위 띠에 고지 줄 '광고 · …' (공정위 지침: 사진·영상 게시물은 그 안에도 표시, 첫 부분에).
+- 취소선 '전 가격 → 지금 가격' 은 '전 가격' 이 우리 가격 기록에 있는 이 상품의 바로 앞 가격일 때만, 근거('우리가 본 10/08 가격')와 함께
+  (표시광고법 — 다른 판매처의 최저가·표시 정가를 취소선으로 그리면 이 상품의 종전 가격처럼 읽힌다). 시중가 비교만 있으면
+  지금 가격을 크게, 그 아래 따로 '네이버 최저가 19,900원보다 4,000원 ↓' (취소선 없이).
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from dealbot.media.card_variants import (
     LINE,
     MUTED,
     PANEL,
+    Font,
     _chip,
     _edge_color,
     _fit,
@@ -63,7 +67,8 @@ class SlideSpec:
     tag: str = ""  # 오른쪽 위 ('#12', '2/7')
     title: str = ""  # 상품명·큰 제목
     big: str = ""  # 큰 숫자 (가격)
-    was: str = ""  # 큰 가격 앞의 비교 가격 (취소선 — 데이터 근거가 있을 때만)
+    was: str = ""  # 큰 가격 앞의 이 상품 바로 앞 가격 (취소선 — 우리 가격 기록에 있을 때만, was_note 와 함께)
+    was_note: str = ""  # 취소선 가격의 근거 '우리가 본 10/08 가격' (was 가 있으면 꼭)
     big_note: str = ""  # 큰 글 아래 한 줄
     rows: list[tuple[str, str]] = field(default_factory=list)  # 표 (항목, 값)
     items: list[tuple[str, str, str]] = field(default_factory=list)  # 목록 (이름, 값, 작은 글)
@@ -73,7 +78,7 @@ class SlideSpec:
     alt: str = ""  # 인스타 대체 텍스트
 
     def texts(self) -> list[str]:
-        out = [self.ad, self.head, self.tag, self.title, self.big, self.was, self.big_note, self.note, self.footer]
+        out = [self.ad, self.head, self.tag, self.title, self.big, self.was, self.was_note, self.big_note, self.note, self.footer]
         for a, b in self.rows:
             out += [a, b]
         for a, b, c in self.items:
@@ -117,6 +122,16 @@ def deal_rows(info: CardInfo) -> list[tuple[str, str]]:
     return rows
 
 
+def compare_line(info: CardInfo) -> str:
+    """시중가·평소 가격 비교를 취소선 없이 한 줄로: '네이버 최저가 19,900원보다 4,000원 ↓' | '평소 40,000원대보다 18% ↓'.
+    비교 가격은 다른 판매처 값이거나 가격대라 이 상품의 종전 가격처럼 그리지 않는다. 근거가 없으면 빈칸."""
+    if not (info.price and info.ref_price and info.ref_pct and info.ref_text):
+        return ""
+    if info.ref_label.endswith("최저가") and info.ref_price > info.price:
+        return f"{info.ref_label} {info.ref_price:,}원보다 {info.ref_price - info.price:,}원 ↓"
+    return f"{info.ref_text}보다 {info.ref_pct}% ↓"
+
+
 def ad_of(info: CardInfo) -> str:
     return info.ad or (f"광고 · {info.disclosure}" if info.disclosure else GENERIC_AD)
 
@@ -140,7 +155,8 @@ def deal_spec(info: CardInfo, photo: bytes | None, *, tag: str | None = None, he
         kind="deal",
         ad=ad_of(info),
         head=head if head is not None else BRAND + (f" · {info.category}" if info.category else ""),
-        tag=tag if tag is not None else (f"#{info.deal_no}" if info.deal_no else ""),
+        # 핫딜 페이지 번호는 인스타 카드에만 (스레드·블로그 카드는 글 안에 구매 링크가 있어 '#번호' 가 필요 없다)
+        tag=tag if tag is not None else (f"#{info.deal_no}" if info.deal_no and info.cta is None else ""),
         title=info.name,
         rows=rows,
         footer=footer,
@@ -303,12 +319,29 @@ def _list(card: DealCard, spec: SlideSpec) -> Image.Image:
         bf = card.font(34)
         y = _lines(d, _wrap(d, spec.big_note, bf, W - 2 * SIDE, 2), bf, ACCENT, SIDE, y + 6, gap=1.3)
     d.line((SIDE, y + 18, W - SIDE, y + 18), fill=INK, width=3)
-    _items(card, d, spec.items, SIDE, y + 24, W - SIDE, H - FOOT - 80, name_size=34, value_size=48)
+    box_h = 168 if spec.rows else 0  # 이 단위의 기준선 (있을 때만 — 우리가 올린 딜 3건 이상)
+    bottom = H - FOOT - 80 - (box_h + 24 if box_h else 0)
+    y = _items(card, d, spec.items, SIDE, y + 24, W - SIDE, bottom, name_size=34, value_size=48)
+    if spec.rows:
+        _baseline_box(card, d, spec.rows, SIDE, y + 24, W - SIDE, box_h)
     if spec.note:
         nf = card.font_regular(26)
         _lines(d, _wrap(d, spec.note, nf, W - 2 * SIDE, 2), nf, MUTED, SIDE, H - FOOT - 74, gap=1.3)
     _foot(card, d, spec, W, H)
     return img
+
+
+def _baseline_box(card: DealCard, d: ImageDraw.ImageDraw, rows: list[tuple[str, str]], x0: int, y: int, x1: int, h: int) -> None:
+    """단위 장 아래 기준선 칸: 왼쪽 '사도 되는 기준선', 오른쪽 '1롤당 480원' (크게), 아래 근거 한 줄."""
+    d.rounded_rectangle((x0, y, x1, y + h), radius=24, fill=SOFT)
+    (label, value), rest = rows[0], rows[1:]
+    lf = card.font(32)
+    vf = _fit(d, value, card.font_heavy, 52, (x1 - x0) // 2, min_size=34)
+    d.text((x0 + 28, y + 30), label, font=lf, fill=INK)
+    d.text((x1 - 28 - _w(d, value, vf), y + 22), value, font=vf, fill=ACCENT)
+    if rest:
+        nf = card.font_regular(26)
+        _lines(d, _wrap(d, rest[0][1], nf, x1 - x0 - 56, 2), nf, MUTED, x0 + 28, y + 92, gap=1.3)
 
 
 def _end(card: DealCard, spec: SlideSpec) -> Image.Image:
@@ -333,8 +366,9 @@ def _end(card: DealCard, spec: SlideSpec) -> Image.Image:
 
 
 # ---------------------------------------------------------------- 9:16 릴스 화면
-REEL_TOP = 230  # 이 위는 인스타 단추가 덮음
-REEL_BOTTOM = 1500  # 이 아래는 본문·단추가 덮음
+REEL_TOP = 250  # 이 위(위 안전 영역)는 인스타 단추가 덮음
+REEL_BOTTOM = RH - 420  # 이 아래(아래 안전 영역 420px)는 본문·단추가 덮음
+REEL_AD_Y = REEL_TOP + 12  # 고지 띠: 위 안전 영역 바로 아래 (모든 장)
 
 
 def _reel_ad(card: DealCard, d: ImageDraw.ImageDraw, spec: SlideSpec, *, fill: str = INK) -> int:
@@ -343,9 +377,9 @@ def _reel_ad(card: DealCard, d: ImageDraw.ImageDraw, spec: SlideSpec, *, fill: s
     tw = _w(d, spec.ad, af)
     h = int(_size(af) * 1.3) + 24
     x = (RW - tw) // 2 - 20
-    d.rounded_rectangle((x, REEL_TOP, x + tw + 40, REEL_TOP + h), radius=h // 2, fill=fill)
-    d.text((x + 20, REEL_TOP + 10), spec.ad, font=af, fill="#FFFFFF")
-    return REEL_TOP + h + 40
+    d.rounded_rectangle((x, REEL_AD_Y, x + tw + 40, REEL_AD_Y + h), radius=h // 2, fill=fill)
+    d.text((x + 20, REEL_AD_Y + 10), spec.ad, font=af, fill="#FFFFFF")
+    return REEL_AD_Y + h + 40
 
 
 def _reel_head(card: DealCard, d: ImageDraw.ImageDraw, spec: SlideSpec, y: int) -> int:
@@ -360,12 +394,22 @@ def _reel_head(card: DealCard, d: ImageDraw.ImageDraw, spec: SlideSpec, y: int) 
     return y + h + 40
 
 
+def _fits(lines: list[str], font: Font, y: int, gap: float = 1.3) -> bool:
+    """줄들이 아래 안전 영역(REEL_BOTTOM) 위에서 끝나나."""
+    return y + int(_size(font) * gap) * len(lines) <= REEL_BOTTOM
+
+
 def _reel_hook(card: DealCard, spec: SlideSpec) -> Image.Image:
+    """첫 1초. 우리 기록의 바로 앞 가격이 있으면 근거 줄 + '19,900원 →'(취소선) + 큰 지금 가격,
+    시중가 비교만 있으면 큰 지금 가격 + 따로 한 줄 '네이버 최저가 19,900원보다 4,000원 ↓' (취소선 없음)."""
     img = Image.new("RGB", (RW, RH), "#FFFFFF")
     d = ImageDraw.Draw(img)
     y = _reel_ad(card, d, spec)
-    y = _reel_head(card, d, spec, y + 30) + 80
-    if spec.was:  # '22,900원 →' (취소선) 다음 줄에 큰 가격
+    y = _reel_head(card, d, spec, y + 30) + 60
+    if spec.was and spec.was_note:  # 근거 없는 취소선은 그리지 않는다
+        nf = card.font(44)
+        d.text((SIDE, y), spec.was_note, font=nf, fill=MUTED)
+        y += int(_size(nf) * 1.4)
         wf = _fit(d, spec.was + " →", card.font_heavy, 104, RW - 2 * SIDE, min_size=60)
         ww = _strike(d, spec.was, wf, SIDE, y, MUTED)
         d.text((SIDE + ww + 24, y), "→", font=wf, fill=INK)
@@ -375,13 +419,19 @@ def _reel_hook(card: DealCard, spec: SlideSpec) -> Image.Image:
     y += int(_size(pf) * 1.22)
     if spec.big_note:
         bf = card.font(48)
-        y = _lines(d, _wrap(d, spec.big_note, bf, RW - 2 * SIDE, 2), bf, INK, SIDE, y, gap=1.3) + 30
+        lines = _wrap(d, spec.big_note, bf, RW - 2 * SIDE, 2)
+        if _fits(lines, bf, y):
+            y = _lines(d, lines, bf, INK, SIDE, y, gap=1.3) + 30
     if spec.title:
         tf = card.font_regular(48)
-        y = _lines(d, _wrap(d, spec.title, tf, RW - 2 * SIDE, 2), tf, INK, SIDE, y, gap=1.3) + 30
-    if spec.note and y < REEL_BOTTOM - 60:
+        lines = _wrap(d, spec.title, tf, RW - 2 * SIDE, 2)
+        if _fits(lines, tf, y):
+            y = _lines(d, lines, tf, INK, SIDE, y, gap=1.3) + 30
+    if spec.note:
         nf = card.font_regular(36)
-        _lines(d, _wrap(d, spec.note, nf, RW - 2 * SIDE, 2), nf, MUTED, SIDE, y, gap=1.3)
+        lines = _wrap(d, spec.note, nf, RW - 2 * SIDE, 2)
+        if _fits(lines, nf, y):
+            _lines(d, lines, nf, MUTED, SIDE, y, gap=1.3)
     return img
 
 

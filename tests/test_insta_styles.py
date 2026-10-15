@@ -103,6 +103,38 @@ def test_variant_cards_render(r: TemplateRenderer, tmp_path: Path, layout: str, 
     assert path.exists() and path != DealCard(tmp_path).save(_market_deal(), _photo())  # 양식마다 다른 파일
 
 
+@pytest.mark.parametrize("layout", ["current", "A", "B", "C"])
+def test_single_cards_never_strike_a_price_that_is_not_our_own_record(r: TemplateRenderer, tmp_path: Path, layout: str,
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """표시광고법: 쿠팡·네이버 최저가(다른 판매처 값)·표시 정가·평소 가격대를 취소선으로 그리면 이 상품의 종전 가격처럼 읽힌다.
+    딜 하나짜리 카드(모든 양식, 사진 있음·없음)는 취소선을 긋지 않고 '쿠팡 최저가 22,900원보다' 처럼 따로 쓴다."""
+    from PIL import ImageDraw
+
+    from dealbot.media import card_variants
+
+    def no_strike(*a: object, **kw: object) -> int:
+        raise AssertionError("single card struck a comparison price")
+
+    monkeypatch.setattr(card_variants, "_strike", no_strike)
+    drawn: list[str] = []
+    text = ImageDraw.ImageDraw.text
+
+    def spy(self: ImageDraw.ImageDraw, xy: object, t: str, *a: object, **kw: object) -> None:
+        drawn.append(t)
+        text(self, xy, t, *a, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy)
+    card = DealCard(tmp_path, layout=layout)
+    for deal in (_market_deal(), _plain_naver_deal()):
+        info = insta_style.card_info(deal, r, shop=REG.get(deal.product.shop), deal_no=3)
+        for photo in (_photo(), None):
+            card.render(deal, photo, info=info)
+    if layout in ("A", "C"):  # 사진 없는 카드(글자 카드)·A 사진 카드: 비교 줄은 '…원보다' 로 따로
+        assert "쿠팡 최저가 22,900원보다" in drawn and "정가 89,000원보다" in drawn
+    if layout == "current":
+        assert "정가 25,800원" in drawn  # 표시 정가는 취소선 없이 '정가' 를 붙여서
+
+
 def test_card_info_uses_only_data(r: TemplateRenderer) -> None:
     """기록 최저 문구는 주인 결정 10/15 로 바뀜: 예전 '30일 최저가 갱신' → '우리가 본 최근 30일 중 가장 낮음 (MM/DD HH시 기준)'."""
     info = insta_style.card_info(_market_deal(), r, shop=REG.get("coupang"), deal_no=7)

@@ -130,14 +130,10 @@ def _strike(draw: ImageDraw.ImageDraw, text: str, font: Font, x: int, y: int, fi
 
 
 def _ref(draw: ImageDraw.ImageDraw, text: str, font: Font, x: int, y: int, fill: str) -> int:
-    """'쿠팡 최저가 22,900원' → 이름은 그대로, 금액만 취소선. '평소 40,000원대'(가격대)는 취소선 없이. 그린 너비 반환."""
-    label, _, amount = text.rpartition(" ")
-    if not label or amount.endswith("원대"):
-        draw.text((x, y), text, font=font, fill=fill)
-        return _w(draw, text, font)
-    draw.text((x, y), label + " ", font=font, fill=fill)
-    lw = _w(draw, label + " ", font)
-    return lw + _strike(draw, amount, font, x + lw, y, fill)
+    """비교 가격 '쿠팡 최저가 22,900원보다' 를 취소선 없이. 다른 판매처 최저가·표시 정가·평소 가격대는 이 상품의 종전 가격이 아니라
+    취소선을 긋지 않는다 (표시광고법 — 취소선 '전 → 지금' 은 우리 기록의 바로 앞 가격에만, card_slides 릴스 첫 장). 그린 너비 반환."""
+    draw.text((x, y), text, font=font, fill=fill)
+    return _w(draw, text, font)
 
 
 def _open_photo(photo: bytes | None) -> Image.Image | None:
@@ -217,7 +213,7 @@ def text_card(card: DealCard, info: CardInfo) -> Image.Image:
     d = ImageDraw.Draw(img)
     y = 96
     _chip(d, BRAND, card.font(30), SIDE, y, fill=INK, ink="#FFFFFF")
-    if info.deal_no:
+    if info.deal_no and info.cta is None:  # 핫딜 페이지 번호는 인스타 카드에만 (스레드·블로그는 글 안에 구매 링크)
         _chip(d, f"#{info.deal_no}", card.font(30), W - SIDE, y, fill=bg, ink=INK, outline=INK, right=True)
     nf = card.font_heavy(72)
     name_lines = _wrap(d, info.name, nf, W - 2 * SIDE, 4)
@@ -234,7 +230,7 @@ def text_card(card: DealCard, info: CardInfo) -> Image.Image:
     if info.price:
         if cmp_:
             sf = card.font_regular(40)
-            tw = _ref(d, cmp_[0], sf, SIDE, y, MUTED)
+            tw = _ref(d, cmp_[0] + ("보다" if cmp_[1] else ""), sf, SIDE, y, MUTED)
             if cmp_[1]:
                 d.text((SIDE + tw + 20, y), cmp_[1], font=card.font(40), fill=ACCENT if cmp_[2] else MUTED)
             y += 64
@@ -269,7 +265,7 @@ def layout_a(card: DealCard, info: CardInfo, photo: Image.Image) -> Image.Image:
     top = 40
     if info.shop_name:
         _chip(d, info.shop_name, card.font(28), SIDE - 16, top, fill="#FFFFFF", ink=INK)
-    if info.deal_no:
+    if info.deal_no and info.cta is None:
         _chip(d, f"#{info.deal_no}", card.font(28), W - SIDE + 16, top, fill=INK, ink="#FFFFFF", right=True)
 
     y = photo_h + 36
@@ -278,7 +274,7 @@ def layout_a(card: DealCard, info: CardInfo, photo: Image.Image) -> Image.Image:
         cmp_ = _compare(info)
         if cmp_:
             sf = card.font_regular(36)
-            tw = _ref(d, cmp_[0], sf, SIDE, y, MUTED)
+            tw = _ref(d, cmp_[0] + ("보다" if cmp_[1] else ""), sf, SIDE, y, MUTED)
             if cmp_[1]:
                 d.text((SIDE + tw + 18, y - 2), cmp_[1], font=card.font(38), fill=ACCENT if cmp_[2] else MUTED)
             y += 50
