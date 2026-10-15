@@ -90,6 +90,8 @@ padding:4px 10px;min-height:28px;text-decoration:none;background:#fff;white-spac
 .num{white-space:nowrap}
 .stat .unit{font-size:12px;font-weight:600;color:var(--sub);margin-left:2px}
 .stat .sub{font-size:12px;color:var(--muted);margin:2px 0 0}
+.stat.stale{background:#fbfbfc}
+.stat.stale .value,.stat.stale .unit,.stat.stale .delta,.stat.stale .delta small{color:#adb5bd}
 .delta{font-size:12px;font-weight:700;margin-left:6px;white-space:nowrap}
 .delta small{font-weight:500;color:var(--muted);margin-left:2px;font-size:11px}
 .delta.up{color:var(--green)}.delta.down{color:#d93025}.delta.flat{color:var(--muted)}
@@ -101,6 +103,7 @@ padding:4px 10px;min-height:28px;text-decoration:none;background:#fff;white-spac
 border-radius:8px;background:#eef0ff;border:1px solid #dcdffc;color:#3f35a8;font-size:13px;font-weight:600}
 .ext.primary:hover{background:#e4e7ff;text-decoration:none}
 .stats-note{color:var(--muted);font-size:12px;line-height:1.5;margin:8px 0 0}
+.stats-note .warn{color:var(--orange);font-weight:600;white-space:nowrap}
 h3{font-size:13px;color:#4e5968;margin:14px 0 8px;font-weight:600}
 .row{margin:0 0 10px}
 .row-top{display:flex;justify-content:space-between;gap:8px;font-size:13px}
@@ -112,6 +115,7 @@ h3{font-size:13px;color:#4e5968;margin:14px 0 8px;font-weight:600}
 .bar.over i{background:var(--orange)}
 .activity{font-size:12px;color:#4e5968;background:var(--tile);border-radius:8px;padding:8px 10px;margin:10px 0 0}
 .activity .it{display:inline-block;max-width:100%}
+.stat .sub .it{display:inline-block;max-width:100%}
 .note{color:var(--sub);font-size:12.5px;margin:10px 0 0;line-height:1.6}
 .hint{color:var(--orange);font-size:12px;margin:8px 0 0;overflow-wrap:anywhere}
 details.manual-box{margin:12px 0 0;border-top:1px dashed var(--line);padding-top:10px}
@@ -256,8 +260,18 @@ def _stat(s: Stat) -> str:
             delta = f'<span class="delta {kind}">{e(fmt_signed(s.delta))}{small}</span>'
         # 숫자 가운데서는 줄이 바뀌지 않게 (단위·증감만 다음 줄로 갈 수 있음)
         value = f'<p class="value"><span class="num">{e(fmt_num(s.value))}</span>{unit}{delta}</p>'
-    sub = f'<p class="sub">{e(s.sub)}</p>' if s.sub else ""
-    return f'<div class="stat"><p class="label">{e(s.label)}</p>{value}{sub}</div>'
+    # 작은 줄도 '공감 3 · 댓글 1 · 이웃 +1' 처럼 항목이 여럿이면 항목마다 한 덩어리 ('이웃 / +1' 로 갈라지지 않게)
+    sub = f'<p class="sub">{_chunks(s.sub) if " · " in s.sub else e(s.sub)}</p>' if s.sub else ""
+    return f'<div class="stat{" stale" if s.stale else ""}"><p class="label">{e(s.label)}</p>{value}{sub}</div>'
+
+
+def _stats_note(v: CardView) -> str:
+    """숫자 칸 밑 회색 안내 + (있으면) 주황 경고 ('자동 · 10. 15. 14:23 읽음 · 어제 못 읽음')."""
+    if not v.stats_note and not v.stats_warn:
+        return ""
+    warn = f'<span class="warn">{e(v.stats_warn)}</span>' if v.stats_warn else ""
+    sep = " · " if v.stats_note and warn else ""
+    return f'<p class="stats-note">{e(v.stats_note)}{sep}{warn}</p>'
 
 
 def _row(r: GoalRow) -> str:
@@ -331,13 +345,17 @@ def _lists(v: CardView, token: str) -> str:
     return '<div class="lists">' + "".join(_group(g, token) for g in v.groups) + "</div>"
 
 
-def _activity(line: str) -> str:
-    """활동 줄 ('오늘 발행 1 · 임시저장 2 · 댓글 3'). 칸이 좁아 줄이 바뀔 때 '댓글 / 3' 처럼 이름과 숫자가 갈라지거나
+def _chunks(line: str) -> str:
+    """' · ' 로 이은 항목들 ('오늘 발행 1 · 임시저장 2 · 댓글 3'). 칸이 좁아 줄이 바뀔 때 '댓글 / 3' 처럼 이름과 숫자가 갈라지거나
     '·' 가 다음 줄 맨 앞에 오지 않게, 항목마다 한 덩어리(넘치게 긴 항목만 안에서 줄바꿈)로 두고 '·' 는 앞 항목 덩어리 안에 넣는다
     (덩어리 바깥에 두면 브라우저가 덩어리와 '·' 사이에서도 줄을 바꾼다)."""
     items = line.split(" · ")
-    spans = [f'<span class="it">{e(item)}{NBSP + "·" if i < len(items) - 1 else ""}</span>' for i, item in enumerate(items)]
-    return f'<p class="activity">{" ".join(spans)}</p>'
+    return " ".join(f'<span class="it">{e(item)}{NBSP + "·" if i < len(items) - 1 else ""}</span>' for i, item in enumerate(items))
+
+
+def _activity(line: str) -> str:
+    """활동 줄 — 항목마다 한 덩어리 (_chunks)."""
+    return f'<p class="activity">{_chunks(line)}</p>'
 
 
 def _form(v: CardView, token: str, today: date, min_day: date | None = None, *, open_: bool = False) -> str:
@@ -395,9 +413,10 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
         parts.append(f'<div class="notice{" bad" if kind == "bad" else ""}" role="status">{e(text)}</div>')
     parts += [
         f'<p class="read">{e(read)}</p>',
-        '<div class="stats">' + "".join(_stat(s) for s in v.stats[:2]) + "</div>",
+        # 숫자 칸은 두 칸씩 줄 (블로그 카드는 자기 통계가 있으면 네 칸)
+        '<div class="stats">' + "".join(_stat(s) for s in v.stats[:4]) + "</div>",
         _links(v.links, v.title),
-        f'<p class="stats-note">{e(v.stats_note)}</p>' if v.stats_note else "",
+        _stats_note(v),
         sparkline(v.spark, days=spark_days, today=today, label=v.spark_label),
         _lists(v, token),
     ]
@@ -492,7 +511,7 @@ def view_dict(v: CardView, tz: str) -> dict[str, Any]:
         "read_at": v.read_at.astimezone(ZoneInfo(tz)).isoformat() if v.read_at else None,
         "stats": [
             {"label": s.label, "value": s.value, "unit": s.unit, "delta": s.delta, "delta_label": s.delta_label or None,
-             "missing": s.missing if s.value is None else None, "sub": s.sub or None}
+             "missing": s.missing if s.value is None else None, "sub": s.sub or None, "stale": s.stale}
             for s in v.stats
         ],
         "spark": {"label": v.spark_label, "points": [{"day": d, "value": val} for d, val in v.spark]},
@@ -504,6 +523,7 @@ def view_dict(v: CardView, tz: str) -> dict[str, Any]:
         "activity": v.activity,
         "links": [{"label": link.label, "url": link.url} for link in v.links if link.url.startswith("https://")],
         "stats_note": v.stats_note or None,
+        "stats_warn": v.stats_warn or None,
         "note": v.note or None,
         "hints": v.hints,
         "manual": [{"metric": f.metric, "label": f.label, "unit": f.unit, "day_offset": f.day_offset,

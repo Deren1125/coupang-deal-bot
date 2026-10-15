@@ -446,8 +446,12 @@ class Dashboard:
         """notice_src 가 카드 키면 안내를 그 카드 안에, 아니면 맨 위에."""
         views = self.views()
         times = ", ".join(self.cfg.collect_times) or "-"
-        footer = (f"API 로 읽는 카드는 매일 {times} 에 자동으로 읽어요 ('다시 읽기'는 카드마다 {self.cfg.refresh_min_minutes}분에 한 번). "
-                  "네이버 블로그 이웃 수·방문자·게시글 수와 오픈채팅 참여자는 카드에서 직접 넣어요.")
+        footer = f"API 로 읽는 카드는 매일 {times} 에 자동으로 읽어요 ('다시 읽기'는 카드마다 {self.cfg.refresh_min_minutes}분에 한 번). "
+        if any("own_stats" in v.detail for v in views):  # Blog-Auto 가 블로그 자기 통계를 보내기 시작한 뒤
+            footer += ("네이버 블로그 이웃 수·방문자·조회수는 Blog-Auto 가 블로그마다 하루 한 번(날마다 다른 시각) 읽어 와요 — "
+                       "읽은 뒤에 이웃 수를 직접 넣으면 그날은 넣은 값이 보여요. 게시글 수와 오픈채팅 참여자는 카드에서 직접 넣어요.")
+        else:
+            footer += "네이버 블로그 이웃 수·방문자·게시글 수와 오픈채팅 참여자는 카드에서 직접 넣어요."
         return render.render_page(
             title=self.cfg.title, views=views, summary=self.summary(views), updated_at=self._updated_at(views),
             token=self.form_token, today=self.ctx.today(), tz=self.ctx.tz, spark_days=self.cfg.spark_days,
