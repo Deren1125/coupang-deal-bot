@@ -1,8 +1,12 @@
 """채널 대시보드 본체: 카드(소스) 목록, 정해진 시각에 읽기, '다시 읽기', 직접 입력, 웹 경로.
 
-경로 (/dashboard 아래 전부 기본 인증 — DASHBOARD_USER / DASHBOARD_PASSWORD 가 둘 다 있을 때만 열림, 아니면 404.
-너무 많이 틀리면 잠시 429 — auth.FailureLimiter):
-  /dashboard                    페이지
+경로 (/dashboard 아래 전부 로그인 — DASHBOARD_USER / DASHBOARD_PASSWORD 가 둘 다 있을 때만 열림, 아니면 404.
+로그인은 로그인 화면의 세션 쿠키(login.py, 30일) 또는 기본 인증. 너무 많이 틀리면 잠시 429 — auth.FailureLimiter.
+로그인 없이 연 화면(/dashboard·refresh·input)은 로그인 화면으로 보내고, data.json·POST·그 밖의 경로는 401):
+  /dashboard                    페이지 (맨 위 '지금 할 일' — todo.py)
+  /dashboard/login              로그인 화면 (GET) · 로그인 (POST 폼: t·user·password) — 로그인 없이 열림
+  POST /dashboard/logout        로그아웃 (폼: t) — 그 쿠키의 세션을 지움, 로그인 없이 열림
+  /dashboard/manifest.webmanifest, /dashboard/static/<아이콘>   바탕화면 앱용 (webapp.py) — 로그인 없이 열림
   /dashboard/refresh?src=키      그 카드를 지금 다시 읽고 돌아감 (카드마다 refresh_min_minutes 에 한 번)
   /dashboard/input?src=키&지표=값&date=YYYY-MM-DD   직접 입력 저장 후 돌아감 (숫자만, 날짜는 오늘~manual_max_days_back)
   /dashboard/data.json          같은 내용을 JSON 으로 (나중에 다른 곳에서 쓰려고, 폼 토큰은 없음)
@@ -24,8 +28,33 @@ from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
 from dealbot.config import DashboardConfig
-from dealbot.dashboard import render
-from dealbot.dashboard.auth import FailureLimiter, check_basic, client_key, password_problems
+from dealbot.dashboard import render, webapp
+from dealbot.dashboard import todo as todo_mod
+from dealbot.dashboard.auth import (
+    FailureLimiter,
+    check_basic,
+    check_credentials,
+    client_key,
+    password_problems,
+)
+from dealbot.dashboard.login import (
+    LOGIN_BODY_MAX,
+    LOGIN_COOKIE,
+    LOGIN_NOTICES,
+    LOGIN_PATH,
+    LOGOUT_PATH,
+    SESSION_COOKIE,
+    SESSION_DAYS,
+    AttemptLimiter,
+    LoginCsrf,
+    SessionStore,
+    clear_session_cookie,
+    cookie_values,
+    login_cookie,
+    login_page,
+    session_cookie,
+    wait_text,
+)
 from dealbot.dashboard.model import (
     ERROR,
     GOOD,
@@ -42,6 +71,7 @@ from dealbot.dashboard.model import (
     safe_text,
 )
 from dealbot.dashboard.sources import CardData, Source, SourceContext, load_all
+from dealbot.dashboard.sources.blog_waiting import BlogWaitingSource
 from dealbot.dashboard.sources.link_waiting import LinkWaitingSource
 from dealbot.shops import find_urls
 from dealbot.storage.db import LINK_WAITING, QueueItem
@@ -62,11 +92,15 @@ LINK_RATE = 10  # '링크 넣기' 는 이 프로세스 전체에서 1분에 이�
 _QUEUE_ID_RE = re.compile(r"^[0-9]{1,9}$")
 _NUMBER_RE = re.compile(r"^(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)$")  # 1234 또는 1,234 (전각 숫자·소수·음수는 안 받음)
 _DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+# 로그인 없이 열면 401 대신 로그인 화면으로 보내는 경로 (브라우저로 여는 화면들). data.json·POST·그 밖은 401
+PAGE_PATHS = frozenset({"/dashboard", "/dashboard/", "/dashboard/refresh", "/dashboard/input"})
+LOGOUT_BODY_MAX = 1024
 
 SECURITY_HEADERS = {
+    # img-src·manifest-src 'self': 바탕화면 앱 아이콘과 매니페스트 (webapp.py). 나머지는 그대로 아무것도 안 불러옴
     "Content-Security-Policy": (
-        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; "
-        "frame-ancestors 'none'"
+        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; manifest-src 'self'; form-action 'self'; "
+        "base-uri 'none'; frame-ancestors 'none'"
     ),
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
@@ -146,9 +180,14 @@ class Dashboard:
         self.by_key = {s.key: s for s in self.sources}
         # '링크 넣기' 안내를 넣을 카드 (링크 기다리는 딜). 없으면 맨 위에
         self.links_key = next((s.key for s in self.sources if isinstance(s, LinkWaitingSource)), None)
+        # '지금 할 일' 버튼이 내려갈 카드 (발행 대기 글)
+        self.waiting_key = next((s.key for s in self.sources if isinstance(s, BlogWaitingSource)), None)
         self._locks: dict[str, asyncio.Lock] = {}
         self._token: str | None = None
-        self.limiter = FailureLimiter()
+        self.limiter = FailureLimiter()  # 틀린 비밀번호 (기본 인증·로그인 화면 합쳐서)
+        self.login_rate = AttemptLimiter()  # 로그인 버튼 1분 5번 (맞든 틀리든)
+        self.sessions = SessionStore(self.db, user=user, password=password, now=ctx.now)
+        self.csrf = LoginCsrf(self.db, clock=lambda: ctx.now().timestamp())
 
     # ------------------------------------------------------------ 상태
     @property
@@ -160,21 +199,29 @@ class Dashboard:
         return self.cfg.enabled and bool(self._user and self._password)
 
     def check_auth(self, headers: dict[str, str]) -> bool | Throttled:
-        """기본 인증. 너무 많이 틀린 손님(또는 전체)은 확인하지 않고 Throttled → 429.
-        Authorization 없이 온 요청(브라우저가 처음 물어보기 전)은 틀린 시도로 세지 않는다."""
+        """로그인 세션 쿠키(로그인 화면) 또는 기본 인증.
+        세션은 32바이트 난수라 맞혀 볼 수 없어 막힘과 상관없이 먼저 본다 (다른 곳이 마구 넣어 봐도 주인 휴대폰은 그대로 열림).
+        기본 인증은 너무 많이 틀린 손님(또는 전체)이면 확인하지 않고 Throttled → 429.
+        Authorization 없이 온 요청(브라우저가 처음 물어보기 전)은 틀린 시도로 세지 않는다 (화면은 로그인 화면으로)."""
+        if self.sessions.any_valid(cookie_values(headers, SESSION_COOKIE)):
+            return True
+        header = headers.get("authorization")
+        if not header:
+            return False
         client = client_key(headers)
         wait = self.limiter.blocked(client)
         if wait is not None:
             return Throttled(wait)
-        header = headers.get("authorization")
         if check_basic(header, self._user, self._password):
             self.limiter.success(client)
             return True
-        if header:
-            self.limiter.failure(client)
-            if n := self.limiter.log_due():  # 1분에 한 줄만 (마구 넣어 봐도 로그가 밀려나지 않게)
-                log.warning("dashboard: 인증 실패 %d번 (값은 기록하지 않음)", n)
+        self._failed(client)
         return False
+
+    def _failed(self, client: str) -> None:
+        self.limiter.failure(client)
+        if n := self.limiter.log_due():  # 1분에 한 줄만 (마구 넣어 봐도 로그가 밀려나지 않게)
+            log.warning("dashboard: 인증 실패 %d번 (값은 기록하지 않음)", n)
 
     @property
     def form_token(self) -> str:
@@ -461,6 +508,27 @@ class Dashboard:
              else "실적을 읽으면 보여요"),
         ]
 
+    def todo(self) -> todo_mod.TodoView:
+        """맨 위 '지금 할 일': Blog-Auto 기록 파일의 todo + 봇 DB 지금 상태 (todo.build). 바깥 요청 없음.
+        만들다 터져도 페이지는 뜬다 (빈 목록 + 안내 한 줄)."""
+        try:
+            reader = self.ctx.blogauto
+            export = reader.read() if reader is not None else None
+            labels = {}
+            for c in self.cfg.cards:  # 블로그 이름 → 블로그 카드 제목 ('발행 대기 글' 줄 이름과 같게)
+                blog = c.options.get("blog")
+                if c.enabled and c.type == "naver_blog" and isinstance(blog, str) and blog.strip():
+                    labels.setdefault(blog.strip().lower(), c.title or c.key)
+            return todo_mod.build(
+                export, self.db, self.ctx.now(), ttl_hours=self.ctx.link_ttl_hours,
+                links_anchor=f"#card-{self.links_key}" if self.links_key else None,
+                waiting_anchor=f"#card-{self.waiting_key}" if self.waiting_key else None,
+                stale_hours=self.cfg.blogauto_stale_hours, labels=labels, shop_label=self.ctx.shop_label,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.exception("dashboard todo failed")
+            return todo_mod.TodoView(hints=[f"할 일 목록을 만들지 못함 ({safe_error(e)})"])
+
     @staticmethod
     def _updated_at(views: list[CardView]) -> datetime | None:
         """맨 위 '마지막 업데이트': 바깥에서 읽은 값(API·Blog-Auto 기록·직접 입력) 중 가장 최근 (봇 DB 카드는 늘 지금이라 뺌)."""
@@ -471,19 +539,24 @@ class Dashboard:
         """notice_src 가 카드 키면 안내를 그 카드 안에, 아니면 맨 위에."""
         views = self.views()
         times = ", ".join(self.cfg.collect_times) or "-"
-        footer = (f"API 로 읽는 카드는 매일 {times} 에 자동으로 읽어요 ('다시 읽기'는 카드마다 {self.cfg.refresh_min_minutes}분에 한 번). "
-                  "네이버 블로그 이웃 수·방문자·게시글 수와 오픈채팅 참여자는 카드에서 직접 넣어요.")
+        footer = f"API 로 읽는 카드는 매일 {times} 에 자동으로 읽어요 ('다시 읽기'는 카드마다 {self.cfg.refresh_min_minutes}분에 한 번). "
+        if any("own_stats" in v.detail for v in views):  # Blog-Auto 가 블로그 자기 통계를 보내기 시작한 뒤
+            footer += ("네이버 블로그 이웃 수·방문자·조회수는 Blog-Auto 가 블로그마다 하루 한 번(날마다 다른 시각) 읽어 와요 — "
+                       "읽은 뒤에 이웃 수를 직접 넣으면 그날은 넣은 값이 보여요. 게시글 수와 오픈채팅 참여자는 카드에서 직접 넣어요.")
+        else:
+            footer += "네이버 블로그 이웃 수·방문자·게시글 수와 오픈채팅 참여자는 카드에서 직접 넣어요."
         return render.render_page(
             title=self.cfg.title, views=views, summary=self.summary(views), updated_at=self._updated_at(views),
             token=self.form_token, today=self.ctx.today(), tz=self.ctx.tz, spark_days=self.cfg.spark_days,
             notice=notice, notice_src=notice_src if notice_src in self.by_key else None, footer=footer,
             min_day=self.ctx.today() - timedelta(days=self.cfg.manual_max_days_back), counts=self.chip_counts(views),
+            todo=self.todo(), now=self.ctx.now(), logout_path=LOGOUT_PATH,
         )
 
     def json_text(self) -> str:
         views = self.views()
         return render.render_json(title=self.cfg.title, views=views, generated_at=self.ctx.now(), tz=self.ctx.tz,
-                                  summary=self.summary(views))
+                                  summary=self.summary(views), todo=self.todo())
 
     # ------------------------------------------------------------ 웹
     def register(self, web: WebServer) -> bool:
@@ -492,17 +565,105 @@ class Dashboard:
         if not self.served:
             web.guard_prefix("/dashboard", None)
             return False
-        web.guard_prefix("/dashboard", self.check_auth)
+        # 로그인 없이 여는 건 이것들뿐 (정확한 경로만): 로그인·로그아웃, 바탕화면 앱 매니페스트·아이콘
+        public = [LOGIN_PATH, LOGOUT_PATH, *webapp.public_paths()]
+        web.guard_prefix("/dashboard", self.check_auth, public=public, on_denied=self._denied)
         for path, handler in (
             ("/dashboard", self._page),
             ("/dashboard/", self._page),
             ("/dashboard/refresh", self._refresh),
             ("/dashboard/input", self._input),
             ("/dashboard/data.json", self._data),
+            (webapp.MANIFEST_PATH, self._manifest),
         ):
             web.route(path, handler)
+        for name in webapp.STATIC_TYPES:
+            web.route(webapp.STATIC_PREFIX + name, self._icon(name))
         web.route_post(LINK_PATH, self._link, max_body=LINK_BODY_MAX)
+        web.route(LOGIN_PATH, self._login_page, with_headers=True)
+        web.route_post(LOGIN_PATH, self._login, max_body=LOGIN_BODY_MAX, with_headers=True)
+        web.route_post(LOGOUT_PATH, self._logout, max_body=LOGOUT_BODY_MAX, with_headers=True)
         return True
+
+    # ------------------------------------------------------------ 로그인 (login.py) · 바탕화면 앱 (webapp.py)
+    def _denied(self, method: str, path: str, headers: dict[str, str]) -> Any:
+        """로그인 없이 브라우저로 연 화면 → 로그인 화면으로 (302). 기본 인증을 넣었는데 틀렸으면 그대로 401
+        (브라우저가 다시 묻게), data.json·POST·그 밖의 경로도 그대로 401. 만료된 세션 쿠키는 지운다."""
+        if method not in ("GET", "HEAD") or path not in PAGE_PATHS or headers.get("authorization"):
+            return None
+        extra = dict(SECURITY_HEADERS)
+        if cookie_values(headers, SESSION_COOKIE):
+            extra["Set-Cookie"] = clear_session_cookie()
+        return 302, LOGIN_PATH, None, extra
+
+    async def _manifest(self, query: dict[str, str]) -> Any:
+        return webapp.manifest_response()
+
+    @staticmethod
+    def _icon(name: str) -> Any:
+        async def handler(query: dict[str, str]) -> Any:
+            return webapp.static_response(name)
+
+        return handler
+
+    def _login_form(self, headers: dict[str, str], status: int, notice: tuple[str, str] | None = None, *,
+                    cross_site: bool = False, retry_after: int | None = None) -> Any:
+        """로그인 화면 + CSRF 난수 쿠키 (받은 난수 쿠키가 있으면 그대로, 없으면 새로) — 폼에는 지금 시각으로 새 서명."""
+        nonce, field = self.csrf.issue(cookie_values(headers, LOGIN_COOKIE))
+        headers = {**SECURITY_HEADERS, "Set-Cookie": login_cookie(nonce)}
+        if retry_after is not None:
+            headers["Retry-After"] = str(retry_after)
+        return status, login_page(title=self.cfg.title, field_token=field, notice=notice, cross_site=cross_site), \
+            "text/html; charset=utf-8", headers
+
+    @staticmethod
+    def _locked_notice(wait: int) -> tuple[str, str]:
+        return f"비밀번호가 여러 번 틀려 잠시 막아 두었어요 — {wait_text(wait)} 뒤에 다시 넣어 주세요.", "bad"
+
+    async def _login_page(self, query: dict[str, str], headers: dict[str, str]) -> Any:
+        """GET /dashboard/login. 이미 로그인한 기기면 바로 대시보드로."""
+        if self.sessions.any_valid(cookie_values(headers, SESSION_COOKIE)):
+            return 303, "/dashboard", None, SECURITY_HEADERS
+        notice = LOGIN_NOTICES.get(query.get("msg", ""))
+        wait = self.limiter.blocked(client_key(headers))
+        if wait is not None:
+            notice = self._locked_notice(wait)
+        cross = (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site"
+        return self._login_form(headers, 200, notice, cross_site=cross)
+
+    async def _login(self, form: dict[str, str], headers: dict[str, str]) -> Any:
+        """POST /dashboard/login: 1분 한도(429) → 틀린 시도 막힘(429) → CSRF(403) → 아이디·비밀번호(상수 시간 비교) →
+        세션 쿠키와 함께 대시보드로 (303). 넣은 값·쿠키 값은 로그에 남기지 않는다."""
+        client = client_key(headers)
+        wait = self.login_rate.hit(client)
+        if wait is not None:
+            return self._login_form(headers, 429, (f"너무 자주 눌렀어요 — {wait_text(wait)} 뒤에 다시 눌러 주세요.", "bad"),
+                                    retry_after=wait)
+        wait = self.limiter.blocked(client)
+        if wait is not None:
+            return self._login_form(headers, 429, self._locked_notice(wait), retry_after=wait)
+        if not self.csrf.check(cookie_values(headers, LOGIN_COOKIE), form.get("t")):
+            return self._login_form(headers, 403, ("화면이 오래됐어요 — 아이디와 비밀번호를 다시 넣어 주세요.", "bad"))
+        given_user = (form.get("user") or "").strip().encode("utf-8")
+        given_password = (form.get("password") or "").encode("utf-8")
+        if check_credentials(given_user, given_password, self._user, self._password):
+            self.limiter.success(client)
+            token = self.sessions.create()
+            log.info("dashboard: 로그인 — 이 기기는 %d일 동안 로그인 유지 (값은 기록하지 않음)", SESSION_DAYS)
+            return 303, "/dashboard", None, {**SECURITY_HEADERS, "Set-Cookie": session_cookie(token)}
+        self._failed(client)
+        wait = self.limiter.blocked(client)
+        if wait is not None:
+            return self._login_form(headers, 429, self._locked_notice(wait), retry_after=wait)
+        return self._login_form(headers, 200, ("아이디나 비밀번호가 맞지 않아요.", "bad"))
+
+    async def _logout(self, form: dict[str, str], headers: dict[str, str]) -> Any:
+        """POST /dashboard/logout (폼 토큰 t): 이 요청의 세션 쿠키를 DB 에서 지우고 쿠키도 지운 뒤 로그인 화면으로."""
+        if not self._token_ok(form.get("t")):
+            return self._forbidden()
+        for token in cookie_values(headers, SESSION_COOKIE):
+            self.sessions.revoke(token)
+        return 303, f"{LOGIN_PATH}?msg=out", None, {**SECURITY_HEADERS, "Set-Cookie": clear_session_cookie()}
 
     def _notice(self, query: dict[str, str]) -> tuple[tuple[str, str] | None, str | None]:
         """((문구, 종류), 안내를 넣을 카드 키 | None)."""

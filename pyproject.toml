@@ -38,6 +38,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# 대시보드 바탕화면 앱 아이콘 (Docker 처럼 -e 없이 설치해도 함께 들어가게)
+"dealbot.dashboard" = ["static/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

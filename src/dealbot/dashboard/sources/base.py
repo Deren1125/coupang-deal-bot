@@ -54,6 +54,8 @@ class SourceContext:
     blogauto: Any = None  # BlogAutoReader
     shop_label: Callable[[str], str] = lambda key: key  # 몰 키 → 이름 (텔레그램 링크 요청과 같은 이름)
     history_days: int = 30  # 봇 DB 가 딜 기록을 지우는 기간 (app.prune_events_days) — 그보다 오래된 날은 다시 세지 않음
+    # 링크·확인을 기다리는 글이 끝나는 시간 (publish.manual_link_ttl_hours) — '지금 할 일' 의 '14시간 남음'. 모르면 남은 시간 없이
+    link_ttl_hours: float | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def local_now(self) -> datetime:
@@ -112,21 +114,28 @@ class CardData:
         row = self.ctx.db.metric_latest(self.key, metric, until_day=d)
         return row["value"] if row else None
 
-    def delta(self, metric: str, *, max_gap_days: int = 7) -> tuple[float, str] | None:
-        """가장 최근 값 − 그 앞의 값 (최대 max_gap_days 전까지). 바로 전날과 비교면 '오늘'/'10. 13.', 아니면 'N. N. 대비'."""
+    def change(self, metric: str, *, max_gap_days: int = 7) -> tuple[float, date, date] | None:
+        """(가장 최근 값 − 그 앞의 값, 최근 날짜, 앞 날짜). 앞 값이 없거나 max_gap_days 보다 먼 날이면 None."""
         rows = self._rows(metric)
         if len(rows) < 2:
             return None
         (d1, v1), (d0, v0) = rows[-1], rows[-2]
         last, prev = date.fromisoformat(d1), date.fromisoformat(d0)
-        gap = (last - prev).days
-        if gap > max_gap_days:
+        if (last - prev).days > max_gap_days:
             return None
-        if gap == 1:
+        return v1 - v0, last, prev
+
+    def delta(self, metric: str, *, max_gap_days: int = 7) -> tuple[float, str] | None:
+        """가장 최근 값 − 그 앞의 값 (최대 max_gap_days 전까지). 바로 전날과 비교면 '오늘'/'10. 13.', 아니면 'N. N. 대비'."""
+        got = self.change(metric, max_gap_days=max_gap_days)
+        if got is None:
+            return None
+        diff, last, prev = got
+        if (last - prev).days == 1:
             label = "오늘" if last == self.today else fmt_short_day(last)
         else:
             label = f"{fmt_short_day(prev)} 대비"
-        return v1 - v0, label
+        return diff, label
 
     def today_delta(self, metric: str) -> float | None:
         """오늘 값 − 어제 값 (둘 다 있을 때만) — 맨 위 '오늘 늘어난' 합계용."""

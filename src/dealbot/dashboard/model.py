@@ -70,6 +70,7 @@ class Stat:
     missing: str = "-"  # 값이 없을 때 보일 말 ("권한 필요" 등)
     sub: str = ""  # 작은 보조 줄 ("최근 7일 35")
     money: bool = False
+    stale: bool = False  # 오래된 값 (회색으로 — 블로그 자기 통계를 36시간 넘게 못 읽었을 때)
 
 
 @dataclass(slots=True)
@@ -158,6 +159,7 @@ class CardView:
     summary: dict[str, float] = field(default_factory=dict)  # 맨 위 요약 줄에 더할 값
     links: list[CardLink] = field(default_factory=list)  # 숫자 칸 바로 밑 링크 (네이버 통계 열기 등)
     stats_note: str = ""  # 숫자 칸 밑 회색 작은 안내 (숫자가 어디서 왔는지 등)
+    stats_warn: str = ""  # 그 안내 뒤에 붙는 주황 글 ('어제 못 읽음' 등)
     groups: list[ListGroup] = field(default_factory=list)  # 그래프 밑 목록 (발행 대기 글 · 링크 기다리는 딜)
     empty_text: str = ""  # 목록 카드인데 줄이 하나도 없을 때 한 줄
     detail: dict[str, Any] = field(default_factory=dict)  # data.json 에 그대로 나갈 목록 값 (폼 토큰은 넣지 않음)

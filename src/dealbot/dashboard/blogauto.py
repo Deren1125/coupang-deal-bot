@@ -1,7 +1,7 @@
 """Blog-Auto 가 한 시간마다 쓰는 활동 기록 파일(var/metrics/blogauto.json) 읽기.
 
-Blog-Auto 는 자기 DB·kv 만 보고 이 파일을 쓴다 (네이버에 요청하지 않음). 딜봇도 이 파일만 읽는다 —
-네이버 블로그 통계·방문자·이웃 목록 페이지는 robots.txt 가 막고 있어 읽지 않는다 (이웃 수·방문자는 주인이 직접 입력).
+Blog-Auto 는 자기 DB·kv (자기 통계 own_stats 는 하루 한 번 따로 읽어 둔 값) 만 보고 이 파일을 쓴다.
+딜봇은 이 파일만 읽는다 — 딜봇(서버)은 네이버에 한 번도 요청하지 않는다.
 
 파일 모양 (docs/DASHBOARD.md):
     {"written_at": "2026-10-14T18:00:05+09:00",
@@ -17,20 +17,37 @@ Blog-Auto 는 자기 DB·kv 만 보고 이 파일을 쓴다 (네이버에 요청
 count = 봇이 네이버 임시저장으로 올려 두고 아직 발행·버림·삭제되지 않은 글 (주인이 고친 임시저장 글도 셈),
 popular = 그중 score(0~100 인기 예상) 가 threshold 이상인 글 수, top = 점수 높은 순(같으면 최근 저장 순) 최대 5개.
 세지 못한 블로그는 blogs 에 없다 → 카드의 그 줄은 '판단 불가'.
+
+블로그 카드용 "own_stats" (주인 결정 10/15 — Blog-Auto 가 주인 블로그 세 개만, 블로그마다 자기 로그인 브라우저로
+하루 한 번 날마다 다른 시각에 자기 통계·이웃 수를 읽어 넣음. 없거나 어떤 블로그만 빠져도 나머지는 그대로 읽힘):
+    "own_stats": {"finance": {"day": "2026-10-15", "read_at": "2026-10-15T14:23:05+09:00", "neighbors": 183,
+        "visitors_today": 2, "visitors_total": 2751, "views_today": 5, "likes_today": 5, "comments_today": 2,
+        "neighbor_change_today": 0, "buddy_requests_pending": 2,
+        "yesterday": {"day": "2026-10-14", "views": 16, "likes": 3, "comments": 1, "neighbor_change": 1} | null,
+        "prev": {"day": "2026-10-14", "neighbors": 182, "visitors_total": 2735} | null}, "issue": {...}, "hotdeal": {...}}
+어느 칸이든 null 일 수 있다 (그 칸만 '-'). '오늘' 숫자는 read_at 까지의 값 (하루 중간에 읽은 것).
+
+대시보드 맨 위 '지금 할 일' 용 "todo" (주인 요청 10/15 — Blog-Auto 알림 목록에서 아직 열린 일 + 대기 글·서로이웃 신청 같은 상태.
+없어도 나머지는 그대로 읽힘):
+    "todo": {"generated_at": "2026-10-15T14:30:05+09:00", "items": [
+        {"key": "draft_ready:issue:31", "marker": "🔔[할 일]", "blog": "issue", "kind": "draft_ready", "short": "≤30자 요약",
+         "text": "첫 줄 무엇\n→ 어떻게 (두 줄 이하)", "since": "…", "urgent": false, "link": "https://…" | "", "group": "", "count": 1}]}
+글은 카톡 메모와 같은 주인용 문구. 항목마다 따로 걸러서 이상한 항목만 버린다 (링크는 https 만, 토큰 모양 글자는 가림).
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard.model import OK, STALE, UNAVAILABLE
+from dealbot.dashboard.model import OK, STALE, UNAVAILABLE, https_url, safe_text
 
 MAX_BYTES = 1_000_000
 
@@ -54,6 +71,17 @@ _TIME_KEYS = ("written_at", "generated_at", "updated_at")
 WAITING_TITLE_MAX = 60  # Blog-Auto 가 60자로 잘라 보내지만 한 번 더
 WAITING_TOP_MAX = 5
 WAITING_CATEGORY_MAX = 20
+OWN_MAX = 1_000_000_000  # 자기 통계 숫자가 이보다 크면 잘못 읽은 것으로 보고 그 칸만 버림
+# '지금 할 일' 표시 (Blog-Auto notify.SEVERITY 순서 + 참고). 모르는 표시는 글 첫머리로 찾고, 그래도 없으면 🔔 (Blog-Auto 와 같게)
+TODO_MARKERS = ("⛔[멈춤]", "🔥[핫]", "⚠️[할 일]", "🔔[할 일]", "ℹ️")
+TODO_DEFAULT_MARKER = "🔔[할 일]"
+_MARKER_ALIASES = {"⚠[할 일]": "⚠️[할 일]", "ℹ": "ℹ️"}  # 이모지 뒤 VS16(️) 이 빠진 모양
+TODO_MAX_ITEMS = 100
+TODO_SHORT_MAX = 40  # Blog-Auto 는 30자 안으로 보냄 — 한 번 더
+TODO_LINE_MAX = 140  # 글 한 줄 (카톡 한 통이 200자)
+TODO_HOW_LINES = 2  # '→ 어떻게' 는 두 줄까지
+TODO_KEY_MAX = 120
+TODO_COUNT_MAX = 100_000
 
 
 @dataclass(slots=True)
@@ -78,12 +106,76 @@ class WaitingExport:
 
 
 @dataclass(slots=True)
+class OwnDay:
+    """읽은 날의 전날 하루 전체 (통계 '일간 현황' 에서 날짜를 한 칸 뒤로 넘긴 값)."""
+
+    day: date
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    neighbor_change: int | None = None  # 이웃증감수 (줄면 음수)
+
+
+@dataclass(slots=True)
+class OwnPrev:
+    """그 앞에 읽은 값 (보통 어제) — 이웃 수 증감을 셀 때."""
+
+    day: date
+    neighbors: int | None = None
+    visitors_total: int | None = None
+
+
+@dataclass(slots=True)
+class OwnStats:
+    """Blog-Auto 가 주인 블로그 하나를 하루 한 번(날마다 다른 시각) 읽은 자기 통계. 숫자 칸은 모르면 None."""
+
+    day: date  # 읽은 날 (app.timezone)
+    read_at: datetime | None  # 읽은 시각 (모르면 None — 그날 언제인지 모름)
+    neighbors: int | None = None
+    visitors_today: int | None = None  # 읽은 시각까지의 그날 방문자
+    visitors_total: int | None = None
+    views_today: int | None = None  # 읽은 시각까지의 그날 조회수
+    likes_today: int | None = None
+    comments_today: int | None = None  # 블로그에 달린 댓글 (봇이 쓴 댓글이 아님)
+    neighbor_change_today: int | None = None
+    buddy_requests_pending: int | None = None  # 받은 서로이웃 신청 중 아직 수락·거절하지 않은 것
+    yesterday: OwnDay | None = None
+    prev: OwnPrev | None = None
+
+
+@dataclass(slots=True)
+class TodoItem:
+    """Blog-Auto 가 보낸 '지금 할 일' 한 줄 (카톡 메모와 같은 주인용 문구를 걸러 둔 것)."""
+
+    key: str  # 같은 일 (Blog-Auto 알림 키 — 딜봇 일은 link:31·review:12·unsure:5·publish_broken 처럼 딜봇이 준 키 그대로)
+    marker: str  # TODO_MARKERS 중 하나
+    short: str  # 한 줄 요약 (≤30자)
+    what: str = ""  # 글 첫 줄에서 표시를 뺀 것
+    how: str = ""  # '→ 어떻게' (두 줄까지, 줄은 \n)
+    since: datetime | None = None
+    urgent: bool = False
+    blog: str = ""  # finance | issue | hotdeal | dealbot | ''
+    kind: str = ""
+    link: str | None = None  # https 만 (아니면 None)
+    group: str = ""
+    count: int = 1
+
+
+@dataclass(slots=True)
+class TodoExport:
+    generated_at: datetime | None
+    items: list[TodoItem] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class BlogAutoExport:
     status: str
     note: str | None = None
     written_at: datetime | None = None
     blogs: dict[str, dict[str, float]] = field(default_factory=dict)  # 이름(소문자) → 지표
     waiting: WaitingExport | None = None  # 파일에 "waiting" 이 없거나 모양이 다르면 None ('발행 대기 글' 은 판단 불가)
+    own_stats: dict[str, OwnStats] = field(default_factory=dict)  # 이름(소문자)·blog_id → 자기 통계 (없으면 직접 입력만)
+    todo: TodoExport | None = None  # 파일에 "todo" 가 없거나 모양이 다르면 None ('지금 할 일' 은 딜봇 것만 + 안내)
 
     @property
     def ok(self) -> bool:
@@ -93,6 +185,12 @@ class BlogAutoExport:
         for n in names:
             if n and n.lower() in self.blogs:
                 return self.blogs[n.lower()]
+        return None
+
+    def own(self, *names: str | None) -> OwnStats | None:
+        for n in names:
+            if isinstance(n, str) and n.lower() in self.own_stats:
+                return self.own_stats[n.lower()]
         return None
 
 
@@ -219,6 +317,139 @@ def parse_waiting(data: Any, tz: str) -> WaitingExport | None:
     return WaitingExport(threshold=_count(data.get("threshold"), top=100), blogs=blogs)
 
 
+_INT_TEXT = re.compile(r"-?[0-9]{1,3}(?:,[0-9]{3})+|-?[0-9]+")
+
+
+def _int(v: Any, *, signed: bool = False) -> int | None:
+    """자기 통계 숫자 한 칸: 정수(12.0·'2,751' 도 받음). 참·거짓·소수·무한·OWN_MAX 넘는 수는 None, signed 가 아니면 음수도 None."""
+    if isinstance(v, str) and _INT_TEXT.fullmatch(v.strip()):
+        v = int(v.strip().replace(",", ""))
+    if isinstance(v, bool) or not isinstance(v, int | float):
+        return None
+    if isinstance(v, float) and not (math.isfinite(v) and v.is_integer()):
+        return None
+    n = int(v)
+    if abs(n) > OWN_MAX or (n < 0 and not signed):
+        return None
+    return n
+
+
+_DAY_TEXT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
+def _day(v: Any) -> date | None:
+    """'YYYY-MM-DD' 만 (그 밖의 모양·없는 날짜는 None)."""
+    if not isinstance(v, str) or not _DAY_TEXT.fullmatch(v.strip()):
+        return None
+    try:
+        return date.fromisoformat(v.strip())
+    except ValueError:
+        return None
+
+
+def _own_stats(v: Any, tz: str) -> OwnStats | None:
+    """블로그 하나. 읽은 날(day, 없으면 read_at 의 날)을 모르거나 숫자가 하나도 없으면 None (그 카드는 직접 입력만)."""
+    if not isinstance(v, dict):
+        return None
+    read_at = _parse_time(v.get("read_at"), tz)
+    day = _day(v.get("day")) or (read_at.astimezone(ZoneInfo(tz)).date() if read_at else None)
+    if day is None:
+        return None
+    if read_at is not None and read_at.astimezone(ZoneInfo(tz)).date() != day:
+        read_at = None  # 날짜와 시각이 어긋나면 시각은 버린다 (어느 쪽이 맞는지 모름 — 날짜만 믿음)
+    own = OwnStats(
+        day=day, read_at=read_at, neighbors=_int(v.get("neighbors")), visitors_today=_int(v.get("visitors_today")),
+        visitors_total=_int(v.get("visitors_total")), views_today=_int(v.get("views_today")),
+        likes_today=_int(v.get("likes_today")), comments_today=_int(v.get("comments_today")),
+        neighbor_change_today=_int(v.get("neighbor_change_today"), signed=True),
+        buddy_requests_pending=_int(v.get("buddy_requests_pending")),
+    )
+    y = v.get("yesterday")
+    if isinstance(y, dict) and (yd := _day(y.get("day"))) is not None and yd < day:
+        own.yesterday = OwnDay(day=yd, views=_int(y.get("views")), likes=_int(y.get("likes")), comments=_int(y.get("comments")),
+                               neighbor_change=_int(y.get("neighbor_change"), signed=True))
+    p = v.get("prev")
+    if isinstance(p, dict) and (pd := _day(p.get("day"))) is not None and pd < day:
+        own.prev = OwnPrev(day=pd, neighbors=_int(p.get("neighbors")), visitors_total=_int(p.get("visitors_total")))
+    numbers = (own.neighbors, own.visitors_today, own.visitors_total, own.views_today, own.likes_today, own.comments_today,
+               own.neighbor_change_today, own.buddy_requests_pending)
+    if all(n is None for n in numbers) and own.yesterday is None:
+        return None
+    return own
+
+
+def parse_own_stats(data: Any, tz: str) -> dict[str, OwnStats]:
+    """파일의 "own_stats" → {블로그 이름(소문자)·blog_id: OwnStats}. 없거나 모양이 다르면 {} — 블로그마다 따로 걸러 이상한 블로그만 빠진다."""
+    out: dict[str, OwnStats] = {}
+    if not isinstance(data, dict):
+        return out
+    for name, v in data.items():
+        if not isinstance(name, str) or not name.strip() or (own := _own_stats(v, tz)) is None:
+            continue
+        for n in (name, v.get("blog_id")):
+            if isinstance(n, str) and n.strip():
+                out.setdefault(n.strip().lower(), own)
+    return out
+
+
+def _marker(raw: Any, first_line: str) -> str:
+    """표시: 준 값이 아는 표시면 그것, 아니면 글 첫머리, 그래도 없으면 🔔 (Blog-Auto notify._marker 와 같게)."""
+    if isinstance(raw, str):
+        m = _MARKER_ALIASES.get(raw.strip(), raw.strip())
+        if m in TODO_MARKERS:
+            return m
+    for m in (*TODO_MARKERS, *_MARKER_ALIASES):
+        if first_line.startswith(m):
+            return _MARKER_ALIASES.get(m, m)
+    return TODO_DEFAULT_MARKER
+
+
+def _strip_marker(line: str) -> str:
+    for m in (*TODO_MARKERS, *_MARKER_ALIASES):
+        if line.startswith(m):
+            return line[len(m):].strip()
+    return line
+
+
+def _todo_line(v: Any, limit: int = TODO_LINE_MAX) -> str:
+    """주인에게 보일 한 줄: 공백 정리 + 토큰처럼 보이는 글자는 가림 (safe_text — 자르기 전에 가려서 잘린 토큰이 새지 않게) + 길이."""
+    if not isinstance(v, str):
+        return ""
+    line = safe_text(v[:2000], 2000)
+    return line if len(line) <= limit else line[: limit - 1] + "…"
+
+
+def _todo_item(v: Any, tz: str) -> TodoItem | None:
+    """할 일 한 줄. 글도 요약도 없으면 None (그 줄만 버림)."""
+    if not isinstance(v, dict):
+        return None
+    text = v.get("text") if isinstance(v.get("text"), str) else ""
+    lines = [ln for ln in (_todo_line(x) for x in text.splitlines()) if ln]
+    first = lines[0] if lines else ""
+    marker = _marker(v.get("marker"), first)
+    what = _strip_marker(first)
+    how = "\n".join(lines[1:1 + TODO_HOW_LINES])
+    short = _todo_line(v.get("short"), TODO_SHORT_MAX) or (what[: TODO_SHORT_MAX - 1] + "…" if len(what) > TODO_SHORT_MAX else what)
+    if not short:
+        return None
+    key = _one_line(v.get("key"), TODO_KEY_MAX) or f"todo:{short}"  # 키가 빠진 줄도 버리지 않는다 (요약으로 키)
+    link = https_url(v.get("link").strip()) if isinstance(v.get("link"), str) else None
+    return TodoItem(
+        key=key, marker=marker, short=short, what=what, how=how, since=_parse_time(v.get("since"), tz),
+        urgent=v.get("urgent") is True, blog=(_one_line(v.get("blog"), 20) or "").lower(),
+        kind=_one_line(v.get("kind"), 40) or "", link=link, group=_one_line(v.get("group"), 40) or "",
+        count=max(1, _count(v.get("count"), top=TODO_COUNT_MAX) or 1),
+    )
+
+
+def parse_todo(data: Any, tz: str) -> TodoExport | None:
+    """파일의 "todo" → TodoExport. 없거나 모양이 다르면 None ('블로그 쪽 할 일을 못 읽음'). 이상한 항목만 버린다."""
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        return None
+    items = [it for it in (_todo_item(x, tz) for x in data["items"][:TODO_MAX_ITEMS]) if it is not None]
+    return TodoExport(generated_at=_parse_time(data.get("generated_at"), tz), items=items)
+
+
 def parse_export(data: Any, tz: str) -> BlogAutoExport:
     if not isinstance(data, dict):
         return BlogAutoExport(UNAVAILABLE, "Blog-Auto 활동 기록의 모양이 달라 읽지 못함")
@@ -237,7 +468,8 @@ def parse_export(data: Any, tz: str) -> BlogAutoExport:
         for n in names:
             if isinstance(n, str) and n.strip():
                 blogs.setdefault(n.strip().lower(), metrics)
-    return BlogAutoExport(OK, written_at=written, blogs=blogs, waiting=parse_waiting(data.get("waiting"), tz))
+    return BlogAutoExport(OK, written_at=written, blogs=blogs, waiting=parse_waiting(data.get("waiting"), tz),
+                          own_stats=parse_own_stats(data.get("own_stats"), tz), todo=parse_todo(data.get("todo"), tz))
 
 
 class BlogAutoReader:
@@ -277,5 +509,7 @@ class BlogAutoReader:
                 written_at=parsed.written_at,
                 blogs=parsed.blogs,
                 waiting=parsed.waiting,
+                own_stats=parsed.own_stats,  # 자기 통계는 읽은 시각(read_at)으로 따로 오래됐는지 본다
+                todo=parsed.todo,  # '지금 할 일' 은 그대로 보이고 '몇 시간 전 것' 안내만 붙는다
             )
         return parsed

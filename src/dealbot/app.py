@@ -548,6 +548,7 @@ class DealBot:
             history_days=s.app.prune_events_days,  # 딜 기록을 지운 날은 다시 세지 않음
             blogauto=BlogAutoReader(dc.blogauto_metrics_path, tz=s.app.timezone, stale_hours=dc.blogauto_stale_hours, now=utcnow),
             shop_label=self.notifier.shop_label,  # '링크 기다리는 딜' 의 몰 이름 (텔레그램 링크 요청과 같은 이름)
+            link_ttl_hours=s.publish.manual_link_ttl_hours,  # '지금 할 일' 의 '14시간 남음' (expire_queue 와 같은 기준)
         )
         # links=self: '링크 넣기' 는 텔레그램 답장과 같은 attach_link·owner_link_problem·refresh_pending_notice 를 부른다
         return Dashboard(dc, ctx, user=s.secrets.dashboard_user, password=s.secrets.dashboard_password,
