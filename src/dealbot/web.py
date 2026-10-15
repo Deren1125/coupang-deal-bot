@@ -5,7 +5,8 @@
   메타는 리디렉션 주소로 localhost 를 받지 않고 https 실제 도메인만 받으므로, Railway 공개 도메인을 여기에 연결한다.
 - `/health` 응답 (플랫폼 상태 확인용), 카드 이미지·핫딜 페이지.
 - `/dashboard` 채널 대시보드 — 경로 앞부분(guard_prefix)이나 경로 하나(route auth=)에 인증을 붙일 수 있다
-  (기본 인증, 틀리면 401 + WWW-Authenticate, 너무 많이 틀리면 429 + Retry-After).
+  (기본 인증, 틀리면 401 + WWW-Authenticate, 너무 많이 틀리면 429 + Retry-After). 앞부분 아래에서 정확히 적은 경로만
+  인증 없이 열 수 있고(public — 로그인 화면·앱 아이콘), 막힌 요청을 401 대신 다른 응답(로그인 화면으로 보내기)으로 바꿀 수 있다.
 
 의존성 없이 asyncio 로만 만들었고, 보통은 요청 한 줄과 헤더만 읽는다. 본문은 route_post 로 연 경로만 읽는다
 (작은 폼 하나: application/x-www-form-urlencoded, 경로마다 정한 크기까지, 다른 사이트에서 보낸 폼은 403).
@@ -16,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
@@ -26,6 +27,8 @@ log = logging.getLogger(__name__)
 # (status, html/text) 또는 (status, bytes, content-type) 또는 (status, 본문, content-type|None, 덧붙일 헤더)
 Response = tuple[int, str] | tuple[int, bytes, str] | tuple[int, str | bytes, str | None, dict[str, str]]
 Handler = Callable[[dict[str, str]], Awaitable[Response]]
+# with_headers=True 로 붙인 경로: (쿼리|폼, 요청 헤더) — 쿠키·접속 주소가 필요한 곳 (대시보드 로그인)
+HeaderHandler = Callable[[dict[str, str], dict[str, str]], Awaitable[Response]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +39,8 @@ class Throttled:
 
 
 AuthCheck = Callable[[dict[str, str]], "bool | Throttled"]  # 요청 헤더(이름은 소문자) → 들여보낼지
+# 앞부분 인증에 막힌 요청(401 이 될 것) → 대신 돌려줄 응답 또는 None(그대로 401). (method, path, headers)
+DeniedHook = Callable[[str, str, dict[str, str]], "Response | None"]
 # 요청 헤더 사전에 넣어 주는 접속 주소 (진짜 헤더 이름은 ':' 로 시작할 수 없어 손님이 보낸 값과 겹치지 않음)
 PEER_HEADER = ":peer"
 _STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
@@ -110,35 +115,60 @@ class WebServer:
         self.auth: dict[str, AuthCheck] = {}  # 인증이 필요한 경로 → 확인 함수
         # 경로 앞부분 → 확인 함수. 그 아래 모든 경로(나중에 auth 없이 붙인 경로도)에 적용. None 이면 닫힘(404)
         self.guards: dict[str, AuthCheck | None] = {}
+        self.guard_public: dict[str, frozenset[str]] = {}  # 앞부분 → 인증 없이 여는 정확한 경로들 (그 밖은 그대로 인증)
+        self.guard_denied: dict[str, DeniedHook] = {}  # 앞부분 → 막혔을 때 401 대신 쓸 응답을 정하는 함수
+        self.header_get: set[str] = set()  # 핸들러가 요청 헤더도 받는 GET 경로 (with_headers=True)
+        self.header_post: set[str] = set()  # 핸들러가 요청 헤더도 받는 POST 경로
         self.auth_realm = "dashboard"
         self._server: asyncio.AbstractServer | None = None
 
-    def route(self, path: str, handler: Handler, *, auth: AuthCheck | None = None) -> None:
-        """auth 를 주면 그 경로는 확인을 통과한 요청만 핸들러로 간다 (아니면 401)."""
-        self.routes[path] = handler
+    def route(self, path: str, handler: Handler | HeaderHandler, *, auth: AuthCheck | None = None,
+              with_headers: bool = False) -> None:
+        """auth 를 주면 그 경로는 확인을 통과한 요청만 핸들러로 간다 (아니면 401).
+        with_headers 면 핸들러를 (쿼리, 요청 헤더) 로 부른다."""
+        self.routes[path] = handler  # type: ignore[assignment]
         if auth is not None:
             self.auth[path] = auth
         else:
             self.auth.pop(path, None)
+        if with_headers:
+            self.header_get.add(path)
+        else:
+            self.header_get.discard(path)
 
-    def route_post(self, path: str, handler: Handler, *, max_body: int = 4096) -> None:
+    def route_post(self, path: str, handler: Handler | HeaderHandler, *, max_body: int = 4096,
+                   with_headers: bool = False) -> None:
         """폼 하나를 POST 로 받는 경로. 주소의 쿼리는 쓰지 않고 본문(application/x-www-form-urlencoded)만 핸들러로 넘긴다.
-        본문이 max_body 보다 크면 읽지 않고 413. 인증은 route 와 같다 (guard_prefix 아래면 먼저 확인)."""
-        self.post_routes[path] = (handler, max_body)
+        본문이 max_body 보다 크면 읽지 않고 413. 인증은 route 와 같다 (guard_prefix 아래면 먼저 확인).
+        with_headers 면 핸들러를 (폼, 요청 헤더) 로 부른다."""
+        self.post_routes[path] = (handler, max_body)  # type: ignore[assignment]
+        if with_headers:
+            self.header_post.add(path)
+        else:
+            self.header_post.discard(path)
 
     def route_prefix(self, prefix: str, handler: Handler) -> None:
         self.prefixes[prefix] = handler
 
-    def guard_prefix(self, prefix: str, check: AuthCheck | None) -> None:
+    def guard_prefix(self, prefix: str, check: AuthCheck | None, *, public: Iterable[str] = (),
+                     on_denied: DeniedHook | None = None) -> None:
         """'/dashboard' 와 '/dashboard/…' 전부를 check 로 지킨다 (경로마다 auth 를 붙이는 걸 잊어도 열리지 않게).
-        check 가 None 이면 그 아래는 모두 404 (기능이 꺼져 있을 때)."""
-        self.guards["/" + prefix.strip("/")] = check
+        check 가 None 이면 그 아래는 모두 404 (기능이 꺼져 있을 때 — public 경로까지).
+        public: 그 아래에서 인증 없이 여는 '정확한' 경로들 (앞부분 자체와 그 밖의 경로는 그대로 인증).
+        on_denied: 인증이 없거나 틀려 401 이 될 요청에 대신 쓸 응답 (None 을 돌려주면 그대로 401). 429 는 그대로."""
+        key = "/" + prefix.strip("/")
+        self.guards[key] = check
+        self.guard_public[key] = frozenset(p for p in public if check is not None and p.startswith(key + "/"))
+        if on_denied is not None and check is not None:
+            self.guard_denied[key] = on_denied
+        else:
+            self.guard_denied.pop(key, None)
 
-    def _guard_for(self, path: str) -> tuple[bool, AuthCheck | None]:
+    def _guard_for(self, path: str) -> tuple[bool, AuthCheck | None, str]:
         for prefix, check in self.guards.items():
             if path == prefix or path.startswith(prefix + "/"):
-                return True, check
-        return False, None
+                return True, check, prefix
+        return False, None, ""
 
     def _auth_denied(self, check: AuthCheck, headers: dict[str, str]) -> Response | None:
         """확인을 통과하면 None, 아니면 401(또는 너무 많이 틀렸으면 429) 응답."""
@@ -233,13 +263,20 @@ class WebServer:
         post = self.post_routes.get(path)
         if method not in ("GET", "HEAD", "POST") or (method == "POST" and post is None):
             return 405, page("허용되지 않는 방식", "GET 만 받습니다.")
-        guarded, guard = self._guard_for(path)
+        guarded, guard, prefix = self._guard_for(path)
         if guarded:  # 지키는 앞부분 아래는 경로가 있든 없든 먼저 확인 (없는 경로도 로그인 전엔 401)
             if guard is None:
                 return 404, page("없는 주소", "이 주소는 쓰지 않습니다.")
-            denied = self._auth_denied(guard, headers or {})
-            if denied is not None:
-                return denied
+            if path not in self.guard_public.get(prefix, ()):
+                denied = self._auth_denied(guard, headers or {})
+                if denied is not None:
+                    hook = self.guard_denied.get(prefix)
+                    if denied[0] == 401 and hook is not None:
+                        try:
+                            denied = hook(method, path, headers or {}) or denied
+                        except Exception:  # noqa: BLE001 — 바꾸다 터지면 그대로 401
+                            log.exception("web denied hook %s failed", prefix)
+                    return denied
         if post is not None:
             if method != "POST" and path not in self.routes:
                 return 405, page("허용되지 않는 방식", "POST 만 받습니다."), "text/html; charset=utf-8", {"Allow": "POST"}
@@ -266,6 +303,8 @@ class WebServer:
             if denied is not None:
                 return denied
         try:
+            if path in self.header_get:
+                return await handler(query, headers or {})  # type: ignore[call-arg]
             return await handler(query)
         except Exception as e:  # noqa: BLE001
             log.exception("web handler %s failed: %s", path, e)
@@ -296,6 +335,8 @@ class WebServer:
             return 400, page("잘못된 요청", "폼을 읽을 수 없습니다.")
         form = {k: v for k, v in pairs}
         try:
+            if path in self.header_post:
+                return await handler(form, headers)  # type: ignore[call-arg]
             return await handler(form)
         except Exception as e:  # noqa: BLE001
             log.exception("web handler %s failed: %s", path, e)
