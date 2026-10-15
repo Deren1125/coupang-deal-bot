@@ -784,6 +784,23 @@ class AdminNotifier:
             return
         await self.send(text, silent=True)
 
+    async def notify_link_replaced(self, item: QueueItem, new_id: int, notice_message_id: int | None, *, until: str) -> bool:
+        """링크 요청 자리가 다 차서 점수가 더 높은 딜에 자리를 내줌 (주인 결정 10/15): 보냈던 링크 요청 메시지만 고친다
+        (새 메시지는 보내지 않음 — 하루에 여러 번 생길 수 있어서). 아직 안 보낸 링크 요청 카톡은 취소. 고쳤으면 True."""
+        p = item.deal.product
+        self.resolve(f"link:{item.id}")
+        if not notice_message_id:
+            return False
+        price = f" — {p.price:,}원" if p.has_price else ""
+        text = (
+            f"↪️ <b>더 좋은 딜로 바꿨어요 #{item.id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
+            f"{html.escape(truncate(p.name, 80))}{price}\n"
+            f"링크 요청 자리가 다 차서 점수가 더 높은 #{new_id} 딜을 대신 물었어요. 이 링크는 만들지 않아도 돼요.\n"
+            f"그래도 올리고 싶으면 {html.escape(until)} 까지 이 메시지에 답장으로 링크를 보내 주세요 "
+            f"(또는 <code>/link {item.id} 링크</code>). 그대로 올려요."
+        )
+        return await self.edit(notice_message_id, text)
+
     def error_cleared(self, kind: str) -> None:
         """그 종류의 작업이 다시 성공함 — '계속 실패' 셈을 처음부터."""
         self._err_since.pop(kind, None)
@@ -1073,13 +1090,25 @@ class StatusReporter:
             lines.append("\n점수가 높은 글부터 올라갑니다. 빼려면 <code>/skip 번호</code>")
         return "\n".join(lines)
 
-    def pending_text(self, limit: int = 15) -> str:
+    def pending_text(self, limit: int | None = None, *, notice: bool = False) -> str:
+        """내 링크·확인을 기다리는 글. limit 을 안 주면 링크 요청 자리 수만큼(최소 15) — 자리에 든 글을 다 보여 준다.
+        notice: 고쳐 쓰는 고정 공지(한 메시지)용 — 자리 15개에 원본 주소까지 넣어 한 메시지를 넘으면 원본 주소 줄을 뺀다."""
+        limit = limit or max(15, self.settings.publish.max_awaiting_links)
+        text = self._pending_text(limit, urls=True)
+        if notice and len(text) > SAFE_CHUNK:
+            text = self._pending_text(limit, urls=False)
+        return text
+
+    def _pending_text(self, limit: int, *, urls: bool) -> str:
         items = self.db.awaiting_items(limit)
         lines = [f"🔗 <b>내가 링크를 만들어 줘야 하는 글</b> ({len(items)}건)" if items else "🔗 <b>내가 링크를 만들어 줘야 하는 글</b>: 지금은 없습니다"]
         for it in items:
             p = it.deal.product
             lines.append(self._item_line(it))
-            lines.append(f"   원본 주소: {html.escape(p.url)}")
+            if urls:
+                lines.append(f"   원본 주소: {html.escape(p.url)}")
+        if items and not urls:
+            lines.append("   (원본 주소는 각 링크 요청 메시지와 /pending 에 있어요)")
         if not items:
             lines.append("(없음 — 토스·네이버처럼 링크를 직접 만들어야 하는 글이 생기면 여기 뜁니다)")
         reviews = self.db.awaiting_items(limit, statuses=("awaiting_approval",))

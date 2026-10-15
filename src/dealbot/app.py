@@ -105,7 +105,7 @@ from dealbot.publisher.threads import (
 )
 from dealbot.shops import ShopRegistry, deal_disclosure
 from dealbot.soldout import looks_sold_out
-from dealbot.storage.db import MAYBE_POSTED, Database, QueueItem
+from dealbot.storage.db import MAYBE_POSTED, REPLACED, Database, QueueItem
 from dealbot.store_browser import StoreBrowser, store_browser_check
 from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
 from dealbot.utils.text import clean_name, truncate
@@ -149,6 +149,9 @@ SKIP_LABELS = {
 }
 # 보류는 Blog-Auto 가 따로 요약에 넣으니 '안 올린 딜' 문장에서는 뺀다 (수집 로그 한 줄에는 그대로)
 SKIP_NOT_SUMMARIZED = frozenset({"held", "held_price"})
+# 링크 요청 자리가 다 차서 빠진 딜 (저녁 요약에서 '안 올린 딜' 문장 대신 링크 자리 문장으로 따로 셈 — 주인 결정 10/15)
+LINK_FULL_LABEL = "요청 밀림"
+LINK_REPLACED_LABEL = "더 좋은 딜로 교체"
 # Blog-Auto 카톡 한 줄 200자 = 머리말('🌙 딜봇 10/14') + 빈칸 + 딜봇 하루 줄. 딜봇 하루 줄은 이 길이 안에서만 늘린다
 DAY_LINE_MAX = 180
 
@@ -166,10 +169,14 @@ def _closed_label(status: str, error: str | None) -> str:
         return "정품 의심"
     if e.startswith("unverified seller"):
         return "판매처 미확인"
+    if e.startswith("review backlog full"):
+        return "확인 요청 밀림"
     if "backlog full" in e:
-        return "요청 밀림"
+        return LINK_FULL_LABEL
     if e.startswith("skipped by admin"):
         return "주인이 넘김"
+    if e.startswith(REPLACED):
+        return LINK_REPLACED_LABEL
     return "기타"
 
 
@@ -631,6 +638,9 @@ class DealBot:
             return f"#{queue_id} 번 글이 없습니다. /queue 나 /pending 에서 번호를 확인해 주세요."
         if item.status == "awaiting_approval":
             return f"#{queue_id} 번은 확인을 기다리는 글이라 링크가 아니라 답이 필요합니다: <code>/ok {queue_id}</code> 또는 <code>/skip {queue_id}</code>"
+        if item.status == "skipped" and (item.last_error or "").startswith(REPLACED):  # 유효 시간 안이면 attach_link 가 이미 받음
+            return (f"#{queue_id} 번은 더 좋은 딜에 자리를 내준 뒤 유효 시간이 지나 링크를 붙이지 않았어요. "
+                    "아직 싸게 팔고 있으면 <code>/post</code> 로 직접 올려 주세요.")
         if item.status not in ("awaiting_link", "pending", "failed", autolink.STATUS):
             return f"#{queue_id} 번은 지금 '{item.status}' 상태라 링크를 붙일 수 없습니다."
         if not url.startswith("http"):
@@ -651,6 +661,9 @@ class DealBot:
             # '채널에 올라갔는지 모름' 글에 채널 글 링크로 답함(답장·/link·일괄 줄) = 채널에 있다는 뜻
             # → 그 주소를 링크로 붙여 다시 올리지 않고 /posted 처럼 올라간 글로 기록한다 (그 글 번호로 품절 표시도)
             return await self.mark_posted(queue_id, url)
+        item, twin = self._replaced_for_link(item)  # 더 좋은 딜에 자리를 내준 글도 주인 링크는 받는다 (주인 결정 10/15)
+        if twin is not None:
+            return f"↪️ #{queue_id} 번과 같은 상품이 #{twin} 번으로 다시 줄 서 있어 그 글에 붙였어요.\n" + await self.attach_link(twin, url)
         problem = self._link_problem(item, queue_id, url)
         if problem or item is None:
             return problem or ""
@@ -663,6 +676,20 @@ class DealBot:
         self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
         self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
         return self.notifier.link_done_text(item)
+
+    def _replaced_for_link(self, item: QueueItem | None) -> tuple[QueueItem | None, int | None]:
+        """더 좋은 딜에 자리를 내준 글에 주인이 링크를 보냄 → (링크를 붙일 글, 대신 붙일 글 번호). 주인이 이긴다 (주인 결정 10/15):
+        - 그사이 같은 상품이 새 글로 다시 줄 섰으면 그 글 번호 (한 상품에 열린 글은 하나 — 그 글에 붙인다)
+        - 링크 요청 유효 시간(manual_link_ttl_hours) 안이면 링크를 기다리는 글처럼 받아 다시 올린다 (발행 전 품절·이미 올림 확인은 그대로)
+        - 지났으면 그대로 (_link_problem 이 이유를 말함). 자리를 내준 글이 아니면 그대로."""
+        if item is None or item.status != "skipped" or not (item.last_error or "").startswith(REPLACED):
+            return item, None
+        twin = next(iter(self.db.items_for_product(item.product_id, OPEN_STATUSES)), None)
+        if twin is not None:
+            return item, twin.id
+        if utcnow() - item.created_at >= timedelta(hours=self.settings.publish.manual_link_ttl_hours):
+            return item, None
+        return replace(item, status="awaiting_link"), None
 
     def attach_auto_link(self, queue_id: int, url: str) -> str | None:
         """쇼핑커넥트 자동 링크를 주인이 답장한 것처럼 붙인다 (같은 확인·같은 재사용 기억). 주인 알림은 없음 (주인 결정 10/11).
@@ -1264,12 +1291,17 @@ class DealBot:
         return None
 
     def _review_backlog_full(self) -> int | None:
-        """관리자 손을 기다리는 글(링크·확인)이 이미 상한만큼 쌓여 있으면 그 상한, 아니면 None."""
-        cap = self.settings.publish.max_awaiting_links
-        if not cap:
-            return None
+        """관리자 손을 기다리는 글이 이미 상한만큼 쌓여 있으면 그 상한, 아니면 None.
+        확인(/ok) 요청은 max_awaiting_reviews 개까지, 그리고 링크 대기와 합쳐 max_awaiting_links 까지 (주인 결정 10/15 로 링크 자리를
+        15로 늘려도 확인 요청이 15개까지 몰리지 않게 — 예전처럼 링크 요청이 먼저고 확인 요청은 6개까지)."""
+        cfg = self.settings.publish
         counts = self.db.queue_counts()
-        return cap if counts.get("awaiting_link", 0) + counts.get("awaiting_approval", 0) >= cap else None
+        reviews = counts.get("awaiting_approval", 0)
+        if cfg.max_awaiting_reviews and reviews >= cfg.max_awaiting_reviews:
+            return cfg.max_awaiting_reviews
+        if cfg.max_awaiting_links and counts.get("awaiting_link", 0) + reviews >= cfg.max_awaiting_links:
+            return cfg.max_awaiting_links
+        return None
 
     async def _authenticity(self, item: QueueItem, deal: Deal) -> AuthResult:
         """정품·공식 판매처 판정. 한 번 판정한 결과는 대기열 항목에 남겨 다시 읽지 않는다."""
@@ -1358,7 +1390,7 @@ class DealBot:
         """관리자 챗 맨 위에 고정해 두는 '내 링크 기다리는 글' 목록을 최신으로 고친다."""
         if not self.notifier.enabled:
             return
-        text = "📌 " + self.reporter.pending_text()
+        text = "📌 " + self.reporter.pending_text(notice=True)
         digest = hashlib.sha1(text.encode()).hexdigest()
         if self.db.kv_get("pending_notice_hash") == digest and self.db.kv_get("pending_notice_id"):
             return
@@ -1521,6 +1553,12 @@ class DealBot:
                 notice = self.db.kv_get(f"link_notice:{item.id}")
                 await self.notifier.notify_sold_out_cancel(item, via, int(notice) if notice else None)
             log.info("sold out (%s): queue #%d dropped — %s", via, item.id, product.name[:40])
+        ttl = timedelta(hours=self.settings.publish.manual_link_ttl_hours)
+        for item in self.db.items_for_product(pid, ("skipped",)):
+            # 더 좋은 딜에 자리를 내준 글 (유효 시간 안): 품절이면 나중에 주인이 /link 해도 다시 올리지 않게 내려 둔다
+            if (item.last_error or "").startswith(REPLACED) and utcnow() - item.created_at < ttl:
+                self.db.update_queue_item(item.id, status="expired", error=f"sold out ({via})")
+                out["cancelled"].append(item.id)
         post = self.db.latest_post(pid)
         out["exported"] = self._export_sold_out(pid, post)
         if (
@@ -2096,10 +2134,10 @@ class DealBot:
             return "fail", f"{type(e).__name__}: {e}"
 
     async def _request_manual_link(self, item: QueueItem, deal: Deal, shop: Any, auth: AuthResult, why: str | None) -> bool:
-        """주인에게 내 링크를 요청한다 (예전 흐름 그대로). 요청이 이미 많이 쌓였으면 건너뛴다."""
+        """주인에게 내 링크를 요청한다 (예전 흐름 그대로). 요청이 이미 많이 쌓였으면 점수가 가장 낮은 글과 바꾸거나 건너뛴다."""
         cap = self.settings.publish.max_awaiting_links
         pid = deal.product.product_id
-        if cap and self.db.queue_counts().get("awaiting_link", 0) >= cap:
+        if cap and self.db.queue_counts().get("awaiting_link", 0) >= cap and not await self._make_link_room(item, cap):
             # 링크 요청이 이미 여러 건 쌓여 있으면 더 보내지 않는다 (관리자 챗 폭주 방지). 딜은 어차피 곧 지난다
             self.db.update_queue_item(item.id, status="skipped", error=f"manual link backlog full ({cap})")
             self.db.log_event("INFO", "queue", f"{pid} skipped: {cap} manual link requests already waiting")
@@ -2114,6 +2152,36 @@ class DealBot:
         log.info("queue #%d awaiting manual link (%s)", item.id, why)
         await self.refresh_pending_notice()
         return True
+
+    async def _make_link_room(self, item: QueueItem, cap: int) -> bool:
+        """링크 요청 자리가 다 참 (주인 결정 10/15): 기다리는 글 중 점수가 가장 낮은 글(같으면 가장 오래된 글)보다 이 딜의 점수가
+        swap_min_score_gain 이상 높으면 그 글을 내리고 자리를 만든다. 점수는 대기열 점수(판정의 DealVerdict.score — 발행 순서도 이것).
+        주인이 손댄 글(링크를 붙임·넘김·상태가 바뀜)은 내리지 않는다: 조건부 UPDATE 로 링크를 기다리는 그대로일 때만 바꾸고,
+        그사이 바뀌었으면 다음 후보를 본다. 내린 글은 넘긴 것이 아니라 같은 상품이 다시 나오면 다시 묻고, 유효 시간 안에 주인이
+        /link 하면 그대로 받는다 (attach_link). 자리가 생겼으면 True."""
+        gain = self.settings.publish.swap_min_score_gain
+        if gain is None:
+            return False
+        for _ in range(3):  # 고르는 사이 주인이 손댄 글이면 다음으로 낮은 글을 다시 고른다
+            if self.db.queue_counts().get("awaiting_link", 0) < cap:
+                return True  # 그사이 자리가 남 (주인이 링크를 붙였거나 품절로 내림)
+            low = self.db.weakest_awaiting_link()
+            if low is None or low.id == item.id or item.score <= low.score or item.score - low.score < gain:
+                return False
+            if not self.db.replace_awaiting_link(low.id, f"{REPLACED} #{item.id} (score {low.score:g}→{item.score:g})"):
+                continue
+            self.db.log_event("INFO", "queue", f"#{low.id} {low.product_id} replaced by #{item.id} {item.product_id} "
+                                               f"(score {low.score:g}→{item.score:g}, {cap} link requests waiting)")
+            log.info("queue #%d replaced by #%d — link backlog full (%d), score %g → %g", low.id, item.id, cap, low.score, item.score)
+            notice = self.db.kv_get(f"link_notice:{low.id}")
+            until = low.created_at + timedelta(hours=self.settings.publish.manual_link_ttl_hours)
+            try:  # 링크 요청 메시지를 '더 좋은 딜로 바꿈'으로 고친다 (못 고쳐도 그대로 진행)
+                await self.notifier.notify_link_replaced(low, item.id, int(notice) if notice else None,
+                                                         until=fmt_local(until, self.settings.app.timezone, "%m/%d %H:%M"))
+            except Exception as e:  # noqa: BLE001
+                log.warning("link request #%d: replaced notice failed: %s", low.id, e)
+            return True
+        return False
 
     # ------------------------------------------------- 네이버 쇼핑커넥트 자동 링크 (Blog-Auto 가 브라우저 일)
     def _autolink_product_no(self, deal: Deal, shop: Any, auth: AuthResult) -> str | None:
@@ -3187,13 +3255,19 @@ class DealBot:
         except Exception:  # noqa: BLE001 — 이유를 못 세도 요약은 보낸다
             log.exception("skipped deal counts failed")
             skipped = {}
+        # 링크 요청 자리가 차서 빠진 딜은 '안 올린 딜' 문장이 아니라 아래 링크 자리 문장에서 따로 (자리가 모자라 잘리지 않게 — 주인 결정 10/15)
+        replaced, full = skipped.pop(LINK_REPLACED_LABEL, 0), skipped.pop(LINK_FULL_LABEL, 0)
         day += _skip_sentence(skipped, room=DAY_LINE_MAX - len(day))  # 맨 끝에, 남는 자리만큼만 (오류·/resume 이 잘리지 않게)
         self.notifier.summary("day", day, replace=True)
         waiting = []
-        links = self.db.awaiting_items(50)
+        links = self.db.awaiting_items(max(50, self.settings.publish.max_awaiting_links))
         if links:
             ids = " ".join(f"#{it.id}" for it in links[:5]) + (" …" if len(links) > 5 else "")
             waiting.append(f"핫딜봇에서 내 링크를 기다리는 딜이 {len(links)}개 있어요 ({ids}).")
+        if replaced or full:
+            cap = self.settings.publish.max_awaiting_links
+            parts = ([f"더 좋은 딜로 바꾼 게 {replaced}개"] if replaced else []) + ([f"못 묻고 건너뛴 게 {full}개"] if full else [])
+            waiting.append(f"오늘 링크 요청 자리({cap}개)가 차서 {', '.join(parts)}예요.")
         asks = self.db.awaiting_items(50, statuses=("awaiting_approval",))
         if asks:
             waiting.append(f"확인(/ok)을 기다리는 딜이 {len(asks)}개 있어요.")
