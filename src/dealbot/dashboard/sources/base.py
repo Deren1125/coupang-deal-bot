@@ -54,6 +54,8 @@ class SourceContext:
     blogauto: Any = None  # BlogAutoReader
     shop_label: Callable[[str], str] = lambda key: key  # 몰 키 → 이름 (텔레그램 링크 요청과 같은 이름)
     history_days: int = 30  # 봇 DB 가 딜 기록을 지우는 기간 (app.prune_events_days) — 그보다 오래된 날은 다시 세지 않음
+    # 링크·확인을 기다리는 글이 끝나는 시간 (publish.manual_link_ttl_hours) — '지금 할 일' 의 '14시간 남음'. 모르면 남은 시간 없이
+    link_ttl_hours: float | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def local_now(self) -> datetime:

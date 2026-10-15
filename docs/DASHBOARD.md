@@ -1,7 +1,8 @@
 # 채널 대시보드
 
 `https://<공개 도메인>/dashboard` 에서 텔레그램·인스타그램·스레드·네이버 블로그 3개·카카오 오픈채팅·쿠팡 파트너스·핫딜 봇 운영 숫자를 한 화면에 본다 (주인 요청 10/14).
-맨 위에는 주인이 할 일이 있는 카드 — `링크 기다리는 딜`(링크를 바로 넣는 칸까지)과 `발행 대기 글`(블로그 세 개) — 이 온다 (주인 요청 10/15).
+맨 위(요약 줄 위)에는 `지금 할 일` — 두 봇에서 주인이 지금 해야 할 일을 한 목록으로 (주인 요청 10/15, 아래 `지금 할 일`).
+카드 중에서는 주인이 할 일이 있는 카드 — `링크 기다리는 딜`(링크를 바로 넣는 칸까지)과 `발행 대기 글`(블로그 세 개) — 이 먼저 온다 (주인 요청 10/15).
 카드마다 상태 칩(조건 충족 / 조건 미충족 / 판단 불가), `다시 읽기`, 읽은 시각, 숫자 칸 두 개(블로그 카드는 자기 통계가 있으면 네 개),
 최근 28일 추이, 목표 줄이 있다.
 
@@ -24,7 +25,7 @@ sudo systemctl restart dealbot
 
 - 둘 중 하나라도 없으면 `/dashboard` 는 404 이고, 시작 자기 점검에 `채널 대시보드 페이지: 꺼짐` 이 뜬다. 숫자 모으기는 `dashboard.enabled` 면 계속한다.
 - 브라우저가 아이디·비밀번호를 물으면(HTTP 기본 인증) 넣는다. Caddy 가 HTTPS 를 붙여 준다 (`deploy/lightsail/https.sh`).
-- 경로: `/dashboard`(화면), `/dashboard/refresh?src=키`(그 카드를 지금 다시 읽음), `/dashboard/input?src=키&지표=값&date=YYYY-MM-DD`(직접 입력), `/dashboard/data.json`(같은 내용 JSON),
+- 경로: `/dashboard`(화면), `/dashboard/refresh?src=키`(그 카드를 지금 다시 읽음), `/dashboard/input?src=키&지표=값&date=YYYY-MM-DD`(직접 입력), `/dashboard/data.json`(같은 내용 JSON — `todo` 에 지금 할 일 목록),
   `POST /dashboard/link`(링크 넣기 — 아래).
   refresh·input·link 는 화면이 넣어 주는 폼 토큰(`t`)이 있어야 한다 (data.json 에는 토큰이 없다).
 
@@ -94,6 +95,37 @@ Blog-Auto 가 주인 블로그 세 개(`derenlog`·`derenpick`·`demiyum`)만, �
   그 전날 날짜로). 하루 중간 값(오늘 조회수 등)은 쌓지 않는다.
 - `data.json` 의 블로그 카드에는 `detail.own_stats`(읽은 값 그대로 + `stale`·`neighbors_from`)와 칸마다 `stale`, `stats_warn` 이 있다.
 - 숫자가 하나도 없거나, 날짜(`day`)가 오늘보다 뒤면 자기 통계가 없는 것처럼(직접 입력) 그린다. 이상한 칸(숫자가 아닌 글자·음수·소수·10억 넘는 수)은 그 칸만 `-`.
+
+### 지금 할 일 (주인 10/15 — "그거 기반으로 대시보드에 다 넣어줘 지금 해야할 일 목록 느낌으로")
+
+페이지 맨 위(요약 줄 위) 카드. 제목에 줄 수(`지금 할 일 7`), 처음 6줄만 보이고 나머지는 `더 보기 (N개)` 를 눌러 펼친다
+(스크립트 없이 `details`). 할 일이 없으면 초록 `지금 할 일 없음 ✓` 한 줄.
+줄마다: 표시 칩(`⛔ 멈춤`·`🔥 핫`·`⚠️ 할 일`·`🔔 할 일`·`ℹ️ 참고`, 급하면 빨간 `급함`), 굵은 요약, `→ 어떻게`(두 줄까지),
+회색 작은 줄(`블로그 이름 · 3시간 전`, 끝나는 일이면 주황 `14시간 남음`), 그리고 버튼 — https 주소면 새 탭(`rel="noopener noreferrer"`),
+아니면 같은 페이지 카드로 내려가는 버튼(`링크 넣기 ↓` → `링크 기다리는 딜`, `대기 글 보기 ↓` → `발행 대기 글`).
+
+어디서 오나:
+- **Blog-Auto 기록 파일의 `todo`** (아래 모양) — Blog-Auto 알림 목록에서 아직 열린 주인 일 (보낼 목록에 있거나, 보냈는데 ttl 안에
+  해결되지 않은 것 = Blog-Auto `notify.is_open` 과 같은 뜻. 딜봇이 맡긴 `link:`·`review:`·`unsure:`·`publish_broken`·`linkprice:`·`sns:` 도 여기)
+  + Blog-Auto 가 셈한 상태 (블로그마다 발행 대기 글 수·인기 예상, 받은 서로이웃 신청, 내 통계 읽기 막힘(⚠️ 네이버 로그인 확인),
+  콘텐츠 블로그가 7일째 새 글이 없음(ℹ️ + 걸러진 이유)). 글은 카톡 메모와 같은 주인용 문구.
+- **봇 DB 지금 상태** (파일보다 새로움 — 페이지를 열 때마다 읽음):
+  - 링크 기다리는 딜(`awaiting_link`) → **한 줄** `핫딜 링크 N건` (하나면 `핫딜 링크 #12` + 상품명), 가장 먼저 끝나는 것의 `N시간 남음`
+    (`publish.manual_link_ttl_hours` — 대기열이 버리는 기준과 같음) + `링크 넣기 ↓`
+  - 확인(/ok)을 기다리는 글(`awaiting_approval`) → `정품 확인 #N`(상품 페이지 https 면 `상품 열기 ↗`)·`정보 글 확인 #N`, 끝나는 시간도 같이
+  - 채널에 올라갔는지 모르는 글(보낸 뒤 텔레그램 답 시간 초과, 최근 7일) → `채널 확인 #N` (`/posted N` · 없으면 `/link N`)
+- 같은 키면 봇 DB 줄이 이긴다. 파일의 `link:`·`review:`·`unsure:` 줄은 그 글이 지금 열려 있지 않으면(이미 처리함) 버리고,
+  `link:` 줄과 `link_request` 묶음은 열려 있어도 위의 한 줄에 들어 있으므로 버린다. 같은 키가 두 번이면 더 급한 것 하나.
+
+순서: `⛔` > 급함·`🔥`·`⚠️` > 끝나는 시간이 가까운 것(링크·확인 기다림 — 먼저 끝나는 것부터) > `🔔` > `ℹ️`. 같은 칸은 오래 기다린 것부터.
+
+- 파일이 없거나 못 읽으면 봇 DB 줄만 + 회색 `블로그 쪽 할 일을 못 읽음 — …`. 파일에 `todo` 가 없으면(예전 Blog-Auto) 같은 안내.
+  `todo` 가 `blogauto_stale_hours` 보다 오래됐으면 그대로 보이고 `블로그 쪽 할 일은 N시간 전 것이에요`. 봇 DB 를 못 읽으면 파일 줄 그대로 + `딜봇 쪽 할 일을 못 읽음`.
+- 버튼 주소는 https 만, 텔레그램 주소(`t.me` 등)는 그리지 않는다 (설정에 봇 이름이 없어서 — `→ 텔레그램 핫딜봇 …` 글로 어디서 할지 적음).
+  따옴표·꺾쇠·`@` 가 든 주소도 버튼 없이 글만. 글은 모두 이스케이프하고, 토큰처럼 보이는 글자는 `***` 로 가린다.
+- `data.json` 의 `todo`: `{title, count, items, hints, blog_generated_at, empty_text}`, 항목마다
+  `key·marker·urgent·blog·blog_label·kind·short·text·how·since·age·expires_at·left·link·action·anchor·group·count·source(blogauto|dealbot)·ids`.
+- 폰(390px): 카드 폭 358px 안에서 줄바꿈 (가로로 넘치지 않음), 버튼 36px·`더 보기` 40px 높이. 1100px 이상에서는 두 칸.
 
 ### 링크 기다리는 딜 · 링크 넣기 (주인 10/15)
 
@@ -200,6 +232,19 @@ Blog-Auto 가 한 시간마다 자기 DB 만 보고 `~/Blog-Auto/var/metrics/blo
 - 어느 칸이든 null 이면 그 칸만 `-`. `yesterday`·`prev` 는 null 이면 없는 것, 있으면 `day` 가 읽은 날보다 앞일 때만 쓴다.
 - `day` 가 없으면 `read_at` 의 날짜, 둘이 어긋나면 시각은 버리고 날짜만 믿는다. 숫자는 정수(`"2,751"` 글자도 받음), 이웃 증감(`neighbor_change_today`·`yesterday.neighbor_change`)만 음수 가능.
 - 활동 기록(`written_at`)이 `blogauto_stale_hours` 보다 오래돼도 자기 통계는 자기 `read_at` 으로 따로 본다.
+
+맨 위 `지금 할 일` 용으로 Blog-Auto 가 더하는 키 (없어도 나머지는 그대로 읽힌다):
+
+```json
+"todo": {"generated_at": "2026-10-15T14:30:05+09:00", "items": [
+  {"key": "draft_ready:issue:31", "marker": "🔔[할 일]", "blog": "issue", "kind": "draft_ready", "short": "Pick #31 발행 대기",
+   "text": "🔔[할 일] [Deren's Pick] #31 발행 대기 「…」\n→ 텔레그램 Deren's Pick 봇에서 🚀 발행 / 🗑 건너뛰기",
+   "since": "2026-10-15T09:12:00+09:00", "urgent": false, "link": "", "group": "", "count": 1}]}
+```
+
+- `marker` 는 `⛔[멈춤]`·`🔥[핫]`·`⚠️[할 일]`·`🔔[할 일]`·`ℹ️` (모르는 값이면 글 첫머리, 그래도 없으면 🔔). `blog` 는 `finance`·`issue`·`hotdeal`·`dealbot`·빈칸.
+- `short` 는 30자 안 요약, `text` 는 카톡 메모와 같은 `첫 줄 무엇\n→ 어떻게`(두 줄까지). `link` 는 https 주소 또는 빈칸 (아니면 버튼 없음).
+- 비밀값은 넣지 않는다. 딜봇도 항목마다 한 번 더 걸러서 이상한 항목(글·요약이 없음)만 버린다. 키가 없으면 요약으로 키를 만든다.
 
 블로그 키는 Blog-Auto 의 블로그 이름(`finance`·`issue`·`hotdeal`) 또는 `blog_id`. 중첩(`{"posts": {"published_today": 1}}`)이나
 목록(`[{"name": "finance", ...}]`)도 읽힌다 (`src/dealbot/dashboard/blogauto.py` 의 `FIELD_ALIASES`). 숫자가 아닌 값은 무시한다.

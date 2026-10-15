@@ -371,6 +371,16 @@ class Database:
             (product_id, f"{MAYBE_POSTED}%", to_iso(now - timedelta(days=days))),
         ) is not None
 
+    def maybe_posted_items(self, since: datetime, limit: int = 20) -> list[tuple[QueueItem, datetime]]:
+        """since 뒤에 '채널에 올라갔는지 모름'(보낸 뒤 텔레그램 답 시간 초과)이 된 글과 그 시각 — 오래된 것부터.
+        주인이 /posted·/link·/skip 하면 상태가 바뀌어 빠진다 (대시보드 '지금 할 일' 의 '채널 확인')."""
+        rows = self._q(
+            "SELECT * FROM deal_queue WHERE status = 'failed' AND last_error LIKE ? AND updated_at >= ? "
+            "ORDER BY updated_at ASC, id ASC LIMIT ?",
+            (f"{MAYBE_POSTED}%", to_iso(since), limit),
+        )
+        return [(self._row_to_queue_item(r), from_iso(r["updated_at"]) or utcnow()) for r in rows]
+
     def posted_within(self, product_id: str, days: int, now: datetime | None = None, *, include_dry_run: bool = True) -> bool:
         last = self.last_posted_at(product_id, include_dry_run=include_dry_run)
         if last is None:

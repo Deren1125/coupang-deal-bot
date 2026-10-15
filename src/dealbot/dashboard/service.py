@@ -2,7 +2,7 @@
 
 경로 (/dashboard 아래 전부 기본 인증 — DASHBOARD_USER / DASHBOARD_PASSWORD 가 둘 다 있을 때만 열림, 아니면 404.
 너무 많이 틀리면 잠시 429 — auth.FailureLimiter):
-  /dashboard                    페이지
+  /dashboard                    페이지 (맨 위 '지금 할 일' — todo.py)
   /dashboard/refresh?src=키      그 카드를 지금 다시 읽고 돌아감 (카드마다 refresh_min_minutes 에 한 번)
   /dashboard/input?src=키&지표=값&date=YYYY-MM-DD   직접 입력 저장 후 돌아감 (숫자만, 날짜는 오늘~manual_max_days_back)
   /dashboard/data.json          같은 내용을 JSON 으로 (나중에 다른 곳에서 쓰려고, 폼 토큰은 없음)
@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 from dealbot.config import DashboardConfig
 from dealbot.dashboard import render
+from dealbot.dashboard import todo as todo_mod
 from dealbot.dashboard.auth import FailureLimiter, check_basic, client_key, password_problems
 from dealbot.dashboard.model import (
     ERROR,
@@ -42,6 +43,7 @@ from dealbot.dashboard.model import (
     safe_text,
 )
 from dealbot.dashboard.sources import CardData, Source, SourceContext, load_all
+from dealbot.dashboard.sources.blog_waiting import BlogWaitingSource
 from dealbot.dashboard.sources.link_waiting import LinkWaitingSource
 from dealbot.shops import find_urls
 from dealbot.storage.db import LINK_WAITING
@@ -137,6 +139,8 @@ class Dashboard:
         self.by_key = {s.key: s for s in self.sources}
         # '링크 넣기' 안내를 넣을 카드 (링크 기다리는 딜). 없으면 맨 위에
         self.links_key = next((s.key for s in self.sources if isinstance(s, LinkWaitingSource)), None)
+        # '지금 할 일' 버튼이 내려갈 카드 (발행 대기 글)
+        self.waiting_key = next((s.key for s in self.sources if isinstance(s, BlogWaitingSource)), None)
         self._locks: dict[str, asyncio.Lock] = {}
         self._token: str | None = None
         self.limiter = FailureLimiter()
@@ -436,6 +440,27 @@ class Dashboard:
              else "실적을 읽으면 보여요"),
         ]
 
+    def todo(self) -> todo_mod.TodoView:
+        """맨 위 '지금 할 일': Blog-Auto 기록 파일의 todo + 봇 DB 지금 상태 (todo.build). 바깥 요청 없음.
+        만들다 터져도 페이지는 뜬다 (빈 목록 + 안내 한 줄)."""
+        try:
+            reader = self.ctx.blogauto
+            export = reader.read() if reader is not None else None
+            labels = {}
+            for c in self.cfg.cards:  # 블로그 이름 → 블로그 카드 제목 ('발행 대기 글' 줄 이름과 같게)
+                blog = c.options.get("blog")
+                if c.enabled and c.type == "naver_blog" and isinstance(blog, str) and blog.strip():
+                    labels.setdefault(blog.strip().lower(), c.title or c.key)
+            return todo_mod.build(
+                export, self.db, self.ctx.now(), ttl_hours=self.ctx.link_ttl_hours,
+                links_anchor=f"#card-{self.links_key}" if self.links_key else None,
+                waiting_anchor=f"#card-{self.waiting_key}" if self.waiting_key else None,
+                stale_hours=self.cfg.blogauto_stale_hours, labels=labels, shop_label=self.ctx.shop_label,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.exception("dashboard todo failed")
+            return todo_mod.TodoView(hints=[f"할 일 목록을 만들지 못함 ({safe_error(e)})"])
+
     @staticmethod
     def _updated_at(views: list[CardView]) -> datetime | None:
         """맨 위 '마지막 업데이트': 바깥에서 읽은 값(API·Blog-Auto 기록·직접 입력) 중 가장 최근 (봇 DB 카드는 늘 지금이라 뺌)."""
@@ -457,12 +482,13 @@ class Dashboard:
             token=self.form_token, today=self.ctx.today(), tz=self.ctx.tz, spark_days=self.cfg.spark_days,
             notice=notice, notice_src=notice_src if notice_src in self.by_key else None, footer=footer,
             min_day=self.ctx.today() - timedelta(days=self.cfg.manual_max_days_back), counts=self.chip_counts(views),
+            todo=self.todo(), now=self.ctx.now(),
         )
 
     def json_text(self) -> str:
         views = self.views()
         return render.render_json(title=self.cfg.title, views=views, generated_at=self.ctx.now(), tz=self.ctx.tz,
-                                  summary=self.summary(views))
+                                  summary=self.summary(views), todo=self.todo())
 
     # ------------------------------------------------------------ 웹
     def register(self, web: WebServer) -> bool:
