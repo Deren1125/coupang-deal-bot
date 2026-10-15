@@ -4,8 +4,13 @@
         images (사진 URL 목록), links (본문 외부 링크, 남의 제휴 링크는 뺀 것), source_url (원문 글 주소), channels
   딜 글(deal_post.j2)과 같은 원칙: 제목은 장식(★·과장어)을 뺀 이름, 링크는 긴 주소 대신 글자 링크,
   오픈채팅·텔레그램 안내는 글마다 넣지 않음 (채널 설명·고정 공지에만).
+  광고 표시 (주인 결정 10/15): 딜 글과 같은 자리(둘째 줄)에 ad_line — 정보 글은 수수료 링크가 없어 늘 비어 있다
+  (남의 제휴 링크는 빼고 올리므로 '광고'라고 쓰면 오히려 틀린 표시). 수수료 링크를 넣게 되면 이 줄과 끝의 전체 고지를 같이 채운다.
 #}
 📢 <b>{{ (product.name | clean) or product.name }}</b>
+{% if ad_line %}
+{{ ad_line }}
+{% endif %}
 {% if product.has_price %}
 💰 {{ product.price | won }}
 {% endif %}

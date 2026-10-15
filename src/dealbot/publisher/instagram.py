@@ -2,7 +2,10 @@
 
 흐름은 스레드와 같다: 승인 링크 → code → 단기 토큰 → 장기 토큰(60일, 자동 갱신) → 컨테이너 생성 → 처리 대기 → 게시.
 인스타는 사진 없는 글을 못 올리고 JPEG 만 받으므로, 봇이 만든 카드 이미지(공개 도메인 /media/…)를 올린다.
-본문 링크는 눌리지 않으니 "프로필 링크" 로 유도하고, 수수료 고지는 본문에 넣는다.
+본문 링크는 눌리지 않으니 "프로필 링크" 로 유도하고, 수수료 고지는 본문 첫 줄과 카드 안에 넣는다 (insta_style.validate 로 확인).
+- 캐러셀(공식 흐름): 장마다 is_carousel_item=true 컨테이너(대체 텍스트 alt_text) → media_type=CAROUSEL 컨테이너(children) → 게시. 10장까지.
+- 릴스: media_type=REELS 컨테이너(video_url·cover_url·share_to_feed) → 처리 끝(FINISHED)까지 기다림 → 게시.
+- 게시 한도는 24시간에 100개 (봇은 하루 6개 안팎).
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -18,6 +22,7 @@ from urllib.parse import urlencode
 import httpx
 
 from dealbot.models import Deal, PublishResult
+from dealbot.publisher.scopes import ScopeState
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.shops import ShopRegistry
 from dealbot.utils.retry import RetryableError, retry_async
@@ -29,8 +34,15 @@ GRAPH_BASE = "https://graph.instagram.com"
 API_VERSION = "v25.0"
 AUTH_BASE = "https://www.instagram.com/oauth/authorize"
 TOKEN_URL = "https://api.instagram.com/oauth/access_token"
-SCOPES = "instagram_business_basic,instagram_business_content_publish"
+# 통계(인사이트) 권한도 받아 둔다 (주인 결정 10/15). 메타 앱 Instagram 사용 사례에 주인이 먼저 더해야 하고(docs/SETUP_KEYS.md),
+# 없는 토큰이어도 발행은 그대로 — 대시보드 조회수만 '권한 필요' (scopes.py)
+SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights"
+# 메타 앱에 통계 권한을 아직 안 넣었을 때 ('Invalid Scopes') 다시 연결할 수 있는 예전 권한 — 올리기만
+BASIC_SCOPES = "instagram_business_basic,instagram_business_content_publish"
 CAPTION_LIMIT = 2200
+
+CHECK_FAILED = "올리기 전 검사 실패"  # PublishResult.error 머리말 — 실패 알림이 아니라 건너뜀 기록으로
+REEL_TIMEOUT = "timeout"
 
 KV_TOKEN = "instagram_access_token"
 KV_TOKEN_EXPIRES = "instagram_token_expires_at"
@@ -40,6 +52,9 @@ KV_USERNAME = "instagram_username"
 CONTAINER_WAIT_SECONDS = 120.0
 CONTAINER_POLL_SECONDS = 4.0
 PUBLISH_ATTEMPT_DELAYS: tuple[float, ...] = (0.0, 5.0, 10.0, 20.0)
+REEL_POLL_SECONDS = 10.0  # 릴스 영상 처리 상태를 보는 간격
+CAROUSEL_MAX = 10
+ALT_TEXT_LIMIT = 1000
 
 
 class InstagramError(Exception):
@@ -69,11 +84,11 @@ class InstagramToken:
     expires_at: datetime | None = None
 
 
-def authorize_url(app_id: str, redirect_uri: str, state: str = "dealbot") -> str:
+def authorize_url(app_id: str, redirect_uri: str, state: str = "dealbot", *, scopes: str = SCOPES) -> str:
     params = {
         "client_id": app_id,
         "redirect_uri": redirect_uri,
-        "scope": SCOPES,
+        "scope": scopes,
         "response_type": "code",
         "state": state,
         "enable_fb_login": "0",
@@ -264,18 +279,77 @@ class InstagramClient:
                 raise InstagramError(f"컨테이너 처리 대기 시간 초과 ({CONTAINER_WAIT_SECONDS:.0f}s, 상태 {status})", step="container")
             await asyncio.sleep(CONTAINER_POLL_SECONDS)
 
-    async def post_image(self, token: InstagramToken, image_url: str, caption: str) -> str:
-        """사진 한 장 + 본문. 게시된 미디어 id 반환."""
+    async def wait_finished(self, token: InstagramToken, container_id: str, *, timeout: float, poll: float | None = None) -> bool:
+        """릴스: 영상 처리가 끝날(FINISHED) 때까지 기다린다. 시간이 넘으면 False (조용히 포기), ERROR·EXPIRED 면 InstagramError.
+        상태 확인 자체가 실패해도 다시 본다 (영상 처리는 몇 분 걸릴 수 있음)."""
+        deadline = time.monotonic() + timeout
+        poll = REEL_POLL_SECONDS if poll is None else poll
+        while True:
+            try:
+                status, detail = await self.container_status(token, container_id)
+            except InstagramError as e:
+                log.info("instagram reel status check failed (%s) — retrying", e)
+                status, detail = "", None
+            if status in ("FINISHED", "PUBLISHED"):
+                return True
+            if status in ("ERROR", "EXPIRED"):
+                raise InstagramError(f"릴스 영상 처리 실패 ({status}): {detail or '사유 없음'}", step="container")
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(poll)
+
+    async def _create(self, token: InstagramToken, params: dict[str, Any], *, step: str = "create_container") -> str:
         created = await self._request(
-            "POST",
-            f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/media",
-            params={"image_url": image_url, "caption": caption[:CAPTION_LIMIT], "access_token": token.access_token},
-            step="create_container",
+            "POST", f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/media",
+            params={**params, "access_token": token.access_token}, step=step,
         )
         container_id = created.get("id")
         if not container_id:
-            raise InstagramError(f"컨테이너 생성 실패: {created}", step="create_container")
-        await self.wait_ready(token, str(container_id))
+            raise InstagramError(f"컨테이너 생성 실패: {created}", step=step)
+        return str(container_id)
+
+    async def post_image(self, token: InstagramToken, image_url: str, caption: str, *, alt_text: str | None = None) -> str:
+        """사진 한 장 + 본문. 게시된 미디어 id 반환. alt_text: 대체 텍스트 (사진을 못 보는 사람·검색용)."""
+        params: dict[str, Any] = {"image_url": image_url, "caption": caption[:CAPTION_LIMIT]}
+        if alt_text:
+            params["alt_text"] = alt_text[:ALT_TEXT_LIMIT]
+        container_id = await self._create(token, params)
+        await self.wait_ready(token, container_id)
+        return await self._publish(token, container_id)
+
+    async def post_carousel(self, token: InstagramToken, images: list[tuple[str, str]], caption: str) -> str:
+        """캐러셀(공식 흐름): 장마다 is_carousel_item 컨테이너 → CAROUSEL 컨테이너(children) → 게시. images: (사진 주소, 대체 텍스트)."""
+        if not 2 <= len(images) <= CAROUSEL_MAX:
+            raise InstagramError(f"캐러셀은 2~{CAROUSEL_MAX}장이어야 합니다 ({len(images)}장)", step="carousel")
+        children: list[str] = []
+        for url, alt in images:
+            params: dict[str, Any] = {"image_url": url, "is_carousel_item": "true"}
+            if alt:
+                params["alt_text"] = alt[:ALT_TEXT_LIMIT]
+            children.append(await self._create(token, params, step="carousel_item"))
+        for child in children:
+            await self.wait_ready(token, child)
+        parent = await self._create(
+            token, {"media_type": "CAROUSEL", "children": ",".join(children), "caption": caption[:CAPTION_LIMIT]}, step="carousel",
+        )
+        await self.wait_ready(token, parent)
+        return await self._publish(token, parent)
+
+    async def post_reel(self, token: InstagramToken, video_url: str, caption: str, *, cover_url: str | None = None,
+                        timeout: float = 300.0, poll: float | None = None) -> str | None:
+        """릴스: REELS 컨테이너 → 처리 끝(FINISHED)까지 기다림 → 게시. 기다리는 시간이 넘으면 None (게시하지 않음)."""
+        params: dict[str, Any] = {"media_type": "REELS", "video_url": video_url, "caption": caption[:CAPTION_LIMIT],
+                                  "share_to_feed": "true"}
+        if cover_url:
+            params["cover_url"] = cover_url
+        container_id = await self._create(token, params, step="reel")
+        if not await self.wait_finished(token, container_id, timeout=timeout, poll=poll):
+            log.info("instagram reel container %s not finished within %.0fs — giving up", container_id, timeout)
+            return None
+        return await self._publish(token, container_id)
+
+    async def _publish(self, token: InstagramToken, container_id: str) -> str:
+        """처리된 컨테이너를 게시한다 (아직 준비 안 됨이면 조금씩 기다렸다 다시)."""
         last: InstagramError | None = None
         delays = PUBLISH_ATTEMPT_DELAYS
         for i, delay in enumerate(delays):
@@ -302,7 +376,8 @@ class InstagramClient:
 
 
 class InstagramPublisher:
-    """딜 하나를 인스타그램에 올린다. 사진은 호출자가 공개 URL(카드)로 준다."""
+    """인스타그램에 올린다: 딜 하나(카드 사진 + 본문), 캐러셀, 릴스. 사진·영상은 호출자가 공개 URL 로 준다.
+    언제 무엇을 올릴지는 publisher/ig_scheduler (인스타 대기열·하루 시간표)가 정한다."""
 
     def __init__(
         self,
@@ -326,6 +401,8 @@ class InstagramPublisher:
         self.dry_run = dry_run
         self.refresh_before_days = refresh_before_days
         self.style = style  # current | A | B | C (config instagram.style)
+        # 토큰이 가진 권한 기억 (인사이트 — 없으면 대시보드 조회수만 건너뜀)
+        self.scopes = ScopeState(db, "instagram", lambda: self.db.kv_get(KV_TOKEN))
 
     # ------------------------------------------------------------ 토큰
     def stored_token(self) -> InstagramToken | None:
@@ -364,22 +441,41 @@ class InstagramPublisher:
     def render(self, deal: Deal, *, deal_no: int | None = None, style: str | None = None) -> str:
         """본문. style 이 A/B/C 면 후보 양식 템플릿(deal_instagram_a/b/c.j2), 아니면 config 의 template.
         deal_no: 핫딜 페이지의 번호 (프로필 링크에서 찾는 표시, 후보 양식만 씀)."""
+        return self._render(deal, deal_no=deal_no, style=style)[0]
+
+    def _render(self, deal: Deal, *, deal_no: int | None = None, style: str | None = None) -> tuple[str, list[str], str]:
+        """(본문, 검사에서 허용할 데이터 근거 말, 대체 텍스트)."""
+        from dealbot.media.card_slides import alt_text
         from dealbot.publisher import insta_style
 
         link = deal.affiliate_url or deal.product.url
         shop = self.registry.get(deal.product.shop)
         style = style or self.style
         template = insta_style.template_for(style, self.template)
+        info = insta_style.card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
         extra = None
         if template != self.template:
-            info = insta_style.card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
             extra = {"ig": insta_style.caption_context(deal, info, shop=shop)}
-        return self.renderer.render_deal(deal, link, shop=shop, template=template, autoescape=False, extra=extra)[:CAPTION_LIMIT]
+        text = self.renderer.render_deal(deal, link, shop=shop, template=template, autoescape=False, extra=extra)[:CAPTION_LIMIT]
+        return text, insta_style.backed_phrases(info), alt_text(info)
+
+    def check(self, deal: Deal, *, deal_no: int | None = None, slides: Sequence[Any] = ()) -> list[str]:
+        """올리기 전 검사 (첫 줄 고지·근거 없는 '최저가'·'역대'). 문제 목록.
+        slides: 카드에 그리는 글 (ig_scheduler.single_slide — 카드 첫 부분 고지·카드 글의 근거 없는 말도 같이 검사)."""
+        from dealbot.publisher import insta_style
+
+        caption, allowed, _ = self._render(deal, deal_no=deal_no)
+        return insta_style.validate(caption, slides=slides, allowed=allowed)
 
     async def publish(self, deal: Deal, image_url: str | None, *, deal_no: int | None = None) -> PublishResult:
+        from dealbot.publisher import insta_style
+
         if not self.enabled:
             return PublishResult(ok=False, error="instagram disabled")
-        caption = self.render(deal, deal_no=deal_no)
+        caption, allowed, alt = self._render(deal, deal_no=deal_no)
+        problems = insta_style.validate(caption, allowed=allowed)
+        if problems:
+            return PublishResult(ok=False, error=f"{CHECK_FAILED}: {'; '.join(problems)}")
         if self.dry_run:
             log.info("[DRY-RUN] would post to instagram (%s):\n%s", image_url, caption)
             return PublishResult(ok=True, dry_run=True)
@@ -389,7 +485,42 @@ class InstagramPublisher:
         if token is None:
             return PublishResult(ok=False, error="instagram not authorized (/instaauth)")
         try:
-            media_id = await self.client.post_image(token, image_url, caption)
+            media_id = await self.client.post_image(token, image_url, caption, alt_text=alt)
         except InstagramError as e:
             return PublishResult(ok=False, error=str(e))
+        return PublishResult(ok=True, message_id=int(media_id) if media_id.isdigit() else None)
+
+    async def publish_carousel(self, images: list[tuple[str, str]], caption: str) -> PublishResult:
+        """캐러셀 (사진 주소·대체 텍스트 목록). 본문·장 검사는 부르는 쪽(ig_scheduler)이 장 내용과 함께 먼저 한다."""
+        if not self.enabled:
+            return PublishResult(ok=False, error="instagram disabled")
+        if self.dry_run:
+            log.info("[DRY-RUN] would post an instagram carousel (%d images):\n%s", len(images), caption)
+            return PublishResult(ok=True, dry_run=True)
+        token = await self.ensure_fresh()
+        if token is None:
+            return PublishResult(ok=False, error="instagram not authorized (/instaauth)")
+        try:
+            media_id = await self.client.post_carousel(token, images, caption)
+        except InstagramError as e:
+            return PublishResult(ok=False, error=str(e))
+        return PublishResult(ok=True, message_id=int(media_id) if media_id.isdigit() else None)
+
+    async def publish_reel(self, video_url: str, caption: str, *, cover_url: str | None = None, timeout: float = 300.0,
+                           poll: float | None = None) -> PublishResult:
+        """릴스. 영상 처리가 timeout 안에 안 끝나면 ok=False, error='timeout' (알림 없이 기록만 — 부르는 쪽)."""
+        if not self.enabled:
+            return PublishResult(ok=False, error="instagram disabled")
+        if self.dry_run:
+            log.info("[DRY-RUN] would post an instagram reel (%s):\n%s", video_url, caption)
+            return PublishResult(ok=True, dry_run=True)
+        token = await self.ensure_fresh()
+        if token is None:
+            return PublishResult(ok=False, error="instagram not authorized (/instaauth)")
+        try:
+            media_id = await self.client.post_reel(token, video_url, caption, cover_url=cover_url, timeout=timeout, poll=poll)
+        except InstagramError as e:
+            return PublishResult(ok=False, error=str(e))
+        if media_id is None:
+            return PublishResult(ok=False, error=REEL_TIMEOUT)
         return PublishResult(ok=True, message_id=int(media_id) if media_id.isdigit() else None)

@@ -253,6 +253,20 @@ async def test_telegram_subscribers_and_channel_posts(db: Database, tmp_path: Pa
     assert v.read_at == NOW
 
 
+async def test_telegram_card_shows_joins_per_invite_link_when_there_are_any(db: Database, tmp_path: Path) -> None:
+    """/invitelinks 로 만든 초대 링크별 새 구독 (주인 결정 10/15): 있을 때만 작은 칸 하나 더 — 예전 두 칸은 그대로."""
+    tg = FakeTelegramBot(1234)
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "telegram", "type": "telegram"}), telegram_bot=lambda: tg, channel_id="@c")
+    assert await dash.refresh("telegram") == "refreshed"
+    assert len(card_of(dash, "telegram").stats) == 2  # 가입 기록이 없으면 예전 그대로
+    db.invite_join_add(TODAY, "ig_bio", 2)
+    db.invite_join_add(YESTERDAY, "unknown", 1)
+    db.invite_join_add("2026-09-01", "qr", 5)  # 7일 밖
+    v = card_of(dash, "telegram")
+    assert [s.label for s in v.stats[:2]] == ["구독자", "채널 글 · 오늘"]
+    assert v.stats[2].label == "새 구독 경로 · 7일" and v.stats[2].value == 3 and v.stats[2].sub == "인스타 프로필 2 · 출처 모름 1"
+
+
 async def test_telegram_error_and_missing_bot_never_crash(db: Database, tmp_path: Path) -> None:
     tg = FakeTelegramBot(error=RuntimeError("Timed out https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/x"))
     dash = make_dash(db, tmp_path, card_list=cards({"key": "telegram", "type": "telegram"}),
@@ -386,10 +400,22 @@ async def test_threads_insights_happy_permission_and_network(db: Database, tmp_p
     assert v.status == model.UNKNOWN and v.stats[0].missing == "권한 필요"
     assert any("threads_manage_insights" in h for h in v.hints)
 
+    # 권한이 없다고 안 토큰으로는 다시 부르지 않는다 (주인 결정 10/15: 권한이 있을 때만 읽기) — 다시 연결해 토큰이 바뀌면 다시 불러 봄
+    called: list[str] = []
+
+    def must_not_call(req: httpx.Request) -> httpx.Response:
+        called.append(req.url.path)
+        return httpx.Response(500)
+
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "th2b", "type": "threads"}), threads=_th(db, must_not_call))
+    res = await dash.collect_one(dash.sources[0])
+    assert res.status == model.PERMISSION and "threads_manage_insights" in (res.note or "") and called == []
+
     def down(req: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow")
 
     dash = make_dash(db, tmp_path, card_list=cards({"key": "th3", "type": "threads"}), threads=_th(db, down))
+    db.kv_set(th.KV_TOKEN, "TH-NEW-TOKEN")  # 다시 연결한 토큰 → 권한을 모름 → 불러 봄
     res = await dash.collect_one(dash.sources[0])
     assert res.status == model.ERROR and "ReadTimeout" in (res.note or "")
 

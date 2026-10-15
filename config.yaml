@@ -393,6 +393,14 @@ publish:
   commentary:
     enabled: true                # 모델은 여기 두지 않음: 서버 .env 의 DEALBOT_MODEL_COMMENTARY (없으면 CLI 기본 모델)
     timeout_seconds: 90
+  # 확인된 상품 사진 없이 올라간 딜: 관리자 챗 '📷 사진 필요 #번호' → 4시간 안에 사진을 답장하면 블로그·인스타에 그 사진 (주인 결정 10/15)
+  late_photo: true
+  late_photo_hours: 4
+  weekly_top:                    # 일요일 20시대 아무 분에 텔레그램 '이번 주 TOP5 + 투표 결과' (보여 줄 게 있을 때만)
+    enabled: true
+    weekday: 6                   # 0=월 … 6=일
+    window: "20:00-20:59"
+    top_n: 5
 
 # 스레드 자동 발행 (THREADS_APP_ID/SECRET 필요, /threadsauth 로 최초 1회 연결)
 threads:
@@ -401,6 +409,25 @@ threads:
   reply_template: null                    # 답글 안 담 (링크는 본문에). 채널 안내 답글을 달려면 deal_threads_reply.j2
   send_photo: true
   refresh_before_days: 7
+  # 주인 결정 10/15: 텔레그램에 올린 딜은 스레드 대기열로 → 07~24시에만, 글 사이 45분 이상, 딜 글 하루 10개까지 (점수 높은 것부터).
+  # 8시간 넘게 기다린 글은 내리고, 10분 넘게 기다린 딜은 올리기 직전에 품절 다시 확인. 사진이 없으면 봇이 만든 4:5 글자 카드
+  rhythm:
+    enabled: true
+    hours: "07:00-24:00"
+    min_gap_minutes: 45
+    max_deal_posts_per_day: 10
+    queue_ttl_hours: 8
+    recheck_after_minutes: 10
+  topic_tag_default: 핫딜                  # 분류별 주제 태그 (topic_tags 기본: 주방·식품 집밥 / 생활용품 살림 / 운동 헬스 / 패션 패션)
+  soldout_reply: true                     # 품절 확인 시 내 스레드 글 아래에만 '업데이트) HH:MM 기준 품절됐어' 한 번 (남의 글엔 안 담)
+  replies:                                # 내 글의 새 답글 → 관리자 챗 '원글 요약 + 답글 + 답변 초안 2개' (자동 답글 없음, threads_read_replies 권한 필요)
+    enabled: true
+    windows: ["12:30-12:59", "20:30-20:59"]   # 날마다 이 안의 아무 분에 한 번씩
+  poll:                                   # 15시까지 스레드 딜 글이 없는 날 링크 없는 투표 하나 (하루 한 번까지)
+    enabled: true
+    after: "15:00"
+    question: 다음 주 뭐부터 찾아볼까?
+    topic_tag: 살림
 
 # 인스타그램 자동 게시 (Instagram API with Instagram Login — 프로페셔널 계정, 페이스북 페이지 불필요)
 # Railway Variables: INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET → /instaauth 로 1회 연결. 사진은 아래 card 로 만든 카드를 올림
@@ -409,8 +436,28 @@ instagram:
   template: deal_instagram.j2
   refresh_before_days: 7
   info_posts: false                       # 정보 글(이벤트류)은 안 올림 (상품 딜만)
-  style: B                                # 카드·본문 양식: current | A 사진+큰 가격 | B 저장각 정보 카드 | C 사진+가격 스티커 (주인 선택 10/12: B, 채널 딜 전부 올림)
-  no_photo: skip                          # 확인된 상품 사진이 없는 딜: skip(인스타엔 안 올림, 기록만) | text_card(글자 카드로 올림). 로고는 절대 안 씀
+  style: B                                # 카드·본문 양식: current | A 사진+큰 가격 | B 가격 정보 카드(우리 가격 기록 크게, 판매처 사진 작게) | C 사진+가격 스티커 (주인 선택 10/12: B — A·C·current 는 카드 첫 부분에 고지 띠가 없어 딜 하나짜리 글이 올리기 전 검사에서 막힘)
+  no_photo: text_card                     # 확인된 상품 사진이 없는 딜: text_card(글자 카드로 올림, 주인 결정 10/15) | skip(인스타엔 안 올림, 기록만). 로고는 절대 안 씀
+  # ---- 인스타 전용 대기열 (주인 결정 10/15): 텔레그램에 올린 딜을 바로 올리지 않고 줄 세워 두었다가 골라 올림
+  daily_singles: 3                        # 딜 하나짜리 글 하루 최대 (점수 높은 순). 캐러셀·릴스·단가표는 따로 셈
+  hours: "07:00-23:00"                    # 인스타에 올리는 시간 (한국 시각)
+  min_gap_minutes: 120                    # 인스타 글 사이 간격 (딜 하나짜리 글은 캐러셀·릴스·단가표와도 2시간 띄움)
+  queue_expire_hours: 12                  # 대기열에서 12시간 넘게 기다린 딜은 안 올림. 올리기 직전엔 품절·가격 오름을 다시 확인
+  carousel:                               # 저녁 '오늘 가격 내려간 딜 TOP5' 캐러셀 (하루 1개, 구간 안 무작위 분)
+    enabled: true
+    window: "20:00-21:00"
+    max_deals: 5
+    min_deals: 2                          # 비교 근거가 있는 딜이 2개보다 적으면 그날은 건너뜀
+  reels:                                  # 점심 'TOP3' 릴스 (하루 1개, 10~15초 세로 영상, 서버에 ffmpeg 필요)
+    enabled: true
+    window: "12:00-13:00"
+    max_deals: 3
+    min_deals: 2
+  unit_carousel:                          # '이번 주 생필품 1개당 가격' 캐러셀 (화·금, 봇이 기록한 가격만)
+    enabled: true
+    days: [tue, fri]
+    window: "19:00-20:00"                 # TOP5 캐러셀과 1시간 넘게 띄워서 고름
+    min_slides: 2
 
 # 딜 카드 이미지 (1080×1350). 인스타그램만 (사진은 텔레그램 글과 같은 확인된 상품 사진만)
 card:
@@ -425,6 +472,7 @@ web:
   site_title: 오늘의 핫딜
   page_hours: 48
   page_max_items: 30                      # instagram.style current 일 때만 (점수 순 상위). A/B/C 는 기간 안의 딜을 모두 번호 순으로
+  past_days: 7                            # 기간 안에 딜이 없으면 최근 7일 딜을 '지난 딜 · 가격이 바뀌었을 수 있어요' 로 (주인 결정 10/15)
 
 # API 가 없어 복붙해야 하는 곳: 발행 성공 시 관리자 챗으로 완성된 문구를 보냄
 # 꺼 둠: 블로그(demiyum)는 Blog-Auto 가 자동 발행하고, 오픈채팅용은 블로그 글마다 카톡 '나에게 보내기'로 감
@@ -481,6 +529,8 @@ channels:
   telegram_url: "https://t.me/hot_deal_and_info"
   kakao_openchat_url: "https://open.kakao.com/o/pHi1MkMi"
   threads_url: "https://www.threads.net/@oneul_hot_deal"
+  instagram_url: "https://www.instagram.com/oneul_hot_deal"   # 핫딜 페이지 위쪽·/channelguide 안내 글
+  blog_url: "https://blog.naver.com/demiyum"                    # /channelguide 안내 글의 블로그 링크
   telegram_name: "오늘의 핫딜"          # 블로그 글의 채널 안내에 쓰는 이름 ("텔레그램 · 오늘의 핫딜")
   kakao_openchat_name: "오늘의 핫딜 오픈채팅"
 
@@ -501,6 +551,7 @@ monitoring:
   kakao_relay: true              # 주인이 해야 할 일(링크 요청·확인·고장)을 카카오톡 '나에게 보내기'로 (Blog-Auto 가 보냄 · 카톡 연결은 /kakao)
   telegram_silent: true          # 주인 결정 10/11: 관리자 챗 알림은 소리 없이 (할 일은 카톡, 카톡이 안 되면 텔레그램으로 소리 내서). 명령 답장은 그대로
   owner_summary_time: "20:50"    # 저녁 요약(카톡)에 넣을 딜봇 하루 정리를 Blog-Auto 에 넘기는 시각
+  sns_zero_alert: true           # 텔레그램엔 딜을 올렸는데 인스타·스레드가 24시간 0개면 할 일 한 통 (이유 요약, 하루 한 번까지)
   error_alert_cooldown_minutes: 30
   daily_summary: false           # 매일 21:00 하루 요약 끔 (/status 로 언제든 볼 수 있음). 켜려면 true
   daily_summary_time: "21:00"

@@ -1,6 +1,7 @@
 """인스타그램 @oneul_hot_deal: 팔로워·게시물 수(공식 Instagram Graph API) + 조회수·도달(인사이트 권한이 있을 때만).
 
 토큰은 게시기가 저장·갱신하는 그대로 쓴다 (/instatoken 으로 넣은 것, 만료 전 자동 갱신). instagram.com 페이지는 읽지 않는다.
+인사이트 권한이 없다고 한 번 안 토큰으로는 조회수를 다시 부르지 않는다 (publisher.scopes, 주인 결정 10/15).
 """
 
 from __future__ import annotations
@@ -27,9 +28,11 @@ from dealbot.dashboard.sources._meta import (
     is_token_problem,
 )
 from dealbot.dashboard.sources.base import CardData, Source, register
+from dealbot.publisher.scopes import IG_INSIGHTS
 
 INSIGHT_DAYS = 28
-NEED_INSIGHTS = "조회수는 인사이트 권한(instagram_business_manage_insights)이 있는 토큰이어야 읽혀요 — 권한을 더해 /instatoken 으로 다시 넣으면 보입니다"
+NEED_INSIGHTS = ("조회수는 인사이트 권한(instagram_business_manage_insights)이 있는 토큰이어야 읽혀요 — "
+                 "메타 앱에 권한을 더한 뒤 /instaauth (또는 /instatoken) 로 다시 연결하면 보입니다")
 
 
 @register
@@ -61,13 +64,20 @@ class InstagramSource(Source):
             if (v := finite_number(acc.get(field))) is not None:
                 values[metric] = v
         now = self.ctx.now()
+        scopes = getattr(pub, "scopes", None)
+        if scopes is not None and not scopes.usable(IG_INSIGHTS):
+            return FetchResult(PARTIAL, values, note=NEED_INSIGHTS)  # 이 토큰엔 권한이 없다고 이미 앎
         try:
             body = await pub.client.account_insights(
                 token, "views,reach", since=int((now - timedelta(days=INSIGHT_DAYS)).timestamp()), until=int(now.timestamp()))
         except Exception as e:  # noqa: BLE001
+            if is_permission(e) and not is_token_problem(e) and scopes is not None:
+                scopes.mark(IG_INSIGHTS, False)
             if is_permission(e) or is_token_problem(e):
                 return FetchResult(PARTIAL, values, note=NEED_INSIGHTS)
             return FetchResult(PARTIAL, values, note=f"조회수를 못 읽음 ({safe_error(e)})")
+        if scopes is not None:
+            scopes.mark(IG_INSIGHTS, True)
         for name in ("views", "reach"):
             v = insight_value(body, name)
             if v is not None:

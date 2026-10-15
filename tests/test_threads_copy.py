@@ -363,6 +363,10 @@ async def test_pipeline_sends_threads_and_copy(settings: Settings) -> None:
     bot.threads.dry_run = False
     bot.db.kv_set(KV_TOKEN, "T")
     bot.db.kv_set(KV_USER_ID, "999")
+    # 스레드는 리듬 안(07~24시)에서만 바로 올라감 (주인 결정 10/15) — 시각을 낮 12시로 정해 둔다
+    from datetime import UTC, datetime
+
+    bot.clock = lambda: datetime(2026, 10, 15, 3, 0, tzinfo=UTC)  # type: ignore[method-assign]
     try:
         FakeSide.products = [Product(source="fake", product_id="coupang:1", shop="coupang", name="상품", price=5000,
                                      url="https://www.coupang.com/vp/products/1", affiliate_url="https://link.coupang.com/a/1",

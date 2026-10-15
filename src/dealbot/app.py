@@ -43,6 +43,11 @@ from dealbot.dashboard.service import Dashboard
 from dealbot.dashboard.sources import SourceContext
 from dealbot.dedupe import find_duplicate
 from dealbot.enrich import PageEnricher, PageMeta, page_images
+from dealbot.growth import alerts as growth_alerts
+from dealbot.growth import invites, weekly
+from dealbot.growth.late_photo import LatePhoto
+from dealbot.growth.slots import mark_slot, slot_due
+from dealbot.growth.threads_flow import ThreadsFlow
 from dealbot.infopost import InfoPostBuilder, PostBody
 from dealbot.keyboard import from_korean_keyboard, is_ascii
 from dealbot.links import (
@@ -55,7 +60,8 @@ from dealbot.links import (
 )
 from dealbot.llm_json import JsonAsker
 from dealbot.manual import parse_manual_post
-from dealbot.media.card import CardStyle, DealCard
+from dealbot.media import reel as reel_tools
+from dealbot.media.card import NEUTRAL_CTA, CardStyle, DealCard
 from dealbot.media.imagecheck import (
     clean_image,
     coupang_image_url,
@@ -64,7 +70,7 @@ from dealbot.media.imagecheck import (
     naver_image_url,
     owner_photo,
 )
-from dealbot.models import Deal, DealVerdict, Product, PublishResult
+from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import (
     _AUTH_RE,
     BOT_COMMANDS,
@@ -98,10 +104,14 @@ from dealbot.pricing.evaluator import DealEvaluator
 from dealbot.pricing.market import NAVER_SOURCE, CoupangMarketReference, MarketQuote, market_name
 from dealbot.publisher.copyblocks import CopyBlock, CopyBlockBuilder
 from dealbot.publisher.digest import BlogDigestBuilder
+from dealbot.publisher.ig_scheduler import InstagramScheduler
 from dealbot.publisher.instagram import InstagramClient, InstagramError, InstagramPublisher
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
+from dealbot.publisher.threads import (
+    BASIC_SCOPES as THREADS_BASIC_SCOPES,
+)
 from dealbot.publisher.threads import (
     KV_USERNAME,
     ThreadsClient,
@@ -110,7 +120,7 @@ from dealbot.publisher.threads import (
     ThreadsToken,
     authorize_url,
 )
-from dealbot.shops import ShopRegistry, deal_disclosure
+from dealbot.shops import ShopRegistry, deal_disclosure, disclosure_program
 from dealbot.soldout import looks_sold_out
 from dealbot.storage.db import MAYBE_POSTED, REPLACED, Database, QueueItem
 from dealbot.store_browser import StoreBrowser, store_browser_check
@@ -210,6 +220,8 @@ def _meta(row: dict[str, Any]) -> dict[str, Any]:
 class DealBot:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        # 지금 시각 (UTC). 스레드 리듬·답글 모으기·주간 글이 쓴다 — 테스트는 이걸 바꿔 끼워 시각을 정한다
+        self.clock: Callable[[], datetime] = utcnow
         self.state = BotState(dry_run=settings.publish.dry_run)
         self.db = Database(settings.db_path)
         cc = settings.publish.commentary
@@ -431,8 +443,13 @@ class DealBot:
                 )
             except Exception as e:  # noqa: BLE001
                 log.warning("deal card disabled: %s", e)
+        # 인스타 대기열·시간표 (주인 결정 10/15): 채널에 올린 딜은 여기 줄 서서 하루 3개만, 점심 릴스·저녁 TOP5·화금 단가표는 따로
+        self.ig = InstagramScheduler(self)
         self.copy_blocks = CopyBlockBuilder(settings.copy_cfg, self.renderer, self.registry)
         self.digest = BlogDigestBuilder(settings.blog_digest, self.renderer, self.registry)
+        # ---- 채널 성장 (주인 결정 10/15): 스레드 리듬·답글 초안·투표, 늦게 받는 딜 사진
+        self.threads_flow = ThreadsFlow(self)
+        self.late_photo = LatePhoto(self)
 
         self.notifier = AdminNotifier(
             self.bot,
@@ -529,6 +546,11 @@ class DealBot:
                 controller=self,
                 nl=self.nl,
             )
+        if self.application is not None and settings.secrets.telegram_channel_id:
+            # 채널 초대 링크별 가입 세기 (chat_member 업데이트 — 봇이 채널 관리자일 때만 옴)
+            from telegram.ext import ChatMemberHandler
+
+            self.application.add_handler(ChatMemberHandler(self._on_chat_member, ChatMemberHandler.CHAT_MEMBER))
 
     def _build_dashboard(self) -> Dashboard:
         s = self.settings
@@ -587,7 +609,9 @@ class DealBot:
             log.warning("set_my_commands failed: %s", e)
         if polling and self.settings.secrets.telegram_admin_chat_id and self.application.updater:
             # 재배포 중(봇이 잠깐 꺼진 사이)에 보낸 명령도 켜지면 처리한다. 너무 오래된 것은 admin 쪽 가드가 버림
-            await self.application.updater.start_polling(allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY], drop_pending_updates=False)
+            # CHAT_MEMBER: 채널 초대 링크별 가입 수 (주인 결정 10/15 — 누가 들어왔는지는 안 남기고 링크 이름별 수만)
+            await self.application.updater.start_polling(
+                allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY, Update.CHAT_MEMBER], drop_pending_updates=False)
 
     async def stop_telegram(self) -> None:
         if self.application is None:
@@ -809,7 +833,9 @@ class DealBot:
                           + (f" 채널 글 {message_id}" if message_id else ""))
         if info:
             return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요.{note}"
-        self.export_published(deal, photo)
+        row = self.export_published(deal, photo)
+        # 사진 기다림 기록을 인스타 대기열에 넣기 전에 — 인스타 시간표가 그 사이에 사진 없는 딜 글을 바로 올리지 않게
+        await self._ask_late_photo(queue_id, deal, photo, row)
         await self._publish_side_channels(deal, photo=photo, deal_no=queue_id)
         return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요. 블로그·스레드·인스타 차례도 이어서 처리했어요.{note}"
 
@@ -1170,6 +1196,8 @@ class DealBot:
             out.append((False, "인스타그램: 공개 도메인이 없어 카드 이미지를 못 올림 (Railway → Networking → Generate Domain)"))
         else:
             out.append((True, f"인스타그램 @{self.db.kv_get(IG_KV_USERNAME) or '?'} (카드 이미지 {self.settings.secrets.public_base_url}/media/…)"))
+            if self.settings.instagram.reels.enabled and reel_tools.find_ffmpeg() is None:
+                out.append((None, "인스타 점심 릴스: 서버에 ffmpeg 없음 — sudo apt-get install -y ffmpeg (그 전엔 릴스만 건너뜀)"))
         if self.copy_blocks.enabled:
             out.append((True, "복붙 문구: " + ", ".join(t.name for t in self.settings.copy_cfg.targets if t.enabled)))
         if self.market is not None:
@@ -1207,6 +1235,12 @@ class DealBot:
             out.append((None, "채널 대시보드: 만들지 못함 (로그 확인)" if self.settings.dashboard.enabled else "채널 대시보드: 꺼짐"))
         else:
             out.extend(self.dashboard.self_check())
+        try:  # 내 도메인 (https.sh --domain 으로 옮겼을 때만): DNS A 레코드가 이 서버를 가리키는지. 할 일 알림은 봇 시작 때 따로
+            line = await growth_alerts.domain_check(self, alert=False)
+            if line is not None:
+                out.append(line)
+        except Exception as e:  # noqa: BLE001
+            out.append((None, f"내 도메인 확인 못 함: {type(e).__name__}"))
         return out
 
     # ------------------------------------------------------------- pipeline
@@ -1311,12 +1345,16 @@ class DealBot:
             await self.notifier.notify_published(deal, result, preview=text)
             return True
         await self.notifier.notify_published(deal, result)
-        # 스레드: 별도 양식으로 한 글
+        # 스레드: 별도 양식으로 한 글 — 요약 + 원문 링크만, 게시판 사진은 쓰지 않는다 (주인 결정 10/15: 남의 사진을 퍼 나르지 않음).
+        # 딜 글과 같은 리듬(07~24시·45분 간격)으로 스레드 대기열에서 올라간다
         if self.settings.threads.enabled and self.threads.configured:
             try:
-                tr = await self.threads.publish_text(self.info.render(cfg.threads_template, deal, body, autoescape=False), body.images[0] if body.images else None)
-                if not tr.ok:
-                    log.warning("threads info post failed: %s", tr.error)
+                job = self.threads_flow.enqueue_info(deal, self.info.render(cfg.threads_template, deal, body, autoescape=False),
+                                                     queue_id=item.id)
+                if job is not None and not self.settings.threads.rhythm.enabled:
+                    await self.threads_flow.post_now(job)
+                elif job is not None:
+                    await self.threads_flow.tick()
             except Exception as e:  # noqa: BLE001
                 log.warning("threads info post error: %s", e)
         # 카톡: 복붙 문구
@@ -1625,6 +1663,11 @@ class DealBot:
                 out["cancelled"].append(item.id)
         post = self.db.latest_post(pid)
         out["exported"] = self._export_sold_out(pid, post)
+        # 스레드: 기다리는 글은 내리고, 이미 올린 내 글 아래에 '업데이트) HH:MM 기준 품절됐어' 하나 (글마다 한 번, 주인 결정 10/15)
+        try:
+            out["threads_replies"] = await self.threads_flow.soldout_update(pid)
+        except Exception as e:  # noqa: BLE001 — 스레드 답글 때문에 품절 처리가 멈추지 않게
+            log.warning("threads sold-out update failed for %s: %s", pid, e)
         if (
             post
             and post.get("message_id")
@@ -1646,6 +1689,27 @@ class DealBot:
                 "INFO", "soldout", f"{pid} via={via} cancelled={out['cancelled']} marked={out['marked']} exported={out['exported']}"
             )
         return out
+
+    # 스레드 대기열이 올리기 직전에 상품 페이지에서 품절을 본 상품 (같은 상품의 다른 기다리는 글도 그 뒤로는 안 올림). 시각만 —
+    # 그 뒤에 다시 올라온 딜은 새 글이라 막지 않는다. 게시판에서 본 품절은 _on_sold_out 이 기다리는 글을 바로 내림
+    SOLDOUT_SEEN_KV = "soldout_at:"
+
+    def mark_sold_out_seen(self, product_id: str, now: datetime | None = None) -> None:
+        self.db.kv_set(f"{self.SOLDOUT_SEEN_KV}{product_id}", to_iso(now or self.clock()))
+
+    def known_sold_out(self, product_id: str) -> bool:
+        """가장 최근 채널 글이 올라간 뒤로 품절로 기록된 상품: 채널 글에 품절 표시를 붙였거나, 블로그에 품절 줄을 남겼거나,
+        스레드가 올리기 직전에 품절을 봤다 (그 전 품절 뒤 다시 올라온 딜은 새 글이라 막지 않는다). 인스타·일요일 TOP5 가 쓴다."""
+        post = self.db.latest_post(product_id)
+        posted = str(post["posted_at"]) if post else ""
+        marked = self.db.kv_get(f"soldout_marked:{product_id}")
+        if marked and (not posted or marked >= posted):
+            return True
+        if posted and self.db.kv_get(f"soldout_exported:{product_id}") == posted:
+            return True
+        seen = from_iso(self.db.kv_get(f"{self.SOLDOUT_SEEN_KV}{product_id}") or None)
+        posted_at = from_iso(posted) if posted else None
+        return seen is not None and (posted_at is None or seen >= posted_at)
 
     def _export_sold_out(self, pid: str, post: dict[str, Any] | None) -> bool:
         """채널에 실제로 올린 상품이 품절됨: published_deals.jsonl 에 품절 줄을 남겨 Blog-Auto 가 그 전에 올라온 같은 상품을
@@ -2611,7 +2675,9 @@ class DealBot:
                 self.export_published(deal, photo, preview=True)  # 블로그 미리보기(/hotdeal)용 — 실제 블로그 발행엔 안 쓰임
             else:
                 await self.notifier.notify_published(deal, result)
-                self.export_published(deal, photo)
+                row = self.export_published(deal, photo)
+                # 사진 기다림 기록이 먼저 — 인스타 시간표(ig_scheduler)가 기다리는 동안 사진 없는 딜 글을 미룬다
+                await self._ask_late_photo(item.id, deal, photo, row)
                 await self._publish_side_channels(deal, photo=photo, deal_no=item.id)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal, maybe_posted=result.maybe_posted)
@@ -2619,46 +2685,150 @@ class DealBot:
 
     EXPORT_KEEP_DAYS = 14  # media/export 의 사진은 블로그가 가져간 뒤 이만큼 지나면 지운다
 
-    def export_published(self, deal: Deal, photo: bytes | None = None, *, preview: bool = False) -> None:
-        """채널에 실제로 올린 딜을 published_deals.jsonl 에 한 줄씩 남긴다 (블로그 자동 발행·카카오 전송이 읽어 감).
+    def export_published(self, deal: Deal, photo: bytes | None = None, *, preview: bool = False) -> dict[str, Any] | None:
+        """채널에 실제로 올린 딜을 published_deals.jsonl 에 한 줄씩 남긴다 (블로그 자동 발행·카카오 전송이 읽어 감). 남긴 줄을 돌려준다.
         사진은 deal_photo 가 확인한 상품 사진(600px 이상 JPEG)만 media/export 에 저장해 경로를 적는다.
-        글자 카드는 상품 사진이 아니라 블로그 사진으로 내보내지 않는다. photo_kind: 'product' | 'none', photo_src: 받은 주소."""
+
+        Blog-Auto 와의 약속 (사진 칸, 주인 결정 10/15 — Blog-Auto 는 같은 product_id 의 가장 나중 줄을 쓴다):
+        - photo_kind: 'verified'(봇이 확인한 상품 사진) | 'owner'(주인이 보낸 사진 — 링크와 같이, 또는 발행 뒤 4시간 안에 답장)
+          | 'text_card'(사진 없음 — text_card_file 의 글자 카드) | null(사진도 글자 카드도 없음)
+        - photo_file: 상품 사진 경로 (사진이 없으면 ''). 글자 카드는 여기에 넣지 않는다 (상품 사진이 아님)
+        - photo_wait_until: 사진이 없을 때 posted_at + publish.late_photo_hours(4시간) — 그때까지 주인 사진을 기다려도 됨
+          (그 안에 사진이 오면 같은 product_id·posted_at 으로 사진이 바뀐 줄이 하나 더 붙음, photo_updated_at 이 있음). 사진이 있으면 null
+        - text_card_file: 사진이 없는 딜이면 봇이 그린 글자 카드(1080×1350 JPEG, media/export) 경로, 사진이 있으면 ''
+        photo_src: 받은 주소 ('owner' = 주인 사진)."""
         try:
             p = deal.product
-            shop = self.registry.get(p.shop)
-            link = deal.affiliate_url or p.url
             out_dir = self.settings.data_dir / "media" / "export"
             out_dir.mkdir(parents=True, exist_ok=True)
+            stem = f"{re.sub(r'[^A-Za-z0-9_-]+', '_', p.product_id)}_{int(time.time())}"
             photo_file = ""
             if photo:
-                photo_file = str(out_dir / f"{re.sub(r'[^A-Za-z0-9_-]+', '_', p.product_id)}_{int(time.time())}.jpg")
+                photo_file = str(out_dir / f"{stem}.jpg")
                 Path(photo_file).write_bytes(photo)
+            text_card_file = "" if photo else self._export_text_card(deal, out_dir / f"{stem}_card.jpg")
             self._prune_exports(out_dir)
-            ctx = self.renderer
-            tier, _ = ctx.deal_tier(deal)
-            v = deal.verdict
-            # 채널 글 첫 줄과 같은 근거·같은 숫자 (배송비를 반영한 평가기 값, 믿을 만한 평균만)
-            ref_price, ref_pct, is_market = ctx.reference(deal)
-            ref_label = (f"{market_name(v.market_source)} 최저가" if is_market else "평소 가격") if ref_price else ""
-            row = {
-                "product_id": p.product_id, "posted_at": utcnow().isoformat(timespec="seconds"),
-                "name": clean_name(p.name), "raw_name": p.name, "headline": p.headline, "price": p.price,
-                "ref_price": ref_price, "ref_label": ref_label,
-                "ref_pct": round(ref_pct) if ref_price and ref_pct else None,
-                "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
-                "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
-                "disclosure": deal_disclosure(shop, p.extra) or "", "link": link, "product_url": p.url,
-                # 주인이 링크와 같이 보낸 사진도 상품 사진 (Blog-Auto 는 photo_kind 'product' 만 상품 사진으로 씀)
-                "image_url": p.image_url, "photo_file": photo_file, "photo_kind": "product" if photo_file else "none",
-                "photo_src": ("owner" if p.extra.get("owner_photo") else p.image_url) if photo_file else None,
-                "kakao_text": ctx.render_deal(deal, link, shop=shop, template="deal_kakao.j2", autoescape=False),
-                **{k: v for k, v in ctx.deal_facts(deal).items() if k != "ref_price"},
-            }
-            name = "preview_deals.jsonl" if preview else "published_deals.jsonl"
-            with (self.settings.data_dir / name).open("a", encoding="utf-8") as f:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            posted_at = self.clock()
+            row = self._export_row(deal, photo_file=photo_file, text_card_file=text_card_file, posted_at=posted_at,
+                                   wait=not photo and not preview and self.late_photo.enabled() and p.deal_kind != "info")
+            self._append_export(row, preview=preview)
+            return row
         except Exception as e:  # noqa: BLE001 — 내보내기 실패가 발행을 막지 않게
             log.warning("export_published failed: %s", e)
+            return None
+
+    def _export_row(self, deal: Deal, *, photo_file: str, text_card_file: str, posted_at: datetime, wait: bool,
+                    kind: str | None = None) -> dict[str, Any]:
+        p = deal.product
+        shop = self.registry.get(p.shop)
+        link = deal.affiliate_url or p.url
+        ctx = self.renderer
+        tier, _ = ctx.deal_tier(deal)
+        v = deal.verdict
+        # 채널 글 첫 줄과 같은 근거·같은 숫자 (배송비를 반영한 평가기 값, 믿을 만한 평균만)
+        ref_price, ref_pct, is_market = ctx.reference(deal)
+        ref_label = (f"{market_name(v.market_source)} 최저가" if is_market else "평소 가격") if ref_price else ""
+        if kind is None:
+            kind = ("owner" if p.extra.get("owner_photo") else "verified") if photo_file else ("text_card" if text_card_file else None)
+        return {
+            "product_id": p.product_id, "posted_at": posted_at.isoformat(timespec="seconds"),
+            "name": clean_name(p.name), "raw_name": p.name, "headline": p.headline, "price": p.price,
+            "ref_price": ref_price, "ref_label": ref_label,
+            "ref_pct": round(ref_pct) if ref_price and ref_pct else None,
+            "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
+            "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
+            "disclosure": deal_disclosure(shop, p.extra) or "", "link": link, "product_url": p.url,
+            "image_url": p.image_url, "photo_file": photo_file, "photo_kind": kind,
+            "photo_src": ("owner" if p.extra.get("owner_photo") else p.image_url) if photo_file else None,
+            "photo_wait_until": (posted_at + timedelta(hours=self.settings.publish.late_photo_hours)).isoformat(timespec="seconds")
+            if wait else None,
+            "text_card_file": text_card_file,
+            "kakao_text": ctx.render_deal(deal, link, shop=shop, template="deal_kakao.j2", autoescape=False),
+            **{k: v for k, v in ctx.deal_facts(deal).items() if k != "ref_price"},
+        }
+
+    def _append_export(self, row: dict[str, Any], *, preview: bool = False) -> None:
+        name = "preview_deals.jsonl" if preview else "published_deals.jsonl"
+        with (self.settings.data_dir / name).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _export_text_card(self, deal: Deal, path: Path) -> str:
+        """사진 없는 딜의 글자 카드 (인스타 글자 카드와 같은 그림 — 상품명·가격 같은 사실만). 못 그리면 ''.
+        바닥 안내는 채널 중립(NEUTRAL_CTA): 블로그 글엔 구매 링크가 따로 있어 인스타용 '구매 링크는 프로필 링크에서' 는 틀린 말."""
+        if self.card is None:
+            return ""
+        try:
+            shop = self.registry.get(deal.product.shop)
+            tier, _ = self.renderer.deal_tier(deal)
+            info = None
+            if self.card.layout != "current":
+                from dealbot.publisher.insta_style import card_info
+
+                info = card_info(deal, self.renderer, shop=shop)
+            path.write_bytes(self.card.render(deal, None, shop_name=shop.name if shop else None, tier=tier, info=info,
+                                              cta=NEUTRAL_CTA))
+            return str(path)
+        except Exception as e:  # noqa: BLE001
+            log.warning("text card for the blog export failed: %s", e)
+            return ""
+
+    def export_photo_update(self, deal: Deal, photo: bytes, *, posted_at: datetime) -> dict[str, Any] | None:
+        """발행 뒤 주인이 보낸 사진: 같은 product_id·posted_at 으로 사진이 바뀐 줄을 하나 더 쓴다 (photo_kind 'owner').
+        Blog-Auto 는 같은 상품의 가장 나중 줄을 쓰고, 품절 기록과 견주는 posted_at 은 처음 발행 시각 그대로."""
+        try:
+            out_dir = self.settings.data_dir / "media" / "export"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            stem = f"{re.sub(r'[^A-Za-z0-9_-]+', '_', deal.product.product_id)}_{int(time.time())}_owner"
+            photo_file = str(out_dir / f"{stem}.jpg")
+            Path(photo_file).write_bytes(photo)
+            row = self._export_row(deal, photo_file=photo_file, text_card_file="", posted_at=posted_at, wait=False, kind="owner")
+            row["photo_updated_at"] = utcnow().isoformat(timespec="seconds")
+            self._append_export(row)
+            return row
+        except Exception as e:  # noqa: BLE001
+            log.warning("export photo update failed: %s", e)
+            return None
+
+    async def _ask_late_photo(self, queue_id: int, deal: Deal, photo: bytes | None, row: dict[str, Any] | None) -> None:
+        """확인된 상품 사진 없이 올라간 딜: 4시간 안에 주인 사진을 받는다 (관리자 챗 📷 + 할 일)."""
+        if photo is not None or row is None or not row.get("photo_wait_until"):
+            return
+        try:
+            posted = from_iso(str(row.get("posted_at"))) or utcnow()
+            await self.late_photo.ask(queue_id, deal, posted)
+        except Exception as e:  # noqa: BLE001 — 사진 부탁이 실패해도 발행은 그대로
+            log.warning("late photo ask failed for #%d: %s", queue_id, e)
+
+    def save_late_photo(self, item: QueueItem, jpeg: bytes) -> bool:
+        """발행 뒤 받은 주인 사진을 그 딜의 상품 사진으로 (owner_photos 에 저장, 대기열 딜에 적음 — 인스타가 나중에 쓰면 이 사진)."""
+        folder = self.settings.data_dir / self.OWNER_PHOTO_DIR
+        name = f"q{item.id}_{time.time_ns()}.jpg"
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(jpeg)) as im:
+                w, h = im.size
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(jpeg)
+        except OSError as e:
+            log.warning("late owner photo not saved for #%d: %s", item.id, e)
+            return False
+        p = item.deal.product
+        p.extra["owner_photo"] = {"file": name, "at": to_iso(utcnow()), "w": w, "h": h, "late": True}
+        self.db.update_queue_item(item.id, status=item.status, error=item.last_error, deal=item.deal)
+        self.db.kv_set(f"{self.OWNER_PHOTO_KV}{p.product_id}", json.dumps(p.extra["owner_photo"], ensure_ascii=False))
+        try:
+            self.ig.attach_photo(item.id, jpeg)  # 인스타 대기열(ig_queue)은 사진 사본을 따로 들고 있음 — 거기에도
+        except Exception as e:  # noqa: BLE001 — 인스타 쪽 문제로 사진 받기가 실패하지 않게
+            log.warning("late owner photo not attached to the instagram queue for #%d: %s", item.id, e)
+        return True
+
+    def late_photo_waiting(self, queue_id: int) -> bool:
+        """이 딜이 지금 주인 사진을 기다리는 중인가 ('/photo N' 을 딜 사진으로 받을지 — 아니면 블로그 명령으로 넘김)."""
+        return self.late_photo.waiting(queue_id) is not None
+
+    async def attach_late_photo(self, queue_id: int, photo: PhotoSource) -> str:
+        return await self.late_photo.attach(queue_id, photo)
 
     def _prune_exports(self, out_dir: Path) -> None:
         cutoff = time.time() - self.EXPORT_KEEP_DAYS * 86400
@@ -2867,18 +3037,21 @@ class DealBot:
         p.image_url = src
         return photo
 
-    async def make_card(self, deal: Deal, photo: bytes | None, *, deal_no: int | None = None) -> str | None:
+    async def make_card(self, deal: Deal, photo: bytes | None, *, deal_no: int | None = None, text_card: bool = False,
+                        cta: str | None = None) -> str | None:
         """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None.
         photo: deal_photo 가 확인한 상품 사진 바이트 (텔레그램 글에 쓴 그 사진). 여기서 사진을 다시 받지 않는다 —
         예전엔 image_url 을 날것으로 다시 받아 쿠팡 로고가 카드에 크게 들어가거나(/instatest), 외부 반출을 막는 스토어 사진이 빠졌다.
-        사진이 없으면 instagram.no_photo 가 text_card 이거나 네이버 딜일 때 글자 카드, 아니면(skip 기본) None."""
+        사진이 없으면 instagram.no_photo 가 text_card(기본, 주인 결정 10/15)이거나 네이버 딜일 때 글자 카드, 아니면(skip) None.
+        text_card=True: 사진이 없으면 언제나 글자 카드 (스레드 — 확인된 사진이 없는 딜도 글만 올리지 않게, 주인 결정 10/15).
+        cta: 바닥 안내 (스레드는 NEUTRAL_CTA — 본문에 구매 링크가 있어 '프로필 링크' 안내는 인스타에서만). None 이면 인스타용."""
         if self.card is None:
             return None
         base = self.settings.secrets.public_base_url
         if not base:
             log.debug("no public domain — card image cannot be served")
             return None
-        if photo is None and not self._ig_text_card(deal):
+        if photo is None and not (text_card or self._ig_text_card(deal)):
             return None
         shop = self.registry.get(deal.product.shop)
         tier, _ = self.renderer.deal_tier(deal)  # 배지는 글 첫 줄과 같은 등급으로
@@ -2889,7 +3062,7 @@ class DealBot:
             info = card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
         try:
             path = await asyncio.to_thread(
-                self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier, info=info,
+                self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier, info=info, cta=cta,
             )
         except Exception as e:  # noqa: BLE001
             log.warning("card render failed: %s", e)
@@ -2915,8 +3088,13 @@ class DealBot:
         return None
 
     async def _publish_side_channels(self, deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
-        """텔레그램 채널 발행 후: 카드 이미지 → 스레드·인스타그램 자동 게시 + 복붙 문구를 관리자 챗으로.
-        photo: 텔레그램 글에 쓴 확인된 상품 사진(deal_photo) — 인스타 카드도 이 사진만 쓴다. deal_no: 핫딜 페이지 번호."""
+        """텔레그램 채널 발행 후: 스레드 대기열 + 인스타 대기열에 넣기 + 복붙 문구를 관리자 챗으로.
+        스레드와 인스타는 대기열·리듬이 따로다 (주인 결정 10/15):
+        - 스레드: threads_jobs 대기열 (threads_flow) — 07~24시·45분 간격·하루 딜 10개, 리듬이 허락하면 바로.
+        - 인스타: ig_queue 대기열 (InstagramScheduler) — 바로 올리지 않고 인스타 시간표(instagram_tick)가 하루 3개까지
+          점수 순으로 07~23시·2시간 간격으로, 올리기 직전 품절·가격을 다시 보고 올린다. 점심 릴스·저녁 TOP5·화금 단가표도 같은 시간표.
+        photo: 텔레그램 글에 쓴 확인된 상품 사진(deal_photo) — 인스타 카드도 이 사진만 쓴다 (사본을 대기열에 남김). deal_no: 대기열 번호."""
+        queue_id = deal_no  # 대기열 번호 그대로
         want_ig = (
             self.settings.instagram.enabled
             and (self.instagram.configured or self.instagram.dry_run)
@@ -2925,48 +3103,35 @@ class DealBot:
         want_threads = self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run)
         ig_skip = self._ig_skip_reason(photo, deal=deal) if want_ig else None
         if ig_skip:
-            # 사진 없는 딜은 인스타에 안 올림 (실패가 아니라 규칙이라 관리자 알림 없이 기록만)
+            # 사진 없는 딜은 인스타에 안 올림 (no_photo: skip 일 때만 — 실패가 아니라 규칙이라 관리자 알림 없이 기록만)
             want_ig = False
             self.db.log_event("INFO", "instagram", f"{deal.product.product_id} skipped: {ig_skip}")
+            self.db.sns_log_add("instagram", "skipped", product_id=deal.product.product_id, reason=ig_skip)
             log.info("instagram skipped (%s): %s", ig_skip, deal.product.name[:40])
-        if want_ig:
-            deal_no = self._page_deal_no(deal_no)  # 카드·본문의 '#번호' 는 핫딜 페이지에 있는 글만
-        # 카드는 인스타만. 사진은 텔레그램 글과 같은 확인된 상품 사진 (없으면 네이버 딜·text_card 설정만 글자 카드)
-        card_url = await self.make_card(deal, photo, deal_no=deal_no) if want_ig else None
         if want_threads:
-            # 스레드는 deal_photo 가 확인한 상품 사진만 (못 쓰면 글만). 글자 카드는 상품 사진 대신 쓰지 않는다
+            # 스레드 대기열에 넣고 리듬(07~24시·45분 간격·하루 딜 10개)이 허락하면 바로 (주인 결정 10/15).
+            # 사진: deal_photo 가 확인한 상품 사진, 없으면 봇이 만든 4:5 글자 카드 (글만 올리지 않음)
             try:
-                result = await self.threads.publish(deal)
-            except Exception as e:  # noqa: BLE001 — 재시도 뒤에도 남은 5xx·429·시간 초과: 실패로 알리고 인스타는 그대로 올린다
-                result = PublishResult(ok=False, error=f"{type(e).__name__}: {e}")
-            if result.ok:
-                self.db.log_event("INFO", "threads", f"{deal.product.product_id} {'dry-run' if result.dry_run else result.message_id}")
-                log.info("threads posted: %s", deal.product.name[:40])
-                if result.error:  # 올라가긴 했지만 사진이 빠졌거나 (선택) 답글이 실패한 경우
-                    self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
-                    if result.error.startswith("답글"):
-                        await self.notifier.send(f"⚠️ <b>스레드 글은 올라갔지만 답글이 실패했습니다</b> (링크는 본문에 있음)\n"
-                                                 f"<code>{html.escape(result.error)}</code>")
-            else:
-                self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {result.error}")
-                log.warning("threads post failed: %s", result.error)
-                await self._sns_failed("스레드", "threadsauth", f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(result.error or '')}</code>",
-                                       result.error or "")
+                job = self.threads_flow.enqueue_deal(deal, queue_id=queue_id, has_photo=photo is not None)
+                if job is not None and not self.settings.threads.rhythm.enabled:
+                    await self.threads_flow.post_now(job)
+                elif job is not None:
+                    await self.threads_flow.tick()
+            except Exception as e:  # noqa: BLE001 — 스레드 쪽 문제로 인스타·복붙 문구가 빠지지 않게
+                log.warning("threads queue failed: %s", e)
+                self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {type(e).__name__}: {e}")
         if want_ig:
             try:
-                ig = await self.instagram.publish(deal, card_url, deal_no=deal_no)
-            except Exception as e:  # noqa: BLE001 — 스레드와 같음: 실패로 알리고 복붙 문구는 그대로 보낸다
-                ig = PublishResult(ok=False, error=f"{type(e).__name__}: {e}")
-            if ig.ok:
-                self.db.log_event("INFO", "instagram", f"{deal.product.product_id} {'dry-run' if ig.dry_run else ig.message_id}")
-                log.info("instagram posted: %s", deal.product.name[:40])
-            else:
-                self.db.log_event("WARNING", "instagram", f"{deal.product.product_id}: {ig.error}")
-                log.warning("instagram post failed: %s", ig.error)
-                await self._sns_failed("인스타그램", "instaauth", f"⚠️ <b>인스타그램 발행 실패</b>\n<code>{html.escape(ig.error or '')}</code>",
-                                       ig.error or "")
+                self.ig.enqueue(deal, photo=photo, queue_id=queue_id)
+            except Exception as e:  # noqa: BLE001 — 대기열에 못 넣어도 채널 글·복붙 문구는 그대로
+                log.warning("instagram queue failed: %s", e)
+                self.db.log_event("WARNING", "instagram", f"{deal.product.product_id}: queue failed: {e}")
         for block in self.copy_blocks.build(deal):
             await self.notifier.send(block.as_telegram_html(), silent=True)
+
+    async def instagram_tick(self) -> str | None:
+        """인스타 시간표 한 번 보기 (scheduler.instagram_loop 가 1분마다): 차례가 된 글 하나를 올리거나 건너뛴다."""
+        return await self.ig.tick()
 
     async def _sns_failed(self, sns: str, cmd: str, tg_text: str, error: str) -> None:
         """스레드·인스타 발행 실패: 연결(토큰·권한)이 끊긴 것이면 주인 카톡 (다시 연결해야 풀림), 아니면 텔레그램만 (소리 없이)."""
@@ -2997,6 +3162,7 @@ class DealBot:
         self.db.kv_set(KV_OAUTH_STATE, state)
         self.db.kv_set(KV_OAUTH_STATE_AT, to_iso(utcnow()))
         url = authorize_url(app_id, redirect, state=state)
+        basic_url = authorize_url(app_id, redirect, state=state, scopes=THREADS_BASIC_SCOPES)
         register = (
             f"1) 메타 앱에 이 콜백 주소가 등록돼 있어야 합니다: <code>{redirect}</code>\n"
             "   developers.facebook.com → 앱 → 사용 사례 → Threads API → 설정 → <b>리디렉션 콜백 URL</b>. "
@@ -3006,7 +3172,11 @@ class DealBot:
         check = (
             f"\n확인: 이 링크의 client_id <code>{app_id}</code> 는 앱 설정 → 기본 설정 아래쪽의 <b>Threads 앱 ID</b>와 같아야 합니다 "
             "(같은 페이지 맨 위 '앱 ID'는 메타 앱용이라 다른 번호입니다). "
-            "'차단된 URL / 리디렉션 URI가 화이트리스트에 없습니다' 가 뜨면 ① 이 번호가 Threads 앱 ID가 아니거나 ② 1)의 주소가 글자 그대로 등록되지 않은 경우입니다."
+            "'차단된 URL / 리디렉션 URI가 화이트리스트에 없습니다' 가 뜨면 ① 이 번호가 Threads 앱 ID가 아니거나 ② 1)의 주소가 글자 그대로 등록되지 않은 경우입니다.\n"
+            "통계·답글 읽기 권한(threads_manage_insights, threads_read_replies)도 요청해요 — 'Invalid Scopes' 가 뜨면 "
+            "앱 → 사용 사례 → Threads API → 권한에서 두 권한을 먼저 추가해 주세요 (docs/SETUP_KEYS.md 7-7).\n"
+            "지금 바로 권한을 추가하기 어려우면 이 링크(올리기·답글 달기만 — 통계·답글 모으기는 꺼진 채로 연결)로 연결하세요:\n"
+            f"{basic_url}"
         )
         if sec.threads_callback_served:
             return (
@@ -3077,6 +3247,7 @@ class DealBot:
                 return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 아래처럼 /instaauth 링크를 다시 승인하세요)"
             except InstagramError:
                 pass
+        from dealbot.publisher.instagram import BASIC_SCOPES as IG_BASIC_SCOPES
         from dealbot.publisher.instagram import authorize_url as ig_authorize_url
 
         app_id = sec.instagram_app_id or ""
@@ -3085,6 +3256,7 @@ class DealBot:
         self.db.kv_set(KV_IG_OAUTH_STATE, state)
         self.db.kv_set(KV_IG_OAUTH_STATE_AT, to_iso(utcnow()))
         url = ig_authorize_url(app_id, redirect, state=state)
+        basic_url = ig_authorize_url(app_id, redirect, state=state, scopes=IG_BASIC_SCOPES)
         register = (
             f"1) 메타 앱에 이 주소가 등록돼 있어야 합니다: <code>{redirect}</code>\n"
             "   developers.facebook.com → 앱 → 인스타그램 → API 설정(Instagram 로그인) → 3. 비즈니스 로그인 설정 → <b>OAuth 리디렉션 URI</b>. "
@@ -3093,7 +3265,11 @@ class DealBot:
         check = (
             f"\n확인: 이 링크의 client_id <code>{app_id}</code> 는 같은 화면의 <b>인스타그램 앱 ID</b>와 같아야 합니다 "
             "(앱 설정 → 기본 설정 맨 위의 '앱 ID'와는 다른 번호). 인스타 계정은 프로페셔널(크리에이터/비즈니스)이어야 하고, "
-            "앱이 개발 모드면 앱 역할 → Instagram 테스터에 내 계정을 넣고 인스타 앱 → 설정 → 웹사이트 권한 → 앱 및 웹사이트 → 테스터 초대에서 수락해야 합니다."
+            "앱이 개발 모드면 앱 역할 → Instagram 테스터에 내 계정을 넣고 인스타 앱 → 설정 → 웹사이트 권한 → 앱 및 웹사이트 → 테스터 초대에서 수락해야 합니다.\n"
+            "통계 권한(instagram_business_manage_insights)도 요청해요 — 'Invalid Scopes' 가 뜨면 앱 → 사용 사례 → "
+            "Instagram 권한에서 먼저 추가해 주세요 (docs/SETUP_KEYS.md 7-7).\n"
+            "지금 바로 권한을 추가하기 어려우면 이 링크(올리기만 — 통계는 꺼진 채로 연결)로 연결하세요:\n"
+            f"{basic_url}"
         )
         if sec.instagram_callback_served:
             return (
@@ -3242,11 +3418,31 @@ class DealBot:
             return None
         return item_id if any(it.id == item_id for it in self._page_items()) else None
 
+    def _past_items(self, now: Any | None = None) -> list[QueueItem]:
+        """기간(page_hours) 안에 딜이 없을 때 보여 줄 최근 web.past_days 일의 딜 (새 것부터, page_max_items 개까지)."""
+        cfg = self.settings.web
+        now = now or utcnow()
+        items = [
+            it
+            for it in self.db.published_items_between(
+                now - timedelta(days=cfg.past_days), now + timedelta(minutes=1), include_dry_run=self.state.dry_run
+            )
+            if it.deal.product.deal_kind != "info" and (it.deal.affiliate_url or it.deal.product.url)
+        ]
+        return sorted(items, key=lambda x: x.id, reverse=True)[: cfg.page_max_items]
+
     async def _deals_page(self, query: dict[str, str]) -> tuple[int, str]:
+        """'/' 핫딜 페이지 (인스타 프로필 링크용). 맨 위 광고 표시 한 줄 + 텔레그램 채널 버튼(초대 링크 deals_page 가 있으면 그것) +
+        인스타·스레드 링크 (주인 결정 10/15). 기간 안에 딜이 없으면 최근 7일 딜을 '지난 딜 · 가격이 바뀌었을 수 있어요' 로."""
         cfg = self.settings.web
         rows = []
         disclosures: list[str] = list(self.settings.blog_digest.always_disclosures)
-        for it in self._page_items():
+        items = self._page_items()
+        past = False
+        if not items:
+            items = self._past_items()
+            past = bool(items)
+        for it in items:
             p = it.deal.product
             shop = self.registry.get(p.shop)
             disc = deal_disclosure(shop, p.extra)
@@ -3264,15 +3460,23 @@ class DealBot:
                     "free_shipping": bool(p.is_free_shipping),
                 }
             )
+        programs = list(dict.fromkeys(p for d in disclosures if (p := disclosure_program(d))))
+        channels = self.settings.channels.as_dict()
         html_text = self.renderer.render(
             "deals_page.j2",
             title=cfg.site_title,
             items=rows,
             hours=cfg.page_hours,
             disclosures=disclosures,
-            channels=self.settings.channels.as_dict(),
+            channels=channels,
             # 인스타 후보 양식(A/B/C)은 카드·본문에 '#번호' 를 적으므로 페이지에도 번호를 보여 찾기 쉽게
             show_numbers=self.settings.instagram.style != "current",
+            past=past,
+            past_days=cfg.past_days,
+            ad_top=("광고 · 이 페이지의 구매 링크는 제휴 링크라, 구매하면 "
+                    + ("·".join(programs) if programs else "판매처") + " 수수료를 받아요"),
+            # 텔레그램 버튼: /invitelinks 로 만든 deals_page 초대 링크 (가입 경로를 셈), 없으면 채널 주소
+            telegram_join=self.db.kv_get(f"{invites.KV_PREFIX}deals_page") or channels.get("telegram_url") or "",
         )
         return 200, html_text
 
@@ -3314,6 +3518,108 @@ class DealBot:
         self.db.log_event("INFO", "threads", f"authorized by user token as {me.get('username')}")
         expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
         return f"✅ 스레드 연결 완료: @{html.escape(str(me.get('username') or ''))} (토큰 만료 {expires}, 자동 갱신됨). 이제 /threadstest 로 시험해 보세요."
+
+    # ----------------------------------------------------------- 채널 성장 (주인 결정 10/15)
+    async def _on_chat_member(self, update: Update, _ctx: Any) -> None:
+        """채널 가입: 어느 초대 링크로 들어왔는지 링크 이름별로 센다 (공개 주소로 들어오면 '출처 모름'). 사람은 남기지 않는다."""
+        try:
+            name = invites.record_join(self.db, update, self.publisher.channel_id, self.settings.app.timezone, self.clock())
+            if name:
+                log.info("channel join via %s", name)
+        except Exception as e:  # noqa: BLE001
+            log.warning("chat member update not counted: %s", e)
+
+    async def invite_links(self) -> str:
+        """/invitelinks: 이름 붙은 채널 초대 링크 (ig_bio·threads_bio·deals_page·demiyum·qr) 를 만들거나 보여 준다."""
+        return await invites.create_links(self)
+
+    def channel_guide_text(self) -> str:
+        """채널 맨 위에 고정할 짧은 안내 (인스타·스레드·블로그 링크). 구매 링크가 없어 광고 표시는 없고, 채널 글의 제휴 링크 안내만."""
+        ch = self.settings.channels
+        base = self.settings.secrets.public_base_url
+        rows = [
+            ("인스타그램", ch.instagram_url),
+            ("스레드", ch.threads_url),
+            ("블로그", ch.blog_url),
+            ("한눈에 보는 최근 딜", f"{base}/" if base and self.settings.web.public_page else ""),
+            ("카카오 오픈채팅", ch.kakao_openchat_url),
+        ]
+        links = [f"· {name} 👉 <a href=\"{html.escape(url)}\">{html.escape(url.split('://', 1)[-1].rstrip('/'))}</a>"
+                 for name, url in rows if url]
+        return "\n".join([
+            f"📌 <b>{html.escape(ch.telegram_name)} 채널 안내</b>",
+            "핫딜은 이 텔레그램 채널에 가장 먼저, 모두 올라와요.",
+            *links,
+            "",
+            "<i>채널 글의 구매 링크는 제휴 링크라 구매하면 판매처에서 수수료를 받아요 (광고). 가격·재고는 올린 때 기준이에요.</i>",
+        ])
+
+    async def channel_guide(self) -> str:
+        """/channelguide (주인이 보낼 때만): 채널에 안내 글을 올리고 고정한다 (봇이 관리자 — 고정 권한이 있어야 함)."""
+        if self.bot is None or self.publisher.channel_id is None or self.publisher.dry_run:
+            return "텔레그램 채널이 연결되어 있지 않거나 연습 모드라 올리지 않았어요."
+        text = self.channel_guide_text()
+        result = await self.publisher.publish_raw(text, preview_disabled=True, silent=True)
+        if not result.ok or result.message_id is None:
+            return f"❌ 채널 안내를 올리지 못했어요: <code>{html.escape(result.error or '')}</code>"
+        try:
+            await self.bot.pin_chat_message(chat_id=self.publisher.channel_id, message_id=result.message_id,
+                                            disable_notification=True)
+        except Exception as e:  # noqa: BLE001 — 고정 권한이 없으면 글은 남기고 켜는 법을 알림
+            log.warning("channel guide pin failed: %s", type(e).__name__)
+            return ("📌 채널 안내를 올렸지만 고정하지 못했어요. 채널 정보 → 관리자 → 핫딜봇 → '메시지 고정' 권한을 켠 뒤 "
+                    "채널에서 그 글을 길게 눌러 고정해 주세요.")
+        self.db.kv_set("channel_guide_message_id", str(result.message_id))
+        self.db.log_event("INFO", "channel_guide", f"posted and pinned ({result.message_id})")
+        return "📌 채널 안내를 올리고 맨 위에 고정했어요."
+
+    async def sns_tick(self) -> list[str]:
+        """1분마다 (scheduler.sns_loop): 스레드 답글 모으기(하루 두 번)·투표·투표 결과·일요일 TOP5·SNS 0개 알림·통계 권한 할 일.
+        하나가 실패해도 나머지는 돈다. 한 일 이름 목록."""
+        now = self.clock()
+        tz = self.settings.app.timezone
+        done: list[str] = []
+        tc = self.settings.threads
+
+        async def run(name: str, job: Callable[[], Any]) -> None:
+            try:
+                if await job():
+                    done.append(name)
+            except Exception as e:  # noqa: BLE001
+                log.warning("sns job %s failed: %s", name, e)
+                self.db.log_event("WARNING", "sns", f"{name}: {type(e).__name__}: {e}")
+
+        for i, win in enumerate(tc.replies.windows):
+            key = f"threads_replies_{i}"
+            if tc.enabled and tc.replies.enabled and slot_due(self.db, key, win, now, tz):
+                mark_slot(self.db, key, now, tz)  # 실패해도 같은 시간대에 몇 번씩 돌지 않게 먼저
+                await run("threads_replies", lambda i=i: self.threads_flow.collect_replies(now, slot=str(i)))
+        await run("threads_poll", lambda: self.threads_flow.maybe_poll(now))
+        if self._hourly("poll_results", now):
+            await run("poll_results", lambda: self.threads_flow.refresh_poll_results(now))
+        await run("weekly_top", lambda: weekly.weekly_top(self, now))
+        if self._hourly("sns_zero", now):
+            await run("sns_zero", lambda: growth_alerts.sns_zero_check(self, now))
+        if slot_due(self.db, "sns_scope", "10:00-10:59", now, tz):
+            mark_slot(self.db, "sns_scope", now, tz)
+            await run("sns_scope", lambda: growth_alerts.scope_todo(self, now))
+        return done
+
+    def _hourly(self, name: str, now: datetime) -> bool:
+        """한 시간에 한 번 (kv 표식)."""
+        key = f"hourly:{name}"
+        last = from_iso(self.db.kv_get(key) or None)
+        if last is not None and now - last < timedelta(hours=1):
+            return False
+        self.db.kv_set(key, to_iso(now))
+        return True
+
+    async def domain_todo(self) -> None:
+        """봇 시작 때: 내 도메인의 DNS A 레코드가 이 서버를 안 가리키면 주인 할 일 (deploy/lightsail/https.sh --domain)."""
+        try:
+            await growth_alerts.domain_check(self, alert=True)
+        except Exception as e:  # noqa: BLE001
+            log.warning("domain check failed: %s", e)
 
     def owner_notice(self, kind: str, text: str) -> None:
         """주인 카톡 '나에게 보내기' 요청을 Blog-Auto 받은편지함에 (카톡 토큰은 Blog-Auto 가 가지고 있어 거기서 보낸다)."""
@@ -3514,6 +3820,8 @@ class DealBot:
         pruned["admin_msgs"] = self.db.prune_admin_msgs(REGISTRY_DAYS)
         pruned["nl_pending"] = self.nl.prune_pending()
         pruned["owner_photos"] = self._prune_owner_photos()
+        pruned["sns"] = self.db.prune_sns(utcnow() - timedelta(days=self.settings.app.prune_events_days))
+        pruned["late_photo"] = self.late_photo.prune()
         log.info("maintenance: pruned %s", pruned)
 
     def __repr__(self) -> str:

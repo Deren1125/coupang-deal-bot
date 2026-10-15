@@ -228,17 +228,23 @@ async def test_export_marks_photo_kind_and_never_exports_the_card(bot, settings:
     d = Deal(Product(source="goldbox", product_id="coupang:5", shop="coupang", name="상품", price=9900,
                      url="https://www.coupang.com/vp/products/5", image_url="https://img.example/tiny.jpg"), DealVerdict(is_deal=True),
              affiliate_url="https://link.coupang.com/a/5")
-    photo = await bot.deal_photo(d)  # 받을 수 없는 사진 → None (글자 카드로 대신하지 않음)
+    photo = await bot.deal_photo(d)  # 받을 수 없는 사진 → None (글자 카드를 상품 사진 칸에 넣지 않음)
     assert photo is None
     bot.export_published(d, photo)
     row = _rows(settings, "published_deals.jsonl")[-1]
-    assert row["photo_kind"] == "none" and row["photo_file"] == "" and row["photo_src"] is None
+    # 약속 10/15: 사진 칸은 비우고, 글자 카드는 text_card_file 로 따로 (photo_kind 'text_card'), 주인 사진을 4시간 기다림
+    assert row["photo_kind"] == "text_card" and row["photo_file"] == "" and row["photo_src"] is None
+    assert Path(row["text_card_file"]).is_file() and Path(row["text_card_file"]).parent.name == "export"
+    from datetime import datetime, timedelta
+
+    assert datetime.fromisoformat(row["photo_wait_until"]) - datetime.fromisoformat(row["posted_at"]) == timedelta(hours=4)
 
     good = _jpeg(900, 900)
     d.product.image_url = "https://img.example/good.jpg"
     bot.export_published(d, clean_image(good))
     row = _rows(settings, "published_deals.jsonl")[-1]
-    assert row["photo_kind"] == "product" and Path(row["photo_file"]).exists() and row["photo_src"] == "https://img.example/good.jpg"
+    assert row["photo_kind"] == "verified" and Path(row["photo_file"]).exists() and row["photo_src"] == "https://img.example/good.jpg"
+    assert row["photo_wait_until"] is None and row["text_card_file"] == ""
     assert min(Image.open(row["photo_file"]).size) >= 600
 
 
@@ -276,7 +282,7 @@ async def test_dry_run_preview_export_has_the_real_photo(settings: Settings) -> 
         await bot.run_collector(bot.collectors[0])
         assert await bot.process_queue_once()
         rows = _rows(settings, "preview_deals.jsonl")
-        assert rows and rows[-1]["photo_kind"] == "product" and Path(rows[-1]["photo_file"]).exists()
+        assert rows and rows[-1]["photo_kind"] == "verified" and Path(rows[-1]["photo_file"]).exists()
         assert seen == ["https://img.example/p.jpg"]
         assert not _rows(settings, "published_deals.jsonl")  # 실제 발행 기록은 안 생김
     finally:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +26,9 @@ W, H = 1080, 1350
 MARGIN = 72
 # 등급 → 배지. top/must 는 쿠팡 시중가·믿을 만한 평소 가격보다 70%/50% 이상 싼 것 (TemplateRenderer.emphasis)
 TIER_BADGES = {"top": "초특가", "must": "반값 핫딜"}
+# 인스타 밖(블로그 내보내기·스레드)에 쓰는 카드의 바닥 안내 — '구매 링크는 프로필 링크에서' 는 인스타에서만 맞는 말
+# (블로그는 글 안에, 스레드는 본문에 구매 링크가 있다)
+NEUTRAL_CTA = "가격·재고는 올린 시점 기준이에요"
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
@@ -66,7 +69,7 @@ class CardInfo:
     ref_pct: int | None = None
     list_price: int | None = None  # 표시 정가 (근거가 약해 비교 가격이 없을 때만 보조로)
     list_pct: int | None = None
-    low_label: str | None = None  # '30일 최저가' 처럼 기록으로 확인된 것만
+    low_label: str | None = None  # '우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)' 처럼 기록으로 확인된 것만 (insta_style.low_text)
     ship: str = ""
     unit: str | None = None
     rating: float | None = None
@@ -74,7 +77,9 @@ class CardInfo:
     shop_name: str = ""
     category: str = ""
     deal_no: int | None = None  # 핫딜 페이지(/d/번호)의 번호 — 프로필 링크에서 찾는 표시
-    disclosure: str = ""  # 카드 안 고지 (짧게). 공정위 지침: 사진 게시물은 사진 안에 표시
+    disclosure: str = ""  # 몰 고지의 짧은 꼴 ('쿠팡 파트너스 활동으로 수수료를 받습니다'). 몰 고지가 없는 딜(원본 링크)은 빈칸
+    ad: str = ""  # 카드 안 고지 줄 '광고 · …' (공정위 지침: 사진 게시물은 사진 안에도). 비면 disclosure 로 만든다
+    cta: str | None = None  # 바닥 구매 안내. None 이면 인스타용('구매 링크: 프로필 링크 → …'), 블로그·스레드 카드는 NEUTRAL_CTA
 
 
 @dataclass(slots=True)
@@ -138,12 +143,13 @@ class DealCard:
     # ------------------------------------------------------------ 그리기
     def render(
         self, deal: Deal, photo: bytes | None = None, *, shop_name: str | None = None, tier: str | None = None,
-        layout: str | None = None, info: CardInfo | None = None,
+        layout: str | None = None, info: CardInfo | None = None, cta: str | None = None,
     ) -> bytes:
         """카드 JPEG 바이트. photo 는 확인된 상품 사진(deal_photo 결과, 없으면 글자 카드).
         tier: 글 첫 줄과 같은 등급(TemplateRenderer.deal_tier — 믿을 수 있는 평소 가격 기준). 모르면 '핫딜'만 단다
         (예전처럼 날것의 평균 대비 비율로 '역대급'을 붙이면 글과 어긋나는 근거 없는 말이 됨).
-        layout: 없으면 이 카드의 기본 양식. A/B/C 는 info(CardInfo) 의 사실로 그린다."""
+        layout: 없으면 이 카드의 기본 양식. A/B/C 는 info(CardInfo) 의 사실로 그린다.
+        cta: 바닥 구매 안내를 바꿔 쓴다 (블로그·스레드 카드는 NEUTRAL_CTA — 없으면 인스타용 '프로필 링크' 안내)."""
         layout = layout or self.layout
         if layout in ("A", "B", "C"):
             from dealbot.media.card_variants import render_variant
@@ -151,6 +157,8 @@ class DealCard:
             if info is None:
                 info = CardInfo(name=deal.product.name, price=deal.product.price if deal.product.has_price else None,
                                 shop_name=shop_name or "")
+            if cta is not None:
+                info = replace(info, cta=cta)
             img = render_variant(self, layout, info, photo)
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=90, optimize=True)
@@ -226,8 +234,10 @@ class DealCard:
         ff = self.font(34)
         draw.line((MARGIN, H - 150, W - MARGIN, H - 150), fill="#E5E5E5", width=3)
         draw.text((MARGIN, H - 120), st.footer, font=ff, fill=st.ink)
-        note_w = self._width(draw, st.footer_note, ff)
-        draw.text((W - MARGIN - note_w, H - 120), st.footer_note, font=ff, fill=st.muted)
+        note = st.footer_note if cta is None else cta
+        if note:
+            note_w = self._width(draw, note, ff)
+            draw.text((W - MARGIN - note_w, H - 120), note, font=ff, fill=st.muted)
 
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=88, optimize=True)
@@ -235,17 +245,20 @@ class DealCard:
 
     def save(
         self, deal: Deal, photo: bytes | None = None, *, key: str | None = None, shop_name: str | None = None,
-        tier: str | None = None, layout: str | None = None, info: CardInfo | None = None,
+        tier: str | None = None, layout: str | None = None, info: CardInfo | None = None, cta: str | None = None,
     ) -> Path:
-        """카드를 만들어 out_dir 에 저장하고 경로를 돌려준다. 파일명은 상품 키(+양식) 해시라 같은 딜은 덮어쓴다."""
+        """카드를 만들어 out_dir 에 저장하고 경로를 돌려준다. 파일명은 상품 키(+양식·바닥 안내) 해시라 같은 딜은 덮어쓴다
+        (인스타 카드와 스레드 카드는 바닥 안내가 달라 파일도 따로)."""
         key = key or deal.product.product_id
         layout = layout or self.layout
         if layout != "current":
             key = f"{key}|{layout}"
+        if cta is not None:
+            key = f"{key}|cta:{cta}"
         name = hashlib.sha1(key.encode()).hexdigest()[:16] + ".jpg"
         self.out_dir.mkdir(parents=True, exist_ok=True)
         path = self.out_dir / name
-        path.write_bytes(self.render(deal, photo, shop_name=shop_name, tier=tier, layout=layout, info=info))
+        path.write_bytes(self.render(deal, photo, shop_name=shop_name, tier=tier, layout=layout, info=info, cta=cta))
         return path
 
     def prune(self, keep_days: int = 7) -> int:

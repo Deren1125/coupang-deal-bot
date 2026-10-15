@@ -53,6 +53,30 @@ def deal_disclosure(shop: Shop | None, extra: dict | None = None) -> str | None:
     return shop.disclosure
 
 
+_PROGRAM_RE = re.compile(r"이 포스팅은\s*(.+?)\s*활동의 일환")
+
+
+def disclosure_program(text: str | None) -> str | None:
+    """고지 문구 속 제휴 프로그램 이름: '이 포스팅은 쿠팡 파트너스 활동의 일환으로…' → '쿠팡 파트너스'. 모르는 꼴이면 None."""
+    m = _PROGRAM_RE.search(text or "")
+    return (m.group(1).strip() or None) if m else None
+
+
+def ad_line(shop: Shop | None, extra: dict | None = None, *, style: str = "telegram") -> str | None:
+    """글 첫 부분에 두는 짧은 광고 표시 (공정위 추천·보증 심사지침 2024-12-01: 글은 제목이나 첫 부분에, '더보기' 아래·댓글은 인정 안 됨).
+    몰마다 늘 같은 말 — 제휴 프로그램 이름은 그 몰 고지 문구에서 (고지가 없는 글 = 수수료 없음 → None, 지어내지 않음).
+    전체 고지 문구는 글 끝(텔레그램)·링크 바로 위(스레드)에 그대로 둔다.
+    telegram: '광고 · 쿠팡 파트너스 수수료' (둘째 줄 — 첫 줄 알림 미리보기는 가격 그대로, 주인 결정 10/15)
+    threads: '[광고·쿠팡 파트너스 수수료 받음]' (첫 줄)"""
+    disclosure = deal_disclosure(shop, extra)
+    if not disclosure:
+        return None
+    program = disclosure_program(disclosure) or (shop.name if shop else "제휴")
+    if style == "threads":
+        return f"[광고·{program} 수수료 받음]"
+    return f"광고 · {program} 수수료"
+
+
 def _d(text: str) -> str:
     return f"이 포스팅은 {text} 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
 

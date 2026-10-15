@@ -22,7 +22,8 @@ if [ -z "$PY" ]; then
   sudo apt-get install -y python3.11 python3.11-venv
   PY=python3.11
 fi
-sudo apt-get install -y "${PY}-venv" git fonts-nanum >/dev/null 2>&1 || sudo apt-get install -y python3-venv git fonts-nanum
+# ffmpeg: 인스타 점심 릴스 영상 만들기 (없으면 릴스만 건너뜀)
+sudo apt-get install -y "${PY}-venv" git fonts-nanum ffmpeg >/dev/null 2>&1 || sudo apt-get install -y python3-venv git fonts-nanum ffmpeg
 
 echo "▶ 2/5 가상환경 ($PY)"
 [ -x .venv/bin/python ] || "$PY" -m venv .venv

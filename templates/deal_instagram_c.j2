@@ -1,7 +1,8 @@
 {#
-  인스타그램 후보 양식 C — 사진 꽉 채움 + 가격 스티커 카드의 본문. 짧게: 첫 줄 사실, 배송·판매처 한 줄, 구매 안내.
-  ig 변수는 publisher/insta_style.caption_context. 해시태그 5개까지. 고지는 카드 안(짧게) + 끝에 몰 고지 문구.
+  인스타그램 후보 양식 C — 사진 꽉 채움 + 가격 스티커 카드의 본문. 짧게: 첫 줄 고지('광고 · …'), 둘째 줄 사실, 배송·판매처 한 줄, 구매 안내.
+  ig 변수는 publisher/insta_style.caption_context. 해시태그 5개까지. 고지는 첫 줄 + 카드 안 + 끝에 몰 고지 문구.
 #}
+{{ ig.first_line }}
 {{ ig.hook }}
 {% set sub = [] %}{% for label, value in ig.rows if label in ("배송", "판매") %}{% set _ = sub.append(value) %}{% endfor %}
 {% if sub %}

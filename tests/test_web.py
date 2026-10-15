@@ -249,11 +249,16 @@ async def test_instagram_callback_and_test_command(settings: Settings, tmp_path:
         assert bot.db.kv_get(ig.KV_TOKEN) == "L" and bot.db.kv_get(ig.KV_USER_ID) == "178" and bot.db.kv_get(ig.KV_USERNAME) == "oneul_hot_deal"
         assert "✅ 연결됨 @oneul_hot_deal" in bot.reporter.status_text()
 
-        # 샘플 딜의 사진 주소는 쿠팡 로고 → 실제 딜과 같은 규칙으로 인스타엔 안 올림 (카드도 안 만듦, 로고 카드 금지)
+        # 샘플 딜의 사진 주소는 쿠팡 로고 → 실제 딜과 같은 규칙: no_photo: skip 이면 인스타엔 안 올림 (카드도 안 만듦, 로고 카드 금지)
+        bot.settings.instagram.no_photo = "skip"
         preview = await bot.instagram_test()
         assert "📸 <b>인스타그램에는 이렇게 올라갑니다 (샘플 딜)</b>" in preview and "/media/" not in preview
         assert "올리지 않습니다: 확인된 상품 사진 없음" in preview and "/instatest 번호" in preview
         assert not list((settings.data_dir / "media").glob("*.jpg"))
+        # 기본(text_card, 주인 결정 10/15): 로고 없는 글자 카드. 본문 첫 줄은 고지
+        bot.settings.instagram.no_photo = "text_card"
+        preview = await bot.instagram_test()
+        assert "사진(카드): https://bot.up.railway.app/media/" in preview and "<pre>광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다\n" in preview
 
         # 확인된 상품 사진이 있는 딜이면 그 사진으로 카드를 만들어 올림
         import io

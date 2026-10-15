@@ -369,7 +369,8 @@ def _rows(settings: Settings, name: str) -> list[dict]:
 
 async def test_blocked_store_deal_without_owner_photo_posts_without_photo(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
     """예전 test_blocked_store_deal_gets_the_api_photo_and_exports_it: 스토어가 막히면 쇼핑 검색 사진을 써서 내보냈다.
-    10/15: 주인 사진이 없으면 사진 없이 (뽐뿌 글·목록 사진도 안 씀) — 블로그 내보내기는 photo_kind 'none'."""
+    10/15: 주인 사진이 없으면 사진 없이 (뽐뿌 글·목록 사진도 안 씀) — 블로그 내보내기는 photo_kind 'text_card'
+    (사진 칸은 비우고 글자 카드는 text_card_file 로 따로, 주인 사진을 4시간 기다릴 수 있음 — 약속 10/15)."""
     http, reqs = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
     bot.naver_shop = NaverShopSearch(http, CLIENT_ID, CLIENT_SECRET)
     seen: list[str] = []
@@ -380,7 +381,8 @@ async def test_blocked_store_deal_without_owner_photo_posts_without_photo(bot, s
     assert seen == []  # 게시판 사진(뽐뿌)은 커도 받아 보지도 않음
     bot.export_published(d, photo)
     row = _rows(settings, "published_deals.jsonl")[-1]
-    assert row["photo_kind"] == "none" and row["photo_file"] == "" and row["photo_src"] is None and row["image_url"] is None
+    assert row["photo_kind"] == "text_card" and row["photo_file"] == "" and row["photo_src"] is None and row["image_url"] is None
+    assert Path(row["text_card_file"]).is_file() and row["photo_wait_until"]
 
 
 async def test_small_photo_still_goes_through_the_size_check(bot) -> None:  # type: ignore[no-untyped-def]
@@ -404,7 +406,7 @@ async def test_no_matching_product_keeps_posting_without_photo(bot, settings: Se
     assert await bot.deal_photo(d) is None and d.product.image_url is None and seen == [] and reqs == []
     bot.export_published(d, None)
     row = _rows(settings, "published_deals.jsonl")[-1]
-    assert row["photo_kind"] == "none" and row["photo_file"] == "" and row["image_url"] is None
+    assert row["photo_kind"] == "text_card" and row["photo_file"] == "" and row["image_url"] is None
 
 
 async def test_bot_without_keys_skips_the_api(bot) -> None:  # type: ignore[no-untyped-def]

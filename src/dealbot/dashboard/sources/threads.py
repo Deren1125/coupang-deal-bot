@@ -4,6 +4,7 @@
 스레드 앱 인사이트의 글 조회수보다 훨씬 작다. 글 조회수는 글마다 따로 물어야 해서(호출이 많음) 읽지 않는다.
 
 토큰은 게시기가 저장·갱신하는 그대로 (/threadstoken). 권한이 없으면 '권한 필요' 로 보이고 멈추지 않는다.
+권한이 없다고 한 번 안 토큰으로는 다시 부르지 않는다 (publisher.scopes — 다시 연결해 토큰이 바뀌면 그때 다시 불러 봄, 주인 결정 10/15).
 """
 
 from __future__ import annotations
@@ -25,9 +26,11 @@ from dealbot.dashboard.model import (
 )
 from dealbot.dashboard.sources._meta import insight_value, is_permission, is_token_problem
 from dealbot.dashboard.sources.base import CardData, Source, register
+from dealbot.publisher.scopes import THREADS_INSIGHTS
 
 INSIGHT_DAYS = 28
-NEED_INSIGHTS = "권한 필요: 팔로워·프로필 조회는 인사이트 권한(threads_manage_insights)이 있는 토큰이어야 읽혀요 — 권한을 더해 /threadstoken 으로 다시 넣어 주세요"
+NEED_INSIGHTS = ("권한 필요: 팔로워·프로필 조회는 인사이트 권한(threads_manage_insights)이 있는 토큰이어야 읽혀요 — "
+                 "메타 앱에 권한을 더한 뒤 /threadsauth (또는 /threadstoken) 로 다시 연결해 주세요")
 
 
 @register
@@ -44,6 +47,9 @@ class ThreadsSource(Source):
         if pub is None or pub.stored_token() is None:
             return FetchResult(UNAVAILABLE, note="스레드가 연결되지 않음 (/threadstoken)")
         now = self.ctx.now()
+        scopes = getattr(pub, "scopes", None)
+        if scopes is not None and not scopes.usable(THREADS_INSIGHTS):
+            return FetchResult(PERMISSION, note=NEED_INSIGHTS)  # 이 토큰엔 권한이 없다고 이미 앎 — 다시 두드리지 않음
         try:
             token = await pub.ensure_fresh()
             if token is None:
@@ -53,8 +59,12 @@ class ThreadsSource(Source):
             if is_token_problem(e):
                 return FetchResult(PERMISSION, note="스레드 토큰이 만료됐거나 잘못됨 — /threadstoken 으로 다시 연결해 주세요")
             if is_permission(e):
+                if scopes is not None:
+                    scopes.mark(THREADS_INSIGHTS, False)
                 return FetchResult(PERMISSION, note=NEED_INSIGHTS)
             return FetchResult(ERROR, note=f"스레드를 못 읽음 ({safe_error(e)})")
+        if scopes is not None:
+            scopes.mark(THREADS_INSIGHTS, True)
         values: dict[str, float] = {}
         if (f := insight_value(followers, "followers_count")) is not None:
             values["followers"] = f

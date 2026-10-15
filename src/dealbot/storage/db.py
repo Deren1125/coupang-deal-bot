@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from dealbot.models import Deal, PriceStats, Product
+from dealbot.storage.sns_store import SnsStoreMixin
 from dealbot.utils.timeutil import from_iso, to_iso, utcnow
 
 log = logging.getLogger(__name__)
@@ -145,6 +146,35 @@ CREATE TABLE IF NOT EXISTS metrics (
     origin         TEXT NOT NULL DEFAULT 'auto',
     PRIMARY KEY (source, metric, day)
 );
+
+-- 인스타그램 대기열 (주인 결정 10/15): 텔레그램에 올린 딜을 바로 올리지 않고 여기 줄 세웠다가 하루 몇 개만 점수 순으로 올린다.
+-- payload 는 텔레그램에 올린 그대로의 딜, photo_file 은 텔레그램 글에 쓴 확인된 상품 사진 사본 (없으면 글자 카드).
+-- status: queued | posting(올리는 중 — 재시작 뒤엔 올라갔을 수 있어 다시 안 올림) | posted | skipped | expired | failed
+CREATE TABLE IF NOT EXISTS ig_queue (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    queue_id       INTEGER,
+    product_id     TEXT NOT NULL,
+    payload        TEXT NOT NULL,
+    score          REAL NOT NULL DEFAULT 0,
+    photo_file     TEXT,
+    status         TEXT NOT NULL DEFAULT 'queued',
+    reason         TEXT,
+    media_id       TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ig_queue_status ON ig_queue(status, score DESC, created_at);
+
+-- 인스타에 올린 글 (single 딜 하나 | top5 캐러셀 | reel 릴스 | unit 단가표) — 하루 개수·글 사이 간격을 여기서 센다
+CREATE TABLE IF NOT EXISTS ig_posts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind           TEXT NOT NULL,
+    media_id       TEXT,
+    items          TEXT,
+    dry_run        INTEGER NOT NULL DEFAULT 0,
+    posted_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ig_posts_time ON ig_posts(posted_at);
 """
 
 # 링크 요청 자리가 다 차서 점수가 더 높은 새 딜에 자리를 내준 글의 last_error 머리말 ('replaced by #12 (score 8→20)').
@@ -207,7 +237,7 @@ class PeriodSummary:
     top_posts: list[dict[str, Any]] | None = None
 
 
-class Database:
+class Database(SnsStoreMixin):
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         if str(self.path) != ":memory:":
@@ -226,6 +256,7 @@ class Database:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._init_sns()  # 스레드 대기열·답글·투표·SNS 발행 기록·초대 링크 가입 (storage/sns_store.py)
         self._migrate()
         if self.kv_get("db_created_at") is None:
             # 기존 DB 를 새 버전으로 처음 열 때는 가장 오래된 기록 시각을 쓴다 (기록이 언제부터 쌓였는지 보여주기 위함)
@@ -994,6 +1025,129 @@ class Database:
                 (product_id, price, source, title, url, to_iso(now), meta),
             )
 
+    # ------------------------------------------------------------ instagram
+    def ig_enqueue(self, deal: Deal, *, queue_id: int | None, score: float, photo_file: str | None = None,
+                   now: datetime | None = None) -> int | None:
+        """인스타 대기열에 넣는다. 넣은(바꾼) 행 번호, 넣지 않았으면 None.
+        같은 상품이 이미 기다리면: 다른 채널 글(더 싸게 다시 올라온 딜 — dedupe_cheaper_pct)이면 그 줄을 새 딜·가격·번호·시각으로
+        바꾸고(사진은 새 사진, 없으면 원래 사진), 같은 글이거나 올리는 중이면 넣지 않는다 — 예전 값·번호로 올라가지 않게."""
+        now = now or utcnow()
+        ts = to_iso(now)
+        with self._tx() as c:
+            dup = c.execute(
+                "SELECT id, queue_id, status FROM ig_queue WHERE product_id = ? AND status IN ('queued', 'posting') "
+                "ORDER BY id DESC LIMIT 1", (deal.product.product_id,)
+            ).fetchone()
+            if dup is not None:
+                if dup["status"] != "queued" or queue_id is None or dup["queue_id"] == queue_id:
+                    return None
+                c.execute(
+                    "UPDATE ig_queue SET queue_id = ?, payload = ?, score = ?, photo_file = COALESCE(?, photo_file), "
+                    "reason = 'replaced by a newer post', created_at = ?, updated_at = ? WHERE id = ?",
+                    (queue_id, json.dumps(deal.to_dict(), ensure_ascii=False), score, photo_file, ts, ts, dup["id"]),
+                )
+                return int(dup["id"])
+            cur = c.execute(
+                "INSERT INTO ig_queue (queue_id, product_id, payload, score, photo_file, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
+                (queue_id, deal.product.product_id, json.dumps(deal.to_dict(), ensure_ascii=False), score, photo_file, ts, ts),
+            )
+            return int(cur.lastrowid or 0)
+
+    @staticmethod
+    def _ig_row(r: sqlite3.Row) -> dict[str, Any]:
+        out = dict(r)
+        out["deal"] = Deal.from_dict(json.loads(r["payload"]))
+        out["created_at"] = from_iso(r["created_at"])
+        return out
+
+    def ig_queued(self, limit: int = 20) -> list[dict[str, Any]]:
+        """올릴 차례를 기다리는 인스타 대기열 (점수 높은 순, 같으면 먼저 온 것)."""
+        rows = self._q("SELECT * FROM ig_queue WHERE status = 'queued' ORDER BY score DESC, created_at ASC, id ASC LIMIT ?", (limit,))
+        return [self._ig_row(r) for r in rows]
+
+    def ig_item(self, item_id: int) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM ig_queue WHERE id = ?", (item_id,))
+        return self._ig_row(row) if row else None
+
+    def ig_items_for(self, queue_id: int) -> list[dict[str, Any]]:
+        return [self._ig_row(r) for r in self._q("SELECT * FROM ig_queue WHERE queue_id = ? ORDER BY id DESC", (queue_id,))]
+
+    def ig_set_photo(self, queue_id: int, photo_file: str, now: datetime | None = None) -> int:
+        """사진 없이 줄 선 딜(같은 대기열 번호)에 나중에 받은 사진 사본을 붙인다. 올리는 중인 행은 건드리지 않음. 바꾼 행 수."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE ig_queue SET photo_file = ?, updated_at = ? WHERE queue_id = ? AND photo_file IS NULL AND status != 'posting'",
+                (photo_file, to_iso(now or utcnow()), queue_id),
+            )
+            return int(cur.rowcount or 0)
+
+    def ig_update(self, item_id: int, *, status: str, reason: str | None = None, media_id: str | None = None,
+                  now: datetime | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE ig_queue SET status = ?, reason = ?, media_id = COALESCE(?, media_id), updated_at = ? WHERE id = ?",
+                (status, reason, media_id, to_iso(now or utcnow()), item_id),
+            )
+
+    def ig_expire(self, older_than: datetime, now: datetime | None = None) -> list[dict[str, Any]]:
+        """오래 기다린 딜과, 올리다 끊긴(posting — 재시작) 딜을 정리한다. 정리한 행을 돌려준다 (사진 사본을 지우게)."""
+        rows = self._q(
+            "SELECT * FROM ig_queue WHERE (status = 'queued' AND created_at < ?) OR status = 'posting'", (to_iso(older_than),)
+        )
+        out = [self._ig_row(r) for r in rows]
+        with self._lock:
+            for r in out:
+                if r["status"] == "posting":
+                    r["status"], r["reason"] = "failed", "maybe posted (stopped while posting)"
+                    # 인스타에 이미 올라갔을 수도 있다 — 하루 개수·글 사이 간격에 셈 (올리기 시작한 시각으로)
+                    self._conn.execute(
+                        "INSERT INTO ig_posts (kind, media_id, items, dry_run, posted_at) VALUES ('single', NULL, ?, 0, ?)",
+                        (json.dumps([{"product_id": r["product_id"], "queue_id": r["queue_id"], "maybe": True}], ensure_ascii=False),
+                         r["updated_at"] or to_iso(now or utcnow())),
+                    )
+                else:
+                    r["status"], r["reason"] = "expired", "waited too long"
+                self._conn.execute(
+                    "UPDATE ig_queue SET status = ?, reason = ?, updated_at = ? WHERE id = ?",
+                    (r["status"], r["reason"], to_iso(now or utcnow()), r["id"]),
+                )
+        return out
+
+    def ig_photo_files(self, *, statuses: tuple[str, ...]) -> list[str]:
+        marks = ",".join("?" for _ in statuses)
+        rows = self._q(f"SELECT photo_file FROM ig_queue WHERE photo_file IS NOT NULL AND status IN ({marks})", statuses)
+        return [r["photo_file"] for r in rows]
+
+    def ig_record_post(self, kind: str, *, media_id: str | None, items: list[Any], dry_run: bool = False,
+                       now: datetime | None = None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO ig_posts (kind, media_id, items, dry_run, posted_at) VALUES (?, ?, ?, ?, ?)",
+                (kind, media_id, json.dumps(items, ensure_ascii=False), 1 if dry_run else 0, to_iso(now or utcnow())),
+            )
+
+    def ig_posts_since(self, since: datetime, *, kind: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM ig_posts WHERE posted_at >= ?"
+        params: tuple[Any, ...] = (to_iso(since),)
+        if kind:
+            sql += " AND kind = ?"
+            params = (to_iso(since), kind)
+        rows = self._q(sql + " ORDER BY posted_at ASC, id ASC", params)
+        return [{**dict(r), "posted_at": from_iso(r["posted_at"]), "items": json.loads(r["items"] or "[]")} for r in rows]
+
+    def ig_last_post_at(self) -> datetime | None:
+        row = self._one("SELECT posted_at FROM ig_posts ORDER BY posted_at DESC, id DESC LIMIT 1")
+        return from_iso(row["posted_at"]) if row else None
+
+    def price_observed_since(self, product_id: str, since: datetime) -> int | None:
+        """그 시각 뒤로 수집기가 본 가장 최근 가격 (없으면 None) — 인스타에 늦게 올리기 전 가격이 올랐는지 본다."""
+        row = self._one(
+            "SELECT price FROM price_history WHERE product_id = ? AND observed_at > ? ORDER BY observed_at DESC, id DESC LIMIT 1",
+            (product_id, to_iso(since)),
+        )
+        return int(row["price"]) if row else None
+
     # ----------------------------------------------------------------- kv
     def kv_get(self, key: str, default: str | None = None) -> str | None:
         row = self._one("SELECT value FROM kv WHERE key = ?", (key,))
@@ -1213,7 +1367,13 @@ class Database:
                 "DELETE FROM collector_runs WHERE started_at < ?",
                 (to_iso(now - timedelta(days=events_days)),),
             ).rowcount
-        return {"price_history": ph, "events": ev, "queue": q, "runs": runs}
+            # 인스타 대기열·글 기록도 같은 기간만 (하루 개수·간격은 하루치만 보면 됨)
+            igq = c.execute(
+                "DELETE FROM ig_queue WHERE status NOT IN ('queued', 'posting') AND updated_at < ?",
+                (to_iso(now - timedelta(days=events_days)),),
+            ).rowcount
+            igp = c.execute("DELETE FROM ig_posts WHERE posted_at < ?", (to_iso(now - timedelta(days=events_days)),)).rowcount
+        return {"price_history": ph, "events": ev, "queue": q, "runs": runs, "ig_queue": igq, "ig_posts": igp}
 
     def db_size_bytes(self) -> int:
         try:

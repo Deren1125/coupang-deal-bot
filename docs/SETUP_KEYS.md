@@ -116,7 +116,7 @@
 ## 7-1. 스레드(Threads) 자동 발행 (선택)
 
 1. 스레드 계정 준비 (인스타그램 계정으로 로그인).
-2. https://developers.facebook.com → 개발자 등록(무료) → **앱 만들기** → 사용 사례에서 **Threads API** 선택 (권한 `threads_basic`, `threads_content_publish`, `threads_manage_replies` — 링크를 답글로 올리므로 답글 권한까지).
+2. https://developers.facebook.com → 개발자 등록(무료) → **앱 만들기** → 사용 사례에서 **Threads API** 선택 (권한 `threads_basic`, `threads_content_publish`, `threads_manage_replies` — 품절 업데이트 답글용. 통계·답글 읽기 권한 `threads_manage_insights`, `threads_read_replies` 는 7-7).
 3. 앱 대시보드 → **앱 설정 → 기본 설정** 페이지를 아래로 내려 **Threads 앱 ID** / **Threads 앱 시크릿** 확인 → Railway Variables 에 `THREADS_APP_ID`, `THREADS_APP_SECRET` (파일이나 챗에 적지 않기).
    - 같은 페이지 맨 위의 **앱 ID / 앱 시크릿**은 메타 앱용이라 번호가 다릅니다. 이걸 넣으면 승인 링크에서 "차단된 URL입니다: 리디렉션 URI가 … 화이트리스트에 없으므로" 오류가 납니다. 사용 사례 → Threads API → 맞춤 설정 → 설정 에서도 같은 Threads 값을 볼 수 있습니다.
 4. **콜백 주소 만들기.** 메타는 리디렉션 주소로 `localhost` 를 받지 않고 https 실제 도메인만 받습니다. Railway 에서 봇에 도메인을 하나 붙이면 봇이 승인 결과를 직접 받아 코드 복사 없이 연결됩니다.
@@ -207,7 +207,55 @@
 |---|---|
 | `kakao_openchat_url` | 텔레그램 채널 글 하단 "💬 카톡 오픈채팅: …", 스레드 답글(텔레그램 주소가 없을 때) |
 | `telegram_url` | 카톡 복붙 문구 하단 "📲 실시간 전체 딜(텔레그램): …", 스레드 답글 |
-| `threads_url` | 아직 템플릿에서 쓰지 않음 (프로필 소개용으로 보관) |
+| `threads_url` | 핫딜 페이지(`/`) 위쪽 링크, `/channelguide` 채널 안내 글 |
+| `instagram_url` | 핫딜 페이지(`/`) 위쪽 링크, `/channelguide` 채널 안내 글 |
+| `blog_url` | `/channelguide` 채널 안내 글의 블로그 링크 |
+
+## 7-7. 통계·답글 권한 (인사이트 · 답글 읽기) — 메타 앱에서 주인이 할 일
+
+봇은 이제 연결할 때 권한을 더 요청합니다 (주인 결정 10/15). **지금 토큰으로도 발행은 그대로 됩니다** — 권한이 없는 기능(대시보드 조회수·팔로워, 스레드 답글 초안)만 조용히 쉬고, 권한이 없다고 알게 되면 하루 한 번 할 일이 옵니다: `인스타·스레드 통계 권한 다시 연결 (/instaauth, /threadsauth)`.
+
+| 어디 | 새 권한 | 쓰는 곳 |
+|---|---|---|
+| 스레드 | `threads_manage_insights` | 대시보드 스레드 카드 (팔로워·프로필 조회) |
+| 스레드 | `threads_read_replies` | 하루 두 번(12:30·20:30대) 내 글의 새 답글 → 관리자 챗 '원글 요약 + 답글 + 답변 초안 2개' (봇이 답글을 달지는 않음) |
+| 인스타 | `instagram_business_manage_insights` | 대시보드 인스타 카드 (조회수·도달) |
+
+순서 (권한을 앱에 먼저 더하지 않고 다시 연결하면 승인 화면에서 'Invalid Scopes' 오류가 납니다):
+1. developers.facebook.com → 앱 → **사용 사례 → Threads API → 맞춤 설정(권한)** → `threads_manage_insights`, `threads_read_replies` 옆 **추가**. (`threads_manage_replies` 는 원래 있음 — 품절 업데이트 답글에 씀)
+2. 같은 앱 → **사용 사례 → Instagram에서 메시지 및 콘텐츠 관리 → 맞춤 설정(권한)** → `instagram_business_manage_insights` **추가**.
+3. 앱이 개발 모드면 그대로 테스터 계정으로 쓰면 됩니다 (검수 불필요). 라이브 모드면 새 권한은 검수 뒤에 열립니다.
+4. 관리자 챗에서 `/threadsauth`, `/instaauth` 로 **다시 연결** (승인 화면에 새 권한이 보이면 허용). 승인 화면이 돌기만 하면 개발자 화면의 토큰 생성기에서 새 권한을 체크해 만든 토큰을 `/threadstoken 토큰`·`/instatoken 토큰` 으로.
+5. 다음 날 아침(10시대) 봇이 권한을 다시 확인해 할 일이 사라지고, 대시보드 숫자·스레드 답글 초안이 나오기 시작합니다.
+
+권한을 앱에 아직 더하지 못했는데 다시 연결해야 하면 (토큰이 끊김 등): `/threadsauth`·`/instaauth` 메시지 끝의 **두 번째 링크**(예전 권한만 — 올리기·품절 답글)로 연결하세요. 발행은 그대로 되고 통계·답글 모으기만 쉽니다.
+
+## 7-8. 스레드 리듬 · 채널 키우기 (주인 결정 10/15)
+
+- **스레드 리듬**: 텔레그램에 올린 딜은 스레드 대기열에 들어가 **07:00~24:00 에만, 글 사이 45분 이상, 딜 글은 하루 10개까지** 점수 높은 것부터 올라갑니다 (`threads.rhythm`). 8시간 넘게 기다린 글은 내리고, 10분 넘게 기다린 딜은 올리기 직전에 품절을 다시 봅니다. 확인된 상품 사진이 없으면 봇이 만든 4:5 글자 카드를 붙입니다. 첫 줄은 `[광고·쿠팡 파트너스 수수료 받음]` 같은 짧은 광고 표시, 전체 고지는 링크 바로 위.
+- **주제 태그**: 분류별 (`threads.topic_tags` — 주방·식품 `집밥`, 생활용품 `살림`, 운동 `헬스`, 패션 `패션`, 그 밖 `핫딜`).
+- **품절 업데이트**: 품절이 확인되면 내 스레드 글 아래에만 `업데이트) HH:MM 기준 품절됐어` 한 번 (`threads.soldout_reply`). 남의 글·남의 답글에는 아무것도 달지 않습니다.
+- **투표**: 15시까지 스레드 딜 글이 없는 날 링크 없는 투표 `다음 주 뭐부터 찾아볼까?` 하나 (태그 `살림`). 결과는 일요일 20시대 텔레그램 `이번 주 TOP5 + 투표 결과` 에 같이 (보여 줄 게 있을 때만, `publish.weekly_top`).
+- **채널 안내 글**: 관리자 챗 `/channelguide` → 텔레그램 채널에 인스타·스레드·블로그 링크가 든 짧은 안내를 올리고 고정 (봇에 '메시지 고정' 권한). `channels.instagram_url`·`threads_url`·`blog_url` 을 채워 두세요.
+- **초대 링크별 가입 경로**: `/invitelinks` → 이름 붙은 초대 링크 5개 (인스타 프로필 `ig_bio`, 스레드 프로필 `threads_bio`, 핫딜 페이지 `deals_page`, 블로그 `demiyum`, 인쇄물 `qr`). 봇이 채널 관리자이고 **'링크로 초대'** 권한이 있어야 합니다 (채널 정보 → 관리자 → 핫딜봇). 프로필 소개에 각 링크를 넣으면 대시보드 텔레그램 카드에 '새 구독 경로 · 7일' 이 나옵니다 (공개 주소 @채널로 들어온 사람은 '출처 모름'). 핫딜 페이지의 텔레그램 버튼은 `deals_page` 링크를 씁니다.
+- **사진 나중에 받기**: 확인된 상품 사진 없이 올라간 딜이면 관리자 챗에 `📷 사진 필요 #번호 …` 가 옵니다. 4시간 안에 그 메시지에 사진을 답장(또는 사진 설명 칸에 `/photo 번호`)하면 블로그·인스타에 그 사진을 씁니다 (채널 글은 그대로). 블로그(Blog-Auto)는 `published_deals.jsonl` 의 `photo_wait_until` 까지 기다렸다가 사진이 없으면 `text_card_file` 글자 카드로 올립니다.
+
+## 7-9. 내 도메인 연결 (핫딜 페이지·카드 주소)
+
+도메인을 사면 sslip.io 주소 대신 내 도메인으로 핫딜 페이지(`/`)·카드 이미지가 나옵니다. 예전 sslip.io 주소도 계속 받으니 메타에 등록해 둔 리디렉션 주소는 그대로 됩니다.
+
+1. **서버 IP 확인**: Lightsail 콘솔 → 인스턴스 → 네트워킹의 공인 IP (고정 IP 를 붙여 두세요 — 껐다 켜도 안 바뀌게).
+2. **DNS A 레코드**: 도메인을 산 곳(가비아·Cloudflare·Route 53 등) → DNS 관리 → 레코드 추가:
+   - 종류 `A`, 호스트(이름) `@` (도메인 그 자체 — 예: `example.com`) 또는 `deals` (→ `deals.example.com`), 값 = 서버 IP, TTL 은 기본(또는 300).
+   - Cloudflare 면 주황 구름(프록시)을 **끄고**(DNS only) — 켜 두면 인증서 발급이 안 됩니다.
+   - 반영까지 몇 분~몇 시간. 확인: 휴대폰·PC 에서 `nslookup example.com` 이 서버 IP 를 보여 주면 됩니다.
+3. **서버에서**: `bash deploy/lightsail/https.sh --domain example.com`
+   - Caddy 가 sslip.io 주소와 내 도메인을 둘 다 받고, `https://example.com/health` 가 열리면 그때 `.env` 의 `PUBLIC_DOMAIN` 을 내 도메인으로 바꿉니다 (예전 주소는 `PUBLIC_DOMAIN_ALIASES` 로 남고, 스레드·인스타 리디렉션 주소는 등록해 둔 sslip.io 주소로 고정).
+   - 안 열리면 `PUBLIC_DOMAIN` 은 그대로 두고 이유(대개 DNS A 레코드가 아직 이 서버를 안 가리킴)를 알려 줍니다. DNS 가 퍼진 뒤 같은 명령을 다시.
+4. 마지막에 나오는 **메타 리디렉션 주소**(`https://example.com/threads/callback`, `https://example.com/instagram/callback`)를 메타 앱에 더해 두면, 나중에 그 주소로 바꿔 연결할 수도 있습니다 (7-1 의 5번, 7-2 의 3번과 같은 자리).
+5. 인스타 프로필 링크를 `https://example.com/` 으로 바꾸세요.
+
+봇은 켜질 때마다 내 도메인의 A 레코드가 이 서버 IP 를 가리키는지 보고, 아니면 할 일 `내 도메인 … 이 서버 IP 를 안 가리켜요` 를 보냅니다 (`/status` 자기 점검에도 ⚠️ 줄).
 
 ## 8. 최종 확인
 

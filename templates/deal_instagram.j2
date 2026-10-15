@@ -1,7 +1,9 @@
 {#
   인스타그램 본문 — 사진(카드)은 따로 올라가고 이 글이 캡션. 링크는 눌리지 않으니 프로필 링크로 유도.
   2,200자 제한, 순수 텍스트. 변수는 deal_post.j2 와 같고 site_url(핫딜 페이지 주소)이 추가로 온다.
+  첫 줄은 고지 (공정위 추천·보증 지침: 첫 부분에 — 몰 고지 원문, 없으면 짧은 고지).
 #}
+광고 · {{ shop.disclosure or "제휴 링크로 수수료를 받아요" }}
 {% if tier == "top" %}
 {{ pname }} 평소 가격의 3분의 1 떴어요
 {% elif tier == "must" %}
@@ -24,12 +26,6 @@
 {% endif %}
 
 구매 링크는 프로필 링크에서 이 상품을 눌러 주세요 (핫딜은 금방 품절돼요)
-{% if channels.telegram_url %}
-실시간 전체 딜: {{ channels.telegram_url }}
-{% endif %}
-{% if shop.disclosure %}
-
-{{ shop.disclosure }}
-{% endif %}
+실시간 전체 딜은 텔레그램에 먼저 올라와요 (프로필 링크)
 
 #핫딜 #특가 #오늘의핫딜 #할인정보{% if product.shop == "coupang" %} #쿠팡핫딜{% endif +%}

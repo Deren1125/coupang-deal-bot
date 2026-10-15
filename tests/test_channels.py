@@ -15,7 +15,9 @@ TG = "https://t.me/oneul_hotdeal"
 
 def test_channels_default_empty() -> None:
     c = ChannelsConfig()
-    assert c.as_dict() == {"telegram_url": "", "kakao_openchat_url": "", "threads_url": "", "telegram_name": "오늘의 핫딜", "kakao_openchat_name": "오늘의 핫딜 오픈채팅"}
+    # instagram_url·blog_url: 핫딜 페이지·채널 안내 글의 링크 (주인 결정 10/15)
+    assert c.as_dict() == {"telegram_url": "", "kakao_openchat_url": "", "threads_url": "", "instagram_url": "", "blog_url": "",
+                           "telegram_name": "오늘의 핫딜", "kakao_openchat_name": "오늘의 핫딜 오픈채팅"}
 
 
 def test_post_footer_only_when_kakao_set(repo_root: Path) -> None:
@@ -24,7 +26,9 @@ def test_post_footer_only_when_kakao_set(repo_root: Path) -> None:
     assert "카톡 오픈채팅" not in plain
     with_kakao = TemplateRenderer(repo_root / "templates", channels={"kakao_openchat_url": KAKAO}).render_deal(sample_deal(), "https://l", shop=shop)
     assert "카톡 오픈채팅" not in with_kakao  # 오픈채팅 안내는 글마다 넣지 않음 (고정 공지로)
-    assert with_kakao.index("https://l") < with_kakao.index("쿠팡 파트너스")  # 제휴 고지는 메시지 끝 (상위 채널 관례)
+    # 전체 제휴 고지는 메시지 끝 그대로 (상위 채널 관례), 짧은 광고 표시는 둘째 줄 (주인 결정 10/15 — 공정위 지침: 첫 부분)
+    assert with_kakao.index("https://l") < with_kakao.index("이 포스팅은 쿠팡 파트너스")
+    assert with_kakao.splitlines()[1] == "광고 · 쿠팡 파트너스 수수료"
 
 
 def test_kakao_copy_has_no_channel_ad_or_tier_filler(repo_root: Path) -> None:
