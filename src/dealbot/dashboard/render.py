@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import icons
+from dealbot.dashboard import icons, webapp
 from dealbot.dashboard import todo as todo_mod
 from dealbot.dashboard.model import (
     CHIP_LABELS,
@@ -57,6 +57,9 @@ font-family:Pretendard,"Pretendard Variable",-apple-system,BlinkMacSystemFont,"A
 .top h1{font-size:20px;line-height:1.3;margin:0;font-weight:700;letter-spacing:-.01em}
 .top .meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;color:var(--sub);font-size:13px}
 .top .counts{display:inline-flex;flex-wrap:wrap;gap:4px}
+.top .logout{display:inline;margin:0}
+.top .logout button{font:inherit;font-size:13px;color:var(--sub);background:none;border:0;padding:6px 2px;min-height:32px;cursor:pointer;
+text-decoration:underline;text-underline-offset:2px}
 .notice{border-radius:10px;padding:10px 14px;margin:0 0 14px;font-size:13px;background:#eef0ff;color:#3f35a8;border:1px solid #dcdffc}
 .notice.bad{background:#fff4e5;color:var(--orange);border-color:#fde7c7}
 .card .notice{margin:10px 0 0;padding:8px 12px;border-radius:8px}
@@ -552,20 +555,25 @@ def render_page(
     counts: dict[str, int] | None = None,
     todo: todo_mod.TodoView | None = None,
     now: datetime | None = None,
+    logout_path: str | None = None,
 ) -> str:
     """notice_src 가 카드 키면 안내는 그 카드 안에(돌아가면 그 카드로 내려가므로), 아니면 맨 위에.
-    todo 가 있으면 요약 줄 위(머리 바로 밑)에 '지금 할 일' 카드 — now 는 '3시간 전'·'14시간 남음' 기준."""
+    todo 가 있으면 요약 줄 위(머리 바로 밑)에 '지금 할 일' 카드 — now 는 '3시간 전'·'14시간 남음' 기준.
+    logout_path 가 있으면 머리 오른쪽에 '로그아웃' (그 주소로 폼 토큰과 함께 POST).
+    <head> 에는 바탕화면 앱용 링크·메타와 <title>Sns-board</title> (webapp.head_tags) — 화면 맨 위 이름은 title 그대로."""
     updated = f"마지막 업데이트 {fmt_time(updated_at.astimezone(ZoneInfo(tz)))}" if updated_at else "아직 읽은 값이 없어요"
     head = (
         "<!doctype html><html lang='ko'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<meta name='robots' content='noindex,nofollow'><meta name='referrer' content='no-referrer'>"
-        f"<title>{e(title)}</title><style>{CSS}</style></head><body><div class='wrap'>"
+        f"{webapp.head_tags()}<style>{CSS}</style></head><body><div class='wrap'>"
     )
     keys = {v.key for v in views}
     in_card = notice is not None and notice_src in keys
+    logout = (f'<form class="logout" method="post" action="{e(logout_path)}"><input type="hidden" name="t" value="{e(token)}">'
+              '<button type="submit">로그아웃</button></form>') if logout_path else ""
     body = [f'<header class="top"><h1>{e(title)}</h1><div class="meta"><span class="updated">{e(updated)}</span>'
-            f'{_counts_html(counts)}</div></header>']
+            f'{_counts_html(counts)}{logout}</div></header>']
     if notice and not in_card:
         text, kind = notice
         body.append(f'<div class="notice{" bad" if kind == "bad" else ""}" role="status">{e(text)}</div>')

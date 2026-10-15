@@ -1,8 +1,10 @@
-"""대시보드 기본 인증(HTTP Basic). 아이디·비밀번호는 서버 .env 의 DASHBOARD_USER / DASHBOARD_PASSWORD.
+"""대시보드 아이디·비밀번호 확인 (기본 인증 HTTP Basic 과 로그인 화면이 같이 씀).
+아이디·비밀번호는 서버 .env 의 DASHBOARD_USER / DASHBOARD_PASSWORD.
 
 비교는 늘 둘 다 하고(아이디가 틀려도 비밀번호까지), 길이가 드러나지 않게 해시끼리 hmac.compare_digest 로 한다.
-틀린 시도는 FailureLimiter 가 센다: 한 곳에서 10분에 10번, 또는 모두 합쳐 10분에 100번 틀리면 그 창이 지날 때까지
-비밀번호를 확인하지 않고 429 (맞는 비밀번호여도 — 맞았는지 알려 주지 않게). 공개 주소라 마구 넣어 보는 걸 막는다.
+틀린 시도는 FailureLimiter 가 센다 (기본 인증·로그인 화면 합쳐서): 한 곳에서 10분에 10번 틀리면 그곳을 10분 막고,
+막힘이 풀린 뒤 또 10번 틀리면 20분·40분… 으로 두 배씩 (최대 하루). 모두 합쳐 10분에 100번 틀려도 그 창이 지날 때까지 막는다.
+막힌 동안은 비밀번호를 확인하지 않고 429 (맞는 비밀번호여도 — 맞았는지 알려 주지 않게). 공개 주소라 마구 넣어 보는 걸 막는다.
 """
 
 from __future__ import annotations
@@ -48,22 +50,27 @@ def client_key(headers: dict[str, str]) -> str:
 
 
 class FailureLimiter:
-    """틀린 비밀번호 시도 제한 (메모리 안 — 재시작하면 처음부터).
+    """틀린 비밀번호 시도 제한 (메모리 안 — 재시작하면 처음부터). 기본 인증과 로그인 화면이 하나를 같이 쓴다.
 
-    - 한 손님이 window 초 안에 per_client 번 틀리면, 그 가운데 가장 오래된 시도가 창 밖으로 나갈 때까지 막음
+    - 한 손님이 window 초 안에 per_client 번 틀리면 그 손님을 막는다. 처음엔 window 초, 풀린 뒤 또 그만큼 틀리면
+      두 배씩 (window·2·window·4·window …, 최대 max_lock 초). 마지막 막힘이 풀리고 reset_after 초 동안 조용하면 처음부터
     - 모든 손님을 합쳐 window 초 안에 global_cap 번 틀리면 모두 막음 (주소를 바꿔 가며 넣어 보는 경우)
-    막혀 있는 동안은 비밀번호를 확인하지 않는다.
+    막혀 있는 동안은 비밀번호를 확인하지 않는다. 맞는 비밀번호로 들어오면 그 손님의 기록은 지운다.
     """
 
     def __init__(self, *, per_client: int = 10, global_cap: int = 100, window: float = 600.0,
-                 clock: Callable[[], float] = time.monotonic, max_clients: int = 4096, log_every: float = 60.0) -> None:
+                 clock: Callable[[], float] = time.monotonic, max_clients: int = 4096, log_every: float = 60.0,
+                 max_lock: float = 86400.0, reset_after: float = 86400.0) -> None:
         self.per_client = max(1, per_client)
         self.global_cap = max(1, global_cap)
         self.window = float(window)
         self.clock = clock
         self.max_clients = max(1, max_clients)
         self.log_every = log_every
+        self.max_lock = max(self.window, float(max_lock))
+        self.reset_after = float(reset_after)
         self._fails: dict[str, deque[float]] = {}
+        self._locks: dict[str, tuple[int, float]] = {}  # 손님 → (몇 번째 막힘, 풀리는 시각)
         self._all: deque[float] = deque()
         self._unlogged = 0
         self._last_log: float | None = None
@@ -78,15 +85,17 @@ class FailureLimiter:
                 q.popleft()
             if not q:
                 del self._fails[key]
+        for key in [k for k, (_, until) in self._locks.items() if until + self.reset_after <= now]:
+            del self._locks[key]  # 풀리고 오래 조용했던 손님은 다음엔 처음(window 초)부터
 
     def blocked(self, client: str) -> int | None:
         """막혀 있으면 풀릴 때까지 남은 초, 아니면 None."""
         now = self.clock()
         self._prune(now)
         waits = []
-        q = self._fails.get(client)
-        if q is not None and len(q) >= self.per_client:
-            waits.append(q[-self.per_client] + self.window - now)
+        lock = self._locks.get(client)
+        if lock is not None and lock[1] > now:
+            waits.append(lock[1] - now)
         if len(self._all) >= self.global_cap:
             waits.append(self._all[-self.global_cap] + self.window - now)
         return max(1, int(max(waits)) + 1) if waits else None
@@ -96,12 +105,20 @@ class FailureLimiter:
         self._prune(now)
         if client not in self._fails and len(self._fails) >= self.max_clients:
             self._fails.pop(next(iter(self._fails)))  # 주소가 너무 많으면 가장 먼저 들어온 것부터 잊음 (전체 한도는 그대로)
-        self._fails.setdefault(client, deque()).append(now)
+        q = self._fails.setdefault(client, deque())
+        q.append(now)
         self._all.append(now)
         self._unlogged += 1
+        if len(q) >= self.per_client:
+            level = self._locks.get(client, (0, 0.0))[0] + 1
+            if client not in self._locks and len(self._locks) >= self.max_clients:
+                self._locks.pop(next(iter(self._locks)))
+            self._locks[client] = (level, now + min(self.window * 2 ** min(level - 1, 30), self.max_lock))
+            q.clear()  # 풀린 뒤에는 새로 per_client 번 틀려야 다시 막힘 (그때는 두 배)
 
     def success(self, client: str) -> None:
         self._fails.pop(client, None)
+        self._locks.pop(client, None)
 
     def log_due(self) -> int:
         """로그에 남길 때가 됐으면(log_every 초에 한 번) 그동안 쌓인 실패 수, 아니면 0."""
@@ -133,11 +150,17 @@ def parse_basic(header: str | None) -> tuple[bytes, bytes] | None:
     return user, password
 
 
+def check_credentials(given_user: bytes, given_password: bytes, user: str | None, password: str | None) -> bool:
+    """넣은 아이디·비밀번호가 설정과 같은지 (상수 시간). 설정이 비어 있으면 늘 거절."""
+    ok_user = hmac.compare_digest(_digest(given_user), _digest((user or "").encode("utf-8")))
+    ok_password = hmac.compare_digest(_digest(given_password), _digest((password or "").encode("utf-8")))
+    # & 로 묶어 둘 다 비교한 뒤에 판단 (and 처럼 앞에서 끊지 않음)
+    return bool(user) and bool(password) and bool(ok_user & ok_password)
+
+
 def check_basic(header: str | None, user: str | None, password: str | None) -> bool:
     """Authorization 헤더가 설정된 아이디·비밀번호와 같은지. 설정이 비어 있으면 늘 거절."""
     given = parse_basic(header)
     given_user, given_password = given if given is not None else (b"", b"")
-    ok_user = hmac.compare_digest(_digest(given_user), _digest((user or "").encode("utf-8")))
-    ok_password = hmac.compare_digest(_digest(given_password), _digest((password or "").encode("utf-8")))
-    # & 로 묶어 둘 다 비교한 뒤에 판단 (and 처럼 앞에서 끊지 않음)
-    return bool(user) and bool(password) and given is not None and bool(ok_user & ok_password)
+    ok = check_credentials(given_user, given_password, user, password)  # 모양이 틀려도 비교는 똑같이 한다
+    return given is not None and ok

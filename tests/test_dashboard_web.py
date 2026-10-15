@@ -1,4 +1,5 @@
-"""채널 대시보드 웹: 기본 인증(401·상수 시간 비교·설정 없으면 404), 화면 값 이스케이프(XSS), 폼 토큰, 돌아가기 주소."""
+"""채널 대시보드 웹: 기본 인증(401·상수 시간 비교·설정 없으면 404), 화면 값 이스케이프(XSS), 폼 토큰, 돌아가기 주소.
+로그인 화면·세션·바탕화면 앱(매니페스트·아이콘)은 test_dashboard_webapp.py."""
 
 from __future__ import annotations
 
@@ -79,10 +80,13 @@ async def test_dashboard_routes_require_auth_over_http(db: Database, tmp_path: P
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{srv.port}") as c:
             for path in ("/dashboard", "/dashboard/data.json", "/dashboard/refresh?src=kakao", "/dashboard/input?src=kakao&members=1"):
                 r = await c.get(path)
-                assert r.status_code == 401 and r.headers["www-authenticate"].startswith('Basic realm="dashboard"'), path
+                if path == "/dashboard/data.json":  # 화면이 아닌 경로는 그대로 401 (기본 인증을 물음)
+                    assert r.status_code == 401 and r.headers["www-authenticate"].startswith('Basic realm="dashboard"'), path
+                else:  # 로그인 없이 브라우저로 연 화면은 로그인 화면으로 (주인 10/15 — 바탕화면 앱)
+                    assert r.status_code == 302 and r.headers["location"] == "/dashboard/login", path
                 assert PASSWORD not in r.text
                 r = await c.get(path, auth=(USER, "wrong"))
-                assert r.status_code == 401, path
+                assert r.status_code == 401 and "www-authenticate" in r.headers, path  # 넣은 값이 틀리면 다시 묻게
             assert db.metric_latest("kakao", "members") is None  # 인증 없이는 아무것도 안 바뀜
             r = await c.get("/dashboard", auth=(USER, PASSWORD))
             assert r.status_code == 200 and "text/html" in r.headers["content-type"]
@@ -137,7 +141,9 @@ async def test_dealbot_wires_dashboard_routes_and_self_check(settings: Settings,
     settings.secrets.public_domain = "52-79-136-64.sslip.io"
     bot = DealBot(settings)
     try:
-        assert (await bot.web.dispatch("GET", "/dashboard"))[0] == 401
+        assert (await bot.web.dispatch("GET", "/dashboard"))[:2] == (302, "/dashboard/login")
+        assert (await bot.web.dispatch("GET", "/dashboard/data.json"))[0] == 401
+        assert (await bot.web.dispatch("GET", "/dashboard/login"))[0] == 200
         res = await bot.web.dispatch("GET", "/dashboard", {"authorization": basic(USER, STRONG)})
         assert res[0] == 200 and "텔레그램 채널" in res[1] and "Deren의 아카이브" in res[1]  # type: ignore[operator]
         lines = await bot.self_check()
@@ -291,7 +297,8 @@ async def test_wrong_passwords_are_throttled_per_client_and_overall(db: Database
     # 다른 곳(주인)은 그대로, 비밀번호 없이 온 첫 요청(브라우저가 묻기 전)은 틀린 시도로 안 셈
     assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.2", good)))[0] == 200
     for _ in range(30):
-        assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.3")))[0] == 401
+        assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.3")))[:2] == (302, "/dashboard/login")
+        assert (await srv.dispatch("GET", "/dashboard/data.json", _from("198.51.100.3")))[0] == 401
     # X-Forwarded-For 는 접속이 이 서버 안(Caddy)에서 왔을 때만 믿는다 — 바깥에서 바로 오면 접속 주소로 셈
     direct = {":peer": "192.0.2.50", "x-forwarded-for": "198.51.100.2", "authorization": bad}
     assert dash_auth.client_key(direct) == "192.0.2.50" and dash_auth.client_key(_from("1.2.3.4, 203.0.113.9")) == "203.0.113.9"
@@ -339,7 +346,10 @@ async def test_every_path_under_dashboard_needs_auth_even_if_added_later(db: Dat
     srv.route("/dashboard", dash._page)  # 같은 경로를 auth 없이 다시 붙여도
     for path in ("/dashboard/export.csv", "/dashboard", "/dashboard/nope", "/dashboard/"):
         res = await srv.dispatch("GET", path, {})
-        assert res[0] == 401 and "secret numbers" not in str(res[1]), path
+        # 화면(/dashboard)만 로그인 화면으로 보내고, 그 밖은 401 — 어느 쪽도 내용은 안 나감
+        assert res[0] == (302 if path in ("/dashboard", "/dashboard/") else 401) and "secret numbers" not in str(res[1]), path
+        if res[0] == 302:
+            assert res[1] == "/dashboard/login"
     assert (await srv.dispatch("GET", "/dashboard/export.csv", GOOD))[:2] == (200, "secret numbers")
     assert (await srv.dispatch("GET", "/dashboard/nope", GOOD))[0] == 404
     assert (await srv.dispatch("GET", "/dashboardx", {}))[0] == 404  # 앞부분만 같은 다른 경로는 상관없음
