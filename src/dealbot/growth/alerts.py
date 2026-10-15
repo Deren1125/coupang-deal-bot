@@ -37,6 +37,9 @@ _REASON_WORDS = (
     (re.compile(r"waited too long", re.I), "너무 오래 기다림"),
     (re.compile(r"not authorized|token|oauth|permission|권한|인증|만료", re.I), "연결·권한 문제"),
     (re.compile(r"규칙 위반"), "글 규칙 검사"),
+    (re.compile(r"price up", re.I), "값 오름"),  # 인스타 대기열: 올리기 직전 다시 본 값이 오름
+    (re.compile(r"stopped while posting", re.I), "올리다 끊김 (재시작)"),
+    (re.compile(r"카드 이미지를 못 만듦"), "카드 못 만듦 (공개 도메인)"),
 )
 
 
@@ -88,6 +91,12 @@ async def sns_zero_check(bot: Any, now: datetime | None = None) -> bool:
             waiting = len(bot.db.threads_waiting(100))
             if waiting:
                 reasons["대기 중 (07~24시·45분 간격)"] += waiting
+        else:
+            # 인스타는 자기 대기열·리듬 (하루 단일 글 daily_singles 개·hours·min_gap_minutes 간격 — publisher/ig_scheduler.py)
+            waiting = len(bot.db.ig_queued(100))
+            if waiting:
+                ig = bot.settings.instagram
+                reasons[f"대기 중 (하루 {ig.daily_singles}개·{ig.hours}·{ig.min_gap_minutes}분 간격)"] += waiting
         if not_ready:
             reasons[not_ready] += 1
         why = ", ".join(f"{k} {v}" for k, v in reasons.most_common(3)) or "이유 기록 없음"

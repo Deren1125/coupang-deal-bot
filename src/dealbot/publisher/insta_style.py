@@ -24,7 +24,7 @@ from dealbot.media.card import CardInfo
 from dealbot.media.card_slides import deal_rows, unit_parts
 from dealbot.models import Deal
 from dealbot.publisher.templates import TemplateRenderer, price_band, shipping_text, short_name
-from dealbot.shops import Shop, deal_disclosure
+from dealbot.shops import Shop, deal_disclosure, disclosure_program
 from dealbot.utils.text import clean_name, unit_price
 
 STYLE_TEMPLATES = {"A": "deal_instagram_a.j2", "B": "deal_instagram_b.j2", "C": "deal_instagram_c.j2"}
@@ -34,7 +34,6 @@ SHOP_TAGS = {"coupang": "#쿠팡핫딜", "naver": "#네이버쇼핑"}
 # 살림 계정 독자가 찾는 말 — 분류·이름에 이 말이 있을 때만 붙인다
 _LIVING = re.compile(r"주방|생활|세제|세탁|욕실|청소|수납|화장지|휴지|물티슈|키친|식기|냄비|프라이팬|텀블러|생수|기저귀")
 _TAG_CHARS = re.compile(r"[^0-9A-Za-z가-힣]")
-_DISCLOSURE = re.compile(r"이 포스팅은\s*(.+?)\s*활동의 일환")
 
 AD = "광고"
 GENERIC_AD = "제휴 링크로 수수료를 받아요"  # 몰 고지가 없을 때·여러 몰을 묶은 표지의 짧은 고지 (주인 문구 10/15)
@@ -54,9 +53,9 @@ def short_disclosure(text: str | None) -> str:
     """몰 고지의 짧은 꼴. '이 포스팅은 쿠팡 파트너스 활동의 일환으로…' → '쿠팡 파트너스 활동으로 수수료를 받습니다'."""
     if not text:
         return ""
-    m = _DISCLOSURE.search(text)
-    if m:
-        return f"{m.group(1)} 활동으로 수수료를 받습니다"
+    program = disclosure_program(text)
+    if program:
+        return f"{program} 활동으로 수수료를 받습니다"
     return text if len(text) <= 48 else text[:47] + "…"
 
 
@@ -67,11 +66,11 @@ def ad_line(disclosures: Iterable[str | None]) -> str:
     for text in disclosures:
         if not text:
             continue
-        m = _DISCLOSURE.search(text)
-        if m is None:
+        program = disclosure_program(text)  # 프로그램 이름은 텔레그램·스레드 광고 줄과 같은 곳에서 (shops)
+        if program is None:
             return f"{AD} · {GENERIC_AD}"
-        if m.group(1) not in programs:
-            programs.append(m.group(1))
+        if program not in programs:
+            programs.append(program)
     if not programs:
         return f"{AD} · {GENERIC_AD}"
     return f"{AD} · {'·'.join(programs)} 활동으로 수수료를 받습니다"

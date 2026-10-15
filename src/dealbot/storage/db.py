@@ -1047,6 +1047,15 @@ class Database(SnsStoreMixin):
     def ig_items_for(self, queue_id: int) -> list[dict[str, Any]]:
         return [self._ig_row(r) for r in self._q("SELECT * FROM ig_queue WHERE queue_id = ? ORDER BY id DESC", (queue_id,))]
 
+    def ig_set_photo(self, queue_id: int, photo_file: str, now: datetime | None = None) -> int:
+        """사진 없이 줄 선 딜(같은 대기열 번호)에 나중에 받은 사진 사본을 붙인다. 올리는 중인 행은 건드리지 않음. 바꾼 행 수."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE ig_queue SET photo_file = ?, updated_at = ? WHERE queue_id = ? AND photo_file IS NULL AND status != 'posting'",
+                (photo_file, to_iso(now or utcnow()), queue_id),
+            )
+            return int(cur.rowcount or 0)
+
     def ig_update(self, item_id: int, *, status: str, reason: str | None = None, media_id: str | None = None,
                   now: datetime | None = None) -> None:
         with self._lock:

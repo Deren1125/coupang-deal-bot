@@ -138,10 +138,29 @@ class InstagramScheduler:
         log.info("instagram queued #%d: %s", item_id, deal.product.name[:40])
         return item_id
 
+    def attach_photo(self, queue_id: int, photo: bytes, now: datetime | None = None) -> int:
+        """발행 뒤 받은 주인 사진 (growth/late_photo): 사진 없이 줄 선 이 딜의 인스타 행에 사본을 붙인다 —
+        단일 글·TOP5·릴스가 글자 카드 대신 이 사진을 쓴다. 붙인 행 수 (없으면 사본도 지움)."""
+        now = now or utcnow()
+        try:
+            self.photo_dir.mkdir(parents=True, exist_ok=True)
+            path = self.photo_dir / (hashlib.sha1(f"late|{queue_id}|{now.isoformat()}".encode()).hexdigest()[:16] + ".jpg")
+            path.write_bytes(photo)
+        except OSError as e:
+            log.warning("instagram queue: late photo copy failed (%s)", e)
+            return 0
+        n = self.db.ig_set_photo(queue_id, str(path), now=now)
+        if not n:
+            path.unlink(missing_ok=True)
+        else:
+            self.db.log_event("INFO", "instagram", f"#{queue_id} late owner photo attached to the instagram queue")
+        return n
+
     def _expire(self, now: datetime) -> None:
         cutoff = now - timedelta(hours=self.cfg.queue_expire_hours)
         for row in self.db.ig_expire(cutoff, now=now):
             self.db.log_event("INFO", "instagram", f"{row['product_id']} not posted: {row['reason']}")
+            self.db.sns_log_add("instagram", row["status"], product_id=row["product_id"], reason=row["reason"], now=now)
             log.info("instagram queue #%d %s: %s", row["id"], row["status"], row["reason"])
         self._prune_files()
         day = (now.astimezone(self.tz) - timedelta(days=KV_KEEP_DAYS)).date().isoformat()
@@ -272,7 +291,7 @@ class InstagramScheduler:
             deal: Deal = item["deal"]
             why = await self.recheck(deal, since=item["created_at"])
             if why:
-                self.db.ig_update(item["id"], status="skipped", reason=why, now=now)
+                self._mark(item, "skipped", reason=why, now=now)
                 self.db.log_event("INFO", "instagram", f"{deal.product.product_id} not posted: {why}")
                 log.info("instagram queue #%d skipped — %s: %s", item["id"], why, deal.product.name[:40])
                 continue
@@ -333,7 +352,7 @@ class InstagramScheduler:
         problems = bot.instagram.check(deal, deal_no=deal_no)
         if problems:
             why = f"{CHECK_FAILED}: {'; '.join(problems)}"
-            self.db.ig_update(item["id"], status="skipped", reason=why[:300], now=now)
+            self._mark(item, "skipped", reason=why[:300], now=now)
             self.db.log_event("WARNING", "instagram", f"{pid} not posted: {why}"[:500])
             return f"single skipped: {pid}"
         self.db.ig_update(item["id"], status="posting", now=now)
@@ -341,7 +360,7 @@ class InstagramScheduler:
         if card_url is None and not bot.instagram.dry_run:
             # 공개 도메인·카드 설정이 없음 (자기 점검이 알림) — 딜마다 실패 알림을 보내지 않고 기록만
             why = "카드 이미지를 못 만듦 (공개 도메인·card 설정)"
-            self.db.ig_update(item["id"], status="skipped", reason=why, now=now)
+            self._mark(item, "skipped", reason=why, now=now)
             self.db.log_event("WARNING", "instagram", f"{pid} not posted: {why}")
             return f"single skipped: {pid}"
         try:
@@ -350,15 +369,21 @@ class InstagramScheduler:
             result = PublishResult(ok=False, error=f"{type(e).__name__}: {e}")
         if result.ok:
             media = "dry-run" if result.dry_run else str(result.message_id or "")
-            self.db.ig_update(item["id"], status="posted", media_id=media or None, now=now)
+            self._mark(item, "posted", media_id=media or None, now=now)
             self.db.ig_record_post("single", media_id=media or None, items=[{"product_id": pid, "queue_id": item["queue_id"]}],
                                    dry_run=result.dry_run, now=now)
             self.db.log_event("INFO", "instagram", f"{pid} {media}")
             log.info("instagram posted: %s", deal.product.name[:40])
             return f"single: {pid}"
-        self.db.ig_update(item["id"], status="failed", reason=(result.error or "")[:300], now=now)
+        self._mark(item, "failed", reason=(result.error or "")[:300], now=now)
         await self._failed(result, now, what=pid)
         return f"single failed: {pid}"
+
+    def _mark(self, item: dict[str, Any], status: str, *, reason: str | None = None, media_id: str | None = None,
+              now: datetime) -> None:
+        """대기열 딜의 결과를 적는다 + SNS 발행 기록(sns_log — 하루 0개 알림이 이유를 셈)."""
+        self.db.ig_update(item["id"], status=status, reason=reason, media_id=media_id, now=now)
+        self.db.sns_log_add("instagram", status, product_id=item["deal"].product.product_id, reason=reason, now=now)
 
     async def _failed(self, result: PublishResult, now: datetime, *, what: str) -> None:
         self.db.log_event("WARNING", "instagram", f"{what}: {result.error}"[:500])
@@ -376,9 +401,11 @@ class InstagramScheduler:
             items = [{"product_id": pk.deal.product.product_id if isinstance(pk, Pick) else pk.product_id,
                       "queue_id": pk.queue_id if isinstance(pk, Pick) else pk.deal_no} for pk in picks]
             self.db.ig_record_post(kind, media_id=media or None, items=items, dry_run=result.dry_run, now=now)
+            self.db.sns_log_add("instagram", "posted", reason=kind, now=now)  # 묶음 글 (TOP5·릴스·단가표)
             return f"posted {media} ({len(picks)} deals)"
         if result.error == REEL_TIMEOUT:
             return "failed: timeout — 인스타가 영상 처리를 끝내지 않아 포기 (다음 날 다시)"
+        self.db.sns_log_add("instagram", "failed", reason=f"{kind}: {result.error}", now=now)
         await self._failed(result, now, what=kind)
         return f"failed: {result.error}"
 

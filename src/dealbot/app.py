@@ -2768,6 +2768,10 @@ class DealBot:
         p.extra["owner_photo"] = {"file": name, "at": to_iso(utcnow()), "w": w, "h": h, "late": True}
         self.db.update_queue_item(item.id, status=item.status, error=item.last_error, deal=item.deal)
         self.db.kv_set(f"{self.OWNER_PHOTO_KV}{p.product_id}", json.dumps(p.extra["owner_photo"], ensure_ascii=False))
+        try:
+            self.ig.attach_photo(item.id, jpeg)  # 인스타 대기열(ig_queue)은 사진 사본을 따로 들고 있음 — 거기에도
+        except Exception as e:  # noqa: BLE001 — 인스타 쪽 문제로 사진 받기가 실패하지 않게
+            log.warning("late owner photo not attached to the instagram queue for #%d: %s", item.id, e)
         return True
 
     def late_photo_waiting(self, queue_id: int) -> bool:

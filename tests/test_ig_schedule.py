@@ -641,3 +641,62 @@ async def test_tick_does_nothing_when_instagram_is_not_connected(bot, clock) -> 
 
 def test_scheduler_module_constants() -> None:
     assert ig_scheduler.RECHECK_TRIES >= 1 and ig_scheduler.SCHEDULED_GAP_MINUTES == 60
+
+
+# ---------------------------------------------------------------- 스레드 쪽(sns-th)과 합친 뒤: 대기열은 따로, 기록·사진은 같이
+async def test_threads_and_instagram_keep_their_own_queues(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """채널 글 하나 → 스레드 대기열(threads_jobs, 07~24시·45분)과 인스타 대기열(ig_queue, 하루 3개·2시간)에 따로 줄 선다."""
+    bot.settings.threads.enabled = True
+    bot.clock = lambda: at(6)  # 스레드 리듬 밖 (07시 전) — 스레드도 기다림
+    qid, deal = published(bot, "coupang:1", "도브 샴푸 680ml 2개", 15900, when=at(6))
+    await to_instagram(bot, clock, qid, deal, photo=_jpeg())
+    assert [j.queue_id for j in bot.db.threads_waiting()] == [qid]
+    assert [(r["product_id"], r["queue_id"]) for r in bot.db.ig_queued()] == [("coupang:1", qid)]
+    assert bot.db.ig_last_post_at() is None  # 인스타는 스레드 리듬과 상관없이 자기 시간표대로
+
+
+async def test_instagram_queue_outcomes_go_to_the_sns_log(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """하루 0개 알림(growth/alerts)이 이유를 셀 수 있게 인스타 대기열의 올림·건너뜀·버림을 sns_log 에 남긴다."""
+    _plan(bot, {})
+    old_q, old = published(bot, "coupang:1", "오래된 딜", 9900, when=at(6))
+    await to_instagram(bot, clock, old_q, old)
+    sold_q, sold = published(bot, "coupang:2", "품절 딜", 9900, when=at(17), score=90)
+    await to_instagram(bot, clock, sold_q, sold)
+    ok_q, ok = published(bot, "coupang:3", "올라갈 딜", 9900, when=at(17), score=50)
+    await to_instagram(bot, clock, ok_q, ok)
+    bot.db.kv_set("soldout_marked:coupang:2", at(17, 30).isoformat())
+    assert await tick(bot, clock, at(18, 30)) == "single: coupang:3"
+    log = {(r["product_id"], r["outcome"]): r["reason"] for r in bot.db.sns_log_since("instagram", at(0))}
+    assert log[("coupang:1", "expired")] == "waited too long"
+    assert log[("coupang:2", "skipped")] == "sold out (channel record)"
+    assert ("coupang:3", "posted") in log
+
+
+async def test_sns_zero_alert_counts_the_instagram_queue_as_waiting(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    from dealbot.growth import alerts
+
+    sent: list[str] = []
+
+    async def alert(kind: str, text: str, kakao: str, **kw: Any) -> None:
+        sent.append(text)
+
+    bot.notifier.alert = alert
+    bot.settings.threads.enabled = False
+    bot.db.kv_set(alerts.SNS_LOG_SINCE, (at(9) - timedelta(days=2)).isoformat())
+    qid, deal = published(bot, "coupang:1", "기다리는 딜", 9900, when=at(8))
+    bot.db.record_post(deal, channel_id="-100", message_id=qid + 100, dry_run=False, now=at(8))  # 실제로 채널에 올라간 글
+    await to_instagram(bot, clock, qid, deal)
+    assert await alerts.sns_zero_check(bot, at(9))
+    assert "인스타 0개 (대기 중 (하루 3개·07:00-23:00·120분 간격) 1)" in sent[0]
+
+
+async def test_late_owner_photo_reaches_the_waiting_instagram_item(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """사진 없이 줄 선 딜에 나중에 주인 사진이 오면 (growth/late_photo) 인스타 대기열 사본에도 붙어 글자 카드 대신 그 사진."""
+    qid, deal = published(bot, "coupang:1", "사진 없는 딜", 9900, when=at(9))
+    await to_instagram(bot, clock, qid, deal)
+    assert bot.db.ig_queued()[0]["photo_file"] is None
+    photo = _jpeg((200, 80, 60))
+    assert bot.save_late_photo(bot.db.get_queue_item(qid), photo)
+    row = bot.db.ig_queued()[0]
+    assert Path(row["photo_file"]).read_bytes() == photo
+    assert bot.ig.attach_photo(qid, _jpeg()) == 0  # 이미 사진이 있으면 덮지 않음
