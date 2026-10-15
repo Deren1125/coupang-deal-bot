@@ -511,6 +511,7 @@ monitoring:
 # 카드 추가(새 SNS): src/dealbot/dashboard/sources/ 에 모듈 하나 + 아래 cards 에 한 줄 (docs/DASHBOARD.md)
 # 카드 순서 = 아래 적은 순서. goals 는 목표 줄의 목표값 (바꿔도 됨), 빼면 그 줄이 없어짐
 # 네이버 블로그 이웃 수·방문자는 robots.txt 가 막은 통계 페이지를 읽지 않고, 카드의 입력 칸으로 직접 넣는다
+#   (카드의 '네이버 통계 열기 ↗' 는 주인이 로그인한 자기 브라우저에서 여는 링크 — 서버는 그 주소를 읽지 않음)
 # ----------------------------------------------------------------------------
 dashboard:
   enabled: true
@@ -544,6 +545,7 @@ dashboard:
         blog_id: derenlog
         open_date: null                     # 블로그 개설일 (예: 2026-09-01) — 블로그 관리에서 확인해 적으면 '개설 기간' 이 채워짐
                                             # 게시글 수는 카드에서 한 번 넣어 두면 손으로 쓴 예전 글까지 셈 (뒤로는 봇 발행만큼 더함)
+        # stats_url: "https://admin.blog.naver.com/{blog_id}/stat/today"   # '네이버 통계 열기' 주소 틀 (이게 기본값, https 만). 네이버가 주소를 바꾸면 세 카드 모두에
     - key: blog_issue
       type: naver_blog
       title: Deren's Pick

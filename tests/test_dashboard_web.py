@@ -88,6 +88,7 @@ async def test_dashboard_routes_require_auth_over_http(db: Database, tmp_path: P
             assert r.status_code == 200 and "text/html" in r.headers["content-type"]
             assert "카카오 오픈채팅" in r.text and "채널 대시보드" in r.text
             assert "default-src 'none'" in r.headers["content-security-policy"] and r.headers["x-frame-options"] == "DENY"
+            assert r.headers["referrer-policy"] == "no-referrer"  # 바깥 링크(네이버 통계 열기)로 대시보드 주소가 안 넘어감
             assert r.headers["cache-control"] == "no-store" and "noindex" in r.headers["x-robots-tag"]
             assert "<script" not in r.text.lower()
             r = await c.get("/dashboard/data.json", auth=(USER, PASSWORD))
@@ -168,7 +169,9 @@ async def test_every_value_is_escaped_and_no_tokens_leak(db: Database, tmp_path:
         "finance": {"posts_published_today": "<img src=x onerror=alert(2)>", "posts_published_total": 3}}}), encoding="utf-8")
     dash = make_dash(db, tmp_path, [
         {"key": "telegram", "type": "telegram", "title": evil},
-        {"key": "blog", "type": "naver_blog", "title": "A&B \"blog\"", "options": {"blog": "finance", "open_date": "<b>"}},
+        {"key": "blog", "type": "naver_blog", "title": "A&B \"blog\"", "options": {
+            "blog": "finance", "open_date": "<b>", "blog_id": "derenlog",
+            "stats_url": "https://admin.blog.naver.com/{blog_id}/stat/today?a=1&b=2"}},
         {"key": "kakao", "type": "kakao_openchat", "title": "<img src=x onerror=alert(3)>"},
     ], telegram_bot=lambda: BadBot('<img src=x onerror=alert(4)> "quoted"'), channel_id="@c")
     assert await dash.refresh("telegram") == "failed"
@@ -179,6 +182,9 @@ async def test_every_value_is_escaped_and_no_tokens_leak(db: Database, tmp_path:
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
     assert "&lt;img src=x onerror=alert(4)&gt; &quot;quoted&quot;" in body  # 오류 글은 보이되 이스케이프
     assert "A&amp;B &quot;blog&quot;" in body
+    # 네이버 통계 열기 링크: 주소·이름표도 이스케이프, 새 탭 + 대시보드 주소를 넘기지 않음
+    assert ('<a class="ext primary" href="https://admin.blog.naver.com/derenlog/stat/today?a=1&amp;b=2" target="_blank" '
+            'rel="noopener noreferrer" aria-label="A&amp;B &quot;blog&quot; 네이버 통계 열기 (새 탭)">') in body
     assert body.lower().count("<script") == 0
     _, data, jtype, _ = await dash._data({})
     assert jtype.startswith("application/json") and "IG-SECRET-TOKEN-XYZ" not in data and PASSWORD not in data

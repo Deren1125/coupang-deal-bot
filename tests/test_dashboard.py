@@ -557,6 +557,137 @@ def test_blog_card_when_export_missing_stale_or_broken(db: Database, tmp_path: P
     assert any("이 블로그가 없음" in h for h in card_of(dash, "blog").hints)
 
 
+BLOG_IDS = {"blog_finance": "derenlog", "blog_issue": "derenpick", "blog_hotdeal": "demiyum"}
+
+
+def _blog_cards(**extra: Any) -> list[DashboardCardConfig]:
+    return cards(*({"key": k, "type": "naver_blog", "title": f"블로그 {k}", "options": {"blog_id": b, **extra}}
+                   for k, b in BLOG_IDS.items()))
+
+
+def _card_html(page_text: str, key: str) -> str:
+    return page_text.split(f'id="card-{key}"', 1)[1].split("</article>", 1)[0]
+
+
+def test_blog_cards_link_to_the_owners_own_naver_stats_and_keep_day_over_day_delta(db: Database, tmp_path: Path) -> None:
+    """주인 10/15: 이웃·방문자는 봇이 못 읽으니(robots.txt) 카드에서 한 번에 '네이버 통계 열기'.
+    증감(전날 대비)은 그대로 — 어제·오늘 값을 다 넣은 날은 '+N 오늘', 맨 위 '오늘 늘어난 팔로워' 에도 더함."""
+    dash = make_dash(db, tmp_path, card_list=_blog_cards())
+    db.metric_put("blog_finance", "neighbors", YESTERDAY, 125, origin="manual")
+    db.metric_put("blog_finance", "neighbors", TODAY, 128, origin="manual")
+    db.metric_put("blog_issue", "neighbors", "2026-10-11", 58, origin="manual")
+    db.metric_put("blog_issue", "neighbors", TODAY, 61, origin="manual")
+    page_text = dash.page_html()
+    for key, blog_id in BLOG_IDS.items():
+        card = _card_html(page_text, key)
+        assert (f'<a class="ext primary" href="https://admin.blog.naver.com/{blog_id}/stat/today" target="_blank" '
+                f'rel="noopener noreferrer" aria-label="블로그 {key} 네이버 통계 열기 (새 탭)">네이버 통계 열기\u00a0'
+                '<span aria-hidden="true">↗</span></a>') in card
+        assert (f'<a class="ext" href="https://m.blog.naver.com/{blog_id}" target="_blank" rel="noopener noreferrer" '
+                f'aria-label="블로그 {key} 내 블로그 (새 탭)">내 블로그') in card
+        # 링크·안내는 숫자 칸 바로 밑 (그래프보다 위)
+        assert card.index('<div class="stats">') < card.index('<div class="links">') < card.index('class="stats-note"') \
+            < card.index('<svg class="spark"')
+        assert ('<p class="stats-note">이웃·방문자는 네이버가 봇 접근을 막아 자동으로 못 읽어요 — 통계 열기로 바로 확인</p>'
+                in card)
+        for other in set(BLOG_IDS.values()) - {blog_id}:
+            assert other not in card  # 카드마다 자기 블로그만
+    # 증감은 그대로: 바로 전날과 비교면 '오늘', 며칠 건너뛰었으면 그날 대비 (오늘 늘어난 합계에는 전날 대비만)
+    fin, iss, hot = (card_of(dash, k) for k in BLOG_IDS)
+    assert (fin.stats[0].value, fin.stats[0].delta, fin.stats[0].delta_label) == (128, 3, "오늘")
+    assert (iss.stats[0].delta, iss.stats[0].delta_label) == (3, "10. 11. 대비")
+    assert hot.stats[0].delta is None
+    assert '<span class="delta up">+3<small>오늘</small></span>' in _card_html(page_text, "blog_finance")
+    assert fin.summary["audience_delta"] == 3.0 and "audience_delta" not in iss.summary
+    assert dash.summary(dash.views())[0] == ("오늘 늘어난 팔로워", "+3", "구독자·팔로워·이웃, 어제와 비교한 카드 1개")
+    # JSON 에도 링크 (주소는 값 그대로)
+    data = json.loads(dash.json_text())
+    blog = next(c for c in data["cards"] if c["key"] == "blog_hotdeal")
+    assert blog["links"] == [{"label": "네이버 통계 열기", "url": "https://admin.blog.naver.com/demiyum/stat/today"},
+                             {"label": "내 블로그", "url": "https://m.blog.naver.com/demiyum"}]
+    assert blog["stats_note"].startswith("이웃·방문자는 네이버가 봇 접근을 막아")
+    # 실제 config.yaml 의 세 블로그 카드도 그 블로그 아이디로
+    real = make_dash(db, tmp_path)
+    real_page = real.page_html()
+    for key, blog_id in BLOG_IDS.items():
+        assert f'href="https://admin.blog.naver.com/{blog_id}/stat/today"' in _card_html(real_page, key)
+
+
+def test_blog_stats_link_is_configurable_but_only_safe_https(db: Database, tmp_path: Path) -> None:
+    from dealbot.dashboard.sources.naver_blog import STATS_URL, owner_url
+
+    assert STATS_URL == "https://admin.blog.naver.com/{blog_id}/stat/today"
+    assert owner_url(STATS_URL, "derenlog") == "https://admin.blog.naver.com/derenlog/stat/today"
+    assert owner_url("https://blog.stat.example/{blog_id}?a=1&b=2", "de-ren_1") == "https://blog.stat.example/de-ren_1?a=1&b=2"
+    for bad_id in ("", "deren log", "../admin", "a/b", "a?b", 'a"b', "<b>", "데렌", "a\nb", "a%2fb", "a.b"):
+        assert owner_url(STATS_URL, bad_id) is None, bad_id
+    for bad_tpl in ("http://admin.blog.naver.com/{blog_id}/stat/today", "javascript:alert(1)//{blog_id}", "//evil.example/{blog_id}",
+                    "https:///{blog_id}", "https://user@evil.example/{blog_id}", 'https://x.example/{blog_id}" onclick="x',
+                    "https://x.example/{blog_id}/{blog_id.__class__}", "https://x.example/ {blog_id}", "data:text/html,{blog_id}",
+                    None, 42):
+        assert owner_url(bad_tpl, "derenlog") is None, bad_tpl
+
+    # 설정에서 바꾼 주소 틀은 이스케이프돼서 들어감
+    dash = make_dash(db, tmp_path, card_list=cards(
+        {"key": "b1", "type": "naver_blog", "options": {"blog_id": "derenlog", "stats_url": "https://example.com/s/{blog_id}?x=1&y=2"}},
+        {"key": "b2", "type": "naver_blog", "options": {"blog_id": "deren log"}},
+        {"key": "b3", "type": "naver_blog", "options": {"blog_id": "demiyum", "stats_url": "javascript:alert(1)//{blog_id}"}},
+        {"key": "b4", "type": "naver_blog", "options": {"blog": "finance"}},
+    ))
+    page_text = dash.page_html()
+    b1, b2, b3, b4 = (_card_html(page_text, k) for k in ("b1", "b2", "b3", "b4"))
+    assert 'href="https://example.com/s/derenlog?x=1&amp;y=2" target="_blank" rel="noopener noreferrer"' in b1
+    # 이상한 blog_id → 링크 없음 (안내 한 줄)
+    assert '<div class="links">' not in b2 and "<a class=\"ext" not in b2 and "options.blog_id 는 영문·숫자·_- 만" in b2
+    assert "통계 열기로 바로 확인" not in b2 and "자동으로 못 읽어요" in b2
+    # https 가 아닌 통계 주소 → 통계 링크만 빠지고 내 블로그는 남음
+    assert "javascript:" not in b3 and "네이버 통계 열기" not in b3 and 'href="https://m.blog.naver.com/demiyum"' in b3
+    assert "options.stats_url 은 https 주소여야 해요" in b3
+    # blog_id 가 없으면 링크도 안내도 없음 (Blog-Auto 이름만 쓰는 카드)
+    assert "<a class=\"ext" not in b4 and "options.blog_id" not in b4 and "options.stats_url" not in b4
+    # 렌더러도 https 가 아닌 주소는 그리지 않는다 (소스를 거치지 않은 값이어도)
+    from dealbot.dashboard.render import _links
+
+    assert _links([model.CardLink("x", "javascript:alert(1)", primary=True), model.CardLink("y", "http://a.example")], "t") == ""
+
+
+async def test_blog_cards_never_make_the_server_request_naver(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """robots.txt 가 막은 네이버 블로그 통계·방문자·이웃 페이지는 서버가 한 번도 요청하지 않는다.
+    링크는 주인 브라우저가 여는 탐색일 뿐 — 이 모듈에는 HTTP 클라이언트가 없고, 카드를 그리고·다시 읽기·정해진 시각 읽기를 해도 요청이 없다."""
+    import ast
+
+    from dealbot.dashboard.sources import naver_blog
+
+    tree = ast.parse(Path(naver_blog.__file__).read_text(encoding="utf-8"))
+    imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    imported |= {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    for net in ("httpx", "requests", "aiohttp", "urllib.request", "http.client", "socket", "playwright", "selenium"):
+        assert not any(m == net or m.startswith(net + ".") for m in imported), net
+    assert naver_blog.NaverBlogSource.fetch is Source.fetch and naver_blog.NaverBlogSource.kind == "export"
+
+    calls: list[str] = []
+
+    def no_sync(self: Any, request: httpx.Request, **kw: Any) -> Any:
+        calls.append(str(request.url))
+        raise AssertionError(f"HTTP 요청 {request.url}")
+
+    async def no_async(self: Any, request: httpx.Request, **kw: Any) -> Any:
+        calls.append(str(request.url))
+        raise AssertionError(f"HTTP 요청 {request.url}")
+
+    monkeypatch.setattr(httpx.Client, "send", no_sync)
+    monkeypatch.setattr(httpx.AsyncClient, "send", no_async)
+    _write_export(tmp_path, "2026-10-14T18:00:00+09:00", {"finance": {"posts_published_total": 3}})
+    dash = make_dash(db, tmp_path, card_list=_blog_cards(blog="finance"))
+    page_text = dash.page_html()
+    assert page_text.count('href="https://admin.blog.naver.com/') == 3
+    dash.json_text()
+    assert await dash.refresh("blog_finance") == "reread"
+    # 정해진 시각에도 블로그 카드는 로컬 Blog-Auto 기록 파일만 다시 읽음 (바깥 읽기 없음)
+    assert sorted(await dash.tick()) == ["blog_finance:live", "blog_hotdeal:live", "blog_issue:live"]
+    assert calls == []
+
+
 def test_blogauto_export_parsing_is_tolerant() -> None:
     ex = parse_export({"generated_at": "2026-10-14T09:00:00Z", "blogs": [
         {"name": "finance", "blog_id": "derenlog", "published_today": "2", "total_posts": 30, "comments_today": True,

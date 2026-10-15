@@ -71,6 +71,15 @@ class Stat:
 
 
 @dataclass(slots=True)
+class CardLink:
+    """카드 안 바깥 링크 (주인이 자기 브라우저에서 눌러 여는 것 — 서버는 이 주소를 읽지 않는다). https 주소만."""
+
+    label: str
+    url: str
+    primary: bool = False  # True 면 버튼 모양, 아니면 옆의 작은 글 링크
+
+
+@dataclass(slots=True)
 class GoalRow:
     """목표 줄: '구독자 수  7 / 1,000 명' + 얇은 막대."""
 
@@ -121,6 +130,8 @@ class CardView:
     manual_days: dict[str, str | None] = field(default_factory=dict)  # 지표 → 그 값의 날짜
     fetch_status: str | None = None
     summary: dict[str, float] = field(default_factory=dict)  # 맨 위 요약 줄에 더할 값
+    links: list[CardLink] = field(default_factory=list)  # 숫자 칸 바로 밑 링크 (네이버 통계 열기 등)
+    stats_note: str = ""  # 숫자 칸 밑 회색 작은 안내 (자동으로 못 읽는 까닭 등)
 
     @property
     def status(self) -> str:

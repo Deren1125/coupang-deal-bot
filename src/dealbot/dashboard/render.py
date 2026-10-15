@@ -21,6 +21,7 @@ from dealbot.dashboard.model import (
     MET,
     UNKNOWN,
     UNMET,
+    CardLink,
     CardView,
     GoalRow,
     Stat,
@@ -90,6 +91,13 @@ padding:4px 10px;min-height:28px;text-decoration:none;background:#fff;white-spac
 .delta small{font-weight:500;color:var(--muted);margin-left:2px;font-size:11px}
 .delta.up{color:var(--green)}.delta.down{color:#d93025}.delta.flat{color:var(--muted)}
 .spark{display:block;width:100%;max-width:240px;height:46px;margin:14px auto 4px}
+.links{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin:10px 0 0}
+.ext{color:var(--sub);font-size:12px;text-decoration:none;white-space:nowrap;padding:4px 0}
+.ext:hover{text-decoration:underline}
+.ext.primary{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:38px;padding:7px 14px;
+border-radius:8px;background:#eef0ff;border:1px solid #dcdffc;color:#3f35a8;font-size:13px;font-weight:600}
+.ext.primary:hover{background:#e4e7ff;text-decoration:none}
+.stats-note{color:var(--muted);font-size:12px;line-height:1.5;margin:8px 0 0}
 h3{font-size:13px;color:#4e5968;margin:14px 0 8px;font-weight:600}
 .row{margin:0 0 10px}
 .row-top{display:flex;justify-content:space-between;gap:8px;font-size:13px}
@@ -239,6 +247,19 @@ def _row(r: GoalRow) -> str:
     )
 
 
+def _links(links: list[CardLink], title: str) -> str:
+    """바깥 링크 줄 (새 탭). 주인 브라우저가 여는 탐색일 뿐 페이지가 읽어 오는 것이 아니라 CSP(default-src 'none')와 상관없고,
+    rel=noreferrer 로 대시보드 주소를 넘기지 않는다. https 가 아닌 주소는 그리지 않는다 (소스에서 한 번 더 거른 값)."""
+    out = []
+    for link in links:
+        if not link.url.startswith("https://"):
+            continue
+        out.append(f'<a class="ext{" primary" if link.primary else ""}" href="{e(link.url)}" target="_blank" '
+                   f'rel="noopener noreferrer" aria-label="{e(f"{title} {link.label} (새 탭)")}">'
+                   f'{e(link.label)}{NBSP}<span aria-hidden="true">↗</span></a>')
+    return f'<div class="links">{"".join(out)}</div>' if out else ""
+
+
 def _activity(line: str) -> str:
     """활동 줄 ('오늘 발행 1 · 임시저장 2 · 댓글 3'). 칸이 좁아 줄이 바뀔 때 '댓글 / 3' 처럼 이름과 숫자가 갈라지거나
     '·' 가 다음 줄 맨 앞에 오지 않게, 항목마다 한 덩어리(넘치게 긴 항목만 안에서 줄바꿈)로 두고 '·' 는 앞 항목 덩어리 안에 넣는다
@@ -304,6 +325,8 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
     parts += [
         f'<p class="read">{e(read)}</p>',
         '<div class="stats">' + "".join(_stat(s) for s in v.stats[:2]) + "</div>",
+        _links(v.links, v.title),
+        f'<p class="stats-note">{e(v.stats_note)}</p>' if v.stats_note else "",
         sparkline(v.spark, days=spark_days, today=today, label=v.spark_label),
     ]
     if v.rows:
@@ -407,6 +430,8 @@ def view_dict(v: CardView, tz: str) -> dict[str, Any]:
                       "lower_is_better": r.lower_is_better} for r in v.rows],
         },
         "activity": v.activity,
+        "links": [{"label": link.label, "url": link.url} for link in v.links if link.url.startswith("https://")],
+        "stats_note": v.stats_note or None,
         "note": v.note or None,
         "hints": v.hints,
         "manual": [{"metric": f.metric, "label": f.label, "unit": f.unit, "day_offset": f.day_offset,
