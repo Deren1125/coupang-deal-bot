@@ -45,7 +45,7 @@ MAX_ALSO = 3
 ASK_GRACE = 5  # AI 호출 상한 = timeout_seconds + 이만큼 (API 는 시간 초과 뒤 한 번 더 시도해서 더 걸릴 수 있음)
 REGISTRY_DAYS = 30  # 보낸 메시지 기록을 이만큼 남긴다 (매일 정리). 이보다 오래된 메시지는 기록이 없어도 블로그 것이라 단정하지 않음
 # 한 딜에 대해 보낸 메시지 (보낼 때 정한 번호를 믿음). 그 밖의 것(📌 고정 공지처럼 고쳐 쓰는 메시지)은 지금 글의 #번호로 본다
-_ITEM_KINDS = frozenset({"link", "review_auth", "review_info", "link_done", "soldout", "unsure"})
+_ITEM_KINDS = frozenset({"link", "review_auth", "review_info", "link_done", "soldout", "unsure", "photo_need"})
 
 # ---------------------------------------------------------------- 주인에게 보이는 말
 ECHO = "이렇게 이해했어요: {plain} ({canonical})"
@@ -143,7 +143,7 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _BLOG_HINT = re.compile(r"\[오늘의 핫딜\]|발행 대기|임시저장|네이버|블로그")
 # 딜봇 자신의 요청 메시지·📌 고정 공지 첫머리 (기록 시작 전 메시지라도 이것이면 딜 메시지 — '네이버' 몰 이름이 들어 있어도).
 # '📌' 만으로는 안 됨: Blog-Auto 의 /notices 목록도 '📌 고정된 공지' 로 시작한다
-_DEAL_HEAD = re.compile(r"^(?:📌\s*)?(?:🔗 내 링크가 필요합니다|🔗 내가 링크를 만들어 줘야 하는 글|🔎 정품 확인 필요|📝 정보 글 확인|✅ 상품 링크 완료|⛔ 품절되어 취소|🗂)")
+_DEAL_HEAD = re.compile(r"^(?:📌\s*)?(?:🔗 내 링크가 필요합니다|🔗 내가 링크를 만들어 줘야 하는 글|🔎 정품 확인 필요|📝 정보 글 확인|✅ 상품 링크 완료|⛔ 품절되어 취소|🗂|📷 사진 필요)")
 _BLOG_WORDS = re.compile(r"블로그|demiyum|모음글", re.I)
 _DEAL_WORDS = re.compile(r"딜봇|채널|게시판")  # 이 말이 있어야 '멈춰'를 딜봇 일로 본다
 _CONNECT_WORDS = re.compile(r"쇼핑|커넥트|링크")
@@ -164,7 +164,7 @@ def msg_kind(text: str) -> str:
     if t.startswith("📌"):
         return "pending"
     for mark, kind in (("🔗", "link"), ("🔎", "review_auth"), ("📝", "review_info"), ("⛔", "soldout"), ("🗂", "queue"),
-                       ("❓", "unsure")):  # ❓ 채널에 올라갔는지 모릅니다 #번호
+                       ("❓", "unsure"), ("📷 사진 필요", "photo_need")):  # ❓ 채널에 올라갔는지 모릅니다 #번호 · 📷 발행 뒤 사진
         if t.startswith(mark):
             return kind
     if t.startswith("✅ 상품 링크 완료"):

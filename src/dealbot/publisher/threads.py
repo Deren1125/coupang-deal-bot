@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ import httpx
 
 from dealbot.commentary import THREAD_BANNED
 from dealbot.models import Deal, PublishResult
+from dealbot.publisher.scopes import THREADS_READ_REPLIES, ScopeState
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.shops import ShopRegistry, deal_disclosure
 from dealbot.utils.retry import RetryableError, retry_async
@@ -35,7 +37,9 @@ log = logging.getLogger(__name__)
 GRAPH_BASE = "https://graph.threads.net"
 AUTH_BASE = "https://threads.com/oauth/authorize"  # 메타 문서 기준 (threads.net 은 여기로 리디렉션됨)
 API_VERSION = "v1.0"
-SCOPES = "threads_basic,threads_content_publish,threads_manage_replies"  # 답글(선택: 채널 안내)을 달 때 쓰는 권한도 받아 둠
+# 답글(품절 업데이트·선택 채널 안내)을 다는 권한, 통계(인사이트)·내 글 답글 읽기 권한도 받아 둔다 (주인 결정 10/15).
+# 뒤의 두 권한은 메타 앱 Threads 사용 사례에 주인이 먼저 더해야 하고(docs/SETUP_KEYS.md), 없는 토큰이어도 발행은 그대로 (scopes.py)
+SCOPES = "threads_basic,threads_content_publish,threads_manage_replies,threads_manage_insights,threads_read_replies"
 TEXT_LIMIT = 500
 
 KV_TOKEN = "threads_access_token"
@@ -47,15 +51,40 @@ KV_RECENT_LINES = "threads_recent_lines"
 RECENT_LINES_KEEP = 20  # 첫 줄은 매번, 마무리는 두 번에 한 번꼴 → 대략 최근 13~14건
 
 
+def first_line(text: str) -> str:
+    return next((ln.strip() for ln in (text or "").splitlines() if ln.strip()), "")
+
+
 def thread_problems(text: str, *, disclosure: str | None = None, link: str | None = None) -> list[str]:
-    """올리기 직전 검사: 주인이 뺀 말·훈수(THREAD_BANNED), 제휴 고지(공식 문구 그대로), 본문 링크가 빠졌는지.
+    """올리기 직전 검사: 주인이 뺀 말·훈수(THREAD_BANNED), 제휴 고지(공식 문구 그대로), 본문 링크가 빠졌는지,
+    그리고 고지가 있는 글이면 첫 줄이 짧은 광고 표시('[광고·… 수수료 받음]')인지 (주인 결정 10/15 — 공정위 지침: 글의 첫 부분).
     렌더러가 이런 말을 만들지 않으니 평소엔 빈 목록 — 걸리면 글을 올리지 않고 관리자에게 알린다."""
     problems = [f"쓰지 않기로 한 말 '{m.group(0)}'" for m in THREAD_BANNED.finditer(text)]
     if disclosure and disclosure not in text:
         problems.append("제휴 고지 문구가 빠짐")
+    if disclosure:
+        head = first_line(text)
+        if not (head.startswith("[광고") and "수수료" in head):
+            problems.append("첫 줄에 광고 표시가 없음")
     if link and link not in text:
         problems.append("링크가 빠짐")
     return problems
+
+
+# 스레드 주제 태그 (topic_tag): 1~50자, 마침표·& 는 못 씀 (Threads API)
+_TAG_BAD = re.compile(r"[.&]")
+
+
+def valid_topic_tag(tag: str | None) -> str | None:
+    tag = (tag or "").strip().lstrip("#")
+    if not tag or len(tag) > 50 or _TAG_BAD.search(tag):
+        return None
+    return tag
+
+
+# 투표 선택지 (poll_attachment option_a~d): 2~4개. 글자 수는 짧게 (25자까지만 보낸다)
+POLL_OPTION_KEYS = ("option_a", "option_b", "option_c", "option_d")
+POLL_OPTION_MAX = 25
 
 
 def fit_text(text: str, limit: int, keep: str | None = None) -> str:
@@ -266,6 +295,28 @@ class ThreadsClient:
         )
         return str(body.get("permalink") or "") or None
 
+    async def replies(self, token: ThreadsToken, post_id: str) -> list[dict[str, Any]]:
+        """내 글에 달린 답글 (바로 아래 단계만). threads_read_replies 권한이 없으면 ThreadsError (권한 오류 코드)."""
+        body = await self._request(
+            "GET", f"{GRAPH_BASE}/{API_VERSION}/{post_id}/replies",
+            params={"fields": "id,text,username,timestamp,is_reply_owned_by_me", "access_token": token.access_token},
+            step="replies",
+        )
+        data = body.get("data")
+        return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+    async def poll_results(self, token: ThreadsToken, post_id: str) -> dict[str, Any]:
+        """내 투표 글의 결과 (선택지별 비율·참여 수). 끝나지 않았으면 지금까지의 값."""
+        fields = ",".join(
+            [*POLL_OPTION_KEYS, *(f"{k}_votes_percentage" for k in POLL_OPTION_KEYS), "total_votes", "expiration_timestamp"]
+        )
+        body = await self._request(
+            "GET", f"{GRAPH_BASE}/{API_VERSION}/{post_id}", params={"fields": f"poll_attachment{{{fields}}}", "access_token": token.access_token},
+            step="poll",
+        )
+        poll = body.get("poll_attachment")
+        return poll if isinstance(poll, dict) else {}
+
     # ------------------------------------------------------------ 게시
     async def container_status(self, token: ThreadsToken, creation_id: str) -> tuple[str, str | None]:
         body = await self._request(
@@ -297,8 +348,12 @@ class ThreadsClient:
                 raise ThreadsMediaError(f"컨테이너 처리 대기 시간 초과 ({timeout:.0f}s, 상태 {status})", step="container")
             await asyncio.sleep(interval)
 
-    async def post(self, token: ThreadsToken, text: str, image_url: str | None = None, *, reply_to_id: str | None = None) -> str:
+    async def post(
+        self, token: ThreadsToken, text: str, image_url: str | None = None, *, reply_to_id: str | None = None,
+        topic_tag: str | None = None, poll: Sequence[str] | None = None,
+    ) -> str:
         """컨테이너 생성 → 처리 대기 → 게시. 게시된 글 id 반환. reply_to_id 를 주면 그 글의 답글로 올린다.
+        topic_tag: 주제 태그 (1~50자, '.'·'&' 없음 — 틀리면 빼고 올림). poll: 투표 선택지 2~4개 (글만 있는 글에만, 공식 poll_attachment).
 
         사진이 문제면(다운로드 실패, 처리 오류, 준비 안 됨) ThreadsMediaError 를 던져 호출자가 사진 없이 다시 올릴 수 있게 한다.
         """
@@ -310,6 +365,14 @@ class ThreadsClient:
             params["media_type"] = "TEXT"
         if reply_to_id:
             params["reply_to_id"] = reply_to_id
+        tag = valid_topic_tag(topic_tag)
+        if tag and not reply_to_id:
+            params["topic_tag"] = tag
+        if poll:
+            options = [o.strip()[:POLL_OPTION_MAX] for o in poll if o and o.strip()][: len(POLL_OPTION_KEYS)]
+            if len(options) < 2 or image_url:
+                raise ThreadsError("투표는 사진 없는 글에 선택지 2~4개로만 올릴 수 있어요", step="create_container")
+            params["poll_attachment"] = json.dumps(dict(zip(POLL_OPTION_KEYS, options, strict=False)), ensure_ascii=False)
         try:
             created = await self._request(
                 "POST", f"{GRAPH_BASE}/{API_VERSION}/{token.user_id}/threads", params=params, step="create_container"
@@ -382,6 +445,8 @@ class ThreadsPublisher:
         self.enabled = enabled
         self.dry_run = dry_run
         self.refresh_before_days = refresh_before_days
+        # 토큰이 가진 권한 기억 (인사이트·답글 읽기 — 없으면 그 기능만 조용히 건너뜀)
+        self.scopes = ScopeState(db, "threads", lambda: self.db.kv_get(KV_TOKEN))
 
     # ------------------------------------------------------------ 토큰
     def stored_token(self) -> ThreadsToken | None:
@@ -459,19 +524,20 @@ class ThreadsPublisher:
         return text.strip() or None
 
     async def _post_with_fallback(
-        self, token: ThreadsToken, text: str, image_url: str | None, fallback_image_url: str | None = None
+        self, token: ThreadsToken, text: str, image_url: str | None, fallback_image_url: str | None = None,
+        *, topic_tag: str | None = None,
     ) -> tuple[str, str | None]:
         """상품 사진 → (거절되면) 카드 이미지 → (그것도 안 되면) 글만. (글 id, 참고 메모)"""
         candidates = [u for u in (image_url, fallback_image_url) if u]
         note: str | None = None
         for i, url in enumerate(candidates):
             try:
-                return await self.client.post(token, text, url), note
+                return await self.client.post(token, text, url, topic_tag=topic_tag), note
             except ThreadsMediaError as e:
                 nxt = candidates[i + 1] if i + 1 < len(candidates) else None
                 log.warning("threads image rejected (%s) — %s: %s", url, "trying card image" if nxt else "posting without photo", e)
                 note = f"카드 이미지로 올림 (상품 사진 거절: {e})" if nxt else f"사진 없이 올림: {e}"
-        return await self.client.post(token, text), note
+        return await self.client.post(token, text, topic_tag=topic_tag), note
 
     async def _reply(self, token: ThreadsToken, text: str, post_id: str) -> None:
         """방금 올린 글이 아직 조회되지 않아 실패하면 조금 쉬었다 다시."""
@@ -487,25 +553,66 @@ class ThreadsPublisher:
                     raise
                 log.warning("threads reply: parent not ready yet (%s), attempt %d/%d", e, i + 1, len(delays))
 
-    async def publish_text(self, text: str, image_url: str | None = None) -> PublishResult:
-        """완성된 평문 한 글(답글 없음). 정보 글 등에 씀."""
+    async def publish_text(self, text: str, image_url: str | None = None, *, topic_tag: str | None = None,
+                           poll: Sequence[str] | None = None) -> PublishResult:
+        """완성된 평문 한 글(답글 없음). 정보 글·투표 글에 씀. poll: 투표 선택지 (링크 없는 글만, 사진 없이)."""
         if not self.enabled:
             return PublishResult(ok=False, error="threads disabled")
         text = text[:TEXT_LIMIT]
         if self.dry_run:
-            log.info("[DRY-RUN] would post to threads:\n%s", text)
+            log.info("[DRY-RUN] would post to threads%s:\n%s", f" (poll {list(poll)})" if poll else "", text)
             return PublishResult(ok=True, dry_run=True)
         token = await self.ensure_fresh()
         if token is None:
             return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
         try:
-            post_id, note = await self._post_with_fallback(token, text, image_url)
+            if poll:
+                post_id, note = await self.client.post(token, text, topic_tag=topic_tag, poll=poll), None
+            else:
+                post_id, note = await self._post_with_fallback(token, text, image_url, topic_tag=topic_tag)
         except ThreadsError as e:
             return PublishResult(ok=False, error=str(e))
         return PublishResult(ok=True, message_id=int(post_id) if post_id.isdigit() else None, error=note)
 
-    async def publish(self, deal: Deal, *, fallback_image_url: str | None = None, force: bool = False) -> PublishResult:
-        """force=True: 자동 게시가 꺼져 있어도 올림 (/threadstest 시험 글만)."""
+    async def publish_reply(self, post_id: str, text: str) -> PublishResult:
+        """내 글 아래에 사실 답글 하나 (품절 업데이트 — 남의 글·남의 답글에는 달지 않는다)."""
+        if not self.enabled:
+            return PublishResult(ok=False, error="threads disabled")
+        if self.dry_run:
+            log.info("[DRY-RUN] would reply to threads %s: %s", post_id, text)
+            return PublishResult(ok=True, dry_run=True)
+        token = await self.ensure_fresh()
+        if token is None:
+            return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
+        try:
+            await self._reply(token, text[:TEXT_LIMIT], post_id)
+        except ThreadsError as e:
+            return PublishResult(ok=False, error=str(e))
+        return PublishResult(ok=True)
+
+    async def read_replies(self, post_id: str) -> list[dict[str, Any]] | None:
+        """내 글의 답글 (threads_read_replies 권한이 있을 때만). 권한이 없다고 알면 부르지 않고 None, 권한 오류도 None (기억함)."""
+        from dealbot.dashboard.sources._meta import is_permission, is_token_problem
+
+        if not self.scopes.usable(THREADS_READ_REPLIES):
+            return None
+        token = await self.ensure_fresh()
+        if token is None:
+            return None
+        try:
+            rows = await self.client.replies(token, post_id)
+        except ThreadsError as e:
+            if is_permission(e) and not is_token_problem(e):
+                self.scopes.mark(THREADS_READ_REPLIES, False)
+                return None
+            raise
+        self.scopes.mark(THREADS_READ_REPLIES, True)
+        return rows
+
+    async def publish(self, deal: Deal, *, fallback_image_url: str | None = None, force: bool = False,
+                      topic_tag: str | None = None) -> PublishResult:
+        """force=True: 자동 게시가 꺼져 있어도 올림 (/threadstest 시험 글만). topic_tag: 주제 태그 (분류별, config threads.topic_tags).
+        fallback_image_url: 상품 사진이 없거나 거절되면 쓸 카드 이미지 (확인된 사진이 없는 딜은 봇이 만든 4:5 글자 카드 — 주인 결정 10/15)."""
         if not self.enabled and not force:
             return PublishResult(ok=False, error="threads disabled")
         recent = self.recent_lines()
@@ -522,7 +629,8 @@ class ThreadsPublisher:
         if token is None:
             return PublishResult(ok=False, error="threads not authorized (/threadsauth)")
         try:
-            post_id, note = await self._post_with_fallback(token, text, deal.product.image_url, fallback_image_url)
+            post_id, note = await self._post_with_fallback(token, text, deal.product.image_url, fallback_image_url,
+                                                           topic_tag=topic_tag)
         except ThreadsError as e:
             return PublishResult(ok=False, error=str(e))
         message_id = int(post_id) if post_id.isdigit() else None

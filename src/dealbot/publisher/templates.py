@@ -13,7 +13,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoes
 
 from dealbot.models import Deal, Product
 from dealbot.pricing.market import market_name
-from dealbot.shops import Shop, deal_disclosure
+from dealbot.shops import Shop, ad_line, deal_disclosure
 from dealbot.utils.text import clean_name, format_won, unit_price
 
 
@@ -146,7 +146,8 @@ class TemplateRenderer:
         self.templates_dir = Path(templates_dir)
         self.tz = ZoneInfo(tz)
         # 템플릿에서 channels.telegram_url 처럼 씀. 없는 키는 빈 문자열
-        self.channels = {"telegram_url": "", "kakao_openchat_url": "", "threads_url": "", **(channels or {})}
+        self.channels = {"telegram_url": "", "kakao_openchat_url": "", "threads_url": "", "instagram_url": "", "blog_url": "",
+                         **(channels or {})}
         # 텔레그램(HTML 서식)용: 특수문자 이스케이프
         self.env = self._build_env(autoescape=True)
         # 카카오·스레드·블로그(평문)용: 이스케이프하면 &lt; 같은 문자가 그대로 복사되므로 끔
@@ -224,17 +225,26 @@ class TemplateRenderer:
             return "must", pct
         return "normal", pct
 
+    def basis_time(self, deal: Deal) -> str:
+        """가격 기록 라벨의 기준 시각 'MM/DD HH시' (딜을 본 시각, app.timezone). 모르면 지금."""
+        at = deal.detected_at or datetime.now(self.tz)
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=ZoneInfo("UTC"))
+        return at.astimezone(self.tz).strftime("%m/%d %H시")
+
     def low_label(self, deal: Deal, days: int) -> str | None:
-        """'N일 최저가(갱신)' 라벨. 기록이 짧거나 관측이 적으면, 또는 값이 내내 같았으면(오르내린 적 없음) 붙이지 않는다."""
+        """가격 기록 라벨: '우리가 본 최근 N일 중 가장 낮음 (MM/DD HH시 기준)' (주인 결정 10/15 — 'N일 최저가'·'역대 최저' 는
+        쓰지 않는다: 봇이 본 기록 안의 말이지 시장 전체의 최저가가 아니다). 기록이 짧거나(low_min_days) 관측이 적으면(low_min_samples),
+        또는 값이 내내 같았으면(오르내린 적 없음) 붙이지 않는다."""
         p, v = deal.product, deal.verdict
         if not (v.low_price and p.price and days >= self.low_min_days and v.sample_count >= self.low_min_samples):
             return None
-        if p.price < v.low_price:
-            return f"{days}일 최저가 갱신"
-        # 최저가와 같은 값: 평균이 지금보다 3% 이상 높아야 실제로 비쌌던 때가 있었던 것
-        if p.price == v.low_price and v.avg_price and p.price <= v.avg_price * 0.97:
-            return f"{days}일 최저가"
-        return None
+        # 기록보다 내려갔거나, 최저가와 같은 값인데 평균이 지금보다 3% 이상 높음(실제로 비쌌던 때가 있었음)
+        lower = p.price < v.low_price
+        tied = p.price == v.low_price and bool(v.avg_price) and p.price <= (v.avg_price or 0) * 0.97
+        if not (lower or tied):
+            return None
+        return f"우리가 본 최근 {days}일 중 가장 낮음 ({self.basis_time(deal)} 기준)"
 
     def deal_facts(self, deal: Deal, *, recent: Sequence[str] = ()) -> dict[str, Any]:
         """글에 쓰는 사실들 (모두 데이터에서 계산한 것만). 텔레그램·블로그 내보내기가 같이 쓴다.
@@ -249,7 +259,7 @@ class TemplateRenderer:
             labels.append("강력 추천")
         low = self.low_label(deal, days)
         if low:
-            labels.append(low)
+            labels.append(low)  # 등급·순위 라벨과 같은 목록 (블로그 내보내기·한줄평 사실). 채널 글은 '가격기록' 칸으로 따로
         src = (p.source or "").lower()
         if "goldbox" in src:
             labels.append("골드박스 특가")  # 골드박스 목록 순서는 판매 순위가 아니라 순위는 쓰지 않음
@@ -267,7 +277,7 @@ class TemplateRenderer:
         list_pct = round(v.discount_rate) if not pct and v.discount_rate and v.discount_rate >= 10 else None
         # 채널 글(정보 항목형) 칸: 할인분류 · 가격비교 · 판매처 · 순위형성 · 방장 한줄평
         kind_map = {"역대급": "초특가", "강력 추천": "강추"}
-        kind_labels = [kind_map.get(x, x) for x in labels if "베스트" not in x]
+        kind_labels = [kind_map.get(x, x) for x in labels if "베스트" not in x and x != low]
         rank_label = next((x for x in labels if "베스트" in x and "위" in x), None)
         where = self.market_word(deal)
         if ref_price and pct:
@@ -278,6 +288,7 @@ class TemplateRenderer:
         genuine = "공식 판매처 확인" if auth.get("status") == "ok" and str(auth.get("reason") or "").startswith("공식") else None
         return {
             "kind_labels": kind_labels,
+            "low_label": low,
             "rank_label": rank_label,
             "compare": compare,
             "genuine": genuine,
@@ -299,7 +310,7 @@ class TemplateRenderer:
             "ref_pct": pct,
             "ref_label": (f"{where} 최저가" if is_market else "평소 가격") if ref_price else "",
             **self.evidence(deal, days=days, ref_price=ref_price, pct=pct, labels=labels, tier=tier,
-                            is_market=is_market, recent=recent),
+                            is_market=is_market, recent=recent, low=low),
         }
 
     # 스레드 첫 줄 (AI 가 못 썼을 때). (문장, 반전): 반전=True 는 생활 속 상황·불편이라 다음 줄을 '근데 {이름} {가격}' 으로
@@ -459,16 +470,16 @@ class TemplateRenderer:
 
     def evidence(
         self, deal: Deal, *, days: int, ref_price: int | None, pct: int | None, labels: list[str], tier: str,
-        is_market: bool = False, recent: Sequence[str] = (),
+        is_market: bool = False, recent: Sequence[str] = (), low: str | None = None,
     ) -> dict[str, Any]:
         """가격 근거를 사람 말로: 첫 줄용 짧은 근거, 문장형 근거, 스레드용 근거. 숫자는 데이터에서만.
-        우선순위: 평소 가격(쿠팡 시중가·최근 평균) 대비 > 기록 최저가 > 단가. 표시(정가) 할인율은 근거로 안 씀.
+        우선순위: 평소 가격(쿠팡 시중가·최근 평균) 대비 > 기록 최저가(low_label) > 단가. 표시(정가) 할인율은 근거로 안 씀.
         스레드 근거(evidence_casual)는 '평소보다 N% 쌈' 대신 비교한 금액을 그대로 보여 준다 (주인 지시 TH-02, 스타일 가이드 6장
-        '같은 상품 쿠팡은 21,900원' / '평소 15,200원대'). 바로 윗줄이 '{이름} {가격}' 이라 금액만 놓아도 차이가 보인다."""
+        '같은 상품 쿠팡은 21,900원' / '평소 15,200원대'). 바로 윗줄이 '{이름} {가격}' 이라 금액만 놓아도 차이가 보인다.
+        기록 최저가는 어디서나 같은 말 '우리가 본 최근 N일 중 가장 낮음 (MM/DD HH시 기준)' (주인 결정 10/15)."""
         p = deal.product
         unit = unit_price(clean_name(p.name), p.price)
         each = f"{unit.split(' (')[0]} 꼴" if unit else None
-        low = next((x for x in labels if "최저가" in x), None)
         if ref_price and pct:
             where = self.market_word(deal) if is_market else "평소"
             short = f"{where}보다 {pct}%↓"
@@ -479,8 +490,8 @@ class TemplateRenderer:
                 band = price_band(ref_price, p.price)
                 casual, sentence = f"평소엔 {band:,}원대", f"평소 {band:,}원대인데 오늘 {p.price:,}원이에요."
         elif low:
-            short, casual = f"{days}일 중 제일 쌈", f"최근 {days}일 중 최저가"
-            sentence = f"최근 {days}일 중 제일 싸요."
+            short = casual = low
+            sentence = f"우리가 본 최근 {days}일 중 가장 낮은 가격이에요 ({self.basis_time(deal)} 기준)."
         elif each:
             short, casual, sentence = each, each, f"{each}이에요."
         else:
@@ -531,6 +542,9 @@ class TemplateRenderer:
             "key": shop.key if shop else p.shop,
             "name": shop.name if shop else p.shop,
             "disclosure": deal_disclosure(shop, p.extra),
+            # 글 첫 부분의 짧은 광고 표시 (텔레그램 둘째 줄 · 스레드 첫 줄). 고지가 없는 글(수수료 없음)은 None
+            "ad_line": ad_line(shop, p.extra),
+            "ad_line_threads": ad_line(shop, p.extra, style="threads"),
             "link_mode": shop.link_mode if shop else "raw",
         }
         tier, tier_pct = self.deal_tier(deal)

@@ -85,6 +85,12 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font: Font, max_w: int, max_line
     return lines[:max_lines]
 
 
+def _split_basis(text: str) -> list[str]:
+    """'우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)' → 두 줄 (기준 시각은 잘리지 않게 따로)."""
+    head, sep, tail = text.partition(" (")
+    return [head, f"({tail}"] if sep else [text]
+
+
 def _lines(draw: ImageDraw.ImageDraw, lines: list[str], font: Font, fill: str, x: int, y: int, *, gap: float = 1.32) -> int:
     for line in lines:
         draw.text((x, y), line, font=font, fill=fill)
@@ -234,7 +240,13 @@ def text_card(card: DealCard, info: CardInfo) -> Image.Image:
         d.text((SIDE, y), _won(info.price), font=pf, fill=ACCENT)
         y += int(_size(pf) * 1.2) + 10
     if bits:
-        d.text((SIDE, y), "  ·  ".join(bits), font=card.font_regular(38), fill=INK)
+        bf = card.font_regular(38)
+        one = "  ·  ".join(bits)
+        # 기록 라벨('우리가 본 최근 N일 중 가장 낮음 (MM/DD HH시 기준)')은 길어서 한 줄에 안 들어가면 나눠 쓴다 (기준 시각은 안 자름)
+        rows = [one] if _w(d, one, bf) <= W - 2 * SIDE else [ln for b in bits for ln in _split_basis(b)]
+        for ln in rows[:3]:
+            d.text((SIDE, y), ln, font=bf, fill=INK)
+            y += int(_size(bf) * 1.3)
     _footer(card, d, info, y=H - 140)
     return img
 
@@ -274,9 +286,20 @@ def layout_a(card: DealCard, info: CardInfo, photo: Image.Image) -> Image.Image:
     bits = [b for b in (info.low_label, info.ship) if b]
     if bits and y + 50 < H - 150:
         cx = SIDE
+        cf = card.font(28)
+        chips: list[tuple[str, bool]] = []
         for i, b in enumerate(bits):
-            w, _ = _chip(d, b, card.font(28), cx, y, fill="#FFF1EE" if i == 0 and info.low_label else PANEL,
-                         ink=ACCENT if i == 0 and info.low_label else INK)
+            low = i == 0 and bool(info.low_label)
+            # 긴 기록 라벨은 칩 두 개로 (기준 시각은 안 자름)
+            parts = _split_basis(b) if _w(d, b, cf) + 40 > W - 2 * SIDE else [b]
+            chips += [(part, low) for part in parts]
+        for text, low in chips:
+            w = _w(d, text, cf) + 40
+            if cx > SIDE and cx + w > W - SIDE:  # 이 줄에 안 들어가면 다음 줄
+                cx, y = SIDE, y + int(_size(cf) * 1.25) + 30
+            if y + 50 >= H - 150:
+                break
+            w, _ = _chip(d, text, cf, cx, y, fill="#FFF1EE" if low else PANEL, ink=ACCENT if low else INK)
             cx += w + 12
     _footer(card, d, info, y=H - 112)
     return img

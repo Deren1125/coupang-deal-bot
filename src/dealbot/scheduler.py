@@ -188,6 +188,10 @@ async def publisher_loop(bot: DealBot, stop: asyncio.Event) -> None:
                     log.info("자동 업데이트가 새 코드를 받는 중 — 새 글 발행은 재시작 뒤에")
                 else:
                     await bot.process_queue_once()
+                    # 스레드 대기열: 리듬(07~24시·45분 간격·하루 딜 10개)이 허락하면 한 글 (발행 루프라 재시작 때 마칠 시간을 받음)
+                    flow = getattr(bot, "threads_flow", None)
+                    if flow is not None:
+                        await flow.tick()
                     bot.notifier.error_cleared("publisher")
         except Exception as e:  # noqa: BLE001
             log.exception("publisher loop error")
@@ -295,6 +299,23 @@ async def maintenance_loop(bot: DealBot, stop: asyncio.Event) -> None:
             bot.state.set_error(f"[maintenance] {e}")
 
 
+async def sns_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """채널 성장 일 (주인 결정 10/15): 1분마다 스레드 답글 모으기(12:30·20:30대)·투표·일요일 TOP5·SNS 0개 알림·통계 권한 할 일.
+    딜 수집·발행 루프와 따로 돈다 (스레드 글 올리기 자체는 발행 루프에서)."""
+    tick = getattr(bot, "sns_tick", None)
+    if tick is None:
+        return
+    await _sleep_or_stop(stop, 45)  # 시작 직후의 자기 점검·첫 수집이 먼저
+    while not stop.is_set():
+        try:
+            ran = await tick()
+            if ran:
+                log.info("sns jobs: %s", ", ".join(ran))
+        except Exception as e:  # noqa: BLE001
+            log.warning("sns loop failed: %s", e)
+        await _sleep_or_stop(stop, 60)
+
+
 async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
     """채널 대시보드 숫자 모으기: 1분마다 확인해서 정해진 시각(dashboard.collect_times)이 지났으면 API 카드를 읽고,
     Blog-Auto 기록·봇 DB 카드는 export_interval_minutes 마다. 딜 수집·발행 루프와 따로 돌아 그쪽을 막지 않는다."""
@@ -362,6 +383,9 @@ async def run_forever(bot: DealBot) -> None:
         for line in lines:
             log.info("self-check: %s", line)
         await selfcheck_alerts(bot, lines)
+        domain_todo = getattr(bot, "domain_todo", None)
+        if domain_todo is not None:
+            await domain_todo()  # 내 도메인 DNS 가 이 서버를 안 가리키면 주인 할 일 (https.sh --domain 뒤)
         if not bot.notifier.enabled:
             log.warning(
                 "관리자 알림을 보낼 수 없습니다 — TELEGRAM_BOT_TOKEN=%s, TELEGRAM_ADMIN_CHAT_ID=%s. "
@@ -396,6 +420,7 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(soldout_loop(bot, stop), name="soldout_loop"),
         asyncio.create_task(dashboard_loop(bot, stop), name="dashboard_loop"),
         asyncio.create_task(instagram_loop(bot, stop), name="instagram_loop"),
+        asyncio.create_task(sns_loop(bot, stop), name="sns_loop"),
     ]
     try:
         await stop.wait()

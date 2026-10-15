@@ -304,6 +304,8 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("instacode", "인스타그램 인증 코드 입력"),
     ("instatoken", "인스타그램 연결: 개발자 화면에서 만든 토큰으로 (/instatoken 토큰)"),
     ("instatest", "인스타그램에 샘플 글 올려 보기 (번호 주면 그 글)"),
+    ("channelguide", "채널에 안내 글(인스타·스레드·블로그 링크)을 올리고 고정"),
+    ("invitelinks", "채널 초대 링크 만들기·보기 (인스타·스레드 프로필·핫딜 페이지·블로그·QR)"),
     ("help", "도움말"),
 ]
 
@@ -1367,6 +1369,14 @@ class BotController(Protocol):
 
     async def naver_link_test(self, url: str) -> str: ...
 
+    async def channel_guide(self) -> str: ...
+
+    async def invite_links(self) -> str: ...
+
+    def late_photo_waiting(self, queue_id: int) -> bool: ...
+
+    async def attach_late_photo(self, queue_id: int, photo: PhotoSource) -> str: ...
+
 
 HELP_NL = (
     "💬 <b>이제 말로 하셔도 돼요</b>\n"
@@ -1416,6 +1426,11 @@ HELP_TEXT = HELP_NL + (
     "/pushtest — 휴대폰 푸시(ntfy) 연결 확인.\n"
     "/threadsauth — 스레드 자동 게시 연결. Threads 앱 ID·시크릿을 변수에 넣은 뒤 1회. Railway 도메인이 있으면 승인만 누르면 끝, 없으면 /threadscode 코드 로 인증 코드 입력. 승인 화면 로그인이 계속 돌면 /threadstoken 토큰 — 메타 앱 Threads API 설정의 사용자 토큰 생성기로 만든 토큰으로 연결(토큰 메시지는 봇이 지움).\n"
     "/instaauth — 인스타그램 자동 게시 연결 (프로페셔널 계정, Instagram 앱 ID·시크릿을 변수에 넣은 뒤 1회). /instacode 코드 — 수동 연결 때 인증 코드 입력. /instatest — 샘플 딜을 인스타에 실제로 올려 카드·본문 확인. 승인 화면 로그인이 계속 돌면 /instatoken 토큰 — Instagram API 설정의 액세스 토큰 생성으로 만든 토큰으로 연결(토큰 메시지는 봇이 지움).\n"
+    "\n<b>채널 키우기</b>\n"
+    "/channelguide — 텔레그램 채널에 짧은 안내 글(인스타·스레드·블로그 링크)을 올리고 맨 위에 고정합니다. 보낼 때만 올라갑니다.\n"
+    "/invitelinks — 이름 붙은 채널 초대 링크(인스타 프로필 ig_bio · 스레드 프로필 threads_bio · 핫딜 페이지 deals_page · 블로그 demiyum · qr)를 만들어 보여 줍니다. 어디서 들어왔는지 세서 대시보드 텔레그램 카드에 나옵니다 (봇에 '링크로 초대' 권한 필요).\n"
+    "📷 사진 필요 #번호 — 확인된 상품 사진 없이 올라간 딜이면 봇이 보냅니다. 4시간 안에 그 메시지에 사진을 답장(또는 사진 설명 칸에 /photo 번호)하면 블로그·인스타에 그 사진을 씁니다.\n"
+    "\n<b>확인·연결 (계속)</b>\n"
     "/naverlogin — 네이버 쇼핑커넥트 링크를 봇이 대신 만들도록 서버 브라우저에 QR 로그인. 블로그 글쓰기가 아니라 링크 생성 자동화이고, 브라우저 자동화를 켰을 때만 됩니다.\n"
     "/naverlink 상품URL — 위 자동화로 링크 하나 만들어 보기.\n"
     "/shot URL — 서버 브라우저로 그 페이지 화면을 찍어 보냅니다. 봇이 게시판을 잘못 읽는 것 같을 때 확인용.\n"
@@ -1723,6 +1738,21 @@ def register_admin_handlers(
         else:
             _track(await msg.reply_text(text), text)
 
+    async def cmd_channelguide(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, await controller.channel_guide())
+
+    async def cmd_invitelinks(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, await controller.invite_links())
+
+    async def late_photo_reply(update: Update, ctx: Any, queue_id: int, ref: dict[str, Any]) -> None:
+        """발행 뒤 받는 딜 사진 (📷 사진 필요 #번호 에 답장, 또는 설명 칸 '/photo 번호'). 사진은 받아 오는 함수로 넘긴다."""
+        bot = getattr(ctx, "bot", None)
+
+        async def load() -> tuple[bytes | None, str]:
+            return await download_photo(bot, ref)
+
+        await reply(update, await controller.attach_late_photo(queue_id, load))
+
     async def cmd_naverlink(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         args = ctx.args or []
         if not args or not args[0].startswith("http"):
@@ -1788,6 +1818,21 @@ def register_admin_handlers(
     def _slash_name(text: str) -> str:
         head = (text or "").strip().split(maxsplit=1)
         return head[0][1:].split("@")[0].lower() if head and head[0].startswith("/") else ""
+
+    def _late_photo_target(caption: str, ref: Any) -> int | None:
+        """이 사진이 발행 뒤 받는 딜 사진이면 그 딜 번호: 📷 사진 필요 메시지에 답장(설명 없음·'/photo 번호'), 또는 설명 칸
+        '/photo 번호' (블로그 메시지에 단 답장이 아니고, 그 번호 딜이 지금 사진을 기다릴 때만 — 블로그 글 번호와 헷갈리지 않게)."""
+        name = _slash_name(caption)
+        if ref.kind == "deal" and ref.sub == "photo_need" and ref.queue_id and (not caption.strip() or name in ("photo", "사진")):
+            return int(ref.queue_id)
+        if name in ("photo", "사진") and ref.kind != "blog":
+            parts = caption.split()
+            if len(parts) >= 2 and parts[1].lstrip("#").isdigit():
+                qid = int(parts[1].lstrip("#"))
+                waiting = getattr(controller, "late_photo_waiting", None)
+                if waiting is not None and waiting(qid):
+                    return qid
+        return None
 
     def _from_bot(msg: Any) -> bool:
         return bool(getattr(getattr(msg, "from_user", None), "is_bot", False))
@@ -1933,7 +1978,15 @@ def register_admin_handlers(
         # 블로그 메시지에 단 답장은 지금처럼 Blog-Auto 로 (거기서 '12 https://…' 는 블로그 글 번호일 수 있음, 검토 지적)
         line = _BATCH_LINE_RE.match(caption.strip()) if "\n" not in caption.strip() and ref.kind == "deal" else None
         state, why, text = "ignore", "media", None
-        if _slash_name(caption) == "link" or (line and line.group(2).lower().startswith("http")):
+        late = _late_photo_target(caption, ref)
+        if late is not None:
+            # 발행 뒤 4시간 안에 받는 딜 사진 (📷 사진 필요 #번호 에 답장 · 설명 칸 '/photo 번호' — 그 번호가 사진을 기다리는 딜일 때만,
+            # 아니면 '/photo 번호' 는 예전처럼 블로그 명령으로 넘어감)
+            if group is not None:
+                group["state"] = "deal"
+            state = "deal"
+            await late_photo_reply(update, ctx, late, first_photo(group, md))
+        elif _slash_name(caption) == "link" or (line and line.group(2).lower().startswith("http")):
             # '/link 12 https://…' (사진 설명은 텔레그램이 명령으로 보지 않아 여기로 옴) · 고정 공지처럼 '12 https://…'
             if group is not None:
                 group["state"] = "deal"  # 사진을 받는 동안 온 같은 앨범의 사진도 블로그로 안 감
@@ -2090,6 +2143,8 @@ def register_admin_handlers(
         ("find", cmd_find),
         ("naverlogin", cmd_naverlogin),
         ("naverlink", cmd_naverlink),
+        ("channelguide", cmd_channelguide),
+        ("invitelinks", cmd_invitelinks),
         ("shot", cmd_shot),
         ("html", cmd_html),
         ("help", cmd_help),

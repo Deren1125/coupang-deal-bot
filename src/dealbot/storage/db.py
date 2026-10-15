@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from dealbot.models import Deal, PriceStats, Product
+from dealbot.storage.sns_store import SnsStoreMixin
 from dealbot.utils.timeutil import from_iso, to_iso, utcnow
 
 log = logging.getLogger(__name__)
@@ -230,7 +231,7 @@ class PeriodSummary:
     top_posts: list[dict[str, Any]] | None = None
 
 
-class Database:
+class Database(SnsStoreMixin):
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
         if str(self.path) != ":memory:":
@@ -249,6 +250,7 @@ class Database:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._init_sns()  # 스레드 대기열·답글·투표·SNS 발행 기록·초대 링크 가입 (storage/sns_store.py)
         self._migrate()
         if self.kv_get("db_created_at") is None:
             # 기존 DB 를 새 버전으로 처음 열 때는 가장 오래된 기록 시각을 쓴다 (기록이 언제부터 쌓였는지 보여주기 위함)

@@ -17,7 +17,7 @@ import re
 import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from dealbot.media.card import CardInfo
@@ -100,11 +100,10 @@ def low_text(deal: Deal, renderer: TemplateRenderer, days: int) -> str | None:
     """기록 최저 문구 — 'N일 최저가' 대신 '우리가 본 최근 N일 중 가장 낮음 (MM/DD HH시 기준)' (주인 결정 10/15).
     조건은 채널 글과 같다 (renderer.low_label: 기록이 충분하고 실제로 오르내린 적이 있을 때만). 기준 시각은 판정한 때(detected_at) —
     기준 시각을 모르면 쓰지 않는다 (언제 기준인지 없는 '가장 낮음' 은 확인할 수 없는 말)."""
-    at = deal.detected_at
-    if at is None or not renderer.low_label(deal, days):
+    if deal.detected_at is None:
         return None
-    local = (at if at.tzinfo else at.replace(tzinfo=UTC)).astimezone(renderer.tz)
-    return f"우리가 본 최근 {days}일 중 가장 낮음 ({local:%m/%d} {local:%H}시 기준)"
+    # 문구·기준 시각은 채널 글과 한 곳에서 (renderer.low_label → basis_time) — 채널·스레드·카드가 같은 말
+    return renderer.low_label(deal, days)
 
 
 def card_info(deal: Deal, renderer: TemplateRenderer, *, shop: Shop | None, deal_no: int | None = None) -> CardInfo:

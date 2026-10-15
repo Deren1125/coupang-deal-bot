@@ -27,7 +27,7 @@ from dealbot.publisher.threads import (
     ThreadsPublisher,
     thread_problems,
 )
-from dealbot.shops import ShopRegistry
+from dealbot.shops import ShopRegistry, disclosure_program
 from dealbot.storage.db import Database
 from dealbot.utils.text import clean_name, unit_price
 
@@ -87,7 +87,8 @@ async def test_threads_posts_never_use_the_banned_lines(r: TemplateRenderer, db:
         p = Product(source="s", product_id=f"{shop_key}:{i}", shop=shop_key, name=name, price=29900, url="u")
         d = Deal(p, v, affiliate_url=LINK)
         post = pub.render(d)
-        seen_hooks.add(post.split("\n")[0])
+        assert post.split("\n")[0] == f"[광고·{disclosure_program(shop.disclosure)} 수수료 받음]"  # 첫 줄 = 광고 표시 (10/15)
+        seen_hooks.add(post.split("\n")[1])
         _assert_clean(post)
         assert len(post) <= TEXT_LIMIT
         # 공식 고지 문구는 그대로 본문 안에, 링크는 그 바로 아래 (댓글로 넘기지 않음)
@@ -111,8 +112,9 @@ def test_threads_sample_matches_the_new_layout(r: TemplateRenderer, db: Database
                            thread_take="용량 커서 사무실 책상용으로 괜찮음")
     post = pub.render(d)
     lines = post.split("\n")
-    assert lines[0] == "텀블러는 꼭 출근길에 두고 나옴" and lines[1] == ""
-    assert lines[2] == "근데 스탠리 퀜처 1.18L 29,900원" and lines[3] == "평소엔 42,000원대"
+    assert lines[0] == "[광고·쿠팡 파트너스 수수료 받음]"  # 짧은 광고 표시가 첫 줄 (주인 결정 10/15)
+    assert lines[1] == "텀블러는 꼭 출근길에 두고 나옴" and lines[2] == ""
+    assert lines[3] == "근데 스탠리 퀜처 1.18L 29,900원" and lines[4] == "평소엔 42,000원대"
     assert "용량 커서 사무실 책상용으로 괜찮음" in post
     assert post.endswith("이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n👉 https://link.coupang.com/a/sample")
     _assert_clean(post)
@@ -179,7 +181,10 @@ async def test_publisher_blocks_a_post_that_slips_through(r: TemplateRenderer, d
     d.product.extra["thread_take"] = "찾던 사람 있을 것 같아서 남겨둠"
     res = await pub.publish(d)
     assert not res.ok and "규칙 위반" in (res.error or "") and "찾던 사람" in (res.error or "") and calls == []
-    assert thread_problems("본문\n고지", disclosure="고지 문구", link=LINK) == ["제휴 고지 문구가 빠짐", "링크가 빠짐"]
+    assert thread_problems("본문\n고지", disclosure="고지 문구", link=LINK) == ["제휴 고지 문구가 빠짐", "첫 줄에 광고 표시가 없음", "링크가 빠짐"]
+    # 고지가 본문에 있어도 첫 줄에 짧은 광고 표시가 없으면 안 올림 (주인 결정 10/15 — 공정위 지침: 첫 부분)
+    assert thread_problems(f"상황 한 줄\n고지 문구\n{LINK}", disclosure="고지 문구", link=LINK) == ["첫 줄에 광고 표시가 없음"]
+    assert thread_problems(f"[광고·쿠팡 파트너스 수수료 받음]\n상황\n고지 문구\n{LINK}", disclosure="고지 문구", link=LINK) == []
     ok = sample_deal()
     assert (await pub.publish(ok)).ok and calls
 

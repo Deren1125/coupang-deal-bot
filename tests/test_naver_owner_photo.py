@@ -253,10 +253,11 @@ async def test_owner_photo_is_the_verified_photo_and_no_page_is_opened(bot, sett
     with Image.open(io.BytesIO(photo)) as im:
         r, g, b = im.convert("RGB").getpixel((500, 500))
         assert abs(r - 120) < 20 and abs(g - 80) < 20 and abs(b - 60) < 20
-    # 블로그 내보내기: Blog-Auto 는 photo_kind 'product' 만 상품 사진으로 씀
+    # 블로그 내보내기 (약속 10/15): 주인이 보낸 사진은 photo_kind 'owner' (봇이 확인한 사진은 'verified'), 기다릴 일 없음
     bot.export_published(deal, photo)
     row = json.loads((settings.data_dir / "published_deals.jsonl").read_text(encoding="utf-8").splitlines()[-1])
-    assert row["photo_kind"] == "product" and row["photo_src"] == "owner" and Path(row["photo_file"]).exists()
+    assert row["photo_kind"] == "owner" and row["photo_src"] == "owner" and Path(row["photo_file"]).exists()
+    assert row["photo_wait_until"] is None and row["text_card_file"] == ""
     assert Path(row["photo_file"]).parent == settings.data_dir / "media" / "export"
     # 사진 파일이 사라졌으면(정리됨) 사진 없는 네이버 딜과 같다 — 찾지 않는다: 스토어 페이지·크롬·뽐뿌 썸네일 모두 안 엶 (검토 지적)
     for f in _owner_files(settings):

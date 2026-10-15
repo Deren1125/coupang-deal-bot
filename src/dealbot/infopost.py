@@ -333,6 +333,8 @@ class InfoPostBuilder:
             "links": links,
             "source_url": p.extra.get("post_url") or p.url,
             "source_name": p.extra.get("source_label") or p.source,
+            # 딜 글 둘째 줄의 광고 표시와 같은 자리. 정보 글은 수수료 링크가 없어 비움 (info_post.j2)
+            "ad_line": None,
         }
 
     def render(self, template: str, deal: Deal, body: PostBody, *, autoescape: bool) -> str:
