@@ -1,6 +1,6 @@
 """일요일 텔레그램 'TOP5 + 투표 결과' (주인 결정 10/15, 2단계).
 
-일요일 20:00~21:00 의 아무 분에 한 번 (publish.weekly_top.window): 지난 7일 채널에 실제로 올린 상품 딜 중 점수 높은 5개와
+일요일 20:00~21:00 의 아무 분에 한 번 (publish.weekly_top.window): 지난 7일 채널에 실제로 올린 상품 딜 중 점수 높은 5개(품절로 기록된 딜 빼고)와
 그 주의 스레드 투표 결과. 둘 다 없으면 올리지 않는다. 구매 링크가 있으면 둘째 줄 짧은 광고 표시 + 끝 전체 고지 (딜 글과 같은 규칙).
 """
 
@@ -29,6 +29,7 @@ def weekly_context(bot: Any, now: datetime) -> dict[str, Any] | None:
     items = [
         it for it in bot.db.published_items_between(since, now + timedelta(seconds=1), include_dry_run=bot.state.dry_run)
         if it.deal.product.deal_kind != "info" and (it.deal.affiliate_url or it.deal.product.url)
+        and not bot.known_sold_out(it.product_id)  # 채널에 품절로 표시한 딜에 '구매하러 가기' 를 달지 않게 (인스타 TOP5 와 같은 규칙)
     ]
     best: dict[str, Any] = {}
     for it in sorted(items, key=lambda x: x.score, reverse=True):  # 같은 상품은 한 번 (점수 높은 쪽)

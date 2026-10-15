@@ -20,6 +20,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dealbot.config import ThreadsConfig
+from dealbot.media.card import NEUTRAL_CTA
 from dealbot.models import Deal, Product, PublishResult
 from dealbot.monitoring.admin import kakao_fit
 from dealbot.publisher.scopes import THREADS_READ_REPLIES
@@ -61,6 +62,7 @@ class ThreadsFlow:
     def __init__(self, bot: Any) -> None:
         self.bot = bot
         self._failed_at: datetime | None = None
+        self._posting: set[int] = set()  # 이 프로세스가 지금 올리는 글 (그 밖의 'posting' 은 재시작으로 끊긴 글)
 
     @property
     def cfg(self) -> ThreadsConfig:
@@ -121,6 +123,9 @@ class ThreadsFlow:
             return False
         now = now or bot.clock()
         ttl = timedelta(hours=self.cfg.rhythm.queue_ttl_hours)
+        for pid in bot.db.threads_fail_stale_posting(self._posting, now):  # 올리다 끊긴 글 (재시작) — 두 번 올리지 않음
+            bot.db.sns_log_add("threads", "failed", product_id=pid, reason="maybe posted (stopped while posting)", now=now)
+            log.warning("threads job for %s was cut off while posting — not retried (it may be on threads already)", pid)
         for pid in bot.db.threads_expire(now - ttl, now):  # 하루 0개 알림의 이유에 남김
             bot.db.sns_log_add("threads", "skipped", product_id=pid, reason="waited too long", now=now)
             log.info("threads queue: dropped %s (waited over %gh)", pid, self.cfg.rhythm.queue_ttl_hours)
@@ -144,6 +149,17 @@ class ThreadsFlow:
 
     # ------------------------------------------------------------ 올리기
     async def post_job(self, job: ThreadsJob, now: datetime) -> PublishResult:
+        bot = self.bot
+        # API 를 부르기 전에 'posting' 으로 — 올리는 사이에 꺼지면 다음 tick 이 실패로 정리하고 다시 올리지 않는다 (인스타 대기열과 같은 방식)
+        if not bot.db.threads_claim(job.id, now):
+            return PublishResult(ok=False, error="skipped")  # 이미 다른 쪽이 올리는 중이거나 내려진 글
+        self._posting.add(job.id)
+        try:
+            return await self._post_claimed(job, now)
+        finally:
+            self._posting.discard(job.id)
+
+    async def _post_claimed(self, job: ThreadsJob, now: datetime) -> PublishResult:
         bot = self.bot
         try:
             if job.kind == KIND_DEAL:
@@ -196,7 +212,8 @@ class ThreadsFlow:
         card_url = None
         if not job.payload.get("has_photo") or not p.image_url:
             # 확인된 상품 사진이 없는 딜: 글만 올리지 않고 봇이 만든 4:5 글자 카드 (상품명·가격 같은 사실만, 주인 결정 10/15)
-            card_url = await bot.make_card(deal, None, deal_no=bot._page_deal_no(job.queue_id), text_card=True)
+            # 바닥 안내는 채널 중립 — 스레드 본문에 구매 링크가 있어 인스타용 '프로필 링크 → 핫딜 페이지' 는 맞지 않음
+            card_url = await bot.make_card(deal, None, deal_no=bot._page_deal_no(job.queue_id), text_card=True, cta=NEUTRAL_CTA)
         return await bot.threads.publish(deal, fallback_image_url=card_url, topic_tag=topic_tag(self.cfg, p))
 
     async def _post_poll(self, job: ThreadsJob, now: datetime) -> PublishResult:

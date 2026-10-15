@@ -132,6 +132,8 @@ def deal_spec(info: CardInfo, photo: bytes | None, *, tag: str | None = None, he
               footer: str | None = None) -> SlideSpec:
     """딜 하나 장 (B 카드·캐러셀 딜 장): 위 고지 띠, 이름 + 작은 사진, 표(가격 크게 → 1개당 → 비교 → 기록 …), 바닥 구매 안내."""
     rows = deal_rows(info)
+    if footer is None and info.cta is not None:
+        footer = info.cta  # 인스타 밖(블로그·스레드) 카드: 채널 중립 안내
     if footer is None:
         footer = f"구매 링크: 프로필 링크 → 핫딜 페이지 #{info.deal_no}" if info.deal_no else "구매 링크는 프로필 링크에서"
     return SlideSpec(
@@ -145,6 +147,25 @@ def deal_spec(info: CardInfo, photo: bytes | None, *, tag: str | None = None, he
         photo=photo,
         alt=alt_text(info, rows),
     )
+
+
+@dataclass(slots=True)
+class FirstPart:
+    """B 가 아닌 카드 양식(current·A·C, 그 양식의 사진 없는 글자 카드)의 첫 부분에 그리는 글 (올리기 전 검사용).
+    이 양식들은 고지 줄이 바닥의 작은 글씨에만 있거나(A·C·글자 카드) 아예 없어서(current) 첫 부분 고지가 없다."""
+
+    lines: list[str]
+
+    def texts(self) -> list[str]:
+        return [t for t in self.lines if t]
+
+
+def drawn_first_part(layout: str, info: CardInfo, photo: bytes | None) -> SlideSpec | FirstPart:
+    """딜 하나짜리 인스타 카드에서 고지가 있어야 할 첫 부분의 글 (insta_style.validate 의 slides 로).
+    B: 캐러셀 딜 장과 같은 그림(deal_spec) — 위 고지 띠가 첫 부분. 다른 양식: 위 칩·상품명·가격뿐 (고지는 바닥이라 첫 부분이 아님)."""
+    if layout == "B":
+        return deal_spec(info, photo)
+    return FirstPart([BRAND, info.name, f"{info.price:,}원" if info.price else ""])
 
 
 # ---------------------------------------------------------------- 그리기 보조

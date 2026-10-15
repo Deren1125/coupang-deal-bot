@@ -347,6 +347,10 @@ def baseline(values: Sequence[int]) -> int | None:
     return round(statistics.median(values)) if len(values) >= 2 else None
 
 
+UNIT_FIND = "구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로"
+UNIT_FIND_OLD = "구매 링크: #번호 딜은 프로필 링크 → 핫딜 페이지에서 (지난 딜은 내려감)"
+
+
 def unit_caption(rows_by_title: dict[str, list[UnitRow]], baselines: list[tuple[str, str, int, int]], deals: Sequence[Deal],
                  registry: Any, *, since: datetime, until: datetime) -> str:
     """단가표 본문: 첫 줄 고지, 제목(기간), 종류마다 낮은 순, 기준선, 몰 고지 원문, 해시태그."""
@@ -359,13 +363,17 @@ def unit_caption(rows_by_title: dict[str, list[UnitRow]], baselines: list[tuple[
         lines.append(f"[{title}]")
         for r in rows:
             head = f"#{r.deal_no} " if r.deal_no else "· "
-            lines.append(f"{head}{r.name} {r.price:,}원 → {r.kind} {r.label} {r.value:,}원")
+            tail = "" if r.deal_no else " (지난 딜)"
+            lines.append(f"{head}{r.name} {r.price:,}원 → {r.kind} {r.label} {r.value:,}원{tail}")
         lines.append("")
     if baselines:
         lines.append("이 가격 밑이면 사도 되는 기준선 (최근 우리가 올린 딜의 가운데 값)")
         lines += [f"· {kind} {label} {value:,}원 (딜 {n}건)" for kind, label, value, n in baselines]
         lines.append("")
-    lines += [AS_OF_LINE, "구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로 찾아 주세요", TELEGRAM_LINE]
+    old = any(r.deal_no is None for rows in rows_by_title.values() for r in rows)
+    find = ("구매 링크: 프로필 링크 → 핫딜 페이지에서 #번호로 찾아 주세요 (번호 없는 지난 딜은 핫딜 페이지에서 내려갔어요)" if old
+            else "구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로 찾아 주세요")
+    lines += [AS_OF_LINE, find, TELEGRAM_LINE]
     disclosures = full_disclosures(deals, registry)
     if disclosures:
         lines += ["", *disclosures]

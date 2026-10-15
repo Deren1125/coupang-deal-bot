@@ -202,8 +202,14 @@ async def test_no_photo_text_card_option_makes_a_clean_card(bot, ig_post_now, st
                      url="https://www.coupang.com/vp/products/6", image_url=None), DealVerdict(is_deal=True))
     await bot._publish_side_channels(d, photo=None, deal_no=6)
     await ig_post_now(bot)
-    assert spy.saved == [None] and len(spy.posted) == 1 and (spy.posted[0] or "").endswith(".jpg")
-    assert not any("skipped" in m for m in _ig_events(bot))
+    if style == "B":
+        assert spy.saved == [None] and len(spy.posted) == 1 and (spy.posted[0] or "").endswith(".jpg")
+        assert not any("skipped" in m for m in _ig_events(bot))
+    else:
+        # 바뀜 (IG-4): 딜 하나짜리 글도 카드에 그리는 글을 검사한다. current·A·C(와 그 글자 카드)는 고지 줄이 바닥에만 있거나
+        # 없어서 첫 부분 고지가 없음 → 카드를 만들기 전에 막고 사유를 남긴다 (예전엔 본문만 검사해 그대로 올라갔음)
+        assert spy.saved == [] and spy.posted == []
+        assert "1번째 장에 광고·수수료 고지가 없음" in (bot.db.ig_item(1)["reason"] or "")
 
 
 async def test_publish_hands_the_telegram_photo_to_instagram(bot) -> None:  # type: ignore[no-untyped-def]

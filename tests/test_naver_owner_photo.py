@@ -452,6 +452,11 @@ async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_fo
     assert await bot.process_queue_once()
     assert bot.db.get_queue_item(qid).status == "published"
     assert got == {"photo": None, "image": None} and opened == [] and fetched == []
+    # 바뀜 (IG-1): 사진 없이 올라간 딜은 주인 사진을 기다리는 동안(📷 사진 필요, 4시간) 인스타 딜 글을 미룬다
+    assert bot.late_photo_waiting(qid)
+    assert await ig_post_now(bot) is None and spy.saved == [] and spy.posted == []
+    info = json.loads(bot.db.kv_get(f"late_photo:{qid}"))
+    bot.db.kv_set(f"late_photo:{qid}", json.dumps({**info, "until": "2000-01-01T00:00:00+00:00"}))  # 사진 없이 기다림이 끝남
     await ig_post_now(bot)
     assert spy.saved == [None] and len(spy.posted) == 1  # 인스타: 글자 카드 (대기열 → 시간표)
     # 텔레그램: 사진도 주소도 없으면 미리보기를 끈다 (스토어 og:image 가 미리보기로 붙지 않게)

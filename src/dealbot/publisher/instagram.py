@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -36,6 +37,8 @@ TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 # 통계(인사이트) 권한도 받아 둔다 (주인 결정 10/15). 메타 앱 Instagram 사용 사례에 주인이 먼저 더해야 하고(docs/SETUP_KEYS.md),
 # 없는 토큰이어도 발행은 그대로 — 대시보드 조회수만 '권한 필요' (scopes.py)
 SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights"
+# 메타 앱에 통계 권한을 아직 안 넣었을 때 ('Invalid Scopes') 다시 연결할 수 있는 예전 권한 — 올리기만
+BASIC_SCOPES = "instagram_business_basic,instagram_business_content_publish"
 CAPTION_LIMIT = 2200
 
 CHECK_FAILED = "올리기 전 검사 실패"  # PublishResult.error 머리말 — 실패 알림이 아니라 건너뜀 기록으로
@@ -81,11 +84,11 @@ class InstagramToken:
     expires_at: datetime | None = None
 
 
-def authorize_url(app_id: str, redirect_uri: str, state: str = "dealbot") -> str:
+def authorize_url(app_id: str, redirect_uri: str, state: str = "dealbot", *, scopes: str = SCOPES) -> str:
     params = {
         "client_id": app_id,
         "redirect_uri": redirect_uri,
-        "scope": SCOPES,
+        "scope": scopes,
         "response_type": "code",
         "state": state,
         "enable_fb_login": "0",
@@ -456,12 +459,13 @@ class InstagramPublisher:
         text = self.renderer.render_deal(deal, link, shop=shop, template=template, autoescape=False, extra=extra)[:CAPTION_LIMIT]
         return text, insta_style.backed_phrases(info), alt_text(info)
 
-    def check(self, deal: Deal, *, deal_no: int | None = None) -> list[str]:
-        """올리기 전 검사 (첫 줄 고지·근거 없는 '최저가'·'역대'). 문제 목록."""
+    def check(self, deal: Deal, *, deal_no: int | None = None, slides: Sequence[Any] = ()) -> list[str]:
+        """올리기 전 검사 (첫 줄 고지·근거 없는 '최저가'·'역대'). 문제 목록.
+        slides: 카드에 그리는 글 (ig_scheduler.single_slide — 카드 첫 부분 고지·카드 글의 근거 없는 말도 같이 검사)."""
         from dealbot.publisher import insta_style
 
         caption, allowed, _ = self._render(deal, deal_no=deal_no)
-        return insta_style.validate(caption, allowed=allowed)
+        return insta_style.validate(caption, slides=slides, allowed=allowed)
 
     async def publish(self, deal: Deal, image_url: str | None, *, deal_no: int | None = None) -> PublishResult:
         from dealbot.publisher import insta_style

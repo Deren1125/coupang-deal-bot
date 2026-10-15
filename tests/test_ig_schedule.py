@@ -203,7 +203,9 @@ async def test_queue_expires_after_twelve_hours_and_a_cut_off_post_is_not_retrie
     rows = {r["product_id"]: r for r in (bot.db.ig_item(i) for i in (1, 2))}
     assert (rows["coupang:1"]["status"], rows["coupang:1"]["reason"]) == ("expired", "waited too long")
     assert rows["coupang:2"]["status"] == "failed" and "maybe posted" in rows["coupang:2"]["reason"]
-    assert singles(bot) == []
+    # 바뀜 (IG-5): 올리다 끊긴 글은 인스타에 올라갔을 수도 있어 하루 개수·간격에 센다 ('maybe' 기록 — 예전엔 아무것도 안 남겼음)
+    assert singles(bot) == ["coupang:2"]
+    assert bot.db.ig_posts_since(at(0), kind="single")[0]["items"][0]["maybe"] is True
 
 
 async def test_recheck_right_before_posting_skips_sold_out_and_price_rises(bot, clock) -> None:  # type: ignore[no-untyped-def]
@@ -700,3 +702,217 @@ async def test_late_owner_photo_reaches_the_waiting_instagram_item(bot, clock) -
     row = bot.db.ig_queued()[0]
     assert Path(row["photo_file"]).read_bytes() == photo
     assert bot.ig.attach_photo(qid, _jpeg()) == 0  # 이미 사진이 있으면 덮지 않음
+
+
+# ---------------------------------------------------------------- 검토 뒤 고침 (IG-1~7)
+def _owner_photo(color: tuple[int, int, int] = (200, 80, 60)) -> Any:
+    async def load() -> tuple[bytes | None, str]:
+        out = io.BytesIO()
+        Image.new("RGB", (1000, 800), color).save(out, "JPEG")
+        return out.getvalue(), ""
+
+    return load
+
+
+async def test_photoless_single_waits_for_the_late_owner_photo_while_photo_deals_go_first(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """IG-1: 사진 없이 올라간 딜은 주인 사진을 기다리는 4시간 동안 인스타 딜 글을 미룬다 (예전엔 몇 분 만에 글자 카드로 올라가
+    주인에게 '인스타에 이 사진을 써요' 라고 한 뒤에도 그 사진이 안 들어갔다). 사진 있는 딜은 그 사이 먼저."""
+    _plan(bot, {})
+    q_a, a = published(bot, "coupang:A", "사진 없는 딜", 9900, when=at(9), score=90)
+    q_b, b = published(bot, "coupang:B", "사진 있는 딜", 9900, when=at(9), score=10)
+    clock["now"] = at(9)
+    await bot._ask_late_photo(q_a, a, None, bot.export_published(a, None))
+    await to_instagram(bot, clock, q_a, a)
+    await to_instagram(bot, clock, q_b, b, photo=_jpeg())
+    assert await tick(bot, clock, at(9, 1)) == "single: coupang:B"  # 점수는 A 가 높아도 사진을 기다리는 중
+    assert await tick(bot, clock, at(11, 5)) is None  # 2시간 지났어도 A 는 아직 기다림 (13:00 까지)
+    clock["now"] = at(11, 10)
+    reply = await bot.attach_late_photo(q_a, _owner_photo())
+    assert "블로그·인스타에 이 사진을 써요" in reply
+    made: list[bytes | None] = []
+    make_card = bot.make_card
+
+    async def spy(deal: Deal, photo: bytes | None, **kw: Any) -> str | None:
+        made.append(photo)
+        return await make_card(deal, photo, **kw)
+
+    bot.make_card = spy
+    assert await tick(bot, clock, at(11, 11)) == "single: coupang:A"
+    assert made and made[0] is not None  # 주인 사진으로 (글자 카드가 아니라)
+
+
+async def test_photoless_single_posts_a_text_card_after_the_wait(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    _plan(bot, {})
+    qid, deal = published(bot, "coupang:1", "사진 없는 딜", 9900, when=at(9))
+    clock["now"] = at(9)
+    await bot._ask_late_photo(qid, deal, None, bot.export_published(deal, None))
+    await to_instagram(bot, clock, qid, deal)
+    assert await tick(bot, clock, at(12, 59)) is None
+    assert await tick(bot, clock, at(13, 1)) == "single: coupang:1"  # 4시간 뒤 사진이 안 왔으면 글자 카드로
+    assert bot.db.ig_item(1)["photo_file"] is None
+
+
+async def test_photo_wait_never_outlives_the_instagram_queue(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    bot.settings.publish.late_photo_hours = 12  # 대기열 시간(12시간)과 같으면 기다리다 버려지지 않게 그 앞에서 멈춤
+    bot.settings.instagram.hours = "00:00-24:00"
+    _plan(bot, {})
+    qid, deal = published(bot, "coupang:1", "사진 없는 딜", 9900, when=at(8))
+    clock["now"] = at(8)
+    await bot._ask_late_photo(qid, deal, None, bot.export_published(deal, None))
+    await to_instagram(bot, clock, qid, deal)
+    assert await tick(bot, clock, at(19, 20)) is None
+    assert await tick(bot, clock, at(19, 31)) == "single: coupang:1"
+
+
+async def test_late_photo_reply_says_when_the_instagram_single_already_went_up(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """IG-1: 이미 글자 카드로 올라간 인스타 딜 글은 사진을 바꿀 수 없다 — 답장도 그렇게 말한다."""
+    _plan(bot, {})
+    qid, deal = published(bot, "coupang:1", "사진 없는 딜", 9900, when=at(9))
+    await to_instagram(bot, clock, qid, deal)  # 사진 부탁 전에 줄 섬 (예전 순서)
+    assert await tick(bot, clock, at(9, 1)) == "single: coupang:1"
+    clock["now"] = at(9, 2)
+    await bot.late_photo.ask(qid, deal, at(9))
+    reply = await bot.attach_late_photo(qid, _owner_photo())
+    assert reply.startswith(f"✅ #{qid} 사진을 받았어요") and "인스타 딜 글은 이미 글자 카드로 올라갔어요" in reply
+    assert "블로그·인스타에" not in reply
+
+
+async def test_publish_records_the_photo_wait_before_queueing_for_instagram(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """발행 흐름: 사진 기다림 기록(📷 사진 필요)이 인스타 대기열에 넣기 전에 — 그 사이 시간표가 돌아도 글자 카드로 먼저 안 올라감."""
+    order: list[str] = []
+    ask, side = bot._ask_late_photo, bot._publish_side_channels
+
+    async def ask_spy(*a: Any, **kw: Any) -> None:
+        order.append("ask")
+        await ask(*a, **kw)
+
+    async def side_spy(*a: Any, **kw: Any) -> None:
+        order.append("side")
+        await side(*a, **kw)
+
+    bot._ask_late_photo, bot._publish_side_channels = ask_spy, side_spy
+    bot.state.dry_run = False
+    bot.publisher.dry_run = False
+    bot.settings.publish.min_interval_seconds = 0
+
+    async def fake_publish(deal: Deal, **kw: Any) -> PublishResult:
+        return PublishResult(ok=True, message_id=1)
+
+    bot.publisher.publish = fake_publish
+    d = Deal(Product(source="goldbox", product_id="coupang:o1", shop="coupang", name="무선 청소기", price=99000,
+                     url="https://shop.example.com/o1"), DealVerdict(is_deal=True, score=40))
+    assert bot.db.enqueue(d, score=40, now=at(9))
+    assert await bot.process_queue_once()
+    assert order == ["ask", "side"]
+
+
+def test_unit_carousel_slot_is_picked_apart_from_top5(bot) -> None:  # type: ignore[no-untyped-def]
+    """IG-2: 단가표 분은 TOP5 와 떨어진 분 중에서 바로 고른다 (예전엔 60번 다시 뽑고도 안 되면 한 시간 안이어도 그대로 썼다).
+    구간이 붙어 있어(19~20시·20~21시) 2시간은 안 되지만 1시간은 늘 넘고, 구간이 허락하면 인스타 글 간격(2시간)도 지킨다."""
+    m = lambda s: int(s[:2]) * 60 + int(s[3:])  # noqa: E731
+    tue = DAY.replace(hour=8)
+    for seed in range(400):
+        bot.ig.rng = random.Random(seed)
+        bot.db.kv_set(f"ig_plan:{tue.date().isoformat()}", "")
+        plan = bot.ig.plan(tue)
+        assert "19:00" <= plan["unit"] < "20:00" and abs(m(plan["top5"]) - m(plan["unit"])) >= 60, (seed, plan)
+    bot.settings.instagram.unit_carousel.window = "17:00-19:00"
+    for seed in range(200):
+        bot.ig.rng = random.Random(seed)
+        bot.db.kv_set(f"ig_plan:{tue.date().isoformat()}", "")
+        plan = bot.ig.plan(tue)
+        assert abs(m(plan["top5"]) - m(plan["unit"])) >= bot.settings.instagram.min_gap_minutes, (seed, plan)
+
+
+async def test_cheaper_repost_replaces_the_waiting_instagram_item(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """IG-3: 같은 상품이 더 싸게 다시 채널에 올라오면 기다리던 인스타 줄을 새 딜(가격·번호)로 바꾼다 — 예전 값·번호로 올라가지 않게."""
+    _plan(bot, {})
+    old_q, old = published(bot, "coupang:1", "도브 샴푸 680ml 2개", 15900, when=at(8))
+    await to_instagram(bot, clock, old_q, old, photo=_jpeg())
+    new_q, new = published(bot, "coupang:1", "도브 샴푸 680ml 2개", 13900, when=at(8, 30))
+    await to_instagram(bot, clock, new_q, new)
+    rows = bot.db.ig_queued()
+    assert len(rows) == 1 and rows[0]["queue_id"] == new_q and rows[0]["deal"].product.price == 13900
+    assert rows[0]["photo_file"]  # 새 글에 사진이 없으면 같은 상품의 원래 사진 그대로
+    assert await tick(bot, clock, at(9)) == "single: coupang:1"
+    assert bot.db.ig_posts_since(at(0), kind="single")[0]["items"] == [{"product_id": "coupang:1", "queue_id": new_q}]
+
+
+def test_single_post_checks_the_text_drawn_on_the_card(bot) -> None:  # type: ignore[no-untyped-def]
+    """IG-4: 딜 하나짜리 글도 카드에 그리는 글을 검사한다. B 는 위 고지 띠가 첫 부분 → 통과,
+    current·A·C 는 고지가 바닥 작은 줄뿐이거나 없음 → 막힘 (예전엔 본문만 검사)."""
+    deal = Deal(Product(source="goldbox", product_id="coupang:1", shop="coupang", name="크리넥스 3겹 30m 30롤", price=15900,
+                        url="https://shop.example.com/1"), DealVerdict(is_deal=True))
+    for layout, ok in (("B", True), ("A", False), ("C", False), ("current", False)):
+        bot.card.layout = layout
+        slide = bot.ig.single_slide(deal, None, deal_no=3)
+        problems = bot.instagram.check(deal, deal_no=3, slides=[slide])
+        assert (not problems) is ok, (layout, problems)
+        if not ok:
+            assert any("1번째 장에 광고·수수료 고지가 없음" in p for p in problems)
+    bot.card.layout = "B"
+    assert bot.ig.single_slide(deal, None, deal_no=3).texts()[0].startswith("광고 · ")
+
+
+async def test_cut_off_single_counts_toward_the_gap_and_the_daily_cap(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """IG-5: 올리다 끊긴 글(재시작)은 인스타에 올라갔을 수 있다 — 간격·하루 개수에 세어 바로 다음 글이 붙어 나가지 않게."""
+    _plan(bot, {})
+    q1, d1 = published(bot, "coupang:1", "끊긴 딜", 9900, when=at(8))
+    await to_instagram(bot, clock, q1, d1)
+    q2, d2 = published(bot, "coupang:2", "다음 딜", 9900, when=at(8))
+    await to_instagram(bot, clock, q2, d2)
+    bot.db.ig_update(1, status="posting", now=at(9))  # 09:00 에 올리기 시작했다가 재시작
+    assert await tick(bot, clock, at(9, 5)) is None  # 끊긴 글을 정리하고, 그 글에서 2시간 안이라 안 올림
+    assert bot.db.ig_last_post_at() == at(9)
+    assert await tick(bot, clock, at(11, 1)) == "single: coupang:2"
+
+
+def test_unit_carousel_marks_past_deals_without_a_page_number(bot) -> None:  # type: ignore[no-untyped-def]
+    """IG-6: 단가표는 지난 7일 딜이라 핫딜 페이지(48시간)에서 내려간 딜도 있다 — 번호 없는 줄은 '지난 딜' 로, 찾는 안내도 그에 맞게."""
+    from dealbot.publisher.insta_style import UnitRow
+
+    def row(no: int | None, pid: str) -> UnitRow:
+        return UnitRow(title="휴지·물티슈", kind="휴지", label="1롤당", value=530, name=f"상품 {pid}", price=15900, deal_no=no,
+                       posted=at(9), product_id=pid)
+
+    local = DAY.replace(hour=19)
+    since = local - timedelta(days=7)
+    week = {"휴지·물티슈": [row(12, "coupang:1"), row(None, "coupang:2")]}
+    specs = bot.ig.unit_specs(week, [], [], local, since)
+    items = [a for a, _b, _c in specs[1].items]
+    assert items == ["#12 상품 coupang:1", "상품 coupang:2 (지난 딜)"]
+    assert specs[0].footer == specs[1].footer == insta_style.UNIT_FIND_OLD
+    caption = insta_style.unit_caption(week, [], [], bot.registry, since=since, until=local)
+    assert "(지난 딜)" in caption and "번호 없는 지난 딜은 핫딜 페이지에서 내려갔어요" in caption
+    only_new = {"휴지·물티슈": [row(12, "coupang:1")]}
+    assert bot.ig.unit_specs(only_new, [], [], local, since)[0].footer == insta_style.UNIT_FIND
+    assert "지난 딜" not in insta_style.unit_caption(only_new, [], [], bot.registry, since=since, until=local)
+
+
+async def test_scheduled_post_crash_is_logged_and_reported(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """IG-7: 묶음 글이 발행 결과 밖에서 실패(영상 도구 오류 등)하면 sns_log(0개 알림 이유)와 주인 알림에 남는다 (예전엔 로그만)."""
+    _plan(bot, {"reel": "12:10"})
+    told: list[str] = []
+
+    async def failed(sns: str, cmd: str, tg_text: str, error: str) -> None:
+        told.append(tg_text)
+
+    async def broken(now: datetime, local: datetime) -> str:
+        raise RuntimeError("ffmpeg exited 1")
+
+    bot._sns_failed = failed
+    bot.ig._post_reel = broken
+    assert (await tick(bot, clock, at(12, 11)) or "").startswith("reel: failed: RuntimeError")
+    logged = bot.db.sns_log_since("instagram", at(0))
+    assert [(r["outcome"], r["reason"]) for r in logged] == [("failed", "reel: RuntimeError: ffmpeg exited 1")]
+    assert len(told) == 1 and "점심 릴스" in told[0] and "ffmpeg exited 1" in told[0]
+    assert await tick(bot, clock, at(12, 20)) is None and len(told) == 1  # 같은 날 다시 안 함
+
+
+async def test_unit_post_records_page_numbers_as_deal_no(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    from dealbot.publisher.insta_style import UnitRow
+
+    rows = [UnitRow(title="휴지·물티슈", kind="휴지", label="1롤당", value=530, name="상품", price=15900, deal_no=7, posted=at(9),
+                    product_id="coupang:1")]
+    await bot.ig._finish("unit", PublishResult(ok=True, dry_run=True), rows, at(19))
+    assert bot.db.ig_posts_since(at(0), kind="unit")[0]["items"] == [{"product_id": "coupang:1", "deal_no": 7}]

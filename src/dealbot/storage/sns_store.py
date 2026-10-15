@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS threads_jobs (
     queue_id         INTEGER,                    -- 딜 대기열 번호 (텔레그램 글 #번호)
     payload          TEXT NOT NULL,              -- JSON
     score            REAL NOT NULL DEFAULT 0,
-    status           TEXT NOT NULL DEFAULT 'waiting',   -- waiting | posted | skipped | failed
+    status           TEXT NOT NULL DEFAULT 'waiting',   -- waiting | posting | posted | skipped | failed
     reason           TEXT,
     post_id          TEXT,                       -- 올린 스레드 글 id
     dry_run          INTEGER NOT NULL DEFAULT 0,
@@ -126,7 +126,7 @@ class SnsStoreMixin:
         """스레드 대기열에 넣는다. 같은 상품이 이미 기다리고 있으면 넣지 않고 None."""
         ts = to_iso(now or utcnow())
         with self._lock:
-            if self._one("SELECT id FROM threads_jobs WHERE product_id = ? AND status = 'waiting'", (product_id,)):
+            if self._one("SELECT id FROM threads_jobs WHERE product_id = ? AND status IN ('waiting', 'posting')", (product_id,)):
                 return None
             cur = self._conn.execute(
                 "INSERT INTO threads_jobs (kind, product_id, queue_id, payload, score, status, created_at, updated_at) "
@@ -153,6 +153,28 @@ class SnsStoreMixin:
                 "posted_at = COALESCE(?, posted_at) WHERE id = ?",
                 (status, reason, post_id, 1 if dry_run else 0, ts, posted, job_id),
             )
+
+    def threads_claim(self, job_id: int, now: datetime | None = None) -> bool:
+        """올리기 직전: 기다리던 글을 'posting' 으로 (API 를 부르는 사이에 꺼졌다 켜져도 다시 올리지 않게). 이 글을 맡았으면 True."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE threads_jobs SET status = 'posting', updated_at = ? WHERE id = ? AND status = 'waiting'",
+                (to_iso(now or utcnow()), job_id),
+            )
+            return (cur.rowcount or 0) == 1
+
+    def threads_fail_stale_posting(self, keep: set[int], now: datetime | None = None) -> list[str]:
+        """올리다 끊긴 글(posting 인데 지금 이 프로세스가 올리는 중이 아님 — 재시작)을 실패로 ('올라갔을 수도 있음' — 다시 올리지 않음).
+        정리한 글의 상품 키 목록."""
+        with self._lock:
+            rows = [r for r in self._q("SELECT id, product_id FROM threads_jobs WHERE status = 'posting'") if int(r["id"]) not in keep]
+            if rows:
+                self._conn.execute(
+                    f"UPDATE threads_jobs SET status = 'failed', reason = 'maybe posted (stopped while posting)', updated_at = ? "
+                    f"WHERE id IN ({','.join('?' for _ in rows)})",
+                    (to_iso(now or utcnow()), *(int(r["id"]) for r in rows)),
+                )
+            return [str(r["product_id"]) for r in rows]
 
     def threads_expire(self, older_than: datetime, now: datetime | None = None) -> list[str]:
         """오래 기다린 글을 내린다 (값·재고가 바뀌었을 수 있음). 내린 글의 상품 키 목록."""

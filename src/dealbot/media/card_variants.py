@@ -179,6 +179,8 @@ def _compare(info: CardInfo) -> tuple[str, str, bool] | None:
 
 
 def _cta(info: CardInfo) -> str:
+    if info.cta is not None:  # 인스타 밖(블로그·스레드) 카드: 채널 중립 안내
+        return info.cta
     return f"구매 링크: 프로필 링크 → #{info.deal_no}" if info.deal_no else "구매 링크는 프로필 링크에서"
 
 

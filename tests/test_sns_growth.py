@@ -747,3 +747,150 @@ async def test_late_photo_records_are_pruned(bot) -> None:  # type: ignore[no-un
     await bot._ask_late_photo(qid, d, None, bot.export_published(d, None))
     assert bot.late_photo.prune(KST_NOON + timedelta(hours=5)) == 0  # 지난 지 하루 안이면 둠
     assert bot.late_photo.prune(KST_NOON + timedelta(days=2)) == 1 and not bot.late_photo_waiting(qid)
+
+
+# ================================================================ 11. 검토 뒤 고침
+def _capture_specs(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    from dealbot.media import card_slides
+
+    specs: list[Any] = []
+    render = card_slides.render
+
+    def spy(card: Any, spec: Any) -> Any:
+        specs.append(spec)
+        return render(card, spec)
+
+    monkeypatch.setattr(card_slides, "render", spy)
+    return specs
+
+
+async def test_blog_export_and_threads_cards_use_a_channel_neutral_footer(bot, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    """블로그로 내보내는 글자 카드·스레드 글자 카드에 인스타 전용 '구매 링크는 프로필 링크에서' 가 그려지지 않는다
+    (블로그·스레드엔 구매 링크가 글 안에 있다). 고지 띠는 그대로. 인스타 카드는 예전처럼 프로필 링크 안내."""
+    from dealbot.media.card import NEUTRAL_CTA
+
+    bot.card.layout = "B"
+    specs = _capture_specs(monkeypatch)
+    d = _deal("coupang:ft", name="데켓 주물팬 28cm")
+    row = bot.export_published(d, None)
+    assert row["text_card_file"] and len(specs) == 1
+    blog = specs[0]
+    assert blog.footer == NEUTRAL_CTA and blog.ad.startswith("광고 · ")
+    assert not any("프로필" in t for t in blog.texts())
+    await bot._publish_side_channels(_deal("coupang:th", name="크리넥스 30롤"), photo=None, deal_no=5)  # 스레드 글자 카드
+    assert bot.fake.posts()[-1]["media_type"] == "IMAGE"
+    th = specs[-1]
+    assert th.footer == NEUTRAL_CTA and not any("프로필" in t for t in th.texts()) and th.ad.startswith("광고 · ")
+    await bot.make_card(_deal("coupang:ig"), None, deal_no=7)  # 인스타 카드
+    assert specs[-1].footer == "구매 링크: 프로필 링크 → 핫딜 페이지 #7"
+    paths = {p.name for p in (bot.settings.data_dir / "media").glob("*.jpg")}
+    assert len(paths) == 2  # 스레드·인스타 카드는 파일도 따로 (같은 상품이어도 덮어쓰지 않음)
+
+
+def test_current_layout_card_takes_the_neutral_footer(tmp_path: Path) -> None:
+    from dealbot.media.card import NEUTRAL_CTA, DealCard
+
+    card = DealCard(tmp_path)
+    d = _deal("coupang:cur")
+    insta = card.render(d, None)
+    neutral = card.render(d, None, cta=NEUTRAL_CTA)
+    assert insta != neutral  # 바닥 안내가 다름 (current 양식도)
+
+
+async def test_threads_job_cut_off_while_posting_is_not_posted_twice(bot) -> None:  # type: ignore[no-untyped-def]
+    """스레드 글도 API 를 부르기 전에 'posting' 으로 — 올리는 사이에 꺼졌다 켜지면 다시 올리지 않고 실패('올라갔을 수도')로 정리."""
+    from dealbot.growth.threads_flow import ThreadsFlow
+
+    _at(bot, datetime(2026, 10, 14, 18, 0, tzinfo=UTC))  # 03:00 KST: 기다림
+    await bot._publish_side_channels(_deal("coupang:c1"), photo=_jpeg(), deal_no=1)
+    job = bot.db.threads_waiting()[0]
+    assert bot.db.threads_claim(job.id)  # 올리던 중 (재시작 전 프로세스)
+    assert not bot.db.threads_claim(job.id)  # 두 번 맡지 않음
+    assert not bot.db.threads_waiting()
+    await bot._publish_side_channels(_deal("coupang:c1"), photo=_jpeg(), deal_no=1)
+    assert not bot.db.threads_waiting()  # 올리는 중인 상품은 다시 줄 서지 않음
+    bot.threads_flow = ThreadsFlow(bot)  # 재시작
+    morning = datetime(2026, 10, 14, 22, 0, tzinfo=UTC)
+    assert not await bot.threads_flow.tick(morning)
+    assert bot.fake.posts() == [] and bot.db.threads_job(job.id).status == "failed"
+    assert "maybe posted" in (bot.db.threads_job(job.id).reason or "")
+    logged = bot.db.sns_log_since("threads", morning - timedelta(days=1))
+    assert [(r["outcome"], r["product_id"]) for r in logged] == [("failed", "coupang:c1")]
+
+
+async def test_threads_tick_does_not_fail_a_post_this_process_is_making(bot) -> None:  # type: ignore[no-untyped-def]
+    _at(bot, datetime(2026, 10, 14, 18, 0, tzinfo=UTC))
+    await bot._publish_side_channels(_deal("coupang:c2"), photo=_jpeg(), deal_no=2)
+    job = bot.db.threads_waiting()[0]
+    seen: list[str] = []
+    publish = bot.threads.publish
+
+    async def slow(deal: Deal, **kw: Any) -> PublishResult:
+        seen.append(bot.db.threads_job(job.id).status)
+        assert bot.db.threads_fail_stale_posting(bot.threads_flow._posting) == []  # 다른 tick 이 이 사이에 돌아도
+        return await publish(deal, **kw)
+
+    bot.threads.publish = slow
+    _at(bot, datetime(2026, 10, 14, 22, 0, tzinfo=UTC))
+    assert await bot.threads_flow.tick()
+    assert seen == ["posting"] and bot.db.threads_job(job.id).status == "posted" and len(bot.fake.posts()) == 1
+
+
+async def test_weekly_top_leaves_out_deals_marked_sold_out(bot) -> None:  # type: ignore[no-untyped-def]
+    """일요일 텔레그램 TOP5 도 채널에 품절로 표시한 딜에 '구매하러 가기' 를 달지 않는다 (인스타 TOP5 와 같은 규칙)."""
+    sunday = datetime(2026, 10, 18, 11, 59, tzinfo=UTC)
+    for i, pid in enumerate(("coupang:s0", "coupang:s1", "coupang:s2")):
+        d = _deal(pid, score=50 - i, name=f"상품 {i}")
+        assert bot.db.enqueue(d, score=50 - i, now=sunday - timedelta(days=2))
+        qid = max(it.id for it in bot.db.pending_items(10))
+        bot.db.update_queue_item(qid, status="published", deal=d)
+        bot.db.record_post(d, channel_id="-1001", message_id=i + 1, now=sunday - timedelta(days=2))
+    bot.db.kv_set("soldout_marked:coupang:s0", (sunday - timedelta(days=1)).isoformat())  # 채널 글에 품절 표시
+    bot.mark_sold_out_seen("coupang:s2", sunday - timedelta(hours=3))  # 스레드가 올리기 직전에 품절을 봄
+    ctx = weekly.weekly_context(bot, sunday)
+    assert ctx is not None and [x["name"] for x in ctx["deals"]] == ["상품 1"]
+
+
+async def test_late_photo_window_closes_a_little_early(bot) -> None:  # type: ignore[no-untyped-def]
+    """Blog-Auto 는 photo_wait_until 이 지나면 글자 카드로 넘어간다 — 사진 받기(내려받기·검사·내보내기)가 그 뒤에 끝나
+    '블로그에 써요' 라고 해 놓고 못 쓰는 일이 없게 받는 창을 조금 일찍 닫고, 받는 사이에 시간이 지나면 받지 않는다."""
+    from dealbot.growth.late_photo import CLOSE_EARLY
+
+    d = _deal("coupang:edge")
+    qid = _publish(bot, "coupang:edge", KST_NOON)
+    row = bot.export_published(d, None)
+    await bot._ask_late_photo(qid, d, None, row)
+    until = datetime.fromisoformat(row["photo_wait_until"])
+    _at(bot, until - CLOSE_EARLY - timedelta(seconds=1))
+    assert bot.late_photo_waiting(qid)
+    _at(bot, until - timedelta(seconds=30))
+    assert not bot.late_photo_waiting(qid)
+
+    async def load() -> tuple[bytes | None, str]:
+        return _jpeg(1000, 800), ""
+
+    assert "시간이 지나" in await bot.attach_late_photo(qid, load)
+    times = iter([until - CLOSE_EARLY - timedelta(seconds=5), until + timedelta(seconds=1)])
+    bot.clock = lambda: next(times, until + timedelta(seconds=1))  # 받는(검사) 사이에 기다림이 끝남
+
+    rows_before = (bot.settings.data_dir / "published_deals.jsonl").read_text(encoding="utf-8").count("\n")
+    assert "시간이 지나" in await bot.attach_late_photo(qid, load)
+    assert (bot.settings.data_dir / "published_deals.jsonl").read_text(encoding="utf-8").count("\n") == rows_before
+
+
+async def test_auth_links_offer_a_basic_scope_fallback(bot) -> None:  # type: ignore[no-untyped-def]
+    """새 권한(통계·답글 읽기)을 메타 앱에 아직 안 넣어 'Invalid Scopes' 가 떠도 다시 연결할 수 있게 예전 권한 링크도 같이 준다."""
+    from urllib.parse import parse_qs, urlsplit
+
+    sec = bot.settings.secrets
+    sec.threads_app_id, sec.threads_app_secret = "TAPP", "TS"
+    sec.instagram_app_id, sec.instagram_app_secret = "IAPP", "IS"
+    bot.db.kv_set(KV_TOKEN, "")
+    for msg, full, basic in ((await bot.threads_auth_url(), th_mod.SCOPES, th_mod.BASIC_SCOPES),
+                             (await bot.instagram_auth_url(), ig_mod.SCOPES, ig_mod.BASIC_SCOPES)):
+        links = [ln for ln in msg.splitlines() if ln.startswith("https://") and "oauth/authorize" in ln]
+        assert len(links) == 2, msg
+        scopes = [parse_qs(urlsplit(link).query)["scope"][0] for link in links]
+        assert scopes == [full, basic]
+        assert set(basic.split(",")) < set(full.split(","))
+        assert "insights" not in basic and "read_replies" not in basic

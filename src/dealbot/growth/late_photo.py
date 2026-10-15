@@ -5,6 +5,10 @@
 링크와 같이 보내는 네이버 딜 사진과 같은 검사(형식·EXIF 방향·크기·짧은 변 600px)를 거쳐 그 딜의 상품 사진이 되고,
 Blog-Auto 가 읽는 published_deals.jsonl 에 사진이 바뀐 줄을 하나 더 쓴다 (같은 product_id·posted_at, photo_kind 'owner').
 채널 글은 이미 올라갔으니 고치지 않는다.
+인스타: 기다리는 동안 인스타 시간표는 사진 없는 딜 글을 미루고(ig_scheduler — 사진 있는 딜이 먼저), 사진이 오면 그 사진으로 올린다.
+이미 글자 카드로 올라간 뒤면 답장에 그렇게 적는다.
+받는 창은 photo_wait_until 보다 CLOSE_EARLY 만큼 일찍 닫는다 — Blog-Auto 는 그 시각이 지나면 글자 카드로 쓰므로
+사진 받기(텔레그램 다운로드·검사·내보내기)가 그 뒤에 끝나 '블로그에 써요' 라고 해 놓고 못 쓰는 일이 없게.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from dealbot.utils.timeutil import from_iso, to_iso
 log = logging.getLogger(__name__)
 
 KV = "late_photo:"  # late_photo:{딜 번호} → {"until", "posted_at", "product_id"}
+CLOSE_EARLY = timedelta(minutes=2)  # 받는 창을 이만큼 일찍 닫음 (Blog-Auto 가 until 에 글자 카드로 넘어가기 전에 다 받게)
 MSG_KIND = "photo_need"
 ASK = "📷 사진 필요 #{n} {name} — 4시간 안에 이 메시지에 사진을 답장하면 블로그·인스타에 그 사진을 써요"
 
@@ -68,13 +73,19 @@ class LatePhoto:
         return mid is not None
 
     def waiting(self, queue_id: int, now: datetime | None = None) -> dict[str, Any] | None:
-        """이 딜이 지금 사진을 기다리는 중이면 그 기록, 아니면 None (시간이 지났거나 받은 뒤)."""
+        """이 딜이 지금 사진을 받는 중이면 그 기록, 아니면 None (시간이 지났거나 받은 뒤). 창은 until 보다 CLOSE_EARLY 일찍 닫힘."""
         info = self._info(queue_id)
         if info is None:
             return None
         until = from_iso(info.get("until"))
         now = now or self.bot.clock()
-        return info if until is not None and now <= until else None
+        return info if until is not None and now <= until - CLOSE_EARLY else None
+
+    def until(self, queue_id: int) -> datetime | None:
+        """사진을 기다리는 딜이면 기다림이 끝나는 시각 (photo_wait_until), 아니면 None (묻지 않았거나 이미 받음).
+        인스타 시간표가 이때까지 이 딜의 사진 없는 글을 미룬다."""
+        info = self._info(queue_id)
+        return from_iso(info.get("until")) if info else None
 
     def prune(self, now: datetime | None = None) -> int:
         """시간이 지났거나 받은 사진 기다림 기록을 지운다 (유지보수, 하루 몇 개씩 쌓임)."""
@@ -105,8 +116,9 @@ class LatePhoto:
             return f"#{queue_id} 번은 사진을 기다리는 딜이 아니에요 (📷 사진 필요 메시지가 온 딜만 받아요)."
         now = bot.clock()
         until = from_iso(info.get("until"))
-        if until is None or now > until:
-            return (f"⌛ #{queue_id} 사진은 {self.hours:g}시간이 지나 받지 않았어요 — 블로그는 이미 글자 카드로 정리했을 수 있어요.")
+        late = (f"⌛ #{queue_id} 사진은 {self.hours:g}시간이 지나 받지 않았어요 — 블로그는 이미 글자 카드로 정리했을 수 있어요.")
+        if until is None or now > until - CLOSE_EARLY:
+            return late
         item = bot.db.get_queue_item(queue_id)
         if item is None or item.status != "published":
             return f"#{queue_id} 번은 채널에 올라간 딜이 아니라 사진을 붙이지 않았어요."
@@ -114,6 +126,8 @@ class LatePhoto:
         if jpeg is None:
             return (f"⚠️ #{queue_id} 사진을 쓸 수 없어요: {html.escape(why, quote=False)}\n다른 사진을 이 메시지(📷 사진 필요)에 답장으로 다시 보내 주세요 "
                     "(JPG·PNG·WEBP, 10MB 이하, 짧은 변 600px 이상).")
+        if bot.clock() > until:  # 사진을 받는(내려받기·검사) 사이에 기다림이 끝남 — 블로그가 이미 글자 카드로 넘어갔을 수 있음
+            return late
         saved = bot.save_late_photo(item, jpeg)
         if not saved:
             return "사진을 저장하지 못했어요 (서버 디스크) — 잠시 뒤 다시 보내 주세요"
@@ -122,4 +136,16 @@ class LatePhoto:
         bot.db.kv_set(f"{KV}{queue_id}", "")
         bot.notifier.resolve(f"photo:{queue_id}")
         bot.db.log_event("INFO", "late_photo", f"#{queue_id} 주인 사진 받음")
-        return f"✅ #{queue_id} 사진을 받았어요 — 블로그·인스타에 이 사진을 써요 (채널 글은 그대로)"
+        return f"✅ #{queue_id} 사진을 받았어요 — {self._where(queue_id)} (채널 글은 그대로)"
+
+    def _where(self, queue_id: int) -> str:
+        """사진을 어디에 쓰는지 — 인스타 딜 글이 아직 기다리는지, 이미 (글자 카드로) 올라갔는지에 따라."""
+        try:
+            statuses = {str(r.get("status")) for r in self.bot.db.ig_items_for(queue_id)}
+        except Exception:  # noqa: BLE001 — 인스타 대기열을 못 읽어도 답은 보냄
+            statuses = set()
+        if "queued" in statuses:
+            return "블로그·인스타에 이 사진을 써요"
+        if statuses & {"posted", "posting"}:
+            return "블로그엔 이 사진을 써요 — 인스타 딜 글은 이미 글자 카드로 올라갔어요"
+        return "블로그에 이 사진을 써요"

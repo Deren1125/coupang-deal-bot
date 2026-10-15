@@ -5,9 +5,13 @@
 - 딜 하나짜리 글: 하루 3개까지(daily_singles), 점수 높은 순, 인스타 글 사이 2시간 이상(min_gap_minutes) — 캐러셀·릴스·단가표가
   잡힌 시각 앞 2시간도 비워 둔다. 올리기 직전에 품절·가격 오름을 다시 확인하고(채널 품절 기록 → 그 뒤 수집기가 본 가격 → 상품 페이지),
   품절이거나 값이 올랐으면 건너뛴다(사유 기록). 12시간(queue_expire_hours) 넘게 기다린 딜은 안 올린다.
+  사진 없이 줄 선 딜은 주인 사진을 기다리는 동안(growth/late_photo — 발행 뒤 4시간) 미루고 사진 있는 딜을 먼저 올린다
+  (사진이 오면 그 사진으로, 안 오면 그 뒤 글자 카드로). 같은 상품이 더 싸게 다시 올라오면 기다리던 줄을 새 딜·번호로 바꾼다.
+  카드에 그리는 글도 올리기 전에 검사한다 (첫 부분 고지 — B 카드의 위 띠).
 - 점심 릴스(12~13시 아무 분): 그날 텔레그램에 올린 딜 중 점수 위 3개 → 10~15초 세로 영상 (서버 ffmpeg).
 - 저녁 캐러셀(20~21시 아무 분): '오늘 가격 내려간 딜 TOP5' — 비교 근거(쿠팡 최저가·평소 가격·우리 기록 최저)가 있는 딜만.
-- 화·금 단가표(19~20시 아무 분, TOP5 와 한 시간 넘게 떨어지게): '이번 주 생필품 1개당 가격' — 봇이 기록한 가격만.
+- 화·금 단가표(19~20시 아무 분, TOP5 와 min_gap_minutes(2시간) 넘게 — 구간이 붙어 있어 안 되면 적어도 한 시간 떨어지게.
+  되는 분 중에서 바로 고른다): '이번 주 생필품 1개당 가격' — 봇이 기록한 가격만.
 릴스·캐러셀·단가표는 날마다 한 번 (kv ig_done:종류:날짜). 딜이 모자라면 그날은 건너뛴다. 하루 시각표는 kv ig_plan:날짜 (재시작해도 같은 시각).
 올리기 전엔 insta_style.validate 로 본문 첫 줄 고지·모든 장의 고지·근거 없는 '최저가'·'역대'를 검사한다 (실패하면 안 올리고 기록).
 """
@@ -47,10 +51,12 @@ LABELS = {"single": "딜 하나", "reel": "점심 릴스", "top5": "TOP5 캐러�
 DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 FAIL_BACKOFF = timedelta(minutes=30)  # 올리다 실패하면 이만큼 쉼 (연결이 끊겼을 때 같은 알림이 줄줄이 가지 않게)
 RECHECK_TRIES = 3  # 한 번 볼 때 딜 하나짜리 글 후보를 이만큼까지 다시 확인
+QUEUE_LOOK = 50  # 한 번 볼 때 살펴보는 대기열 줄 (사진 기다리느라 미룬 줄은 건너뛰고 그 뒤를 봄)
+HOLD_MARGIN = timedelta(minutes=30)  # 사진을 기다리다 대기열 시간(12시간)이 끝나지 않게 이만큼 앞에서 기다림을 멈춤
 PHOTO_KEEP_SECONDS = 36 * 3600  # 상품 사진 사본: 그날 캐러셀·릴스가 쓰고 나면 지움
 REEL_KEEP_SECONDS = 2 * 86400
 UNIT_LISTING = 4  # 단가표 한 장에 넣는 딜 수
-SCHEDULED_GAP_MINUTES = 60  # 단가표와 TOP5 캐러셀은 같은 시간(한 시간 안)에 올리지 않는다
+SCHEDULED_GAP_MINUTES = 60  # 단가표와 TOP5 캐러셀은 적어도 이만큼 떨어지게 (되면 min_gap_minutes 만큼)
 KV_BACKOFF = "ig_backoff_until"
 KV_FFMPEG = "ig_ffmpeg_alerted"
 KV_KEEP_DAYS = 7
@@ -199,12 +205,7 @@ class InstagramScheduler:
             plan["top5"] = self._pick(cfg.carousel.window)
         uc = cfg.unit_carousel
         if uc.enabled and DAY_NAMES[local.weekday()] in uc.days:
-            slot = self._pick(uc.window)
-            for _ in range(60):  # TOP5 와 한 시간 넘게 떨어지게 (같은 시간대에 캐러셀 두 개가 나가지 않게)
-                if "top5" not in plan or abs(_minutes(slot) - _minutes(plan["top5"])) >= SCHEDULED_GAP_MINUTES:
-                    break
-                slot = self._pick(uc.window)
-            plan["unit"] = slot
+            plan["unit"] = self._pick_apart(uc.window, plan.get("top5"))
         self.db.kv_set(key, json.dumps(plan))
         log.info("instagram plan %s: %s", local.date().isoformat(), plan)
         return plan
@@ -212,6 +213,23 @@ class InstagramScheduler:
     def _pick(self, spec: str) -> str:
         start, end = _window(spec)
         m = self.rng.randrange(start, end)
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    def _pick_apart(self, spec: str, other: str | None) -> str:
+        """구간 안에서 other(TOP5 시각)와 인스타 글 간격(min_gap_minutes, 2시간) 넘게 떨어진 분을 바로 고른다.
+        구간이 붙어 있어 그런 분이 없으면 적어도 SCHEDULED_GAP_MINUTES(1시간), 그것도 없으면 가장 먼 분 (같은 시간대에 캐러셀 두 개가 나가지 않게)."""
+        start, end = _window(spec)
+        if other is None:
+            return self._pick(spec)
+        o = _minutes(other)
+        minutes = range(start, end)
+        for gap in (max(self.cfg.min_gap_minutes, SCHEDULED_GAP_MINUTES), SCHEDULED_GAP_MINUTES):
+            ok = [m for m in minutes if abs(m - o) >= gap]
+            if ok:
+                m = self.rng.choice(ok)
+                break
+        else:
+            m = max(minutes, key=lambda x: abs(x - o))
         return f"{m // 60:02d}:{m % 60:02d}"
 
     def _window_of(self, kind: str) -> str:
@@ -261,6 +279,7 @@ class InstagramScheduler:
         except Exception as e:  # noqa: BLE001 — 한 종류가 실패해도 다른 인스타 글·발행 루프는 계속
             log.exception("instagram %s failed", kind)
             status = f"failed: {type(e).__name__}: {e}"
+            await self._crashed(kind, f"{type(e).__name__}: {e}", now)
         self.db.kv_set(key, status[:300])
         level = "WARNING" if status.startswith("failed") else "INFO"
         self.db.log_event(level, "instagram", f"{kind} {local.date().isoformat()}: {status}"[:500])
@@ -284,7 +303,9 @@ class InstagramScheduler:
             if _at(local, _minutes(slot)) - local < gap:
                 return None  # 곧 캐러셀·릴스·단가표 차례 — 그 앞 2시간은 비워 둔다
         tries = 0
-        for item in self.db.ig_queued(10):
+        for item in self.db.ig_queued(QUEUE_LOOK):
+            if self._photo_hold(item, now):
+                continue  # 주인 사진을 기다리는 사진 없는 딜 — 사진 있는 딜이 먼저
             if tries >= RECHECK_TRIES:
                 break
             tries += 1
@@ -298,15 +319,25 @@ class InstagramScheduler:
             return await self._post_single(item, now)
         return None
 
+    def _photo_hold(self, item: dict[str, Any], now: datetime) -> bool:
+        """사진 없이 줄 선 딜이고 주인 사진을 기다리는 중이면(growth/late_photo, 발행 뒤 4시간) True — 그동안 딜 글을 미룬다.
+        사진이 오면 photo_file 이 붙어 바로 올릴 수 있고, 안 오면 기다림이 끝난 뒤 글자 카드로. 대기열 시간 안에서만 기다린다."""
+        if item.get("photo_file") or item.get("queue_id") is None:
+            return False
+        late = getattr(self.bot, "late_photo", None)
+        if late is None:
+            return False
+        until = late.until(int(item["queue_id"]))
+        if until is None:
+            return False
+        created = item.get("created_at") or now
+        last = created + timedelta(hours=self.cfg.queue_expire_hours) - HOLD_MARGIN
+        return now < min(until, last)
+
     # ------------------------------------------------------------ 올리기 직전 확인
     def _known_sold_out(self, pid: str) -> bool:
-        """채널 글이 품절로 기록된 상품 (품절 표시를 붙였거나 블로그에 품절 줄을 남김 — app._on_sold_out)."""
-        post = self.db.latest_post(pid)
-        posted = str(post["posted_at"]) if post else ""
-        marked = self.db.kv_get(f"soldout_marked:{pid}")
-        if marked and (not posted or marked >= posted):
-            return True
-        return bool(posted) and self.db.kv_get(f"soldout_exported:{pid}") == posted
+        """채널 글이 품절로 기록된 상품 (app.known_sold_out — 품절 표시·블로그 품절 줄·스레드가 본 품절)."""
+        return bool(self.bot.known_sold_out(pid))
 
     async def recheck(self, deal: Deal, *, since: datetime | None) -> str | None:
         """올리기 직전 확인. 품절이거나 값이 올랐으면 그 사유, 아니면 None. 못 읽은 페이지로는 막지 않는다 (채널 글과 같은 규칙).
@@ -349,14 +380,17 @@ class InstagramScheduler:
         deal: Deal = item["deal"]
         pid = deal.product.product_id
         deal_no = bot._page_deal_no(item["queue_id"])  # 카드·본문의 '#번호' 는 핫딜 페이지에 있는 글만
-        problems = bot.instagram.check(deal, deal_no=deal_no)
+        photo = _read(item.get("photo_file"))
+        # 본문과 카드에 그리는 글을 같이 검사 (TOP5·릴스·단가표처럼) — 카드 첫 부분(위 띠)에 고지가 있어야 함
+        slide = self.single_slide(deal, photo, deal_no=deal_no)
+        problems = bot.instagram.check(deal, deal_no=deal_no, slides=[slide] if slide is not None else ())
         if problems:
             why = f"{CHECK_FAILED}: {'; '.join(problems)}"
             self._mark(item, "skipped", reason=why[:300], now=now)
             self.db.log_event("WARNING", "instagram", f"{pid} not posted: {why}"[:500])
             return f"single skipped: {pid}"
         self.db.ig_update(item["id"], status="posting", now=now)
-        card_url = await bot.make_card(deal, _read(item.get("photo_file")), deal_no=deal_no)
+        card_url = await bot.make_card(deal, photo, deal_no=deal_no)
         if card_url is None and not bot.instagram.dry_run:
             # 공개 도메인·카드 설정이 없음 (자기 점검이 알림) — 딜마다 실패 알림을 보내지 않고 기록만
             why = "카드 이미지를 못 만듦 (공개 도메인·card 설정)"
@@ -379,11 +413,33 @@ class InstagramScheduler:
         await self._failed(result, now, what=pid)
         return f"single failed: {pid}"
 
+    def single_slide(self, deal: Deal, photo: bytes | None, *, deal_no: int | None) -> Any | None:
+        """딜 하나짜리 글의 카드에 그리는 글 (검사용). 카드가 없으면 None (그땐 카드를 못 만들어 어차피 안 올림)."""
+        bot = self.bot
+        card = getattr(bot, "card", None)
+        if card is None:
+            return None
+        shop = bot.registry.get(deal.product.shop)
+        info = insta_style.card_info(deal, bot.renderer, shop=shop, deal_no=deal_no)
+        return card_slides.drawn_first_part(card.layout, info, photo)
+
     def _mark(self, item: dict[str, Any], status: str, *, reason: str | None = None, media_id: str | None = None,
               now: datetime) -> None:
         """대기열 딜의 결과를 적는다 + SNS 발행 기록(sns_log — 하루 0개 알림이 이유를 셈)."""
         self.db.ig_update(item["id"], status=status, reason=reason, media_id=media_id, now=now)
         self.db.sns_log_add("instagram", status, product_id=item["deal"].product.product_id, reason=reason, now=now)
+
+    async def _crashed(self, kind: str, error: str, now: datetime) -> None:
+        """묶음 글(릴스·TOP5·단가표)이 발행 결과 밖에서 실패 (영상 만들기 ffmpeg 오류 등): 하루 0개 알림이 이유를 셀 수 있게
+        sns_log 에 남기고 주인에게 소리 없이 한 통 (그날 그 글은 끝 — 같은 날 다시 안 올림, 다음 날 다시)."""
+        self.db.sns_log_add("instagram", "failed", reason=f"{kind}: {error}"[:300], now=now)
+        try:
+            await self.bot._sns_failed(
+                "인스타그램", "instaauth",
+                f"⚠️ <b>인스타 {LABELS.get(kind, kind)} 못 올림</b> (오늘은 건너뜀, 내일 다시)\n<code>{html.escape(error[:300])}</code>", error,
+            )
+        except Exception as e:  # noqa: BLE001 — 알림 실패가 시간표를 멈추지 않게
+            log.warning("instagram %s failure notice failed: %s", kind, e)
 
     async def _failed(self, result: PublishResult, now: datetime, *, what: str) -> None:
         self.db.log_event("WARNING", "instagram", f"{what}: {result.error}"[:500])
@@ -398,8 +454,8 @@ class InstagramScheduler:
     async def _finish(self, kind: str, result: PublishResult, picks: list[Any], now: datetime) -> str:
         if result.ok:
             media = "dry-run" if result.dry_run else str(result.message_id or "")
-            items = [{"product_id": pk.deal.product.product_id if isinstance(pk, Pick) else pk.product_id,
-                      "queue_id": pk.queue_id if isinstance(pk, Pick) else pk.deal_no} for pk in picks]
+            items = [{"product_id": pk.deal.product.product_id, "queue_id": pk.queue_id} if isinstance(pk, Pick)
+                     else {"product_id": pk.product_id, "deal_no": pk.deal_no} for pk in picks]  # 단가표 줄은 대기열 번호가 아니라 페이지 번호
             self.db.ig_record_post(kind, media_id=media or None, items=items, dry_run=result.dry_run, now=now)
             self.db.sns_log_add("instagram", "posted", reason=kind, now=now)  # 묶음 글 (TOP5·릴스·단가표)
             return f"posted {media} ({len(picks)} deals)"
@@ -633,11 +689,14 @@ class InstagramScheduler:
         n = 1 + len(week) + (1 if baselines else 0)
         need = self.bot.renderer.low_min_samples
         period = f"{since:%m/%d}~{local:%m/%d}"
+        # 핫딜 페이지(최근 page_hours)에서 내려간 지난 딜은 번호가 없다 — '번호로 찾아 주세요' 라고만 하면 못 찾는 딜이 섞임
+        old = any(r.deal_no is None for rows in week.values() for r in rows)
+        footer = insta_style.UNIT_FIND_OLD if old else insta_style.UNIT_FIND
         cover = SlideSpec(
             kind="cover", ad=GENERIC_AD, head=insta_style.date_kr(local), tag=f"1/{n}", title="이번 주 생필품 1개당 가격",
             big_note=f"{period} 텔레그램에 올린 딜 · 우리가 기록한 가격으로 계산했어요",
             items=[(title, f"{len(rows)}개", " · ".join(dict.fromkeys(f"{r.kind} {r.label}" for r in rows))) for title, rows in week.items()],
-            note="가격·재고는 올린 시점 기준이에요", footer="구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로",
+            note="가격·재고는 올린 시점 기준이에요", footer=footer,
             alt="이번 주 생필품 1개당 가격 표지 — " + ", ".join(week),
         )
         specs = [cover]
@@ -647,13 +706,13 @@ class InstagramScheduler:
                 deal_disclosure(self.bot.registry.get(by_id[r.product_id].product.shop), by_id[r.product_id].product.extra)
                 for r in rows if r.product_id in by_id
             )
-            items = [(f"#{r.deal_no} {r.name}" if r.deal_no else r.name, f"{r.value:,}원", f"{r.kind} {r.label} · 판매가 {r.price:,}원")
-                     for r in rows]
+            items = [(f"#{r.deal_no} {r.name}" if r.deal_no else f"{r.name} (지난 딜)", f"{r.value:,}원",
+                      f"{r.kind} {r.label} · 판매가 {r.price:,}원") for r in rows]
             specs.append(SlideSpec(
                 kind="list", ad=ad, head="이번 주 생필품 1개당 가격", tag=f"{i}/{n}", title=title,
                 big_note="1개당 가격 낮은 순 · 우리가 기록한 가격", items=items,
                 note=f"가격 기록이 {need}번 이상인 상품만 · {period} 텔레그램에 올린 딜",
-                footer="구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로",
+                footer=footer,
                 alt=f"{title} 1개당 가격 — " + ", ".join(f"{a} {b}" for a, b, _ in items),
             ))
         if baselines:

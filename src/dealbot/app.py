@@ -61,7 +61,7 @@ from dealbot.links import (
 from dealbot.llm_json import JsonAsker
 from dealbot.manual import parse_manual_post
 from dealbot.media import reel as reel_tools
-from dealbot.media.card import CardStyle, DealCard
+from dealbot.media.card import NEUTRAL_CTA, CardStyle, DealCard
 from dealbot.media.imagecheck import (
     clean_image,
     coupang_image_url,
@@ -109,6 +109,9 @@ from dealbot.publisher.instagram import InstagramClient, InstagramError, Instagr
 from dealbot.publisher.rate_limiter import RateLimiter
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
+from dealbot.publisher.threads import (
+    BASIC_SCOPES as THREADS_BASIC_SCOPES,
+)
 from dealbot.publisher.threads import (
     KV_USERNAME,
     ThreadsClient,
@@ -803,8 +806,9 @@ class DealBot:
         if info:
             return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요.{note}"
         row = self.export_published(deal, photo)
-        await self._publish_side_channels(deal, photo=photo, deal_no=queue_id)
+        # 사진 기다림 기록을 인스타 대기열에 넣기 전에 — 인스타 시간표가 그 사이에 사진 없는 딜 글을 바로 올리지 않게
         await self._ask_late_photo(queue_id, deal, photo, row)
+        await self._publish_side_channels(deal, photo=photo, deal_no=queue_id)
         return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요. 블로그·스레드·인스타 차례도 이어서 처리했어요.{note}"
 
     def _own_post_number(self, link: str) -> tuple[int | None, str]:
@@ -1664,6 +1668,20 @@ class DealBot:
 
     def mark_sold_out_seen(self, product_id: str, now: datetime | None = None) -> None:
         self.db.kv_set(f"{self.SOLDOUT_SEEN_KV}{product_id}", to_iso(now or self.clock()))
+
+    def known_sold_out(self, product_id: str) -> bool:
+        """가장 최근 채널 글이 올라간 뒤로 품절로 기록된 상품: 채널 글에 품절 표시를 붙였거나, 블로그에 품절 줄을 남겼거나,
+        스레드가 올리기 직전에 품절을 봤다 (그 전 품절 뒤 다시 올라온 딜은 새 글이라 막지 않는다). 인스타·일요일 TOP5 가 쓴다."""
+        post = self.db.latest_post(product_id)
+        posted = str(post["posted_at"]) if post else ""
+        marked = self.db.kv_get(f"soldout_marked:{product_id}")
+        if marked and (not posted or marked >= posted):
+            return True
+        if posted and self.db.kv_get(f"soldout_exported:{product_id}") == posted:
+            return True
+        seen = from_iso(self.db.kv_get(f"{self.SOLDOUT_SEEN_KV}{product_id}") or None)
+        posted_at = from_iso(posted) if posted else None
+        return seen is not None and (posted_at is None or seen >= posted_at)
 
     def _export_sold_out(self, pid: str, post: dict[str, Any] | None) -> bool:
         """채널에 실제로 올린 상품이 품절됨: published_deals.jsonl 에 품절 줄을 남겨 Blog-Auto 가 그 전에 올라온 같은 상품을
@@ -2630,8 +2648,9 @@ class DealBot:
             else:
                 await self.notifier.notify_published(deal, result)
                 row = self.export_published(deal, photo)
-                await self._publish_side_channels(deal, photo=photo, deal_no=item.id)
+                # 사진 기다림 기록이 먼저 — 인스타 시간표(ig_scheduler)가 기다리는 동안 사진 없는 딜 글을 미룬다
                 await self._ask_late_photo(item.id, deal, photo, row)
+                await self._publish_side_channels(deal, photo=photo, deal_no=item.id)
         else:
             await self._handle_publish_failure(item, result.error or "unknown error", deal=deal, maybe_posted=result.maybe_posted)
         return True
@@ -2706,7 +2725,8 @@ class DealBot:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def _export_text_card(self, deal: Deal, path: Path) -> str:
-        """사진 없는 딜의 글자 카드 (인스타 글자 카드와 같은 그림 — 상품명·가격 같은 사실만). 못 그리면 ''."""
+        """사진 없는 딜의 글자 카드 (인스타 글자 카드와 같은 그림 — 상품명·가격 같은 사실만). 못 그리면 ''.
+        바닥 안내는 채널 중립(NEUTRAL_CTA): 블로그 글엔 구매 링크가 따로 있어 인스타용 '구매 링크는 프로필 링크에서' 는 틀린 말."""
         if self.card is None:
             return ""
         try:
@@ -2717,7 +2737,8 @@ class DealBot:
                 from dealbot.publisher.insta_style import card_info
 
                 info = card_info(deal, self.renderer, shop=shop)
-            path.write_bytes(self.card.render(deal, None, shop_name=shop.name if shop else None, tier=tier, info=info))
+            path.write_bytes(self.card.render(deal, None, shop_name=shop.name if shop else None, tier=tier, info=info,
+                                              cta=NEUTRAL_CTA))
             return str(path)
         except Exception as e:  # noqa: BLE001
             log.warning("text card for the blog export failed: %s", e)
@@ -2988,12 +3009,14 @@ class DealBot:
         p.image_url = src
         return photo
 
-    async def make_card(self, deal: Deal, photo: bytes | None, *, deal_no: int | None = None, text_card: bool = False) -> str | None:
+    async def make_card(self, deal: Deal, photo: bytes | None, *, deal_no: int | None = None, text_card: bool = False,
+                        cta: str | None = None) -> str | None:
         """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None.
         photo: deal_photo 가 확인한 상품 사진 바이트 (텔레그램 글에 쓴 그 사진). 여기서 사진을 다시 받지 않는다 —
         예전엔 image_url 을 날것으로 다시 받아 쿠팡 로고가 카드에 크게 들어가거나(/instatest), 외부 반출을 막는 스토어 사진이 빠졌다.
         사진이 없으면 instagram.no_photo 가 text_card(기본, 주인 결정 10/15)이거나 네이버 딜일 때 글자 카드, 아니면(skip) None.
-        text_card=True: 사진이 없으면 언제나 글자 카드 (스레드 — 확인된 사진이 없는 딜도 글만 올리지 않게, 주인 결정 10/15)."""
+        text_card=True: 사진이 없으면 언제나 글자 카드 (스레드 — 확인된 사진이 없는 딜도 글만 올리지 않게, 주인 결정 10/15).
+        cta: 바닥 안내 (스레드는 NEUTRAL_CTA — 본문에 구매 링크가 있어 '프로필 링크' 안내는 인스타에서만). None 이면 인스타용."""
         if self.card is None:
             return None
         base = self.settings.secrets.public_base_url
@@ -3011,7 +3034,7 @@ class DealBot:
             info = card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
         try:
             path = await asyncio.to_thread(
-                self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier, info=info,
+                self.card.save, deal, photo, shop_name=shop.name if shop else None, tier=tier, info=info, cta=cta,
             )
         except Exception as e:  # noqa: BLE001
             log.warning("card render failed: %s", e)
@@ -3111,6 +3134,7 @@ class DealBot:
         self.db.kv_set(KV_OAUTH_STATE, state)
         self.db.kv_set(KV_OAUTH_STATE_AT, to_iso(utcnow()))
         url = authorize_url(app_id, redirect, state=state)
+        basic_url = authorize_url(app_id, redirect, state=state, scopes=THREADS_BASIC_SCOPES)
         register = (
             f"1) 메타 앱에 이 콜백 주소가 등록돼 있어야 합니다: <code>{redirect}</code>\n"
             "   developers.facebook.com → 앱 → 사용 사례 → Threads API → 설정 → <b>리디렉션 콜백 URL</b>. "
@@ -3122,7 +3146,9 @@ class DealBot:
             "(같은 페이지 맨 위 '앱 ID'는 메타 앱용이라 다른 번호입니다). "
             "'차단된 URL / 리디렉션 URI가 화이트리스트에 없습니다' 가 뜨면 ① 이 번호가 Threads 앱 ID가 아니거나 ② 1)의 주소가 글자 그대로 등록되지 않은 경우입니다.\n"
             "통계·답글 읽기 권한(threads_manage_insights, threads_read_replies)도 요청해요 — 'Invalid Scopes' 가 뜨면 "
-            "앱 → 사용 사례 → Threads API → 권한에서 두 권한을 먼저 추가해 주세요 (docs/SETUP_KEYS.md 7-7)."
+            "앱 → 사용 사례 → Threads API → 권한에서 두 권한을 먼저 추가해 주세요 (docs/SETUP_KEYS.md 7-7).\n"
+            "지금 바로 권한을 추가하기 어려우면 이 링크(올리기·답글 달기만 — 통계·답글 모으기는 꺼진 채로 연결)로 연결하세요:\n"
+            f"{basic_url}"
         )
         if sec.threads_callback_served:
             return (
@@ -3193,6 +3219,7 @@ class DealBot:
                 return f"이미 연결되어 있습니다: @{me.get('username')} (다시 연결하려면 아래처럼 /instaauth 링크를 다시 승인하세요)"
             except InstagramError:
                 pass
+        from dealbot.publisher.instagram import BASIC_SCOPES as IG_BASIC_SCOPES
         from dealbot.publisher.instagram import authorize_url as ig_authorize_url
 
         app_id = sec.instagram_app_id or ""
@@ -3201,6 +3228,7 @@ class DealBot:
         self.db.kv_set(KV_IG_OAUTH_STATE, state)
         self.db.kv_set(KV_IG_OAUTH_STATE_AT, to_iso(utcnow()))
         url = ig_authorize_url(app_id, redirect, state=state)
+        basic_url = ig_authorize_url(app_id, redirect, state=state, scopes=IG_BASIC_SCOPES)
         register = (
             f"1) 메타 앱에 이 주소가 등록돼 있어야 합니다: <code>{redirect}</code>\n"
             "   developers.facebook.com → 앱 → 인스타그램 → API 설정(Instagram 로그인) → 3. 비즈니스 로그인 설정 → <b>OAuth 리디렉션 URI</b>. "
@@ -3211,7 +3239,9 @@ class DealBot:
             "(앱 설정 → 기본 설정 맨 위의 '앱 ID'와는 다른 번호). 인스타 계정은 프로페셔널(크리에이터/비즈니스)이어야 하고, "
             "앱이 개발 모드면 앱 역할 → Instagram 테스터에 내 계정을 넣고 인스타 앱 → 설정 → 웹사이트 권한 → 앱 및 웹사이트 → 테스터 초대에서 수락해야 합니다.\n"
             "통계 권한(instagram_business_manage_insights)도 요청해요 — 'Invalid Scopes' 가 뜨면 앱 → 사용 사례 → "
-            "Instagram 권한에서 먼저 추가해 주세요 (docs/SETUP_KEYS.md 7-7)."
+            "Instagram 권한에서 먼저 추가해 주세요 (docs/SETUP_KEYS.md 7-7).\n"
+            "지금 바로 권한을 추가하기 어려우면 이 링크(올리기만 — 통계는 꺼진 채로 연결)로 연결하세요:\n"
+            f"{basic_url}"
         )
         if sec.instagram_callback_served:
             return (

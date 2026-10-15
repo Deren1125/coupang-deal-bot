@@ -1012,15 +1012,25 @@ class Database(SnsStoreMixin):
     # ------------------------------------------------------------ instagram
     def ig_enqueue(self, deal: Deal, *, queue_id: int | None, score: float, photo_file: str | None = None,
                    now: datetime | None = None) -> int | None:
-        """인스타 대기열에 넣는다. 같은 상품이 이미 기다리고 있으면 넣지 않고 None."""
+        """인스타 대기열에 넣는다. 넣은(바꾼) 행 번호, 넣지 않았으면 None.
+        같은 상품이 이미 기다리면: 다른 채널 글(더 싸게 다시 올라온 딜 — dedupe_cheaper_pct)이면 그 줄을 새 딜·가격·번호·시각으로
+        바꾸고(사진은 새 사진, 없으면 원래 사진), 같은 글이거나 올리는 중이면 넣지 않는다 — 예전 값·번호로 올라가지 않게."""
         now = now or utcnow()
         ts = to_iso(now)
         with self._tx() as c:
             dup = c.execute(
-                "SELECT id FROM ig_queue WHERE product_id = ? AND status IN ('queued', 'posting') LIMIT 1", (deal.product.product_id,)
+                "SELECT id, queue_id, status FROM ig_queue WHERE product_id = ? AND status IN ('queued', 'posting') "
+                "ORDER BY id DESC LIMIT 1", (deal.product.product_id,)
             ).fetchone()
             if dup is not None:
-                return None
+                if dup["status"] != "queued" or queue_id is None or dup["queue_id"] == queue_id:
+                    return None
+                c.execute(
+                    "UPDATE ig_queue SET queue_id = ?, payload = ?, score = ?, photo_file = COALESCE(?, photo_file), "
+                    "reason = 'replaced by a newer post', created_at = ?, updated_at = ? WHERE id = ?",
+                    (queue_id, json.dumps(deal.to_dict(), ensure_ascii=False), score, photo_file, ts, ts, dup["id"]),
+                )
+                return int(dup["id"])
             cur = c.execute(
                 "INSERT INTO ig_queue (queue_id, product_id, payload, score, photo_file, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)",
@@ -1074,6 +1084,12 @@ class Database(SnsStoreMixin):
             for r in out:
                 if r["status"] == "posting":
                     r["status"], r["reason"] = "failed", "maybe posted (stopped while posting)"
+                    # 인스타에 이미 올라갔을 수도 있다 — 하루 개수·글 사이 간격에 셈 (올리기 시작한 시각으로)
+                    self._conn.execute(
+                        "INSERT INTO ig_posts (kind, media_id, items, dry_run, posted_at) VALUES ('single', NULL, ?, 0, ?)",
+                        (json.dumps([{"product_id": r["product_id"], "queue_id": r["queue_id"], "maybe": True}], ensure_ascii=False),
+                         r["updated_at"] or to_iso(now or utcnow())),
+                    )
                 else:
                     r["status"], r["reason"] = "expired", "waited too long"
                 self._conn.execute(

@@ -40,6 +40,8 @@ API_VERSION = "v1.0"
 # 답글(품절 업데이트·선택 채널 안내)을 다는 권한, 통계(인사이트)·내 글 답글 읽기 권한도 받아 둔다 (주인 결정 10/15).
 # 뒤의 두 권한은 메타 앱 Threads 사용 사례에 주인이 먼저 더해야 하고(docs/SETUP_KEYS.md), 없는 토큰이어도 발행은 그대로 (scopes.py)
 SCOPES = "threads_basic,threads_content_publish,threads_manage_replies,threads_manage_insights,threads_read_replies"
+# 메타 앱에 통계·답글 읽기 권한을 아직 안 넣었을 때 ('Invalid Scopes') 다시 연결할 수 있는 예전 권한 — 올리기·답글 달기만
+BASIC_SCOPES = "threads_basic,threads_content_publish,threads_manage_replies"
 TEXT_LIMIT = 500
 
 KV_TOKEN = "threads_access_token"
@@ -142,11 +144,11 @@ class ThreadsToken:
     expires_at: datetime | None = None
 
 
-def authorize_url(app_id: str, redirect_uri: str, state: str = "dealbot") -> str:
+def authorize_url(app_id: str, redirect_uri: str, state: str = "dealbot", *, scopes: str = SCOPES) -> str:
     params = {
         "client_id": app_id,
         "redirect_uri": redirect_uri,
-        "scope": SCOPES,
+        "scope": scopes,
         "response_type": "code",
         "state": state,
     }
