@@ -66,7 +66,7 @@ class CardInfo:
     ref_pct: int | None = None
     list_price: int | None = None  # 표시 정가 (근거가 약해 비교 가격이 없을 때만 보조로)
     list_pct: int | None = None
-    low_label: str | None = None  # '30일 최저가' 처럼 기록으로 확인된 것만
+    low_label: str | None = None  # '우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)' 처럼 기록으로 확인된 것만 (insta_style.low_text)
     ship: str = ""
     unit: str | None = None
     rating: float | None = None
@@ -74,7 +74,8 @@ class CardInfo:
     shop_name: str = ""
     category: str = ""
     deal_no: int | None = None  # 핫딜 페이지(/d/번호)의 번호 — 프로필 링크에서 찾는 표시
-    disclosure: str = ""  # 카드 안 고지 (짧게). 공정위 지침: 사진 게시물은 사진 안에 표시
+    disclosure: str = ""  # 몰 고지의 짧은 꼴 ('쿠팡 파트너스 활동으로 수수료를 받습니다'). 몰 고지가 없는 딜(원본 링크)은 빈칸
+    ad: str = ""  # 카드 안 고지 줄 '광고 · …' (공정위 지침: 사진 게시물은 사진 안에도). 비면 disclosure 로 만든다
 
 
 @dataclass(slots=True)

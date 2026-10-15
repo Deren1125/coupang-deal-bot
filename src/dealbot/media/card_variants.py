@@ -1,9 +1,11 @@
-"""인스타그램 카드 후보 양식 A/B/C (주인이 고르기 전까지 기본은 current — config instagram.style).
+"""인스타그램 카드 양식 A/B/C (config instagram.style — 주인 선택 10/12: B).
 
 A 사진 크게 + 큰 가격: 위 60% 상품 사진, 아래 이름·큰 가격·비교 가격.
-B 저장각 정보 카드: 위 띠(채널 이름·번호), 이름, 사진, 아래 '항목 : 값' 표 (가격·비교·단가·배송·평점).
+B 가격 정보 카드 (10/15 바뀜): 우리 데이터가 주인공 — 위 고지 띠, 이름 옆에 작은 판매처 사진(높이 22%), 표 (가격 크게 → 1개당 →
+  비교 → 기록 → 배송 …). 캐러셀 딜 장과 같은 그림 (media/card_slides.deal_spec). 사진이 없으면 같은 카드에서 사진 칸만 빠진다.
 C 사진 꽉 채움 + 가격 스티커: 사진을 크게, 모서리에 기울인 가격 스티커, 아래 이름 한 줄.
-사진이 없으면(instagram.no_photo: text_card 일 때만 불림) 셋 다 같은 글자 카드. 로고·기본 이미지는 애초에 photo 로 오지 않는다.
+A·C 는 사진이 없으면(instagram.no_photo: text_card) 같은 글자 카드. 로고·기본 이미지는 애초에 photo 로 오지 않는다.
+카드 안 고지는 '광고 · …' 한 줄 (공정위 지침: 사진 게시물은 사진 안에도).
 
 모든 숫자는 CardInfo 에 온 데이터만 쓴다. 근거 없는 말('역대급' 등)은 카드에 안 쓴다.
 프로필 격자는 3:4 로 잘려 보이므로(좌우 약 34px) 글자는 양옆 56px 안쪽에만 둔다.
@@ -29,7 +31,6 @@ MUTED = "#6E6E6E"
 LINE = "#E6E6E6"
 ACCENT = "#E8442B"
 PANEL = "#F4F4F2"
-NOTE = "#7A7A7A"  # 카드 안 고지 (휴대폰에서도 읽히는 크기·진하기)
 BRAND = "오늘의 핫딜"
 
 Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
@@ -175,6 +176,11 @@ def _cta(info: CardInfo) -> str:
     return f"구매 링크: 프로필 링크 → #{info.deal_no}" if info.deal_no else "구매 링크는 프로필 링크에서"
 
 
+def _ad(info: CardInfo) -> str:
+    """카드 안 고지 줄 '광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다' (몰 고지가 없으면 '광고 · 제휴 링크로 수수료를 받아요')."""
+    return info.ad or (f"광고 · {info.disclosure}" if info.disclosure else "광고 · 제휴 링크로 수수료를 받아요")
+
+
 def _footer(card: DealCard, draw: ImageDraw.ImageDraw, info: CardInfo, *, y: int, bg: str | None = None) -> None:
     """바닥: 채널 이름 + 구매 안내, 그 아래 작은 고지."""
     if bg:
@@ -186,9 +192,8 @@ def _footer(card: DealCard, draw: ImageDraw.ImageDraw, info: CardInfo, *, y: int
     cta = _cta(info)
     cf = card.font_regular(30)
     draw.text((W - SIDE - _w(draw, cta, cf), y + 2), cta, font=cf, fill=MUTED)
-    if info.disclosure:
-        df = card.font_regular(26)
-        draw.text((SIDE, y + 50), info.disclosure, font=df, fill=NOTE)
+    df = _fit(draw, _ad(info), card.font, 28, W - 2 * SIDE, min_size=20)
+    draw.text((SIDE, y + 50), _ad(info), font=df, fill=INK)
 
 
 def _paste_contained(canvas: Image.Image, img: Image.Image, box: tuple[int, int, int, int]) -> None:
@@ -287,70 +292,12 @@ def _whiten_to(photo: Image.Image, color: str) -> Image.Image:
     return out
 
 
-# ---------------------------------------------------------------- B: 저장각 정보 카드
-def layout_b(card: DealCard, info: CardInfo, photo: Image.Image) -> Image.Image:
-    img = Image.new("RGB", (W, H), "#FFFFFF")
-    d = ImageDraw.Draw(img)
-    # 위 띠: 채널 이름 · 분류 / 번호
-    d.rectangle((0, 0, W, 104), fill=INK)
-    hf = card.font(34)
-    head = BRAND + (f"  |  {info.category}" if info.category else "")
-    d.text((SIDE, 30), head, font=hf, fill="#FFFFFF")
-    if info.deal_no:
-        n = f"#{info.deal_no}"
-        d.text((W - SIDE - _w(d, n, hf), 30), n, font=hf, fill="#FFFFFF")
+# ---------------------------------------------------------------- B: 가격 정보 카드 (우리 데이터 크게, 사진 작게)
+def layout_b(card: DealCard, info: CardInfo, photo: bytes | None) -> Image.Image:
+    """캐러셀 딜 장과 같은 그림 (card_slides.deal_spec). 사진(바이트)이 없거나 깨졌으면 사진 칸 없이 글만."""
+    from dealbot.media.card_slides import deal_spec, render
 
-    y = 136
-    nf = card.font(46)
-    y = _lines(d, _wrap(d, info.name, nf, W - 2 * SIDE, 2), nf, INK, SIDE, y, gap=1.28) + 10
-    box_top, box_bottom = y, y + 470
-    d.rounded_rectangle((SIDE - 16, box_top, W - SIDE + 16, box_bottom), radius=28, fill=PANEL)
-    edge = _edge_color(photo)
-    ph = _whiten_to(photo, PANEL) if min(edge) > 235 else photo
-    _paste_contained(img, ph, (SIDE + 10, box_top + 22, W - SIDE - 10, box_bottom - 22))
-
-    rows: list[tuple[str, str, str]] = []  # (항목, 값, 색)
-    if info.price:
-        rows.append(("가격", _won(info.price), ACCENT))
-    cmp_ = _compare(info)
-    if cmp_:
-        rows.append(("비교", f"{cmp_[0]}" + (f" ({cmp_[1]})" if cmp_[1] else ""), INK))
-    if info.low_label:
-        rows.append(("기록", info.low_label, INK))
-    if info.unit:
-        rows.append(("단가", info.unit, INK))
-    if info.ship:
-        rows.append(("배송", info.ship, INK))
-    if info.rating:
-        rows.append(("평점", f"{info.rating}" + (f" · 리뷰 {info.review_count:,}" if info.review_count else ""), INK))
-    if info.shop_name and len(rows) < 5:
-        rows.append(("판매", info.shop_name, INK))
-    y = box_bottom + 22
-    lf = card.font_regular(32)
-    row_h = 72
-    max_rows = max(1, (H - 150 - y) // row_h)
-    for label, value, color in rows[:max_rows]:
-        d.text((SIDE, y + 18), label, font=lf, fill=MUTED)
-        if label == "가격":
-            pf = _fit(d, value, card.font_heavy, 58, W - 2 * SIDE - 150)
-            d.text((SIDE + 140, y + 2), value, font=pf, fill=color)
-        else:
-            vfont = _fit(d, value, card.font, 38, W - 2 * SIDE - 150, min_size=28)
-            d.text((SIDE + 140, y + 14), value, font=vfont, fill=color)
-        y += row_h
-        d.line((SIDE, y, W - SIDE, y), fill=LINE, width=2)
-    # 바닥: 저장 안내 띠 + 고지
-    band = H - 132
-    d.rectangle((0, band, W, H), fill="#FFF1EE")
-    sf = card.font(32)
-    save = "저장해 두면 다시 찾기 쉬워요"
-    d.text((SIDE, band + 26), save, font=sf, fill=ACCENT)
-    cta = _cta(info).replace("구매 링크: ", "")
-    cf = card.font_regular(30)
-    d.text((W - SIDE - _w(d, cta, cf), band + 28), cta, font=cf, fill=INK)
-    if info.disclosure:
-        d.text((SIDE, band + 82), info.disclosure, font=card.font_regular(26), fill=NOTE)
-    return img
+    return render(card, deal_spec(info, photo))
 
 
 # ---------------------------------------------------------------- C: 사진 꽉 채움 + 가격 스티커
@@ -368,8 +315,7 @@ def layout_c(card: DealCard, info: CardInfo, photo: Image.Image) -> Image.Image:
     sub = [b for b in (info.shop_name, info.ship) if b]
     sub.append(_cta(info).replace("구매 링크: ", ""))
     d.text((SIDE, H - bar_h + 100), "  ·  ".join(sub), font=card.font_regular(30), fill=MUTED)
-    if info.disclosure:
-        d.text((SIDE, H - bar_h + 158), info.disclosure, font=card.font_regular(26), fill=NOTE)
+    d.text((SIDE, H - bar_h + 158), _ad(info), font=_fit(d, _ad(info), card.font, 28, W - 2 * SIDE, min_size=20), fill=INK)
     if info.price:
         _sticker(card, img, info)
     return img
@@ -401,11 +347,11 @@ def _sticker(card: DealCard, img: Image.Image, info: CardInfo) -> None:
 
 
 def render_variant(card: DealCard, layout: str, info: CardInfo, photo: bytes | None) -> Image.Image:
+    if layout == "B":
+        return layout_b(card, info, photo)
     src = _open_photo(photo)
     if src is None:
         return text_card(card, info)
     if layout == "A":
         return layout_a(card, info, src)
-    if layout == "B":
-        return layout_b(card, info, src)
     return layout_c(card, info, src)

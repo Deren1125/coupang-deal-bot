@@ -111,13 +111,14 @@ def write_running_version() -> None:
 
 
 @contextlib.contextmanager
-def publishing_mark() -> Iterator[None]:
-    """발행하는 동안 var/busy/publish_<pid> 를 둔다 — auto-update.sh 는 이게 있으면 재시작을 1분 미룬다."""
+def publishing_mark(name: str = "publish") -> Iterator[None]:
+    """발행하는 동안 var/busy/<name>_<pid> 를 둔다 — auto-update.sh 는 이게 있으면 재시작을 1분 미룬다.
+    채널 발행 루프와 인스타 루프가 따로 표식을 둔다 (한쪽이 끝나며 다른 쪽 표식을 지우지 않게)."""
     mark: Path | None = None
     if VAR_DIR is not None:
         try:
             (VAR_DIR / "busy").mkdir(parents=True, exist_ok=True)
-            mark = VAR_DIR / "busy" / f"publish_{os.getpid()}"
+            mark = VAR_DIR / "busy" / f"{name}_{os.getpid()}"
             mark.write_text("publish", encoding="utf-8")
         except OSError:
             mark = None
@@ -311,6 +312,29 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
         await _sleep_or_stop(stop, 60)
 
 
+INSTAGRAM_TICK_SECONDS = 60
+
+
+async def instagram_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """인스타 시간표 (주인 결정 10/15): 1분마다 인스타 대기열·점심 릴스·저녁 TOP5·화금 단가표 중 차례가 된 글 하나를 올린다.
+    텔레그램 발행 루프와 따로 돌아 (릴스 영상 처리를 몇 분 기다려도) 채널 발행을 막지 않는다. 연습 모드·인스타 꺼짐이면 할 일 없음."""
+    ig = getattr(bot, "ig", None)
+    if ig is None or not bot.settings.instagram.enabled:
+        return
+    await _sleep_or_stop(stop, 20)  # 시작 직후의 자기 점검·첫 수집이 먼저
+    while not stop.is_set():
+        if not bot.state.paused:
+            try:
+                with publishing_mark("publish_instagram"):
+                    done = await bot.instagram_tick()
+                if done:
+                    log.info("instagram: %s", done)
+            except Exception as e:  # noqa: BLE001
+                log.exception("instagram loop error")
+                bot.db.log_event("ERROR", "instagram", f"{type(e).__name__}: {e}")
+        await _sleep_or_stop(stop, INSTAGRAM_TICK_SECONDS)
+
+
 def _install_signal_handlers(stop: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -371,19 +395,20 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(heartbeat_loop(bot, stop), name="heartbeat_loop"),
         asyncio.create_task(soldout_loop(bot, stop), name="soldout_loop"),
         asyncio.create_task(dashboard_loop(bot, stop), name="dashboard_loop"),
+        asyncio.create_task(instagram_loop(bot, stop), name="instagram_loop"),
     ]
     try:
         await stop.wait()
     finally:
         stop.set()  # 예외로 빠져나와도 루프들이 멈추도록
-        # 발행 중이던 글은 스레드 글·답글까지 마치게 발행 루프만 기다리고 (최대 shutdown_grace()), 나머지 루프는 바로 끊는다
-        publisher = next(t for t in tasks if t.get_name() == "publisher_loop")
+        # 발행 중이던 글은 스레드 글·답글까지(인스타는 하던 글까지) 마치게 발행 루프만 기다리고 (최대 shutdown_grace()), 나머지 루프는 바로 끊는다
+        publishers = [t for t in tasks if t.get_name() in ("publisher_loop", "instagram_loop")]
         for t in tasks:
-            if t is not publisher:
+            if t not in publishers:
                 t.cancel()
         grace = shutdown_grace()
         log.info("shutting down — 하던 발행을 마치는 중 (최대 %g초)...", grace)
-        _, pending = await asyncio.wait([publisher], timeout=grace)
+        _, pending = await asyncio.wait(publishers, timeout=grace)
         for t in pending:
             log.warning("종료 대기 시간이 지나 중단합니다: %s", t.get_name())
             t.cancel()

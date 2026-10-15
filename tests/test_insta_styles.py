@@ -1,14 +1,15 @@
-"""인스타그램 후보 양식 A/B/C (주인이 고르기 전까지 기본은 current).
+"""인스타그램 양식 A/B/C (주인 선택 10/12: B).
 
 - 카드: 세 양식 모두 1080×1350 JPEG, 사진 있음·없음(글자 카드)·아주 긴 이름
-- 본문: 첫 줄은 사실(이름·가격·데이터로 확인된 비교 가격)만, 홍보 말·느낌표·링크 주소 없음, 프로필 링크 안내,
-  고지 문구, 해시태그 3~5개 (인스타 게시물당 5개 제한)
+- 본문: 첫 줄은 고지 '광고 · …' (주인 결정 10/15 — 공정위 지침: 첫 부분에), 둘째 줄은 사실(이름·가격·데이터로 확인된 비교 가격)만,
+  홍보 말·느낌표·링크 주소 없음, 프로필 링크 안내, 끝에 몰 고지 원문, 해시태그 3~5개 (인스타 게시물당 5개 제한)
 """
 
 from __future__ import annotations
 
 import io
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,7 @@ def _market_deal(name: str = "도브 인텐스 리페어 샴푸 680ml 2개") -> 
         DealVerdict(is_deal=True, discount_rate=38.4, market_price=22900, below_market_pct=30.6, low_price=16900,
                     history_days=30, sample_count=12),
         affiliate_url="https://link.coupang.com/a/1",
+        detected_at=datetime(2026, 10, 15, 5, 12, tzinfo=UTC),  # 14:12 KST — 기록 최저 문구의 기준 시각
     )
 
 
@@ -67,8 +69,15 @@ def _pub(r: TemplateRenderer) -> InstagramPublisher:
 
 # ---------------------------------------------------------------- 설정
 def test_config_keeps_the_current_style_until_the_owner_picks() -> None:
+    """예전엔 no_photo: skip. 주인 결정 10/15: 확인된 사진이 없는 딜도 건너뛰지 않고 글자 카드로 (text_card).
+    인스타 전용 대기열 설정: 하루 3개·07~23시·2시간 간격·12시간 지나면 버림, 저녁 TOP5 캐러셀·점심 릴스·화금 단가표."""
     s = load_settings(ROOT / "config.yaml", load_env=False)
-    assert s.instagram.style == "B" and s.instagram.no_photo == "skip" and s.instagram.info_posts is False
+    ig = s.instagram
+    assert ig.style == "B" and ig.no_photo == "text_card" and ig.info_posts is False
+    assert (ig.daily_singles, ig.hours, ig.min_gap_minutes, ig.queue_expire_hours) == (3, "07:00-23:00", 120, 12)
+    assert (ig.carousel.enabled, ig.carousel.window, ig.carousel.max_deals, ig.carousel.min_deals) == (True, "20:00-21:00", 5, 2)
+    assert (ig.reels.enabled, ig.reels.window, ig.reels.max_deals, ig.reels.min_deals) == (True, "12:00-13:00", 3, 2)
+    assert ig.unit_carousel.enabled and ig.unit_carousel.days == ["tue", "fri"] and ig.unit_carousel.window == "19:00-20:00"
 
 
 def test_style_accepts_lowercase() -> None:
@@ -95,9 +104,12 @@ def test_variant_cards_render(r: TemplateRenderer, tmp_path: Path, layout: str, 
 
 
 def test_card_info_uses_only_data(r: TemplateRenderer) -> None:
+    """기록 최저 문구는 주인 결정 10/15 로 바뀜: 예전 '30일 최저가 갱신' → '우리가 본 최근 30일 중 가장 낮음 (MM/DD HH시 기준)'."""
     info = insta_style.card_info(_market_deal(), r, shop=REG.get("coupang"), deal_no=7)
-    assert info.ref_text == "쿠팡 최저가 22,900원" and info.ref_pct == 31 and info.low_label == "30일 최저가 갱신"
+    assert info.ref_text == "쿠팡 최저가 22,900원" and info.ref_pct == 31
+    assert info.low_label == "우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)"
     assert info.ship == "무료 로켓배송" and info.deal_no == 7 and info.disclosure == "쿠팡 파트너스 활동으로 수수료를 받습니다"
+    assert info.ad == "광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다"
     plain = insta_style.card_info(_plain_naver_deal(), r, shop=REG.get("naver"))
     assert plain.ref_price is None and plain.ref_text == "" and plain.low_label is None
     assert plain.list_price == 89000  # 표시 정가는 보조로만
@@ -109,13 +121,16 @@ def test_variant_captions_follow_the_rules(r: TemplateRenderer, style: str) -> N
     pub = _pub(r)
     for deal, shop in ((_market_deal(), "coupang"), (_market_deal(LONG), "coupang"), (_plain_naver_deal(), "naver")):
         text = pub.render(deal, deal_no=1532, style=style)
-        first = text.splitlines()[0]
+        first, second = text.splitlines()[:2]
         price = f"{deal.product.price:,}원"
-        assert price in first  # 첫 줄 = 이름 + 가격 (사실)
+        # 첫 줄 = 고지 (주인 결정 10/15, 예전엔 첫 줄이 이름 + 가격), 둘째 줄 = 이름 + 가격 (사실)
+        assert first == f"광고 · {insta_style.short_disclosure(REG.get(shop).disclosure)}"  # type: ignore[union-attr]
+        assert price in second
         if deal.verdict.market_price:
-            assert "쿠팡 최저가 22,900원" in first
+            assert "쿠팡 최저가 22,900원" in second
         else:
             assert "최저가" not in text and "평소" not in text  # 근거 없는 비교는 안 씀
+        assert not insta_style.validate(text, allowed=["쿠팡 최저가"] if deal.verdict.market_price else [])
         assert not BANNED.search(text.replace("https://", "")), text  # '역대급'·'강추'·느낌표·★ 등
         assert not THREAD_BANNED.search(text), text
         assert "http" not in text  # 인스타 본문 링크는 눌리지 않음 → 주소를 안 씀
@@ -134,9 +149,20 @@ def test_default_style_caption_is_unchanged(r: TemplateRenderer) -> None:
                                              template="deal_instagram.j2", autoescape=False)
 
 
-def test_b_caption_has_save_and_share_prompts(r: TemplateRenderer) -> None:
+def test_b_caption_has_plain_info_lines_instead_of_save_and_share_prompts(r: TemplateRenderer) -> None:
+    """예전 test_b_caption_has_save_and_share_prompts: '저장해 두세요'·'같이 쓸 가족·친구가 있으면 보내 주세요' 가 있었다.
+    주인 결정 10/15 (조사: 인스타는 저장·공유를 조르는 글을 추천에서 뺄 수 있음): 그 줄을 빼고 사실 안내 줄로."""
     text = _pub(r).render(_market_deal(), deal_no=3, style="B")
-    assert "저장해 두세요" in text and "보내 주세요" in text and "✔ 가격  15,900원" in text
+    assert "저장해" not in text and "보내 주세요" not in text and "✔ 가격  15,900원" in text
+    lines = text.splitlines()
+    assert lines[0] == "광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다"
+    assert lines[1] == "도브 인텐스 리페어 샴푸 680ml 2개 15,900원 · 쿠팡 최저가 22,900원"
+    assert "✔ 1개당  7,950원 · 100mL당 1,169원" in lines  # 카드 표 둘째 줄과 같은 줄
+    for line in ("1개당 가격은 카드 표 둘째 줄에 있어요", "가격·재고는 올린 시점 기준이에요",
+                 "실시간 전체 딜은 텔레그램에 먼저 올라와요 (프로필 링크)", "구매 링크: 프로필 링크 → 핫딜 페이지 #3"):
+        assert line in lines
+    assert "✔ 기록  우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)" in lines
+    assert "최저가 갱신" not in text and "역대" not in text
 
 
 def test_hashtags_are_relevant_and_capped() -> None:
@@ -166,7 +192,7 @@ async def test_deals_page_shows_numbers_only_for_variant_styles(settings) -> Non
         await bot.close()
 
 
-async def test_numbered_page_lists_every_deal_and_caption_numbers_only_page_deals(settings) -> None:  # type: ignore[no-untyped-def]
+async def test_numbered_page_lists_every_deal_and_caption_numbers_only_page_deals(settings, ig_post_now) -> None:  # type: ignore[no-untyped-def]
     """번호 양식이면 핫딜 페이지가 기간 안의 딜을 점수로 자르지 않고 모두 번호 순(최근 먼저)으로 보여 준다 —
     인스타 글의 '#번호' 를 페이지에서 찾을 수 있게. 페이지에 없는 글(기간이 지난 글)엔 카드·본문에 번호를 적지 않는다."""
     from datetime import timedelta
@@ -211,9 +237,14 @@ async def test_numbered_page_lists_every_deal_and_caption_numbers_only_page_deal
             return PublishResult(ok=True, dry_run=True)
 
         bot.instagram.publish = publish  # type: ignore[method-assign]
-        await bot._publish_side_channels(_market_deal("샴푸 5호"), photo=_photo(), deal_no=5)
+        new = _market_deal("샴푸 5호")
+        new.product.product_id = "coupang:5"
+        await bot._publish_side_channels(new, photo=_photo(), deal_no=5)
         await bot._publish_side_channels(old, photo=_photo(), deal_no=7)
-        assert got == [5, None]  # 페이지에 없는 글엔 '#번호' 를 적지 않음
+        assert got == []  # 인스타는 바로 안 올리고 대기열로 (주인 결정 10/15)
+        await ig_post_now(bot)
+        await ig_post_now(bot)
+        assert got == [5, None]  # 페이지에 없는 글엔 '#번호' 를 적지 않음 (번호는 올리는 때 다시 봄)
         assert "핫딜 페이지 #7" not in bot.instagram.render(old, deal_no=bot._page_deal_no(7))
     finally:
         await bot.close()

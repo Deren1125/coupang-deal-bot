@@ -345,14 +345,18 @@ def _ig_events(bot) -> list[str]:  # type: ignore[no-untyped-def]
     return [e["message"] for e in bot.db.recent_events(20) if e["kind"] == "instagram"]
 
 
-async def test_naver_deal_without_photo_gets_a_text_card(bot) -> None:  # type: ignore[no-untyped-def]
-    assert bot.settings.instagram.no_photo == "skip"  # 설정은 그대로 (쿠팡 등은 지금처럼 안 올림)
+async def test_naver_deal_without_photo_gets_a_text_card(bot, ig_post_now) -> None:  # type: ignore[no-untyped-def]
+    """주인 결정 10/15 로 기본(no_photo)이 text_card 가 됐다 (예전엔 skip 이 기본이라 쿠팡 등은 안 올림). 네이버 딜은 skip 설정이어도
+    글자 카드 — 여기선 skip 으로 두고 본다. 인스타는 대기열 → 시간표로 올라간다 (ig_post_now)."""
+    assert bot.settings.instagram.no_photo == "text_card"
+    bot.settings.instagram.no_photo = "skip"
     spy = _Spy(bot)
     bot._fetch_image = lambda *a, **k: (_ for _ in ()).throw(AssertionError("사진을 받으면 안 됨"))
     d = Deal(_product(), DealVerdict(is_deal=True), affiliate_url=LINK)
     photo = await bot.deal_photo(d)  # 스토어 막힘(conftest) · 크롬 못 엶 · 뽐뿌 썸네일은 안 씀
     assert photo is None and d.product.image_url is None
     await bot._publish_side_channels(d, photo=photo, deal_no=7)
+    await ig_post_now(bot)
     assert spy.saved == [None] and len(spy.posted) == 1 and (spy.posted[0] or "").startswith("https://bot.example.com/media/")
     assert not any("skipped" in m for m in _ig_events(bot))
     card = bot.settings.data_dir / "media" / (spy.posted[0] or "").rsplit("/", 1)[-1]
@@ -362,11 +366,12 @@ async def test_naver_deal_without_photo_gets_a_text_card(bot) -> None:  # type: 
     c = Deal(Product(source="goldbox", product_id="coupang:9", shop="coupang", name="텀블러", price=29900,
                      url="https://www.coupang.com/vp/products/9"), DealVerdict(is_deal=True))
     await bot._publish_side_channels(c, photo=None, deal_no=8)
+    await ig_post_now(bot)
     assert len(spy.saved) == 1 and any("coupang:9 skipped: 확인된 상품 사진 없음" in m for m in _ig_events(bot))
     assert bot._ig_skip_reason(None, deal=d) is None and bot._ig_skip_reason(None, deal=c) == "확인된 상품 사진 없음"
 
 
-async def test_naver_owner_photo_becomes_the_instagram_card_photo(bot) -> None:  # type: ignore[no-untyped-def]
+async def test_naver_owner_photo_becomes_the_instagram_card_photo(bot, ig_post_now) -> None:  # type: ignore[no-untyped-def]
     qid = _waiting(bot)
     await bot.attach_link(qid, LINK, photo=_jpeg(1000, 1000, (120, 80, 60)))
     deal = bot.db.get_queue_item(qid).deal
@@ -374,6 +379,7 @@ async def test_naver_owner_photo_becomes_the_instagram_card_photo(bot) -> None: 
     photo = await bot.deal_photo(deal)
     assert photo is not None
     await bot._publish_side_channels(deal, photo=photo, deal_no=9)
+    await ig_post_now(bot)  # 대기열에 남긴 사진 사본으로 카드
     assert spy.saved == [photo] and len(spy.posted) == 1
     card = bot.settings.data_dir / "media" / (spy.posted[0] or "").rsplit("/", 1)[-1]
     with Image.open(card) as im:  # 카드 사진 칸이 주인 사진 색 (글자 카드가 아님)
@@ -404,7 +410,7 @@ def test_maintenance_prunes_old_owner_photos(bot, settings: Settings) -> None:  
 
 
 # ---------------------------------------------------------------- 6. 검토 반영 (10/15 둘째 판)
-async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_for_a_photo(bot) -> None:  # type: ignore[no-untyped-def]
+async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_for_a_photo(bot, ig_post_now) -> None:  # type: ignore[no-untyped-def]
     """검토 지적 (②를 글자 그대로): 주인이 사진 없이 링크만 보낸 네이버 딜은 사진을 찾지 않는다 — 딜에 적힌 큰 스토어 사진,
     일반 요청으로 읽힌 스토어 페이지, 크롬(최대 45초) 모두 쓰지 않는다. 예전엔 크롬이 열리면 채널에 스토어 사진이 붙고 인스타도
     그 사진 카드였다. 이제 채널엔 글만(사진 바이트·주소 없음), 인스타는 글자 카드."""
@@ -445,7 +451,8 @@ async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_fo
     assert await bot.process_queue_once()
     assert bot.db.get_queue_item(qid).status == "published"
     assert got == {"photo": None, "image": None} and opened == [] and fetched == []
-    assert spy.saved == [None] and len(spy.posted) == 1  # 인스타: 글자 카드
+    await ig_post_now(bot)
+    assert spy.saved == [None] and len(spy.posted) == 1  # 인스타: 글자 카드 (대기열 → 시간표)
     # 텔레그램: 사진도 주소도 없으면 미리보기를 끈다 (스토어 og:image 가 미리보기로 붙지 않게)
     from dealbot.cli import sample_deal
 
