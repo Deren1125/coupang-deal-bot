@@ -110,6 +110,17 @@ class FakeController:
     def named(self, name: str) -> list[tuple[Any, ...]]:
         return [c for c in self.calls if c[0] == name]
 
+    # 발행 뒤 받는 딜 사진 (📷 사진 필요 #번호, 주인 결정 10/15)
+    waiting_photos: set[int] = set()
+
+    def late_photo_waiting(self, q: int) -> bool:
+        return q in self.waiting_photos
+
+    async def attach_late_photo(self, q: int, photo: Any) -> str:
+        data, why = await photo()
+        self.calls.append(("attach_late_photo", q, data))
+        return f"✅ #{q} 사진을 받았어요"
+
 
 class FakeReporter:
     def queue_text(self) -> str:
@@ -699,6 +710,29 @@ async def test_photo_reply_to_blog_message_and_slash_caption_relayed_without_ai(
     await env.media(photo=True, reply_to=req)
     await env.media(photo=True, caption="/photo 12 자리3")
     assert [r["nl"]["why"] for r in env.relayed] == ["reply_blog", "passthrough"] and llm.calls == []
+
+
+async def test_photo_reply_to_photo_need_or_photo_caption_goes_to_the_deal(env: Env) -> None:
+    """📷 사진 필요 #번호 에 사진만 답장 → 그 딜 사진. 설명 칸 '/photo 번호' 는 그 번호 딜이 사진을 기다릴 때만 딜로,
+    아니면 예전처럼 블로그 명령으로 넘어간다 (블로그 글 번호와 헷갈리지 않게). AI 는 부르지 않는다."""
+    llm = with_llm(env, ans("none"))
+    env.ctrl.waiting_photos = {812}
+    ask = env.bot_msg("📷 사진 필요 #812 데켓 주물팬 — 4시간 안에 이 메시지에 사진을 답장하면 블로그·인스타에 그 사진을 써요",
+                      kind="photo_need", q=812)
+    env.bot.files["F1"] = b"late-photo"
+    await env.media(photo=True, reply_to=ask, mid=1)
+    assert env.ctrl.named("attach_late_photo") == [("attach_late_photo", 812, b"late-photo")]
+    assert env.texts[-1] == "✅ #812 사진을 받았어요" and env.relayed == []
+    env.bot.files["F2"] = b"by-caption"
+    await env.media(photo=True, caption="/photo 812", mid=2)
+    assert env.ctrl.named("attach_late_photo")[-1] == ("attach_late_photo", 812, b"by-caption") and env.relayed == []
+    await env.media(photo=True, caption="/photo 12 자리3", mid=3)  # 사진을 기다리는 딜이 아님 → 블로그로
+    assert [r["nl"]["why"] for r in env.relayed] == ["passthrough"] and len(env.ctrl.named("attach_late_photo")) == 2
+    blog = env.bot_msg("📸 #812 사진 요청", record=False)  # 블로그 메시지에 단 답장은 번호가 같아도 블로그로
+    await env.media(photo=True, caption="/photo 812", reply_to=blog, mid=4)
+    assert env.relayed[-1]["nl"]["why"] in ("passthrough", "reply_blog") and len(env.ctrl.named("attach_late_photo")) == 2
+    assert llm.calls == []
+    env.ctrl.waiting_photos = set()
 
 
 # ------------------------------------------------------------------ 네이버 딜: 링크 + 상품 사진 (주인 결정 10/15)

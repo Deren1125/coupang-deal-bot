@@ -19,8 +19,9 @@ def test_render_deal_post(repo_root: Path) -> None:
     r = TemplateRenderer(repo_root / "templates")
     text = r.render_deal(sample_deal(), "https://link.coupang.com/a/sample", shop=ShopRegistry().get("coupang"))
     lines = text.splitlines()
-    assert lines[0] == "☑️ <b>29,900원</b> · 평소보다 29%↓"  # 1줄 = 알림 미리보기: 등급 + 가격 + 근거
-    assert lines[1] == "<b>[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L</b>" and "[샘플 · 오늘의 특가]" in lines
+    assert lines[0] == "☑️ <b>29,900원</b> · 평소보다 29%↓"  # 1줄 = 알림 미리보기: 등급 + 가격 + 근거 (그대로)
+    assert lines[1] == "광고 · 쿠팡 파트너스 수수료"  # 2줄 = 짧은 광고 표시 (주인 결정 10/15 — 공정위 지침: 첫 부분)
+    assert lines[2] == "<b>[샘플] 스탠리 텀블러 퀜처 H2.0 플로우스테이트 1.18L</b>" and "[샘플 · 오늘의 특가]" in lines
     assert "평소보다 확실히" not in text  # 숫자 없는 상투 문구는 쓰지 않음
     assert '\n👉 <a href="https://link.coupang.com/a/sample">구매하러 가기</a>\n' in text  # 긴 주소 대신 글자 링크
     assert text.endswith("<i>이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</i>")
@@ -124,8 +125,14 @@ def test_emphasis_tiers(repo_root: Path) -> None:
     # 평소 가격 대비가 기록 최저가보다 먼저 (스타일 가이드 우선순위), 최저가는 평소 가격 근거가 없을 때
     both = deal(below_avg_pct=20.0, avg_price=15450, low_price=13000, history_days=12.4, sample_count=6)
     assert r.render_deal(both, "https://l", shop=shop).startswith("☑️ <b>12,360원</b> · 평소보다 20%↓")
-    low = r.render_deal(deal(below_avg_pct=8.4, avg_price=13500, low_price=13000, history_days=12.4, sample_count=6), "https://l", shop=shop)
-    assert low.startswith("☑️ <b>12,360원</b> · 12일 중 제일 쌈")
+    low_deal = deal(below_avg_pct=8.4, avg_price=13500, low_price=13000, history_days=12.4, sample_count=6)
+    from datetime import UTC, datetime
+
+    low_deal.detected_at = datetime(2026, 10, 15, 0, 5, tzinfo=UTC)  # 09:05 KST
+    low = r.render_deal(low_deal, "https://l", shop=shop)
+    # 기록 최저가 라벨 (주인 결정 10/15): '우리가 본 최근 N일 중 가장 낮음 (MM/DD HH시 기준)' — 'N일 중 제일 쌈'·'역대 최저' 안 씀
+    assert low.startswith("☑️ <b>12,360원</b> · 우리가 본 최근 12일 중 가장 낮음 (10/15 09시 기준)\n")
+    assert "가격기록 :" not in low  # 첫 줄 근거와 같으면 칸을 또 만들지 않음
     th = r.render_deal(deal(below_avg_pct=20.0, avg_price=15450), "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
     assert "갈아만든배 340ml 24개 12,360원\n평소엔 15,000원대" in th and "쿠팡 파트너스" in th  # 평균 15,450 → '원대'는 끝자리 내림
     assert "원임" not in th and "% 쌈" not in th and "댓글" not in th  # 주인이 뺀 말 (TH-02)
@@ -187,7 +194,8 @@ def test_threads_uses_ai_lines_and_category_hooks(repo_root: Path) -> None:
     d = Deal(product=p, verdict=DealVerdict(is_deal=True, avg_price=21800, below_avg_pct=31.7), affiliate_url="https://l")
     t = r.render_deal(d, "https://l", shop=shop, template="deal_threads.j2", autoescape=False)
     lines = t.split("\n")
-    assert lines[0] == "휴지 떨어진 거 꼭 샤워 끝나고 알게 됨"  # 분류 '화장지' → 휴지 첫 줄 (상황 문장이라 '근데'로 뒤집음)
+    assert lines[0] == "[광고·쿠팡 파트너스 수수료 받음]"  # 첫 줄 = 짧은 광고 표시 (주인 결정 10/15)
+    assert lines[1] == "휴지 떨어진 거 꼭 샤워 끝나고 알게 됨"  # 분류 '화장지' → 휴지 첫 줄 (상황 문장이라 '근데'로 뒤집음)
     assert "근데 크리넥스 30롤 14,900원\n평소엔 21,000원대" in t and "롤당 497원 꼴이면" in t
     assert check_hook("휴지 떨어진 거 꼭 샤워 끝나고 알게 됨") and check_hook("어제 3개 샀음") is None
     assert check_short_name("크리넥스 30롤", "크리넥스 3겹 데코앤소프트 30m 30롤") == "크리넥스 30롤"

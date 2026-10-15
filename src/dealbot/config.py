@@ -353,6 +353,33 @@ class CommentaryConfig(BaseModel):
     timeout_seconds: float = 90
 
 
+def _window(v: str) -> str:
+    """'HH:MM-HH:MM' (끝은 24:00 까지). 틀리면 ValueError."""
+    start, sep, end = str(v).partition("-")
+    if not sep:
+        raise ValueError("시간대는 'HH:MM-HH:MM'")
+    for i, t in enumerate((start, end)):
+        hh, _, mm = t.strip().partition(":")
+        if not (hh.isdigit() and mm.isdigit() and 0 <= int(mm) < 60 and (0 <= int(hh) < 24 or (i == 1 and t.strip() == "24:00"))):
+            raise ValueError(f"시간대 '{v}' 는 'HH:MM-HH:MM'")
+    return f"{start.strip()}-{end.strip()}"
+
+
+class WeeklyTopConfig(BaseModel):
+    """일요일 텔레그램 'TOP5 + 투표 결과' 글 (주인 결정 10/15, 2단계): 지난 7일 채널 딜 중 점수 높은 5개 + 스레드 투표 결과.
+    window 안의 아무 분에 한 번 (보여 줄 것이 있을 때만)."""
+
+    enabled: bool = True
+    weekday: int = Field(6, ge=0, le=6)  # 0=월 … 6=일
+    window: str = "20:00-20:59"
+    top_n: int = Field(5, ge=1, le=10)
+
+    @field_validator("window")
+    @classmethod
+    def _win(cls, v: str) -> str:
+        return _window(v)
+
+
 class PublishConfig(BaseModel):
     enabled: bool = True
     dry_run: bool = False
@@ -389,6 +416,73 @@ class PublishConfig(BaseModel):
     templates_dir: Path = Path("templates")
     template: str = "deal_post.j2"
     commentary: CommentaryConfig = Field(default_factory=CommentaryConfig)
+    # 확인된 상품 사진 없이 올라간 딜 (주인 결정 10/15): 관리자 챗에 '📷 사진 필요' 를 보내고 이 시간 안에 사진을 답장하면
+    # 그 사진을 블로그·인스타 사진으로 (Blog-Auto 는 published_deals.jsonl 의 photo_wait_until 까지 기다렸다가 없으면 글자 카드로)
+    late_photo: bool = True
+    late_photo_hours: float = Field(4.0, gt=0, le=24)
+    weekly_top: WeeklyTopConfig = Field(default_factory=WeeklyTopConfig)
+
+
+class ThreadsRhythmConfig(BaseModel):
+    """스레드 글 리듬 (주인 결정 10/15): 07:00~24:00 에만, 글 사이 45분 이상, 딜 글은 하루 10개까지.
+    텔레그램에 올린 딜은 스레드 대기열(DB)에 넣고, 리듬이 허락할 때 점수 높은 것부터 올린다. 기다린 글은 올리기 직전에 품절을 다시 본다."""
+
+    enabled: bool = True  # false 면 예전처럼 텔레그램 발행 직후 바로 (대기열 없이)
+    hours: str = "07:00-24:00"  # 이 시간대(app.timezone)에만 올림
+    min_gap_minutes: float = Field(45, ge=0)
+    max_deal_posts_per_day: int = Field(10, ge=0)  # 0 = 제한 없음
+    queue_ttl_hours: float = Field(8, gt=0)  # 이보다 오래 기다린 글은 내림 (값·재고가 바뀌었을 수 있음)
+    recheck_after_minutes: float = Field(10, ge=0)  # 이만큼 넘게 기다린 딜은 올리기 직전에 품절 다시 확인
+
+    @field_validator("hours")
+    @classmethod
+    def _hours(cls, v: str) -> str:
+        return _window(v)
+
+
+class ThreadsRepliesConfig(BaseModel):
+    """내 스레드 글에 달린 답글 → 관리자 챗에 '원글 요약 + 답글 + 답변 초안 2개' (주인 결정 10/15: 하루 두 번 모아서, 자동 답글 없음).
+    threads_read_replies 권한이 있는 토큰일 때만 (없으면 조용히 건너뜀)."""
+
+    enabled: bool = True
+    windows: list[str] = Field(default_factory=lambda: ["12:30-12:59", "20:30-20:59"])  # 날마다 이 안의 아무 분에 한 번씩
+    lookback_hours: float = Field(48, gt=0)  # 이 시간 안에 올린 내 글의 답글만
+    max_posts: int = Field(20, ge=1)  # 한 번에 답글을 읽는 내 글 수 (API 호출 수)
+    max_messages: int = Field(15, ge=1)  # 한 번에 관리자 챗으로 보내는 답글 수 (넘치면 다음 번에)
+
+    @field_validator("windows")
+    @classmethod
+    def _windows(cls, v: list[str]) -> list[str]:
+        return [_window(x) for x in v]
+
+
+class ThreadsPollConfig(BaseModel):
+    """딜 글이 없는 날의 스레드 투표 (주인 결정 10/15, 2단계): after 시각까지 스레드 딜 글이 하나도 없으면 링크 없는 투표 글 하나
+    (공식 poll_attachment, 하루 한 번까지). 결과는 일요일 텔레그램 'TOP5 + 투표 결과' 에 (publish.weekly_top)."""
+
+    enabled: bool = True
+    after: str = "15:00"
+    question: str = "다음 주 뭐부터 찾아볼까?"
+    topic_tag: str = "살림"
+    # 우리가 찾는 분류 (수집기 카테고리) — 날마다 돌려 가며 4개 (선택지는 25자까지)
+    options: list[str] = Field(default_factory=lambda: ["주방·식품", "생활용품·세제", "가전·디지털", "뷰티·헬스",
+                                                         "반려동물", "출산·유아동", "홈인테리어"])
+
+    @field_validator("after")
+    @classmethod
+    def _after(cls, v: str) -> str:
+        return _window(f"{v}-24:00").split("-")[0]
+
+
+# 스레드 주제 태그 (topic_tag) — 분류(쿠팡 카테고리 칸)·상품명에 이 말이 있으면 그 태그 (앞에 적은 것이 먼저). 없으면 topic_tag_default
+DEFAULT_TOPIC_TAGS: dict[str, list[str]] = {
+    "집밥": ["주방", "식품", "조리", "냄비", "프라이팬", "식기", "라면", "햇반", "즉석밥", "간식", "과자", "음료", "생수", "커피",
+            "우유", "만두", "고기", "닭가슴살", "김치", "쌀", "과일", "채소", "축산", "수산", "냉동식품"],
+    "살림": ["생활", "세제", "세탁", "섬유유연제", "화장지", "휴지", "물티슈", "키친타올", "청소", "욕실", "수납", "정리", "쓰레기봉투",
+            "지퍼백", "홈인테리어"],
+    "헬스": ["운동", "스포츠", "헬스", "피트니스", "요가", "레저", "프로틴", "단백질", "아령", "덤벨"],
+    "패션": ["패션", "의류", "신발", "운동화", "가방", "잡화", "속옷", "양말", "티셔츠", "패딩", "레깅스"],
+}
 
 
 class ThreadsConfig(BaseModel):
@@ -399,6 +493,33 @@ class ThreadsConfig(BaseModel):
     reply_template: str | None = None  # 선택: 링크 없는 답글(채널 안내). deal_threads_reply.j2
     send_photo: bool = True
     refresh_before_days: int = 7
+    topic_tag_default: str = "핫딜"
+    topic_tags: dict[str, list[str]] = Field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_TOPIC_TAGS.items()})
+    rhythm: ThreadsRhythmConfig = Field(default_factory=ThreadsRhythmConfig)
+    # 품절이 확인된 딜: 내 스레드 글 아래에만 '업데이트) HH:MM 기준 품절됐어' 사실 답글 하나 (글마다 한 번, 남의 글에는 안 담)
+    soldout_reply: bool = True
+    replies: ThreadsRepliesConfig = Field(default_factory=ThreadsRepliesConfig)
+    poll: ThreadsPollConfig = Field(default_factory=ThreadsPollConfig)
+
+    @field_validator("topic_tag_default")
+    @classmethod
+    def _default_tag(cls, v: str) -> str:
+        return _topic_tag(v)
+
+    @field_validator("topic_tags")
+    @classmethod
+    def _tags(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
+        for tag in v:
+            _topic_tag(tag)
+        return v
+
+
+def _topic_tag(v: str) -> str:
+    """스레드 주제 태그 규칙: 1~50자, 마침표(.)·& 없음."""
+    t = str(v or "").strip().lstrip("#")
+    if not t or len(t) > 50 or "." in t or "&" in t:
+        raise ValueError(f"스레드 주제 태그 '{v}' 는 1~50자, '.'·'&' 없이")
+    return t
 
 
 class InstagramConfig(BaseModel):
@@ -440,6 +561,7 @@ class WebConfig(BaseModel):
     public_page: bool = True  # "/" 에 최근 채널 딜 목록(구매 링크 포함) 페이지를 연다 — 인스타 프로필 링크용
     site_title: str = "오늘의 핫딜"
     page_hours: int = 48  # 페이지에 보여줄 기간
+    past_days: int = Field(7, ge=1, le=30)  # 기간 안에 딜이 없으면 최근 N일 딜을 '지난 딜'로 보여 줌 (주인 결정 10/15)
     page_max_items: int = 30  # 예전 인스타 양식(current)만: 점수 순 위에서 이만큼. 번호 양식(A/B/C)은 기간 안의 딜을 모두 (인스타 '#번호' 를 찾게)
 
 
@@ -614,6 +736,8 @@ class ChannelsConfig(BaseModel):
     telegram_url: str = ""  # 예: https://t.me/oneul_hotdeal
     kakao_openchat_url: str = ""  # 예: https://open.kakao.com/o/xxxx
     threads_url: str = ""  # 예: https://www.threads.net/@oneul_hot_deal
+    instagram_url: str = ""  # 예: https://www.instagram.com/oneul_hot_deal (핫딜 페이지·채널 안내 글의 링크)
+    blog_url: str = ""  # 예: https://blog.naver.com/demiyum (채널 안내 글의 블로그 링크)
     telegram_name: str = "오늘의 핫딜"  # 블로그 글 채널 안내에 쓰는 이름
     kakao_openchat_name: str = "오늘의 핫딜 오픈채팅"
 
@@ -622,6 +746,8 @@ class ChannelsConfig(BaseModel):
             "telegram_url": self.telegram_url,
             "kakao_openchat_url": self.kakao_openchat_url,
             "threads_url": self.threads_url,
+            "instagram_url": self.instagram_url,
+            "blog_url": self.blog_url,
             "telegram_name": self.telegram_name,
             "kakao_openchat_name": self.kakao_openchat_name,
         }
@@ -692,6 +818,8 @@ class MonitoringConfig(BaseModel):
     # Blog-Auto·카톡이 안 될 때만 텔레그램으로 소리 내서. 명령에 대한 답장은 그대로 (소리와 함께). false 면 예전 그대로
     telegram_silent: bool = True
     owner_summary_time: str = "20:50"  # 저녁 요약(카톡, Blog-Auto 가 21~22시에 보냄)에 넣을 딜봇 하루 정리를 넘기는 시각
+    # 텔레그램엔 딜을 올렸는데 인스타·스레드가 24시간 동안 0개면 주인 할 일 한 통 (안 올린 이유 요약과 함께, 하루 한 번까지)
+    sns_zero_alert: bool = True
     heartbeat_minutes: int = 0  # 관리자 챗이 N분 동안 조용하면 "정상 가동 중" 짧은 상태를 보냄 (0 = 끔). 특가 알림이 있으면 그걸로 대신함
 
     @field_validator("daily_summary_time", "owner_summary_time")
@@ -721,6 +849,9 @@ class Secrets(BaseModel):
     instagram_app_secret: str | None = None
     instagram_redirect_uri: str = "https://localhost/instagram/callback"
     public_domain: str | None = None  # Railway 가 넣어 주는 RAILWAY_PUBLIC_DOMAIN (예: xxx.up.railway.app)
+    # 같은 봇을 가리키는 다른 공개 주소 (PUBLIC_DOMAIN_ALIASES, 쉼표로). 내 도메인으로 옮긴 뒤에도 Caddy 가 예전 sslip.io 주소를
+    # 같이 받아서 메타에 등록해 둔 예전 리디렉션 주소가 계속 된다 (deploy/lightsail/https.sh --domain)
+    public_domain_aliases: list[str] = Field(default_factory=list)
     web_port: int = 8080  # PORT — 스레드 OAuth 콜백·/health 를 받는 작은 HTTP 서버
     ntfy_topic: str | None = None
     ntfy_token: str | None = None
@@ -757,9 +888,15 @@ class Secrets(BaseModel):
         return urlsplit(self.instagram_redirect_uri).path or "/instagram/callback"
 
     @property
+    def served_hosts(self) -> set[str]:
+        """이 봇이 받는 공개 주소들 (PUBLIC_DOMAIN + 별칭)."""
+        hosts = {(self.public_domain or "").strip().strip("/").lower()} | {a.strip().strip("/").lower() for a in self.public_domain_aliases}
+        return {h for h in hosts if h}
+
+    @property
     def instagram_callback_served(self) -> bool:
         host = (urlsplit(self.instagram_redirect_uri).hostname or "").lower()
-        return bool(host) and host == (self.public_domain or "").lower()
+        return bool(host) and host in self.served_hosts
 
     @property
     def public_base_url(self) -> str | None:
@@ -773,9 +910,9 @@ class Secrets(BaseModel):
 
     @property
     def threads_callback_served(self) -> bool:
-        """리디렉션 주소가 이 봇의 공개 도메인을 가리키면 승인만 눌러도 자동으로 연결된다."""
+        """리디렉션 주소가 이 봇의 공개 도메인(또는 별칭)을 가리키면 승인만 눌러도 자동으로 연결된다."""
         host = (urlsplit(self.threads_redirect_uri).hostname or "").lower()
-        return bool(host) and host == (self.public_domain or "").lower()
+        return bool(host) and host in self.served_hosts
 
     @property
     def has_ntfy(self) -> bool:
@@ -957,6 +1094,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         instagram_redirect_uri=_env_str("INSTAGRAM_REDIRECT_URI")
         or _default_threads_redirect(_public_domain(), "/instagram/callback"),
         public_domain=_public_domain(),
+        public_domain_aliases=[a.strip() for a in (_env_str("PUBLIC_DOMAIN_ALIASES") or "").split(",") if a.strip()],
         web_port=_env_int("PORT") or 8080,
         ntfy_topic=_env_str("NTFY_TOPIC"),
         ntfy_token=_env_str("NTFY_TOKEN"),

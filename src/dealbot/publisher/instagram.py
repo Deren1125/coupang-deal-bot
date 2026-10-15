@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 import httpx
 
 from dealbot.models import Deal, PublishResult
+from dealbot.publisher.scopes import ScopeState
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.shops import ShopRegistry
 from dealbot.utils.retry import RetryableError, retry_async
@@ -29,7 +30,9 @@ GRAPH_BASE = "https://graph.instagram.com"
 API_VERSION = "v25.0"
 AUTH_BASE = "https://www.instagram.com/oauth/authorize"
 TOKEN_URL = "https://api.instagram.com/oauth/access_token"
-SCOPES = "instagram_business_basic,instagram_business_content_publish"
+# 통계(인사이트) 권한도 받아 둔다 (주인 결정 10/15). 메타 앱 Instagram 사용 사례에 주인이 먼저 더해야 하고(docs/SETUP_KEYS.md),
+# 없는 토큰이어도 발행은 그대로 — 대시보드 조회수만 '권한 필요' (scopes.py)
+SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights"
 CAPTION_LIMIT = 2200
 
 KV_TOKEN = "instagram_access_token"
@@ -326,6 +329,8 @@ class InstagramPublisher:
         self.dry_run = dry_run
         self.refresh_before_days = refresh_before_days
         self.style = style  # current | A | B | C (config instagram.style)
+        # 토큰이 가진 권한 기억 (인사이트 — 없으면 대시보드 조회수만 건너뜀)
+        self.scopes = ScopeState(db, "instagram", lambda: self.db.kv_get(KV_TOKEN))
 
     # ------------------------------------------------------------ 토큰
     def stored_token(self) -> InstagramToken | None:

@@ -31,9 +31,9 @@ sudo systemctl restart dealbot
 
 | 카드 (type) | 숫자 | 출처 |
 |---|---|---|
-| 텔레그램 (`telegram`) | 구독자, 채널 글 오늘·7일 | Bot API `getChatMemberCount`, 봇 DB |
+| 텔레그램 (`telegram`) | 구독자, 채널 글 오늘·7일, (가입 기록이 있으면) 새 구독 경로 7일 | Bot API `getChatMemberCount`, 봇 DB. 새 구독 경로는 `/invitelinks` 로 만든 이름 붙은 초대 링크별 가입 수 (chat_member 업데이트 — 공개 주소로 들어오면 '출처 모름') |
 | 인스타그램 (`instagram`) | 팔로워, 게시물 수, 조회수·도달 28일 | Instagram Graph API (`/instatoken` 토큰). 조회수는 인사이트 권한이 있을 때만 — 없으면 `권한 필요` |
-| 스레드 (`threads`) | 팔로워, 프로필 조회 28일 | Threads API `threads_insights` (`/threadstoken` 토큰, `threads_manage_insights` 권한 필요). 사용자 단위 `views` 는 **프로필 조회수**라 스레드 앱의 글 조회수보다 훨씬 작다 (글 조회수는 글마다 따로 물어야 해서 안 읽음) |
+| 스레드 (`threads`) | 팔로워, 프로필 조회 28일 | Threads API `threads_insights` (`/threadstoken` 토큰, `threads_manage_insights` 권한 필요 — 없다고 한 번 안 토큰으로는 다시 부르지 않고 '권한 필요'로, 다시 연결하면 다시 읽음. docs/SETUP_KEYS.md 7-7). 사용자 단위 `views` 는 **프로필 조회수**라 스레드 앱의 글 조회수보다 훨씬 작다 (글 조회수는 글마다 따로 물어야 해서 안 읽음) |
 | 쿠팡 파트너스 (`coupang_partners`) | 클릭·주문·수익 (날짜별, **어제까지**) | 파트너스 리포트 API. 한 번에 3회(리포트마다 재시도 없이 1번), `min_interval_hours`(8)에 한 번·하루 `max_calls_per_day`(6)회까지, 딥링크 예약 몫은 안 씀. 첫 리포트가 실패하면 나머지는 안 부름 (4xx → 판단 불가, 429·5xx·네트워크 → 다음 시각에) |
 | 링크 기다리는 딜 (`dealbot_links`) | 내 링크를 기다리는 딜 목록(새것부터 10개)·모두 몇 개·가장 오래 기다린 시간 + `링크 넣기` | 봇 DB (`awaiting_link`) |
 | 발행 대기 글 (`blog_waiting`) | 블로그마다 임시저장 대기 글 수·인기 예상 수·점수 높은 글 3개 | Blog-Auto 기록 파일의 `waiting` |

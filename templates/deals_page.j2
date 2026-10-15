@@ -1,6 +1,8 @@
 {#
   봇의 공개 도메인 "/" — 최근 채널 딜 목록 (인스타 프로필 링크용). 변수: title, items[] (id, name, price, original_price,
-  discount_rate, shop, rocket, free_shipping), hours, disclosures[], channels{telegram_url, kakao_openchat_url, ...}
+  discount_rate, shop, rocket, free_shipping), hours, disclosures[], channels{telegram_url, instagram_url, threads_url, ...},
+  past (기간 안 딜이 없어 최근 past_days 일 딜을 보여 주는 중), ad_top (맨 위 광고 표시 한 줄), telegram_join (채널 버튼 주소 —
+  /invitelinks 의 deals_page 초대 링크, 없으면 채널 주소). 주인 결정 10/15: 광고 표시는 맨 위(첫 부분)에, 전체 고지는 아래에 그대로.
 #}
 <!doctype html>
 <html lang="ko">
@@ -25,18 +27,31 @@
   .meta { color: #666; font-size: 13px; margin: 4px 0 10px; }
   .btn { display: block; text-align: center; background: #111; color: #fff; text-decoration: none; padding: 12px; border-radius: 10px; font-weight: 600; }
   .empty { color: #666; padding: 32px 0; text-align: center; }
+  .ad { background: #fff4e5; color: #8a4b00; font-size: 12px; line-height: 1.5; padding: 8px 16px; margin: 0; }
+  .join { display: block; text-align: center; background: #229ed9; color: #fff; text-decoration: none; padding: 12px; border-radius: 10px; font-weight: 600; margin: 12px 0 4px; }
+  .links { color: #666; font-size: 13px; margin: 6px 0 0; text-align: center; }
+  .links a { color: #444; }
+  .past { display: inline-block; background: #eee; color: #555; font-size: 12px; border-radius: 6px; padding: 2px 6px; margin-bottom: 6px; }
   footer { color: #777; font-size: 12px; line-height: 1.6; padding: 12px 16px 32px; max-width: 640px; margin: 0 auto; }
   footer a { color: #444; }
 </style>
 </head>
 <body>
+{% if ad_top is defined and ad_top %}<p class="ad">{{ ad_top }}</p>{% endif %}
 <header>
   <h1>{{ title }}</h1>
+  {% if past is defined and past %}
+  <p class="sub">오늘은 아직 올라온 딜이 없어 최근 {{ past_days }}일 동안 올라온 딜을 보여 드려요. 가격이 바뀌었을 수 있어요.</p>
+  {% else %}
   <p class="sub">최근 {{ hours }}시간 안에 올라온 딜입니다. 핫딜은 금방 품절돼요.</p>
+  {% endif %}
+  {% if telegram_join is defined and telegram_join %}<a class="join" href="{{ telegram_join }}" rel="nofollow">텔레그램 채널에서 실시간으로 받기</a>{% endif %}
+  {% if channels.instagram_url or channels.threads_url %}<p class="links">{% if channels.instagram_url %}<a href="{{ channels.instagram_url }}" rel="nofollow">인스타그램</a>{% endif %}{% if channels.instagram_url and channels.threads_url %} · {% endif %}{% if channels.threads_url %}<a href="{{ channels.threads_url }}" rel="nofollow">스레드</a>{% endif %}</p>{% endif %}
 </header>
 <main>
 {% for it in items %}
   <article class="deal">
+    {% if past is defined and past %}<span class="past">지난 딜 · 가격이 바뀌었을 수 있어요</span>{% endif %}
     <p class="name">{% if show_numbers is defined and show_numbers %}<span class="no">#{{ it.id }}</span> {% endif %}{{ it.name }}</p>
     {% if it.price %}
     <div><span class="price">{{ "{:,}".format(it.price) }}원</span>{% if it.original_price %}<span class="orig">{{ "{:,}".format(it.original_price) }}원</span>{% endif %}{% if it.discount_rate %}<span class="rate">{{ it.discount_rate | round | int }}%↓</span>{% endif %}</div>

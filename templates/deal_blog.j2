@@ -1,8 +1,12 @@
 {#
   네이버 블로그 복붙용 — 제목과 본문. 첫 줄이 제목, 그 뒤가 본문입니다.
   블로그는 글자 수 제한이 없으니 설명을 조금 더 붙입니다.
+  광고 표시 (주인 결정 10/15, 공정위 지침: 제목이나 첫 부분): 본문 첫 줄에 짧은 '광고 · … 수수료', 전체 고지는 끝 그대로.
 #}
 [{{ shop.name }}] {{ product.name }}{% if product.has_price %} {{ product.price | won }}{% endif +%}
+{% if shop.ad_line %}
+{{ shop.ad_line }}
+{% endif %}
 
 {% if product.headline %}
 {{ product.headline }}

@@ -216,6 +216,9 @@ async def test_threads_server_error_does_not_skip_instagram(bot, boom: str) -> N
 
     bot.settings.threads.enabled = True
     bot.threads.dry_run = True  # 연결된 것처럼 (실제 요청은 아래 가짜가 받음)
+    from datetime import UTC, datetime
+
+    bot.clock = lambda: datetime(2026, 10, 15, 3, 0, tzinfo=UTC)  # 스레드 리듬 안 (낮 12시) — 대기열에서 바로 올라감
 
     async def threads_down(deal: Deal, **_kw: object) -> PublishResult:
         if boom == "retryable":

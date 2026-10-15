@@ -95,8 +95,14 @@ def test_variant_cards_render(r: TemplateRenderer, tmp_path: Path, layout: str, 
 
 
 def test_card_info_uses_only_data(r: TemplateRenderer) -> None:
-    info = insta_style.card_info(_market_deal(), r, shop=REG.get("coupang"), deal_no=7)
-    assert info.ref_text == "쿠팡 최저가 22,900원" and info.ref_pct == 31 and info.low_label == "30일 최저가 갱신"
+    from datetime import UTC, datetime
+
+    deal = _market_deal()
+    deal.detected_at = datetime(2026, 10, 15, 11, 0, tzinfo=UTC)  # 20:00 KST
+    info = insta_style.card_info(deal, r, shop=REG.get("coupang"), deal_no=7)
+    # 기록 라벨 (주인 결정 10/15): '30일 최저가 갱신' → '우리가 본 최근 30일 중 가장 낮음 (MM/DD HH시 기준)'
+    assert info.ref_text == "쿠팡 최저가 22,900원" and info.ref_pct == 31
+    assert info.low_label == "우리가 본 최근 30일 중 가장 낮음 (10/15 20시 기준)"
     assert info.ship == "무료 로켓배송" and info.deal_no == 7 and info.disclosure == "쿠팡 파트너스 활동으로 수수료를 받습니다"
     plain = insta_style.card_info(_plain_naver_deal(), r, shop=REG.get("naver"))
     assert plain.ref_price is None and plain.ref_text == "" and plain.low_label is None

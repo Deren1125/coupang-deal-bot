@@ -32,6 +32,11 @@ esac
 exit 0
 """,
     "sleep": "#!/usr/bin/env bash\nexit 0\n",
+    # 내 도메인 DNS (https.sh --domain): FAKE_DNS 의 IP 들을 A 레코드로
+    "getent": r"""#!/usr/bin/env bash
+for ip in ${FAKE_DNS:-}; do echo "$ip      STREAM $2"; done
+[ -n "${FAKE_DNS:-}" ]
+""",
     "caddy": '#!/usr/bin/env bash\necho "caddy $*" >> "$SIM/calls.log"\nexit 0\n',
     # 텔레그램 알림은 보낸 문구만 기록, 공인 IP·health 확인은 가짜 응답
     "curl": r"""#!/usr/bin/env bash
@@ -40,7 +45,10 @@ for a in "$@"; do
     text=*) printf '%s\n----\n' "${a#text=}" >> "$SIM/notify.log" ;;
     disable_notification=*) echo "$a" >> "$SIM/curl_flags.log" ;;
     https://checkip.amazonaws.com) echo "${FAKE_IP:-3.35.1.2}"; exit 0 ;;
-    */health) printf '200'; exit 0 ;;
+    */health)
+      echo "$a" >> "$SIM/health.log"
+      for down in ${FAKE_DOWN:-}; do case "$a" in "https://$down/health") printf '000'; exit 0 ;; esac; done
+      printf '200'; exit 0 ;;
   esac
 done
 exit 0
@@ -513,14 +521,83 @@ STOCK_CADDYFILE = """# The Caddyfile is an easy way to configure your Caddy web 
 """
 
 
-def _https(server: Server, env_lines: str = "", caddyfile: str | None = None, ip: str = "3.35.1.2") -> subprocess.CompletedProcess[str]:
+def _https(server: Server, env_lines: str = "", caddyfile: str | None = None, ip: str = "3.35.1.2", *args: str,
+           env: str | None = None) -> subprocess.CompletedProcess[str]:
+    """env=None 이면 .env 를 새로 쓰고, 문자열이면 그대로 (다시 실행 흉내는 '' 로 그대로 둠)."""
     etc = server.sim / "etc"
     if caddyfile is not None:
         (etc / "Caddyfile").write_text(caddyfile, encoding="utf-8")
-    (server.srv / ".env").write_text("TELEGRAM_BOT_TOKEN=fake\n" + env_lines, encoding="utf-8")
+    if env is None:
+        (server.srv / ".env").write_text("TELEGRAM_BOT_TOKEN=fake\n" + env_lines, encoding="utf-8")
     server.env["CADDY_DIR"] = str(etc)
     server.env["FAKE_IP"] = ip
-    return server.run(script="https.sh")
+    return server.run(*args, script="https.sh")
+
+
+def _env(server: Server) -> dict[str, str]:
+    lines = (server.srv / ".env").read_text(encoding="utf-8").splitlines()
+    return dict(ln.split("=", 1) for ln in lines if "=" in ln)
+
+
+# ---- https.sh --domain (내 도메인, 주인 결정 10/15)
+
+
+def test_https_domain_switches_only_after_its_health_check(server: Server) -> None:
+    """Caddy 는 sslip.io 와 내 도메인을 둘 다 받고, 내 도메인 https 확인이 되면 PUBLIC_DOMAIN 을 바꾼다.
+    메타에 등록된 예전(sslip.io) 리디렉션 주소는 고정해 계속 되게, 새로 더할 주소는 그대로 보여 준다."""
+    r = _https(server, "", None, "3.35.1.2", "--domain", "Deals.Example.com")
+    assert r.returncode == 0, r.stdout + r.stderr
+    caddy = (server.sim / "etc" / "Caddyfile").read_text(encoding="utf-8")
+    assert "3-35-1-2.sslip.io, deals.example.com {" in caddy and "reverse_proxy 127.0.0.1:8080" in caddy
+    env = _env(server)
+    assert env["PUBLIC_DOMAIN"] == "deals.example.com" and env["PUBLIC_DOMAIN_ALIASES"] == "3-35-1-2.sslip.io"
+    assert env["THREADS_REDIRECT_URI"] == "https://3-35-1-2.sslip.io/threads/callback"
+    assert env["INSTAGRAM_REDIRECT_URI"] == "https://3-35-1-2.sslip.io/instagram/callback"
+    assert (server.srv / ".env").read_text(encoding="utf-8").count("PUBLIC_DOMAIN=") == 1
+    assert "https://deals.example.com/threads/callback" in r.stdout and "https://deals.example.com/instagram/callback" in r.stdout
+    assert "https://deals.example.com/health" in server.log("health.log")
+    # 다시 실행(--domain 없이)해도 내 도메인을 계속 받고 그대로 둔다 (핫딜 페이지·카드 주소가 끊기지 않게)
+    r2 = _https(server, "", None, "3.35.1.2", env="")
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert "3-35-1-2.sslip.io, deals.example.com {" in (server.sim / "etc" / "Caddyfile").read_text(encoding="utf-8")
+    env = _env(server)
+    assert env["PUBLIC_DOMAIN"] == "deals.example.com" and env["PUBLIC_DOMAIN_ALIASES"] == "3-35-1-2.sslip.io"
+    assert env["THREADS_REDIRECT_URI"] == "https://3-35-1-2.sslip.io/threads/callback"
+
+
+def test_https_domain_keeps_the_old_address_until_dns_points_here(server: Server) -> None:
+    server.env["FAKE_DOWN"] = "deals.example.com"
+    server.env["FAKE_DNS"] = "9.9.9.9"
+    r = _https(server, "PUBLIC_DOMAIN=3-35-1-2.sslip.io\n", None, "3.35.1.2", "--domain", "deals.example.com")
+    assert r.returncode == 0, r.stdout + r.stderr
+    env = _env(server)
+    assert env["PUBLIC_DOMAIN"] == "3-35-1-2.sslip.io" and "PUBLIC_DOMAIN_ALIASES" not in env
+    assert "THREADS_REDIRECT_URI" not in env  # 그대로 (sslip.io 기준 자동)
+    assert "가리키지 않아요" in r.stdout and "9.9.9.9" in r.stdout and "3.35.1.2" in r.stdout
+    assert "--domain deals.example.com" in r.stdout  # 준비되면 다시
+    assert "3-35-1-2.sslip.io, deals.example.com {" in (server.sim / "etc" / "Caddyfile").read_text(encoding="utf-8")
+    # A 레코드가 아예 없을 때도 이유를 말한다
+    server.env["FAKE_DNS"] = ""
+    r = _https(server, "PUBLIC_DOMAIN=3-35-1-2.sslip.io\n", None, "3.35.1.2", "--domain", "deals.example.com")
+    assert "A 레코드가 아직 없어요" in r.stdout and _env(server)["PUBLIC_DOMAIN"] == "3-35-1-2.sslip.io"
+
+
+@pytest.mark.parametrize("bad", ["https://deals.example.com/", "deals", "-bad.example.com", "a..b.com", "1-2-3-4.sslip.io", "dealsㅋ.com"])
+def test_https_rejects_a_bad_domain_before_changing_anything(server: Server, bad: str) -> None:
+    before = "TELEGRAM_BOT_TOKEN=fake\nPUBLIC_DOMAIN=3-35-1-2.sslip.io\n"
+    r = _https(server, "PUBLIC_DOMAIN=3-35-1-2.sslip.io\n", None, "3.35.1.2", "--domain", bad)
+    assert r.returncode == 2 and "⛔" in r.stdout
+    assert (server.srv / ".env").read_text(encoding="utf-8") == before
+    assert not (server.sim / "etc" / "Caddyfile").exists() and "systemctl restart" not in server.log("calls.log")
+
+
+def test_https_domain_keeps_redirect_overrides_for_either_host(server: Server) -> None:
+    keep = "THREADS_REDIRECT_URI=https://deals.example.com/threads/callback\n"
+    r = _https(server, keep, None, "3.35.1.2", "--domain", "deals.example.com")
+    assert r.returncode == 0, r.stdout + r.stderr
+    env = _env(server)
+    assert env["THREADS_REDIRECT_URI"] == "https://deals.example.com/threads/callback"  # 내 도메인 주소는 그대로
+    assert env["INSTAGRAM_REDIRECT_URI"] == "https://3-35-1-2.sslip.io/instagram/callback"  # 없던 것만 고정
 
 
 def test_https_drops_redirect_overrides_for_another_host(server: Server) -> None:

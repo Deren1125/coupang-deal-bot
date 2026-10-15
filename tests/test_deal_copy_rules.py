@@ -86,19 +86,26 @@ def test_market_pct_never_exceeds_evaluator_value_with_shipping(r: TemplateRende
         (dict(low_price=13900, history_days=3.5, sample_count=1), None),
         # 기록이 짧음 (7일 미만)
         (dict(low_price=13900, avg_price=14000, history_days=5, sample_count=6), None),
-        # 진짜로 기록보다 내려감
-        (dict(low_price=13900, avg_price=14000, history_days=12, sample_count=6), "12일 최저가 갱신"),
-        # 오르내리다 최저가와 같은 값
-        (dict(low_price=12900, avg_price=14000, history_days=12, sample_count=6), "12일 최저가"),
+        # 진짜로 기록보다 내려감 / 오르내리다 최저가와 같은 값 — 둘 다 '우리가 본 최근 N일 중 가장 낮음 (MM/DD HH시 기준)'
+        # (주인 결정 10/15: 'N일 최저가(갱신)'·'역대 최저' 는 안 씀 — 봇이 본 기록 안의 말)
+        (dict(low_price=13900, avg_price=14000, history_days=12, sample_count=6), "우리가 본 최근 12일 중 가장 낮음 (10/15 14시 기준)"),
+        (dict(low_price=12900, avg_price=14000, history_days=12, sample_count=6), "우리가 본 최근 12일 중 가장 낮음 (10/15 14시 기준)"),
     ],
 )
 def test_low_label_needs_real_history(r: TemplateRenderer, verdict: dict, label: str | None) -> None:
+    from datetime import UTC, datetime
+
     d = _deal(DealVerdict(is_deal=True, discount_rate=55, **verdict), source="goldbox", price=12900)
+    d.detected_at = datetime(2026, 10, 15, 5, 30, tzinfo=UTC)  # 14:30 KST
     labels = r.deal_facts(d)["labels"]
-    lows = [x for x in labels if "최저가" in x]
+    lows = [x for x in labels if "가장 낮음" in x]
     assert lows == ([label] if label else [])
+    tg = _tg(r, d)
+    assert "최저가" not in tg and "역대 최저" not in tg and "제일 쌈" not in tg
     if label is None:
-        assert "제일 쌈" not in _tg(r, d)
+        assert "가장 낮음" not in tg
+    else:
+        assert label in tg
 
 
 def test_reference_gap_beats_short_low_label(r: TemplateRenderer) -> None:
@@ -211,7 +218,8 @@ def test_turn_only_after_situation_hooks(r: TemplateRenderer) -> None:
         for name in ("할리스 바닐라 딜라이트 로우슈거, 24개", "크리넥스 화장지 30롤"):
             d = _deal(product_id=f"toss:{i}", shop="toss", name=name, price=24900)
             lines = _th(r, d).split("\n")
-            hook, price_line = lines[0], lines[2]
+            assert lines[0] == "[광고·토스쇼핑 쉐어링크 수수료 받음]"  # 첫 줄은 짧은 광고 표시 (주인 결정 10/15)
+            hook, price_line = lines[1], lines[3]
             if hook in situation:
                 seen_situation = True
                 assert price_line.startswith("근데 "), lines
@@ -220,7 +228,7 @@ def test_turn_only_after_situation_hooks(r: TemplateRenderer) -> None:
                 assert not price_line.startswith("근데"), lines
     assert seen_statement and seen_situation
     ai = _deal(name="상품 24개", extra={"thread_hook": "라면 떨어지면 꼭 밤에 알게 됨"})
-    assert _th(r, ai).split("\n")[2].startswith("근데 ")  # AI 첫 줄은 상황 문장으로 쓰게 함
+    assert _th(r, ai).split("\n")[3].startswith("근데 ")  # AI 첫 줄은 상황 문장으로 쓰게 함 (광고 표시 다음 줄)
 
 
 # ---------------------------------------------------------------- 짧은 이름 (#15)
@@ -300,7 +308,8 @@ async def test_threads_rotation_over_ten_posts(db: Database, repo_root: Path) ->
         preview = pub.render(d)
         assert (await pub.publish(d)).ok
         assert posted[-1] == preview
-    hooks = [t.split("\n")[0] for t in posted]
+    assert all(t.split("\n")[0] == "[광고·토스쇼핑 쉐어링크 수수료 받음]" for t in posted)  # 첫 줄 = 광고 표시 (주인 결정 10/15)
+    hooks = [t.split("\n")[1] for t in posted]
     assert len(set(hooks)) == 10, hooks
     closes = [t.split("\n\n")[-2] for t in posted if t.split("\n\n")[-2] in TemplateRenderer.THREAD_CLOSES]
     assert len(closes) == len(set(closes)), closes
@@ -354,7 +363,8 @@ def test_channel_post_is_info_field_layout(r: TemplateRenderer) -> None:
     tg = _tg(r, d)
     lines = tg.splitlines()
     assert lines[0].startswith("☑️ <b>29,900원</b>") or lines[0].split(" <b>")[0] in ("🔥 초특가", "👍 강추")  # 1줄 = 가격 (알림 미리보기)
-    assert lines[1] == "<b>스탠리 퀜처 텀블러 1.18L</b>"
+    assert lines[1] == "광고 · 쿠팡 파트너스 수수료"  # 2줄 = 짧은 광고 표시 (주인 결정 10/15), 전체 고지는 끝 그대로
+    assert lines[2] == "<b>스탠리 퀜처 텀블러 1.18L</b>"
     for row in ("카테고리 : 텀블러", "배송관련 : 무료 로켓배송", "판매처 : 공식 판매처 확인", "평점점수 : 4.7", "리뷰숫자 : 1,312",
                 "방장 한줄평 : 주방템은 한 번 사면 오래 써요"):
         assert row in lines, row

@@ -2,12 +2,16 @@
   카카오톡(나에게 보내기 → 오픈채팅 전달)용 — 순수 텍스트. 라벨은 꺾쇠만. 배송은 게시판 줄임말 대신 읽는 말(facts.ship).
   변수는 deal_post.j2 와 같다 (pname / ref_price / ref_label / ref_pct / tier 포함).
   등급 문구("역대급 가격", "꼭 담으세요" 같은 확인 안 되는 말)와 텔레그램 안내(글마다 반복되는 채널 광고)는 넣지 않는다.
+  광고 표시 (주인 결정 10/15, 공정위 지침: 첫 부분): 상품명 줄 바로 아래 짧은 '광고 · … 수수료', 전체 고지는 끝 그대로.
 #}
 {% if product.headline %}
 [{{ product.headline }}]
 
 {% endif %}
 {% if tier == "top" %}🚨 {% elif tier == "must" %}🔥 {% endif %}{{ pname }}
+{% if shop.ad_line %}
+{{ shop.ad_line }}
+{% endif %}
 {% if product.has_price %}
 {{ product.price | won }}{% if ref_price %} ({{ ref_label }} {{ ref_price | won }}보다 {{ ref_pct }}%↓){% elif discount_rate %} (표시 할인 {{ discount_rate | pct }}){% endif +%}
 {% endif %}

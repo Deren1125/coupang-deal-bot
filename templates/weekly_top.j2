@@ -1,0 +1,30 @@
+{#
+  일요일 텔레그램 'TOP5 + 투표 결과' (주인 결정 10/15, 2단계). 지난 7일 채널에 올린 딜 중 점수 높은 순 + 스레드 투표 결과.
+  1줄 = 제목. 2줄 = 짧은 광고 표시 (구매 링크가 있을 때만 — 그 링크들의 제휴 프로그램 이름, 딜 글과 같은 말). 끝 = 전체 제휴 고지.
+  가격은 올린 때의 값 (지금은 바뀌었을 수 있다고 적는다). 숫자는 데이터에서만. 텔레그램 HTML.
+  변수: deals[] (name, price, posted, link, link_label), poll (question, total, options[] (label, pct)) | None,
+        ad_line, disclosures[]
+#}
+📊 <b>이번 주 {% if deals %}TOP{{ deals | length }}{% endif %}{% if deals and poll %} + {% endif %}{% if poll %}투표 결과{% endif %}</b>
+{% if ad_line %}
+{{ ad_line }}
+{% endif %}
+{% if deals %}
+
+{% for d in deals %}
+{{ loop.index }}. <b>{{ d.name }}</b>{% if d.price %} — {{ d.price | won }} ({{ d.posted }} 올린 가격){% endif +%}
+👉 <a href="{{ d.link }}">{{ d.link_label }}</a>
+{% endfor %}
+가격·재고는 올린 때 기준이라 지금은 바뀌었을 수 있어요.
+{% endif %}
+{% if poll %}
+
+🗳 <b>스레드 투표</b> · {{ poll.question }} (참여 {{ "{:,}".format(poll.total) }}명)
+{% for o in poll.options %}
+{{ loop.index }}위 {{ o.label }} {{ o.pct }}%
+{% endfor %}
+{% endif %}
+{% for d in disclosures %}
+
+<i>{{ d }}</i>
+{% endfor %}
