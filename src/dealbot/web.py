@@ -7,7 +7,8 @@
 - `/dashboard` 채널 대시보드 — 경로 앞부분(guard_prefix)이나 경로 하나(route auth=)에 인증을 붙일 수 있다
   (기본 인증, 틀리면 401 + WWW-Authenticate, 너무 많이 틀리면 429 + Retry-After).
 
-의존성 없이 asyncio 로만 만들었고, 요청 한 줄과 헤더만 읽는다. 본문(POST)은 다루지 않는다.
+의존성 없이 asyncio 로만 만들었고, 보통은 요청 한 줄과 헤더만 읽는다. 본문은 route_post 로 연 경로만 읽는다
+(작은 폼 하나: application/x-www-form-urlencoded, 경로마다 정한 크기까지, 다른 사이트에서 보낸 폼은 403).
 """
 
 from __future__ import annotations
@@ -40,11 +41,14 @@ PEER_HEADER = ":peer"
 _STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 
 _STATUS_TEXT = {
-    200: "OK", 302: "Found", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-    405: "Method Not Allowed", 429: "Too Many Requests", 500: "Internal Server Error",
+    200: "OK", 302: "Found", 303: "See Other", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    405: "Method Not Allowed", 411: "Length Required", 413: "Content Too Large", 415: "Unsupported Media Type",
+    429: "Too Many Requests", 500: "Internal Server Error",
 }
 _MAX_HEADER_BYTES = 16 * 1024
 _READ_TIMEOUT = 10.0
+FORM_TYPE = "application/x-www-form-urlencoded"
+MAX_FORM_FIELDS = 20
 
 
 def page(title: str, body: str) -> str:
@@ -72,6 +76,12 @@ def parse_headers(lines: list[bytes]) -> dict[str, str]:
     return out
 
 
+def content_length(headers: dict[str, str]) -> int | None:
+    """Content-Length 값 (숫자만, 없거나 이상하면 None)."""
+    raw = (headers.get("content-length") or "").strip()
+    return int(raw) if raw.isdigit() and len(raw) <= 12 else None
+
+
 def _header_safe(value: str) -> bool:
     return "\r" not in value and "\n" not in value
 
@@ -93,6 +103,8 @@ class WebServer:
         self.port = port
         self.host = host
         self.routes: dict[str, Handler] = {}
+        # POST 로만 받는 경로 → (핸들러, 본문 최대 바이트). 핸들러는 쿼리 대신 폼 본문을 사전으로 받는다
+        self.post_routes: dict[str, tuple[Handler, int]] = {}
         self.prefixes: dict[str, Handler] = {}  # "/d/" 처럼 앞부분만 맞는 경로 → 핸들러 (쿼리에 "path" 로 나머지를 넘김)
         self.static: dict[str, Path] = {}  # URL 앞부분 → 폴더 (카드 이미지 등)
         self.auth: dict[str, AuthCheck] = {}  # 인증이 필요한 경로 → 확인 함수
@@ -108,6 +120,11 @@ class WebServer:
             self.auth[path] = auth
         else:
             self.auth.pop(path, None)
+
+    def route_post(self, path: str, handler: Handler, *, max_body: int = 4096) -> None:
+        """폼 하나를 POST 로 받는 경로. 주소의 쿼리는 쓰지 않고 본문(application/x-www-form-urlencoded)만 핸들러로 넘긴다.
+        본문이 max_body 보다 크면 읽지 않고 413. 인증은 route 와 같다 (guard_prefix 아래면 먼저 확인)."""
+        self.post_routes[path] = (handler, max_body)
 
     def route_prefix(self, prefix: str, handler: Handler) -> None:
         self.prefixes[prefix] = handler
@@ -186,7 +203,14 @@ class WebServer:
             peer = writer.get_extra_info("peername")
             if isinstance(peer, tuple) and peer:
                 headers[PEER_HEADER] = str(peer[0])
-            result = await self.dispatch(method, target, headers)
+            form_body: bytes | None = None
+            if method == "POST":
+                route = self.post_routes.get(urlsplit(target).path or "/")
+                length = content_length(headers)
+                # POST 로 연 경로이고 크기가 정한 만큼 안이면 그만큼만 읽는다 (아니면 읽지 않고 dispatch 가 405·411·413)
+                if route is not None and length is not None and length <= route[1]:
+                    form_body = await asyncio.wait_for(reader.readexactly(length), timeout=_READ_TIMEOUT) if length else b""
+            result = await self.dispatch(method, target, headers, form_body)
             status, body = result[0], result[1]
             ctype = result[2] if len(result) >= 3 else None  # type: ignore[misc]
             extra = result[3] if len(result) >= 4 else None  # type: ignore[misc]
@@ -198,13 +222,16 @@ class WebServer:
         except Exception:  # noqa: BLE001
             pass
 
-    async def dispatch(self, method: str, target: str, headers: dict[str, str] | None = None) -> Response:
-        """테스트에서도 바로 부를 수 있게 분리. headers 는 이름을 소문자로 (인증이 필요한 경로만 봄)."""
+    async def dispatch(self, method: str, target: str, headers: dict[str, str] | None = None,
+                       body: bytes | None = None) -> Response:
+        """테스트에서도 바로 부를 수 있게 분리. headers 는 이름을 소문자로 (인증이 필요한 경로만 봄).
+        body 는 POST 본문 (route_post 경로만 씀. None 이면 크기를 넘었거나 길이를 몰라 읽지 않은 것)."""
         split = urlsplit(target)
         path = split.path or "/"
         if path in ("/health", "/healthz"):
             return 200, "ok"
-        if method not in ("GET", "HEAD"):
+        post = self.post_routes.get(path)
+        if method not in ("GET", "HEAD", "POST") or (method == "POST" and post is None):
             return 405, page("허용되지 않는 방식", "GET 만 받습니다.")
         guarded, guard = self._guard_for(path)
         if guarded:  # 지키는 앞부분 아래는 경로가 있든 없든 먼저 확인 (없는 경로도 로그인 전엔 401)
@@ -213,6 +240,11 @@ class WebServer:
             denied = self._auth_denied(guard, headers or {})
             if denied is not None:
                 return denied
+        if post is not None:
+            if method != "POST" and path not in self.routes:
+                return 405, page("허용되지 않는 방식", "POST 만 받습니다."), "text/html; charset=utf-8", {"Allow": "POST"}
+            if method == "POST":
+                return await self._dispatch_post(path, post, headers or {}, body)
         for prefix, directory in self.static.items():
             if path.startswith(prefix):
                 return self._static(directory, path[len(prefix):])
@@ -235,6 +267,36 @@ class WebServer:
                 return denied
         try:
             return await handler(query)
+        except Exception as e:  # noqa: BLE001
+            log.exception("web handler %s failed: %s", path, e)
+            return 500, page("오류", html.escape(str(e)))
+
+    async def _dispatch_post(self, path: str, route: tuple[Handler, int], headers: dict[str, str],
+                             body: bytes | None) -> Response:
+        """POST 폼 하나: 다른 사이트에서 보낸 폼(Sec-Fetch-Site: cross-site)·폼이 아닌 본문·너무 큰 본문은 핸들러까지 가지 않는다."""
+        handler, max_body = route
+        check = self.auth.get(path)
+        if check is not None:
+            denied = self._auth_denied(check, headers)
+            if denied is not None:
+                return denied
+        if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
+            return 403, page("받지 않음", "다른 사이트에서 보낸 요청은 받지 않습니다.")
+        if (headers.get("content-type") or "").split(";", 1)[0].strip().lower() != FORM_TYPE:
+            return 415, page("받지 않는 형식", "폼으로만 보내 주세요.")
+        if body is None:
+            if content_length(headers) is None:
+                return 411, page("길이 필요", "요청 길이를 알 수 없습니다.")
+            return 413, page("너무 큼", "보낸 내용이 너무 깁니다.")
+        if len(body) > max_body:
+            return 413, page("너무 큼", "보낸 내용이 너무 깁니다.")
+        try:
+            pairs = parse_qsl(body.decode("utf-8"), keep_blank_values=True, max_num_fields=MAX_FORM_FIELDS)
+        except (UnicodeDecodeError, ValueError):
+            return 400, page("잘못된 요청", "폼을 읽을 수 없습니다.")
+        form = {k: v for k, v in pairs}
+        try:
+            return await handler(form)
         except Exception as e:  # noqa: BLE001
             log.exception("web handler %s failed: %s", path, e)
             return 500, page("오류", html.escape(str(e)))

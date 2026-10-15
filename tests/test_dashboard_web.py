@@ -127,7 +127,9 @@ async def test_dealbot_wires_dashboard_routes_and_self_check(settings: Settings,
         assert (await bot.web.dispatch("GET", "/dashboard", GOOD))[0] == 404
         lines = await bot.self_check()
         assert (None, "채널 대시보드 페이지: 꺼짐 (DASHBOARD_USER·DASHBOARD_PASSWORD 미설정 — 숫자는 계속 모음)") in lines
-        assert bot.dashboard is not None and [s.key for s in bot.dashboard.sources][:3] == ["telegram", "instagram", "threads"]
+        assert bot.dashboard is not None and [s.key for s in bot.dashboard.sources][:5] == [
+            "links", "blog_waiting", "telegram", "instagram", "threads"]
+        assert bot.dashboard.links is bot and bot.dashboard.links_key == "links"  # '링크 넣기' 는 봇의 attach_link 로
     finally:
         await bot.close()
 
@@ -139,7 +141,7 @@ async def test_dealbot_wires_dashboard_routes_and_self_check(settings: Settings,
         res = await bot.web.dispatch("GET", "/dashboard", {"authorization": basic(USER, STRONG)})
         assert res[0] == 200 and "텔레그램 채널" in res[1] and "Deren의 아카이브" in res[1]  # type: ignore[operator]
         lines = await bot.self_check()
-        assert (True, "채널 대시보드 https://52-79-136-64.sslip.io/dashboard (카드 9개, 비밀번호 보호)") in lines
+        assert (True, "채널 대시보드 https://52-79-136-64.sslip.io/dashboard (카드 11개, 비밀번호 보호)") in lines
         assert not any(STRONG in text for _, text in lines)
         # 다른 경로는 그대로 (인증 없이)
         assert (await bot.web.dispatch("GET", "/health"))[:2] == (200, "ok")

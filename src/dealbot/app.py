@@ -531,9 +531,11 @@ class DealBot:
             include_dry_run=lambda: self.state.dry_run,
             history_days=s.app.prune_events_days,  # 딜 기록을 지운 날은 다시 세지 않음
             blogauto=BlogAutoReader(dc.blogauto_metrics_path, tz=s.app.timezone, stale_hours=dc.blogauto_stale_hours, now=utcnow),
+            shop_label=self.notifier.shop_label,  # '링크 기다리는 딜' 의 몰 이름 (텔레그램 링크 요청과 같은 이름)
         )
+        # links=self: '링크 넣기' 는 텔레그램 답장과 같은 attach_link·owner_link_problem·refresh_pending_notice 를 부른다
         return Dashboard(dc, ctx, user=s.secrets.dashboard_user, password=s.secrets.dashboard_password,
-                         public_base_url=s.secrets.public_base_url)
+                         public_base_url=s.secrets.public_base_url, links=self)
 
     # ------------------------------------------------------------ lifecycle
     async def start_telegram(self, *, polling: bool = True) -> None:
@@ -644,6 +646,11 @@ class DealBot:
                         f"없으면 <code>/link {queue_id} 상품 링크</code> 로 다시 올려 주세요.")
             return "텔레그램 주소(t.me)는 제휴·상품 링크가 아니라 붙일 수 없어요. 그 몰 앱에서 만든 제휴 링크를 보내 주세요."
         return None
+
+    def owner_link_problem(self, queue_id: int, url: str) -> str | None:
+        """주인이 준 링크를 붙일 수 없는 이유 — attach_link 가 붙이기 전에 보는 것과 같은 _link_problem (같은 기준).
+        대시보드 '링크 넣기' 는 이걸로 먼저 거른 뒤에만 attach_link 를 부른다. 붙일 수 있으면 None."""
+        return self._link_problem(self.db.get_queue_item(queue_id), queue_id, url)
 
     async def attach_link(self, queue_id: int, url: str) -> str:
         item = self.db.get_queue_item(queue_id)

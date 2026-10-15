@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 
 # 채널에 보냈지만 텔레그램 답이 없던(시간 초과) 발행 실패의 last_error 머리말 — 올라갔을 수 있어 다시 보내지 않은 글
 MAYBE_POSTED = "maybe posted"
+# 주인의 링크를 기다리는 글 (링크 요청 카톡·텔레그램 링크 요청·고정 공지 /pending·대시보드 '링크 기다리는 딜' 이 모두 이 상태로 셈)
+LINK_WAITING = ("awaiting_link",)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS products (
@@ -601,13 +603,23 @@ class Database:
         )
         return dict(row) if row else None
 
-    def awaiting_items(self, limit: int = 20, *, statuses: tuple[str, ...] = ("awaiting_link",)) -> list[QueueItem]:
-        """관리자 손을 기다리는 항목: 기본은 내 링크 대기, statuses=("awaiting_approval",) 이면 정보 글 확인 대기."""
+    def awaiting_items(self, limit: int = 20, *, statuses: tuple[str, ...] = LINK_WAITING,
+                       newest_first: bool = False) -> list[QueueItem]:
+        """관리자 손을 기다리는 항목: 기본은 내 링크 대기, statuses=("awaiting_approval",) 이면 정보 글 확인 대기.
+        오래된 것부터 (newest_first 면 새것부터 — 대시보드 목록)."""
         marks = ",".join("?" * len(statuses))
+        order = "DESC" if newest_first else "ASC"
         rows = self._q(
-            f"SELECT * FROM deal_queue WHERE status IN ({marks}) ORDER BY created_at ASC LIMIT ?", (*statuses, limit)
+            f"SELECT * FROM deal_queue WHERE status IN ({marks}) ORDER BY created_at {order}, id {order} LIMIT ?",
+            (*statuses, limit),
         )
         return [self._row_to_queue_item(r) for r in rows]
+
+    def awaiting_count(self, *, statuses: tuple[str, ...] = LINK_WAITING) -> int:
+        """awaiting_items 와 같은 항목의 수 (목록은 몇 개만 보여도 모두 몇 개인지)."""
+        marks = ",".join("?" * len(statuses))
+        row = self._one(f"SELECT COUNT(*) AS c FROM deal_queue WHERE status IN ({marks})", statuses)
+        return int(row["c"]) if row else 0
 
     def set_queue_link(self, item_id: int, url: str, now: datetime | None = None, *, auto: bool = False) -> QueueItem | None:
         """관리자가 만든 제휴 링크를 붙이고 다시 pending 으로. auto: 쇼핑커넥트 자동 링크 (주인 알림 없이)."""

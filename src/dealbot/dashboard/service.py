@@ -5,8 +5,9 @@
   /dashboard                    페이지
   /dashboard/refresh?src=키      그 카드를 지금 다시 읽고 돌아감 (카드마다 refresh_min_minutes 에 한 번)
   /dashboard/input?src=키&지표=값&date=YYYY-MM-DD   직접 입력 저장 후 돌아감 (숫자만, 날짜는 오늘~manual_max_days_back)
-  /dashboard/data.json          같은 내용을 JSON 으로 (나중에 다른 곳에서 쓰려고)
-refresh·input 은 페이지가 넣어 주는 t(폼 토큰)가 맞아야 한다 — 다른 사이트가 링크로 값을 바꾸지 못하게.
+  /dashboard/data.json          같은 내용을 JSON 으로 (나중에 다른 곳에서 쓰려고, 폼 토큰은 없음)
+  POST /dashboard/link          '링크 기다리는 딜' 카드의 '링크 넣기' (폼: t·q=글 번호·url) → 텔레그램 답장과 같은 attach_link
+refresh·input·link 는 페이지가 넣어 주는 t(폼 토큰)가 맞아야 한다 — 다른 사이트가 링크로 값을 바꾸지 못하게.
 """
 
 from __future__ import annotations
@@ -18,8 +19,9 @@ import logging
 import math
 import re
 import secrets
+from collections import deque
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from dealbot.config import DashboardConfig
 from dealbot.dashboard import render
@@ -40,6 +42,9 @@ from dealbot.dashboard.model import (
     safe_text,
 )
 from dealbot.dashboard.sources import CardData, Source, SourceContext, load_all
+from dealbot.dashboard.sources.link_waiting import LinkWaitingSource
+from dealbot.shops import find_urls
+from dealbot.storage.db import LINK_WAITING
 from dealbot.utils.timeutil import from_iso, to_iso
 from dealbot.web import Throttled, WebServer, page
 
@@ -50,6 +55,11 @@ KV_SLOT = "dash:slot"  # 마지막으로 다 읽은 정해진 시각 ("YYYY-MM-D
 KV_LIVE_AT = "dash:live_at"  # 로컬 기록(Blog-Auto 파일·봇 DB)을 마지막으로 저장한 시각
 KV_FORM_TOKEN = "dash:form_token"
 
+LINK_PATH = "/dashboard/link"
+LINK_BODY_MAX = 16 * 1024  # 폼 하나 (토큰·번호·링크 칸 1,500자 — 한글 공유 글도 들어가게)
+LINK_TEXT_MAX = 2000  # 링크 칸 글자 수 상한 (넘으면 붙이지 않음)
+LINK_RATE = 10  # '링크 넣기' 는 이 프로세스 전체에서 1분에 이만큼까지 (토큰 맞혀 보기·연타 막기)
+_QUEUE_ID_RE = re.compile(r"^[0-9]{1,9}$")
 _NUMBER_RE = re.compile(r"^(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)$")  # 1234 또는 1,234 (전각 숫자·소수·음수는 안 받음)
 _DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
@@ -78,18 +88,38 @@ NOTICES: dict[str, tuple[str, str]] = {
     "empty": ("넣은 값이 없어요.", "bad"),
     "unknown": ("없는 카드예요.", "bad"),
     "not_manual": ("이 카드는 직접 넣는 값이 없어요.", "bad"),
+    # '링크 넣기' ({qid} 는 주소의 q 가 숫자일 때만 '#12 ', 아니면 빈칸 — 넣은 링크 글자는 화면에 다시 보이지 않음)
+    "linked": ("{qid}링크를 넣었어요 — 올릴 차례가 되면 채널에 올라가요.", "ok"),
+    "link_not_waiting": ("{qid}지금은 링크를 기다리는 딜이 아니에요 (이미 넣었거나 내려간 딜) — 아무것도 바꾸지 않았어요.", "bad"),
+    "link_bad": ("{qid}이 링크는 붙일 수 없어요 — 그 몰 앱에서 만든 상품·제휴 링크(https://…)를 넣어 주세요. "
+                 "텔레그램 주소(t.me)는 안 돼요.", "bad"),
+    "link_failed": ("{qid}링크를 넣지 못했어요 — 텔레그램 /pending 에서 확인해 주세요.", "bad"),
+    "link_busy": ("잠깐만요 — 링크 넣기는 1분에 {rate}번까지예요. 조금 뒤에 다시 눌러 주세요.", "bad"),
+    "link_off": ("지금은 대시보드에서 링크를 넣을 수 없어요 — 텔레그램 링크 요청에 답장해 주세요.", "bad"),
 }
+
+
+class LinkDesk(Protocol):
+    """'링크 넣기' 가 부르는 봇 쪽 (app.DealBot). 텔레그램 링크 요청에 답장했을 때와 같은 함수들."""
+
+    def owner_link_problem(self, queue_id: int, url: str) -> str | None: ...
+
+    async def attach_link(self, queue_id: int, url: str) -> str: ...
+
+    async def refresh_pending_notice(self) -> None: ...
 
 
 class Dashboard:
     def __init__(self, cfg: DashboardConfig, ctx: SourceContext, *, user: str | None = None, password: str | None = None,
-                 public_base_url: str | None = None) -> None:
+                 public_base_url: str | None = None, links: LinkDesk | None = None) -> None:
         self.cfg = cfg
         self.ctx = ctx
         self.db = ctx.db
         self._user = user
         self._password = password
         self.public_base_url = public_base_url
+        self.links = links
+        self._link_times: deque[datetime] = deque()  # '링크 넣기' 를 받은 시각 (1분 창)
         self.problems: list[str] = []
         types = load_all()
         self.sources: list[Source] = []
@@ -105,6 +135,8 @@ class Dashboard:
                 continue
             self.sources.append(cls(card, ctx))
         self.by_key = {s.key: s for s in self.sources}
+        # '링크 넣기' 안내를 넣을 카드 (링크 기다리는 딜). 없으면 맨 위에
+        self.links_key = next((s.key for s in self.sources if isinstance(s, LinkWaitingSource)), None)
         self._locks: dict[str, asyncio.Lock] = {}
         self._token: str | None = None
         self.limiter = FailureLimiter()
@@ -323,6 +355,45 @@ class Dashboard:
         log.info("dashboard %s: 직접 입력 %d개 저장 (%s)", key, len(rows), day.isoformat())
         return "saved"
 
+    def link_rate_ok(self) -> bool:
+        """'링크 넣기' 1분 창 (이 프로세스 전체). 넘으면 False — 그 요청은 아무것도 하지 않는다."""
+        now = self.ctx.now()
+        while self._link_times and now - self._link_times[0] >= timedelta(minutes=1):
+            self._link_times.popleft()
+        if len(self._link_times) >= LINK_RATE:
+            return False
+        self._link_times.append(now)
+        return True
+
+    async def attach_owner_link(self, queue_id: int, text: str) -> str:
+        """'링크 넣기' 결과 코드 (linked|link_not_waiting|link_bad|link_failed|link_off).
+        텔레그램 링크 요청에 링크로 답장했을 때와 같은 길: 글에서 주소 찾기(shops.find_urls 의 첫 주소) →
+        attach_link 와 같은 기준(DealBot.owner_link_problem = _link_problem)으로 거르기 → attach_link 한 번 → 고정 공지 고치기.
+        지금 링크를 기다리는 글(LINK_WAITING)이 아니면 아무것도 부르지 않는다 (두 번 눌러도 한 번만 붙음)."""
+        if self.links is None:
+            return "link_off"
+        item = self.db.get_queue_item(queue_id)
+        if item is None or item.status not in LINK_WAITING:
+            return "link_not_waiting"
+        if len(text) > LINK_TEXT_MAX:
+            return "link_bad"
+        urls = find_urls(text)
+        if not urls:
+            return "link_bad"
+        url = urls[0]
+        if self.links.owner_link_problem(queue_id, url) is not None:
+            return "link_bad"
+        await self.links.attach_link(queue_id, url)
+        after = self.db.get_queue_item(queue_id)
+        try:
+            await self.links.refresh_pending_notice()  # 텔레그램 고정 공지('내 링크 기다리는 글')도 답장했을 때처럼 고침
+        except Exception as e:  # noqa: BLE001 — 공지를 못 고쳐도 링크는 붙었다
+            log.warning("dashboard link: pending notice refresh failed: %s", safe_error(e))
+        if after is None or after.status in LINK_WAITING:
+            return "link_failed"
+        log.info("dashboard: #%d 링크를 대시보드에서 넣음", queue_id)
+        return "linked"
+
     # ------------------------------------------------------------ 화면 값
     def views(self) -> list[CardView]:
         out = []
@@ -405,6 +476,7 @@ class Dashboard:
             ("/dashboard/data.json", self._data),
         ):
             web.route(path, handler)
+        web.route_post(LINK_PATH, self._link, max_body=LINK_BODY_MAX)
         return True
 
     def _notice(self, query: dict[str, str]) -> tuple[tuple[str, str] | None, str | None]:
@@ -413,14 +485,17 @@ class Dashboard:
         if code not in NOTICES:
             return None, None
         text, kind = NOTICES[code]
-        text = text.format(minutes=self.cfg.refresh_min_minutes, days=self.cfg.manual_max_days_back)
+        q = query.get("q", "")
+        text = text.format(minutes=self.cfg.refresh_min_minutes, days=self.cfg.manual_max_days_back, rate=LINK_RATE,
+                           qid=f"#{int(q)} " if _QUEUE_ID_RE.match(q) else "")
         key = query.get("src", "")
         return (text, kind), (key if key in self.by_key else None)
 
-    def _back(self, code: str, key: str | None = None) -> tuple[int, str]:
+    def _back(self, code: str, key: str | None = None, *, queue_id: int | None = None, status: int = 302) -> tuple[int, str]:
+        q = f"&q={queue_id}" if queue_id is not None else ""
         if key and key in self.by_key:
-            return 302, f"/dashboard?msg={code}&src={key}#card-{key}"
-        return 302, f"/dashboard?msg={code}"
+            return status, f"/dashboard?msg={code}&src={key}{q}#card-{key}"
+        return status, f"/dashboard?msg={code}{q}"
 
     async def _page(self, query: dict[str, str]) -> Any:
         notice, src = self._notice(query)
@@ -445,6 +520,21 @@ class Dashboard:
             return self._forbidden()
         key = query.get("src", "")
         return self._back(self.save_manual(key, query), key)
+
+    async def _link(self, form: dict[str, str]) -> Any:
+        """POST /dashboard/link (폼 본문만 — 주소의 쿼리는 안 씀). 1분 한도 → 폼 토큰(403) → 글 번호(숫자만, 아니면 400) →
+        attach_owner_link → 결과 안내와 함께 대시보드로 돌아감 (303, 새로고침해도 다시 보내지 않게)."""
+        if not self.link_rate_ok():
+            return self._back("link_busy", self.links_key, status=303)
+        if not self._token_ok(form.get("t")):
+            return self._forbidden()
+        raw = (form.get("q") or "").strip().removeprefix("#")
+        if not _QUEUE_ID_RE.match(raw):
+            return 400, page("잘못된 요청", "글 번호가 없어요. <a href='/dashboard'>대시보드</a>를 새로 열어 주세요."), \
+                "text/html; charset=utf-8", SECURITY_HEADERS
+        queue_id = int(raw)
+        code = await self.attach_owner_link(queue_id, form.get("url") or "")
+        return self._back(code, self.links_key, queue_id=queue_id, status=303)
 
     # ------------------------------------------------------------ 자기 점검
     def self_check(self) -> list[tuple[bool | None, str]]:

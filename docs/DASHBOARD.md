@@ -1,6 +1,7 @@
 # 채널 대시보드
 
 `https://<공개 도메인>/dashboard` 에서 텔레그램·인스타그램·스레드·네이버 블로그 3개·카카오 오픈채팅·쿠팡 파트너스·핫딜 봇 운영 숫자를 한 화면에 본다 (주인 요청 10/14).
+맨 위에는 주인이 할 일이 있는 카드 — `링크 기다리는 딜`(링크를 바로 넣는 칸까지)과 `발행 대기 글`(블로그 세 개) — 이 온다 (주인 요청 10/15).
 카드마다 상태 칩(조건 충족 / 조건 미충족 / 판단 불가), `다시 읽기`, 읽은 시각, 숫자 칸 두 개, 최근 28일 추이, 목표 줄이 있다.
 
 ## 켜기
@@ -22,8 +23,9 @@ sudo systemctl restart dealbot
 
 - 둘 중 하나라도 없으면 `/dashboard` 는 404 이고, 시작 자기 점검에 `채널 대시보드 페이지: 꺼짐` 이 뜬다. 숫자 모으기는 `dashboard.enabled` 면 계속한다.
 - 브라우저가 아이디·비밀번호를 물으면(HTTP 기본 인증) 넣는다. Caddy 가 HTTPS 를 붙여 준다 (`deploy/lightsail/https.sh`).
-- 경로: `/dashboard`(화면), `/dashboard/refresh?src=키`(그 카드를 지금 다시 읽음), `/dashboard/input?src=키&지표=값&date=YYYY-MM-DD`(직접 입력), `/dashboard/data.json`(같은 내용 JSON).
-  refresh·input 은 화면이 넣어 주는 폼 토큰(`t`)이 있어야 한다.
+- 경로: `/dashboard`(화면), `/dashboard/refresh?src=키`(그 카드를 지금 다시 읽음), `/dashboard/input?src=키&지표=값&date=YYYY-MM-DD`(직접 입력), `/dashboard/data.json`(같은 내용 JSON),
+  `POST /dashboard/link`(링크 넣기 — 아래).
+  refresh·input·link 는 화면이 넣어 주는 폼 토큰(`t`)이 있어야 한다 (data.json 에는 토큰이 없다).
 
 ## 카드와 숫자 출처
 
@@ -33,6 +35,8 @@ sudo systemctl restart dealbot
 | 인스타그램 (`instagram`) | 팔로워, 게시물 수, 조회수·도달 28일 | Instagram Graph API (`/instatoken` 토큰). 조회수는 인사이트 권한이 있을 때만 — 없으면 `권한 필요` |
 | 스레드 (`threads`) | 팔로워, 프로필 조회 28일 | Threads API `threads_insights` (`/threadstoken` 토큰, `threads_manage_insights` 권한 필요). 사용자 단위 `views` 는 **프로필 조회수**라 스레드 앱의 글 조회수보다 훨씬 작다 (글 조회수는 글마다 따로 물어야 해서 안 읽음) |
 | 쿠팡 파트너스 (`coupang_partners`) | 클릭·주문·수익 (날짜별, **어제까지**) | 파트너스 리포트 API. 한 번에 3회(리포트마다 재시도 없이 1번), `min_interval_hours`(8)에 한 번·하루 `max_calls_per_day`(6)회까지, 딥링크 예약 몫은 안 씀. 첫 리포트가 실패하면 나머지는 안 부름 (4xx → 판단 불가, 429·5xx·네트워크 → 다음 시각에) |
+| 링크 기다리는 딜 (`dealbot_links`) | 내 링크를 기다리는 딜 목록(새것부터 10개)·모두 몇 개·가장 오래 기다린 시간 + `링크 넣기` | 봇 DB (`awaiting_link`) |
+| 발행 대기 글 (`blog_waiting`) | 블로그마다 임시저장 대기 글 수·인기 예상 수·점수 높은 글 3개 | Blog-Auto 기록 파일의 `waiting` |
 | 핫딜 봇 운영 (`dealbot`) | 올린 딜 오늘·7일, 링크 기다림, 대기열 | 봇 DB |
 | 네이버 블로그 (`naver_blog`) | 이웃 수·어제 방문자·게시글 수 (직접 입력), 발행·임시저장·서로이웃 신청·댓글 (자동) | 카드 입력 칸 + Blog-Auto 기록 파일 |
 | 카카오 오픈채팅 (`kakao_openchat`) | 참여자 수 | 카드 입력 칸 |
@@ -60,6 +64,35 @@ sudo systemctl restart dealbot
   blog_id·stats_url 이 이상하면 링크를 숨기고 카드에 안내 한 줄.
 - 증감(`+N 오늘`)은 그대로 — 전날 값을 넣어 둔 날만 전날 대비로 나오고, 며칠 건너뛰었으면 `10. 12. 대비` 처럼 비교한 날을 적는다.
   봇이 네이버 숫자를 못 읽으니 증감도 자동으로는 못 만든다 (넣은 값끼리의 차이).
+
+### 링크 기다리는 딜 · 링크 넣기 (주인 10/15)
+
+토스·네이버처럼 내 제휴 링크를 직접 만들어야 하는 핫딜을 한 카드에 모은다. 목록은 링크 요청 카톡·텔레그램 링크 요청·
+고정 공지(`/pending`)·저녁 요약과 **같은 묶음** — 봇 DB 대기열의 `awaiting_link` (`storage.db.LINK_WAITING`, `Database.awaiting_items()` 기본값).
+새것부터 10개(넘으면 `나머지 N개는 텔레그램 /pending`), 줄마다 상품명·몰·가격·딜 점수·언제부터 몇 시간째인지, `상품 열기 ↗`(그 상품 페이지,
+https 주소만, 새 탭·`rel="noopener noreferrer"`), 그리고 링크 칸 + `링크 넣기`.
+
+`링크 넣기` 는 텔레그램 링크 요청에 링크로 답장한 것과 **같은 길**이다:
+1. 링크 칸의 글에서 첫 주소를 찾는다 (`shops.find_urls` — 텔레그램 답장과 같은 함수. 몰 앱의 공유 글을 통째로 붙여도 됨)
+2. `DealBot.owner_link_problem` = `attach_link` 가 붙이기 전에 보는 `_link_problem` 과 같은 기준으로 거른다
+   (http(s) 가 아니거나 텔레그램 주소(t.me)면 붙이지 않음) — 걸리면 아무것도 부르지 않는다
+3. `attach_link(번호, 주소)` 를 **한 번** 부르고, 텔레그램 고정 공지도 답장했을 때처럼 고친다
+4. 대시보드로 돌아가 카드 안에 결과 한 줄 (`#12 링크를 넣었어요` 등 정해진 문구만 — 넣은 글자는 다시 보여 주지 않음)
+
+- 지금 `awaiting_link` 가 아닌 글(이미 넣었거나 내려간 딜)이면 아무것도 하지 않고 그렇게 알려 준다 (두 번 눌러도 한 번만 붙음).
+- `POST` 만, 폼(`application/x-www-form-urlencoded`)만, 본문 16KB·링크 칸 2,000자까지, 다른 사이트에서 보낸 폼(`Sec-Fetch-Site: cross-site`)은 403,
+  폼 토큰이 없거나 틀리면 403, 글 번호가 숫자가 아니면 400. 이 프로세스 전체에서 1분에 10번까지 (넘으면 `잠깐만요` 안내).
+  CSP 는 그대로 `default-src 'none'` + `form-action 'self'` (폼은 같은 서버로만).
+- 폰(390px) 기준: 칸·버튼은 40px 높이, 링크 칸 글자는 16px (아이폰이 확대하지 않게), 가로로 넘치지 않음.
+
+### 발행 대기 글 (주인 10/15)
+
+블로그 세 개(줄 이름은 블로그 카드 제목 — `Deren의 아카이브`·`Deren's Pick`·`오늘의 핫딜 블로그`)마다
+`대기 N개 · 인기 예상 M개` 와 점수가 높은 글 3개(제목 + `82점` 알약, 기준 이상이면 보라색). 대기 글이 없으면 `대기 글 없음`.
+- 숫자는 Blog-Auto 기록 파일의 `waiting` 만 본다 (아래). 딜봇은 임시저장 글을 읽지도 고치지도 않는다.
+- 파일에 `waiting` 이 없으면(예전 Blog-Auto) 세 줄 모두 `판단 불가` + 회색 안내 한 줄 (오류 아님), 어떤 블로그만 빠졌으면 그 줄만 `판단 불가`.
+- 파일이 없거나 `blogauto_stale_hours` 보다 오래됐으면 다른 블로그 카드처럼 `판단 불가` + 몇 시간 전 것인지. 읽은 시각은 파일의 `written_at`.
+- 줄을 바꾸려면 `options.blogs: [{blog: finance, title: 아카이브}, ...]`.
 
 ### 직접 입력
 
@@ -106,6 +139,20 @@ Blog-Auto 가 한 시간마다 자기 DB 만 보고 `~/Blog-Auto/var/metrics/blo
   }
 }
 ```
+
+`발행 대기 글` 카드용으로 Blog-Auto 가 더하는 키 (없어도 나머지는 그대로 읽힌다 — `version: 1` 과 기존 키는 그대로):
+
+```json
+"waiting": {"threshold": 70, "blogs": {
+  "finance": {"count": 4, "popular": 1, "top": [
+    {"title": "…", "score": 82, "saved_at": "2026-10-15T09:12:00+09:00", "category": "MONEY"}]},
+  "issue": {"...": 0}, "hotdeal": {"...": 0}}}
+```
+
+- `count` = 봇이 네이버 임시저장으로 올려 두고 아직 발행·버림·삭제되지 않은 글 (주인이 고친 임시저장 글도 셈)
+- `score` = 0~100 인기 예상, `popular` = 그중 `score >= threshold` 인 글 수, `top` = 점수 높은 순(같으면 최근 저장 순) 최대 5개,
+  제목 60자, `saved_at` 은 시간대가 붙은 ISO 또는 null, `category` 는 글자 또는 null
+- 세지 못한 블로그는 `blogs` 에서 빠진다 (카드의 그 줄은 `판단 불가`). 딜봇도 한 번 더 걸러서, 이상한 값은 그 글·그 블로그만 버린다.
 
 블로그 키는 Blog-Auto 의 블로그 이름(`finance`·`issue`·`hotdeal`) 또는 `blog_id`. 중첩(`{"posts": {"published_today": 1}}`)이나
 목록(`[{"name": "finance", ...}]`)도 읽힌다 (`src/dealbot/dashboard/blogauto.py` 의 `FIELD_ALIASES`). 숫자가 아닌 값은 무시한다.

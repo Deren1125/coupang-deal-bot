@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 # ---- 읽기 결과 상태
 OK = "ok"
@@ -43,6 +44,7 @@ class FetchResult:
     days: dict[str, dict[str, float]] = field(default_factory=dict)
     note: str | None = None  # 카드 아래 한 줄 안내 (권한 필요 등). 토큰·비밀값은 넣지 않는다
     read_at: datetime | None = None  # 값이 만들어진 시각 (Blog-Auto 기록 파일의 written_at 등). 없으면 읽은 시각
+    detail: Any = None  # 숫자가 아닌 화면용 값 (발행 대기 글 제목·링크 기다리는 딜 목록). metrics 표에는 저장하지 않는다
 
 
 @dataclass(slots=True)
@@ -77,6 +79,30 @@ class CardLink:
     label: str
     url: str
     primary: bool = False  # True 면 버튼 모양, 아니면 옆의 작은 글 링크
+
+
+@dataclass(slots=True)
+class ListEntry:
+    """카드 안 목록의 한 줄 (발행 대기 글 제목 · 링크 기다리는 딜).
+    url 은 '상품 열기 ↗' (https 만, 주인 브라우저가 새 탭으로 여는 것), queue_id 가 있으면 그 줄에 '링크 넣기' 폼."""
+
+    title: str
+    pill: str = ""  # 오른쪽 작은 알약 (점수)
+    hot: bool = False  # 알약 강조 (인기 예상)
+    sub: str = ""  # 회색 작은 줄 (몰 · 가격 · 기다린 시간)
+    url: str | None = None
+    url_label: str = ""
+    queue_id: int | None = None
+
+
+@dataclass(slots=True)
+class ListGroup:
+    """카드 안 목록 묶음 (블로그 하나): 이름 · 요약('대기 4개 · 인기 예상 1개' / '대기 글 없음' / '판단 불가') · 줄들."""
+
+    title: str = ""
+    summary: str = ""
+    entries: list[ListEntry] = field(default_factory=list)
+    unknown: bool = False  # 요약을 '판단 불가' 회색 칩으로
 
 
 @dataclass(slots=True)
@@ -132,6 +158,9 @@ class CardView:
     summary: dict[str, float] = field(default_factory=dict)  # 맨 위 요약 줄에 더할 값
     links: list[CardLink] = field(default_factory=list)  # 숫자 칸 바로 밑 링크 (네이버 통계 열기 등)
     stats_note: str = ""  # 숫자 칸 밑 회색 작은 안내 (숫자가 어디서 왔는지 등)
+    groups: list[ListGroup] = field(default_factory=list)  # 그래프 밑 목록 (발행 대기 글 · 링크 기다리는 딜)
+    empty_text: str = ""  # 목록 카드인데 줄이 하나도 없을 때 한 줄
+    detail: dict[str, Any] = field(default_factory=dict)  # data.json 에 그대로 나갈 목록 값 (폼 토큰은 넣지 않음)
 
     @property
     def status(self) -> str:
@@ -251,6 +280,23 @@ def explain(program: str | None, rows: list[GoalRow]) -> str:
     if not unmet and not unknown:
         parts.append("목표를 모두 채웠습니다.")
     return " ".join(parts)
+
+
+# ---------------------------------------------------------------- 바깥 링크
+def https_url(url: Any) -> str | None:
+    """카드에 그려도 되는 바깥 주소: https 이고 호스트가 있고, 공백·제어 문자·따옴표·꺾쇠·역슬래시·중괄호·'@'(아이디 끼우기)가
+    없는 것만 그대로, 아니면 None (링크를 그리지 않음). 화면에 넣을 때는 따로 이스케이프한다."""
+    if not isinstance(url, str) or not url or len(url) > 2000:
+        return None
+    if any(c.isspace() or not c.isprintable() or c in "\"'<>\\`{}" for c in url):
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme != "https" or not parts.hostname or "@" in parts.netloc:
+        return None
+    return url
 
 
 # ---------------------------------------------------------------- 오류 글자 다듬기

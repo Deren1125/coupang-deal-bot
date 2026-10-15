@@ -524,6 +524,13 @@ dashboard:
   blogauto_metrics_path: /home/ubuntu/Blog-Auto/var/metrics/blogauto.json   # Blog-Auto 가 한 시간마다 쓰는 활동 기록
   blogauto_stale_hours: 3          # 이보다 오래된 기록이면 블로그 활동은 '판단 불가'
   cards:
+    # 주인이 할 일이 있는 카드를 맨 위에 (주인 요청 10/15: 핫딜 링크는 내가 줘야 하니 대시보드에 다 띄우기)
+    - key: links
+      type: dealbot_links
+      title: 링크 기다리는 딜               # 내 링크를 기다리는 핫딜 (링크 요청 카톡·텔레그램 /pending 과 같은 목록) + '링크 넣기' 칸
+    - key: blog_waiting
+      type: blog_waiting
+      title: 발행 대기 글                   # 블로그 세 개의 임시저장 대기 글 수·인기 예상 (Blog-Auto 기록 파일의 waiting). 줄 이름은 아래 블로그 카드 제목
     - key: telegram
       type: telegram
       title: 텔레그램 채널

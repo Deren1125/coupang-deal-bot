@@ -24,11 +24,14 @@ from dealbot.dashboard.model import (
     CardLink,
     CardView,
     GoalRow,
+    ListEntry,
+    ListGroup,
     Stat,
     fmt_num,
     fmt_short_day,
     fmt_signed,
     fmt_time,
+    https_url,
     josa,
     safe_error,
 )
@@ -129,13 +132,39 @@ form.manual .last{font-size:11px;line-height:1.35;color:var(--muted)}
 form.manual button{font:inherit;font-size:13px;font-weight:600;padding:6px 14px;border:0;border-radius:6px;background:var(--purple);
 color:#fff;cursor:pointer;align-self:flex-end;margin-bottom:17px}
 form.manual .form-note{flex:1 1 100%;margin:0;font-size:11px;color:var(--muted)}
+.lists{margin:6px 0 0}
+.lgroup{border-top:1px solid var(--line);padding:10px 0 4px;min-width:0}
+.lgroup:first-child{border-top:0;padding-top:2px}
+.lg-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:2px 8px}
+.lg-head h3{margin:0;font-size:13.5px;color:var(--text);font-weight:700;min-width:0}
+.lg-sum{font-size:12.5px;color:#4e5968;white-space:nowrap;font-variant-numeric:tabular-nums}
+.lg-sum.unknown{font-size:12px;font-weight:600;padding:1px 8px;border-radius:6px;background:#f1f2f4}
+.litems{list-style:none;margin:4px 0 0;padding:0}
+.lit{padding:7px 0;min-width:0}
+.lit+.lit{border-top:1px dashed var(--line)}
+.lit-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.lit-title{font-size:13px;line-height:1.45;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+overflow:hidden}
+.pill{flex:none;font-size:11.5px;font-weight:700;line-height:1.6;padding:0 8px;border-radius:999px;background:#f1f2f4;color:#4e5968;
+white-space:nowrap;font-variant-numeric:tabular-nums}
+.pill.hot{background:#eef0ff;color:#3f35a8}
+.lit-sub{font-size:12px;color:var(--muted);margin:2px 0 0}
+.lit-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0 0;min-width:0}
+.lit-act .ext.primary{flex:0 0 auto;min-height:40px}
+.lempty{color:var(--sub);font-size:13px;background:var(--tile);border-radius:8px;padding:10px 12px;margin:10px 0 0}
+form.linkform{flex:1 1 220px;display:flex;gap:6px;min-width:0;margin:0}
+form.linkform input{flex:1 1 auto;width:100%;min-width:0;font:inherit;font-size:16px;min-height:40px;padding:6px 10px;
+border:1px solid #d1d6db;border-radius:8px;background:#fff;color:var(--text)}
+form.linkform input::placeholder{color:#b0b8c1}
+form.linkform button{flex:none;font:inherit;font-size:14px;font-weight:600;min-height:40px;padding:0 14px;border:0;border-radius:8px;
+background:var(--purple);color:#fff;cursor:pointer;white-space:nowrap}
 .empty{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:24px;color:var(--sub)}
 .foot{color:var(--muted);font-size:12px;margin:18px 0 0}
 .card{container-type:inline-size}
 @container (max-width:344px){.btn .btn-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
 clip-path:inset(50%);white-space:nowrap}.btn{padding:4px 8px}}
 @media (max-width:420px){.btn .btn-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
-clip-path:inset(50%);white-space:nowrap}.btn{padding:4px 8px}}
+clip-path:inset(50%);white-space:nowrap}.btn{padding:4px 8px;min-height:36px;min-width:36px;justify-content:center}}
 @media (max-width:399px){.stat .value{font-size:18px}.sum .value{font-size:17px}}
 """
 
@@ -260,6 +289,48 @@ def _links(links: list[CardLink], title: str) -> str:
     return f'<div class="links">{"".join(out)}</div>' if out else ""
 
 
+def _entry(x: ListEntry, token: str) -> str:
+    """목록 한 줄: 제목 + 점수 알약, 회색 작은 줄, '상품 열기 ↗'(https 만, 새 탭, 대시보드 주소를 넘기지 않음),
+    queue_id 가 있으면 '링크 넣기' 폼 (POST /dashboard/link, 폼 토큰 t·글 번호 q·링크 url).
+    링크 칸은 type=text + inputmode=url: 몰 앱의 '공유하기' 글(상품명 + 주소)을 통째로 붙여도 텔레그램 답장처럼 주소만 찾아 붙인다."""
+    pill = f'<span class="pill{" hot" if x.hot else ""}">{e(x.pill)}</span>' if x.pill else ""
+    out = [f'<li class="lit"><div class="lit-top"><span class="lit-title">{e(x.title)}</span>{pill}</div>']
+    if x.sub:
+        out.append(f'<p class="lit-sub">{e(x.sub)}</p>')
+    act = []
+    url = https_url(x.url)
+    if url:
+        act.append(f'<a class="ext primary" href="{e(url)}" target="_blank" rel="noopener noreferrer" '
+                   f'aria-label="{e(f"{x.title} {x.url_label} (새 탭)")}">{e(x.url_label)}{NBSP}<span aria-hidden="true">↗</span></a>')
+    if x.queue_id is not None:
+        act.append(
+            '<form class="linkform" method="post" action="/dashboard/link">'
+            f'<input type="hidden" name="t" value="{e(token)}"><input type="hidden" name="q" value="{e(int(x.queue_id))}">'
+            '<input type="text" name="url" inputmode="url" required maxlength="1500" autocomplete="off" autocapitalize="off" '
+            f'spellcheck="false" placeholder="만든 링크 https://…" aria-label="{e(f"#{x.queue_id} {x.title} 링크")}">'
+            '<button type="submit">링크 넣기</button></form>'
+        )
+    if act:
+        out.append(f'<div class="lit-act">{"".join(act)}</div>')
+    return "".join(out) + "</li>"
+
+
+def _group(g: ListGroup, token: str) -> str:
+    head = ""
+    if g.title or g.summary:
+        head = (f'<div class="lg-head"><h3>{e(g.title)}</h3>'
+                f'<span class="lg-sum{" unknown" if g.unknown else ""}">{e(g.summary)}</span></div>')
+    items = "".join(_entry(x, token) for x in g.entries)
+    return f'<section class="lgroup">{head}' + (f'<ol class="litems">{items}</ol>' if items else "") + "</section>"
+
+
+def _lists(v: CardView, token: str) -> str:
+    """그래프 밑 목록 (발행 대기 글 · 링크 기다리는 딜). 줄이 하나도 없으면 empty_text 한 줄."""
+    if not v.groups:
+        return f'<p class="lempty">{e(v.empty_text)}</p>' if v.empty_text else ""
+    return '<div class="lists">' + "".join(_group(g, token) for g in v.groups) + "</div>"
+
+
 def _activity(line: str) -> str:
     """활동 줄 ('오늘 발행 1 · 임시저장 2 · 댓글 3'). 칸이 좁아 줄이 바뀔 때 '댓글 / 3' 처럼 이름과 숫자가 갈라지거나
     '·' 가 다음 줄 맨 앞에 오지 않게, 항목마다 한 덩어리(넘치게 긴 항목만 안에서 줄바꿈)로 두고 '·' 는 앞 항목 덩어리 안에 넣는다
@@ -328,6 +399,7 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
         _links(v.links, v.title),
         f'<p class="stats-note">{e(v.stats_note)}</p>' if v.stats_note else "",
         sparkline(v.spark, days=spark_days, today=today, label=v.spark_label),
+        _lists(v, token),
     ]
     if v.rows:
         parts.append(f"<h3>{e(v.program or '목표')}</h3>")
@@ -436,6 +508,8 @@ def view_dict(v: CardView, tz: str) -> dict[str, Any]:
         "hints": v.hints,
         "manual": [{"metric": f.metric, "label": f.label, "unit": f.unit, "day_offset": f.day_offset,
                     "latest": v.manual_values.get(f.metric), "latest_day": v.manual_days.get(f.metric)} for f in v.manual],
+        # 목록 카드의 값 (발행 대기 글 · 링크 기다리는 딜). 폼 토큰은 화면의 폼에만 있고 여기에는 없다
+        "detail": v.detail or None,
     }
 
 

@@ -52,6 +52,7 @@ class SourceContext:
     budget: Any = None  # 쿠팡 ApiBudget (딥링크 몫은 건드리지 않음)
     include_dry_run: Callable[[], bool] = lambda: False
     blogauto: Any = None  # BlogAutoReader
+    shop_label: Callable[[str], str] = lambda key: key  # 몰 키 → 이름 (텔레그램 링크 요청과 같은 이름)
     history_days: int = 30  # 봇 DB 가 딜 기록을 지우는 기간 (app.prune_events_days) — 그보다 오래된 날은 다시 세지 않음
     extra: dict[str, Any] = field(default_factory=dict)
 

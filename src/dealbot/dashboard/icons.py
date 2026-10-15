@@ -40,6 +40,17 @@ KAKAO = _mark(
     '<path d="M12 6c-4 0-7.3 2.6-7.3 5.7 0 2 1.4 3.8 3.4 4.8l-.7 2.6c-.1.3.2.5.4.3l3.1-2.1h1.1c4 0 7.3-2.6'
     ' 7.3-5.7S16 6 12 6z" fill="#3C1E1E"/>'
 )
+# 발행 대기 글: 보라 바탕에 쌓인 글 세 줄
+WAITING = _mark(
+    '<rect width="24" height="24" rx="6" fill="#5b4fd6"/>'
+    '<path d="M7 8h10M7 12h10M7 16h6" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none"/>'
+)
+# 링크 기다리는 딜: 주황 바탕에 사슬 고리
+LINK = _mark(
+    '<rect width="24" height="24" rx="6" fill="#FF6B00"/>'
+    '<path d="M10.6 13.4a3 3 0 0 0 4.2 0l2.4-2.4a3 3 0 0 0-4.2-4.2l-1 1M13.4 10.6a3 3 0 0 0-4.2 0L6.8 13a3 3 0 0 0 4.2 4.2l1-1"'
+    ' stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none"/>'
+)
 GENERIC = _mark('<rect width="24" height="24" rx="6" fill="#8b95a1"/><circle cx="12" cy="12" r="4" fill="#fff"/>')
 
 REFRESH = (

@@ -20,7 +20,6 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 from typing import Any
-from urllib.parse import urlsplit
 
 from dealbot.dashboard import icons
 from dealbot.dashboard.model import (
@@ -34,6 +33,7 @@ from dealbot.dashboard.model import (
     Stat,
     fmt_num,
     fmt_short_day,
+    https_url,
 )
 from dealbot.dashboard.sources.base import CardData, Source, register
 
@@ -51,16 +51,7 @@ def owner_url(template: Any, blog_id: str) -> str | None:
     공백·따옴표·꺾쇠 같은 글자가 섞였으면 None (링크를 그리지 않음). str.format 은 쓰지 않는다 ({blog_id.x} 같은 틀 방지)."""
     if not isinstance(template, str) or not BLOG_ID_RE.fullmatch(blog_id):
         return None
-    url = template.replace("{blog_id}", blog_id)
-    if any(c.isspace() or not c.isprintable() or c in "\"'<>\\`{}" for c in url):
-        return None
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return None
-    if parts.scheme != "https" or not parts.hostname or "@" in parts.netloc:
-        return None
-    return url
+    return https_url(template.replace("{blog_id}", blog_id))
 
 
 @register
