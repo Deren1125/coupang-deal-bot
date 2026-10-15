@@ -2690,12 +2690,15 @@ class DealBot:
         쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고(주인 사진은 공개 사본 주소), 못 찾았으면 비운다."""
         cc = self.settings.publish
         p = deal.product
+        if p.shop == "naver":
+            # 가격만 (사진은 버림). 주인 사진보다 먼저 — 예전 링크·사진을 다시 쓰는 딜은 주인이 가격을 본 게 아니라서
+            # 발행 전 가격 확인이 이것뿐이다 (주인이 이번에 확인한 딜은 _read_unverified_price 가 아무것도 안 함)
+            await self._read_unverified_price(p)
         owned = self._owner_photo(p)
         if owned is not None:
             p.image_url = self._public_owner_photo(owned)  # 공개 도메인이 없으면 None (텔레그램은 바이트로, 스레드는 글만)
             return owned
         if p.shop == "naver":
-            await self._read_unverified_price(p)  # 가격만 (사진은 버림)
             if p.image_url:
                 log.info("naver deal without the owner's photo — posting text only: %s", p.product_id)
             p.image_url = None

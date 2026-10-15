@@ -389,6 +389,31 @@ async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> No
     assert bot.sent[-1][2] == "price_hold"  # type: ignore[attr-defined]
 
 
+async def test_reused_link_and_photo_still_get_the_price_check(bot: DealBot) -> None:
+    """검토 지적 (10/15): 예전 링크(mylink)와 그때 받은 주인 사진(myphoto)을 다시 쓰는 딜도 이번엔 주인이 가격을 본 게 아니다 —
+    사진이 있어도 발행 직전 크롬 가격 확인은 그대로, 안 맞으면 보류 (사진 때문에 확인을 건너뛰면 안 됨)."""
+    import io
+    import json as _json
+
+    from PIL import Image
+
+    _serve(bot, {})
+    opened = _browser_pages(bot)
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"pending": 1}
+    folder = bot.settings.data_dir / DealBot.OWNER_PHOTO_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 800), (200, 120, 60)).save(buf, "JPEG")
+    (folder / "saved.jpg").write_bytes(buf.getvalue())
+    bot.db.kv_set(f"{DealBot.OWNER_PHOTO_KV}naver:11223344556", _json.dumps({"file": "saved.jpg", "w": 800, "h": 800}))
+    bot.db.kv_set("mylink:naver:11223344556", "https://naver.me/MINE")
+    assert await bot.process_queue_once()
+    assert opened == [NAVER_URL]  # 사진이 있어도 가격은 한 번 본다
+    assert bot.db.queue_counts() == {"held": 1} and bot.db.recent_posts() == []
+
+
 async def test_owner_linked_naver_deal_is_not_held_by_the_browser_page(bot: DealBot) -> None:
     """주인 결정 10/15: 주인이 휴대폰으로 가격·옵션을 보고 링크를 붙인 네이버 딜은 그 확인이 가격 확인 — 발행 직전 크롬 페이지
     값이 제목 가격과 달라도 보류하지 않고 올린다. 사진도 찾지 않으니(②, 검토 지적) 크롬을 아예 열지 않는다 (예전엔 사진 때문에 한 번)."""
