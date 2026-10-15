@@ -299,7 +299,8 @@ async def test_401_turns_it_off_once_and_the_run_keeps_going(bot: DealBot, caplo
     with caplog.at_level(logging.INFO):
         res = await bot.run_collector(bot.collectors[0])
     assert res["status"] == "ok" and len(api.requests) == 1 and bot.naver_shop.disabled_reason == "HTTP 401"
-    assert caplog.text.count("HTTP 401") == 1 and "네이버 최저가 비교 모두" in caplog.text
+    # 경고는 사진 찾기 얘기 없이 최저가 비교만 (사진 찾기는 10/15 에 지움 — 쇼핑 검색 API 종료)
+    assert caplog.text.count("HTTP 401") == 1 and "네이버 최저가 비교를 끔" in caplog.text and "큰 사진" not in caplog.text
     assert CLIENT_SECRET not in caplog.text and CLIENT_ID not in caplog.text
     assert bot.db.get_market_quote(NAVER_QUOTE_KEY + "coupang:7:71", 24) is None  # 꺼진 것은 '못 찾음'으로 기억하지 않음
 

@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import html
+import io
 import json
 import logging
 import os
@@ -60,18 +62,23 @@ from dealbot.media.imagecheck import (
     is_board_thumb,
     is_generic_image,
     naver_image_url,
+    owner_photo,
 )
 from dealbot.models import Deal, DealVerdict, Product, PublishResult
 from dealbot.monitoring.admin import (
     _AUTH_RE,
     BOT_COMMANDS,
+    PHOTO_NOT_RECEIVED,
     AdminNotifier,
+    PhotoSource,
     StatusReporter,
     channel_post_base,
     channel_post_ref,
     is_telegram_url,
     kakao_fit,
+    photo_refused,
     register_admin_handlers,
+    wants_owner_photo,
 )
 from dealbot.monitoring.nl import REGISTRY_DAYS, NLRouter
 from dealbot.monitoring.push import PushNotifier
@@ -302,7 +309,8 @@ class DealBot:
             retry_seconds=pc.browser_cooldown_minutes * 60,
             log_every_seconds=pc.unverified_log_hours * 3600,
         )
-        # 스토어 페이지가 막혀(429) 사진을 못 읽은 네이버 딜: 쇼핑 검색 API 에서 같은 상품(상품번호 일치)의 사진. 키가 없으면 건너뜀
+        # 네이버 쇼핑 검색 Open API 는 2026-07-31 종료 (대신할 API 없음, 이 서버 키는 401): 사진 찾기에는 안 쓴다 (주인 결정 10/15 —
+        # 네이버 딜 사진은 주인이 링크와 같이 보낸 사진). 아래 최저가 비교를 설정으로 켤 때만 부른다 (운영은 꺼 둠)
         self.naver_shop = NaverShopSearch(
             self.http,
             settings.secrets.naver_client_id,
@@ -662,16 +670,35 @@ class DealBot:
         대시보드 '링크 넣기' 는 이걸로 먼저 거른 뒤에만 attach_link 를 부른다. 붙일 수 있으면 None."""
         return self._link_problem(self.db.get_queue_item(queue_id), queue_id, url)
 
-    async def attach_link(self, queue_id: int, url: str) -> str:
+    async def attach_link(self, queue_id: int, url: str, *, photo: PhotoSource | None = None) -> str:
+        """주인이 만든 링크를 붙인다. photo: 링크와 같이 보낸 상품 사진 — 바이트, 또는 텔레그램에서 받아 오는 함수 (주인 결정 10/15).
+        사진은 링크를 붙일 수 있는 네이버 상품 딜일 때만 받아 검사한다: 없는 번호·붙일 수 없는 상태·채널 글 주소·네이버가 아닌 딜이면
+        사진을 받지도 거절하지도 않는다 (예전엔 사진부터 받아 HEIC·10MB 사진이 토스 링크까지 막았다 — 검토 지적)."""
         item = self.db.get_queue_item(queue_id)
         item, queue_id = await self._replaced_for_link(item, queue_id)  # 더 좋은 딜에 자리를 내준 글도 주인 링크는 받는다 (주인 결정 10/15)
         if self._maybe_posted(item) and channel_post_ref(url) is not None:
             # '채널에 올라갔는지 모름' 글에 채널 글 링크로 답함(답장·/link·일괄 줄) = 채널에 있다는 뜻
             # → 그 주소를 링크로 붙여 다시 올리지 않고 /posted 처럼 올라간 글로 기록한다 (그 글 번호로 품절 표시도)
-            return await self.mark_posted(queue_id, url)
+            done = await self.mark_posted(queue_id, url)
+            return done + ("\n사진은 쓰지 않았어요 (채널에 이미 올라간 글)" if photo is not None else "")
         problem = self._link_problem(item, queue_id, url)
         if problem or item is None:
             return problem or ""
+        jpeg: bytes | None = None
+        if photo is not None and wants_owner_photo(item.deal.product.shop, item.deal.product):
+            jpeg, why = await self._check_owner_photo(photo)
+            if jpeg is None:
+                log.info("owner photo refused for #%d: %s", queue_id, why)
+                return photo_refused(queue_id, why)  # 못 쓰는 사진: 링크도 아직 안 붙임 (사진을 바꿔 다시 보내면 됨)
+            # 사진을 받고 푸는 사이 글이 바뀌었을 수 있다 (다른 답장으로 링크가 붙음·건너뜀·만료) → 다시 읽어 같은 기준으로
+            item = self.db.get_queue_item(queue_id)
+            problem = self._link_problem(item, queue_id, url)
+            if problem or item is None:
+                return problem or ""
+        # 여기서부터 링크를 붙일 때까지 await 없음 (사진을 먼저 적고 링크 → 발행 루프가 사진 없이 집어 가지 않게)
+        photo_note, refused = self._take_owner_photo(item, jpeg, sent=photo is not None)
+        if refused:
+            return photo_refused(queue_id, refused)
         if item.status == autolink.STATUS:
             self._cancel_autolink(queue_id)  # 주인이 먼저 붙였으면 Blog-Auto 일은 거둔다
         if (item.last_error or "").startswith(MAYBE_POSTED):
@@ -679,8 +706,8 @@ class DealBot:
         self.db.set_queue_link(queue_id, url.strip())
         # 상품 1개에 내 링크 1개 (네이버 쇼핑 커넥트·토스 쉐어링크는 만료 없음) → 같은 상품이 또 나오면 다시 묻지 않고 재사용
         self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
-        self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}")
-        return self.notifier.link_done_text(item)
+        self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}" + (" + 상품 사진" if photo_note == "ok" else ""))
+        return self.notifier.link_done_text(item, photo=photo_note)
 
     async def _replaced_for_link(self, item: QueueItem | None, queue_id: int) -> tuple[QueueItem | None, int]:
         """더 좋은 딜에 자리를 내준 글에 주인이 링크를 보냄 → (링크를 붙일 글, 그 번호). 주인이 이긴다 (주인 결정 10/15):
@@ -1122,7 +1149,9 @@ class DealBot:
         else:
             out.append((None, "시중가 대조: 꺼짐 (쿠팡 키 필요)"))
         if self.naver_ref is None:
-            out.append((None, "쿠팡 딜 네이버 최저가 비교: 꺼짐 (설정)"))
+            # 네이버 쇼핑 검색 API 는 끝났다 (10/15): 키를 고칠 일이 아님을 분명히 (예전엔 시작할 때마다 401 경고가 남았음)
+            out.append((None, "네이버 쇼핑 검색: 2026-07-31 종료 — 대신할 API 없음, 키 조치 필요 없음 "
+                              "(네이버 딜 사진은 주인이 링크와 같이 보낸 사진, 쿠팡 딜은 가격 이력으로 판정)"))
         elif not self.naver_shop.configured:
             out.append((None, "쿠팡 딜 네이버 최저가 비교: 꺼짐 (NAVER_CLIENT_ID/SECRET 없음 — developers.naver.com 검색 API 키)"))
         elif self.naver_shop.disabled_reason:
@@ -1453,7 +1482,7 @@ class DealBot:
                 if (self._should_enrich(p) or check_price) and (room or cached is not None):
                     if cached is None:
                         enriched += 1
-                    await self._enrich(p, check_price=check_price, pages=pages, seen=page, photo_search=room)
+                    await self._enrich(p, check_price=check_price, pages=pages, seen=page)
                 elif check_price:
                     # 이번 판 페이지 읽기 한도: 확인 못 함으로 진행하고 다음 판에 새로 읽음
                     self._check_page_price(p, None, why="이번 판 페이지 읽기 한도" + (f" ({NEW_PRICE})" if stale else ""))
@@ -1766,10 +1795,9 @@ class DealBot:
         check_price: bool = False,
         pages: RunBudget | None = None,
         seen: list[PageRead] | None = None,
-        photo_search: bool = True,
     ) -> list[str]:
         """빈 칸(사진·별점 등)을 상품 페이지로 채운다. check_price 면 그 전에 제목 가격을 페이지와 대조 (seen 에 읽은 페이지를 남김).
-        photo_search: 그래도 사진이 없을 때 네이버 쇼핑 검색까지 (이번 판 읽기 한도가 찬 뒤 기억해 둔 페이지로만 대조하는 딜은 안 함)."""
+        사진을 찾으러 다른 곳(쇼핑 검색 등)에 가지 않는다 — 네이버 쇼핑 검색 API 는 2026-07-31 종료 (주인 결정 10/15)."""
         if check_price:
             # 가격 대조: 기억해 둔 페이지 → 일반 요청 → 막힌 네이버 상품 페이지는 크롬 (이번 판·한 시간 한도 안에서)
             got = await self.page_reader.read(
@@ -1790,17 +1818,6 @@ class DealBot:
         filled = PageEnricher.apply(p, meta) if meta is not None else []
         if filled:
             log.info("enriched %s from page: %s", p.name[:40], ", ".join(filled))
-        if photo_search and (not p.image_url or is_board_thumb(p.image_url)) and store_product_no(p.url):
-            # 스토어 페이지를 못 읽었거나(429) 사진이 없으면: 네이버 쇼핑 검색에서 같은 상품의 사진 (상품번호가 같을 때만)
-            try:
-                img = await self.naver_shop.find_image(p)
-            except Exception as e:  # noqa: BLE001 — 사진 찾기 때문에 수집이 멈추면 안 됨
-                log.info("naver shop search failed for %s: %s", p.name[:40], type(e).__name__)
-                img = None
-            if img:
-                p.image_url = img
-                filled.append("image_url")
-                log.info("enriched %s from naver shop search: image_url", p.name[:40])
         return filled
 
     def _wants_page_check(self, p: Product) -> bool:
@@ -1882,11 +1899,18 @@ class DealBot:
         앞서 줄 세운 그 글(대기·링크 요청 중)이 있으면 새 보류 글 대신 그 글을 보류한다 — 예전 판정대로 올라가지 않게 (_open_hold).
         page: 이 딜을 대조한 페이지 (읽은 곳 — 기억해 둔 페이지인지 — 도)."""
         first: int | None = None
+        owner_ok = False  # 주인이 휴대폰으로 보고 링크를 붙인 같은 글(네이버)이 있음 → 그 확인을 믿고 새 보류도 만들지 않음
         for item in self.db.items_for_product(p.product_id, ("pending", "awaiting_link", autolink.STATUS)):
+            if self._owner_checked(item.deal.product) and self._title_price(item.deal.product) == self._title_price(p):
+                owner_ok = True
+                continue
             if await self._open_hold(item, p, page) and first is None:
                 first = item.id
         if first is not None:
             return first
+        if owner_ok:
+            log.info("deal %s not held — the owner checked the price on her phone and linked it", p.product_id)
+            return None
         if any(r == "low_interest" or r.startswith(("excluded", "few_reviews")) for r in verdict.reasons):
             return None  # 가격이 맞았어도 안 올렸을 글 (관심 없음·제외 낱말·후기 적음) — 메모 안 보냄
         if self._posted_recently(p.product_id, now) or self._declined_recently(p, now):
@@ -1911,8 +1935,8 @@ class DealBot:
           없을 때만. 새로 읽어 나온 적 없는 보류는 만들지 않고(page_reader 와 같은 규칙), 맞은 글의 확인은 이 페이지보다 새 것일 수
           있다 (발행 전 크롬 대조 등) — 5분마다 되풀이되는 보류가 맞은 글을 뒤집거나 다른 글을 매번 보류·메모하지 않게."""
         q = item.deal.product
-        if self._title_price(q) != self._title_price(p):
-            return False
+        if self._title_price(q) != self._title_price(p) or self._owner_checked(q):
+            return False  # 주인이 휴대폰으로 확인하고 링크를 붙인 네이버 글은 페이지 대조로 보류하지 않음 (주인 결정 10/15)
         if page is not None and page.meta is not None and page.source != "cache":
             check = self._price_check(q, page.meta)  # 새로 읽은 페이지로 그 글 그대로 대조
         elif self._page_claim(q) == self._page_claim(p) and (q.extra.get("page_price") or {}).get("status") not in ("ok", "option"):
@@ -1954,9 +1978,19 @@ class DealBot:
             return False
         return p.has_price and self.db.held_since(p.product_id, now - REASK_COOLDOWN, price=p.price) is not None
 
+    @staticmethod
+    def _owner_checked(p: Product) -> bool:
+        """주인이 휴대폰으로 가격·옵션을 보고 링크를 붙인 네이버 딜 (주인 결정 10/15): 그 확인을 가격 확인으로 친다 —
+        상품 페이지 대조로 보류하지 않는다 (다시 수집·발행 직전 모두). 예전에 만든 링크를 다시 쓴 딜(mylink)은 아님."""
+        return p.shop == "naver" and bool(p.extra.get("owner_link"))
+
     def _recheck_page_price(self, p: Product, meta: PageMeta | None) -> None:
-        """수집 때 페이지 가격을 확인 못 한 딜: 발행 직전에 사진 때문에 이미 읽은 페이지가 있으면 그걸로 대조 (새로 열지 않음).
-        이미 정한 판정(시중가 대조)은 그대로 두고, 가격이 안 맞으면 보류만 한다."""
+        """수집 때 페이지 가격을 확인 못 한 딜: 발행 직전에 읽은 페이지(다른 몰은 사진 때문에 읽은 페이지, 네이버 딜은
+        _read_unverified_price 가 가격만 보려고 읽은 페이지)가 있으면 그걸로 대조.
+        이미 정한 판정(시중가 대조)은 그대로 두고, 가격이 안 맞으면 보류만 한다.
+        주인이 휴대폰으로 확인하고 링크를 붙인 네이버 딜은 대조하지 않는다 (그 확인이 가격·옵션 확인, 주인 결정 10/15)."""
+        if self._owner_checked(p):
+            return
         state = p.extra.get("page_price")
         if meta is None or meta.prices is None or not isinstance(state, dict) or state.get("status") != "unverified":
             return
@@ -2119,6 +2153,7 @@ class DealBot:
             saved = self.db.kv_get(f"mylink:{deal.product.product_id}")
             if saved and not is_telegram_url(saved):  # 전에 관리자가 만들어 준 같은 상품의 내 링크 (예전에 잘못 남은 채널 글 주소는 안 씀)
                 deal.affiliate_url = saved
+                self._reuse_owner_photo(deal.product)  # 그때 링크와 같이 보낸 상품 사진도 (남아 있으면)
                 return "ok", None
             if self.settings.publish.dry_run:
                 # 연습 모드(DEALBOT_DRY_RUN)에서는 링크 요청으로 귀찮게 하지 않고 원본 링크로 기록만
@@ -2237,26 +2272,34 @@ class DealBot:
     async def _held_before_autolink(self, item: QueueItem, deal: Deal) -> bool:
         """쇼핑커넥트에 묻기 전 가격 대조 (주인 결정 10/12 보류 규칙): 보류할 딜이면 보류하고 True — 검색·발급 없음.
         수집 때 페이지를 못 읽은(unverified) 딜은 여기서 한 번 더 본다: 품절 확인 때 읽은 페이지(캐시)로, 그래도 모르면
-        스토어 크롬으로 (발행 때 사진용으로 다시 열지 않게 크롬이 읽은 페이지는 잠시 기억). 못 읽으면 예전처럼 진행."""
+        스토어 크롬으로 (_read_unverified_price — 발행 때 다시 열지 않게 크롬이 읽은 페이지는 잠시 기억). 못 읽으면 예전처럼 진행."""
         p = deal.product
-        state = p.extra.get("page_price")
-        if isinstance(state, dict) and state.get("status") == "unverified":
-            meta: PageMeta | None = None
-            if self._can_check_page(p):
-                try:
-                    meta = await self.enricher.fetch(p.url)
-                except Exception:  # noqa: BLE001
-                    meta = None
-            if (meta is None or meta.prices is None) and p.shop not in self.settings.deal.enrich.exclude_shops:
-                try:
-                    meta = await self.store_browser.page_meta(p.url)
-                except Exception:  # noqa: BLE001
-                    meta = None
-            self._recheck_page_price(p, meta)
+        await self._read_unverified_price(p)
         if (p.extra.get("page_price") or {}).get("status") == "hold":
             await self._hold_item(item, deal, when="before link")
             return True
         return False
+
+    async def _read_unverified_price(self, p: Product) -> None:
+        """수집 때 페이지 가격을 확인 못 한(unverified) 딜의 가격만 한 번 더 본다: 품절 확인 때 읽은 페이지(캐시)·일반 요청으로,
+        그래도 가격이 없으면 스토어 크롬으로 (크롬이 읽은 페이지는 잠시 기억 — 쇼핑커넥트 전에 읽었으면 발행 때 다시 안 엶).
+        페이지 사진은 쓰지 않는다. 못 읽으면 예전처럼 진행. 쇼핑커넥트에 묻기 전(_held_before_autolink)과
+        주인 사진이 없는 네이버 딜의 발행 직전(deal_photo)에 부른다. 주인이 휴대폰으로 확인하고 링크를 붙인 딜은 읽지 않는다."""
+        state = p.extra.get("page_price")
+        if not isinstance(state, dict) or state.get("status") != "unverified" or self._owner_checked(p):
+            return
+        meta: PageMeta | None = None
+        if self._can_check_page(p):
+            try:
+                meta = await self.enricher.fetch(p.url)
+            except Exception:  # noqa: BLE001
+                meta = None
+        if (meta is None or meta.prices is None) and p.shop not in self.settings.deal.enrich.exclude_shops:
+            try:
+                meta = await self.store_browser.page_meta(p.url)
+            except Exception:  # noqa: BLE001
+                meta = None
+        self._recheck_page_price(p, meta)
 
     def _request_autolink(self, item: QueueItem, deal: Deal, product_no: str) -> None:
         """Blog-Auto 에 쇼핑커넥트 링크를 부탁한다. 글마다 한 번 (job 을 kv 에 먼저 남기고 받은편지함에 한 줄)."""
@@ -2519,8 +2562,8 @@ class DealBot:
         silent = in_time_window(local_now(self.settings.app.timezone), cfg.quiet_hours)
         # 사진은 연습 모드·사진 끔이어도 확인한다 (블로그 내보내기·미리보기용, 보내는 건 publisher 가 send_photo 일 때만)
         photo = await self.deal_photo(deal)
-        if (deal.product.extra.get("page_price") or {}).get("status") == "hold":
-            await self._hold_item(item, deal)  # 사진 때문에 연 상품 페이지 가격이 글 가격과 다름 → 올리지 않음
+        if (deal.product.extra.get("page_price") or {}).get("status") == "hold" and not self._owner_checked(deal.product):
+            await self._hold_item(item, deal)  # 발행 직전에 연 상품 페이지 가격이 글 가격과 다름 → 올리지 않음
             return True
         result = await self.publisher.publish(deal, silent=silent, photo=photo)
         if result.ok:
@@ -2577,8 +2620,9 @@ class DealBot:
                 "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
                 "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
                 "disclosure": deal_disclosure(shop, p.extra) or "", "link": link, "product_url": p.url,
+                # 주인이 링크와 같이 보낸 사진도 상품 사진 (Blog-Auto 는 photo_kind 'product' 만 상품 사진으로 씀)
                 "image_url": p.image_url, "photo_file": photo_file, "photo_kind": "product" if photo_file else "none",
-                "photo_src": p.image_url if photo_file else None,
+                "photo_src": ("owner" if p.extra.get("owner_photo") else p.image_url) if photo_file else None,
                 "kakao_text": ctx.render_deal(deal, link, shop=shop, template="deal_kakao.j2", autoescape=False),
                 **{k: v for k, v in ctx.deal_facts(deal).items() if k != "ref_price"},
             }
@@ -2613,14 +2657,152 @@ class DealBot:
             log.info("photo fetch failed %s: %s", url[:100], e)
             return None
 
+    # ------------------------------------------------- 주인이 링크와 같이 보낸 네이버 딜 상품 사진 (주인 결정 10/15)
+    OWNER_PHOTO_DIR = "owner_photos"  # data_dir 아래. 공개 폴더(media)가 아님 — 발행할 때 media/export·media/owner_… 로 복사됨
+    OWNER_PHOTO_KEEP_DAYS = 14
+    OWNER_PHOTO_KV = "myphoto:"  # 상품마다 마지막으로 받은 주인 사진 (mylink 처럼 — 같은 상품이 또 나오면 그 사진도)
+    OWNER_PUBLIC_PREFIX = "owner_"  # media/ 아래 공개 사본 이름 (발행할 때)
+
+    async def _check_owner_photo(self, photo: PhotoSource) -> tuple[bytes | None, str]:
+        """링크와 같이 온 사진을 받아(함수면) 검사한다: (저장할 JPEG, "") 또는 (None, 주인에게 보일 이유).
+        큰 사진(최대 4,000만 화소)을 푸는 일은 따로 돌린다 — 그동안 텔레그램 받기·발행이 멈추지 않게 (검토 지적)."""
+        if callable(photo):
+            try:
+                data, why = await photo()
+            except Exception as e:  # noqa: BLE001 — 텔레그램 오류·시간 초과: 링크도 안 붙이고 다시 보내 달라고
+                log.warning("owner photo download failed: %s", type(e).__name__)
+                return None, PHOTO_NOT_RECEIVED
+            if data is None:
+                return None, why or PHOTO_NOT_RECEIVED
+        else:
+            data = photo
+        return await asyncio.to_thread(owner_photo, data, min_side=self.settings.publish.photo_min_side)
+
+    def _take_owner_photo(self, item: QueueItem, jpeg: bytes | None, *, sent: bool = False) -> tuple[str | None, str]:
+        """검사를 마친 사진(jpeg)을 그 딜의 상품 사진으로 저장 (네이버 상품 딜만). 링크를 붙이기 바로 전에 부른다 (await 없음).
+        (답장에 붙일 사진 상태, 못 쓰는 이유). 상태: 'ok'(저장함) · 'kept'(사진 없이 다시 보냄 — 전에 받은 사진 그대로) ·
+        'none'(네이버 딜인데 사진 없음) · 'unused'(사진이 왔지만 네이버 상품 딜이 아님 — 받지 않음) · None(사진과 상관없는 딜).
+        이유가 있으면 링크도 붙이지 않는다. sent: 주인이 사진을 같이 보냈는지."""
+        p = item.deal.product
+        if not wants_owner_photo(p.shop, p):
+            return ("unused" if sent else None), ""
+        if jpeg is None:
+            return ("kept" if p.extra.get("owner_photo") else "none"), ""
+        folder = self.settings.data_dir / self.OWNER_PHOTO_DIR
+        name = f"q{item.id}_{time.time_ns()}.jpg"
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(jpeg)) as im:
+                w, h = im.size
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(jpeg)
+        except OSError as e:
+            log.warning("owner photo not saved for #%d: %s", item.id, e)
+            return None, "사진을 저장하지 못했어요 (서버 디스크) — 잠시 뒤 다시 보내 주세요"
+        old = p.extra.get("owner_photo")
+        info = {"file": name, "at": to_iso(utcnow()), "w": w, "h": h}
+        p.extra["owner_photo"] = info
+        # 링크(→ pending)보다 먼저 사진을 적는다: 발행 루프가 링크만 붙은 글을 사진 없이 집어 가지 않게 (사이에 await 없음)
+        self.db.update_queue_item(item.id, status=item.status, error=item.last_error, deal=item.deal)
+        # 같은 상품이 또 나와 그때 만든 링크(mylink)를 다시 쓰면 이 사진도 같이 (_reuse_owner_photo, 남아 있는 동안만)
+        self.db.kv_set(f"{self.OWNER_PHOTO_KV}{p.product_id}", json.dumps(info, ensure_ascii=False))
+        if isinstance(old, dict) and old.get("file") and old.get("file") != name and not old.get("reused"):
+            with contextlib.suppress(OSError):
+                (folder / Path(str(old["file"])).name).unlink()  # 사진을 바꿔 다시 보냄: 예전 사진은 지움
+        log.info("owner photo saved for #%d (%dx%d)", item.id, w, h)
+        return "ok", ""
+
+    def _reuse_owner_photo(self, p: Product) -> None:
+        """예전에 주인이 만든 링크(mylink)를 다시 쓰는 같은 상품: 그때 링크와 같이 보낸 상품 사진도 쓴다 (검토 제안 — 사진 파일이
+        남아 있는 동안만, 14일). 이번 딜을 주인이 본 건 아니라 가격·옵션 확인으로는 치지 않는다 (owner_link 아님 → 예전 대조 그대로)."""
+        if p.extra.get("owner_photo") or not wants_owner_photo(p.shop, p):
+            return
+        try:
+            info = json.loads(self.db.kv_get(f"{self.OWNER_PHOTO_KV}{p.product_id}") or "null")
+        except ValueError:
+            return
+        if not isinstance(info, dict) or not info.get("file"):
+            return
+        if not (self.settings.data_dir / self.OWNER_PHOTO_DIR / Path(str(info["file"])).name).is_file():
+            return  # 정리된 사진 (14일 지남)
+        p.extra["owner_photo"] = {**info, "reused": True}
+        log.info("reusing the owner's photo for %s with the saved link", p.product_id)
+
+    def _owner_photo(self, p: Product) -> bytes | None:
+        """주인이 링크와 같이 보낸 이 딜의 상품 사진 (저장할 때 검사했지만 한 번 더 같은 규칙으로 — owner_photo: 줄인 뒤에도
+        짧은 변 600 을 지키는 규칙이라 clean_image 로 다시 보면 길쭉한 사진이 떨어짐). 없거나 못 읽으면 None."""
+        info = p.extra.get("owner_photo")
+        if not isinstance(info, dict) or not info.get("file"):
+            return None
+        path = self.settings.data_dir / self.OWNER_PHOTO_DIR / Path(str(info["file"])).name  # 이름만 (경로를 믿지 않음)
+        try:
+            data = path.read_bytes()
+        except OSError:
+            log.warning("owner photo missing for %s: %s", p.product_id, path.name)
+            return None
+        jpeg, why = owner_photo(data, min_side=self.settings.publish.photo_min_side)
+        if jpeg is None:
+            log.warning("owner photo unusable for %s: %s", p.product_id, why)
+        return jpeg
+
+    def _public_owner_photo(self, photo: bytes) -> str | None:
+        """주인 사진의 공개 사본 주소 (/media/owner_….jpg). 캡션이 1024자를 넘어 텔레그램 글로 보낼 때 그 사진을 큰 미리보기로 띄우고
+        (주소가 없으면 미리보기를 꺼서 채널에 사진이 빠졌다 — 검토 지적), 스레드도 같은 확인된 사진을 쓴다.
+        발행할 때만 만든다 (받을 때는 공개 폴더 밖 owner_photos 에만). 공개 도메인이 없거나 못 쓰면 None."""
+        base = self.settings.secrets.public_base_url
+        if not base:
+            return None
+        folder = self.settings.data_dir / "media"
+        name = f"{self.OWNER_PUBLIC_PREFIX}{hashlib.sha256(photo).hexdigest()[:24]}.jpg"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            if not (folder / name).exists():
+                (folder / name).write_bytes(photo)
+        except OSError as e:
+            log.warning("owner photo public copy failed: %s", e)
+            return None
+        return f"{base}/media/{name}"
+
+    def _prune_owner_photos(self) -> int:
+        cutoff = time.time() - self.OWNER_PHOTO_KEEP_DAYS * 86400
+        n = 0
+        folders = ((self.settings.data_dir / self.OWNER_PHOTO_DIR, "*.jpg"),
+                   (self.settings.data_dir / "media", f"{self.OWNER_PUBLIC_PREFIX}*.jpg"))
+        for folder, pattern in folders:
+            for f in folder.glob(pattern) if folder.is_dir() else []:
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        f.unlink()
+                        n += 1
+                except OSError:
+                    pass
+        return n
+
     async def deal_photo(self, deal: Deal) -> bytes | None:
         """올릴 상품 사진: 디코딩되고 짧은 변 photo_min_side(600px) 이상인 JPEG (EXIF 방향 반영). 없으면 None → 사진 없이 올린다.
-        순서: 딜의 상품 사진(쿠팡·네이버 CDN 은 큰 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만)
-        → 네이버 스토어 딜이면 실제 크롬으로 한 번 연 스토어 페이지 사진(일반 요청이 429 일 때) → 쇼핑 검색 API 의 같은 상품(상품번호 일치) 사진.
-        게시판 목록 썸네일·로고·기본 배너는 상품 사진으로 쓰지 않는다. 글자 카드도 상품 사진이 아니라 여기서 만들지 않는다
-        (카드는 인스타만). 쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고, 못 찾으면 비운다."""
+        - 주인이 링크와 같이 보낸 사진이 있으면 그것 (네이버 딜, 주인 결정 10/15 ① — 페이지·크롬을 열지 않음).
+        - 그 사진이 없는 네이버 딜은 사진을 찾지 않는다 (10/15 ②): 딜에 적힌 사진·스토어 페이지·크롬 사진 모두 안 씀 →
+          채널엔 글만, 인스타는 상품명·가격 글자 카드. 수집 때 가격을 확인 못 한 딜만 가격을 한 번 본다 (_read_unverified_price).
+        - 다른 몰: 딜의 상품 사진(쿠팡·네이버 CDN 은 큰 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만).
+        사진을 찾으러 검색하지 않는다 (네이버 쇼핑 검색 API 는 2026-07-31 종료). 게시판 목록·글 사진(뽐뿌 등)·로고·기본 배너는
+        상품 사진으로 쓰지 않는다. 글자 카드도 상품 사진이 아니라 여기서 만들지 않는다 (카드는 인스타만).
+        쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고(주인 사진은 공개 사본 주소), 못 찾았으면 비운다."""
         cc = self.settings.publish
         p = deal.product
+        if p.shop == "naver":
+            # 가격만 (사진은 버림). 주인 사진보다 먼저 — 예전 링크·사진을 다시 쓰는 딜은 주인이 가격을 본 게 아니라서
+            # 발행 전 가격 확인이 이것뿐이다 (주인이 이번에 확인한 딜은 _read_unverified_price 가 아무것도 안 함)
+            await self._read_unverified_price(p)
+        owned = self._owner_photo(p)
+        if owned is not None:
+            p.image_url = self._public_owner_photo(owned)  # 공개 도메인이 없으면 None (텔레그램은 바이트로, 스레드는 글만)
+            return owned
+        if p.shop == "naver":
+            if p.image_url:
+                log.info("naver deal without the owner's photo — posting text only: %s", p.product_id)
+            p.image_url = None
+            return None
         referer = p.url if p.url and p.url.startswith("http") else None
         tried: set[str] = set()
 
@@ -2636,7 +2818,6 @@ class DealBot:
 
         photo: bytes | None = None
         src: str | None = None
-        page_had_photo = False  # 일반 요청으로 읽은 페이지에 사진 주소가 있었음 → 크롬도 같은 주소를 줄 테니 안 엶
         for url in _sizes(p.image_url):
             photo = await _try(url)
             if photo is not None:
@@ -2648,32 +2829,7 @@ class DealBot:
             except Exception:  # noqa: BLE001
                 meta = None
             self._recheck_page_price(p, meta)
-            page_had_photo = bool(meta and page_images(meta))
             for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
-                photo = await _try(url)
-                if photo is not None:
-                    src = url
-                    break
-        if photo is None and not page_had_photo and store_product_no(p.url) and p.shop not in self.settings.deal.enrich.exclude_shops:
-            # 일반 요청이 막혔으면(429) 실제 크롬으로 한 번 (로그인 없는 빈 창, 발행 직전에만 — 주인 결정 10/10).
-            # 페이지를 읽었는데 사진이 600px 미만 등으로 못 쓴 경우엔 크롬도 같은 사진을 주므로 열지 않는다 (검토 지적)
-            try:
-                meta = await self.store_browser.page_meta(p.url)
-            except Exception:  # noqa: BLE001
-                meta = None
-            self._recheck_page_price(p, meta)  # 크롬으로 연 김에 가격도 (따로 열지 않음)
-            for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
-                photo = await _try(url)
-                if photo is not None:
-                    src = url
-                    break
-        if photo is None and store_product_no(p.url):
-            # 스토어 페이지가 막혔으면(429) 네이버 쇼핑 검색에서 같은 상품의 사진 — 상품번호가 다르면 비슷해도 안 씀
-            try:
-                found = await self.naver_shop.find_image(p)
-            except Exception:  # noqa: BLE001
-                found = None
-            for url in _sizes(found):
                 photo = await _try(url)
                 if photo is not None:
                     src = url
@@ -2687,14 +2843,14 @@ class DealBot:
         """딜 카드 이미지를 만들어 공개 URL 을 돌려준다. 카드가 꺼져 있거나 공개 도메인이 없으면 None.
         photo: deal_photo 가 확인한 상품 사진 바이트 (텔레그램 글에 쓴 그 사진). 여기서 사진을 다시 받지 않는다 —
         예전엔 image_url 을 날것으로 다시 받아 쿠팡 로고가 카드에 크게 들어가거나(/instatest), 외부 반출을 막는 스토어 사진이 빠졌다.
-        사진이 없으면 instagram.no_photo 가 text_card 일 때만 글자 카드, skip(기본)이면 None."""
+        사진이 없으면 instagram.no_photo 가 text_card 이거나 네이버 딜일 때 글자 카드, 아니면(skip 기본) None."""
         if self.card is None:
             return None
         base = self.settings.secrets.public_base_url
         if not base:
             log.debug("no public domain — card image cannot be served")
             return None
-        if photo is None and self.settings.instagram.no_photo != "text_card":
+        if photo is None and not self._ig_text_card(deal):
             return None
         shop = self.registry.get(deal.product.shop)
         tier, _ = self.renderer.deal_tier(deal)  # 배지는 글 첫 줄과 같은 등급으로
@@ -2716,10 +2872,17 @@ class DealBot:
             pass
         return f"{base}/media/{path.name}"
 
-    def _ig_skip_reason(self, photo: bytes | None) -> str | None:
-        """인스타에 안 올리는 이유 (사진 규칙). 확인된 상품 사진이 없고 no_photo 가 skip 이면 올리지 않는다
+    def _ig_text_card(self, deal: Deal | None) -> bool:
+        """확인된 상품 사진이 없는 딜을 글자 카드(상품명·가격 같은 사실만, 브랜드 글꼴 — 로고·퍼 온 사진 없음)로 올리나:
+        no_photo 가 text_card 이거나, 네이버 딜 (주인 결정 10/15 — 네이버 딜은 주인이 사진을 같이 보내지 않으면 사진이 없다)."""
+        if self.settings.instagram.no_photo == "text_card":
+            return True
+        return deal is not None and deal.product.shop == "naver"
+
+    def _ig_skip_reason(self, photo: bytes | None, *, deal: Deal | None = None) -> str | None:
+        """인스타에 안 올리는 이유 (사진 규칙). 확인된 상품 사진이 없고 글자 카드로 올릴 딜도 아니면(no_photo: skip) 올리지 않는다
         — 인스타는 사진이 꼭 있어야 하고, 로고·기본 이미지를 크게 띄운 카드는 계정 인상을 해친다."""
-        if photo is None and self.settings.instagram.no_photo == "skip":
+        if photo is None and not self._ig_text_card(deal):
             return "확인된 상품 사진 없음"
         return None
 
@@ -2732,7 +2895,7 @@ class DealBot:
             and (deal.product.deal_kind != "info" or self.settings.instagram.info_posts)
         )
         want_threads = self.settings.threads.enabled and (self.threads.configured or self.threads.dry_run)
-        ig_skip = self._ig_skip_reason(photo) if want_ig else None
+        ig_skip = self._ig_skip_reason(photo, deal=deal) if want_ig else None
         if ig_skip:
             # 사진 없는 딜은 인스타에 안 올림 (실패가 아니라 규칙이라 관리자 알림 없이 기록만)
             want_ig = False
@@ -2740,7 +2903,7 @@ class DealBot:
             log.info("instagram skipped (%s): %s", ig_skip, deal.product.name[:40])
         if want_ig:
             deal_no = self._page_deal_no(deal_no)  # 카드·본문의 '#번호' 는 핫딜 페이지에 있는 글만
-        # 카드는 사진이 꼭 있어야 하는 인스타만. 사진은 텔레그램 글과 같은 확인된 상품 사진
+        # 카드는 인스타만. 사진은 텔레그램 글과 같은 확인된 상품 사진 (없으면 네이버 딜·text_card 설정만 글자 카드)
         card_url = await self.make_card(deal, photo, deal_no=deal_no) if want_ig else None
         if want_threads:
             # 스레드는 deal_photo 가 확인한 상품 사진만 (못 쓰면 글만). 글자 카드는 상품 사진 대신 쓰지 않는다
@@ -3001,7 +3164,7 @@ class DealBot:
         photo = await self.deal_photo(deal)
         caption = self.instagram.render(deal, deal_no=deal_no)
         preview = f"📸 <b>인스타그램에는 이렇게 올라갑니다 ({html.escape(label)})</b>\n<pre>{html.escape(caption)}</pre>"
-        skip = self._ig_skip_reason(photo)
+        skip = self._ig_skip_reason(photo, deal=deal)
         if skip:
             return preview + (
                 f"\n\n⏭ 이 딜은 인스타에 올리지 않습니다: {skip} (로고·기본 이미지·작은 썸네일은 카드에 안 씀). 실제 딜도 같은 규칙입니다."
@@ -3322,6 +3485,7 @@ class DealBot:
         )
         pruned["admin_msgs"] = self.db.prune_admin_msgs(REGISTRY_DAYS)
         pruned["nl_pending"] = self.nl.prune_pending()
+        pruned["owner_photos"] = self._prune_owner_photos()
         log.info("maintenance: pruned %s", pruned)
 
     def __repr__(self) -> str:

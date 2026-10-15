@@ -225,10 +225,11 @@ async def test_deal_photo_uses_a_big_shop_image_under_thumbnails(bot) -> None:  
 
     bot._fetch_image = fetch
     bot.enricher.fetch = no_page  # type: ignore[method-assign]
-    d = Deal(Product(source="s", product_id="naver:1", shop="naver", name="상품", price=9900, url="https://www.musinsa.com/products/123",
+    # 무신사 주소의 딜은 무신사 딜 (예전엔 shop="naver" 로 적혀 있었는데, 10/15 부터 주인 사진이 없는 네이버 딜은 사진을 찾지 않음)
+    d = Deal(Product(source="s", product_id="musinsa:123", shop="musinsa", name="상품", price=9900, url="https://www.musinsa.com/products/123",
                      image_url=big), DealVerdict(is_deal=True))
     assert await bot.deal_photo(d) is not None and d.product.image_url == big
-    d = Deal(Product(source="s", product_id="naver:2", shop="naver", name="상품", price=9900, url="https://www.musinsa.com/products/124",
+    d = Deal(Product(source="s", product_id="musinsa:124", shop="musinsa", name="상품", price=9900, url="https://www.musinsa.com/products/124",
                      image_url=small), DealVerdict(is_deal=True))
     assert await bot.deal_photo(d) is None and d.product.image_url is None  # 작은 건 크기 검사(600px)가 거른다
 

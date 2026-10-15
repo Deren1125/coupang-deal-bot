@@ -356,10 +356,12 @@ async def test_naver_store_page_match_uses_page_price(bot: DealBot) -> None:
     assert deal.product.price == 14465 and deal.product.extra["page_option"] == "2L 24개"
 
 
-async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> None:
-    """수집 때 스토어가 막혀(429) 확인 못 한 딜: 발행 직전 사진 때문에 이미 여는 크롬 페이지로 가격을 보고, 안 맞으면 올리지 않는다.
-    크롬을 따로 더 열지는 않는다 (사진이 있으면 크롬도 안 엶)."""
-    _serve(bot, {})
+def _naver_22(no: str = "11223344556") -> Product:
+    return Product(source="ppomppu", product_id=f"naver:{no}", shop="naver", name="풀무원 샘물 2L 24개", price=6410,
+                   url=f"https://smartstore.naver.com/water/products/{no}", recommend_count=9, affiliate_url=None)
+
+
+def _browser_pages(bot: DealBot) -> list[str]:
     opened: list[str] = []
 
     async def page_meta(url: str) -> PageMeta:
@@ -367,17 +369,130 @@ async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> No
         return _meta("naver_store_state.html", url)
 
     bot.store_browser.page_meta = page_meta  # type: ignore[method-assign]
-    p = Product(source="ppomppu", product_id="naver:11223344556", shop="naver", name="풀무원 샘물 2L 24개", price=6410, url=NAVER_URL,
-                recommend_count=9, affiliate_url=None)
-    FakePageCollector.products = [p]
+    return opened
+
+
+async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> None:
+    """수집 때 스토어가 막혀(429) 확인 못 한 딜: 발행 직전 크롬 페이지로 가격을 보고, 안 맞으면 올리지 않는다. 크롬은 한 번만.
+    10/15 ②: 주인 사진이 없는 네이버 딜은 사진을 찾지 않으므로 이 크롬은 가격만 보려고 연다 (아래 테스트: 그 사진은 안 씀).
+    주인 결정 10/15 로 바뀐 점: 주인이 휴대폰으로 보고 링크를 붙인 네이버 딜은 이 대조로 보류하지 않는다 (아래 테스트) —
+    보류는 예전에 만든 링크(mylink)를 다시 써서 이번엔 주인이 보지 않은 딜만."""
+    _serve(bot, {})
+    opened = _browser_pages(bot)
+    FakePageCollector.products = [_naver_22()]
     await bot.run_collector(bot.collectors[0])
     assert bot.db.queue_counts() == {"pending": 1}
-    item = bot.db.pending_items()[0]
-    await bot.attach_link(item.id, "https://naver.me/MINE")  # 주인이 링크를 만들어 줌
+    bot.db.kv_set("mylink:naver:11223344556", "https://naver.me/MINE")  # 전에 주인이 만든 같은 상품의 링크를 다시 씀
     assert await bot.process_queue_once()
-    assert opened == [NAVER_URL]  # 사진이 없어 원래 여는 그 한 번
+    assert opened == [NAVER_URL]  # 가격을 확인 못 한 딜이라 가격 때문에 여는 그 한 번
     assert bot.db.queue_counts() == {"held": 1} and bot.db.recent_posts() == []
     assert bot.sent[-1][2] == "price_hold"  # type: ignore[attr-defined]
+
+
+async def test_reused_link_and_photo_still_get_the_price_check(bot: DealBot) -> None:
+    """검토 지적 (10/15): 예전 링크(mylink)와 그때 받은 주인 사진(myphoto)을 다시 쓰는 딜도 이번엔 주인이 가격을 본 게 아니다 —
+    사진이 있어도 발행 직전 크롬 가격 확인은 그대로, 안 맞으면 보류 (사진 때문에 확인을 건너뛰면 안 됨)."""
+    import io
+    import json as _json
+
+    from PIL import Image
+
+    _serve(bot, {})
+    opened = _browser_pages(bot)
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"pending": 1}
+    folder = bot.settings.data_dir / DealBot.OWNER_PHOTO_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 800), (200, 120, 60)).save(buf, "JPEG")
+    (folder / "saved.jpg").write_bytes(buf.getvalue())
+    bot.db.kv_set(f"{DealBot.OWNER_PHOTO_KV}naver:11223344556", _json.dumps({"file": "saved.jpg", "w": 800, "h": 800}))
+    bot.db.kv_set("mylink:naver:11223344556", "https://naver.me/MINE")
+    assert await bot.process_queue_once()
+    assert opened == [NAVER_URL]  # 사진이 있어도 가격은 한 번 본다
+    assert bot.db.queue_counts() == {"held": 1} and bot.db.recent_posts() == []
+
+
+async def test_owner_linked_naver_deal_is_not_held_by_the_browser_page(bot: DealBot) -> None:
+    """주인 결정 10/15: 주인이 휴대폰으로 가격·옵션을 보고 링크를 붙인 네이버 딜은 그 확인이 가격 확인 — 발행 직전 크롬 페이지
+    값이 제목 가격과 달라도 보류하지 않고 올린다. 사진도 찾지 않으니(②, 검토 지적) 크롬을 아예 열지 않는다 (예전엔 사진 때문에 한 번)."""
+    _serve(bot, {})
+    opened = _browser_pages(bot)
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    item = bot.db.pending_items()[0]
+    reply = await bot.attach_link(item.id, "https://naver.me/MINE")  # 주인이 링크를 만들어 줌 (사진 없이)
+    assert "사진 없이 받았어요" in reply
+    assert await bot.process_queue_once()
+    assert opened == []
+    assert bot.db.queue_counts() == {"published": 1} and len(bot.db.recent_posts()) == 1
+    published = bot.db.get_queue_item(item.id)
+    assert published is not None and published.deal.product.extra["page_price"]["status"] == "unverified"  # 크롬 값으로 다시 판정 안 함
+    assert not any(kind == "price_hold" for _t, _s, kind, _q in bot.sent)  # type: ignore[attr-defined]
+
+
+async def test_unchecked_naver_deal_reads_only_the_price_and_posts_text_only(bot: DealBot) -> None:
+    """주인 결정 10/15 ② (검토 지적): 주인 사진이 없는 네이버 딜은 발행 직전에도 사진을 찾지 않는다. 예전 링크를 다시 써서 주인이
+    이번엔 안 본 딜이 수집 때 가격을 확인 못 했으면 크롬으로 가격만 한 번 보고(맞으면 올림), 그 페이지의 사진(og:image ?type=o1000)은
+    받지도 않는다 — 채널엔 글만 (사진 바이트도 주소도 없음)."""
+    from dealbot.models import PublishResult
+
+    _serve(bot, {})
+    opened = _browser_pages(bot)
+    fetched: list[str] = []
+
+    async def fetch_image(url: str, **_kw: object) -> bytes | None:
+        fetched.append(url)
+        return None
+
+    bot._fetch_image = fetch_image  # type: ignore[method-assign]
+    got: dict[str, object] = {}
+
+    async def publish(deal: Deal, **kw: object) -> PublishResult:
+        got.update(photo=kw.get("photo"), image=deal.product.image_url)
+        return PublishResult(ok=True, message_id=5)
+
+    bot.publisher.publish = publish  # type: ignore[method-assign]
+    p = _naver_22()
+    p.price = 14465  # 페이지의 24개 값과 같음 → 확인되면 올림
+    FakePageCollector.products = [p]
+    await bot.run_collector(bot.collectors[0])
+    qid = bot.db.pending_items()[0].id
+    assert bot.db.pending_items()[0].deal.product.extra["page_price"]["status"] == "unverified"
+    bot.db.kv_set("mylink:naver:11223344556", "https://naver.me/MINE")
+    assert await bot.process_queue_once()
+    assert opened == [NAVER_URL] and fetched == []
+    assert got == {"photo": None, "image": None}
+    assert bot.db.queue_counts() == {"published": 1}
+    assert bot.db.get_queue_item(qid).deal.product.extra["page_price"]["status"] in ("ok", "option")  # type: ignore[union-attr]  # 크롬 값으로 확인
+
+
+async def test_recollected_owner_linked_naver_deal_is_not_held(bot: DealBot) -> None:
+    """주인이 링크를 붙여 올릴 차례를 기다리는 네이버 글을 게시판이 다시 돌려주고, 이번엔 페이지를 읽었더니 값이 다름:
+    예전엔 그 글을 보류했지만(_open_hold) 주인 확인을 믿고 그대로 둔다. 따로 보류 글·보류 메모도 만들지 않는다."""
+    _serve(bot, {})
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    item = bot.db.pending_items()[0]
+    await bot.attach_link(item.id, "https://naver.me/MINE")
+    bot.settings.publish.enabled = False  # 아직 안 올라감
+    _serve(bot, {NAVER_URL: _meta("naver_store_state.html", NAVER_URL)})  # 다시 수집: 페이지 값이 제목 가격과 다름
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.queue_counts() == {"pending": 1}
+    assert bot.db.get_queue_item(item.id).status == "pending"  # type: ignore[union-attr]
+    assert bot.sent == []  # type: ignore[attr-defined]  # 보류 메모 없음
+
+
+async def test_recollected_naver_deal_without_owner_link_is_still_held(bot: DealBot) -> None:
+    """같은 상황이라도 주인이 링크를 붙이기 전(링크 요청 전 대기 글)이면 예전처럼 그 글을 보류한다 (주인이 아직 안 봄)."""
+    _serve(bot, {})
+    FakePageCollector.products = [_naver_22()]
+    await bot.run_collector(bot.collectors[0])
+    item = bot.db.pending_items()[0]
+    _serve(bot, {NAVER_URL: _meta("naver_store_state.html", NAVER_URL)})
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.get_queue_item(item.id).status == "held"  # type: ignore[union-attr]
 
 
 async def test_page_check_off_keeps_old_behaviour(bot: DealBot) -> None:
