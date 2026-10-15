@@ -1,11 +1,15 @@
 {# 일일 요약. 변수: s (PeriodSummary: since, until, runs, run_errors, collected, deals_found, published,
-   publish_failed, expired, skipped, errors, pending, awaiting, top_posts[]), tz #}
+   publish_failed, expired, skipped, errors, pending, awaiting, link_replaced, link_backlog_full, top_posts[]), tz
+   skipped 에는 링크 요청 자리 줄(↪️ link_replaced·link_backlog_full)에서 따로 세는 글을 넣지 않는다 (같은 딜을 두 번 세지 않게) #}
 📊 <b>오늘 하루 정리</b> ({{ s.since | local('%m/%d %H:%M') }} ~ {{ s.until | local('%m/%d %H:%M') }})
 
 📥 게시판을 {{ s.runs }}번 확인해서{% if s.run_errors %} (확인 실패 {{ s.run_errors }}번){% endif %} 글 {{ s.collected }}개를 봤습니다
 🎯 기준을 넘은 특가 {{ s.deals_found }}건, 그중 새로 잡은 것 {{ s.queued | default(0) }}건
 📤 채널에 올린 글 <b>{{ s.published }}</b>건 · 실패 {{ s.publish_failed }}건 · 시간 지나 버림 {{ s.expired }}건 · 겹쳐서 건너뜀 {{ s.skipped }}건
 🗂 지금 기다리는 글 {{ s.pending }}건{% if s.awaiting %} · 🔗 내 링크 기다리는 글 {{ s.awaiting }}건 (/pending){% endif +%}
+{% if s.link_replaced or s.link_backlog_full %}
+↪️ 링크 요청 자리가 차서: 더 좋은 딜로 바꾼 딜 {{ s.link_replaced }}개 · 못 묻고 건너뛴 딜 {{ s.link_backlog_full }}개
+{% endif %}
 {% if s.errors %}
 🚨 에러 {{ s.errors }}건 — /errors 로 확인
 {% else %}

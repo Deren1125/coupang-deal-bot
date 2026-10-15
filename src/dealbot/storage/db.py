@@ -147,6 +147,11 @@ CREATE TABLE IF NOT EXISTS metrics (
 );
 """
 
+# 링크 요청 자리가 다 차서 점수가 더 높은 새 딜에 자리를 내준 글의 last_error 머리말 ('replaced by #12 (score 8→20)').
+# 주인이 넘긴 것이 아니므로 다시 묻지 않는 기록(declined_since)에 넣지 않고, 유효 시간 안에 /link 가 오면 다시 받는다
+REPLACED = "replaced by"
+LINK_BACKLOG_FULL = "manual link backlog full"
+
 
 @dataclass(slots=True)
 class QueueItem:
@@ -190,6 +195,8 @@ class PeriodSummary:
     errors: int = 0
     pending: int = 0
     awaiting: int = 0
+    link_replaced: int = 0  # 링크 요청 자리가 다 차서 더 좋은 딜에 자리를 내준 글
+    link_backlog_full: int = 0  # 링크 요청 자리가 다 차서 묻지 못하고 건너뛴 딜
     community: dict[str, dict[str, Any]] | None = None
     top_posts: list[dict[str, Any]] | None = None
 
@@ -636,13 +643,73 @@ class Database:
         self.update_queue_item(item_id, status="pending", error=None, deal=item.deal, now=now, reset_created=True)
         return self.get_queue_item(item_id)
 
+    def weakest_awaiting_link(self) -> QueueItem | None:
+        """내 링크를 기다리는 글 중 점수가 가장 낮은 글 (같은 점수면 가장 오래된 글). 링크가 붙은 글은 뺀다."""
+        row = self._one(
+            "SELECT * FROM deal_queue WHERE status = 'awaiting_link' AND json_extract(payload, '$.affiliate_url') IS NULL "
+            "ORDER BY score ASC, created_at ASC, id ASC LIMIT 1"
+        )
+        return self._row_to_queue_item(row) if row else None
+
+    def replace_awaiting_link(self, item_id: int, error: str, now: datetime | None = None) -> bool:
+        """더 좋은 딜에 자리를 내준 글을 skipped 로. 아직 링크를 기다리는 그대로일 때만 (조건부 UPDATE 한 번 —
+        그사이 주인이 링크를 붙였거나 넘겼거나 품절·만료로 상태가 바뀐 글은 건드리지 않는다). 바꿨으면 True."""
+        now = now or utcnow()
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE deal_queue SET status = 'skipped', last_error = ?, updated_at = ? "
+                "WHERE id = ? AND status = 'awaiting_link' AND json_extract(payload, '$.affiliate_url') IS NULL",
+                (error, to_iso(now), item_id),
+            )
+            return cur.rowcount == 1
+
+    def replaced_since(self, product_id: str, since: datetime) -> QueueItem | None:
+        """since 이후에 줄 선(created_at) 같은 상품의 글 중 더 좋은 딜에 자리를 내준 마지막 글 (아직 주인 답을 받을 수 있는 글)."""
+        row = self._one(
+            "SELECT * FROM deal_queue WHERE product_id = ? AND status = 'skipped' AND last_error LIKE ? AND created_at >= ? "
+            "ORDER BY id DESC LIMIT 1",
+            (product_id, REPLACED + "%", to_iso(since)),
+        )
+        return self._row_to_queue_item(row) if row else None
+
+    def refresh_waiting_score(self, product_id: str, score: float) -> bool:
+        """내 링크를 기다리는 같은 상품 글의 점수를 지금 판정 점수로 (게시판에서 다시 봄 — 뽐뿌 딜은 추천 수가 늘면 점수도 오름).
+        자리를 바꿀 때 새 딜과 기다리는 글을 같은 때의 점수로 견주려고. 유효 시간·요약에 쓰는 시각은 그대로. 바꿨으면 True."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE deal_queue SET score = ? WHERE product_id = ? AND status = 'awaiting_link' AND score != ?",
+                (score, product_id, score),
+            )
+            return cur.rowcount > 0
+
+    def move_unlinked(self, item_id: int, *, status: str, error: str | None, deal: Deal | None = None,
+                      now: datetime | None = None) -> bool:
+        """링크 요청으로 넘기거나(awaiting_link) 자리가 없어 건너뛸 때(skipped): 아직 링크 없이 처리 중인 글
+        (pending·awaiting_autolink)일 때만 바꾼다 (조건부 UPDATE 한 번). 처리하는 사이 주인이 링크를 붙였거나(/link)
+        넘긴(/skip) 글은 건드리지 않는다 — 주인 링크를 지우고 또 묻지 않게. 바꿨으면 True."""
+        now = now or utcnow()
+        sets, args = "status = ?, last_error = ?, updated_at = ?", [status, error, to_iso(now)]
+        if deal is not None:
+            sets += ", payload = ?"
+            args.append(json.dumps(deal.to_dict(), ensure_ascii=False))
+        with self._lock:
+            cur = self._conn.execute(
+                f"UPDATE deal_queue SET {sets} WHERE id = ? AND status IN ('pending', 'awaiting_autolink') "
+                "AND json_extract(payload, '$.affiliate_url') IS NULL",
+                (*args, item_id),
+            )
+            return cur.rowcount == 1
+
     def expire_queue(
         self,
         older_than: datetime,
         now: datetime | None = None,
         *,
         awaiting_older_than: datetime | None = None,
+        review_older_than: datetime | None = None,
     ) -> int:
+        """review_older_than: 확인(/ok)·자동 링크를 기다리는 글의 기준 (링크 요청만 24시간으로 늘린 주인 결정 10/15 —
+        확인 요청은 예전 그대로). 안 주면 awaiting_older_than 와 같음."""
         now = now or utcnow()
         with self._lock:
             cur = self._conn.execute(
@@ -651,28 +718,31 @@ class Database:
             )
             n = cur.rowcount
             if awaiting_older_than is not None:
+                review = review_older_than or awaiting_older_than
                 cur2 = self._conn.execute(  # 관리자에게 물었는데 답이 없던 글 — 다시 묻지 않으려고 표시해 둔다
                     "UPDATE deal_queue SET status = 'expired', last_error = 'unanswered', updated_at = ? "
-                    "WHERE status IN ('awaiting_link', 'awaiting_approval') AND created_at < ?",
-                    (to_iso(now), to_iso(awaiting_older_than)),
+                    "WHERE (status = 'awaiting_link' AND created_at < ?) OR (status = 'awaiting_approval' AND created_at < ?)",
+                    (to_iso(now), to_iso(awaiting_older_than), to_iso(review)),
                 )
                 n += cur2.rowcount
                 cur3 = self._conn.execute(  # 자동 링크 답을 끝내 못 받은 글 (보통은 그 전에 주인 요청으로 넘어감) — 주인이 넘긴 것은 아님
                     "UPDATE deal_queue SET status = 'expired', last_error = 'autolink unanswered', updated_at = ? "
                     "WHERE status = 'awaiting_autolink' AND created_at < ?",
-                    (to_iso(now), to_iso(awaiting_older_than)),
+                    (to_iso(now), to_iso(review)),
                 )
                 n += cur3.rowcount
             return n
 
     def declined_since(self, product_id: str, since: datetime) -> Deal | None:
         """since 이후 관리자가 넘겼거나(skipped) 묻고도 답이 없어 버린(unanswered) 같은 상품의 마지막 글.
-        자리가 없어 못 물어본 것(review backlog full · manual link backlog full)은 넘긴 게 아니므로 뺀다."""
+        자리가 없어 못 물어본 것(review backlog full · manual link backlog full)과 더 좋은 딜에 자리를 내준 것(replaced by)은
+        넘긴 게 아니므로 뺀다 (같은 상품이 다시 나오면 다시 물을 수 있게)."""
         row = self._one(
             "SELECT payload FROM deal_queue WHERE product_id = ? AND updated_at >= ? AND ("
             "(status = 'expired' AND last_error = 'unanswered') OR "
             "(status = 'skipped' AND COALESCE(last_error, '') NOT LIKE 'review backlog full%' "
-            "AND COALESCE(last_error, '') NOT LIKE 'manual link backlog full%')"
+            "AND COALESCE(last_error, '') NOT LIKE 'manual link backlog full%' "
+            "AND COALESCE(last_error, '') NOT LIKE 'replaced by%')"
             ") ORDER BY id DESC LIMIT 1",
             (product_id, to_iso(since)),
         )
@@ -1072,6 +1142,18 @@ class Database:
         out.publish_failed = by_status.get("failed", 0)
         out.expired = by_status.get("expired", 0)
         out.skipped = by_status.get("skipped", 0)
+        row = self._one(  # 상품 수로 (자리가 없어 건너뛴 딜은 게시판이 다시 돌려줄 때마다 또 줄 섰다 빠짐 — 저녁 요약과 같은 셈)
+            "SELECT COUNT(DISTINCT CASE WHEN last_error LIKE ? THEN product_id END) AS replaced, "
+            "COUNT(DISTINCT CASE WHEN last_error LIKE ? THEN product_id END) AS full, "
+            "COUNT(CASE WHEN last_error LIKE ? OR last_error LIKE ? THEN 1 END) AS link_rows FROM deal_queue "
+            "WHERE status = 'skipped' AND updated_at >= ? AND updated_at <= ?",
+            (REPLACED + "%", LINK_BACKLOG_FULL + "%", REPLACED + "%", LINK_BACKLOG_FULL + "%", s, u),
+        )
+        if row:
+            out.link_replaced = int(row["replaced"] or 0)
+            out.link_backlog_full = int(row["full"] or 0)
+            # 링크 요청 자리 줄(↪️)에서 따로 세니 '겹쳐서 건너뜀'에는 넣지 않는다 (같은 딜을 두 번 세지 않게)
+            out.skipped = max(0, out.skipped - int(row["link_rows"] or 0))
         counts = self.queue_counts()
         out.pending = counts.get("pending", 0)
         out.awaiting = counts.get("awaiting_link", 0)
