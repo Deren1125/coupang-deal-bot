@@ -8,7 +8,8 @@
 #
 # 내 도메인 (주인 결정 10/15, docs/SETUP_KEYS.md '내 도메인 연결'):
 #   - Caddy 는 sslip.io 주소와 내 도메인을 둘 다 받는다 → 메타에 등록해 둔 예전 리디렉션 주소가 그대로 된다
-#   - .env 의 PUBLIC_DOMAIN 은 내 도메인의 https://도메인/health 확인이 통과한 뒤에만 내 도메인으로 바꾼다
+#   - .env 의 PUBLIC_DOMAIN 은 내 도메인의 https://도메인/health 확인이 통과하고 DNS A 레코드가 이 서버를 가리킬 때만 내 도메인으로 바꾼다
+#     (A 레코드가 다른 서버면 그 서버의 /health 응답일 수 있어 안 바꿈)
 #     (안 되면 예전 주소 그대로 두고 이유를 알려 줌 — 대개 DNS A 레코드가 아직 이 서버를 안 가리킴)
 #   - 바꾼 뒤 핫딜 페이지(/)·카드 이미지 주소는 내 도메인. 메타에 더할 리디렉션 주소를 마지막에 그대로 보여 준다
 #   - 한 번 옮긴 뒤에는 --domain 없이 다시 실행해도 내 도메인을 계속 받는다
@@ -64,13 +65,17 @@ if [ -z "$CUSTOM" ] && [ -n "$OLD_DOMAIN" ] && valid_host "$OLD_DOMAIN"; then
 fi
 
 echo "   $DOMAIN${CUSTOM:+ + $CUSTOM}"
+# 예전 sslip.io 주소: PUBLIC_DOMAIN 이 sslip.io 이면 그것, 내 도메인으로 옮긴 서버면 PUBLIC_DOMAIN_ALIASES 의 sslip.io 주소
+OLD_ALIASES="$(grep -E '^PUBLIC_DOMAIN_ALIASES=' .env | tail -1 | cut -d= -f2- | tr -d "'\"" || true)"
+OLD_SSLIP=""
 case "$OLD_DOMAIN" in
-  *.sslip.io)
-    if [ "$OLD_DOMAIN" != "$DOMAIN" ]; then
-      echo "⚠️ 서버 주소가 바뀌었어요: $OLD_DOMAIN → $DOMAIN"
-      echo "   스레드·인스타 앱 설정의 리디렉션 URI 도 새 주소로 바꿔야 해요 (맨 아래에 나오는 주소)"
-    fi ;;
+  *.sslip.io) OLD_SSLIP="$OLD_DOMAIN" ;;
+  *) OLD_SSLIP="$(printf '%s' "$OLD_ALIASES" | tr ',' '\n' | grep -E '\.sslip\.io$' | head -1 || true)" ;;
 esac
+if [ -n "$OLD_SSLIP" ] && [ "$OLD_SSLIP" != "$DOMAIN" ]; then
+  echo "⚠️ 서버 주소가 바뀌었어요: $OLD_SSLIP → $DOMAIN"
+  echo "   스레드·인스타 앱 설정의 리디렉션 URI 도 새 주소로 바꿔야 해요 (맨 아래에 나오는 주소)"
+fi
 echo "▶ 2/4 Caddy(HTTPS) 설치·설정"
 if ! command -v caddy >/dev/null; then
   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
@@ -153,18 +158,20 @@ sudo systemctl restart caddy
 # .env 쓰기: PUBLIC_DOMAIN(봇이 쓰는 공개 주소)·PUBLIC_DOMAIN_ALIASES(같이 받는 주소)를 정하고, 받지 않는 주소를 가리키는
 # 리디렉션 설정(예전 Railway·예시 값)은 지운다 (남아 있으면 봇이 그걸 먼저 써서 스레드 로그인이 '리디렉션 URI 불일치'로 실패).
 # pin: 그 주소로 스레드·인스타 리디렉션 주소를 고정 (내 도메인으로 옮길 때 — 메타에 등록해 둔 sslip.io 주소가 계속 되게)
-write_env() {  # write_env PUBLIC 별칭(쉼표) 받는주소(쉼표) [pin]
+# repin: pin 을 '받지 않는 주소라 지운' 리디렉션 설정에만 (이미 옮긴 서버의 IP 가 바뀜 — 예전 sslip.io 로 고정해 둔 것을 새 sslip.io 로.
+#        그냥 지우면 봇이 메타에 없을 수 있는 내 도메인 콜백 주소로 넘어간다)
+write_env() {  # write_env PUBLIC 별칭(쉼표) 받는주소(쉼표) [pin] [repin]
   touch .env
   mkdir -p var/env_backups && chmod 700 var/env_backups
   cp .env "var/env_backups/env_$(date +%m%d_%H%M%S_%N)"
   ls -1t var/env_backups/env_* 2>/dev/null | tail -n +21 | xargs -r rm -f --  # setenv.sh 와 같이 최근 20개만
-  python3 - .env "$1" "$2" "$3" "${4:-}" <<'PY'
+  python3 - .env "$1" "$2" "$3" "${4:-}" "${5:-}" <<'PY'
 import sys
 from urllib.parse import urlparse
 
-path, public, aliases, served, pin = sys.argv[1:6]
+path, public, aliases, served, pin, repin = sys.argv[1:7]
 hosts = {h.split(":")[0] for h in served.split(",") if h}
-out, kept = [], set()
+out, kept, dropped = [], set(), set()
 for line in open(path, encoding="utf-8").read().splitlines():
     key, _, value = line.partition("=")
     key = key.strip()
@@ -173,7 +180,9 @@ for line in open(path, encoding="utf-8").read().splitlines():
     if key in ("THREADS_REDIRECT_URI", "INSTAGRAM_REDIRECT_URI"):
         host = urlparse(value.strip().strip("'\"")).hostname or ""
         if host not in hosts:
-            print(f"   {key} 지움 — 다른 주소({value.strip()})를 가리키고 있었어요. 이제 {public} 기준으로 자동으로 맞춰져요")
+            dropped.add(key)
+            if not (pin and repin):
+                print(f"   {key} 지움 — 다른 주소({value.strip()})를 가리키고 있었어요. 이제 {public} 기준으로 자동으로 맞춰져요")
             continue
         kept.add(key)
     out.append(line)
@@ -182,7 +191,7 @@ if aliases:
     out.append(f"PUBLIC_DOMAIN_ALIASES={aliases}")
 if pin:
     for key, cb in (("THREADS_REDIRECT_URI", "/threads/callback"), ("INSTAGRAM_REDIRECT_URI", "/instagram/callback")):
-        if key not in kept:
+        if key not in kept and (not repin or key in dropped):
             out.append(f"{key}=https://{pin}{cb}")
             print(f"   {key}=https://{pin}{cb} 로 고정 — 메타에 등록해 둔 주소가 그대로 돼요")
 open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
@@ -194,10 +203,21 @@ health() {  # health 주소 → 200 이면 0
   curl -s --max-time 15 -o /dev/null -w '%{http_code}' "https://$1/health" | grep -q '^2'
 }
 
+dns_of() {  # dns_of 도메인 → A 레코드 IP 들 (공백으로)
+  getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/ *$//' || true
+}
+
+points_elsewhere() {  # 도메인의 A 레코드가 있는데 이 서버($IP)가 없으면 0 — 그 주소의 /health 가 2xx 여도 다른 서버의 응답
+  local d
+  d="$(dns_of "$1")"
+  [ -n "$d" ] && ! printf ' %s ' "$d" | grep -q " $IP "
+}
+
 echo "▶ 3/4 봇에 주소 기록 후 재시작"
 SERVED="$DOMAIN${CUSTOM:+,$CUSTOM}"
 if [ -n "$CUSTOM" ] && [ "$OLD_DOMAIN" = "$CUSTOM" ]; then
-  write_env "$CUSTOM" "$DOMAIN" "$SERVED"  # 이미 옮긴 서버: 내 도메인 그대로, sslip.io 는 별칭
+  # 이미 옮긴 서버: 내 도메인 그대로, sslip.io 는 별칭. 예전 sslip.io 로 고정해 둔 리디렉션 주소는 새 sslip.io 로 (IP 가 바뀐 경우)
+  write_env "$CUSTOM" "$DOMAIN" "$SERVED" "$DOMAIN" repin
 else
   write_env "$DOMAIN" "" "$SERVED"  # 내 도메인은 확인이 통과한 뒤에 (4/4)
 fi
@@ -219,7 +239,7 @@ PUBLIC="$DOMAIN"
 if [ -n "$CUSTOM" ]; then
   cok=""
   for _ in 1 2 3 4 5 6; do
-    if health "$CUSTOM"; then cok=1; break; fi
+    if health "$CUSTOM" && ! points_elsewhere "$CUSTOM"; then cok=1; break; fi
     sleep 10
   done
   if [ -n "$cok" ]; then
@@ -245,7 +265,7 @@ if [ -n "$CUSTOM" ]; then
     else
       echo "⚠️ 내 도메인 https://$CUSTOM 확인이 안 돼서 PUBLIC_DOMAIN 은 그대로 $DOMAIN 이에요"
     fi
-    DNS="$(getent ahostsv4 "$CUSTOM" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/ *$//' || true)"
+    DNS="$(dns_of "$CUSTOM")"
     if [ -z "$DNS" ]; then
       echo "   이유: DNS 에 $CUSTOM 의 A 레코드가 아직 없어요 — 도메인 관리 화면에서 A 레코드를 $IP 로 (docs/SETUP_KEYS.md '내 도메인 연결')"
     elif ! printf ' %s ' "$DNS" | grep -q " $IP "; then

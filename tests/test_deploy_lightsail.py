@@ -582,6 +582,39 @@ def test_https_domain_keeps_the_old_address_until_dns_points_here(server: Server
     assert "A 레코드가 아직 없어요" in r.stdout and _env(server)["PUBLIC_DOMAIN"] == "3-35-1-2.sslip.io"
 
 
+def test_https_domain_does_not_switch_on_another_servers_health(server: Server) -> None:
+    """내 도메인의 A 레코드가 다른 서버를 가리키면 그 서버가 /health 에 2xx 를 줘도 PUBLIC_DOMAIN 을 바꾸지 않는다."""
+    server.env["FAKE_DNS"] = "9.9.9.9"  # /health 는 200 (가짜 curl), DNS 는 다른 서버
+    r = _https(server, "PUBLIC_DOMAIN=3-35-1-2.sslip.io\n", None, "3.35.1.2", "--domain", "deals.example.com")
+    assert r.returncode == 0, r.stdout + r.stderr
+    env = _env(server)
+    assert env["PUBLIC_DOMAIN"] == "3-35-1-2.sslip.io" and "PUBLIC_DOMAIN_ALIASES" not in env
+    assert "가리키지 않아요" in r.stdout and "9.9.9.9" in r.stdout
+    server.env["FAKE_DNS"] = "3.35.1.2"  # 이 서버를 가리키면 바꿈
+    r = _https(server, "PUBLIC_DOMAIN=3-35-1-2.sslip.io\n", None, "3.35.1.2", "--domain", "deals.example.com")
+    assert _env(server)["PUBLIC_DOMAIN"] == "deals.example.com", r.stdout
+
+
+def test_https_custom_domain_server_warns_and_repins_after_an_ip_change(server: Server) -> None:
+    """내 도메인으로 옮긴 서버의 IP 가 바뀌면: 바뀌었다고 알리고, 예전 sslip.io 로 고정해 둔 리디렉션 주소는 새 sslip.io 로
+    (그냥 지우면 메타에 없을 수 있는 내 도메인 콜백으로 넘어감). 내 도메인 콜백으로 직접 정한 값은 그대로."""
+    server.env["FAKE_DNS"] = "3.35.1.2"
+    old = ("PUBLIC_DOMAIN=deals.example.com\nPUBLIC_DOMAIN_ALIASES=52-79-136-64.sslip.io\n"
+           "THREADS_REDIRECT_URI=https://52-79-136-64.sslip.io/threads/callback\n"
+           "INSTAGRAM_REDIRECT_URI=https://deals.example.com/instagram/callback\n")
+    r = _https(server, old, None, "3.35.1.2")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "서버 주소가 바뀌었어요: 52-79-136-64.sslip.io → 3-35-1-2.sslip.io" in r.stdout
+    env = _env(server)
+    assert env["PUBLIC_DOMAIN"] == "deals.example.com" and env["PUBLIC_DOMAIN_ALIASES"] == "3-35-1-2.sslip.io"
+    assert env["THREADS_REDIRECT_URI"] == "https://3-35-1-2.sslip.io/threads/callback"
+    assert env["INSTAGRAM_REDIRECT_URI"] == "https://deals.example.com/instagram/callback"
+    assert "https://3-35-1-2.sslip.io/threads/callback" in r.stdout
+    # IP 가 그대로면 아무것도 안 바뀌고 경고도 없음
+    r = _https(server, "", None, "3.35.1.2", env="")
+    assert "바뀌었어요" not in r.stdout and _env(server)["THREADS_REDIRECT_URI"] == "https://3-35-1-2.sslip.io/threads/callback"
+
+
 @pytest.mark.parametrize("bad", ["https://deals.example.com/", "deals", "-bad.example.com", "a..b.com", "1-2-3-4.sslip.io", "dealsㅋ.com"])
 def test_https_rejects_a_bad_domain_before_changing_anything(server: Server, bad: str) -> None:
     before = "TELEGRAM_BOT_TOKEN=fake\nPUBLIC_DOMAIN=3-35-1-2.sslip.io\n"
