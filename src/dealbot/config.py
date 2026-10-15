@@ -366,6 +366,9 @@ class PublishConfig(BaseModel):
     emphasis_top_pct: float = 70
     queue_ttl_hours: int = 6
     manual_link_ttl_hours: int = 24  # 내 링크 입력을 기다리는 항목의 유효 시간 (주인 결정 10/15: 12 → 24)
+    # 정보 글·정품 확인(/ok)과 쇼핑커넥트 자동 링크를 기다리는 항목의 유효 시간. 링크 요청만 24시간으로 늘렸으니 이것은 예전 그대로
+    # (하루 지난 정보 글이 /ok 로 올라가거나 확인 요청이 자리를 오래 잡지 않게)
+    review_ttl_hours: int = 12
     max_publish_attempts: int = 3
     publisher_tick_seconds: int = 20
     send_photo: bool = True
@@ -377,8 +380,8 @@ class PublishConfig(BaseModel):
     # 높으면 그 글을 내리고 새 딜을 묻는다 (점수 = 대기열 점수, 판정의 DealVerdict.score). null 이면 바꾸지 않고 예전처럼 건너뜀
     max_awaiting_links: int = 15
     swap_min_score_gain: float | None = 5
-    # 정보 글·정품 확인(/ok)을 기다리는 글의 상한. 확인 요청은 이 개수를 넘지 않고, 링크 대기와 합쳐 max_awaiting_links 도 넘지 않는다
-    # (링크 자리를 15로 늘려도 확인 요청은 예전처럼 6개까지만 — 관리자 챗 폭주 방지). 0 = 제한 없음
+    # 정보 글·정품 확인(/ok)을 기다리는 글의 자리 (링크 요청 자리와 따로). 링크 자리를 15로 늘려도 확인 요청은 6개까지만
+    # (관리자 챗 폭주 방지). 링크 자리와 합쳐 세면 교체로 링크 15칸이 늘 차 있어 확인 요청을 하나도 못 보냄. 0 = 제한 없음
     max_awaiting_reviews: int = 6
     allow_raw_links: bool = True  # 제휴 변환이 불가능한 쇼핑몰은 원본 링크로라도 발행
     templates_dir: Path = Path("templates")

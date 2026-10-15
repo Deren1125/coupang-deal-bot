@@ -37,7 +37,9 @@ PENDING_TTL = 30 * 60  # 확인·고르기 버튼은 30분 뒤 무효
 GROUP_TTL = 60  # 사진 묶음(앨범) 결정은 60초 동안 같은 묶음의 다른 사진에도 적용
 TEXT_CAP = 1500
 REPLY_CAP = 600
-MAX_CANDIDATES = 15
+# AI 에게 보여 줄 후보 딜 수: 답장·적은 번호 → 방금 올린 글 → 링크·확인을 기다리는 글 모두(링크 15칸 + 확인 6칸, 주인 결정 10/15)
+# → 대기 글 10개가 다 들어가게. 15 였을 땐 링크 15칸이 차면 새 링크 요청·방금 올린 글·대기 글이 빠져 엉뚱한 딜을 골랐다 (리뷰 10/15)
+MAX_CANDIDATES = 40
 MAX_BUTTONS = 5
 MAX_ALSO = 3
 ASK_GRACE = 5  # AI 호출 상한 = timeout_seconds + 이만큼 (API 는 시간 초과 뒤 한 번 더 시도해서 더 걸릴 수 있음)
@@ -436,9 +438,9 @@ class NLRouter:
             add(self.db.get_queue_item(ref.queue_id))
         for n in self.typed_ids(text):
             add(self.db.get_queue_item(n))
+        add(self.db.last_published_item())  # '방금 올린 거 품절이야' — 기다리는 글이 아무리 많아도 빠지지 않게 먼저
         for it in self.db.awaiting_items(MAX_CANDIDATES, statuses=("awaiting_link", "awaiting_approval")):
             add(it)
-        add(self.db.last_published_item())
         for it in self.db.pending_items(10):
             add(it)
         return items

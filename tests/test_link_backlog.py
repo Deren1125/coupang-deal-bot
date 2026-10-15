@@ -14,9 +14,12 @@ import pytest
 from telegram.error import TelegramError
 
 from dealbot.app import DealBot
-from dealbot.config import Settings, load_settings
+from dealbot.authenticity import AuthResult
+from dealbot.collectors import BaseCollector, register
+from dealbot.config import CollectorConfig, Settings, load_settings
 from dealbot.models import Deal, DealVerdict, Product
 from dealbot.monitoring.admin import SAFE_CHUNK
+from dealbot.monitoring.nl import Ref
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.storage.db import REPLACED
 from dealbot.utils.timeutil import to_iso, utcnow
@@ -57,9 +60,9 @@ def bot(settings: Settings) -> DealBot:
     b.db.close()
 
 
-def _toss(key: str, price: int = 10000) -> Product:
+def _toss(key: str, price: int = 10000, *, votes: int | None = None) -> Product:
     return Product(source="fake", product_id=f"toss:{key}", shop="toss", name=f"토스 상품 {key}", price=price,
-                   url=f"https://toss.im/_m/{key}")
+                   url=f"https://toss.im/_m/{key}", recommend_count=votes)
 
 
 def _waiting(bot: DealBot, key: str, score: float, *, age_h: float = 1.0) -> int:
@@ -90,11 +93,43 @@ def _status(bot: DealBot, qid: int) -> tuple[str, str | None]:
     return it.status, it.last_error
 
 
+ALL_STATUSES = ("pending", "awaiting_link", "awaiting_approval", "awaiting_autolink", "skipped", "expired", "published", "failed")
+
+
+@register("fake_backlog_board")
+class _Board(BaseCollector):
+    """게시판 가짜: 테스트가 정해 둔 상품을 돌려준다 (5분마다 같은 글을 다시 봄 — 추천 수만 늘어남)."""
+
+    products: list[Product] = []
+
+    async def collect(self) -> list[Product]:
+        return list(_Board.products)
+
+
+@pytest.fixture
+def board_bot(settings: Settings) -> DealBot:
+    settings.collectors = [CollectorConfig(name="board", type="fake_backlog_board", interval_minutes=5)]
+    settings.publish.dry_run = False
+    settings.publish.min_interval_seconds = 0
+    settings.publish.max_per_hour = 100
+    _Board.products = []
+    b = DealBot(settings)
+    yield b
+    b.db.close()
+
+
+async def _drain(bot: DealBot) -> None:
+    for _ in range(30):
+        if not await bot.process_queue_once():
+            return
+
+
 def test_config_has_the_owner_numbers() -> None:
     s = load_settings(ROOT / "config.yaml", load_env=False)
     p = s.publish
     assert p.max_awaiting_links == 15 and p.manual_link_ttl_hours == 24
     assert p.swap_min_score_gain == 5 and p.max_awaiting_reviews == 6
+    assert p.review_ttl_hours == 12  # 확인(/ok) 요청은 링크 요청과 따로 예전 그대로 (리뷰 10/15)
 
 
 async def test_fifteen_link_requests_then_backlog_full(bot: DealBot) -> None:
@@ -143,7 +178,11 @@ async def test_replaced_deal_is_not_a_decline(bot: DealBot) -> None:
     now = utcnow()
     assert bot.db.declined_since("toss:w0", now - timedelta(days=3)) is None  # 주인이 넘긴 게 아님
     assert not bot._declined_recently(_toss("w0"), now)
-    assert bot._not_queued_reason(_toss("w0"), now) is None  # 같은 상품이 다시 나오면 다시 줄 설 수 있음
+    # 링크 요청 유효 시간 안에는 다시 줄 세우지 않음 (내린 글의 메시지에 답하면 그대로 올라감 — 리뷰 10/15: 다시 묻고 또 밀어내며 돌고 돎)
+    assert bot._not_queued_reason(_toss("w0"), now) == "replaced"
+    # 그 시간이 지나면 넘긴 게 아니니 같은 상품이 다시 나오면 다시 줄 설 수 있음 (w0 은 10시간 전에 줄 섬 → 14시간 뒤면 24시간)
+    assert bot._not_queued_reason(_toss("w0"), now + timedelta(hours=14, minutes=1)) is None
+    assert bot._not_queued_reason(_toss("w0"), now + timedelta(hours=13, minutes=59)) == "replaced"
     # 주인이 /skip 한 것은 그대로 '넘김'
     bot.skip_item(ids[1])
     assert bot.db.declined_since("toss:w1", now - timedelta(days=3)) is not None
@@ -242,16 +281,84 @@ async def test_owner_link_on_replaced_deal_after_ttl_is_refused_clearly(bot: Dea
     assert "'skipped' 상태라" in await bot.attach_link(ids[0], "https://toss.im/_m/MINE")
 
 
+def _requeue_twin(bot: DealBot, key: str, status: str, score: float = 10) -> int:
+    """내린 상품이 (유효 시간이 지나 — 또는 더 싸져서) 게시판에 다시 나와 새 글로 줄 섬."""
+    assert bot.db.enqueue(Deal(_toss(key), DealVerdict(is_deal=True, score=score)), score=score)
+    twin = bot.db.items_for_product(f"toss:{key}", ("pending",))[0]
+    if status != "pending":
+        bot.db.update_queue_item(twin.id, status=status, error="x")
+    return twin.id
+
+
 async def test_owner_link_on_replaced_deal_goes_to_the_requeued_twin(bot: DealBot) -> None:
+    tg = _Tg()
+    bot.notifier.bot, bot.notifier.chat_id = tg, 1  # type: ignore[assignment]
     ids = _fill(bot, [10] * 15)
     await _offer(bot, "big", 30)
-    # 내린 상품이 게시판에 다시 나와 새 글로 줄 섬 (넘긴 게 아니라 다시 물을 수 있음)
-    assert bot.db.enqueue(Deal(_toss("w0"), DealVerdict(is_deal=True, score=10)), score=10)
-    twin = bot.db.items_for_product("toss:w0", ("pending",))[0]
+    twin = _requeue_twin(bot, "w0", "awaiting_link")
     msg = await bot.attach_link(ids[0], "https://toss.im/_m/MINE")
-    assert f"#{twin.id} 번으로 다시 줄 서 있어" in msg and "상품 링크 완료" in msg
-    assert bot.db.get_queue_item(twin.id).deal.affiliate_url == "https://toss.im/_m/MINE"  # type: ignore[union-attr]
+    note = f"↪️ #{ids[0]} 번과 같은 상품이 지금 #{twin} 번으로 다시 줄 서 있어 #{twin} 번으로 받아요."
+    assert note in tg.sent  # 어느 글로 받았는지는 따로 한 줄 (답은 그 글 기준)
+    assert f"상품 링크 완료 #{twin}" in msg and "붙였어요" not in msg
+    assert bot.db.get_queue_item(twin).deal.affiliate_url == "https://toss.im/_m/MINE"  # type: ignore[union-attr]
     assert _status(bot, ids[0])[0] == "skipped"
+
+
+async def test_link_on_replaced_deal_whose_twin_cannot_take_it_does_not_claim_success(bot: DealBot) -> None:
+    ids = _fill(bot, [10] * 15)
+    await _offer(bot, "big", 30)
+    twin = _requeue_twin(bot, "w0", "awaiting_approval")  # 다시 줄 선 글이 확인(/ok)을 기다림
+    msg = await bot.attach_link(ids[0], "https://toss.im/_m/MINE")
+    assert msg.startswith(f"#{twin} 번은 확인을 기다리는 글이라 링크가 아니라 답이 필요합니다") and "붙였어요" not in msg
+    assert bot.db.get_queue_item(twin).deal.affiliate_url is None  # type: ignore[union-attr]
+    assert _status(bot, twin)[0] == "awaiting_approval" and _status(bot, ids[0])[0] == "skipped"
+    # 링크를 받을 수 있는 글이어도 잘못된 주소면 그 이유만 (붙였다는 말 없이)
+    bot.db.update_queue_item(twin, status="awaiting_link", error="manual link required")
+    msg = await bot.attach_link(ids[0], "https://t.me/mychannel/12")
+    assert msg.startswith("텔레그램 주소(t.me)는") and "붙였어요" not in msg
+    assert bot.db.get_queue_item(twin).deal.affiliate_url is None  # type: ignore[union-attr]
+    msg = await bot.attach_link(ids[0], "toss.im/_m/MINE")
+    assert msg.startswith("링크는 http:// 또는 https:// 로 시작해야") and _status(bot, twin)[0] == "awaiting_link"
+
+
+async def test_owner_link_sent_while_the_twin_is_being_checked_is_kept(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    """다시 줄 선 글(대기)을 발행 루프가 확인하는 사이(품절 확인을 기다림) 주인이 내린 글에 링크를 보냄:
+    루프가 예전 딜로 링크 요청을 하며 주인 링크를 지우고 또 묻지 않는다 (리뷰 10/15). 다른 글을 내리지도 않음."""
+    tg = _Tg()
+    bot.notifier.bot, bot.notifier.chat_id = tg, 1  # type: ignore[assignment]
+    ids = _fill(bot, [10] * 15)
+    await _offer(bot, "big", 30)
+    twin = _requeue_twin(bot, "w0", "pending", score=40)
+
+    async def owner_answers_meanwhile(p: Product) -> bool:
+        if p.product_id == "toss:w0":
+            await bot.attach_link(ids[0], "https://toss.im/_m/MINE")
+        return False
+
+    monkeypatch.setattr(bot, "_page_sold_out", owner_answers_meanwhile)
+    asked_before = sum("내 링크가 필요합니다" in t for t in tg.sent)
+    assert await bot.process_queue_once()
+    item = bot.db.get_queue_item(twin)
+    assert item is not None and item.status == "pending" and item.deal.affiliate_url == "https://toss.im/_m/MINE"
+    assert sum("내 링크가 필요합니다" in t for t in tg.sent) == asked_before  # 또 묻지 않음
+    assert _status(bot, ids[1])[0] == "awaiting_link"  # 자리를 만들려고 다른 글을 내리지 않음
+    assert await bot.process_queue_once()
+    assert _status(bot, twin)[0] == "published" and bot.db.recent_posts()[0]["affiliate_url"] == "https://toss.im/_m/MINE"
+
+
+async def test_owner_skip_while_the_deal_is_being_checked_stays_a_skip(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    _fill(bot, [20] * 15)
+    assert bot.db.enqueue(Deal(_toss("late"), DealVerdict(is_deal=True, score=21)), score=21)  # 바꿀 만큼 높지 않음 → 자리 없음
+    late = bot.db.items_for_product("toss:late", ("pending",))[0].id
+
+    async def owner_skips_meanwhile(p: Product) -> bool:
+        bot.skip_item(late)
+        return False
+
+    monkeypatch.setattr(bot, "_page_sold_out", owner_skips_meanwhile)
+    assert await bot.process_queue_once()
+    assert _status(bot, late) == ("skipped", "skipped by admin")  # 'manual link backlog full' 로 덮어쓰지 않음
+    assert bot.db.declined_since("toss:late", utcnow() - timedelta(days=1)) is not None  # 주인이 넘긴 것으로 남음
 
 
 async def test_link_requests_expire_after_24_hours(bot: DealBot) -> None:
@@ -268,28 +375,56 @@ def _review(bot: DealBot, key: str) -> None:
     bot.db.update_queue_item(item.id, status="awaiting_approval", error="needs approval: x")
 
 
-def test_review_cap_stays_six_and_links_come_first(bot: DealBot) -> None:
+def test_review_slots_are_their_own_six(bot: DealBot) -> None:
+    """확인(/ok) 요청 자리는 링크 요청 자리와 따로 6칸 (리뷰 10/15: 교체로 링크 15칸이 늘 차 있어 합쳐 세면 하나도 못 보냄)."""
     assert bot._review_backlog_full() is None
-    for i in range(6):
+    _fill(bot, [10] * 15)  # 링크 자리가 다 차 있어도
+    for i in range(5):
         _review(bot, f"r{i}")
+    assert bot._review_backlog_full() is None  # 확인 요청은 보냄
+    _review(bot, "r5")
     assert bot._review_backlog_full() == 6  # 링크 자리를 15로 늘려도 확인 요청은 6개까지
-    bot.db._conn.execute("DELETE FROM deal_queue")
-    _fill(bot, [10] * 12)
-    _review(bot, "r0")
-    _review(bot, "r1")
-    assert bot._review_backlog_full() is None  # 12 + 2 = 14
-    _review(bot, "r2")
-    assert bot._review_backlog_full() == 15  # 링크 대기와 합쳐 15
     bot.settings.publish.max_awaiting_links = 0
-    assert bot._review_backlog_full() is None  # 링크 상한을 끄면 확인 요청 상한(6)만
+    assert bot._review_backlog_full() == 6  # 링크 상한과 상관없이
     bot.settings.publish.max_awaiting_reviews = 0
-    for i in range(3, 9):
-        _review(bot, f"r{i}")
-    assert bot._review_backlog_full() is None
+    _review(bot, "r6")
+    assert bot._review_backlog_full() is None  # 0 = 제한 없음
+
+
+async def test_review_request_is_sent_while_link_slots_are_full(bot: DealBot) -> None:
+    _fill(bot, [10] * 15)
+    assert bot.db.enqueue(Deal(_toss("open"), DealVerdict(is_deal=True, score=10)), score=10)
+    item = bot.db.items_for_product("toss:open", ("pending",))[0]
+    assert await bot._request_deal_review(item, item.deal, AuthResult("unknown", "공식 판매처 확인 안 됨"))
+    assert _status(bot, item.id)[0] == "awaiting_approval"  # 예전엔 'review backlog full (15)' 로 버려짐
+
+
+def _aged(bot: DealBot, key: str, status: str, age_h: float) -> int:
+    at = utcnow() - timedelta(hours=age_h)
+    assert bot.db.enqueue(Deal(_toss(key), DealVerdict(is_deal=True, score=10)), score=10, now=at)
+    item = bot.db.items_for_product(f"toss:{key}", ("pending",))[0]
+    bot.db.update_queue_item(item.id, status=status, error="x", now=at)
+    return item.id
+
+
+def test_review_and_autolink_waits_keep_the_12_hour_ttl(bot: DealBot) -> None:
+    """링크 요청만 24시간으로 늘렸다 (주인 결정 10/15). 확인(/ok)·자동 링크 대기는 예전 그대로 12시간 —
+    하루 지난 정보 글이 /ok 로 올라가거나 확인 요청이 자리를 오래 잡지 않게 (리뷰 10/15)."""
+    link = _aged(bot, "link", "awaiting_link", 13)
+    review = _aged(bot, "review", "awaiting_approval", 13)
+    young_review = _aged(bot, "young", "awaiting_approval", 11)
+    auto = _aged(bot, "auto", "awaiting_autolink", 13)
+    assert bot._expire_queue(utcnow()) == 2
+    assert _status(bot, link)[0] == "awaiting_link"
+    assert _status(bot, review) == ("expired", "unanswered") and _status(bot, young_review)[0] == "awaiting_approval"
+    assert _status(bot, auto) == ("expired", "autolink unanswered")
+    # 설정으로 따로 바꿀 수 있음 (같게 두면 예전처럼 한 기준)
+    bot.settings.publish.review_ttl_hours = 24
+    assert bot._expire_queue(utcnow()) == 0 and _status(bot, young_review)[0] == "awaiting_approval"
 
 
 async def test_summaries_count_replaced_and_dropped_deals(bot: DealBot, repo_root: Path) -> None:
-    _fill(bot, [10] * 15)
+    ids = _fill(bot, [10] * 15)
     await _offer(bot, "big", 30)  # 교체 1
     await _offer(bot, "small", 12)  # 못 물어봄
     bot.db.enqueue(Deal(_toss("small"), DealVerdict(is_deal=True, score=12)), score=12)  # 게시판이 다시 돌려줌 → 또 못 물어봄
@@ -298,8 +433,10 @@ async def test_summaries_count_replaced_and_dropped_deals(bot: DealBot, repo_roo
     now = utcnow()
     s = bot.db.summary(now - timedelta(days=1), now + timedelta(seconds=1))
     assert (s.link_replaced, s.link_backlog_full) == (1, 2)  # 상품 수로
+    assert s.skipped == 0  # 링크 자리 줄에서 따로 세는 글은 '겹쳐서 건너뜀'에 다시 넣지 않음 (리뷰 10/15: 두 번 셈)
     text = TemplateRenderer(repo_root / "templates").render("daily_summary.j2", s=s, tz="Asia/Seoul")
     assert "링크 요청 자리가 차서: 더 좋은 딜로 바꾼 딜 1개 · 못 묻고 건너뛴 딜 2개" in text
+    assert "겹쳐서 건너뜀 0건" in text
     sent: list[tuple[str, str]] = []
     bot.notifier.summary = lambda cat, text, replace=False: sent.append((cat, text))  # type: ignore[method-assign]
     await bot.owner_summary()
@@ -311,6 +448,9 @@ async def test_summaries_count_replaced_and_dropped_deals(bot: DealBot, repo_roo
     quiet = bot.db.summary(now + timedelta(days=2), now + timedelta(days=3))
     assert (quiet.link_replaced, quiet.link_backlog_full) == (0, 0)
     assert "링크 요청 자리가 차서" not in TemplateRenderer(repo_root / "templates").render("daily_summary.j2", s=quiet, tz="Asia/Seoul")
+    bot.skip_item(ids[3])  # 다른 이유로 건너뛴 글은 '겹쳐서 건너뜀'에 그대로 셈
+    s = bot.db.summary(now - timedelta(days=1), utcnow() + timedelta(seconds=1))
+    assert s.skipped == 1 and (s.link_replaced, s.link_backlog_full) == (1, 2)
 
 
 def test_pinned_notice_fits_one_message_with_fifteen_slots(bot: DealBot) -> None:
@@ -329,3 +469,125 @@ def test_pinned_notice_fits_one_message_with_fifteen_slots(bot: DealBot) -> None
     notice = bot.reporter.pending_text(notice=True)
     assert len("📌 " + notice) <= SAFE_CHUNK and "(15건)" in notice and "원본 주소:" not in notice
     assert all(f"#{it.id} " in notice for it in bot.db.awaiting_items(50))
+
+
+# ------------------------------------------------------------------ 리뷰 10/15 고친 것
+async def test_swap_margin_holds_for_decimal_scores(bot: DealBot) -> None:
+    """10.2 - 5.2 = 4.999… (소수 뺄셈 오차): 정확히 5 높은 딜도 바꾼다 (10 → 15 와 같게)."""
+    ids = _fill(bot, [5.2] + [30] * 14)
+    new = await _offer(bot, "dec", 10.2)
+    assert _status(bot, new)[0] == "awaiting_link"
+    assert _status(bot, ids[0]) == ("skipped", f"{REPLACED} #{new} (score 5.2→10.2)")
+    low = await _offer(bot, "dec2", 15.1)  # 이제 가장 낮은 10.2 보다 4.9 높음 → 바꾸지 않음
+    assert _status(bot, low) == ("skipped", "manual link backlog full (15)")
+
+
+async def test_replaced_deal_coming_back_with_more_votes_is_not_asked_again(board_bot: DealBot) -> None:
+    """리뷰 10/15 재현: 기다리는 15건(점수 10~24, 처음 물을 때 점수) + 새 딜 30 → 가장 낮은 글을 내림.
+    그 뒤 30분(5분마다 6번) 게시판이 같은 글을 추천 +3 씩 다시 돌려줘도: 내린 상품은 다시 줄 서지 않고(그 메시지에 답하면 올라감),
+    기다리는 글의 점수는 게시판 값으로 따라가 서로 밀어내지 않는다 → 새 링크 요청·메시지 고침 0건 (예전엔 30분에 요청 14건·고침 28건)."""
+    bot = board_bot
+    tg = _Tg()
+    bot.notifier.bot, bot.notifier.chat_id = tg, 1  # type: ignore[assignment]
+    ids = _fill(bot, [10 + i for i in range(15)])
+    for i, qid in enumerate(ids):
+        bot.db.kv_set(f"link_notice:{qid}", str(500 + i))
+    big = await _offer(bot, "big", 30)
+
+    def asked() -> int:
+        return sum("내 링크가 필요합니다" in t for t in tg.sent)
+
+    def flipped() -> int:
+        return sum("더 좋은 딜로 바꿨어요" in t for _, t in tg.edits)
+
+    assert _status(bot, ids[0])[0] == "skipped" and asked() == 1 and flipped() == 1
+    for run in range(1, 7):
+        _Board.products = [_toss(f"w{i}", votes=10 + i + 3 * run) for i in range(15)] + [_toss("big", votes=30 + 3 * run)]
+        await bot.run_collector(bot.collectors[0])
+        await _drain(bot)
+    assert asked() == 1 and flipped() == 1  # 더 묻지도, 고치지도 않음
+    assert [it.status for it in bot.db.items_for_product("toss:w0", ALL_STATUSES)] == ["skipped"]  # 다시 줄 서지 않음
+    assert bot.db.queue_counts()["awaiting_link"] == 15
+    assert bot.db.get_queue_item(ids[1]).score == 11 + 18  # type: ignore[union-attr]  # 기다리는 글 점수는 게시판 값으로
+    assert bot.db.get_queue_item(big).score == 48  # type: ignore[union-attr]
+    # 저녁 요약: 내린 글은 '더 좋은 딜로 교체' 1건, 다시 본 것은 따로 세지 않음
+    counts = bot.skipped_deal_counts(utcnow() - timedelta(days=1))
+    assert counts == {"더 좋은 딜로 교체": 1}, counts
+    # 주인은 여전히 이김: 내린 글 메시지에 답하면 그대로 올라감
+    assert "상품 링크 완료" in await bot.attach_link(ids[0], "https://toss.im/_m/MINE")
+    assert _status(bot, ids[0])[0] == "pending"
+
+
+async def test_waiting_scores_follow_the_board_before_a_swap(board_bot: DealBot) -> None:
+    bot = board_bot
+    ids = _fill(bot, [10] + [30] * 14)
+    _Board.products = [_toss("w0", votes=20)]  # 처음 물을 때 10 이던 글이 지금은 추천 20
+    await bot.run_collector(bot.collectors[0])
+    assert bot.db.get_queue_item(ids[0]).score == 20  # type: ignore[union-attr]
+    new = await _offer(bot, "n24", 24)  # 예전 점수(10)로는 바꿨겠지만 지금 점수(20)보다는 4 높을 뿐
+    assert _status(bot, new) == ("skipped", "manual link backlog full (15)") and _status(bot, ids[0])[0] == "awaiting_link"
+    new = await _offer(bot, "n25", 25)
+    assert _status(bot, ids[0]) == ("skipped", f"{REPLACED} #{new} (score 20→25)")
+
+
+async def test_replaced_deal_that_got_cheaper_is_a_new_deal(bot: DealBot) -> None:
+    _fill(bot, [10] * 15)
+    await _offer(bot, "big", 30)
+    now = utcnow()
+    assert bot._not_queued_reason(_toss("w0", price=10000), now) == "replaced"
+    assert bot._not_queued_reason(_toss("w0", price=9000), now) is None  # 그사이 더 싸짐 → 새 딜 (넘긴 글과 같은 규칙)
+
+
+async def test_replaced_message_keeps_the_source_address(bot: DealBot) -> None:
+    tg = _Tg()
+    bot.notifier.bot, bot.notifier.chat_id = tg, 1  # type: ignore[assignment]
+    p = Product(source="fake", product_id="naver:777", shop="naver", name="네이버 스토어 상품 777", price=12900,
+                url="https://smartstore.naver.com/goodstore/products/777",
+                extra={"post_url": "https://www.ppomppu.co.kr/zboard/view.php?no=777"})
+    at = utcnow() - timedelta(hours=11)
+    assert bot.db.enqueue(Deal(p, DealVerdict(is_deal=True, score=1)), score=1, now=at)
+    low = bot.db.items_for_product("naver:777", ("pending",))[0].id
+    bot.db.update_queue_item(low, status="awaiting_link", error="manual link required", now=at)
+    bot.db.kv_set(f"link_notice:{low}", "77")
+    _fill(bot, [10] * 14)
+    new = await _offer(bot, "big", 30)
+    edit = next(t for mid, t in tg.edits if mid == 77)
+    assert f"더 좋은 딜로 바꿨어요 #{low}" in edit and f"#{new} 딜을 대신 물었어요" in edit
+    # 그래도 올리고 싶을 때 링크를 만들 주소 (내린 글은 /pending·고정 공지에서 빠짐)
+    assert "원본 주소: https://smartstore.naver.com/goodstore/products/777" in edit
+    assert "글: https://www.ppomppu.co.kr/zboard/view.php?no=777" in edit
+    assert "쇼핑 커넥트 '상품 찾기' 검색어" in edit and "goodstore" in edit
+    assert "smartstore.naver.com/goodstore" not in bot.reporter.pending_text()  # /pending 에는 이제 없음
+
+
+def _nl_item(bot: DealBot, key: str, shop: str, status: str, age_h: float) -> int:
+    url = f"https://toss.im/_m/{key}" if shop == "toss" else f"https://smartstore.naver.com/s{key}/products/{len(key)}"
+    p = Product(source="fake", product_id=f"{shop}:{key}", shop=shop, name=f"상품 {key}", price=10000, url=url)
+    at = utcnow() - timedelta(hours=age_h)
+    assert bot.db.enqueue(Deal(p, DealVerdict(is_deal=True, score=10)), score=10, now=at)
+    qid = bot.db.items_for_product(p.product_id, ("pending",))[0].id
+    if status != "pending":
+        bot.db.update_queue_item(qid, status=status, error="x", now=at)
+    return qid
+
+
+def test_nl_router_sees_every_waiting_deal_and_the_last_post(bot: DealBot) -> None:
+    """리뷰 10/15: 말 명령 후보가 15개로 잘려 링크 15칸이 차면 새 링크 요청·방금 올린 글·대기 글이 빠졌다."""
+    review = _nl_item(bot, "r", "toss", "awaiting_approval", 20)
+    toss_old = _nl_item(bot, "t1", "toss", "awaiting_link", 19)
+    naver = [_nl_item(bot, f"n{i}", "naver", "awaiting_link", 18 - i) for i in range(13)]
+    toss_new = _nl_item(bot, "t2", "toss", "awaiting_link", 1)  # 가장 새 링크 요청 (15번째 링크 자리)
+    posted = _nl_item(bot, "pub", "toss", "published", 2)
+    pending = [_nl_item(bot, f"p{i}", "toss", "pending", 0.1) for i in range(3)]
+    text = "토스 링크 https://toss.im/_m/MINE"
+    cands = bot.nl.candidates(text, Ref())
+    assert {review, toss_old, toss_new, posted, *naver, *pending} <= set(cands)
+    # 그냥 보낸 토스 링크: 토스 딜이 둘이면 둘 다 버튼으로 (예전엔 새 것이 안 보여 오래된 #toss_old 를 골랐다)
+    d = bot.nl.decide({"intent": "/link", "post": None, "args": "https://toss.im/_m/MINE", "confidence": 0.95}, text, Ref(), cands)
+    assert d.act == "ask" and [o.cmds for o in d.options] == [[f"/link {toss_old} https://toss.im/_m/MINE"],
+                                                              [f"/link {toss_new} https://toss.im/_m/MINE"]]
+    # 토스 딜이 새 것 하나뿐이면 그 딜
+    bot.skip_item(toss_old)
+    cands = bot.nl.candidates(text, Ref())
+    d = bot.nl.decide({"intent": "/link", "post": None, "args": "https://toss.im/_m/MINE", "confidence": 0.95}, text, Ref(), cands)
+    assert d.actions and d.actions[0].post == toss_new

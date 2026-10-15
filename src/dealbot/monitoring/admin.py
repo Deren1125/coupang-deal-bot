@@ -795,9 +795,13 @@ class AdminNotifier:
         text = (
             f"↪️ <b>더 좋은 딜로 바꿨어요 #{item.id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
             f"{html.escape(truncate(p.name, 80))}{price}\n"
-            f"링크 요청 자리가 다 차서 점수가 더 높은 #{new_id} 딜을 대신 물었어요. 이 링크는 만들지 않아도 돼요.\n"
+            # 그래도 올리고 싶을 때 링크를 만들 주소 (내린 글은 /pending·고정 공지에서 빠지니 여기에 남긴다)
+            f"원본 주소: {html.escape(p.url)}\n"
+            + (f"글: {html.escape(str(p.extra.get('post_url')))}\n" if p.extra.get("post_url") else "")
+            + f"링크 요청 자리가 다 차서 점수가 더 높은 #{new_id} 딜을 대신 물었어요. 이 링크는 만들지 않아도 돼요.\n"
             f"그래도 올리고 싶으면 {html.escape(until)} 까지 이 메시지에 답장으로 링크를 보내 주세요 "
-            f"(또는 <code>/link {item.id} 링크</code>). 그대로 올려요."
+            f"(또는 <code>/link {item.id} 링크</code>). 그대로 올려요.\n"
+            + naver_search_help(p.name, p.url, p.shop)
         )
         return await self.edit(notice_message_id, text)
 
