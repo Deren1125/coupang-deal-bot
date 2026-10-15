@@ -12,7 +12,7 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -61,6 +61,12 @@ REVIEW_MARK = "📝"  # 정보 글 확인 요청 메시지의 첫 글자 (답장
 LINK_USAGE = "이렇게 보내주세요: <code>/link 12 https://...</code> (번호는 링크 요청 메시지의 #번호)"
 PHOTO_NOT_RECEIVED = "사진을 받지 못했어요 (텔레그램 오류) — 잠시 뒤 다시 보내 주세요"
 OWNER_PHOTO_MIMES = ("image/jpeg", "image/png", "image/webp")  # 파일로 보낸 사진 (HEIC·GIF·동영상은 안 받음)
+# 링크와 같이 온 상품 사진: 바이트, 또는 받아 오는 함수 (받은 바이트 또는 None, 못 받은 이유). 함수면 attach_link 가 링크를
+# 붙일 수 있는 네이버 상품 딜인 걸 확인한 뒤에만 부른다 — 못 붙일 링크·안 쓸 사진 때문에 받거나 거절하지 않게 (검토 지적)
+PhotoSource = bytes | Callable[[], Awaitable[tuple[bytes | None, str]]]
+# 사진만 답장하면(설명 칸 비움) 붙일 링크가 없다 — 링크 요청·링크 완료 메시지에 답장한 사진이면 한 줄 알려 준다 (사진이 조용히 버려지지 않게)
+PHOTO_ONLY_REPLY = ("📸 #{q} 사진만 받았어요 — 링크를 사진 설명 칸에 같이 넣어 다시 보내 주세요 "
+                    "(사진과 링크를 따로 보내면 사진은 쓰지 않아요)")
 # 고정 공지에 한 번에 답할 때 한 줄 형식: "675 https://링크" / "677 ok" / "673 skip"
 _BATCH_LINE_RE = re.compile(r"^\s*#?(\d+)\s*[:：.)]?\s+(https?://\S+|ok|okay|확인|승인|ㅇㅋ|skip|스킵|패스|건너뛰기|x)\s*$", re.I)
 _BATCH_OK = {"ok", "okay", "확인", "승인", "ㅇㅋ"}
@@ -714,7 +720,7 @@ class AdminNotifier:
         how_photo = (
             f"{ask}\n"
             f"사진을 <b>이 메시지에 답장</b>으로 보내며 설명 칸에 링크를 넣거나, 사진 설명 칸에 <code>/link {item.id} https://...</code>\n"
-            "(사진 없이 링크만 보내도 올라가요 — 상품 사진을 못 찾으면 채널엔 글만, 인스타는 글자 카드)\n"
+            "(화면 캡처는 상품 부분만 잘라서. 사진 없이 링크만 보내도 올라가요 — 그때는 채널엔 글만, 인스타는 글자 카드)\n"
         ) if ask else ""
         text = (
             f"🔗 <b>내 링크가 필요합니다 #{item.id}</b> [{html.escape(shop.name)}]\n"
@@ -764,7 +770,7 @@ class AdminNotifier:
         note = {
             "ok": "📸 상품 사진도 받았어요 (채널·블로그·인스타에 씀)\n",
             "kept": "📸 전에 받은 상품 사진을 그대로 써요\n",
-            "none": "사진 없이 받았어요 — 상품 사진을 못 찾으면 채널엔 글만, 인스타는 글자 카드로 올라가요\n",
+            "none": "사진 없이 받았어요 — 채널엔 글만, 인스타는 상품명·가격 글자 카드로 올라가요\n",
             "unused": "사진은 네이버 딜에만 써요 — 링크만 붙였어요\n",
         }.get(photo or "", "")
         head = f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n{note}"
@@ -1280,7 +1286,7 @@ class BotController(Protocol):
 
     def collector_names(self) -> list[str]: ...
 
-    async def attach_link(self, queue_id: int, url: str, *, photo: bytes | None = None) -> str: ...
+    async def attach_link(self, queue_id: int, url: str, *, photo: PhotoSource | None = None) -> str: ...
 
     def skip_item(self, queue_id: int) -> str: ...
 
@@ -1353,7 +1359,7 @@ HELP_TEXT = HELP_NL + (
     "/ppstats — 게시판별 추천 수 분포. 판정 기준이 너무 높거나 낮은지 볼 때.\n"
     "\n<b>글 올리기·다루기</b>\n"
     "/link 번호 링크 — 봇이 '내 링크가 필요합니다 #번호' 를 보내면, 그 몰 앱에서 제휴 링크를 만들어 이 명령으로 붙입니다. 그 메시지에 답장으로 링크만 보내도 됩니다. 붙이는 순간 채널에 올라갑니다. "
-    "네이버 딜은 휴대폰으로 가격·옵션을 확인한 뒤 상품 사진의 설명 칸에 이 명령을 적어 보내면(또는 링크 요청 메시지에 사진을 답장하며 설명 칸에 링크) 그 사진이 채널·블로그·인스타 상품 사진이 됩니다 (JPG·PNG·WEBP, 10MB 이하, 짧은 변 600px 이상). 앨범이면 첫 사진만 씁니다.\n"
+    "네이버 딜은 휴대폰으로 가격·옵션을 확인한 뒤 상품 사진의 설명 칸에 이 명령을 적어 보내면(또는 링크 요청 메시지에 사진을 답장하며 설명 칸에 링크) 그 사진이 채널·블로그·인스타 상품 사진이 됩니다 (JPG·PNG·WEBP, 10MB 이하, 짧은 변 600px 이상 — 화면 캡처는 상품 부분만 잘라서). 앨범이면 첫 사진만 씁니다. 사진 없이 링크만 붙이면 채널엔 글만, 인스타는 상품명·가격 글자 카드로 올라갑니다 (스토어·게시판 사진은 쓰지 않음).\n"
     "/skip 번호 — 그 글은 올리지 않고 건너뜁니다. 품절이거나 별로일 때. 번호는 링크 요청 메시지나 /queue 에 있습니다.\n"
     "/posted 번호 [채널 글 링크] — 봇이 '채널에 올라갔는지 모릅니다 #번호' 를 보냈는데 채널에 그 글이 있으면 보냅니다. 올라간 글로 기록하고 블로그·스레드·인스타로 이어서 올립니다 (채널 글 링크를 붙이면 품절 표시도 됩니다). 그 메시지에 답장으로 채널 글 링크(t.me)만 보내도 됩니다. 채널에 없으면 /link 번호 상품 링크 로 다시 올립니다 (텔레그램 주소는 상품 링크로 붙지 않습니다).\n"
     "/ok 번호 — 봇이 '정품 확인 필요 #번호'(오픈마켓인데 공식 판매처 표시가 없음) 나 '정보 글 확인 #번호' 를 보내면, 확인했다는 뜻으로 보냅니다. 정품 확인이면 링크를 만들어 올리고, 정보 글이면 그대로 올립니다. 정보 글은 그 메시지에 답장으로 본문을 새로 써 보내면 그 내용으로 올라갑니다.\n"
@@ -1517,13 +1523,14 @@ def register_admin_handlers(
         return data, ""
 
     async def link_with_photo(update: Update, ctx: Any, queue_id: int, url: str, ref: dict[str, Any]) -> None:
-        """링크 + 상품 사진. 사진을 못 쓰면 링크도 붙이지 않고 이유를 알린다 (다시 보내면 됨)."""
-        data, why = await download_photo(getattr(ctx, "bot", None), ref)
-        if data is None:
-            log.info("owner photo refused for #%d: %s", queue_id, why)
-            await reply(update, photo_refused(queue_id, why))
-            return
-        await reply(update, await controller.attach_link(queue_id, url, photo=data))
+        """링크 + 상품 사진. 사진은 받아 오는 함수로 넘긴다 — 딜봇이 링크를 붙일 수 있는 네이버 상품 딜인 걸 확인한 뒤에만 받는다
+        (없는 번호·채널 글 주소·토스 딜이면 받지도 거절하지도 않음). 사진을 못 쓰면 링크도 붙이지 않고 이유를 알린다 (다시 보내면 됨)."""
+        bot = getattr(ctx, "bot", None)
+
+        async def load() -> tuple[bytes | None, str]:
+            return await download_photo(bot, ref)
+
+        await reply(update, await controller.attach_link(queue_id, url, photo=load))
         await controller.refresh_pending_notice()
 
     async def cmd_skip(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1874,8 +1881,9 @@ def register_admin_handlers(
     async def on_media(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """사진·파일. 블로그 글 사진(블로그 메시지에 답장·/photo 설명·말로 블로그 글)이면 Blog-Auto 로 통째로 넘긴다.
         앨범은 설명이나 답장이 있는 첫 사진이 정한 대로 나머지도 따라간다 (Blog-Auto 가 묶음으로 받게).
-        네이버 딜 상품 사진 (주인 결정 10/15): 설명 칸이 '/link 번호 링크'·'번호 링크' 이거나 링크 요청(🔗)에 답장하며 설명 칸에 링크
-        → 링크와 그 사진(앨범이면 첫 사진)을 같이 붙인다. 앨범의 나머지 사진은 블로그로 넘기지 않고 버린다 (state 'deal')."""
+        네이버 딜 상품 사진 (주인 결정 10/15): 설명 칸이 '/link 번호 링크' 이거나 링크 요청(🔗)·딜봇 메시지에 답장하며 설명 칸에 링크
+        ('번호 링크' 한 줄도 딜봇 메시지에 답장할 때만 — 고정 공지 일괄 답처럼) → 링크와 그 사진(앨범이면 첫 사진)을 같이 붙인다.
+        앨범의 나머지 사진은 블로그로 넘기지 않고 버린다 (state 'deal')."""
         msg = update.effective_message
         if msg is None or nl is None or not nl.enabled or _from_bot(msg):
             return
@@ -1888,8 +1896,9 @@ def register_admin_handlers(
         caption = msg.caption or ""
         ref = nl.reply_ref(msg)
         urls = find_urls(caption)
-        # 블로그 메시지에 단 답장은 지금처럼 Blog-Auto 로 (거기서 '12 https://…' 는 블로그 글 번호일 수 있음)
-        line = _BATCH_LINE_RE.match(caption.strip()) if "\n" not in caption.strip() and ref.kind != "blog" else None
+        # '12 https://…' 한 줄은 딜봇 메시지(고정 공지·링크 요청)에 답장한 사진만 /link 로 — 그냥 보낸 사진은 예전처럼 말 명령으로,
+        # 블로그 메시지에 단 답장은 지금처럼 Blog-Auto 로 (거기서 '12 https://…' 는 블로그 글 번호일 수 있음, 검토 지적)
+        line = _BATCH_LINE_RE.match(caption.strip()) if "\n" not in caption.strip() and ref.kind == "deal" else None
         state, why, text = "ignore", "media", None
         if _slash_name(caption) == "link" or (line and line.group(2).lower().startswith("http")):
             # '/link 12 https://…' (사진 설명은 텔레그램이 명령으로 보지 않아 여기로 옴) · 고정 공지처럼 '12 https://…'
@@ -1917,6 +1926,9 @@ def register_admin_handlers(
         elif not caption.strip():
             if group is not None:
                 group["held"].append(md)  # 설명 없는 앞 사진: 설명 있는 사진이 오면 같이 처리
+            elif ref.kind == "deal" and ref.queue_id and ref.sub in ("link", "link_done"):
+                # 링크 요청·링크 완료에 사진만 답장: 붙일 링크가 없다 — 조용히 버리지 않고 링크를 설명 칸에 같이 넣으라고 (검토 지적)
+                await reply(update, PHOTO_ONLY_REPLY.format(q=ref.queue_id))
             return  # 설명도 답장도 없는 사진은 예전처럼 무시
         elif not nl.rate_ok():
             await say(update, nlmod.RATE_LIMITED)
@@ -1933,8 +1945,9 @@ def register_admin_handlers(
             if d.act == "blog" or (d.act == "fail" and not d.reply and nl.wants_blog_anyway(caption)):
                 state, text = "relay", None if d.blog_text in ("", caption) else d.blog_text
             else:
-                # 말로 보낸 링크 + 사진 (/link 로 알아들으면 확인 버튼 뒤 그 사진도 같이 붙임)
-                await nl_apply(update, ctx, d, caption, msg, ref, why="media", photo=first_photo(group, md))
+                # 말로 보낸 링크 + 사진 (/link 로 알아들으면 확인 버튼 뒤 그 사진도 같이 붙임). 사진이 아닌 파일(PDF·동영상)은
+                # 사진으로 넘기지 않는다 — 넘기면 '사진으로 열리지 않아요'로 링크까지 막힘 (HEIC 는 image/* 라 그 이유로 거절)
+                await nl_apply(update, ctx, d, caption, msg, ref, why="media", photo=first_photo(group, md) if is_image else None)
         if group is not None:
             group["state"] = state
         if state == "relay":

@@ -4,7 +4,7 @@
 2. (10/15 지움) 예전엔 그래도 사진이 없으면 네이버 쇼핑 검색 API 의 같은 상품 사진을 썼다. 그 API 는 2026-07-31 종료 (대신할 API 없음,
    서버 키는 401) — 이제 키가 있어도 openapi.naver.com 에 사진을 찾으러 가지 않는다 (아래 2. 묶음은 '안 부름'을 확인).
    네이버 딜 사진은 주인이 링크와 같이 보낸 사진 (test_naver_owner_photo.py)
-3. 못 찾으면 지금처럼 사진 없이 (채널엔 글만, 블로그는 링크 카드, 인스타는 글자 카드)
+3. 주인 사진이 없으면 사진 없이 (채널엔 글만, 블로그는 링크 카드, 인스타는 글자 카드) — 스토어 페이지·크롬 사진도 쓰지 않음
 테스트는 가짜 HTTP 만 쓰고 실제로 자지 않는다.
 """
 
@@ -384,11 +384,15 @@ async def test_blocked_store_deal_without_owner_photo_posts_without_photo(bot, s
 
 
 async def test_small_photo_still_goes_through_the_size_check(bot) -> None:  # type: ignore[no-untyped-def]
-    """예전엔 작은 검색 API 사진을 크기 검사로 걸렀다. 이제 그 사진은 없고, 딜의 작은 사진은 그대로 크기 검사(600px)로 거른다."""
+    """예전엔 작은 검색 API 사진을 크기 검사로 걸렀다. 이제 그 사진은 없다. 주인 사진이 없는 네이버 딜은 딜의 사진도 받지 않고
+    (10/15 ②), 다른 몰 딜의 작은 사진은 그대로 크기 검사(600px)로 거른다."""
     small = "https://shop-phinf.pstatic.net/20260901_1/abc_JPEG/small.jpg"
-    bot._fetch_image = _images({small: _jpeg(300, 300)}, [])
+    seen: list[str] = []
+    bot._fetch_image = _images({small: _jpeg(300, 300)}, seen)
     d = Deal(_deal_product(image_url=small), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is None and d.product.image_url is None
+    assert await bot.deal_photo(d) is None and d.product.image_url is None and seen == []
+    other = Deal(_deal_product(shop="toss", product_id="toss:1", url="https://toss.im/_m/abc", image_url=small), DealVerdict(is_deal=True))
+    assert await bot.deal_photo(other) is None and other.product.image_url is None and small in seen
 
 
 async def test_no_matching_product_keeps_posting_without_photo(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
@@ -424,19 +428,29 @@ async def test_collect_time_enrich_keeps_the_board_thumb_and_asks_no_api(bot) ->
 
 
 @pytest.mark.real_fetch
-async def test_store_page_after_429_gives_the_full_size_photo(bot) -> None:  # type: ignore[no-untyped-def]
-    """429 뒤 다시 읽은 스토어 페이지의 og:image(510px 축소본) → 원본 주소로 받아 600px 검사를 통과."""
+async def test_store_page_after_429_is_read_for_the_price_but_its_photo_is_not_used(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_store_page_after_429_gives_the_full_size_photo: 429 뒤 다시 읽은 스토어 페이지의 og:image(510px 축소본)를 원본 주소로
+    받아 발행 사진으로 썼다. 10/15 ②(검토 지적으로 그대로 따름): 주인 사진이 없는 네이버 딜은 사진을 찾지 않는다 — 가격을 확인 못 한
+    딜이면 발행 직전에 같은 재시도로 페이지를 읽어 가격만 보고(Retry-After 1초여도 스토어 간격 3초는 지킴), 그 사진은 받지 않는다."""
     http, seen = _store_server(httpx.Response(429, headers={"Retry-After": "1"}), httpx.Response(200, text=STORE_HTML))
     bot.enricher = PageEnricher(http)
     _, sleeps = _fake_time(bot.enricher)
     api, reqs = _api([_item("https://smartstore.naver.com/main/products/1234567890")])
     bot.naver_shop = NaverShopSearch(api, CLIENT_ID, CLIENT_SECRET)
+    browser: list[str] = []
+
+    async def page_meta(url: str) -> None:  # 읽은 페이지에 가격이 없어 크롬도 한 번 (가짜 — 못 읽음)
+        browser.append(url)
+
+    bot.store_browser.page_meta = page_meta
     got: list[str] = []
     bot._fetch_image = _images({OG_BIG: _jpeg(1000, 1000), OG_SMALL: _jpeg(510, 510)}, got)
-    d = Deal(_deal_product(), DealVerdict(is_deal=True))
-    photo = await bot.deal_photo(d)
-    assert photo is not None and d.product.image_url == OG_BIG and got == [OG_BIG]
-    assert len(seen) == 2 and sleeps == [3.0] and reqs == []  # Retry-After 1초여도 스토어 간격(3초)은 지킴. 스토어에서 찾았으면 검색 API 는 안 부름
+    p = _deal_product()
+    p.extra["page_price"] = {"status": "unverified", "title_price": p.price, "reason": "페이지를 못 읽음"}
+    d = Deal(p, DealVerdict(is_deal=True))
+    assert await bot.deal_photo(d) is None and d.product.image_url is None and got == []
+    assert len(seen) == 2 and sleeps == [3.0] and reqs == [] and browser == [STORE_URL]
+    assert naver_image_url(OG_SMALL) == OG_BIG  # 축소본 → 원본 주소 규칙은 그대로 (다른 몰 사진에 씀)
 
 
 @pytest.mark.real_fetch

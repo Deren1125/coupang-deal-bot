@@ -65,8 +65,15 @@ class FakeController:
     def resume(self) -> None:
         self.calls.append(("resume",))
 
-    async def attach_link(self, q: int, url: str, *, photo: bytes | None = None) -> str:
+    async def attach_link(self, q: int, url: str, *, photo: Any = None) -> str:
+        # 사진은 받아 오는 함수로 온다 (딜봇은 링크를 붙일 수 있는 네이버 딜일 때만 부름 — 여기선 늘 부름).
         # 사진 없이 붙인 링크는 예전 모양 그대로 ('attach_link', 번호, 주소) — 사진이 있을 때만 바이트를 덧붙여 기록
+        if callable(photo):
+            data, why = await photo()
+            if data is None:
+                self.calls.append(("photo_refused", q, why))
+                return admin_mod.photo_refused(q, why)
+            photo = data
         self.calls.append(("attach_link", q, url) if photo is None else ("attach_link", q, url, photo))
         return f"✅ 상품 링크 완료 #{q}"
 
@@ -712,13 +719,24 @@ async def test_photo_with_link_command_caption_attaches_link_and_photo(env: Env)
     assert env.ctrl.named("attach_link") == [("attach_link", 675, NAVER_LINK, OWNER_JPEG)]
     assert ("refresh",) in env.ctrl.calls and env.texts[-1] == "✅ 상품 링크 완료 #675"
     assert llm.calls == [] and env.relayed == [] and env.bot.asked == ["F9001"]
-    # 고정 공지처럼 '번호 링크' 한 줄을 사진 설명에 적어도 같음
+    # 고정 공지(딜봇 메시지)에 답장하며 '번호 링크' 한 줄을 사진 설명에 적어도 같음 (글 일괄 답처럼)
+    notice = env.bot_msg("📌 <b>링크를 기다리는 딜</b>\n#677 데켓 주물팬\n#678 풀무원 샘물")
     env.bot.files["F9002"] = b"second"
-    await env.media(caption=f"677 {NAVER_LINK}", photo=True, mid=9002)
+    await env.media(caption=f"677 {NAVER_LINK}", photo=True, reply_to=notice, mid=9002)
     assert env.ctrl.named("attach_link")[-1] == ("attach_link", 677, NAVER_LINK, b"second")
     # 번호가 없으면 쓰는 법 안내 (링크는 안 붙임)
     await env.media(caption="/link https://naver.me/x", photo=True)
     assert env.texts[-1].startswith("이렇게 보내주세요: <code>/link 12") and len(env.ctrl.named("attach_link")) == 2
+    assert llm.calls == []
+
+
+async def test_number_and_link_caption_without_a_reply_goes_to_words(env: Env) -> None:
+    """검토 지적: 답장이 아닌 사진의 '3 https://…' 한 줄은 /link 3 으로 바로 붙이지 않는다 (블로그 글 사진일 수도) — 예전처럼
+    말 명령(AI)이 정한다. 주인 결정이 정한 길은 '/link 번호 링크' 설명과 링크 요청에 답장한 사진뿐."""
+    llm = with_llm(env, ans("blog"))
+    await env.media(caption="3 https://blog.naver.com/demiyum/123", photo=True)
+    assert env.ctrl.calls == [] and env.bot.asked == [] and len(llm.calls) == 1
+    assert [r["nl"]["why"] for r in env.relayed] == ["media"]
 
 
 async def test_photo_reply_to_link_request_with_link_caption_attaches_both(env: Env) -> None:
@@ -729,10 +747,22 @@ async def test_photo_reply_to_link_request_with_link_caption_attaches_both(env: 
     await env.media(caption=f"이거요 {NAVER_LINK}", photo=True, reply_to=req, mid=9011)
     assert env.ctrl.named("attach_link") == [("attach_link", 676, NAVER_LINK, OWNER_JPEG)]
     assert llm.calls == [] and env.relayed == []
-    # 링크 없이 사진만 답장하면 예전처럼 무시 (붙일 링크가 없음)
+    # 링크 없이 사진만 답장: 붙일 링크가 없다 — 예전엔 조용히 버렸지만 이제 한 줄 알려 줌 (검토 지적: 사진 먼저, 링크는 따로 글로
+    # 보내면 링크만 붙고 사진은 사라졌다)
     env.out.clear()
     await env.media(photo=True, reply_to=req)
-    assert env.out == [] and len(env.ctrl.named("attach_link")) == 1
+    assert env.texts == [admin_mod.PHOTO_ONLY_REPLY.format(q=676)] and "설명 칸에 같이" in env.texts[0]
+    assert len(env.ctrl.named("attach_link")) == 1 and llm.calls == [] and env.relayed == []
+    # 링크 완료(✅)에 사진만 답장해도 같은 안내 (사진 없이 붙인 뒤 사진을 보내려는 경우)
+    done = env.bot_msg("✅ <b>상품 링크 완료 #676</b> [네이버]\n데켓 주물팬\n사진 없이 받았어요")
+    await env.media(photo=True, reply_to=done)
+    assert env.texts[-1] == admin_mod.PHOTO_ONLY_REPLY.format(q=676)
+    # 앨범(설명 있는 사진이 뒤에 올 수 있음)·다른 메시지에 답장·그냥 보낸 사진은 예전처럼 조용히
+    env.out.clear()
+    await env.media(photo=True, reply_to=req, group="gx")
+    await env.media(photo=True)
+    await env.media(photo=True, reply_to=env.bot_msg("⏸ #676 보류: 글 가격 6,410원"))
+    assert env.out == [] and env.relayed == []
 
 
 async def test_album_with_link_uses_the_first_photo_and_never_relays_the_rest(env: Env) -> None:
@@ -772,7 +802,7 @@ async def test_unusable_photo_is_refused_and_the_link_is_not_attached(env: Env) 
     env.bot.files["F9301"] = b"x" * 10_000_001  # 크기를 안 알려 준 파일: 받은 뒤 길이로 거름
     await env.media(caption=cmd, photo=True, mid=9301)
     assert "10MB" in env.texts[-1]
-    assert env.ctrl.named("attach_link") == [] and ("refresh",) not in env.ctrl.calls and env.relayed == []
+    assert env.ctrl.named("attach_link") == [] and len(env.ctrl.named("photo_refused")) == 5 and env.relayed == []
     # PNG 파일(문서)로 보낸 사진은 받는다
     env.bot.files["D3"] = OWNER_JPEG
     await env.media(caption=cmd, document={"file_id": "D3", "mime_type": "image/png", "file_name": "a.png"})
@@ -793,6 +823,24 @@ async def test_words_with_a_photo_and_link_confirm_then_attach_with_that_photo(e
     with_llm(env, ans("/ok", q))
     await env.media(caption="이 딜 올려줘", photo=True)
     assert env.texts[-1] == nlmod.DEAL_PHOTO
+
+
+async def test_words_with_a_non_image_file_and_link_attach_the_link_without_a_photo(env: Env) -> None:
+    """검토 지적: 말로 보낸 링크에 붙은 파일이 사진이 아니면(PDF·동영상 파일) 사진으로 넘기지 않는다 — 넘기면 '사진으로 열리지 않아요'로
+    링크까지 막혔다 (이 변경 전엔 링크가 붙었음). HEIC 처럼 사진(image/*)인데 못 쓰는 형식은 그 이유로 거절 (링크는 안 붙임)."""
+    q = add_item(env.db, "데켓 주물팬", shop="naver", url="https://smartstore.naver.com/d/products/1")
+    llm = with_llm(env, ans("/link", q, NAVER_LINK))
+    await env.media(caption=f"{q}번 링크 {NAVER_LINK}", document={"file_id": "P1", "mime_type": "application/pdf", "file_name": "a.pdf"})
+    assert '"사진": 0' in llm.calls[-1][1]
+    await env.press(env.press_data("실행"))
+    assert env.ctrl.named("attach_link") == [("attach_link", q, NAVER_LINK)] and env.bot.asked == []
+    await env.media(caption=f"{q}번 링크 {NAVER_LINK}", document={"file_id": "V1", "mime_type": "video/mp4", "file_name": "a.mp4"})
+    await env.press(env.press_data("실행"))
+    assert env.ctrl.named("attach_link")[-1] == ("attach_link", q, NAVER_LINK) and env.ctrl.named("photo_refused") == []
+    # HEIC: 사진이라 같이 넘기고, 그 이유로 거절
+    await env.media(caption=f"{q}번 링크 {NAVER_LINK}", document={"file_id": "H1", "mime_type": "image/heic", "file_name": "a.HEIC"})
+    await env.press(env.press_data("실행"))
+    assert "HEIC" in env.texts[-1] and env.ctrl.named("photo_refused") and len(env.ctrl.named("attach_link")) == 2
 
 
 async def test_blog_reply_with_a_number_and_link_caption_still_goes_to_blog(env: Env) -> None:
@@ -1072,6 +1120,47 @@ async def test_naver_link_and_photo_reply_end_to_end_with_the_real_bot(settings:
         it = bot.db.get_queue_item(q)
         assert it.status == "pending" and it.deal.affiliate_url == NAVER_LINK and it.deal.product.extra["owner_link"] is True
         assert (settings.data_dir / "owner_photos" / it.deal.product.extra["owner_photo"]["file"]).exists()
+    finally:
+        bot.db.close()
+
+
+async def test_photo_is_downloaded_only_when_the_naver_link_can_be_attached(settings: Settings) -> None:
+    """검토 지적: 예전엔 사진부터 받아 검사해서 (1) 쓰지도 않을 HEIC·10MB 사진이 토스 링크를 막고 (2) '/link 999' 도 사진부터 받았다.
+    이제 딜봇이 번호·상태·몰을 먼저 보고, 링크를 붙일 수 있는 네이버 상품 딜일 때만 사진을 받는다."""
+    import io
+
+    from PIL import Image
+
+    from dealbot.app import DealBot
+
+    settings.collectors = []
+    bot = DealBot(settings)
+    try:
+        env = Env(settings, bot.db, FakeLLM(ans("none")))
+        env.nl = bot.nl
+        bot.nl.asker, bot.nl.bot_id = env.llm, BOT_ID
+        env.app = FakeApp()
+        register_admin_handlers(env.app, admin_chat_id=ADMIN, reporter=bot.reporter, controller=bot, nl=bot.nl)  # type: ignore[arg-type]
+        toss = add_item(bot.db, "풀무원 샘물", shop="toss", url="https://toss.im/_m/abc")
+        await env.media(caption=f"/link {toss} https://toss.im/_m/MINE",
+                        document={"file_id": "H1", "mime_type": "image/heic", "file_name": "IMG.HEIC"})
+        assert "상품 링크 완료" in env.texts[-1] and "사진은 네이버 딜에만 써요" in env.texts[-1]
+        assert bot.db.get_queue_item(toss).status == "pending"
+        big = env.msg(caption=f"/link 999 {NAVER_LINK}", photo=True)
+        big.photo[0].file_size = 11_000_000
+        await env.app.cb("on_media")(update(big), SimpleNamespace(args=[], application=None, bot=env.bot))
+        assert "#999 번 글이 없습니다" in env.texts[-1] and "10MB" not in env.texts[-1]
+        env.bot.files["F9601"] = b"never-read"
+        await env.media(caption=f"/link 998 {NAVER_LINK}", photo=True, mid=9601)
+        assert "#998 번 글이 없습니다" in env.texts[-1]
+        assert env.bot.asked == []  # 셋 다 사진을 받지 않음
+        # 네이버 딜이면 그때 받는다 (한 번)
+        naver = add_item(bot.db, "데켓 주물팬", shop="naver", url="https://brand.naver.com/daekket/products/1")
+        out = io.BytesIO()
+        Image.new("RGB", (900, 900), (90, 140, 200)).save(out, "JPEG")
+        env.bot.files["F9602"] = out.getvalue()
+        await env.media(caption=f"/link {naver} {NAVER_LINK}", photo=True, mid=9602)
+        assert "📸 상품 사진도 받았어요" in env.texts[-1] and env.bot.asked == ["F9602"]
     finally:
         bot.db.close()
 

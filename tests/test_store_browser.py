@@ -1,6 +1,8 @@
 """막힌 네이버 스토어 페이지를 발행 직전 한 번 실제 크롬으로 (주인 결정 10/10 '발행 직전 한 번만').
 
 서버에서 스토어는 일반 요청엔 429 지만 크롬으로는 200 + og:image(?type=o1000). 테스트는 크롬을 띄우지 않고 _open_page 를 가짜로 바꾼다.
+10/15 주인 결정 ②: 네이버 딜 사진은 주인이 링크와 같이 보낸 사진만 — 크롬은 가격 확인용으로만 열고 그 페이지 사진은 쓰지 않는다
+(아래 '발행 사진' 묶음).
 """
 
 from __future__ import annotations
@@ -353,44 +355,55 @@ def _images(images: dict[str, bytes], seen: list[str]):  # type: ignore[no-untyp
     return fetch
 
 
-async def test_blocked_store_deal_gets_the_browser_photo_at_publish(bot) -> None:  # type: ignore[no-untyped-def]
-    """일반 요청은 막힘(conftest: 상품 페이지 못 읽음) → 크롬으로 연 페이지의 og:image(?type=o1000, 이미 1000px 라 그대로) 가
-    600px 검사 통과 (주인 사진이 없는 네이버 딜도 스토어 자기 사진은 씀 — 10/10 결정 그대로)."""
-    assert bot.settings.deal.enrich.store_browser  # config.yaml 에서 켬
+def _unverified(p: Product) -> Product:
+    """수집 때 스토어가 막혀(429) 가격을 확인 못 한 딜 (page_price 'unverified')."""
+    p.extra["page_price"] = {"status": "unverified", "title_price": p.price, "reason": "페이지를 못 읽음"}
+    return p
+
+
+async def test_blocked_store_deal_opens_no_browser_for_a_photo(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_blocked_store_deal_gets_the_browser_photo_at_publish: 일반 요청이 막힌 스토어 딜은 발행 직전 크롬으로 연 페이지의
+    og:image 를 썼다 (10/10). 주인 결정 10/15 ②(검토 지적으로 그대로 따름): 주인 사진이 없는 네이버 딜은 사진을 찾지 않는다 —
+    크롬을 사진 때문에 열지 않고(최대 45초) 채널엔 글만. 가격을 이미 확인한 딜이면 크롬을 아예 안 연다."""
+    assert bot.settings.deal.enrich.store_browser  # config.yaml 에서 켬 (이제 가격 확인용)
     sb, opened, _ = _browser((200, STORE_URL, HTML))
     bot.store_browser = sb
     got: list[str] = []
     bot._fetch_image = _images({OG: _jpeg(1000, 1000)}, got)
     d = Deal(_product(), DealVerdict(is_deal=True))
-    photo = await bot.deal_photo(d)
-    assert photo is not None and d.product.image_url == OG
-    assert opened == [STORE_URL] and got == [OG]
+    assert await bot.deal_photo(d) is None and d.product.image_url is None
+    assert opened == [] and got == []
     assert not hasattr(bot.naver_shop, "find_image")  # 쇼핑 검색 사진 찾기는 없음 (10/15)
 
 
-async def test_small_browser_photo_is_upsized(bot) -> None:  # type: ignore[no-untyped-def]
-    """크롬으로 연 페이지가 510px 축소본(?type=m510)을 주면 원본 주소부터 받는다."""
+async def test_unchecked_store_deal_reads_the_price_with_the_browser_but_not_its_photo(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_small_browser_photo_is_upsized (크롬 페이지의 510px 축소본 → 원본 주소로 받음). 이제 크롬은 가격 확인용:
+    수집 때 가격을 확인 못 한 딜이면 발행 직전에 한 번 열어 가격만 보고, 그 페이지의 사진은 큰 주소든 작은 주소든 받지 않는다."""
     small = OG_FULL + "?type=m510"
-    sb, _, _ = _browser((200, STORE_URL, HTML.replace(OG, small)))
+    sb, opened, _ = _browser((200, STORE_URL, HTML.replace(OG, small)))
     bot.store_browser = sb
     got: list[str] = []
     bot._fetch_image = _images({OG_FULL: _jpeg(1000, 1000), small: _jpeg(510, 510)}, got)
-    d = Deal(_product(), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is not None and d.product.image_url == OG_FULL and got == [OG_FULL]
+    d = Deal(_unverified(_product()), DealVerdict(is_deal=True))
+    assert await bot.deal_photo(d) is None and d.product.image_url is None
+    assert opened == [STORE_URL] and got == []
 
 
-async def test_browser_is_not_used_when_the_deal_already_has_a_photo(bot) -> None:  # type: ignore[no-untyped-def]
+async def test_naver_deal_photo_address_is_not_used_without_the_owner_photo(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_browser_is_not_used_when_the_deal_already_has_a_photo: 딜에 큰 스토어 사진 주소가 있으면 그걸 썼다 (크롬 안 엶).
+    10/15 ②: 주인 사진이 없는 네이버 딜은 그 주소도 쓰지 않는다 (받지도 않음). 크롬도 안 엶."""
     sb, opened, _ = _browser((200, STORE_URL, HTML))
     bot.store_browser = sb
     big = "https://shop-phinf.pstatic.net/x/1.jpg"
-    bot._fetch_image = _images({big: _jpeg(800, 800)}, [])
+    got: list[str] = []
+    bot._fetch_image = _images({big: _jpeg(800, 800)}, got)
     d = Deal(_product(image_url=big), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is not None and opened == []
+    assert await bot.deal_photo(d) is None and opened == [] and got == [] and d.product.image_url is None
 
 
 async def test_browser_without_a_usable_photo_posts_without_photo(bot) -> None:  # type: ignore[no-untyped-def]
     """크롬 페이지에도 쓸 사진이 없으면 사진 없이 (예전엔 쇼핑 검색 API 사진으로 넘어갔지만 그 API 는 2026-07-31 종료 — 주인 결정 10/15:
-    채널엔 글만, 인스타는 글자 카드). 키가 있어도 검색 API 를 부르지 않는다."""
+    채널엔 글만, 인스타는 글자 카드). 키가 있어도 검색 API 를 부르지 않는다. 가격을 이미 확인한 딜이라 크롬도 안 엶."""
     sb, opened, _ = _browser((200, STORE_URL, "<html><title>x</title></html>"))
     bot.store_browser = sb
     api_img = "https://shopping-phinf.pstatic.net/main_1/1.jpg"
@@ -404,29 +417,37 @@ async def test_browser_without_a_usable_photo_posts_without_photo(bot) -> None: 
     seen: list[str] = []
     bot._fetch_image = _images({api_img: _jpeg(700, 700)}, seen)
     d = Deal(_product(), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is None and d.product.image_url is None and opened == [STORE_URL]
+    assert await bot.deal_photo(d) is None and d.product.image_url is None and opened == []
     assert asked == [] and seen == []
 
 
-async def test_browser_is_not_opened_when_the_page_was_read_but_its_photo_is_unusable(bot) -> None:  # type: ignore[no-untyped-def]
-    """일반 요청으로 페이지를 읽었는데 사진이 600px 미만이면, 크롬도 같은 사진을 주므로 열지 않고 사진 없이 (검토 지적).
-    예전엔 쇼핑 검색으로 넘어갔지만 그 API 는 끝났다 (주인 결정 10/15)."""
+async def test_browser_is_not_opened_when_the_read_page_had_the_price(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_browser_is_not_opened_when_the_page_was_read_but_its_photo_is_unusable (사진 기준). 이제 가격 기준:
+    일반 요청으로 읽은 페이지에 가격이 있으면 그걸로 대조하고 크롬은 열지 않는다. 그 페이지 사진도 쓰지 않는다."""
+    from pathlib import Path
+
     from dealbot.enrich import page_meta_at
 
-    async def read_page(url: str) -> object:
-        return page_meta_at(HTML, STORE_URL)
+    store = (Path(__file__).parent / "fixtures" / "naver_store_state.html").read_text(encoding="utf-8")
+    url = "https://smartstore.naver.com/water/products/11223344556"  # 그 페이지(가격·옵션이 든 스토어 상태)의 상품
+
+    async def read_page(page_url: str) -> object:
+        return page_meta_at(store, page_url)
 
     bot.enricher.fetch = read_page  # type: ignore[method-assign]
-    sb, opened, _ = _browser((200, STORE_URL, HTML))
+    sb, opened, _ = _browser((200, url, HTML))
     bot.store_browser = sb
-    bot._fetch_image = _images({OG: _jpeg(500, 500)}, [])
-    d = Deal(_product(), DealVerdict(is_deal=True))
+    got: list[str] = []
+    bot._fetch_image = _images({OG: _jpeg(1000, 1000)}, got)
+    d = Deal(_unverified(_product(url=url, product_id="naver:11223344556")), DealVerdict(is_deal=True))
     assert await bot.deal_photo(d) is None and d.product.image_url is None
-    assert opened == []
+    assert opened == [] and got == []
+    assert d.product.extra["page_price"]["status"] != "unverified"  # 읽은 페이지로 대조함
 
 
-async def test_browser_is_opened_when_the_read_page_had_no_photo(bot) -> None:  # type: ignore[no-untyped-def]
-    """읽은 페이지에 사진 주소가 아예 없으면(막힘 안내 화면 등) 크롬으로 한 번."""
+async def test_browser_is_opened_when_the_read_page_had_no_price(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_browser_is_opened_when_the_read_page_had_no_photo. 읽은 페이지에 가격이 없으면(막힘 안내 화면 등) 크롬으로 한 번 —
+    가격만 보고 사진은 쓰지 않는다."""
     from dealbot.enrich import page_meta_at
 
     async def read_page(url: str) -> object:
@@ -435,9 +456,10 @@ async def test_browser_is_opened_when_the_read_page_had_no_photo(bot) -> None:  
     bot.enricher.fetch = read_page  # type: ignore[method-assign]
     sb, opened, _ = _browser((200, STORE_URL, HTML))
     bot.store_browser = sb
-    bot._fetch_image = _images({OG: _jpeg(1000, 1000)}, [])
-    d = Deal(_product(), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is not None and opened == [STORE_URL] and d.product.image_url == OG
+    got: list[str] = []
+    bot._fetch_image = _images({OG: _jpeg(1000, 1000)}, got)
+    d = Deal(_unverified(_product()), DealVerdict(is_deal=True))
+    assert await bot.deal_photo(d) is None and opened == [STORE_URL] and got == [] and d.product.image_url is None
 
 
 def test_newest_full_chromium_is_found_across_layouts(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]

@@ -5,6 +5,7 @@
   그 확인이 가격 확인이라, 주인이 링크를 붙인 네이버 딜은 페이지 대조로 보류하지 않는다 (test_page_price.py 에도).
   링크 요청(텔레그램·카톡)에 '가격·옵션 확인 후 사진도 같이 보내 주세요 — 제목 가격 N원'.
 ② 주인 사진이 없는 네이버 딜: 채널엔 글만(미리보기 끔), 인스타는 상품명·가격 글자 카드 (설정은 skip 그대로 — 쿠팡 등은 그대로 안 올림).
+  사진을 찾지 않는다 — 딜에 적힌 사진·스토어 페이지·크롬 사진 모두 안 씀 (검토 지적으로 '스토어 사진은 시도' 를 뺐음).
 ③ 뽐뿌 글 사진은 쓰지 않는다. ④ 쇼핑 검색 사진 찾기는 지움 (test_naver_store_photo.py).
 테스트는 가짜만 쓴다 (네트워크·텔레그램·크롬 없음).
 """
@@ -109,7 +110,8 @@ async def test_link_request_asks_for_the_photo_with_the_title_price(bot, setting
     tg = sent[-1]
     assert tg.startswith(f"🔗 <b>내 링크가 필요합니다 #{qid}</b> [네이버]")  # 말 명령이 알아보는 첫머리는 그대로
     assert ASK in tg and f"<code>/link {qid} https://...</code>" in tg and "이 메시지에 답장" in tg
-    assert "채널엔 글만, 인스타는 글자 카드" in tg
+    assert "채널엔 글만, 인스타는 글자 카드" in tg and "못 찾으면" not in tg  # 사진을 찾지 않으니 '못 찾으면' 이 아님
+    assert "화면 캡처는 상품 부분만 잘라서" in tg
     note = _inbox(settings)[-1]
     text = note["text"]
     # 카톡: 긴 상품명은 잘려도 사진 부탁은 둘째 줄이라 남는다 (200자 한 통, 주소 없음)
@@ -184,7 +186,9 @@ async def test_link_with_photo_stores_a_clean_private_photo(bot, settings: Setti
         (b"x" * 10_000_001, "10MB"),
         (b"<html>not a photo</html>", "JPG·PNG·WEBP"),
         (_jpeg(800, 800, fmt="GIF"), "HEIC·GIF"),
-        (_jpeg(400, 300), "사진이 너무 작아요 (400×300)"),
+        (_jpeg(400, 300), "사진이 너무 작아요 (400×300) — 짧은 변이 600px 이상이어야 해요"),
+        # 텔레그램이 줄인 휴대폰 화면 캡처 (1179×2556 → 590×1280): '작다'만이 아니라 자르거나 파일로 보내는 법까지
+        (_jpeg(590, 1280), "사진이 너무 작아요 (590×1280) — 짧은 변이 600px 이상이어야 해요 (화면 캡처면 상품 부분만 잘라서, 또는 파일로 보내 주세요)"),
         (_jpeg(700, 1800), "사진이 너무 길쭉해요 (700×1800)"),
     ],
 )
@@ -220,7 +224,7 @@ async def test_photo_with_a_non_naver_link_is_not_used(bot, settings: Settings) 
 
 async def test_naver_link_without_photo_says_text_only(bot) -> None:  # type: ignore[no-untyped-def]
     reply = await bot.attach_link(_waiting(bot), LINK)
-    assert "사진 없이 받았어요 — 상품 사진을 못 찾으면 채널엔 글만, 인스타는 글자 카드로 올라가요" in reply
+    assert "사진 없이 받았어요 — 채널엔 글만, 인스타는 상품명·가격 글자 카드로 올라가요" in reply and "못 찾으면" not in reply
 
 
 # ---------------------------------------------------------------- 3. 확인된 상품 사진으로 쓰기
@@ -242,7 +246,10 @@ async def test_owner_photo_is_the_verified_photo_and_no_page_is_opened(bot, sett
     bot._fetch_image = fetch
     photo = await bot.deal_photo(deal)
     assert photo is not None and opened == []  # 스토어 페이지·크롬·게시판 사진 모두 안 엶
-    assert deal.product.image_url is None  # 주소 없는 사진 (스레드는 글만)
+    # 주소: 발행할 때 만든 공개 사본 (캡션이 길어 글로 보낼 때 미리보기·스레드가 쓰는 같은 사진)
+    url = deal.product.image_url or ""
+    assert url.startswith("https://bot.example.com/media/owner_") and url.endswith(".jpg")
+    assert (settings.data_dir / "media" / url.rsplit("/", 1)[-1]).read_bytes() == photo
     with Image.open(io.BytesIO(photo)) as im:
         r, g, b = im.convert("RGB").getpixel((500, 500))
         assert abs(r - 120) < 20 and abs(g - 80) < 20 and abs(b - 60) < 20
@@ -251,12 +258,12 @@ async def test_owner_photo_is_the_verified_photo_and_no_page_is_opened(bot, sett
     row = json.loads((settings.data_dir / "published_deals.jsonl").read_text(encoding="utf-8").splitlines()[-1])
     assert row["photo_kind"] == "product" and row["photo_src"] == "owner" and Path(row["photo_file"]).exists()
     assert Path(row["photo_file"]).parent == settings.data_dir / "media" / "export"
-    # 사진 파일이 사라졌으면(정리됨) 예전 순서대로 찾는다 — 스토어 페이지·크롬 (뽐뿌 썸네일은 여전히 안 씀)
+    # 사진 파일이 사라졌으면(정리됨) 사진 없는 네이버 딜과 같다 — 찾지 않는다: 스토어 페이지·크롬·뽐뿌 썸네일 모두 안 엶 (검토 지적)
     for f in _owner_files(settings):
         f.unlink()
     opened.clear()
     deal.product.image_url = BOARD_THUMB
-    assert await bot.deal_photo(deal) is None and opened == [STORE_URL, STORE_URL] and BOARD_THUMB not in opened
+    assert await bot.deal_photo(deal) is None and opened == [] and deal.product.image_url is None
 
 
 async def test_owner_photo_deal_publishes_with_that_photo_everywhere(bot) -> None:  # type: ignore[no-untyped-def]
@@ -298,8 +305,8 @@ class _FakeTg:
 
 
 async def test_telegram_photo_without_address_never_gets_an_auto_preview(repo_root: Path) -> None:
-    """주인 사진은 주소가 없다(image_url None). 캡션이 길어 글로 보내게 되면 미리보기를 꺼야 한다 — 안 끄면 텔레그램이 본문 첫
-    링크(스토어)의 검사 안 한 사진을 붙인다. 짧으면 그 사진을 그대로 보낸다."""
+    """공개 도메인이 없으면 주인 사진은 주소가 없다(image_url None). 캡션이 길어 글로 보내게 되면 미리보기를 꺼야 한다 — 안 끄면
+    텔레그램이 본문 첫 링크(스토어)의 검사 안 한 사진을 붙인다. 짧으면 그 사진을 그대로 보낸다 (주소가 있으면 아래 테스트)."""
     from dealbot.cli import sample_deal
 
     fake = _FakeTg()
@@ -394,3 +401,212 @@ def test_maintenance_prunes_old_owner_photos(bot, settings: Settings) -> None:  
     os.utime(old, (past, past))
     bot.maintenance()
     assert not old.exists() and new.exists()
+
+
+# ---------------------------------------------------------------- 6. 검토 반영 (10/15 둘째 판)
+async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_for_a_photo(bot) -> None:  # type: ignore[no-untyped-def]
+    """검토 지적 (②를 글자 그대로): 주인이 사진 없이 링크만 보낸 네이버 딜은 사진을 찾지 않는다 — 딜에 적힌 큰 스토어 사진,
+    일반 요청으로 읽힌 스토어 페이지, 크롬(최대 45초) 모두 쓰지 않는다. 예전엔 크롬이 열리면 채널에 스토어 사진이 붙고 인스타도
+    그 사진 카드였다. 이제 채널엔 글만(사진 바이트·주소 없음), 인스타는 글자 카드."""
+    from dealbot.enrich import page_meta_at
+
+    big = "https://shop-phinf.pstatic.net/20260123_260/1769_JPEG/1032.jpeg"
+    store_html = f'<html><head><title>데켓 주물팬</title><meta property="og:image" content="{big}"></head></html>'
+    opened: list[str] = []
+    fetched: list[str] = []
+
+    async def page(url: str) -> object:  # 일반 요청: 읽힘 (품절·정품 확인도 이걸 쓴다 — 그 페이지에 큰 사진이 있음)
+        return page_meta_at(store_html, STORE_URL)
+
+    async def browser(url: str) -> object:
+        opened.append(url)
+        return page_meta_at(store_html, STORE_URL)
+
+    async def fetch(url: str, **_kw: object) -> bytes:
+        fetched.append(url)
+        return _jpeg(1000, 1000, (120, 80, 60))
+
+    bot.enricher.fetch = page
+    bot.store_browser.page_meta = browser
+    bot._fetch_image = fetch
+    qid = _waiting(bot, image_url=big)
+    reply = await bot.attach_link(qid, LINK)  # 사진 없이
+    assert "사진 없이 받았어요 — 채널엔 글만" in reply
+    got: dict[str, object] = {}
+
+    async def fake_publish(deal: Deal, **kw: object) -> PublishResult:
+        got.update(photo=kw.get("photo"), image=deal.product.image_url)
+        return PublishResult(ok=True, message_id=1)
+
+    spy = _Spy(bot)
+    bot.publisher.publish = fake_publish
+    bot.settings.publish.min_interval_seconds = 0
+    bot.state.dry_run = False
+    assert await bot.process_queue_once()
+    assert bot.db.get_queue_item(qid).status == "published"
+    assert got == {"photo": None, "image": None} and opened == [] and fetched == []
+    assert spy.saved == [None] and len(spy.posted) == 1  # 인스타: 글자 카드
+    # 텔레그램: 사진도 주소도 없으면 미리보기를 끈다 (스토어 og:image 가 미리보기로 붙지 않게)
+    from dealbot.cli import sample_deal
+
+    fake = _FakeTg()
+    pub = TelegramPublisher(fake, "-100123", bot.renderer)  # type: ignore[arg-type]
+    d = sample_deal()
+    d.product.image_url = None
+    assert (await pub.publish(d, photo=None)).ok
+    assert fake.calls[-1][0] == "message" and fake.calls[-1][1]["link_preview_options"].is_disabled is True
+
+
+def test_phone_jpeg_with_a_multi_picture_block_is_accepted() -> None:
+    """검토 지적: 요즘 휴대폰 JPG (안드로이드 Ultra HDR·아이폰 HDR — JPEG 안에 MPF 묶음)는 Pillow 가 'MPO' 로 읽는다.
+    예전엔 'JPG·PNG·WEBP 사진만 받아요' 로 JPG 를 거절했다 (다시 보내도 같음). 첫 장만 보통 JPEG 로 다시 저장."""
+    main = Image.new("RGB", (1600, 1200), (40, 120, 200))
+    gain = Image.new("RGB", (400, 300), (0, 0, 0))  # HDR 게인 맵 같은 둘째 장
+    out = io.BytesIO()
+    ex = Image.Exif()
+    ex[0x8825] = {1: "N", 2: (37.0, 33.0, 0.0)}  # 위치
+    main.save(out, "MPO", save_all=True, append_images=[gain], exif=ex.tobytes())
+    raw = out.getvalue()
+    with Image.open(io.BytesIO(raw)) as im:
+        assert im.format == "MPO" and im.n_frames == 2
+    jpeg, why = owner_photo(raw)
+    assert jpeg is not None and why == ""
+    with Image.open(io.BytesIO(jpeg)) as im:
+        assert im.format == "JPEG" and getattr(im, "n_frames", 1) == 1 and im.size == (1280, 960) and not im.getexif()
+
+
+async def test_phone_screenshot_sent_as_a_file_survives_to_publish(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
+    """검토 지적의 짝: 텔레그램이 줄이지 않게 파일로 보낸 휴대폰 화면 캡처(1179×2556, 비율 2.17)는 받는다. 예전엔 긴 변 1280 으로 줄여
+    590×1280 으로 저장해, 발행 때 600px 검사에서 떨어져 사진 없이 올라갔다 — 이제 줄여도 짧은 변 600 을 지킨다."""
+    qid = _waiting(bot)
+    reply = await bot.attach_link(qid, LINK, photo=_jpeg(1179, 2556))
+    assert "📸 상품 사진도 받았어요" in reply
+    info = bot.db.get_queue_item(qid).deal.product.extra["owner_photo"]
+    assert min(info["w"], info["h"]) >= 600 and max(info["w"], info["h"]) <= 1310
+    photo = await bot.deal_photo(bot.db.get_queue_item(qid).deal)
+    assert photo is not None
+    with Image.open(io.BytesIO(photo)) as im:
+        assert min(im.size) >= 600
+    # 보통 사진은 그대로 긴 변 1280
+    jpeg, _ = owner_photo(_jpeg(4000, 3000))
+    assert jpeg is not None and Image.open(io.BytesIO(jpeg)).size == (1280, 960)
+
+
+def test_owner_photo_check_turns_pillow_bomb_warnings_into_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """검토 지적: 화소 폭탄 경고(DecompressionBombWarning)·오류 갈래가 시험되지 않았다 (9000×9000 은 Pillow 경고 기준 아래).
+    기준을 낮춰 두 갈래를 모두 지난다 — 경고(기준 초과)도, 오류(기준 두 배 초과)도 '해상도가 너무 커요' 로 거절."""
+    data = _jpeg(800, 800)  # 64만 화소
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 500_000)  # 64만 > 50만 → 경고 (두 배 100만 아래)
+    jpeg, why = owner_photo(data)
+    assert jpeg is None and why == "사진 해상도가 너무 커요"
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 200_000)  # 64만 > 40만 → 오류
+    jpeg, why = owner_photo(data)
+    assert jpeg is None and why == "사진 해상도가 너무 커요"
+
+
+async def test_photo_is_fetched_only_when_the_naver_link_can_be_attached(bot) -> None:  # type: ignore[no-untyped-def]
+    """검토 지적: 사진부터 받아 검사하지 않는다 — 없는 번호·채널 글 주소(❓)·네이버가 아닌 딜이면 사진을 받지 않고 링크 쪽 답만.
+    (HEIC·10MB 사진이 토스 링크를 막던 일, '/link 999' 에도 사진을 받던 일)"""
+    asked: list[int] = []
+
+    def loader(data: bytes | None, why: str = ""):  # type: ignore[no-untyped-def]
+        async def load() -> tuple[bytes | None, str]:
+            asked.append(1)
+            return data, why
+        return load
+
+    heic = loader(None, "사진으로 열리지 않아요 — HEIC")
+    assert "#999 번 글이 없습니다" in await bot.attach_link(999, LINK, photo=heic)
+    toss = _waiting(bot, product_id="toss:1", shop="toss", name="풀무원 샘물 2L 24개", price=6410, url="https://toss.im/_m/abc")
+    reply = await bot.attach_link(toss, "https://toss.im/_m/MINE", photo=heic)
+    assert "상품 링크 완료" in reply and "사진은 네이버 딜에만 써요" in reply and bot.db.get_queue_item(toss).status == "pending"
+    assert "링크는 http" in await bot.attach_link(_waiting(bot, product_id="naver:5"), "naver.me/x", photo=heic)
+    assert asked == []
+    qid = _waiting(bot, product_id="naver:6")
+    assert "📸 상품 사진도 받았어요" in await bot.attach_link(qid, LINK, photo=loader(_jpeg(900, 900)))
+    assert asked == [1]
+
+
+async def test_item_changed_while_the_photo_was_loading_is_checked_again(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
+    """사진을 받고 푸는 사이(await) 주인이 다른 답으로 그 글을 건너뛰었으면 링크도 사진도 붙이지 않는다 (다시 읽어 같은 기준)."""
+    qid = _waiting(bot)
+
+    async def load() -> tuple[bytes | None, str]:
+        bot.skip_item(qid)  # 받는 사이에 건너뜀
+        return _jpeg(900, 900), ""
+
+    reply = await bot.attach_link(qid, LINK, photo=load)
+    assert "'skipped' 상태라 링크를 붙일 수 없습니다" in reply
+    item = bot.db.get_queue_item(qid)
+    assert item.status == "skipped" and item.deal.affiliate_url is None and "owner_photo" not in item.deal.product.extra
+    assert _owner_files(settings) == []
+
+
+async def test_big_photo_is_decoded_off_the_event_loop(bot, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    """검토 지적: 4,000만 화소까지 푸는 일이 이벤트 루프에서 돌면 그동안 텔레그램 받기·발행이 멈춘다 → 따로 돌린다."""
+    import threading
+
+    import dealbot.app as app_mod
+
+    where: list[bool] = []
+    real = app_mod.owner_photo
+
+    def spy(data: bytes | None, **kw: object) -> tuple[bytes | None, str]:
+        where.append(threading.current_thread() is threading.main_thread())
+        return real(data, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(app_mod, "owner_photo", spy)
+    assert "📸 상품 사진도 받았어요" in await bot.attach_link(_waiting(bot), LINK, photo=_jpeg(900, 900))
+    assert where == [False]
+
+
+async def test_repeat_deal_with_the_saved_link_reuses_the_owner_photo(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
+    """검토 제안: 같은 상품이 또 나와 그때 만든 링크(mylink)를 다시 쓰면, 그때 같이 보낸 사진도 다시 쓴다 (파일이 남아 있는 동안).
+    주인이 이번 딜을 본 건 아니라 가격 확인으로는 치지 않는다 (owner_link 없음)."""
+    first = _waiting(bot)
+    await bot.attach_link(first, LINK, photo=_jpeg(1000, 1000, (120, 80, 60)))
+    bot.db.update_queue_item(first, status="published")
+    assert bot.db.enqueue(Deal(_product(), DealVerdict(is_deal=True)), score=1)
+    item = next(i for i in bot.db.pending_items() if i.id != first)
+    assert await bot._ensure_link(item) == ("ok", None) and item.deal.affiliate_url == LINK
+    p = item.deal.product
+    assert p.extra["owner_photo"]["reused"] is True and not p.extra.get("owner_link") and not bot._owner_checked(p)
+    photo = await bot.deal_photo(item.deal)
+    assert photo is not None
+    with Image.open(io.BytesIO(photo)) as im:
+        r, g, b = im.convert("RGB").getpixel((500, 500))
+        assert abs(r - 120) < 20 and abs(g - 80) < 20 and abs(b - 60) < 20
+    # 사진이 정리(14일)됐으면 다시 쓰지 않음 → 글만
+    bot.db.update_queue_item(item.id, status="published")
+    for f in _owner_files(settings):
+        f.unlink()
+    assert bot.db.enqueue(Deal(_product(product_id="naver:13008954661", name="데켓 주물팬 다시"), DealVerdict(is_deal=True)), score=1)
+    again = max(bot.db.pending_items(), key=lambda i: i.id)
+    assert await bot._ensure_link(again) == ("ok", None) and "owner_photo" not in again.deal.product.extra
+
+
+async def test_long_caption_keeps_the_owner_photo_as_the_preview(bot, settings: Settings, repo_root: Path) -> None:  # type: ignore[no-untyped-def]
+    """검토 지적: 글이 길어(캡션 1024자 초과) 텔레그램 글로 보낼 때 주인 사진은 주소가 없어 미리보기가 꺼지고 채널에 사진이 빠졌다.
+    이제 발행할 때 공개 사본(/media/owner_…)을 만들어 그 주소로 큰 미리보기를 띄운다 (스레드도 같은 사진). 오래된 사본은 정리."""
+    qid = _waiting(bot)
+    await bot.attach_link(qid, LINK, photo=_jpeg(1000, 1000, (120, 80, 60)))
+    deal = bot.db.get_queue_item(qid).deal
+    photo = await bot.deal_photo(deal)
+    url = deal.product.image_url or ""
+    assert photo is not None and url.startswith("https://bot.example.com/media/owner_")
+    fake = _FakeTg()
+    pub = TelegramPublisher(fake, "-100123", TemplateRenderer(repo_root / "templates"))  # type: ignore[arg-type]
+    deal.product.name = "아주 긴 상품명 " * 120  # 캡션 1024자 넘음 → 글로
+    assert (await pub.publish(deal, photo=photo)).ok
+    kind, kw = fake.calls[-1]
+    assert kind == "message" and kw["link_preview_options"].url == url and kw["link_preview_options"].is_disabled is not True
+    # 공개 도메인이 없으면 예전처럼 주소 없음 → 미리보기 끔 (위 test_telegram_photo_without_address_never_gets_an_auto_preview)
+    bot.settings.secrets.public_domain = None
+    assert bot.settings.secrets.public_base_url is None
+    assert await bot.deal_photo(deal) is not None and deal.product.image_url is None
+    # 공개 사본도 14일 뒤 정리
+    copy = settings.data_dir / "media" / url.rsplit("/", 1)[-1]
+    past = time.time() - 15 * 86400
+    os.utime(copy, (past, past))
+    bot.maintenance()
+    assert not copy.exists()

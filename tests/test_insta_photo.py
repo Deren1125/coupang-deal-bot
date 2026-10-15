@@ -120,10 +120,11 @@ async def test_make_card_never_downloads_the_photo_itself(bot) -> None:  # type:
     assert await bot.make_card(d, None) is None  # 사진 없으면 (skip) 카드 없음
 
 
-# ---------------------------------------------------------------- 2. 네이버 스토어: 크롬으로 읽은 사진을 카드에도
-async def test_naver_store_browser_photo_is_the_card_photo(bot) -> None:  # type: ignore[no-untyped-def]
-    """일반 요청은 막힌 스토어(conftest), 크롬으로 연 페이지의 og:image 를 deal_photo 가 받음 → 카드도 그 바이트.
-    그 CDN 은 두 번째 요청을 막지만(once) 카드는 다시 받지 않으니 사진이 빠지지 않는다."""
+# ---------------------------------------------------------------- 2. 네이버 스토어: 스토어 사진은 카드에도 안 씀 (10/15)
+async def test_naver_store_photo_never_becomes_the_card_photo(bot) -> None:  # type: ignore[no-untyped-def]
+    """예전 test_naver_store_browser_photo_is_the_card_photo: 크롬으로 연 스토어 페이지의 og:image 를 deal_photo 가 받아 카드에도 썼다.
+    주인 결정 10/15 ②(검토 지적으로 그대로 따름): 주인 사진이 없는 네이버 딜은 사진을 찾지 않는다 — 크롬이 그 페이지를 읽어도
+    (가격을 확인 못 한 딜이라 가격 때문에 열어도) 그 사진은 받지 않고, 인스타는 상품명·가격 글자 카드 (퍼 온 사진 없음)."""
     calls: list[str] = []
 
     async def page_meta(url: str):  # type: ignore[no-untyped-def]
@@ -134,24 +135,25 @@ async def test_naver_store_browser_photo_is_the_card_photo(bot) -> None:  # type
 
     bot.store_browser.page_meta = page_meta
     seen: list[str] = []
-    store_photo = _jpeg(1000, 1000, (120, 80, 60))
-    bot._fetch_image = _fetcher({OG: store_photo}, seen, once=True)
+    bot._fetch_image = _fetcher({OG: _jpeg(1000, 1000, (120, 80, 60))}, seen)
     spy = _Spy(bot)
     d = Deal(Product(source="ppomppu", product_id="naver:13008954661", shop="naver", name="데켓 주물 IH 오발쿡플레이트 31cm",
-                     price=60020, url=STORE_URL, image_url=BOARD_THUMB), DealVerdict(is_deal=True),
-             affiliate_url=STORE_URL)
+                     price=60020, url=STORE_URL, image_url=BOARD_THUMB,
+                     extra={"page_price": {"status": "unverified", "title_price": 60020, "reason": "페이지를 못 읽음"}}),
+             DealVerdict(is_deal=True), affiliate_url=STORE_URL)
     photo = await bot.deal_photo(d)
-    assert photo is not None and calls == [STORE_URL] and d.product.image_url == OG
+    assert photo is None and calls == [STORE_URL] and d.product.image_url is None  # 크롬은 가격 때문에 한 번
+    assert seen == []  # 그 페이지의 사진은 받지도 않음
     await bot._publish_side_channels(d, photo=photo, deal_no=12)
-    assert spy.saved == [photo]  # 텔레그램에 쓴 바로 그 바이트
-    assert seen == [OG]  # 카드 때문에 다시 받지 않음
+    assert spy.saved == [None]  # 글자 카드
     assert len(spy.posted) == 1 and (spy.posted[0] or "").startswith("https://bot.example.com/media/")
     card_file = bot.settings.data_dir / "media" / (spy.posted[0] or "").rsplit("/", 1)[-1]
     with Image.open(card_file) as im:
         assert im.format == "JPEG" and im.size == (1080, 1350)
-        # 카드 사진 칸 가운데가 상품 사진 색 (글자 카드가 아님)
+        # 카드 사진 칸 가운데가 스토어 사진 색이 아님 (글자 카드)
         r, g, b = im.convert("RGB").getpixel((540, 340))
-        assert abs(r - 120) < 30 and abs(g - 80) < 30 and abs(b - 60) < 30
+        assert not (abs(r - 120) < 30 and abs(g - 80) < 30 and abs(b - 60) < 30)
+    assert seen == []
 
 
 # ---------------------------------------------------------------- 3. 사진 없음: skip(기본) / text_card

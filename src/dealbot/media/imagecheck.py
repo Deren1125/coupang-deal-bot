@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import re
 import warnings
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -113,15 +114,20 @@ def clean_image(data: bytes | None, *, min_side: int = 600, max_aspect: float = 
 # ---------------------------------------------------------------- 주인이 링크와 같이 보낸 네이버 딜 상품 사진 (주인 결정 10/15)
 OWNER_PHOTO_MAX_BYTES = 10_000_000  # 텔레그램에서 받는 파일 한도 (받기 전 크기·받은 뒤 길이 둘 다)
 OWNER_PHOTO_MAX_PIXELS = 40_000_000  # 디코딩 폭탄 방지 (휴대폰 사진은 1,200만~5,000만 화소 안팎이라 넉넉히 4,000만까지)
-OWNER_PHOTO_FORMATS = ("JPEG", "PNG", "WEBP")
+OWNER_PHOTO_FORMATS = ("JPEG", "MPO", "PNG", "WEBP")  # MPO: 요즘 휴대폰 JPG (HDR·여러 장 묶음 표시가 붙은 JPEG — 첫 장만 씀)
 OWNER_PHOTO_TOO_BIG = "사진 파일이 너무 커요 (10MB 이하로 보내 주세요)"
 OWNER_PHOTO_NOT_IMAGE = "사진으로 열리지 않아요 — JPG·PNG·WEBP 사진만 받아요 (HEIC·GIF·동영상은 안 돼요)"
+SCREENSHOT_ASPECT = 1.6  # 이보다 길쭉한 사진은 휴대폰 화면 캡처일 가능성이 큼 (텔레그램이 긴 변 1280 으로 줄여 짧은 변이 600 아래로)
+SCREENSHOT_HINT = "화면 캡처면 상품 부분만 잘라서, 또는 파일로 보내 주세요"
 
 
-def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 2.2) -> tuple[bytes | None, str]:
+def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 2.2, max_side: int = 1280) -> tuple[bytes | None, str]:
     """주인이 보낸 상품 사진을 검사해 (JPEG 바이트, "") 또는 (None, 주인에게 보일 이유).
-    상품 사진 규칙은 clean_image 와 같다 (짧은 변 min_side 이상, 비율 max_aspect 이하, 긴 변 1280 이하로 줄임, EXIF 방향 반영).
-    다시 저장하므로 EXIF(위치·기기 정보)는 남지 않는다. 열기 전에 파일 크기·형식·화소 수를 먼저 본다 (큰 그림으로 서버가 멈추지 않게)."""
+    상품 사진 규칙은 clean_image 와 같다 (짧은 변 min_side 이상, 비율 max_aspect 이하, 긴 변 max_side 이하로 줄임, EXIF 방향 반영).
+    단 줄인 뒤에도 짧은 변이 min_side 아래로 내려가지 않게 한다 — 길쭉한 사진(화면 캡처 1179×2556 등)을 긴 변 1280 으로 줄이면
+    590×1280 이 되어, 저장한 사진이 발행 때 600px 검사에서 떨어지고 글만 올라갔다 (그런 사진은 긴 변을 조금 더 둠).
+    다시 저장하므로 EXIF(위치·기기 정보)는 남지 않는다. 열기 전에 파일 크기·형식·화소 수를 먼저 본다 (큰 그림으로 서버가 멈추지 않게).
+    저장한 사진을 발행 때 다시 볼 때도 이 함수로 (같은 규칙 — clean_image 로 보면 위의 길쭉한 사진이 다시 줄어 떨어짐)."""
     if not data:
         return None, OWNER_PHOTO_NOT_IMAGE
     if len(data) > OWNER_PHOTO_MAX_BYTES:
@@ -142,11 +148,15 @@ def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 
         return None, OWNER_PHOTO_NOT_IMAGE
     if w * h > OWNER_PHOTO_MAX_PIXELS:
         return None, f"사진 해상도가 너무 커요 ({w}×{h})"
+    aspect = max(w, h) / max(1, min(w, h))
     if min(w, h) < min_side:
-        return None, f"사진이 너무 작아요 ({w}×{h}) — 짧은 변이 {min_side}px 이상이어야 해요"
-    if max(w, h) / max(1, min(w, h)) > max_aspect:
+        # 텔레그램이 줄인 휴대폰 화면 캡처(590×1280 등)는 '작다'만 들으면 왜인지 모름 → 자르거나 파일로 보내는 법을 같이
+        hint = f" ({SCREENSHOT_HINT})" if aspect >= SCREENSHOT_ASPECT else ""
+        return None, f"사진이 너무 작아요 ({w}×{h}) — 짧은 변이 {min_side}px 이상이어야 해요{hint}"
+    if aspect > max_aspect:
         return None, f"사진이 너무 길쭉해요 ({w}×{h}) — 가로세로 {max_aspect:g}배 이하로 (화면 캡처면 상품 부분만 잘라서)"
-    out = clean_image(data, min_side=min_side, max_aspect=max_aspect)
+    side = max(max_side, math.ceil(max(w, h) * min_side / min(w, h)) + 1)  # 줄여도 짧은 변 min_side 이상
+    out = clean_image(data, min_side=min_side, max_aspect=max_aspect, max_side=side)
     if out is None:
         return None, OWNER_PHOTO_NOT_IMAGE
     return out, ""

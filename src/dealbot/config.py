@@ -168,7 +168,8 @@ class EnrichConfig(BaseModel):
     store_breaker_seconds: float = 600.0
     store_breaker_max_seconds: float = 7200.0
     store_cache_seconds: float = 300.0  # 읽은 스토어 페이지를 이만큼 기억 (수집·정품 확인·발행 사진이 같은 페이지를 다시 안 읽게)
-    # 그래도 사진이 없는 네이버 스토어 딜: 발행 직전에만 실제 크롬(로그인 없는 빈 창)으로 한 번 열어 상품 사진을 읽음 (주인 결정 10/10)
+    # 일반 요청이 막힌 네이버 스토어 페이지를 실제 크롬(로그인 없는 빈 창)으로 한 번 열어 가격을 읽음 (10/10 엔 사진용, 10/15 부터
+    # 네이버 딜 사진은 주인이 보낸 사진만이라 크롬은 가격 확인용 — 수집 때 대조·쇼핑커넥트 전·발행 직전)
     store_browser: bool = False
     store_browser_min_interval_seconds: float = 60.0  # 열기 사이 간격
     store_browser_min_free_mb: int = 500  # 서버 여유 메모리가 이보다 적으면 열지 않음 (블로그 크롬이 떠 있을 때 등)

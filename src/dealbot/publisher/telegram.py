@@ -86,7 +86,8 @@ class TelegramPublisher:
         image = deal.product.image_url
         if photo is not None:
             # 사진 끔(send_photo: false)·캡션이 길어 글로 보낼 때는 같은(확인된) 사진 주소로 큰 미리보기를 띄운다.
-            # 주소 없는 사진(주인이 보낸 네이버 딜 사진)이면 미리보기를 끈다 — 안 끄면 텔레그램이 본문 첫 링크의 검사 안 한 사진을 붙임
+            # 주인이 보낸 네이버 딜 사진은 공개 사본 주소(/media/owner_…)로 미리보기. 공개 도메인이 없어 주소가 없으면 미리보기를 끈다
+            # — 안 끄면 텔레그램이 본문 첫 링크의 검사 안 한 사진을 붙임
             return await self.publish_raw(text, photo=photo if self.send_photo else None, preview_url=image,
                                           preview_disabled=not image, silent=silent)
         if not image:
