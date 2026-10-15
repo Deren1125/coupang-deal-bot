@@ -1821,13 +1821,15 @@ def register_admin_handlers(
 
     def _late_photo_target(caption: str, ref: Any) -> int | None:
         """이 사진이 발행 뒤 받는 딜 사진이면 그 딜 번호: 📷 사진 필요 메시지에 답장(설명 없음·'/photo 번호'), 또는 설명 칸
-        '/photo 번호' (블로그 메시지에 단 답장이 아니고, 그 번호 딜이 지금 사진을 기다릴 때만 — 블로그 글 번호와 헷갈리지 않게)."""
+        '/photo 번호' (블로그 메시지에 단 답장이 아니고, 뒤에 '자리N' 같은 말이 없고, 그 번호 딜이 지금 사진을 기다릴 때만 —
+        블로그 글 번호와 헷갈리지 않게)."""
         name = _slash_name(caption)
         if ref.kind == "deal" and ref.sub == "photo_need" and ref.queue_id and (not caption.strip() or name in ("photo", "사진")):
             return int(ref.queue_id)
         if name in ("photo", "사진") and ref.kind != "blog":
             parts = caption.split()
-            if len(parts) >= 2 and parts[1].lstrip("#").isdigit():
+            # '/photo 번호' 딱 두 마디만 — '/photo 12 자리3' 처럼 뒤에 더 붙은 건 블로그 사진 자리 바꾸기라 딜 번호와 겹쳐도 블로그로
+            if len(parts) == 2 and parts[1].lstrip("#").isdigit():
                 qid = int(parts[1].lstrip("#"))
                 waiting = getattr(controller, "late_photo_waiting", None)
                 if waiting is not None and waiting(qid):

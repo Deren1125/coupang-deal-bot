@@ -732,6 +732,9 @@ async def test_photo_reply_to_photo_need_or_photo_caption_goes_to_the_deal(env: 
     await env.media(photo=True, caption="/photo 812", reply_to=blog, mid=4)
     assert env.relayed[-1]["nl"]["why"] in ("passthrough", "reply_blog") and len(env.ctrl.named("attach_late_photo")) == 2
     assert llm.calls == []
+    # 사진을 기다리는 딜 번호와 같아도 '/photo 번호 자리N' 은 블로그 사진 자리 바꾸기 → 블로그로 (딜 사진은 자리가 없다)
+    await env.media(photo=True, caption="/photo 812 자리3", mid=5)
+    assert env.relayed[-1]["nl"]["why"] == "passthrough" and len(env.ctrl.named("attach_late_photo")) == 2
     env.ctrl.waiting_photos = set()
 
 
