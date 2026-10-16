@@ -282,7 +282,8 @@ async def test_live_single_post_sends_the_card_alt_text_and_first_line_disclosur
     lines = p["caption"].splitlines()
     assert lines[0] == "광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다"
     assert lines[1] == "크리넥스 3겹 30m 30롤 15,900원 · 쿠팡 최저가 22,900원"
-    assert "1롤당 가격은 카드 표 둘째 줄에 있어요" in lines and "실시간 전체 딜은 텔레그램에 먼저 올라와요 (프로필 링크)" in lines
+    # 종이 카드(P, 주인 결정 10/16)엔 표가 없음 — 예전 B 의 '카드 표 둘째 줄에 있어요' 대신
+    assert "1롤당 가격도 카드에 적어 두었어요" in lines and "실시간 전체 딜은 텔레그램에 먼저 올라와요 (프로필 링크)" in lines
     assert "저장해" not in p["caption"] and "보내 주세요" not in p["caption"] and "http" not in p["caption"]
     assert bot.db.ig_item(1)["status"] == "posted" and bot.db.ig_item(1)["media_id"] == "5150"
 
