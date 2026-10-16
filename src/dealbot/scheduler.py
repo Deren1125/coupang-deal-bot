@@ -375,6 +375,9 @@ async def run_forever(bot: DealBot) -> None:
     except Exception as e:  # noqa: BLE001 — 어떤 경우에도 봇 프로세스는 살아 있어야 한다
         log.exception("텔레그램 시작 중 예기치 못한 오류 — 오프라인으로 계속합니다: %s", e)
     await bot.start_web()  # 스레드 OAuth 콜백·/health (실패해도 계속)
+    export_links = getattr(bot, "export_channel_links", None)
+    if export_links is not None:
+        export_links()  # 기억한 채널 초대 링크를 Blog-Auto 에 (channel_links.json — 핫딜 블로그 서명의 demiyum 링크)
     log.info("DealBot started: %r (tz=%s)", bot, ZoneInfo(bot.settings.app.timezone))
     bot.db.log_event("INFO", "lifecycle", "started")
     try:

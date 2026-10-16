@@ -5,13 +5,19 @@
   '링크로 초대' 권한이 있어야 한다 — 없으면 켜는 법을 답한다.
 - 가입 세기: chat_member 업데이트(allowed_updates 에 CHAT_MEMBER)에서 그 사람이 어느 초대 링크로 들어왔는지만 본다.
   공개 주소(@채널이름)로 들어온 사람은 링크가 없어 '출처 모름'. 날짜·링크 이름·수만 남긴다 (누가 들어왔는지는 안 남김).
+- Blog-Auto 에 넘기기 (주인 10/16): 기억한 링크를 데이터 폴더(published_deals.jsonl 옆)의 channel_links.json 에 쓴다
+  (켜질 때와 /invitelinks 뒤). 핫딜 블로그(demiyum) 서명이 공개 주소 대신 demiyum 링크를 써서 블로그 독자 가입도 센다.
 """
 
 from __future__ import annotations
 
 import html
+import json
 import logging
+import os
+import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -30,6 +36,9 @@ LABELS = {
     OTHER: "다른 초대 링크",
 }
 KV_PREFIX = "invite_link:"
+EXPORT_FILE = "channel_links.json"
+# 넘기는 주소는 텔레그램 https://t.me/ 주소만 (공개 주소 https://t.me/채널이름 · 초대 링크 https://t.me/+… )
+TME_RE = re.compile(r"^https://t\.me/[A-Za-z0-9_+/-]+$")
 JOINED = ("member", "administrator", "creator")
 LEFT = ("left", "kicked")
 
@@ -46,6 +55,31 @@ def stored_links(db: Any) -> dict[str, str]:
         if url:
             out[name] = url
     return out
+
+
+def export_links(db: Any, data_dir: Path, public_url: str = "", now: datetime | None = None) -> Path | None:
+    """기억한 초대 링크를 Blog-Auto 가 읽는 channel_links.json 에 (임시 파일에 쓴 뒤 바꿔치기 — 읽는 쪽이 반쯤 쓴 파일을 보지 않게).
+    모양: {"v": 1, "telegram_public": "https://t.me/채널", "invites": {"demiyum": "https://t.me/+…", …}, "updated_at": "…"}
+    INVITE_NAMES 의 이름·https://t.me/ 주소만 넣는다. 쓴 파일 경로, 못 썼으면 None (봇은 그대로 돈다)."""
+    links = {name: url for name, url in stored_links(db).items() if TME_RE.match(url.strip())}
+    public = (public_url or "").strip()
+    row = {"v": 1, "telegram_public": public if TME_RE.match(public) else "", "invites": links,
+           "updated_at": (now or datetime.now().astimezone()).isoformat(timespec="seconds")}
+    path = Path(data_dir) / EXPORT_FILE
+    tmp = path.with_name(f".{EXPORT_FILE}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(row, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        os.chmod(tmp, 0o600)  # 초대 링크는 주인만 (Blog-Auto 는 같은 사용자로 돈다)
+        os.replace(tmp, path)
+    except OSError as e:
+        log.warning("channel links export failed: %s", type(e).__name__)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+    return path
 
 
 async def create_links(bot: Any) -> str:

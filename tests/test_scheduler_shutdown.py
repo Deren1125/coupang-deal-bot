@@ -189,3 +189,15 @@ def test_var_dir_points_at_the_repo_checkout() -> None:
     root = Path(sched.__file__).resolve().parents[2]
     if (root / ".git").exists():
         assert sched.VAR_DIR == root / "var"
+
+
+async def test_channel_links_are_exported_at_startup(var_dir: Path) -> None:
+    """켜질 때 기억한 채널 초대 링크를 Blog-Auto 에 넘긴다 (channel_links.json). 없는 봇(예전 판)은 건너뜀."""
+    bot = FakeBot()
+    bot.queue = 0
+    bot.export_channel_links = lambda: bot.calls.append("export_channel_links")  # type: ignore[attr-defined]
+    task = asyncio.create_task(sched.run_forever(bot))  # type: ignore[arg-type]
+    await _until(lambda: "export_channel_links" in bot.calls)
+    os.kill(os.getpid(), signal.SIGTERM)
+    await asyncio.wait_for(task, 5)
+    assert bot.calls.count("export_channel_links") == 1
