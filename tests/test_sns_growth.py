@@ -756,9 +756,9 @@ def _capture_specs(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     specs: list[Any] = []
     render = card_slides.render
 
-    def spy(card: Any, spec: Any) -> Any:
+    def spy(card: Any, spec: Any, layout: str | None = None) -> Any:
         specs.append(spec)
-        return render(card, spec)
+        return render(card, spec, layout)
 
     monkeypatch.setattr(card_slides, "render", spy)
     return specs

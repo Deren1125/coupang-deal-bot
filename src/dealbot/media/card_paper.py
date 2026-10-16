@@ -6,8 +6,8 @@
 - 그리는 글은 모두 SlideSpec 에서 (insta_style.validate 가 spec.texts() 로 고지·근거 없는 말을 본다). 사실 줄·메모는
   card_slides 의 데이터 함수(deal_rows · unit_parts · ad_of)와 CardInfo 의 비교·기록 값으로만 만든다 (deal_spec).
 - 맨 위 첫 줄은 언제나 고지 '광고 · …' — 검은 '광고' 칩 + 나머지 글 (spec.ad 를 그대로 나눠 그림).
-- '#번호' 와 '프로필 링크 → 핫딜 페이지' 는 포스트잇 한 곳에만, 카드마다 한 번. 번호가 없거나 인스타 밖(스레드·블로그) 카드면
-  포스트잇이 없고 바닥 오른쪽에 spec.footer (NEUTRAL_CTA) 만.
+- '#번호' 와 '프로필 링크 → 핫딜 페이지' 는 포스트잇 한 곳에만, 카드마다 한 번. 번호가 없는 인스타 카드는 포스트잇 없이 바닥
+  오른쪽에 '구매 링크는 프로필 링크에서' 한 번, 인스타 밖(스레드·블로그) 카드는 바닥 오른쪽에 spec.footer (NEUTRAL_CTA) 만.
 - 사진이 없으면(네이버 글자 카드·스레드·블로그) 사진 자리에 같은 종이의 이름 카드 — 꾸민 그림·가짜 사진은 없다.
 - 같은 딜이면 늘 같은 그림: 무늬·기울기는 spec 에서 만든 씨앗의 random.Random 으로만 (Image.effect_noise 는 안 씀).
 - 2배 크기로 그리고 마지막에 줄인다 (펜 선·기울인 종이를 깨끗하게). 글꼴은 media/fonts (OFL) — 모듈에서 한 번만 연다.
@@ -40,6 +40,7 @@ SS = 2  # 2배로 그리고 마지막에 줄임
 M = 60  # 바깥 여백 (프로필 격자 3:4 잘림 34px 보다 넉넉히)
 BRAND = "오늘의 핫딜"
 GUIDE = "프로필 링크 → 핫딜 페이지"  # 포스트잇의 구매 안내 (번호와 함께 한 번)
+GUIDE_NO_NUMBER = "구매 링크는 프로필 링크에서"  # 번호 없는 인스타 카드의 바닥 안내 (B 카드·card_slides.deal_spec 과 같은 말)
 STICKY_LABEL = "핫딜 번호"
 MIN_TEXT = 30  # 가장 작은 글 (1080 기준 — 360px 화면에서 10px)
 
@@ -58,11 +59,15 @@ FONT_FILES = {
     "hand": "GamjaFlower-Regular-KSX1001.ttf",  # 빨간 펜 메모·테이프 글씨
 }
 _FALLBACK = {"num": "sb", "hand": "md", "md": "sb"}
-Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
+Font = ImageFont.FreeTypeFont
 
 
-@lru_cache(maxsize=160)
-def _font(key: str, px: int) -> Font:
+class FontMissing(RuntimeError):
+    """한글 글꼴이 하나도 없음 — 고지가 빈 네모로 나오는 카드를 올리지 않게 그리기를 멈춘다 (make_card·캐러셀이 건너뜀)."""
+
+
+@lru_cache(maxsize=64)
+def _font(key: str, px: int) -> ImageFont.FreeTypeFont:
     try:
         return ImageFont.truetype(str(FONT_DIR / FONT_FILES[key]), px)
     except OSError:
@@ -76,13 +81,13 @@ def _font(key: str, px: int) -> Font:
                 return ImageFont.truetype(path, px)
             except OSError:
                 pass
-        log.warning("paper card font missing: %s", FONT_FILES[key])
-        return ImageFont.load_default(size=px)
+        # Pillow 기본 글꼴엔 한글이 없다 → '광고 · …' 고지가 빈 네모. 그런 카드는 그리지 않는다
+        raise FontMissing(f"paper card font missing: {FONT_FILES[key]} (no Korean system font either)") from None
 
 
-def F(key: str, size: float) -> Font:
-    """1배 크기 size 의 글꼴 (2배 캔버스용으로 연다)."""
-    return _font(key, max(1, int(round(size * SS))))
+def F(key: str, size: float) -> ImageFont.FreeTypeFont:
+    """1배 크기 size 의 글꼴 (2배 캔버스용으로 연다). 크기는 1배 정수로 맞춤 — 글꼴 캐시가 연속 값으로 불어나지 않게."""
+    return _font(key, max(1, int(round(size))) * SS)
 
 
 _GLYPH: dict[tuple[str, str], bool] = {}
@@ -332,7 +337,18 @@ def hero_image(photo: Image.Image, bw: int, bh: int, P: dict, rng: random.Random
     if mode == "framed":
         pan = paper((bw, bh), P["panel"], 0.22, corner=1)
         iw, ih = photo.size
-        sc = min(bw * 0.70 / iw, bh * 0.78 / ih, 4.0 * SS)
+        # 아주 길쭉한 사진: 긴 쪽 끝을 조금(합쳐 22%까지)만 잘라 인화지를 키움 — 더 자르면 상품이 잘려 나감
+        target = bw / bh
+        if iw / ih < target / 1.8:
+            ch = max(int(ih * 0.78), min(ih, int(iw / (target / 1.8))))
+            top = (ih - ch) // 2
+            photo = photo.crop((0, top, iw, top + ch))
+        elif iw / ih > target * 1.8:
+            cw = max(int(iw * 0.78), min(iw, int(ih * target * 1.8)))
+            left = (iw - cw) // 2
+            photo = photo.crop((left, 0, left + cw, ih))
+        iw, ih = photo.size
+        sc = min(bw * 0.80 / iw, bh * 0.86 / ih, 4.0 * SS)
         pw, ph = max(1, int(iw * sc)), max(1, int(ih * sc))
         border = S(12)
         fw, fh = pw + 2 * border, ph + 2 * border
@@ -387,6 +403,13 @@ def tape_len(label: str, max_len: float = 520) -> tuple[str, float]:
     while label and tw(f, label) + 64 > max_len:
         label = label[:-1]
     return label, max(170.0, tw(f, label) + 64)
+
+
+def tape_clear_cy(want: float, length: float, angle: float, floor: float) -> float:
+    """기울인 테이프의 가운데 y — 테이프 맨 위가 floor(고지 줄 바닥 + 틈) 아래에 오게. 긴 테이프는 기울이면 위로 솟아 고지를 덮었다."""
+    a = math.radians(abs(angle))
+    rot_h = 58 * math.cos(a) + length * math.sin(a)
+    return max(want, floor + rot_h / 2 + 2)
 
 
 def make_sticky(num: str, guide: list[str], P: dict, size: tuple[int, int]) -> Image.Image:
@@ -577,27 +600,43 @@ def amount_width(value: str, size: float, unit_ratio: float = 0.36) -> float:
     return tw(F("num", size), num) + (size * 0.06 + tw(fu, unit) if unit else 0)
 
 
-def disclosure(d: ImageDraw.ImageDraw, ad: str, paper_col: tuple[int, int, int], *, right: str = "") -> float:
-    """맨 위 첫 줄 고지: 검은 '광고' 칩 + 나머지 ('광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다' 를 그대로 나눠).
-    오른쪽에 장 번호('2/7')가 있으면 그만큼 비우고, 안 들어가면 두 줄로 (MIN_TEXT 보다 작게 줄이지 않음). 고지 줄 바닥 y."""
+def _disc_layout(ad: str, right: str) -> tuple[str, float, float, list[str]]:
+    """고지 줄 배치 (나머지 글, 글 x, 글 크기, 줄들) — 그리기와 높이 재기가 같은 값을 쓰게."""
     rest = ad[2:].lstrip(" ·") if ad.startswith("광고") else ad
-    f_tag = F("sb", 31)
-    ty = 54
-    tag_w = tw(f_tag, "광고") + 24
-    d.rounded_rectangle([S(M), S(ty - 23), S(M + tag_w), S(ty + 23)], radius=S(6), fill=INK)
-    text(d, M + tag_w / 2, ty + 1, "광고", f_tag, paper_col, anchor="mm")
-    fr = F("num", 34)
-    right_w = tw(fr, right) + 28 if right else 0.0
+    tag_w = tw(F("sb", 31), "광고") + 24
+    right_w = tw(F("num", 34), right) + 28 if right else 0.0
     x = M + tag_w + 14
     avail = W - M - right_w - x
     size = fit_size(rest, "sb", 34, avail, MIN_TEXT)
     f = F("sb", size)
     lines = wrap(rest, f, avail) if tw(f, rest) > avail else [rest]  # 고지는 자르지 않는다 (몰 고지 짧은 꼴은 48자까지)
+    return rest, x, size, lines
+
+
+DISC_TY = 54  # 고지 줄 가운데 y
+
+
+def disclosure_bottom(ad: str, right: str = "") -> float:
+    _, _, size, lines = _disc_layout(ad, right)
+    return DISC_TY + 23 + (len(lines) - 1) * size * 1.3
+
+
+def disclosure(d: ImageDraw.ImageDraw, ad: str, paper_col: tuple[int, int, int], *, right: str = "") -> float:
+    """맨 위 첫 줄 고지: 검은 '광고' 칩 + 나머지 ('광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다' 를 그대로 나눠).
+    오른쪽에 장 번호('2/7')가 있으면 그만큼 비우고, 안 들어가면 두 줄로 (MIN_TEXT 보다 작게 줄이지 않음). 고지 줄 바닥 y."""
+    _, x, size, lines = _disc_layout(ad, right)
+    f_tag = F("sb", 31)
+    ty = DISC_TY
+    tag_w = tw(f_tag, "광고") + 24
+    d.rounded_rectangle([S(M), S(ty - 23), S(M + tag_w), S(ty + 23)], radius=S(6), fill=INK)
+    text(d, M + tag_w / 2, ty + 1, "광고", f_tag, paper_col, anchor="mm")
+    f = F("sb", size)
     for i, ln in enumerate(lines):
         text(d, x, ty + 1 + i * size * 1.3, ln, f, INK, anchor="lm")
     if right:  # 장 번호 '2/7' (고지 다음에 그림)
+        fr = F("num", 34)
         text(d, W - M - tw(fr, right), ty + 12, right, fr, SUB)
-    return ty + 23 + (len(lines) - 1) * size * 1.3
+    return disclosure_bottom(ad, right)
 
 
 def folio(d: ImageDraw.ImageDraw, paper_col: tuple[int, int, int], right: str = "") -> None:
@@ -606,10 +645,11 @@ def folio(d: ImageDraw.ImageDraw, paper_col: tuple[int, int, int], right: str = 
     d.line([(S(M), S(fy)), (S(W - M), S(fy))], fill=INK, width=S(1.6))
     price_tag_icon(d, M, fy + 24, 26, hole=paper_col)
     text(d, M + 36, fy + 48, BRAND, F("sb", MIN_TEXT), INK)
-    if right:
-        f = F("md", MIN_TEXT)
+    if right:  # 구매 안내('구매 링크는 프로필 링크에서')는 진하게, 기준 시각 안내는 흐리게
+        guide = right.startswith("구매 링크")
+        f = F("sb" if guide else "md", MIN_TEXT)
         right = ellipsize(right, f, W - 2 * M - 260)
-        text(d, W - M - tw(f, right), fy + 48, right, f, SUB)
+        text(d, W - M - tw(f, right), fy + 48, right, f, INK if guide else SUB)
 
 
 FOLIO = 76  # 바닥 줄 높이
@@ -699,8 +739,8 @@ def facts_of(info: CardInfo, note_kind: str) -> list[tuple[str, str, str]]:
 def deal_spec(info: CardInfo, photo: bytes | None, *, page: str = "") -> SlideSpec:
     """종이 카드 한 장 (딜 하나짜리 글·TOP5 딜 장·사진 없는 글자 카드·스레드·블로그 카드).
     tag = '#번호' (포스트잇, 인스타 카드에 번호가 있을 때만), footer = 포스트잇의 구매 안내 '프로필 링크 → 핫딜 페이지' —
-    인스타 밖 카드(info.cta)는 포스트잇 없이 바닥에 cta. items = 그리는 사실 줄, rows = 그 바탕 데이터(대체 텍스트·본문과 같은 표)."""
-    from dealbot.media.card import NEUTRAL_CTA
+    번호 없는 인스타 카드는 포스트잇 없이 바닥에 '구매 링크는 프로필 링크에서', 인스타 밖 카드(info.cta)는 바닥에 cta.
+    items = 그리는 사실 줄, rows = 그 바탕 데이터(대체 텍스트·본문과 같은 표)."""
     from dealbot.media.card_slides import SlideSpec, ad_of, alt_text, deal_rows
 
     rows = deal_rows(info)
@@ -710,8 +750,8 @@ def deal_spec(info: CardInfo, photo: bytes | None, *, page: str = "") -> SlideSp
     if not instagram:
         footer = info.cta or ""
     else:
-        # 번호가 없으면 핫딜 페이지에서 찾을 수 없다 → 포스트잇·'프로필 링크' 안내 없이 기준 시각 안내만
-        footer = GUIDE if tag else NEUTRAL_CTA
+        # 번호가 없으면 포스트잇 없이 바닥에 B 카드와 같은 안내 한 번 ('#' 없이 — 캡션의 '구매 링크: 프로필 링크 → …' 와 같은 길)
+        footer = GUIDE if tag else GUIDE_NO_NUMBER
     return SlideSpec(
         kind="deal", ad=ad_of(info), head=info.category, tag=tag, page=page, title=info.name,
         big=f"{info.price:,}원" if info.price else "", big_note=note, rows=rows, items=facts_of(info, kind),
@@ -782,26 +822,39 @@ def render_deal(spec: SlideSpec) -> Image.Image:
     sticky_left_beside = has_sticky and not sticky_right and not in_panel
     px0 = M if mirror else 0
     bw = W - M
-    if in_panel:  # 이름 카드 안: 바깥 끝 쪽 여백을 두고 카드 폭 그대로 (포스트잇은 아래 모서리 — 이름은 그 위에서 끝남)
-        name_x = (px0 + 56) if mirror else M + 4
-        name_max = ((W - M - 8) if mirror else (px0 + bw - 56)) - name_x
-        plan: tuple[tuple[float, int], ...] = ((96, 2), (84, 2), (76, 3), (66, 3), (58, 4), (52, 4))
-    elif sticky_left_beside:
-        name_x = sx1 + 34
-        name_max = W - M - name_x
-        plan = ((56, 1), (52, 1), (48, 1), (52, 2), (48, 2), (44, 2))
-    else:
-        name_x = M
-        name_max = (sx0 - 30 - M) if has_sticky else W - 2 * M
-        plan = ((56, 1), (52, 1), (48, 1), (52, 2), (48, 2), (44, 2))
-    name_font, name_lines = fit_lines(spec.title, "sb", name_max, plan)
+    sticky_zone = STICKY_LIFT + STICKY[1] / 2 + 30 if has_sticky else 0
+
+    def panel_name(plan: tuple[tuple[float, int], ...]) -> tuple[float, Font, list[str], bool]:
+        """이름 카드 안의 이름 (x, 글꼴, 줄, 포스트잇 칸을 비켜 카드 전체 가운데에 놓이나)."""
+        x = (px0 + 56) if mirror else M + 4
+        max_w = ((W - M - 8) if mirror else (px0 + bw - 56)) - x
+        f, lines = fit_lines(spec.title, "sb", max_w, plan)
+        if has_sticky:
+            n_x = x if sticky_right else max(x, sx1 + 28)
+            n_max = ((sx0 - 28) if sticky_right else (x + max_w)) - n_x
+            n_f, n_l = fit_lines(spec.title, "sb", n_max, plan)
+            if n_f.size >= f.size - S(12) and len(n_l) <= 3:
+                return n_x, n_f, n_l, True
+        return x, f, lines, False
+
+    def panel_need(font: Font, lines: list[str], full: bool) -> float:
+        """이름 카드에 이 이름이 들어가는 높이 (위아래 여백, 포스트잇 자리 포함)."""
+        block = font.size / SS * 1.2 * len(lines)
+        return max(2 * 84 + block, sticky_zone + 150) if full else 76 + block + (sticky_zone or 76)
+
     name_full_panel = False  # 이름이 포스트잇 칸을 비켜 가서 이름 카드 전체의 가운데에 놓이나
-    if in_panel and has_sticky:
-        n_x = name_x if sticky_right else max(name_x, sx1 + 28)
-        n_max = ((sx0 - 28) if sticky_right else (name_x + name_max)) - n_x
-        n_font, n_lines = fit_lines(spec.title, "sb", n_max, plan)
-        if n_font.size >= name_font.size - S(12) and len(n_lines) <= 3:
-            name_x, name_font, name_lines, name_full_panel = n_x, n_font, n_lines, True
+    if in_panel:  # 이름 카드 안: 바깥 끝 쪽 여백을 두고 카드 폭 그대로 (포스트잇은 아래 모서리 — 이름은 그 위에서 끝남)
+        plan: tuple[tuple[float, int], ...] = ((96, 2), (84, 2), (76, 3), (66, 3), (58, 4), (52, 4))
+        name_x, name_font, name_lines, name_full_panel = panel_name(plan)
+    else:
+        if sticky_left_beside:
+            name_x = sx1 + 34
+            name_max = W - M - name_x
+        else:
+            name_x = M
+            name_max = (sx0 - 30 - M) if has_sticky else W - 2 * M
+        plan = ((56, 1), (52, 1), (48, 1), (52, 2), (48, 2), (44, 2))
+        name_font, name_lines = fit_lines(spec.title, "sb", name_max, plan)
     name_size = name_font.size / SS
     name_lh = name_size * (1.2 if in_panel else 1.26)
     name_block = name_lh * len(name_lines)
@@ -812,23 +865,31 @@ def render_deal(spec: SlideSpec) -> Image.Image:
     note = spec.big_note
     note_min = 250 if note else 0
     p_size = 190.0 if in_panel else 166.0  # 사진이 없으면 가격이 더 크게 (빈 자리 없이)
-    while num and p_size > 100 and tw(F("num", p_size), num) + 10 + tw(f_won, "원") > W - 2 * M - note_min:
-        p_size -= 6
-    f_num = F("num", p_size)
-    cap = -f_num.getbbox("0123456789", anchor="ls")[1] / SS if num else 0.0
-    desc = max(f_num.getbbox(",", anchor="ls")[3] / SS, 4.0) if num else 0.0
-    digits_w = tw(f_num, num) if num else 0.0
-    price_w = digits_w + 10 + tw(f_won, "원") if num else 0.0
 
-    # 빨간 손글씨 메모: 가격 오른쪽에 자리가 없으면 사실 줄로 (같은 글). 메모가 비교 폭이면 사실 줄의 빨간 덧말은 빼서 한 번만
+    def price_w_of(size: float) -> float:
+        return tw(F("num", size), num) + 10 + tw(f_won, "원") if num else 0.0
+
+    while num and p_size > 100 and price_w_of(p_size) > W - 2 * M - note_min:
+        p_size -= 6
+
+    # 빨간 손글씨 메모 자리: 가격 오른쪽 → (안 들어가면) 가격 위 오른쪽 띠에 아래로 짧은 화살표 → 그래도 안 되면 사실 줄 (같은 글).
+    # 메모가 비교 폭이면 사실 줄의 빨간 덧말은 빼서 한 번만
     note_key = hand(note) if note else "hand"
     note_size = 54.0
-    room = W - M - (M + price_w) - 60
-    if note and num and tw(F(note_key, note_size), note) > room:
-        note_size = max(42.0, note_size * room / tw(F(note_key, note_size), note))
+    note_mode = ""
+    if note and num:
+        nw54 = tw(F(note_key, note_size), note)
+        room = W - M - (M + price_w_of(p_size)) - 60
+        if nw54 * 42 / note_size <= room:
+            note_size = min(note_size, max(42.0, note_size * room / nw54))
+            note_mode = "beside"
+        elif nw54 * 44 / note_size <= W - 2 * M - 160:
+            note_size = min(note_size, (W - 2 * M - 160) * note_size / nw54)
+            note_mode = "above"
+    band_h = note_size * 1.25 + 8 if note_mode == "above" else 0.0
     facts = list(spec.items)
     same = [i for i, (_, red, _) in enumerate(facts) if red and note.endswith(red)] if note else []
-    if note and (not num or tw(F(note_key, note_size), note) > room):
+    if note and not note_mode:
         if not same:
             facts.insert(0, (note, "", ""))
         note = ""
@@ -838,39 +899,82 @@ def render_deal(spec: SlideSpec) -> Image.Image:
 
     fact_w = W - 2 * M
     fsz = 38.0 if in_panel else FACT  # 사진이 없으면 사실 줄도 조금 크게
-    facts_h = fact_rows(d, facts, M, 0, fact_w, draw=False, size=fsz)
     g_photo_name, g_name_price, g_bottom = 40.0, 22.0, 26.0
-    g_price_facts = max(34.0, desc + 30) + 14 if num else 10.0
-    price_block = cap if num else 0.0
 
     def p_top_of(gpn: float) -> float:
+        """사진(이름 카드) 아래 끝에서 가격 줄 맨 위까지 (위 메모 띠 포함)."""
         top = gpn + (name_h + g_name_price if name_h else 0)
         if has_sticky and (sticky_left_beside or in_panel):
             top = max(top, overhang + 22)  # 가격 줄은 포스트잇 아래에서
+        if band_h:
+            if has_sticky and sticky_right:
+                top = max(top, overhang + 8)  # 오른쪽 메모 띠는 포스트잇 아래에서
+            top += band_h
         return top
 
-    text_h = p_top_of(g_photo_name) + price_block + g_price_facts + facts_h + g_bottom
-    space = H - FOLIO - text_h - hero_top
-    if in_panel:  # 이름 (+ 포스트잇 자리) 가 들어가는 만큼부터 — 남는 자리는 이름 카드와 글 사이로 나눔
-        sticky_zone = STICKY_LIFT + STICKY[1] / 2 + 30 if has_sticky else 0
-        need = (max(2 * 84 + name_block, sticky_zone + 150) if name_full_panel
-                else 76 + name_block + (sticky_zone or 76))
-        lo, hi = max(360.0, need), max(360.0, need) + 180
+    def measure() -> tuple[float, float, float, float]:
+        """(글자 높이 cap, 쉼표 아래 desc, 가격→사실 줄 틈, 사진 칸에 남는 높이 space)."""
+        f = F("num", p_size)
+        cap_ = -f.getbbox("0123456789", anchor="ls")[1] / SS if num else 0.0
+        desc_ = max(f.getbbox(",", anchor="ls")[3] / SS, 4.0) if num else 0.0
+        gpf = (max(34.0, desc_ + 30) + 14 if facts else desc_ + 20) if num else 10.0  # 사실 줄이 없으면 밑줄 아래만
+        facts_h = fact_rows(d, facts, M, 0, fact_w, draw=False, size=fsz)
+        text_h = p_top_of(g_photo_name) + (cap_ if num else 0.0) + gpf + facts_h + g_bottom
+        return cap_, desc_, gpf, H - FOLIO - text_h - hero_top
+
+    cap, desc, g_price_facts, space = measure()
+    if in_panel:  # 이름 (+ 포스트잇 자리) 가 들어가는 만큼부터 — 남는 자리는 거의 다 이름 카드로 (이름도 그만큼 크게)
+        lo = max(360.0, panel_need(name_font, name_lines, name_full_panel))
     else:
-        lo, hi = 420.0, 800.0
+        lo = 420.0
     while space < lo and len(facts) > 1:  # 넘치면 덜 중요한 줄부터 (평점 → 판매처·배송 …) — 기준 시각이 붙은 기록 줄은 남김
         drop = next((i for i in range(len(facts) - 1, -1, -1) if not facts[i][2]), None)
         if drop is None:
             break
         facts.pop(drop)
-        facts_h = fact_rows(d, facts, M, 0, fact_w, draw=False, size=fsz)
-        text_h = p_top_of(g_photo_name) + price_block + g_price_facts + facts_h + g_bottom
-        space = H - FOLIO - text_h - hero_top
-    hero_h = int(max(lo, min(space, hi)))
-    slack = max(0.0, space - hero_h)
-    g_photo_name += slack * 0.40
-    g_price_facts += slack * 0.25
-    g_bottom += slack * 0.35
+        cap, desc, g_price_facts, space = measure()
+    if in_panel:
+        # 자리가 많이 남으면 가격·사실 줄을 키우고 (메모 자리는 남김), 나머지는 이름 카드가 받는다 — 아래에 빈 띠가 생기지 않게
+        p_max = min(250.0, p_size + 60)
+        while num and p_size < p_max and space - lo > 300:
+            grown = p_size + 6
+            if price_w_of(grown) > W - 2 * M - note_min or (
+                    note_mode == "beside" and tw(F(note_key, note_size), note) > W - M - (M + price_w_of(grown)) - 60):
+                break
+            p_size = grown
+            cap, desc, g_price_facts, space = measure()
+        if facts and space - lo > 360 and fsz < 42:
+            fsz = 42.0
+            cap, desc, g_price_facts, space = measure()
+        extra = max(0.0, space - lo)
+        add_top = min(extra * 0.25, 56.0)
+        add_mid = min(extra * 0.10, 24.0) if facts else 0.0
+        add_bot = min(extra * 0.10, 30.0) if len(facts) >= 2 else min(extra * 0.05, 12.0)
+        g_photo_name += add_top
+        g_price_facts += add_mid
+        g_bottom += add_bot
+        hero_h = int(max(lo, space - add_top - add_mid - add_bot))
+        # 이름 카드가 커졌으면 이름도 크게 (낱말을 자르지 않는 크기만 — 짧은 이름이 넓은 카드에 한 줄로 떠 있지 않게)
+        for size, n in ((140, 2), (128, 2), (116, 2), (106, 3)):
+            if size * SS <= name_font.size:
+                break
+            cand = panel_name(((size, n),))
+            whole = " ".join(cand[2]) == " ".join(spec.title.split())  # 다 들어가고, 낱말 가운데서 끊지 않음
+            if whole and panel_need(cand[1], cand[2], cand[3]) + 40 <= hero_h:
+                name_x, name_font, name_lines, name_full_panel = cand
+                name_size = name_font.size / SS
+                name_lh = name_size * 1.2
+                name_block = name_lh * len(name_lines)
+                break
+    else:
+        hi = 800.0 if len(facts) >= 2 else 900.0  # 사실 줄이 적으면 사진을 더 크게 (글 아래 빈 띠 대신)
+        hero_h = int(max(lo, min(space, hi)))
+        slack = max(0.0, space - hero_h)
+        g_photo_name += slack * 0.40
+        g_price_facts += slack * 0.25
+        g_bottom += slack * 0.35
+    f_num = F("num", p_size)
+    digits_w = tw(f_num, num) if num else 0.0
 
     # ---- 4. 사진 칸 (한쪽 끝으로 붙여, 위에 테이프) / 사진이 없으면 이름 카드
     if photo is not None:
@@ -891,12 +995,12 @@ def render_deal(spec: SlideSpec) -> Image.Image:
             y += name_size
             text(d, name_x, y, ln, name_font, INK)
             y += name_lh - name_size
-    label, t_len = tape_len(spec.head)
+    label, t_len = tape_len(spec.head, 440)
     tape = make_tape(t_len, P["tape"], rng, label)
     t_ang = rng.uniform(4, 8) * (1 if sticky_right else -1)
     t_cx = (M + 130 + rng.uniform(0, 70)) if sticky_right else (W - M - 120 - t_len / 2 - rng.uniform(0, 60))
     t_cx = min(max(t_cx, M + t_len / 2), W - M - t_len / 2)
-    paste_rot(canvas, tape, t_cx, hero_top + 10, t_ang)
+    paste_rot(canvas, tape, t_cx, tape_clear_cy(hero_top + 10, t_len, t_ang, disc_bot + 8), t_ang)
     if has_sticky:
         s_ang = rng.uniform(2.5, 4.5) * (-1 if sticky_right else 1)
         sticky = make_sticky(spec.tag, guide_lines(spec.footer), P, STICKY)
@@ -921,24 +1025,33 @@ def render_deal(spec: SlideSpec) -> Image.Image:
         price_right = end + 10 + tw(f_won, "원")
         pen_underline(d, M - 2, end + 4, p_base + desc + 12, rng)
 
-    # ---- 7. 빨간 손글씨 메모 + 짧은 화살표
+    # ---- 7. 빨간 손글씨 메모 + 짧은 화살표 (가격 오른쪽, 또는 가격 위 오른쪽 띠)
     if note:
         f_hand = F(note_key, note_size)
         nw = tw(f_hand, note)
         layer = Image.new("RGBA", (S(nw + 24), S(note_size * 1.5)), (0, 0, 0, 0))
         ImageDraw.Draw(layer).text((S(10), S(note_size * 1.08)), note, font=f_hand, fill=PEN_RED, anchor="ls",
                                    stroke_width=1 if note_key == "hand" else 0, stroke_fill=PEN_RED)
-        nx0 = min(price_right + rng.uniform(88, 112), W - M - nw)
-        ncy = p_base - cap * rng.uniform(0.66, 0.84)
-        if has_sticky and sticky_right and not in_panel:
-            ncy = max(ncy, hero_bot + overhang + 46 + note_size * 0.55)
-        ncy = min(ncy, p_base - note_size * 0.15)
+        if note_mode == "beside":
+            nx0 = min(price_right + rng.uniform(88, 112), W - M - nw)
+            ncy = p_base - cap * rng.uniform(0.66, 0.84)
+            if has_sticky and sticky_right and not in_panel:
+                ncy = max(ncy, hero_bot + overhang + 46 + note_size * 0.55)
+            ncy = min(ncy, p_base - note_size * 0.15)
+        else:  # 위 띠: 오른쪽 끝에 맞추고, 화살표는 아래 왼쪽 숫자로
+            nx0 = W - M - nw - rng.uniform(0, 14)
+            ncy = p_base - cap - band_h / 2 - 4
         paste_rot(canvas, layer, nx0 + (nw + 24) / 2 - 10, ncy, rng.choice((-1, 1)) * rng.uniform(1.5, 5.0))
         d = ImageDraw.Draw(canvas)
-        start = (nx0 - 18, ncy + note_size * rng.uniform(0.3, 0.5))
-        tip = (price_right + 14, p_base - cap * rng.uniform(0.32, 0.5))
-        if start[0] - tip[0] > 30:
-            hand_arrow(d, start, tip, rng.choice((-1, 1)) * rng.uniform(10, 22), rng, head=rng.choice(("v", "v", "hook")))
+        if note_mode == "beside":
+            start = (nx0 - 18, ncy + note_size * rng.uniform(0.3, 0.5))
+            tip = (price_right + 14, p_base - cap * rng.uniform(0.32, 0.5))
+            if start[0] - tip[0] > 30:
+                hand_arrow(d, start, tip, rng.choice((-1, 1)) * rng.uniform(10, 22), rng, head=rng.choice(("v", "v", "hook")))
+        else:
+            start = (nx0 - 6, ncy + note_size * 0.05)
+            tip = (max(M + 40, min(start[0] - 44, price_right - 30)), p_base - cap - 6)
+            hand_arrow(d, start, tip, rng.choice((-1, 1)) * rng.uniform(4, 9), rng, head="v")
 
     # ---- 8. 체크 표시 사실 줄
     fact_rows(d, facts, M, p_base + g_price_facts if num else hero_bot + p_top_of(g_photo_name) + 10, fact_w, size=fsz)
@@ -949,12 +1062,22 @@ def render_deal(spec: SlideSpec) -> Image.Image:
 
 
 # ---------------------------------------------------------------- 그리기: 표지·단가표 장·마지막 장
-def _title(d: ImageDraw.ImageDraw, title: str, y: float, rng: random.Random, size: float = 80, lines_max: int = 2) -> float:
-    """편집 디자인 제목 (Pretendard SemiBold) — 마지막 줄 아래 빨간 펜 밑줄. 다음 y."""
+def _title_fit(title: str, size: float, lines_max: int) -> tuple[Font, list[str]]:
     parts = [p for p in title.split("\n") if p.strip()]
     f, lines = fit_lines(" ".join(parts), "sb", W - 2 * M, ((size, lines_max), (size - 8, lines_max), (size - 16, lines_max)))
     if len(parts) > 1 and all(tw(f, p) <= W - 2 * M for p in parts) and len(parts) <= lines_max:
         lines = parts
+    return f, lines
+
+
+def _title_h(title: str, size: float = 80, lines_max: int = 2) -> float:
+    f, lines = _title_fit(title, size, lines_max)
+    return f.size / SS * 1.24 * len(lines) + 22
+
+
+def _title(d: ImageDraw.ImageDraw, title: str, y: float, rng: random.Random, size: float = 80, lines_max: int = 2) -> float:
+    """편집 디자인 제목 (Pretendard SemiBold) — 마지막 줄 아래 빨간 펜 밑줄. 다음 y."""
+    f, lines = _title_fit(title, size, lines_max)
     s = f.size / SS
     last_w = 0.0
     for ln in lines:
@@ -967,31 +1090,68 @@ def _title(d: ImageDraw.ImageDraw, title: str, y: float, rng: random.Random, siz
     return y + 22
 
 
+# 목록 줄 크기 차례 (이름 글, 값 글, 줄 간격 배수, 위아래 여백) — 들어가는 첫 크기. 마지막(촘촘)도 안 되면 그때만 줄을 뺀다
+ROW_PLANS = ((42, 72, 1.3, 34), (38, 60, 1.3, 34), (34, 52, 1.25, 22), (32, 46, 1.2, 12))
+
+
+def _row_plan(items: list[tuple[str, str, str]], avail: float) -> tuple[float, float, float, int]:
+    """(이름 글 크기, 값 글 크기, 줄 높이, 그릴 줄 수)."""
+    n = len(items)
+    has_sub = any(sub for _, _, sub in items)
+    plans = ROW_PLANS if n <= 3 else ROW_PLANS[1:]
+    row_min = 1.0
+    for name_size, val_size, lh, pad in plans:
+        row_min = name_size * lh + (MIN_TEXT * lh if has_sub else 0) + pad
+        if row_min * n <= avail:
+            return name_size, val_size, max(row_min, min(avail / n, row_min + 36)), n
+    name_size, val_size, _, _ = plans[-1]
+    return name_size, val_size, row_min, max(0, min(n, int(avail // row_min)))
+
+
+def fit_sub(sub: str, font: Font, max_w: float) -> str:
+    """목록 작은 글을 칸에 — 숫자 가운데서 자르지 않는다: 끝의 '(N%↓)' 를 먼저 빼고, 그래도 길면 낱말(괄호 묶음은 통째로) 단위로 '…'."""
+    if tw(font, sub) <= max_w:
+        return sub
+    short = re.sub(r"\s*\(\d+%↓\)$", "", sub)
+    if tw(font, short) <= max_w:
+        return short
+    tokens = re.findall(r"\([^)]*\)|[^\s(]+", short)
+    while len(tokens) > 1 and tw(font, " ".join(tokens) + "…") > max_w:
+        tokens.pop()
+    out = " ".join(tokens)
+    return out + "…" if tw(font, out + "…") <= max_w else ellipsize(out, font, max_w)
+
+
 def _items(d: ImageDraw.ImageDraw, items: list[tuple[str, str, str]], y: float, bottom: float, P: dict, rng: random.Random,
            *, mark_first: bool = False) -> float:
     """목록: 왼쪽 '#12' (Bodoni) + 이름 한 줄 + 작은 글, 오른쪽 값(Bodoni 숫자 + 단위). 줄 사이 가는 선.
-    딜이 적으면 글을 키우고, 많으면 줄 높이를 맞춘다. 그래도 넘치는 줄은 그리지 않는다. 다음 y."""
+    딜이 적으면 글을 키우고, 많으면 촘촘하게 — 그래도 넘치는 줄만 뺀다 (items_that_fit 과 같은 계산). 다음 y."""
     if not items:
         return y
-    n = len(items)
+    name_size, val_size, row_h, count = _row_plan(items, bottom - y)
+    items = items[:count]
     sub_size = MIN_TEXT
-    name_size, val_size = (42, 72) if n <= 3 else (38, 60)
-    row_min = name_size * 1.3 + sub_size * 1.3 + 34
-    avail = bottom - y
-    if row_min * n > avail:
-        name_size, val_size = 34, 52
-        row_min = name_size * 1.25 + sub_size * 1.25 + 22
-    row_h = max(row_min, min(avail / n, row_min + 36))
     f_name, f_no = F("sb", name_size), F("num", name_size + 6)
+    f_sub = F("md", sub_size)
     nos = [name.partition(" ")[0] for name, _, _ in items if name.startswith("#")]
     no_col = max((tw(f_no, no) for no in nos), default=0.0)
     no_col = no_col + 20 if no_col else 0.0
+    x = M + no_col
+
+    def sub_room(vs: float) -> float:
+        return min(W - M - amount_width(v, vs) - 28 - x for _, v, _ in items) if any(v for _, v, _ in items) else W - M - x
+
+    # 작은 글(비교·기록)이 값 칸에 밀려 잘리면 값 글을 조금 줄여 자리를 냄 (7자리 가격)
+    need = max((tw(f_sub, sub) for _, _, sub in items if sub), default=0.0)
+    for k in (1.0, 0.88, 0.78):
+        if sub_room(val_size * k) >= need:
+            val_size *= k
+            break
+    else:
+        val_size *= 0.78
     line_col = ink(0.18, P["paper"])
     for i, (name, value, sub) in enumerate(items):
-        if y + name_size * 1.25 + (sub_size * 1.25 if sub else 0) + 10 > bottom:
-            break
         no, _, rest = name.partition(" ") if name.startswith("#") else ("", "", name)
-        x = M + no_col
         val_w = amount_width(value, val_size) if value else 0
         right_x = W - M - val_w - 28
         content_h = name_size * 1.25 + (sub_size * 1.3 if sub else 0)
@@ -1000,8 +1160,7 @@ def _items(d: ImageDraw.ImageDraw, items: list[tuple[str, str, str]], y: float, 
             text(d, M, top + name_size, no, f_no, ink(0.82, P["paper"]))
         text(d, x, top + name_size, ellipsize(rest, f_name, right_x - x), f_name, INK)
         if sub:
-            sub_f = F("md", fit_size(sub, "md", sub_size, right_x - x, MIN_TEXT))
-            text(d, x, top + name_size * 1.25 + sub_size * 1.05, ellipsize(sub, sub_f, right_x - x), sub_f, SUB)
+            text(d, x, top + name_size * 1.25 + sub_size * 1.05, fit_sub(sub, f_sub, right_x - x), f_sub, SUB)
         if value:
             base = y + row_h / 2 + val_size * 0.34
             x0, end = draw_amount(d, W - M, base, value, val_size, ink(0.96, P["paper"]), right=True)
@@ -1041,6 +1200,17 @@ def _guide_sticky(footer: str, P: dict, width: float = 400) -> Image.Image:
     return out
 
 
+FOOT_SIZE, FOOT_LH, NOTE_LH = 32, 32 * 1.3, MIN_TEXT * 1.38
+
+
+def _foot_lines(spec: SlideSpec) -> tuple[Font, list[str], list[str]]:
+    """바닥 안내 한 줄 꼴 (구매 안내 글꼴, 그 줄들, 작은 안내 줄들)."""
+    f = F("sb", fit_size(spec.footer, "sb", FOOT_SIZE, W - 2 * M, MIN_TEXT)) if spec.footer else F("sb", FOOT_SIZE)
+    guide = wrap(spec.footer, f, W - 2 * M)[:2] if spec.footer else []
+    notes = wrap(spec.note, F("md", MIN_TEXT), W - 2 * M)[:2] if spec.note else []
+    return f, guide, notes
+
+
 def _bottom(canvas: Image.Image, spec: SlideSpec, y_end: float, P: dict, rng: random.Random) -> Image.Image:
     """표지·단가표 바닥: 목록 아래 자리가 넉넉하면 구매 안내를 포스트잇으로(빈 자리 없이), 아니면 바닥 위 한 줄. 작은 안내."""
     d = ImageDraw.Draw(canvas)
@@ -1053,34 +1223,45 @@ def _bottom(canvas: Image.Image, spec: SlideSpec, y_end: float, P: dict, rng: ra
         paste_rot(canvas, sticky, W - M - 200 + 6, cy, rng.uniform(1.8, 3.2))
         d = ImageDraw.Draw(canvas)
         if note_lines:  # 포스트잇 왼쪽, 바닥 위
-            yy = H - FOLIO - 30 - (len(note_lines) - 1) * MIN_TEXT * 1.38
+            yy = H - FOLIO - 30 - (len(note_lines) - 1) * NOTE_LH
             for ln in note_lines:
                 text(d, M, yy, ln, F("md", MIN_TEXT), QUAL)
-                yy += MIN_TEXT * 1.38
+                yy += NOTE_LH
         return canvas
+    f, guide, notes = _foot_lines(spec)
     yy = H - FOLIO - 26
-    if spec.footer:
-        _foot_guide(d, spec.footer, yy)
-        yy -= 32 * 1.3 * len(wrap(spec.footer, F("sb", fit_size(spec.footer, "sb", 32, W - 2 * M, MIN_TEXT)), W - 2 * M)[:2]) + 8
-    for ln in reversed(wrap(spec.note, F("md", MIN_TEXT), W - 2 * M)[:2] if spec.note else []):
+    for ln in reversed(guide):
+        text(d, M, yy, ln, f, INK)
+        yy -= FOOT_LH
+    if guide:
+        yy -= 8
+    for ln in reversed(notes):
         text(d, M, yy, ln, F("md", MIN_TEXT), QUAL)
-        yy -= MIN_TEXT * 1.38
+        yy -= NOTE_LH
     return canvas
 
 
 def _foot_h(spec: SlideSpec) -> float:
-    """바닥 안내(한 줄 꼴)가 차지하는 높이 — 목록이 여기까지 내려옴."""
-    return (48 if spec.footer else 0) + (2 * MIN_TEXT * 1.38 if spec.note else 0) + 24
+    """바닥 안내(한 줄 꼴)가 차지하는 높이 — 목록이 여기까지 내려옴. _bottom 이 실제로 그리는 줄 수로 잰다."""
+    _, guide, notes = _foot_lines(spec)
+    if not guide and not notes:
+        return 24.0
+    h = 26.0
+    if guide:
+        h += FOOT_LH * len(guide) + 8
+    h += NOTE_LH * len(notes)
+    return h + (30 - NOTE_LH if notes else 32 - FOOT_LH - 8) + 18
 
 
-def _foot_guide(d: ImageDraw.ImageDraw, footer: str, y: float) -> None:
-    """바닥 위 구매 안내 한 줄 (표지·단가표 — 딜이 여럿이라 번호는 목록에)."""
-    if footer:
-        f = F("sb", fit_size(footer, "sb", 32, W - 2 * M, MIN_TEXT))
-        lines = wrap(footer, f, W - 2 * M)[:2]
-        for ln in reversed(lines):
-            text(d, M, y, ln, f, INK)
-            y -= f.size / SS * 1.3
+def _head_bottom(spec: SlideSpec, title_size: float) -> float:
+    """_head 가 그린 뒤의 y (그리지 않고 잼)."""
+    y = disclosure_bottom(spec.ad, spec.tag) + 40
+    if spec.head:
+        y += 70
+    y += 10 + _title_h(spec.title, title_size)
+    if spec.big_note:
+        y += 44 * len(wrap(spec.big_note, F("md", 32), W - 2 * M)[:2])
+    return y + 30
 
 
 def _head(canvas: Image.Image, spec: SlideSpec, P: dict, rng: random.Random, title_size: float) -> tuple[Image.Image, float]:
@@ -1089,7 +1270,8 @@ def _head(canvas: Image.Image, spec: SlideSpec, P: dict, rng: random.Random, tit
     y = disclosure(d, spec.ad, P["paper"], right=spec.tag) + 40
     if spec.head:
         label, t_len = tape_len(spec.head)
-        paste_rot(canvas, make_tape(t_len, P["tape"], rng, label), M + t_len / 2 - 6, y + 26, rng.uniform(-4, -2))
+        ang = rng.uniform(-4, -2)
+        paste_rot(canvas, make_tape(t_len, P["tape"], rng, label), M + t_len / 2 - 6, tape_clear_cy(y + 26, t_len, ang, y - 32), ang)
         d = ImageDraw.Draw(canvas)
         y += 70
     y = _title(d, spec.title, y + 10, rng, size=title_size)
@@ -1102,14 +1284,41 @@ def _head(canvas: Image.Image, spec: SlideSpec, P: dict, rng: random.Random, tit
     return canvas, y + 30
 
 
+COVER_TITLE, LIST_TITLE = 84, 80
+
+
+def _baseline_h(spec: SlideSpec) -> float:
+    if not spec.rows:
+        return 0.0
+    rest = spec.rows[1][1] if len(spec.rows) > 1 else ""
+    n_rest = len(wrap(rest, F("md", MIN_TEXT), W - 2 * M - 64)[:2]) if rest else 0
+    return 118 + n_rest * MIN_TEXT * 1.4
+
+
+def _list_frame(spec: SlideSpec) -> tuple[float, float]:
+    """표지·단가표의 목록 칸 (위 y, 아래 y)."""
+    top = _head_bottom(spec, COVER_TITLE if spec.kind == "cover" else LIST_TITLE)
+    box_h = _baseline_h(spec) if spec.kind == "list" else 0.0
+    return top, H - FOLIO - _foot_h(spec) - (box_h + 30 if box_h else 0)
+
+
+def items_that_fit(spec: SlideSpec) -> int:
+    """표지·단가표 장에 그려지는 목록 줄 수 (_items 와 같은 계산). 다른 장은 spec.items 전부."""
+    if spec.kind not in ("cover", "list") or not spec.items:
+        return len(spec.items)
+    top, bottom = _list_frame(spec)
+    return _row_plan(spec.items, bottom - top)[3]
+
+
 def render_cover(spec: SlideSpec) -> Image.Image:
     """표지 (TOP5·단가표): 고지, 날짜 테이프, 편집 디자인 제목, 목록, 구매 안내(포스트잇 또는 한 줄)."""
     rng = seed_of("cover", spec.title, spec.head, spec.tag)
     P = theme_of(spec.title, rng)
     canvas = paper((S(W), S(H)), P["paper"]).convert("RGBA")
-    canvas, y = _head(canvas, spec, P, rng, 84)
+    canvas, y = _head(canvas, spec, P, rng, COVER_TITLE)
     d = ImageDraw.Draw(canvas)
-    y = _items(d, spec.items, y, H - FOLIO - _foot_h(spec), P, rng)
+    _, bottom = _list_frame(spec)
+    y = _items(d, spec.items, y, bottom, P, rng)
     canvas = _bottom(canvas, spec, y, P, rng)
     folio(ImageDraw.Draw(canvas), P["paper"])
     return canvas.convert("RGB").resize((W, H), Image.Resampling.LANCZOS)
@@ -1120,14 +1329,10 @@ def render_list(spec: SlideSpec) -> Image.Image:
     rng = seed_of("list", spec.title, spec.head, spec.tag)
     P = theme_of(f"{spec.head} {spec.title}", rng)
     canvas = paper((S(W), S(H)), P["paper"]).convert("RGBA")
-    canvas, y = _head(canvas, spec, P, rng, 80)
+    canvas, y = _head(canvas, spec, P, rng, LIST_TITLE)
     d = ImageDraw.Draw(canvas)
-    box_h = 0.0
-    if spec.rows:
-        rest = spec.rows[1][1] if len(spec.rows) > 1 else ""
-        n_rest = len(wrap(rest, F("md", MIN_TEXT), W - 2 * M - 64)[:2]) if rest else 0
-        box_h = 118 + n_rest * MIN_TEXT * 1.4
-    bottom = H - FOLIO - _foot_h(spec) - (box_h + 30 if box_h else 0)
+    box_h = _baseline_h(spec)
+    _, bottom = _list_frame(spec)
     y = _items(d, spec.items, y, bottom, P, rng, mark_first=True)
     if spec.rows:
         canvas = _baseline_card(canvas, spec.rows, y + 22, box_h, P, rng)

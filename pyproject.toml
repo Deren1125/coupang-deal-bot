@@ -15,7 +15,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "tzdata>=2024.1",
     "anthropic>=1.5,<2",
-    "Pillow>=10",
+    "Pillow>=10.1",
     # 막힌 네이버 스토어 페이지를 발행 직전 한 번 실제 크롬으로 (10/10). 서버는 블로그 봇과 같은 버전 → 같은 크롬(chromium-1243)을 함께 씀
     "playwright==1.63.0",
 ]

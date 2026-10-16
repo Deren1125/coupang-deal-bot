@@ -491,9 +491,10 @@ _RENDER = {
 }
 
 
-def render(card: DealCard, spec: SlideSpec) -> Image.Image:
-    """장 하나를 그림. 카드 양식이 P(종이 카드)면 4:5 장(deal·cover·list·end)은 card_paper 로 — 릴스 화면은 양식과 상관없이 그대로."""
-    if getattr(card, "layout", "") == PAPER:
+def render(card: DealCard, spec: SlideSpec, layout: str | None = None) -> Image.Image:
+    """장 하나를 그림. 양식(layout, 없으면 카드 기본 양식)이 P(종이 카드)면 4:5 장(deal·cover·list·end)은 card_paper 로 —
+    릴스 화면은 양식과 상관없이 그대로. 한 번만 다른 양식으로 그릴 때(DealCard.render(..., layout=))는 layout 을 넘긴다."""
+    if (layout or getattr(card, "layout", "")) == PAPER:
         from dealbot.media import card_paper
 
         if spec.kind in card_paper.RENDER:

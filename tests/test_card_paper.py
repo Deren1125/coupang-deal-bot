@@ -2,7 +2,7 @@
 
 - 크기 1080×1350, 사진 있음·없음·깨짐·아주 작음·아주 넓음·흰 바탕·투명 PNG·한 색뿐인 그림
 - 맨 처음 그리는 글 = 고지 ('광고' 칩 + 몰 고지 그대로), spec.texts() 첫 글도 '광고 · …'
-- '#번호' 와 '프로필 링크 → 핫딜 페이지' 는 카드에 한 번 (포스트잇). 번호가 없거나 스레드·블로그 카드면 둘 다 없음
+- '#번호' 와 '프로필 링크 → 핫딜 페이지' 는 카드에 한 번 (포스트잇). 번호 없는 인스타 카드는 바닥에 '구매 링크는 프로필 링크에서' 한 번, 스레드·블로그 카드는 둘 다 없음
 - 긴 이름·빠진 줄에도 글이 카드 밖으로 나가지 않음, 가장 작은 글 30px (360px 화면에서 읽힘)
 - 같은 딜이면 같은 그림 (난수는 딜에서 만든 씨앗으로만)
 - 비교 가격엔 취소선이 없고, 말은 데이터로만 (평소/최저가 메모는 CardInfo 의 비교 근거에서)
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -170,18 +171,53 @@ def test_number_and_profile_guide_appear_once(r: TemplateRenderer, kind: str, mo
     assert "핫딜 번호" in drawn.texts
 
 
-@pytest.mark.parametrize("cta", [NEUTRAL_CTA, None])
-def test_cards_without_a_page_number_have_no_number_or_profile_guide(r: TemplateRenderer, cta: str | None,
-                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
-    """스레드·블로그 카드(cta): 구매 링크는 글 안에 → '#번호'·'프로필' 없이 바닥에 NEUTRAL_CTA.
-    번호가 없는 인스타 카드: 핫딜 페이지에서 찾을 수 없으니 '프로필 링크 → 핫딜 페이지' 도 쓰지 않는다."""
-    info = replace(_info(r, deal_no=5 if cta else None), cta=cta)
+def test_threads_and_blog_cards_have_no_number_or_profile_guide(r: TemplateRenderer, monkeypatch: pytest.MonkeyPatch) -> None:
+    """스레드·블로그 카드(cta): 구매 링크는 글 안에 → '#번호'·'프로필' 없이 바닥에 NEUTRAL_CTA."""
+    info = replace(_info(r, deal_no=5), cta=NEUTRAL_CTA)
     spec = card_paper.deal_spec(info, None)
     assert spec.tag == "" and spec.footer == NEUTRAL_CTA
     assert not any("프로필" in t for t in spec.texts()) and not any(t.startswith("#") for t in spec.texts())
     drawn = Drawn(monkeypatch)
     card_paper.render(spec)
     assert drawn.count("프로필") == 0 and not any(t.startswith("#") for t in drawn.texts) and NEUTRAL_CTA in drawn.texts
+
+
+@pytest.mark.parametrize("kind", ["photo", "none"])
+def test_instagram_card_without_a_number_still_says_where_to_buy_once(r: TemplateRenderer, kind: str,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """번호 없는 인스타 카드(_page_deal_no 가 None·번호 없는 TOP5 딜): 포스트잇·'#' 없이 바닥에 B 카드와 같은 '구매 링크는 프로필 링크에서' 한 번
+    (캡션의 '구매 링크: 프로필 링크 → 핫딜 페이지' 와 같은 길 — 카드만 구매 안내가 빠지지 않게)."""
+    spec = card_paper.deal_spec(_info(r, deal_no=None), PHOTOS[kind])
+    assert spec.tag == "" and spec.footer == card_paper.GUIDE_NO_NUMBER == "구매 링크는 프로필 링크에서"
+    drawn = Drawn(monkeypatch)
+    card_paper.render(spec)
+    assert drawn.texts.count(card_paper.GUIDE_NO_NUMBER) == 1 and drawn.count("프로필") == 1
+    assert not any(t.startswith("#") for t in drawn.texts) and "핫딜 번호" not in drawn.texts
+    assert NEUTRAL_CTA not in drawn.texts
+    # B 카드도 같은 말 (되돌리기 해도 안내가 같음)
+    assert card_slides.deal_spec(_info(r, deal_no=None), None).footer == card_paper.GUIDE_NO_NUMBER
+
+
+@pytest.mark.parametrize("deal_no", [70, 71])
+@pytest.mark.parametrize("category", ["생활용품 욕실용품 세면용품 칫솔치약 세트 구성", "스킨케어 메이크업 세트 한정판 기획"])
+def test_tape_never_covers_the_disclosure(r: TemplateRenderer, deal_no: int, category: str,
+                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """사진 위 테이프(분류 이름)는 기울어도 맨 위 고지 줄 아래에서 시작 — 긴 분류 이름의 긴 테이프가 고지 글자를 덮었다."""
+    for photo in (PHOTOS["photo"], None):
+        spec = card_paper.deal_spec(replace(_info(r, deal_no=deal_no), category=category), photo)
+        tops: list[float] = []
+        real = card_paper.paste_rot
+
+        def spy(canvas: Image.Image, layer: Image.Image, cx: float, cy: float, angle: float,
+                real: Any = real, tops: list[float] = tops) -> tuple[float, float]:
+            w, h = real(canvas, layer, cx, cy, angle)
+            tops.append(cy - h / 2)
+            return w, h
+
+        monkeypatch.setattr(card_paper, "paste_rot", spy)
+        card_paper.render(spec)
+        monkeypatch.undo()
+        assert tops and tops[0] > card_paper.disclosure_bottom(spec.ad, spec.page), (category, deal_no, tops[0])
 
 
 # ---------------------------------------------------------------- 글 배치
@@ -213,6 +249,114 @@ def test_missing_rows_still_make_a_full_card(monkeypatch: pytest.MonkeyPatch) ->
     assert "9,900" in joined and not any(w in joined for w in ("평소", "최저가", "%↓", "역대"))
     no_price = card_paper.render(card_paper.deal_spec(replace(info, price=None, shop_name="쿠팡"), PHOTOS["photo"]))
     assert no_price.size == (1080, 1350)
+
+
+def _plain_band(img: Image.Image, y0: int, y1: int) -> int:
+    """y0~y1 사이에서 글·펜·사진이 하나도 없는(가장 어두운 픽셀도 밝은) 가로 띠의 가장 긴 높이."""
+    g = img.convert("L").crop((card_paper.M, 0, card_paper.W - card_paper.M, img.height))
+    run = best = 0
+    for y in range(y0, y1):
+        lo, _ = g.crop((0, y, g.width, y + 1)).getextrema()
+        run = run + 1 if lo > 170 else 0
+        best = max(best, run)
+    return best
+
+
+def _panel_bottom(img: Image.Image, panel: tuple[int, int, int], paper_col: tuple[int, int, int]) -> int:
+    """가운데 세로줄에서 이름 카드(판 색)가 끝나는 y."""
+    px = img.convert("RGB")
+    last = 0
+    for y in range(0, int(img.height * 0.85)):
+        row = [px.getpixel((x, y)) for x in range(300, 780, 16)]
+        med = sorted(row, key=sum)[len(row) // 2]
+        if sum((a - b) ** 2 for a, b in zip(med, panel, strict=True)) < sum((a - b) ** 2 for a, b in zip(med, paper_col, strict=True)):
+            last = y
+    return last
+
+
+@pytest.mark.parametrize("deal_no", [88, None])
+def test_no_photo_cards_have_no_large_empty_band(deal_no: int | None) -> None:
+    """사진 없는 카드에 사실 줄이 거의 없어도(가격·이름뿐) 이름 카드 아래 ~ 바닥 사이에 큰 빈 종이 띠가 없다 —
+    남는 자리는 이름 카드·가격이 받는다. 이름이 짧으면 이름 카드가 커진 만큼 이름도 크게."""
+    ad = "광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다"
+    for info in (CardInfo(name="오뚜기 진라면 매운맛 120g 40개", price=23900, category="식품", deal_no=deal_no, ad=ad),
+                 CardInfo(name="곰곰 맥반석 구운란", price=9800, shop_name="쿠팡", category="식품", deal_no=deal_no, ad=ad,
+                          cta=NEUTRAL_CTA if deal_no is None else None)):
+        spec = card_paper.deal_spec(info, None)
+        img = card_paper.render(spec)
+        P = card_paper.theme_of(spec.head, card_paper.seed_of("deal", spec.tag, spec.title, spec.big, spec.head))
+        top = _panel_bottom(img, P["panel"], P["paper"]) + 30
+        assert top > 400
+        assert _plain_band(img, top, card_paper.H - card_paper.FOLIO - 4) <= 160, info.name
+
+
+def test_pen_note_stays_for_seven_digit_prices(r: TemplateRenderer, monkeypatch: pytest.MonkeyPatch) -> None:
+    """가격이 7자리라 메모가 가격 오른쪽에 안 들어가도 빨간 손글씨 메모는 남는다 (가격 위 오른쪽) — 사실 줄로 내려가지 않음."""
+    for note_info in (replace(_info(r, _deal("삼성 비스포크 냉장고 4도어 875L", price=1890000)), unit=None),
+                      _info(r, _deal("크리넥스 3겹 30m 30롤", price=1299000))):
+        spec = card_paper.deal_spec(note_info, PHOTOS["photo"])
+        assert spec.big_note
+        drawn = Drawn(monkeypatch)
+        card_paper.render(spec)
+        assert drawn.texts.count(spec.big_note) == 1, spec.big_note  # 메모로 한 번 (사실 줄로 그렸다면 같은 글이 사실 줄에)
+        pct = re.search(r"\d+%↓", spec.big_note)
+        if pct:
+            assert drawn.count(pct.group()) == 1  # 비교 폭은 메모에서만
+        assert all(inside for _, _, inside in drawn.items)
+        monkeypatch.undo()
+
+
+def test_list_sub_lines_never_cut_inside_a_number() -> None:
+    f = card_paper.F("md", card_paper.MIN_TEXT)
+    sub = "쿠팡 최저가 2,299,000원 (18%↓)"
+    assert card_paper.fit_sub(sub, f, 2000) == sub
+    narrow = card_paper.fit_sub(sub, f, card_paper.tw(f, sub) - 10)
+    assert narrow == "쿠팡 최저가 2,299,000원"  # 끝의 '(N%↓)' 를 통째로 뺌
+    rec = "우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)"
+    cut = card_paper.fit_sub(rec, f, card_paper.tw(f, rec) - 40)
+    assert cut == "우리가 본 최근 30일 중 가장 낮음…"  # 괄호 묶음은 통째로 — '(10/15…' 처럼 숫자 가운데서 안 끊음
+
+
+def _unit_card(n: int, *, layout: str = "P") -> tuple[Any, list[card_slides.SlideSpec]]:
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from dealbot.publisher.ig_scheduler import InstagramScheduler
+
+    card = SimpleNamespace(layout=layout)
+    local = datetime(2026, 10, 16, 20, 15, tzinfo=ZoneInfo("Asia/Seoul"))
+    rows = [insta_style.UnitRow(title="휴지·물티슈", kind="휴지", label="1롤당", value=480 + 10 * i, name=f"두루마리 화장지 {i}번 30m 30롤",
+                                price=14400 + 300 * i, deal_no=100 + i if i % 3 else None, product_id=f"c:{i}") for i in range(n)]
+    fake = SimpleNamespace(bot=SimpleNamespace(card=card, renderer=SimpleNamespace(low_min_samples=5),
+                                               registry=SimpleNamespace(get=lambda k: None)),
+                           cfg=SimpleNamespace(unit_carousel=SimpleNamespace(baseline_days=60)))
+    specs = InstagramScheduler.unit_specs(fake, {"휴지 1롤당": rows}, [("휴지", "1롤당", 540, 7)], [], local,  # type: ignore[arg-type]
+                                          local.replace(day=10))
+    return card, specs
+
+
+def test_unit_list_draws_every_row_that_fits_and_the_spec_matches_the_picture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """단가표 장: 자리가 있으면 줄을 빼지 않는다 (촘촘하게 줄여서라도 — B 카드보다 적게 그리지 않음).
+    정말 넘쳐서 빠지는 줄은 spec 에서도 빠짐 (대체 텍스트·검사가 그림과 같은 줄)."""
+    _, specs = _unit_card(6)
+    lst = specs[1]
+    assert len(lst.items) == 6 and card_paper.items_that_fit(lst) == 6
+    drawn = Drawn(monkeypatch)
+    card_paper.render(lst)
+    assert sum(t.startswith("판매가") for t in drawn.texts) == 6
+    assert all(inside for _, _, inside in drawn.items)
+    monkeypatch.undo()
+    _, many = _unit_card(14)
+    lst = many[1]
+    k = card_paper.items_that_fit(lst)
+    assert 6 <= k == len(lst.items) < 14  # paper_fit 이 넘치는 줄을 spec 에서 뺌
+    assert "13번" not in lst.alt and lst.alt.count("두루마리 화장지") == k
+    drawn = Drawn(monkeypatch)
+    card_paper.render(lst)
+    assert sum(t.startswith("판매가") for t in drawn.texts) == k
+    monkeypatch.undo()
+    _, b_specs = _unit_card(14, layout="B")  # B 는 그대로 (B 그림의 줄 수 계산은 바꾸지 않음)
+    assert len(b_specs[1].items) == 14
 
 
 def test_pen_note_and_facts_come_from_the_card_data(r: TemplateRenderer) -> None:
@@ -275,6 +419,16 @@ def test_style_switch_routes_p_to_the_paper_card_and_keeps_b(r: TemplateRenderer
     DealCard(tmp_path, layout="P").render(_deal(), None, info=info)
     DealCard(tmp_path, layout="B").render(_deal(), None, info=info)
     assert called == ["deal"]
+    # 한 번만 다른 양식으로 그려도(render(..., layout=)) 그 양식의 그림 — 카드 기본 양식을 따라 엉뚱한 렌더러로 가지 않음
+    called.clear()
+    drawn = Drawn(monkeypatch)
+    DealCard(tmp_path, layout="B").render(_deal(), None, info=info, layout="P")
+    assert called == ["deal"] and drawn.texts.count("#71") == 1 and "핫딜 번호" in drawn.texts
+    called.clear()
+    drawn.items.clear()
+    DealCard(tmp_path, layout="P").render(_deal(), None, info=info, layout="B")
+    assert called == [] and "핫딜 번호" not in drawn.texts and "핫딜 페이지 #71" not in drawn.texts  # B 그림 (포스트잇 없음)
+    assert "구매 링크: 프로필 링크 → 핫딜 페이지 #71" in drawn.texts
 
 
 def test_caption_card_hint_matches_the_style(r: TemplateRenderer) -> None:
@@ -342,3 +496,27 @@ def test_fonts_and_licenses_are_bundled() -> None:
     assert '"dealbot.media" = ["fonts/*"]' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert card_paper.covers("hand", "1롤당 530원") and not card_paper.covers("hand", "똠")  # 부분 글꼴 밖 글자 → Pretendard
     assert card_paper.hand("뷁똠") == "md"
+
+
+def test_missing_fonts_stop_the_card_instead_of_posting_empty_boxes(r: TemplateRenderer, tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """번들 글꼴도 서버 한글 글꼴도 없으면 Pillow 기본 글꼴(한글 없음 — 고지가 빈 네모)로 그리지 않고 멈춘다 → 올리지 않음."""
+    from dealbot.media import card as card_mod
+
+    monkeypatch.setattr(card_paper, "FONT_DIR", tmp_path / "nofonts")
+    monkeypatch.setattr(card_mod, "FONT_CANDIDATES", [])
+    card_paper._font.cache_clear()
+    try:
+        with pytest.raises(card_paper.FontMissing):
+            card_paper.render(card_paper.deal_spec(_info(r), None))
+    finally:
+        monkeypatch.undo()
+        card_paper._font.cache_clear()
+    assert isinstance(card_paper.F("sb", 40), ImageFont.FreeTypeFont)
+
+
+def test_font_cache_stays_small() -> None:
+    """글꼴 크기는 1배 정수로 맞춰 열어 캐시가 연속 값(메모 크기·맞춤 반복)으로 불어나지 않음 (얼굴 하나 ~0.7MB)."""
+    assert card_paper.F("hand", 47.3) is card_paper.F("hand", 47.0)
+    assert card_paper.F("num", 151.6).size == 152 * card_paper.SS
+    assert card_paper._font.cache_info().maxsize <= 64

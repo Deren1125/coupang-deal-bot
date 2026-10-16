@@ -92,6 +92,17 @@ def _read(path: str | None) -> bytes | None:
         return None
 
 
+def paper_fit(card: object, spec: SlideSpec, alt: Callable[[list[tuple[str, str, str]]], str]) -> SlideSpec:
+    """종이 카드(P) 표지·단가표 장: 자리가 모자라 그려지지 않는 줄은 spec 에서도 뺀다 — 대체 텍스트·검사가 그림과 같은 줄을 보게."""
+    if getattr(card, "layout", "") != card_slides.PAPER:
+        return spec
+    k = card_paper.items_that_fit(spec)
+    if k >= len(spec.items):
+        return spec
+    items = spec.items[:k]
+    return replace(spec, items=items, alt=alt(items))
+
+
 class InstagramScheduler:
     """인스타 대기열과 하루 시간표. bot 은 DealBot (설정·DB·게시기·카드·품절 확인을 그대로 씀)."""
 
@@ -572,6 +583,7 @@ class InstagramScheduler:
             note="가격·재고는 올린 시점 기준이에요", footer="구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로",
             alt=f"{title} 표지 — " + ", ".join(f"{a} {b}" for a, b, _ in rows),
         )
+        cover = paper_fit(self.bot.card, cover, lambda got: f"{title} 표지 — " + ", ".join(f"{a} {b}" for a, b, _ in got))
         if getattr(self.bot.card, "layout", "") == card_slides.PAPER:
             # 종이 카드: 딜 장은 딜 하나짜리 카드와 같은 그림 — 포스트잇에 '#번호' + 구매 안내 한 번, 장 번호는 위 오른쪽
             deals = [card_paper.deal_spec(pk.info, pk.photo, page=f"{i + 2}/{n}") for i, pk in enumerate(picks)]
@@ -733,7 +745,7 @@ class InstagramScheduler:
             note="가격·재고는 올린 시점 기준이에요", footer=footer,
             alt="이번 주 생필품 1개당 가격 표지 — " + ", ".join(week),
         )
-        specs = [cover]
+        specs = [paper_fit(self.bot.card, cover, lambda got: "이번 주 생필품 1개당 가격 표지 — " + ", ".join(a for a, _, _ in got))]
         by_id = {d.product.product_id: d for d in deals}
         for i, (title, rows) in enumerate(week.items(), 2):
             ad = insta_style.ad_line(
@@ -748,14 +760,15 @@ class InstagramScheduler:
                 value, cnt = base[title]
                 line = [("사도 되는 기준선", f"{label} {value:,}원"),
                         ("근거", f"최근 {uc.baseline_days}일 우리가 올린 {rows[0].kind} 딜 {cnt}건의 가운데 값 · 이보다 낮으면 그 절반보다 싸요")]
-            specs.append(SlideSpec(
+            def list_alt(got: list[tuple[str, str, str]], title: str = title, line: list[tuple[str, str]] = line) -> str:
+                return f"{title} 가격 — " + ", ".join(f"{a} {b}" for a, b, _ in got) + (f" · 사도 되는 기준선 {line[0][1]}" if line else "")
+
+            specs.append(paper_fit(self.bot.card, SlideSpec(
                 kind="list", ad=ad, head=f"이번 주 생필품 · {rows[0].title}", tag=f"{i}/{n}", title=f"{title} 가격",
                 big_note=f"{label} 가격 낮은 순 · 우리가 기록한 가격", items=items, rows=line,
                 note=f"가격 기록이 {need}번 이상인 상품만 · {period} 텔레그램에 올린 딜",
-                footer=footer,
-                alt=f"{title} 가격 — " + ", ".join(f"{a} {b}" for a, b, _ in items)
-                + (f" · 사도 되는 기준선 {line[0][1]}" if line else ""),
-            ))
+                footer=footer, alt=list_alt(items),
+            ), list_alt))
         return specs
 
     async def _post_unit(self, now: datetime, local: datetime) -> str:

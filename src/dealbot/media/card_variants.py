@@ -315,10 +315,11 @@ def _whiten_to(photo: Image.Image, color: str) -> Image.Image:
 
 # ---------------------------------------------------------------- B: 가격 정보 카드 (우리 데이터 크게, 사진 작게)
 def layout_b(card: DealCard, info: CardInfo, photo: bytes | None) -> Image.Image:
-    """캐러셀 딜 장과 같은 그림 (card_slides.deal_spec). 사진(바이트)이 없거나 깨졌으면 사진 칸 없이 글만."""
+    """캐러셀 딜 장과 같은 그림 (card_slides.deal_spec). 사진(바이트)이 없거나 깨졌으면 사진 칸 없이 글만.
+    card.layout 과 상관없이 B 그림으로 (card_slides.render 는 카드 양식이 P 면 종이 카드로 보냄 — 한 번만 B 로 그릴 때도 B)."""
     from dealbot.media.card_slides import deal_spec, render
 
-    return render(card, deal_spec(info, photo))
+    return render(card, deal_spec(info, photo), layout="B")
 
 
 # ---------------------------------------------------------------- C: 사진 꽉 채움 + 가격 스티커
@@ -369,10 +370,10 @@ def _sticker(card: DealCard, img: Image.Image, info: CardInfo) -> None:
 
 def layout_p(card: DealCard, info: CardInfo, photo: bytes | None) -> Image.Image:
     """P 종이 카드 (주인 결정 10/16): media/card_paper. 사진이 없거나 깨졌으면 같은 종이의 이름 카드로."""
-    from dealbot.media.card_paper import deal_spec
+    from dealbot.media.card_paper import LAYOUT, deal_spec
     from dealbot.media.card_slides import render
 
-    return render(card, deal_spec(info, photo))
+    return render(card, deal_spec(info, photo), layout=LAYOUT)  # card.layout 과 상관없이 P 그림으로
 
 
 def render_variant(card: DealCard, layout: str, info: CardInfo, photo: bytes | None) -> Image.Image:
