@@ -589,9 +589,11 @@ class InstagramConfig(BaseModel):
     template: str = "deal_instagram.j2"
     refresh_before_days: int = 7
     info_posts: bool = False  # 정보 글(이벤트류)도 올릴지. 기본은 상품 딜만
-    # 카드·본문 양식. current = 지금 쓰는 카드 + template. A/B/C 는 후보 양식(주인이 고르기 전까지 current 유지):
-    # A 사진 크게 + 큰 가격, B 저장각 정보 카드, C 사진 꽉 채움 + 가격 스티커 (본문은 deal_instagram_a/b/c.j2)
-    style: Literal["current", "A", "B", "C"] = "current"
+    # 카드·본문 양식. current = 처음 카드 + template. A/B/C 는 후보 양식:
+    # A 사진 크게 + 큰 가격, B 가격 정보 카드(표), C 사진 꽉 채움 + 가격 스티커 (본문은 deal_instagram_a/b/c.j2),
+    # P 종이 카드 (주인 결정 10/16 '1+2 섞은 안' — 종이 결·테이프·포스트잇 '#번호'·Bodoni 가격 + 빨간 펜 밑줄, media/card_paper.py;
+    # 본문은 B 와 같은 deal_instagram_b.j2). TOP5·단가표 캐러셀도 같은 그림. 되돌리려면 B.
+    style: Literal["current", "A", "B", "C", "P"] = "current"
     # 확인된 상품 사진(deal_photo — 텔레그램에 올린 그 사진)이 없을 때: text_card = 사진 없는 글자 카드로 올림 (기본, 주인 결정 10/15),
     # skip = 인스타엔 안 올리고 기록만. 로고·기본 이미지·게시판 썸네일은 어느 쪽이든 카드에 안 넣는다
     no_photo: Literal["skip", "text_card"] = "text_card"
@@ -607,7 +609,7 @@ class InstagramConfig(BaseModel):
     @field_validator("style", mode="before")
     @classmethod
     def _style_upper(cls, v: Any) -> Any:
-        return v.upper() if isinstance(v, str) and v.lower() in ("a", "b", "c") else v
+        return v.upper() if isinstance(v, str) and v.lower() in ("a", "b", "c", "p") else v
 
     @field_validator("hours")
     @classmethod

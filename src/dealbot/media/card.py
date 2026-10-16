@@ -3,7 +3,7 @@
 인스타그램은 사진 없는 글을 못 올리고 사진 규격(JPEG, 4:5 ~ 1.91:1, 320~1440px)이 있어 게시판 썸네일은 대부분 거절된다.
 그래서 상품 사진에 상품명·가격·할인율을 얹은 카드를 봇이 직접 만들어 공개 도메인(/media/…)으로 서빙한다.
 사진은 텔레그램 글에 쓴 확인된 상품 사진(app.deal_photo)만 받는다 — 여기서 따로 받아 오지 않는다 (로고·기본 이미지가 카드에 크게 들어가던 문제).
-양식(layout): current = 지금 카드, A/B/C = 후보 양식 (media/card_variants.py).
+양식(layout): current = 처음 카드, A/B/C = 후보 양식 (media/card_variants.py), P = 종이 카드 (media/card_paper.py — 기본, 10/16).
 Pillow 만 쓰고, 한글 글꼴은 서버(도커)의 나눔고딕이나 config 로 준 글꼴을 쓴다. 글꼴이 없으면 Pillow 기본 글꼴로라도 만든다.
 """
 
@@ -51,8 +51,8 @@ REGULAR_FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",
     "C:/Windows/Fonts/malgun.ttf",
 ]
-Layout = Literal["current", "A", "B", "C"]
-LAYOUTS: tuple[str, ...] = ("current", "A", "B", "C")
+Layout = Literal["current", "A", "B", "C", "P"]
+LAYOUTS: tuple[str, ...] = ("current", "A", "B", "C", "P")
 
 
 @dataclass(slots=True)
@@ -155,7 +155,7 @@ class DealCard:
         layout: 없으면 이 카드의 기본 양식. A/B/C 는 info(CardInfo) 의 사실로 그린다.
         cta: 바닥 구매 안내를 바꿔 쓴다 (블로그·스레드 카드는 NEUTRAL_CTA — 없으면 인스타용 '프로필 링크' 안내)."""
         layout = layout or self.layout
-        if layout in ("A", "B", "C"):
+        if layout in ("A", "B", "C", "P"):
             from dealbot.media.card_variants import render_variant
 
             if info is None:

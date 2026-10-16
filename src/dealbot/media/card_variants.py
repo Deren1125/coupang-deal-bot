@@ -367,7 +367,17 @@ def _sticker(card: DealCard, img: Image.Image, info: CardInfo) -> None:
     img.paste(layer, (W - layer.width - 30, 30), layer)
 
 
+def layout_p(card: DealCard, info: CardInfo, photo: bytes | None) -> Image.Image:
+    """P 종이 카드 (주인 결정 10/16): media/card_paper. 사진이 없거나 깨졌으면 같은 종이의 이름 카드로."""
+    from dealbot.media.card_paper import deal_spec
+    from dealbot.media.card_slides import render
+
+    return render(card, deal_spec(info, photo))
+
+
 def render_variant(card: DealCard, layout: str, info: CardInfo, photo: bytes | None) -> Image.Image:
+    if layout == "P":
+        return layout_p(card, info, photo)
     if layout == "B":
         return layout_b(card, info, photo)
     src = _open_photo(photo)

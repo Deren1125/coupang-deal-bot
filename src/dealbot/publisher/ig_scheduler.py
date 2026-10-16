@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.media import card_slides, reel
+from dealbot.media import card_paper, card_slides, reel
 from dealbot.media.card import CardInfo
 from dealbot.media.card_slides import GENERIC_AD, SlideSpec, ad_of, deal_rows
 from dealbot.models import Deal, PublishResult
@@ -572,9 +572,13 @@ class InstagramScheduler:
             note="가격·재고는 올린 시점 기준이에요", footer="구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로",
             alt=f"{title} 표지 — " + ", ".join(f"{a} {b}" for a, b, _ in rows),
         )
-        deals = [
-            card_slides.deal_spec(pk.info, pk.photo, tag=f"{i + 2}/{n}", head=f"{title} · {i + 1}") for i, pk in enumerate(picks)
-        ]
+        if getattr(self.bot.card, "layout", "") == card_slides.PAPER:
+            # 종이 카드: 딜 장은 딜 하나짜리 카드와 같은 그림 — 포스트잇에 '#번호' + 구매 안내 한 번, 장 번호는 위 오른쪽
+            deals = [card_paper.deal_spec(pk.info, pk.photo, page=f"{i + 2}/{n}") for i, pk in enumerate(picks)]
+        else:
+            deals = [
+                card_slides.deal_spec(pk.info, pk.photo, tag=f"{i + 2}/{n}", head=f"{title} · {i + 1}") for i, pk in enumerate(picks)
+            ]
         end = SlideSpec(
             kind="end", ad=GENERIC_AD, tag=f"{n}/{n}", title="실시간 전체 딜은\n텔레그램에 먼저", big="프로필 링크",
             note="가격·재고는 올린 시점 기준이에요. 구매 링크도 프로필 링크의 핫딜 페이지에 있어요.", footer=card_slides.BRAND,

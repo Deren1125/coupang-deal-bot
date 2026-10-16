@@ -27,7 +27,8 @@ from dealbot.publisher.templates import TemplateRenderer, price_band, shipping_t
 from dealbot.shops import Shop, deal_disclosure, disclosure_program
 from dealbot.utils.text import clean_name, unit_price
 
-STYLE_TEMPLATES = {"A": "deal_instagram_a.j2", "B": "deal_instagram_b.j2", "C": "deal_instagram_c.j2"}
+# P(종이 카드)의 본문은 B 와 같은 템플릿 — 다른 점은 caption_context 의 카드 안내 줄 하나 (P 카드엔 표가 없음)
+STYLE_TEMPLATES = {"A": "deal_instagram_a.j2", "B": "deal_instagram_b.j2", "C": "deal_instagram_c.j2", "P": "deal_instagram_b.j2"}
 MAX_HASHTAGS = 5
 BRAND_TAG = "#오늘의핫딜"
 SHOP_TAGS = {"coupang": "#쿠팡핫딜", "naver": "#네이버쇼핑"}
@@ -185,8 +186,9 @@ def _dedupe(tags: Iterable[str | None]) -> list[str]:
 
 
 # ---------------------------------------------------------------- 딜 하나짜리 글 (양식 A/B/C)
-def caption_context(deal: Deal, info: CardInfo, *, shop: Shop | None) -> dict[str, Any]:
-    """후보 양식 본문(deal_instagram_a/b/c.j2)의 ig 변수. 첫 줄 고지(first_line), 둘째 줄 사실(hook)."""
+def caption_context(deal: Deal, info: CardInfo, *, shop: Shop | None, style: str = "B") -> dict[str, Any]:
+    """후보 양식 본문(deal_instagram_a/b/c.j2)의 ig 변수. 첫 줄 고지(first_line), 둘째 줄 사실(hook).
+    style P(종이 카드)는 표가 없어 1개당 가격 안내를 '카드에도 적어 두었어요' 로 (빨간 손글씨 메모나 체크 줄에 있음)."""
     p = deal.product
     name = ig_name((p.extra or {}).get("short_name") or short_name(p.name))
     compare = info.ref_text or None
@@ -200,7 +202,7 @@ def caption_context(deal: Deal, info: CardInfo, *, shop: Shop | None) -> dict[st
     notes: list[str] = []
     unit = next((label for label, _ in rows[1:2] if label.endswith("당")), None)
     if unit:
-        notes.append(f"{unit} 가격은 카드 표 둘째 줄에 있어요")
+        notes.append(f"{unit} 가격도 카드에 적어 두었어요" if style == "P" else f"{unit} 가격은 카드 표 둘째 줄에 있어요")
     notes.append(AS_OF_LINE)
     if info.deal_no:
         cta = f"구매 링크: 프로필 링크 → 핫딜 페이지 #{info.deal_no}"

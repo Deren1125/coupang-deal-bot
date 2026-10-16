@@ -400,7 +400,7 @@ class InstagramPublisher:
         self.enabled = enabled
         self.dry_run = dry_run
         self.refresh_before_days = refresh_before_days
-        self.style = style  # current | A | B | C (config instagram.style)
+        self.style = style  # current | A | B | C | P (config instagram.style)
         # 토큰이 가진 권한 기억 (인사이트 — 없으면 대시보드 조회수만 건너뜀)
         self.scopes = ScopeState(db, "instagram", lambda: self.db.kv_get(KV_TOKEN))
 
@@ -439,7 +439,7 @@ class InstagramPublisher:
 
     # ------------------------------------------------------------ 발행
     def render(self, deal: Deal, *, deal_no: int | None = None, style: str | None = None) -> str:
-        """본문. style 이 A/B/C 면 후보 양식 템플릿(deal_instagram_a/b/c.j2), 아니면 config 의 template.
+        """본문. style 이 A/B/C/P 면 후보 양식 템플릿(deal_instagram_a/b/c.j2 — P 는 b), 아니면 config 의 template.
         deal_no: 핫딜 페이지의 번호 (프로필 링크에서 찾는 표시, 후보 양식만 씀)."""
         return self._render(deal, deal_no=deal_no, style=style)[0]
 
@@ -455,7 +455,7 @@ class InstagramPublisher:
         info = insta_style.card_info(deal, self.renderer, shop=shop, deal_no=deal_no)
         extra = None
         if template != self.template:
-            extra = {"ig": insta_style.caption_context(deal, info, shop=shop)}
+            extra = {"ig": insta_style.caption_context(deal, info, shop=shop, style=style)}
         text = self.renderer.render_deal(deal, link, shop=shop, template=template, autoescape=False, extra=extra)[:CAPTION_LIMIT]
         return text, insta_style.backed_phrases(info), alt_text(info)
 

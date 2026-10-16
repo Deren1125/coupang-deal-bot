@@ -55,6 +55,8 @@ FOOT = 96  # 바닥 안내 띠
 PHOTO_MAX = 0.30  # 판매처 사진은 화면 높이의 이만큼까지만
 GENERIC_AD = "광고 · 제휴 링크로 수수료를 받아요"
 SOFT = "#FFF1EE"
+PAPER = "P"  # 종이 카드 양식 (media/card_paper.py — 주인 결정 10/16, 기본)
+SPEC_LAYOUTS = ("P", "B")  # SlideSpec 으로 그리는 양식 (맨 위 고지 줄이 첫 부분)
 
 
 @dataclass(slots=True)
@@ -76,9 +78,11 @@ class SlideSpec:
     footer: str = ""  # 바닥 안내 (구매 링크)
     photo: bytes | None = None  # 확인된 판매처 사진 (작게) — 없으면 글만
     alt: str = ""  # 인스타 대체 텍스트
+    page: str = ""  # 종이 카드(P) 딜 장의 장 번호 '2/7' (tag 는 포스트잇의 '#번호')
 
     def texts(self) -> list[str]:
-        out = [self.ad, self.head, self.tag, self.title, self.big, self.was, self.was_note, self.big_note, self.note, self.footer]
+        out = [self.ad, self.head, self.tag, self.page, self.title, self.big, self.was, self.was_note, self.big_note, self.note,
+               self.footer]
         for a, b in self.rows:
             out += [a, b]
         for a, b, c in self.items:
@@ -176,11 +180,20 @@ class FirstPart:
         return [t for t in self.lines if t]
 
 
+def deal_spec_for(layout: str, info: CardInfo, photo: bytes | None) -> SlideSpec:
+    """딜 하나짜리 카드의 장: P(종이 카드, 기본) 는 card_paper.deal_spec, B 는 deal_spec (예전 가격 정보 카드 — 되돌리기용)."""
+    if layout == PAPER:
+        from dealbot.media import card_paper
+
+        return card_paper.deal_spec(info, photo)
+    return deal_spec(info, photo)
+
+
 def drawn_first_part(layout: str, info: CardInfo, photo: bytes | None) -> SlideSpec | FirstPart:
     """딜 하나짜리 인스타 카드에서 고지가 있어야 할 첫 부분의 글 (insta_style.validate 의 slides 로).
-    B: 캐러셀 딜 장과 같은 그림(deal_spec) — 위 고지 띠가 첫 부분. 다른 양식: 위 칩·상품명·가격뿐 (고지는 바닥이라 첫 부분이 아님)."""
-    if layout == "B":
-        return deal_spec(info, photo)
+    P·B: 캐러셀 딜 장과 같은 그림 — 맨 위 고지 줄이 첫 부분. 다른 양식: 위 칩·상품명·가격뿐 (고지는 바닥이라 첫 부분이 아님)."""
+    if layout in SPEC_LAYOUTS:
+        return deal_spec_for(layout, info, photo)
     return FirstPart([BRAND, info.name, f"{info.price:,}원" if info.price else ""])
 
 
@@ -479,6 +492,12 @@ _RENDER = {
 
 
 def render(card: DealCard, spec: SlideSpec) -> Image.Image:
+    """장 하나를 그림. 카드 양식이 P(종이 카드)면 4:5 장(deal·cover·list·end)은 card_paper 로 — 릴스 화면은 양식과 상관없이 그대로."""
+    if getattr(card, "layout", "") == PAPER:
+        from dealbot.media import card_paper
+
+        if spec.kind in card_paper.RENDER:
+            return card_paper.render(spec)
     return _RENDER[spec.kind](card, spec)
 
 
