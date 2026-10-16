@@ -107,6 +107,7 @@ from dealbot.publisher.digest import BlogDigestBuilder
 from dealbot.publisher.ig_scheduler import InstagramScheduler
 from dealbot.publisher.instagram import InstagramClient, InstagramError, InstagramPublisher
 from dealbot.publisher.rate_limiter import RateLimiter
+from dealbot.publisher.scopes import GRANTED, IG_INSIGHTS, THREADS_INSIGHTS, THREADS_READ_REPLIES
 from dealbot.publisher.telegram import TelegramPublisher
 from dealbot.publisher.templates import TemplateRenderer
 from dealbot.publisher.threads import (
@@ -139,6 +140,16 @@ def _ascii_sub_id(sub_id: str | None) -> str | None:
     return sub_id
 
 log = logging.getLogger(__name__)
+
+# 승인 링크(code 교환)를 메타가 'API access blocked'(code 200) 로 막을 때 — 이 계정은 10/12 에도 토큰 생성기로만 연결됐다 (주인 10/16)
+_AUTH_BLOCKED_HINT = (
+    "\n\n메타가 승인 링크 연결을 막고 있어요(같은 링크를 다시 받아도 똑같이 막혀요). 대신 개발자 화면 {where} 에서 "
+    "토큰을 만들어 <code>{cmd} 토큰</code> 으로 보내 주세요. 지금 연결·게시는 그대로 유지돼요."
+)
+
+
+def _auth_blocked(err: Exception) -> bool:
+    return getattr(err, "code", None) == 200 or "API access blocked" in str(err)
 
 KV_OAUTH_STATE = "threads_oauth_state"
 KV_OAUTH_STATE_AT = "threads_oauth_state_at"
@@ -3154,6 +3165,10 @@ class DealBot:
             try:
                 me = await self.threads.client.me(token.access_token)
                 # 이미 연결돼 있어도 링크는 준다 — 새 권한(통계·답글)을 받으려면 다시 승인해야 함 (주인 10/15: '이미 연결'만 와서 못 함)
+                if all(self.threads.scopes.status(s) == GRANTED for s in (THREADS_INSIGHTS, THREADS_READ_REPLIES)):
+                    # 지금 토큰이 새 권한까지 이미 갖고 있으면 다시 승인할 일이 없다 (주인 10/16: 재승인이 'API access blocked' 로만 끝남)
+                    return (f"✅ 스레드는 이미 연결되어 있고(@{me.get('username')}) 통계·답글 권한도 다 받아져 있어요. "
+                            "다시 승인할 필요 없어요.")
                 lead = (f"이미 연결되어 있어요: @{me.get('username')}. 통계·답글 권한을 받으려면 아래 링크로 한 번 더 승인해 주세요 "
                         "(승인해도 지금 연결은 끊기지 않아요).\n\n")
             except ThreadsError:
@@ -3249,6 +3264,9 @@ class DealBot:
             try:
                 me = await self.instagram.client.me(token.access_token)
                 # 이미 연결돼 있어도 링크는 준다 — 새 권한(통계)을 받으려면 다시 승인해야 함 (주인 10/15)
+                if self.instagram.scopes.status(IG_INSIGHTS) == GRANTED:
+                    return (f"✅ 인스타그램은 이미 연결되어 있고(@{me.get('username')}) 통계 권한도 받아져 있어요. "
+                            "다시 승인할 필요 없어요.")
                 lead = (f"이미 연결되어 있어요: @{me.get('username')}. 통계 권한을 받으려면 아래 링크로 한 번 더 승인해 주세요 "
                         "(승인해도 지금 연결은 끊기지 않아요).\n\n")
             except InstagramError:
@@ -3337,7 +3355,12 @@ class DealBot:
             self.db.log_event("INFO", "instagram", f"authorized as {username}")
             return f"✅ 인스타그램 연결 완료: @{username} (토큰 만료 {expires}, 자동 갱신됨)"
         except InstagramError as e:
-            return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /instaauth 로 다시 받아 주세요."
+            self.db.log_event("WARNING", "instagram", f"authorize failed: {e}")
+            log.warning("instagram authorize failed: %s", e)
+            msg = f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /instaauth 로 다시 받아 주세요."
+            if _auth_blocked(e):
+                msg += _AUTH_BLOCKED_HINT.format(cmd="/instatoken", where="인스타그램 → API 설정 → 2. 액세스 토큰 생성")
+            return msg
 
     async def instagram_submit_token(self, token: str) -> str:
         """/instatoken: 메타 개발자 화면에서 만든 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""
@@ -3510,7 +3533,12 @@ class DealBot:
             self.db.log_event("INFO", "threads", f"authorized as {me.get('username')}")
             return f"✅ 스레드 연결 완료: @{me.get('username')} (토큰 만료 {expires}, 자동 갱신됨)"
         except ThreadsError as e:
-            return f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
+            self.db.log_event("WARNING", "threads", f"authorize failed: {e}")
+            log.warning("threads authorize failed: %s", e)
+            msg = f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /threadsauth 로 다시 받아 주세요."
+            if _auth_blocked(e):
+                msg += _AUTH_BLOCKED_HINT.format(cmd="/threadstoken", where="사용 사례 → Threads API → 설정 → 사용자 토큰 생성기")
+            return msg
 
     async def threads_submit_token(self, token: str) -> str:
         """/threadstoken: 메타 개발자 화면에서 만든 사용자 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""

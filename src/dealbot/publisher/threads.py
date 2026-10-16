@@ -208,6 +208,7 @@ class ThreadsClient:
         short = await self._request(
             "POST",
             f"{GRAPH_BASE}/oauth/access_token",
+            step="oauth_code",
             data={
                 "client_id": self.app_id,
                 "client_secret": self.app_secret,
@@ -223,6 +224,7 @@ class ThreadsClient:
         long = await self._request(
             "GET",
             f"{GRAPH_BASE}/access_token",
+            step="long_token",
             params={
                 "grant_type": "th_exchange_token",
                 "client_secret": self.app_secret,

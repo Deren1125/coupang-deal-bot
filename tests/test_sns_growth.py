@@ -918,3 +918,54 @@ async def test_auth_links_are_given_even_when_already_connected(bot) -> None:  #
     for msg in (await bot.threads_auth_url(), await bot.instagram_auth_url()):
         assert msg.startswith("이미 연결되어 있어요: @oneul_hot_deal") and "한 번 더 승인" in msg
         assert sum(1 for ln in msg.splitlines() if ln.startswith("https://") and "oauth/authorize" in ln) == 2
+
+
+async def test_auth_url_says_nothing_to_do_when_new_scopes_are_already_granted(bot) -> None:  # type: ignore[no-untyped-def]
+    """주인 10/16: 스레드 토큰은 이미 통계·답글 권한이 있었는데 재승인을 시켜 'API access blocked' 만 받았다 —
+    지금 토큰이 새 권한까지 갖고 있으면 링크 대신 '다시 승인할 필요 없음'만 알려 준다."""
+    from types import SimpleNamespace
+
+    from dealbot.publisher import instagram as ig_mod
+    from dealbot.publisher import threads as th_mod
+    from dealbot.publisher.scopes import IG_INSIGHTS, THREADS_INSIGHTS, THREADS_READ_REPLIES
+
+    sec = bot.settings.secrets
+    sec.threads_app_id, sec.threads_app_secret = "TAPP", "TS"
+    sec.instagram_app_id, sec.instagram_app_secret = "IAPP", "IS"
+
+    async def me(_token: str) -> dict:
+        return {"username": "oneul_hot_deal"}
+
+    for svc, kv in ((bot.threads, th_mod.KV_TOKEN), (bot.instagram, ig_mod.KV_TOKEN)):
+        bot.db.kv_set(kv, "tok")
+        svc.stored_token = lambda: SimpleNamespace(access_token="tok")  # type: ignore[method-assign]
+        svc.client.me = me  # type: ignore[method-assign]
+    bot.threads.scopes.mark(THREADS_INSIGHTS, True)
+    msg = await bot.threads_auth_url()
+    assert "한 번 더 승인" in msg, "한 권한만 있으면 아직 링크를 준다"
+    bot.threads.scopes.mark(THREADS_READ_REPLIES, True)
+    bot.instagram.scopes.mark(IG_INSIGHTS, True)
+    for msg in (await bot.threads_auth_url(), await bot.instagram_auth_url()):
+        assert msg.startswith("✅") and "다시 승인할 필요 없어요" in msg and "oauth/authorize" not in msg
+
+
+async def test_blocked_code_exchange_keeps_old_token_and_points_to_token_generator(bot) -> None:  # type: ignore[no-untyped-def]
+    """메타가 code 교환을 'API access blocked'(code 200) 로 막으면: 지금 토큰은 그대로, 실패는 기록, 토큰 생성기 안내."""
+    import httpx
+
+    from dealbot.publisher import threads as th_mod
+
+    sec = bot.settings.secrets
+    sec.threads_app_id, sec.threads_app_secret = "TAPP", "TS"
+    bot.db.kv_set(th_mod.KV_TOKEN, "OLD")
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "API access blocked.", "type": "OAuthException", "code": 200}})
+
+    bot.threads.client = th_mod.ThreadsClient(
+        httpx.AsyncClient(transport=httpx.MockTransport(handler)), app_id="TAPP", app_secret="TS", max_retries=1, retry_backoff=0
+    )
+    msg = await bot.threads_submit_code("CODE")
+    assert msg.startswith("❌") and "(oauth_code)" in msg
+    assert "/threadstoken" in msg and "사용자 토큰 생성기" in msg
+    assert bot.db.kv_get(th_mod.KV_TOKEN) == "OLD"
