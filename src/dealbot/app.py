@@ -3536,8 +3536,19 @@ class DealBot:
             log.warning("chat member update not counted: %s", e)
 
     async def invite_links(self) -> str:
-        """/invitelinks: 이름 붙은 채널 초대 링크 (ig_bio·threads_bio·deals_page·demiyum·qr) 를 만들거나 보여 준다."""
-        return await invites.create_links(self)
+        """/invitelinks: 이름 붙은 채널 초대 링크 (ig_bio·threads_bio·deals_page·demiyum·qr) 를 만들거나 보여 준다.
+        새로 만든 링크도 바로 Blog-Auto 에 넘긴다 (channel_links.json — 핫딜 블로그 서명의 demiyum 링크)."""
+        text = await invites.create_links(self)
+        self.export_channel_links()
+        return text
+
+    def export_channel_links(self) -> Path | None:
+        """기억한 초대 링크를 데이터 폴더(published_deals.jsonl 옆)의 channel_links.json 에 (켜질 때·/invitelinks 뒤)."""
+        try:
+            return invites.export_links(self.db, self.settings.data_dir, self.settings.channels.telegram_url, self.clock())
+        except Exception as e:  # noqa: BLE001 — 넘기기 실패가 봇을 막지 않게
+            log.warning("channel links export failed: %s", type(e).__name__)
+            return None
 
     def channel_guide_text(self) -> str:
         """채널 맨 위에 고정할 짧은 안내 (인스타·스레드·블로그 링크). 구매 링크가 없어 광고 표시는 없고, 채널 글의 제휴 링크 안내만."""

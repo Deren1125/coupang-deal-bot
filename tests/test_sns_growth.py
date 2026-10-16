@@ -545,6 +545,51 @@ async def test_invite_links_are_created_once_and_explained(bot) -> None:  # type
     assert "링크로 초대" in msg and "/invitelinks" in msg and "https://t.me/+IG_BIO" in msg
 
 
+async def test_invite_links_are_handed_to_blogauto_as_channel_links_json(bot) -> None:  # type: ignore[no-untyped-def]
+    """/invitelinks 뒤 데이터 폴더(published_deals.jsonl 옆)의 channel_links.json 에 이름별 링크 (주인 10/16 — 블로그 서명용)."""
+    bot.bot = FakeTgBot()
+    bot.publisher.channel_id = -1001
+    bot.db.kv_set("invite_link:other_place", "https://t.me/+OTHERPLACE1")  # INVITE_NAMES 밖: 안 넘김
+    await bot.invite_links()
+    path = bot.settings.data_dir / invites.EXPORT_FILE
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data) == {"v", "telegram_public", "invites", "updated_at"}
+    assert data["invites"] == {n: f"https://t.me/+{n.upper()}" for n in invites.INVITE_NAMES}
+    assert data["telegram_public"] == bot.settings.channels.telegram_url
+    assert datetime.fromisoformat(data["updated_at"]).tzinfo is not None
+    assert oct(path.stat().st_mode & 0o777) == "0o600"  # 초대 링크는 주인만
+    assert not [p.name for p in path.parent.iterdir() if p.name.endswith(".tmp")]  # 임시 파일 안 남김
+
+
+def test_channel_links_export_keeps_only_telegram_links(bot) -> None:  # type: ignore[no-untyped-def]
+    bot.db.kv_set("invite_link:demiyum", "https://t.me/+DemiyumFake123")
+    bot.db.kv_set("invite_link:qr", "http://t.me/+NOT_HTTPS")
+    bot.db.kv_set("invite_link:ig_bio", "https://evil.example/+x")
+    bot.db.kv_set("invite_link:threads_bio", "https://t.me/+bad link")
+    path = bot.export_channel_links()  # 켜질 때 (run_forever) 부르는 것
+    assert path == bot.settings.data_dir / "channel_links.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["invites"] == {"demiyum": "https://t.me/+DemiyumFake123"}
+    assert invites.export_links(bot.db, bot.settings.data_dir, "javascript:alert(1)") is not None
+    assert json.loads(path.read_text(encoding="utf-8"))["telegram_public"] == ""  # 텔레그램 주소가 아니면 비움
+
+
+def test_channel_links_export_is_atomic(bot, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    """바꿔치기에 실패하면 예전 파일이 그대로 남고 (반쯤 쓴 파일 없음) 봇은 계속 돈다."""
+    bot.db.kv_set("invite_link:demiyum", "https://t.me/+OldLink12345")
+    path = bot.export_channel_links()
+    before = path.read_text(encoding="utf-8")
+    bot.db.kv_set("invite_link:demiyum", "https://t.me/+NewLink12345")
+
+    def boom(*a: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(invites.os, "replace", boom)
+    assert bot.export_channel_links() is None
+    assert path.read_text(encoding="utf-8") == before
+    assert not [p.name for p in path.parent.iterdir() if p.name.endswith(".tmp")]
+
+
 def _member_update(chat_id: int, old: str, new: str, link: Any = None) -> SimpleNamespace:
     return SimpleNamespace(chat_member=SimpleNamespace(
         chat=SimpleNamespace(id=chat_id, username=None), old_chat_member=SimpleNamespace(status=old),
