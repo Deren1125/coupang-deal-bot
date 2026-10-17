@@ -56,7 +56,7 @@ CONFIRM = frozenset({
 })
 DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 # 그 블로그가 자동 발행 모드면 바로 네이버에 공개되는 일 (Blog-Auto nl.CATALOG 의 may_publish 와 같게) — 그때만 ★
-MAY_PUBLISH = frozenset({"blog.retry", "blog.photos", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic"})
+MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic"})
 FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
               "blog.fixpic": "finance"}
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
@@ -334,9 +334,9 @@ def publish_blog(action: str, args: dict[str, Any]) -> str | None:
 
 def needs_confirm(action: str, args: dict[str, Any], *, this_device: bool = True, publish_mode: bool = False) -> bool:
     """★ 확인 창이 필요한가. publish_mode: 그 일이 걸린 블로그가 자동 발행 모드(또는 모름)라 MAY_PUBLISH 일이 바로 공개되는 때."""
-    if action in MAY_PUBLISH:
-        return publish_mode
-    if action not in CONFIRM:
+    if action in MAY_PUBLISH and publish_mode:
+        return True
+    if action not in CONFIRM:  # (blog.fix 처럼 원래 ★ 인 일은 임시저장 모드여도 ★)
         return False
     if action == "blog.mode":
         return args.get("mode") == "publish"
@@ -386,7 +386,9 @@ def confirm_text(action: str, args: dict[str, Any], facts: dict[str, Any]) -> di
         "blog.publish": (f"{blog}{num} 글을 발행할까요?", "네이버 블로그에 바로 올라가요. 발행 후에는 네이버 앱에서만 지울 수 있어요.", "발행"),
         "blog.drop": (f"{blog}{num} 글을 버릴까요?", "이 글은 올리지 않아요. 봇이 만든 임시저장 글만 지워요."
                       + (" 직접 고치신 임시저장 글은 네이버에 그대로 남아요." if edited else ""), "버리기"),
-        "blog.fix": (f"{blog}{num} 글을 말한 대로 고칠까요?", "지금 글을 고쳐 다시 저장해요." + (ed_note if edited else ""), "고치기"),
+        "blog.fix": ((f"{blog}{num} 글을 말한 대로 고칠까요?", "고친 뒤 자동 발행 모드라 바로 네이버에 공개돼요."
+                      + (ed_note if edited else ""), "고치고 발행") if facts.get("publish") else
+                     (f"{blog}{num} 글을 말한 대로 고칠까요?", "지금 글을 고쳐 다시 저장해요." + (ed_note if edited else ""), "고치기")),
         "blog.rewrite": (f"Pick{num} 글을 다시 쓸까요?", "지금 글을 새로 써서 바꿔요." + (ed_note if edited else ""), "다시 쓰기"),
         "blog.restyle": (("Pick 글 전체 스타일을 다시 입힐까요?", "기다리는 Pick 글의 꾸밈을 새로 입혀요. 직접 고친 글은 건너뛰어요.", "스타일 다시")
                          if args.get("pids") == "all" else
@@ -513,10 +515,13 @@ class ActionDesk:
         if action.startswith("blog.") and (down := self._blog_down(action[5:], caller, target, args)) is not None:
             return down  # 확인 창을 띄우기 전에 (맡길 곳이 없는데 '발행할까요?'를 묻지 않게)
         this_device = True
-        need = needs_confirm(action, args, this_device=this_device, publish_mode=self._publish_mode(action, args))
+        pub = self._publish_mode(action, args)
+        need = needs_confirm(action, args, this_device=this_device, publish_mode=pub)
         if need:
             if body.get("ctoken") is None:
                 facts = self.facts(target) if target else {}
+                if pub:
+                    facts = {**facts, "publish": True}
                 tok = self.tokens.issue(caller.session, action, args)
                 return 409, {"status": "confirm", "ctoken": tok, **confirm_text(action, args, facts)}
             if not self.tokens.check(body.get("ctoken"), caller.session, action, args):

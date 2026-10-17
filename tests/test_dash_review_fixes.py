@@ -94,6 +94,22 @@ async def test_may_publish_actions_ask_first_when_the_blog_publishes_directly(bo
     assert pick["confirm"] is False
 
 
+async def test_fix_keeps_its_confirm_and_warns_when_the_blog_publishes_directly(bot: DealBot, settings: Settings,
+                                                                               tmp_path: Path) -> None:
+    """말로 고치기(Blog-Auto /fix 도 may_publish): 임시저장 모드여도 원래대로 ★, 자동 발행 모드면 바로 공개된다고 알린다."""
+    write_export(tmp_path / "blogauto.json", modes={"issue": "publish", "finance": "draft"})
+    blogauto_status(settings)
+    h = session_headers(bot)
+    status, body = await act(bot, "blog.fix", {"blog": "finance", "pid": 4, "text": "제목 차분하게"}, h)
+    assert status == 409 and body["status"] == "confirm" and body["ok"] == "고치기" and "공개" not in body["body"]
+    status, body = await act(bot, "blog.fix", {"blog": "issue", "pid": 3, "text": "제목 차분하게"}, h)
+    assert status == 409 and "바로 네이버에 공개" in body["body"] and body["ok"] == "고치고 발행", body
+    status, body = await act(bot, "blog.fix", {"blog": "issue", "pid": 3, "text": "제목 차분하게"}, h, ctoken=body["ctoken"])
+    assert status == 202
+    [f] = new_files(bot)
+    assert f["action"] == "fix" and f["confirmed"] is True
+
+
 async def test_availability_is_checked_before_the_confirm_sheet(bot: DealBot, settings: Settings) -> None:
     blogauto_status(settings, age=3600)
     status, body = await act(bot, "blog.publish", {"blog": "issue", "pid": 3})

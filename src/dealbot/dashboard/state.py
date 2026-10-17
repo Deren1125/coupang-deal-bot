@@ -131,7 +131,8 @@ class StateBuilder:
     def _mark_publish(a: dict[str, Any], modes: dict[str, str]) -> None:
         """자동 발행 모드 블로그의 MAY_PUBLISH 일은 확인 창이 있다고 표시 (서버 ActionDesk 가 같은 기준으로 409)."""
         if a.get("action") in MAY_PUBLISH:
-            a["confirm"] = modes.get(publish_blog(a["action"], a.get("args") or {}) or "") != "draft"
+            # (blog.fix 처럼 원래 ★ 인 일은 임시저장 모드여도 ★ 그대로)
+            a["confirm"] = bool(a.get("confirm")) or modes.get(publish_blog(a["action"], a.get("args") or {}) or "") != "draft"
 
     def _hhmm(self, dt: datetime) -> str:
         return dt.astimezone(ZoneInfo(self.tz)).strftime("%H:%M")
