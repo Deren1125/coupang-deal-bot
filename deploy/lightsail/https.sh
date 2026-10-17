@@ -86,12 +86,15 @@ if ! command -v caddy >/dev/null; then
 fi
 
 # 사이트 주소: sslip.io 주소 (+ 내 도메인). 둘 다 같은 봇으로 — 예전 리디렉션 주소가 계속 되게
+# 대시보드 앱(/dashboard 아래 — 화면 값 JSON·app.js)은 압축해서 보낸다 (휴대폰 데이터로도 빨리 뜨게, 주인 10/18)
 SITE="$DOMAIN${CUSTOM:+, $CUSTOM} {
+	@dash path /dashboard /dashboard/*
+	encode @dash zstd gzip
 	reverse_proxy 127.0.0.1:$PORT
 }"
 # 설치 직후 기본 Caddyfile 이거나 이 스크립트가 쓴 것이면 통째로 바꾸고,
 # 다른 사이트 설정이 들어 있으면 그대로 두고 핫딜 봇 주소는 따로 파일(dealbot.caddy)로 만들어 import 한 줄만 더한다
-KNOWN='^[[:space:]]*(#.*)?$|^:80 \{$|^[[:space:]]*root \* /usr/share/caddy$|^[[:space:]]*file_server$|^[0-9-]+\.sslip\.io(, [a-z0-9.-]+)? \{$|^[[:space:]]*reverse_proxy 127\.0\.0\.1:[0-9]+$|^\}$'
+KNOWN='^[[:space:]]*(#.*)?$|^:80 \{$|^[[:space:]]*root \* /usr/share/caddy$|^[[:space:]]*file_server$|^[0-9-]+\.sslip\.io(, [a-z0-9.-]+)? \{$|^[[:space:]]*reverse_proxy 127\.0\.0\.1:[0-9]+$|^[[:space:]]*@dash path /dashboard /dashboard/\*$|^[[:space:]]*encode @dash zstd gzip$|^\}$'
 BAK=""
 if [ -s "$CADDY_DIR/Caddyfile" ]; then
   BAK="$CADDY_DIR/Caddyfile.bak-$(date +%m%d_%H%M%S)"
@@ -127,7 +130,7 @@ import re
 import sys
 
 text = open(sys.argv[1], encoding="utf-8").read()
-own = re.compile(r"^[0-9-]+\.sslip\.io(?:, [a-z0-9.-]+)? \{[ \t]*\n(?:[ \t]*reverse_proxy 127\.0\.0\.1:[0-9]+[ \t]*\n)+\}[ \t]*(?:\n|$)", re.M)
+own = re.compile(r"^[0-9-]+\.sslip\.io(?:, [a-z0-9.-]+)? \{[ \t]*\n(?:[ \t]*(?:reverse_proxy 127\.0\.0\.1:[0-9]+|@dash path /dashboard /dashboard/\*|encode @dash zstd gzip)[ \t]*\n)+\}[ \t]*(?:\n|$)", re.M)
 text = own.sub("", text).rstrip("\n") + "\n"
 if sys.argv[2] not in text.splitlines():
     text += "\n" + sys.argv[2] + "\n"

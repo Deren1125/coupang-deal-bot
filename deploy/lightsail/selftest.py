@@ -37,6 +37,25 @@ def _reason(e: BaseException) -> str:
     return f"{type(e).__name__}: {first}"[:300]
 
 
+def _notify_check(s: object) -> None:
+    """대시보드 앱 알림 (주인 10/18): 웹 푸시 암호화가 이 서버에서 되는지 (cryptography), 알림 키 파일이 있으면 읽히는지.
+    키를 만들거나 바꾸지 않고, 값도 출력하지 않는다 (있음/없음만). 알림 길이 legacy 면 건너뜀."""
+    from dealbot.notify import vapid, webpush
+
+    if getattr(getattr(s, "notify", None), "router", "push") != "push":
+        return
+    try:
+        _body = webpush.encrypt(b"selftest", vapid.public_raw(vapid.ec.generate_private_key(vapid.ec.SECP256R1())), b"0" * 16)
+    except Exception as e:  # noqa: BLE001
+        raise CheckFailed(f"웹 푸시 암호화가 안 됨: {_reason(e)}") from e
+    key = getattr(s, "data_dir", None)
+    if key is not None and (key / vapid.KEY_FILE).exists():
+        try:
+            vapid.load_or_create(key)
+        except vapid.VapidError as e:
+            raise CheckFailed(f"알림 키 파일을 읽지 못함 ({e})") from e
+
+
 def run() -> list[str]:
     """점검한 템플릿 이름 목록. 문제가 있으면 예외."""
     import dealbot.scheduler  # noqa: F401  — 봇이 시작할 때 읽는 모듈 전부 (app·admin·발행기)
@@ -45,6 +64,7 @@ def run() -> list[str]:
     from dealbot.publisher.templates import TemplateRenderer
 
     s = load_settings()
+    _notify_check(s)
     r = TemplateRenderer(s.templates_dir, s.app.timezone, s.channels.as_dict())
     names = sorted(p.name for p in s.templates_dir.glob("*.j2"))
     if not names:
@@ -85,7 +105,7 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(_reason(e), file=sys.stderr)
         return 1
-    print(f"점검 통과: 설정 + 템플릿 {len(names)}개")
+    print(f"점검 통과: 설정 + 템플릿 {len(names)}개 + 대시보드 앱 알림")
     return 0
 
 
