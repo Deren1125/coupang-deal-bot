@@ -29,6 +29,9 @@ from telegram.ext import Application
 
 from dealbot import __version__, autolink
 from dealbot.authenticity import AuthResult, check_authenticity
+from dealbot.bridge.actions_out import ActionsOut
+from dealbot.bridge.kakao_out import KakaoOut
+from dealbot.bridge.status import read_blogauto
 from dealbot.collectors import (
     BaseCollector,
     CollectorContext,
@@ -98,6 +101,8 @@ from dealbot.naver_shop import (
     store_name,
     store_product_no,
 )
+from dealbot.notify.digest import Digests
+from dealbot.notify.router import NotifyRouter
 from dealbot.page_price import DISCOUNT_WORDS, PageCheck, check_page_price, hold_line
 from dealbot.page_reader import NEW_PRICE, PageRead, PageReader, RunBudget
 from dealbot.pricing.evaluator import DealEvaluator
@@ -476,6 +481,21 @@ class DealBot:
         # 알림 정책 (주인 결정 10/11): 할 일 카톡은 Blog-Auto 받은편지함으로(v2), Blog-Auto 생존 신호로 카톡이 되는지 본다
         self.notifier.owner_inbox = self.relay_to_blog
         self.notifier.status_path = settings.data_dir / "blogauto_status.json"
+        # ---- 주인 알림 한 곳 (주인 10/18): 대시보드 앱 웹 푸시가 먼저, 카톡은 예비(Blog-Auto 가 보냄), 텔레그램 관리자 챗은 조용히.
+        # 대시보드에서 누른 블로그 일은 Blog-Auto 에 파일로 맡긴다 (bridge/). notify.router: legacy 면 예전 그대로
+        data_dir = settings.data_dir
+        self.kakao_out = KakaoOut(data_dir, bridge_ok=lambda: read_blogauto(data_dir).bridge_ok(), inbox=self.relay_to_blog)
+        self.actions_out = ActionsOut(self.db, data_dir, status=lambda: read_blogauto(data_dir))
+        self.router: NotifyRouter | None = None
+        self.digests: Digests | None = None
+        if settings.notify.router == "push":
+            self.router = NotifyRouter(self.db, data_dir=data_dir, http=self.http, public_url=settings.dashboard.public_url,
+                                       tz=settings.app.timezone, kakao=self.kakao_out, quiet_hours=settings.notify.push_quiet_hours,
+                                       badge=self.todo_count)
+            self.notifier.router = self.router
+            self.digests = Digests(self.db, self.router, tz=settings.app.timezone, export=self._blog_export,
+                                   todo=self._todo_brief)
+        self.dash_state: Any = None  # dashboard.state.StateBuilder (대시보드를 만든 뒤)
         # 말 명령 (주인 요청 10/11): 일반 말 → 기존 명령. AI 는 정보 글 요약기처럼 API 키가 있으면 API, 없으면 서버 claude CLI
         nc = settings.monitoring.nl_router
         self.nl = NLRouter(
@@ -527,6 +547,10 @@ class DealBot:
         self.dashboard: Dashboard | None = None
         try:
             self.dashboard = self._build_dashboard()
+            from dealbot.dashboard.state import StateBuilder
+
+            self.dash_state = StateBuilder(self)
+            self.dashboard.attach_app(self)  # 대시보드 앱 API (/dashboard/api/…, dashboard/api.py)
             self.dashboard.register(self.web)
         except Exception as e:  # noqa: BLE001
             log.exception("dashboard disabled: %s", e)
@@ -789,6 +813,136 @@ class DealBot:
             await self.notifier.send(f"↪️ #{queue_id} 번과 같은 상품이 지금 #{target_id} 번으로 다시 줄 서 있어 #{target_id} 번으로 받아요.",
                                      silent=True)
         return target, target_id
+
+    async def repost_unsure(self, queue_id: int) -> tuple[str, str]:
+        """대시보드 '없어요 · 다시 올리기' (★): '채널에 올라갔는지 모름' 글을 넣어 둔 링크로 다시 올린다 — 오늘 /link N <그 글의 링크>
+        와 똑같다 (attach_link). 링크가 없으면 'no_link' (화면이 '링크 넣기' 를 보여 줌). (코드, 화면 글)."""
+        item = self.db.get_queue_item(queue_id)
+        if item is None:
+            return "not_found", ""
+        if not self._maybe_posted(item):
+            return "wrong_state", "지금은 '채널에 올라갔는지 모름' 딜이 아니에요"
+        link = (item.deal.affiliate_url or "").strip()
+        if not link.startswith("http") or channel_post_ref(link) is not None:
+            return "no_link", ""
+        reply = await self.attach_link(queue_id, link)
+        after = self.db.get_queue_item(queue_id)
+        if after is not None and after.status == "pending":
+            return "done", "다시 올릴 차례에 넣었어요 — 곧 채널에 올라가요"
+        return "wrong_state", truncate(re.sub(r"<[^>]+>", "", reply).split("\n", 1)[0], 100)
+
+    # ------------------------------------------------------------ 대시보드 앱이 읽는 값 (dashboard/state.py)
+    def queue_view(self, limit: int = 10) -> list[dict[str, Any]]:
+        """/queue 의 값 (글이 아니라 줄들): 올릴 차례를 기다리는 딜."""
+        out = []
+        for it in self.db.pending_items(limit):
+            p = it.deal.product
+            shop = self.registry.get(p.shop)
+            out.append({"qid": it.id, "title": truncate(clean_name(p.name), 40), "shop": shop.name if shop else p.shop,
+                        "price": f"{p.price:,}원" if p.has_price else "", "at": it.created_at.timestamp(), "url": None,
+                        "photo": "owner" if p.extra.get("owner_photo") else "none", "score": it.score})
+        return out
+
+    def recent_view(self, limit: int = 10) -> list[dict[str, Any]]:
+        """/recent 의 값: 최근에 올린 글."""
+        out = []
+        for r in self.db.recent_posts(limit):
+            at = from_iso(r.get("posted_at"))
+            out.append({"title": truncate(clean_name(r.get("name") or r["product_id"]), 40), "price": f"{r['price']:,}원" if r.get("price") else "",
+                        "where": self.notifier.source_label(r.get("source") or ""), "at": at.timestamp() if at else None})
+        return out
+
+    def errors_view(self, limit: int = 8) -> list[dict[str, Any]]:
+        """/errors 의 값: 최근 오류 (한 줄씩, 토큰처럼 보이는 글자는 가림)."""
+        from dealbot.dashboard.model import safe_text
+        from dealbot.monitoring.admin import describe_kind
+
+        out = []
+        for e in self.db.recent_events(limit, level="ERROR"):
+            at = from_iso(e.get("ts"))
+            out.append({"at": at.timestamp() if at else None, "where": describe_kind(e["kind"], self.notifier.labels),
+                        "text": safe_text((e.get("message") or "").splitlines()[0] if e.get("message") else "", 120)})
+        return out
+
+    def hot_view(self, n: int = 5, hours: int = 24) -> list[dict[str, Any]]:
+        """/hot 의 값: 최근 추천을 많이 받은 글."""
+        out = []
+        for it in self.db.hot_items(utcnow() - timedelta(hours=hours), min_recommend=max(1, min(n, 100))):
+            at = from_iso(it.get("first_seen_at"))
+            url = it.get("url") if isinstance(it.get("url"), str) and str(it.get("url")).startswith("https://") else None
+            out.append({"title": truncate(it.get("title") or "", 70), "where": self.notifier.source_label(it["source"]),
+                        "recommend": it.get("recommend"), "views": it.get("views"), "comments": it.get("comments"),
+                        "at": at.timestamp() if at else None, "url": url})
+        return out
+
+    def find_view(self, keyword: str) -> list[dict[str, Any]]:
+        """/find 의 값: 수집한 글 중 낱말이 든 것."""
+        out = []
+        for it in self.db.find_items(keyword[:40]):
+            at = from_iso(it.get("first_seen_at"))
+            url = it.get("url") if isinstance(it.get("url"), str) and str(it.get("url")).startswith("https://") else None
+            out.append({"title": truncate(it.get("title") or "", 70), "where": self.notifier.source_label(it["source"]),
+                        "recommend": it.get("recommend"), "at": at.timestamp() if at else None, "url": url})
+        return out
+
+    def replaced_link_view(self) -> list[QueueItem]:
+        """더 좋은 딜에 자리를 내준 글 중 아직 늦게 링크를 받는 것 (유효 시간 안, 같은 상품이 다시 줄 서지 않음)."""
+        ttl = self._link_ttl()
+        now = utcnow()
+        out = []
+        for r in self.db._q("SELECT * FROM deal_queue WHERE status = 'skipped' AND last_error LIKE ? AND created_at >= ? "
+                            "ORDER BY created_at", (REPLACED + "%", to_iso(now - ttl))):
+            it = self.db._row_to_queue_item(r)
+            if not it.link_replaced or now - it.created_at >= ttl:
+                continue
+            if self.db.items_for_product(it.product_id, OPEN_STATUSES):
+                continue  # 같은 상품이 다시 줄 섬 — 그 글이 따로 보인다
+            out.append(it)
+        return out
+
+    def late_photo_view(self, now: datetime | None = None) -> list[tuple[int, datetime]]:
+        """사진을 기다리는 딜 (번호, 끝나는 시각) — 받는 창이 열린 것만."""
+        now = now or self.clock()
+        out = []
+        for r in self.db._q("SELECT key FROM kv WHERE key LIKE 'late_photo:%'"):
+            raw = str(r["key"]).split(":", 1)[1]
+            if not raw.isdigit():
+                continue
+            info = self.late_photo.waiting(int(raw), now)
+            until = from_iso(info.get("until")) if info else None
+            if until is not None:
+                out.append((int(raw), until))
+        return sorted(out, key=lambda x: x[1])
+
+    def blog_ids(self) -> dict[str, str]:
+        """Blog-Auto 블로그 이름 → 네이버 블로그 id (대시보드 카드 설정 — '직접 발행한 주소' 는 이 블로그 글만 받음)."""
+        out = {}
+        for c in self.settings.dashboard.cards:
+            blog, bid = c.options.get("blog"), c.options.get("blog_id")
+            if c.type == "naver_blog" and isinstance(blog, str) and isinstance(bid, str):
+                out[blog.strip().lower()] = bid.strip().lower()
+        return out
+
+    def _blog_export(self) -> Any:
+        reader = getattr(getattr(self.dashboard, "ctx", None), "blogauto", None) if self.dashboard is not None else None
+        try:
+            return reader.read() if reader is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _todo_brief(self) -> list[dict[str, Any]]:
+        """정리의 '기다리는 일' — 대시보드 할 일 줄 (종류·제목만)."""
+        if self.dash_state is None:
+            return []
+        try:
+            return [{"kind": it.get("kind"), "title": it.get("title"), "iid": it.get("iid")} for it in self.dash_state.items()]
+        except Exception as e:  # noqa: BLE001
+            log.warning("todo brief failed: %s", e)
+            return []
+
+    def todo_count(self) -> int:
+        """앱 아이콘 숫자 (할 일 수)."""
+        return len(self._todo_brief())
 
     def attach_auto_link(self, queue_id: int, url: str) -> str | None:
         """쇼핑커넥트 자동 링크를 주인이 답장한 것처럼 붙인다 (같은 확인·같은 재사용 기억). 주인 알림은 없음 (주인 결정 10/11).
@@ -1246,12 +1400,31 @@ class DealBot:
             out.append((None, "채널 대시보드: 만들지 못함 (로그 확인)" if self.settings.dashboard.enabled else "채널 대시보드: 꺼짐"))
         else:
             out.extend(self.dashboard.self_check())
+        out.extend(self._notify_self_check())
         try:  # 내 도메인 (https.sh --domain 으로 옮겼을 때만): DNS A 레코드가 이 서버를 가리키는지. 할 일 알림은 봇 시작 때 따로
             line = await growth_alerts.domain_check(self, alert=False)
             if line is not None:
                 out.append(line)
         except Exception as e:  # noqa: BLE001
             out.append((None, f"내 도메인 확인 못 함: {type(e).__name__}"))
+        return out
+
+    def _notify_self_check(self) -> list[tuple[bool | None, str]]:
+        """주인 알림 길 (주인 10/18): 알림 키 (값은 말하지 않음 — '있음' 만) · 기기 수 · Blog-Auto 다리."""
+        if self.router is None:
+            return [(None, "대시보드 앱 알림: 꺼짐 (notify.router: legacy — 예전처럼 카톡·텔레그램)")]
+        out: list[tuple[bool | None, str]] = []
+        if self.router.load_key():
+            n = len(self.router.devices())
+            out.append((True, f"대시보드 앱 알림 키 있음 · 알림 켠 기기 {n}대") if n else
+                       (None, "대시보드 앱 알림 키 있음 · 아직 알림 켠 기기 없음 (급한 일은 카톡으로) — 앱 '연결' 에서 알림 켜기"))
+        else:
+            out.append((False, f"대시보드 앱 알림 키: {self.router.key_error} — 푸시 꺼짐 (파일은 그대로 둠)"))
+        st = read_blogauto(self.settings.data_dir)
+        if st.bridge_ok():
+            out.append((True, f"Blog-Auto 다리 (대시보드 블로그 일 {len(st.actions)}가지)"))
+        else:
+            out.append((None, "Blog-Auto 다리: 아직 없음 또는 15분 넘게 신호 없음 — 대시보드의 블로그 일은 잠시 쉼"))
         return out
 
     # ------------------------------------------------------------- pipeline
@@ -1503,6 +1676,9 @@ class DealBot:
             return
         text = "📌 " + self.reporter.pending_text(notice=True)
         digest = hashlib.sha1(text.encode()).hexdigest()
+        if self.notifier.tg_quiet:  # 주인 10/18: 고정 공지는 보내지 않는다 (DB 기록만 — 텔레그램에서는 /pending 이 그 자리)
+            self.db.kv_set("pending_notice_hash", digest)
+            return
         if self.db.kv_get("pending_notice_hash") == digest and self.db.kv_get("pending_notice_id"):
             return
         mid = self.db.kv_get("pending_notice_id")
@@ -3154,6 +3330,10 @@ class DealBot:
                 key=f"sns:{cmd}", short=f"{sns} 다시 연결", ttl_h=24,
             )
         else:
+            if self.router is not None:  # 주인 10/18: 연결이 끊긴 게 아닌 실패는 정리의 '소식' (이어지면 sns_zero 가 따로)
+                hour = local_now(self.settings.app.timezone).strftime("%m%d%H")
+                self.notifier.owner_line({"kind": "sns_failed", "key": f"sns_fail:{cmd}:{hour}", "urgent": False,
+                                          "text": f"{sns} 발행 실패", "short": f"{sns} 발행 실패", "ttl_h": 24})
             await self.notifier.send(tg_text)
 
     async def threads_auth_url(self) -> str:
@@ -3248,12 +3428,42 @@ class DealBot:
         )
 
     async def _notify_quiet(self, text: str) -> None:
+        # 주인 10/18: 연결 결과는 대시보드 '연결' 에 (다음에 화면을 열 때 한 번 '스레드 연결됐어요'). 글자는 남기지 않고 결과만
+        plain = re.sub(r"<[^>]+>", "", text or "")
+        ok = plain.lstrip().startswith("✅")
+        who = "인스타" if "인스타" in plain else "스레드" if "스레드" in plain else "SNS"
+        self.db.kv_set("dash:oauth_note", json.dumps({"at": time.time(), "ok": ok,
+                                                     "text": f"{who} 연결됐어요" if ok else f"{who} 연결이 안 됐어요 — 다시 연결해 주세요"},
+                                                    ensure_ascii=False))
         try:
             await self.notifier.send(text, silent=True)
         except Exception as e:  # noqa: BLE001
             log.warning("notify failed: %s", e)
 
     # ----------------------------------------------------------- instagram
+    async def threads_auth_link(self) -> str | None:
+        """대시보드 '다시 연결' (스레드): 승인 화면 주소 하나 (state 를 새로 만들어 둠 — 콜백이 끝냄). 앱 설정이 없으면 None.
+        주소는 302 Location 으로만 주고 어디에도 남기지 않는다."""
+        sec = self.settings.secrets
+        if not sec.has_threads_app:
+            return None
+        state = pysecrets.token_urlsafe(12)
+        self.db.kv_set(KV_OAUTH_STATE, state)
+        self.db.kv_set(KV_OAUTH_STATE_AT, to_iso(utcnow()))
+        return authorize_url(sec.threads_app_id or "", sec.threads_redirect_uri, state=state)
+
+    async def instagram_auth_link(self) -> str | None:
+        """대시보드 '다시 연결' (인스타): 승인 화면 주소 하나. 앱 설정이 없으면 None."""
+        from dealbot.publisher.instagram import authorize_url as ig_authorize_url
+
+        sec = self.settings.secrets
+        if not sec.has_instagram_app:
+            return None
+        state = pysecrets.token_urlsafe(12)
+        self.db.kv_set(KV_IG_OAUTH_STATE, state)
+        self.db.kv_set(KV_IG_OAUTH_STATE_AT, to_iso(utcnow()))
+        return ig_authorize_url(sec.instagram_app_id or "", sec.instagram_redirect_uri, state=state)
+
     async def instagram_auth_url(self) -> str:
         sec = self.settings.secrets
         if not sec.has_instagram_app:
@@ -3867,6 +4077,12 @@ class DealBot:
         pruned["owner_photos"] = self._prune_owner_photos()
         pruned["sns"] = self.db.prune_sns(utcnow() - timedelta(days=self.settings.app.prune_events_days))
         pruned["late_photo"] = self.late_photo.prune()
+        if self.router is not None:  # 주인 알림·푸시 기록 (14일) · 스레드 답글 (7일)
+            now = time.time()
+            pruned["owner_notices"] = self.router.store.prune(now - 14 * 86400)
+            pruned["threads_replies"] = self.router.store.prune_replies(now)
+        with contextlib.suppress(Exception):
+            self.db._conn.execute("DELETE FROM dash_audit WHERE ts < ?", (time.time() - 90 * 86400,))
         log.info("maintenance: pruned %s", pruned)
 
     def __repr__(self) -> str:

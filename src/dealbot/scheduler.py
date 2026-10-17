@@ -333,6 +333,62 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
         await _sleep_or_stop(stop, 60)
 
 
+NOTIFY_TICK_SECONDS = 2.0
+HEARTBEAT_SECONDS = 60.0
+GC_SECONDS = 3600.0
+
+
+async def notify_loop(bot: DealBot, stop: asyncio.Event) -> None:
+    """주인 알림·대시보드 다리 (주인 10/18), 2초마다: Blog-Auto 알림 받기 → 푸시 보내기(묶기·한도) → 블로그 일 결과 읽기.
+    1분마다 생존 신호(dashboard_status.json)·오래된 일 정리·아침/저녁 정리, 1시간마다 받은 파일 정리.
+    하나가 실패해도 나머지는 돈다 (딜 수집·발행 루프와 따로)."""
+    from dealbot.bridge import status as bridge_status
+    from dealbot.notify import ingest
+
+    router = getattr(bot, "router", None)
+    outbox = getattr(bot, "actions_out", None)
+    if router is None and outbox is None:
+        return
+    if router is not None:
+        router.load_key()  # 알림 키 (처음이면 만든다 — 값은 남기지 않음)
+    last_beat = last_gc = 0.0
+    while not stop.is_set():
+        now = time.monotonic()
+        try:
+            if router is not None:
+                ingest.ingest(bot.settings.data_dir, router)
+                await router.tick()
+        except Exception as e:  # noqa: BLE001
+            log.warning("notify tick failed: %s", e)
+        try:
+            if outbox is not None:
+                outbox.ingest()
+        except Exception as e:  # noqa: BLE001
+            log.warning("dashboard results ingest failed: %s", e)
+        if now - last_beat >= HEARTBEAT_SECONDS:
+            last_beat = now
+            try:
+                if router is not None:
+                    bridge_status.write_dashboard(bot.settings.data_dir, push_devices=len(router.devices()),
+                                                  push_ok_at=router.store.last_push_ok())
+                if outbox is not None:
+                    outbox.sweep()
+                digests = getattr(bot, "digests", None)
+                if digests is not None:
+                    await digests.tick()
+            except Exception as e:  # noqa: BLE001
+                log.warning("notify minute jobs failed: %s", e)
+        if now - last_gc >= GC_SECONDS:
+            last_gc = now
+            api = getattr(getattr(bot, "dashboard", None), "api", None)
+            try:
+                if api is not None:
+                    api.uploads.gc()
+            except Exception as e:  # noqa: BLE001
+                log.warning("dashboard upload gc failed: %s", e)
+        await _sleep_or_stop(stop, NOTIFY_TICK_SECONDS)
+
+
 INSTAGRAM_TICK_SECONDS = 60
 
 
@@ -396,6 +452,8 @@ async def run_forever(bot: DealBot) -> None:
                 "설정됨" if bot.settings.secrets.has_telegram else "없음",
                 bot.settings.secrets.telegram_admin_chat_id or "없음",
             )
+        elif bot.notifier.tg_quiet:  # 주인 10/18: 관리자 챗 알림 끔 — 점검 결과는 대시보드 '연결' → 봇 상태, ❌ 는 위에서 할 일로
+            log.info("시작 알림은 보내지 않음 (대시보드 '연결' 에서 봄)")
         elif not startup_notice_due(bot.db, lines):
             log.info("시작 알림 생략 — 자기 점검 결과가 지난 알림과 같습니다 (/status 로 확인)")
         else:
@@ -424,6 +482,7 @@ async def run_forever(bot: DealBot) -> None:
         asyncio.create_task(dashboard_loop(bot, stop), name="dashboard_loop"),
         asyncio.create_task(instagram_loop(bot, stop), name="instagram_loop"),
         asyncio.create_task(sns_loop(bot, stop), name="sns_loop"),
+        asyncio.create_task(notify_loop(bot, stop), name="notify_loop"),
     ]
     try:
         await stop.wait()

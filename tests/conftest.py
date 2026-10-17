@@ -100,6 +100,9 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     # 운영 설정에서는 꺼 둔 복붙 문구·블로그 정리본도 흐름 테스트에서는 켠다
     s.copy_cfg.enabled = True
     s.blog_digest.enabled = True
+    # 주인 알림 길 (주인 10/18): 예전 흐름 테스트는 legacy(카톡 받은편지함 + 텔레그램) 그대로 본다.
+    # push(대시보드 앱 웹 푸시 · 관리자 챗 조용히)는 test_notify_*.py · test_dash_*.py 가 직접 켜서 본다
+    s.notify.router = "legacy"
     return s
 
 

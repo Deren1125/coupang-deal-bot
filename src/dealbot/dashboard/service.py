@@ -26,6 +26,7 @@ import secrets
 from collections import deque
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol
+from urllib.parse import quote
 
 from dealbot.config import DashboardConfig
 from dealbot.dashboard import render, webapp
@@ -38,6 +39,7 @@ from dealbot.dashboard.auth import (
     password_problems,
 )
 from dealbot.dashboard.login import (
+    HOME,
     LOGIN_BODY_MAX,
     LOGIN_COOKIE,
     LOGIN_NOTICES,
@@ -52,6 +54,7 @@ from dealbot.dashboard.login import (
     cookie_values,
     login_cookie,
     login_page,
+    safe_next,
     session_cookie,
     wait_text,
 )
@@ -92,15 +95,20 @@ LINK_RATE = 10  # '링크 넣기' 는 이 프로세스 전체에서 1분에 이�
 _QUEUE_ID_RE = re.compile(r"^[0-9]{1,9}$")
 _NUMBER_RE = re.compile(r"^(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)$")  # 1234 또는 1,234 (전각 숫자·소수·음수는 안 받음)
 _DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
-# 로그인 없이 열면 401 대신 로그인 화면으로 보내는 경로 (브라우저로 여는 화면들). data.json·POST·그 밖은 401
+# 로그인 없이 열면 401 대신 로그인 화면으로 보내는 경로 (브라우저로 여는 화면들 + 알림 바로가기 /dashboard/go/…).
+# /dashboard/api/… 는 401 JSON {"code":"login"} (앱이 로그인 시트를 띄움), 그 밖의 POST·data.json 은 401
 PAGE_PATHS = frozenset({"/dashboard", "/dashboard/", "/dashboard/refresh", "/dashboard/input"})
+PAGE_PREFIXES = ("/dashboard/go/", "/dashboard/connect/")
+API_PREFIX = "/dashboard/api/"
 LOGOUT_BODY_MAX = 1024
+CLASSIC = "classic"  # /dashboard/?view=classic — 예전 한 장 화면 (카드·'링크 넣기' 폼)
 
 SECURITY_HEADERS = {
-    # img-src·manifest-src 'self': 바탕화면 앱 아이콘과 매니페스트 (webapp.py). 나머지는 그대로 아무것도 안 불러옴
+    # 대시보드 앱 (주인 10/18): 스크립트는 이 서버의 파일만 (app.js — 페이지 안 스크립트 없음, boot 는 application/json 이라 실행 안 됨),
+    # 요청은 이 서버로만, 서비스 워커·매니페스트·아이콘도 이 서버
     "Content-Security-Policy": (
-        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; manifest-src 'self'; form-action 'self'; "
-        "base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; "
+        "manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     ),
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
@@ -138,6 +146,15 @@ NOTICES: dict[str, tuple[str, str]] = {
     "link_busy": ("잠깐만요 — 링크 넣기는 1분에 {rate}번까지예요. 조금 뒤에 다시 눌러 주세요.", "bad"),
     "link_off": ("지금은 대시보드에서 링크를 넣을 수 없어요 — 텔레그램 링크 요청에 답장해 주세요.", "bad"),
 }
+
+
+PHOTO_REFUSED_MARK = "사진을 쓸 수 없어 링크도 아직 안 붙였어요"  # monitoring.admin.photo_refused 의 글 (사진만 바꿔 다시 보내면 됨)
+
+
+def _refused_why(reply: str) -> str:
+    """photo_refused 답에서 이유만 (태그·명령 줄 없이)."""
+    first = re.sub(r"<[^>]+>", "", reply.split("\n", 1)[0])
+    return safe_text(first.split(":", 1)[-1].strip(), 80)
 
 
 class LinkDesk(Protocol):
@@ -188,6 +205,13 @@ class Dashboard:
         self.login_rate = AttemptLimiter()  # 로그인 버튼 1분 5번 (맞든 틀리든)
         self.sessions = SessionStore(self.db, user=user, password=password, now=ctx.now)
         self.csrf = LoginCsrf(self.db, clock=lambda: ctx.now().timestamp())
+        self.api: Any = None  # dashboard/api.DashApi (app 이 attach_app 으로 넣어 줌 — 없으면 예전 화면만)
+
+    def attach_app(self, bot: Any) -> None:
+        """대시보드 앱 API 를 붙인다 (bot = app.DealBot: 알림 길·Blog-Auto 다리·화면 값)."""
+        from dealbot.dashboard.api import DashApi
+
+        self.api = DashApi(self, bot)
 
     # ------------------------------------------------------------ 상태
     @property
@@ -422,6 +446,10 @@ class Dashboard:
         return True
 
     async def attach_owner_link(self, queue_id: int, text: str) -> str:
+        """예전 '링크 넣기' 폼 (POST /dashboard/link) — 결과 코드만."""
+        return (await self.owner_link(queue_id, text))[0]
+
+    async def owner_link(self, queue_id: int, text: str, *, photo: bytes | None = None) -> tuple[str, str | None]:
         """'링크 넣기' 결과 코드 (linked|linked_twin|link_not_waiting|link_replaced_late|link_twin_review|link_bad|link_failed|link_off).
         텔레그램 링크 요청에 링크로 답장했을 때와 같은 길: 링크를 붙일 글 찾기(DealBot.owner_link_target — 화면을 연 뒤 더 좋은
         딜에 자리를 내준 글도 attach_link 와 같은 _replaced_target 으로: 유효 시간 안이면 받고, 같은 상품이 다시 줄 섰으면 그 글로,
@@ -430,41 +458,46 @@ class Dashboard:
         링크를 기다리는 글(LINK_WAITING·유효 시간 안의 자리를 내준 글)이 아니거나 이미 링크가 붙은 글이면 아무것도 부르지 않는다
         (두 번 눌러도 한 번만 붙음)."""
         if self.links is None:
-            return "link_off"
+            return "link_off", None
         item = self.db.get_queue_item(queue_id)
         target = self.links.owner_link_target(queue_id) if item is not None else None
         if item is None or target is None:
-            return "link_not_waiting"
+            return "link_not_waiting", None
         moved = target.id != queue_id  # 자리를 내준 글 → 다시 줄 선 같은 상품 글 (텔레그램 답장도 그 글로 받음)
         if moved:
             if target.status == "awaiting_approval":
-                return "link_twin_review"
+                return "link_twin_review", None
             if target.deal.affiliate_url:
-                return "link_not_waiting"  # 그 글엔 이미 링크가 있음 (한 번 넣은 뒤 같은 칸을 또 누름)
+                return "link_not_waiting", None  # 그 글엔 이미 링크가 있음 (한 번 넣은 뒤 같은 칸을 또 누름)
         elif target.status not in LINK_WAITING:
             # 유효 시간 안의 자리를 내준 글은 target 이 링크를 기다리는 글처럼 열려 여기 오지 않는다 — 지났으면 그 이유를
-            return "link_replaced_late" if target.link_replaced else "link_not_waiting"
+            return ("link_replaced_late" if target.link_replaced else "link_not_waiting"), None
         if len(text) > LINK_TEXT_MAX:
-            return "link_bad"
+            return "link_bad", None
         urls = find_urls(text)
         if not urls:
-            return "link_bad"
+            return "link_bad", None
         url = urls[0]
         if self.links.owner_link_problem(queue_id, url) is not None:
-            return "link_bad"
-        await self.links.attach_link(queue_id, url)
+            return "link_bad", None
+        if photo is not None:  # 대시보드 '사진 추가' (네이버 딜, 주인 결정 10/15 — 텔레그램 사진+링크 답장과 같은 attach_link)
+            reply = await self.links.attach_link(queue_id, url, photo=photo)  # type: ignore[call-arg]
+            if PHOTO_REFUSED_MARK in reply:
+                return "photo_refused", _refused_why(reply)
+        else:
+            await self.links.attach_link(queue_id, url)
         after = self.db.get_queue_item(target.id)
         try:
             await self.links.refresh_pending_notice()  # 텔레그램 고정 공지('내 링크 기다리는 글')도 답장했을 때처럼 고침
         except Exception as e:  # noqa: BLE001 — 공지를 못 고쳐도 링크는 붙었다
             log.warning("dashboard link: pending notice refresh failed: %s", safe_error(e))
         if after is None or after.status in (*LINK_WAITING, "skipped") or not after.deal.affiliate_url:
-            return "link_failed"
+            return "link_failed", None
         if moved:
             log.info("dashboard: #%d 링크를 대시보드에서 넣음 (자리를 내준 #%d 와 같은 상품)", target.id, queue_id)
-            return "linked_twin"
+            return "linked_twin", str(target.id)
         log.info("dashboard: #%d 링크를 대시보드에서 넣음", queue_id)
-        return "linked"
+        return "linked", None
 
     # ------------------------------------------------------------ 화면 값
     def views(self) -> list[CardView]:
@@ -565,12 +598,16 @@ class Dashboard:
         if not self.served:
             web.guard_prefix("/dashboard", None)
             return False
-        # 로그인 없이 여는 건 이것들뿐 (정확한 경로만): 로그인·로그아웃, 바탕화면 앱 매니페스트·아이콘
-        public = [LOGIN_PATH, LOGOUT_PATH, *webapp.public_paths()]
+        # 로그인 없이 여는 건 이것들뿐 (정확한 경로만): 로그인·로그아웃, 바탕화면 앱 매니페스트·아이콘, 앱 파일(app.js·sw.js — 데이터 없음)
+        from dealbot.dashboard.api import DashApi
+
+        public = [LOGIN_PATH, LOGOUT_PATH, *webapp.public_paths(), *DashApi.public_paths()]
         web.guard_prefix("/dashboard", self.check_auth, public=public, on_denied=self._denied)
+        web.route("/dashboard", self._root)
+        web.route("/dashboard/", self._page, with_headers=True)
+        if self.api is not None:
+            self.api.register(web)
         for path, handler in (
-            ("/dashboard", self._page),
-            ("/dashboard/", self._page),
             ("/dashboard/refresh", self._refresh),
             ("/dashboard/input", self._input),
             ("/dashboard/data.json", self._data),
@@ -587,14 +624,21 @@ class Dashboard:
 
     # ------------------------------------------------------------ 로그인 (login.py) · 바탕화면 앱 (webapp.py)
     def _denied(self, method: str, path: str, headers: dict[str, str]) -> Any:
-        """로그인 없이 브라우저로 연 화면 → 로그인 화면으로 (302). 기본 인증을 넣었는데 틀렸으면 그대로 401
-        (브라우저가 다시 묻게), data.json·POST·그 밖의 경로도 그대로 401. 만료된 세션 쿠키는 지운다."""
-        if method not in ("GET", "HEAD") or path not in PAGE_PATHS or headers.get("authorization"):
+        """로그인 없이 브라우저로 연 화면·알림 바로가기 → 로그인 화면으로 (302, 돌아올 곳 next). 앱 API 는 401 JSON
+        {"code":"login"} (앱이 로그인 시트를 띄움). 기본 인증을 넣었는데 틀렸으면 그대로 401 (브라우저가 다시 묻게),
+        data.json·그 밖의 POST 도 그대로 401. 만료된 세션 쿠키는 지운다."""
+        if path.startswith(API_PREFIX) and not headers.get("authorization"):
+            body = json.dumps({"status": "error", "code": "login", "text": "다시 로그인해 주세요"}, ensure_ascii=False)
+            return 401, body, "application/json; charset=utf-8", {"Cache-Control": "no-store"}
+        page_path = path in PAGE_PATHS or path.startswith(PAGE_PREFIXES)
+        if method not in ("GET", "HEAD") or not page_path or headers.get("authorization"):
             return None
         extra = dict(SECURITY_HEADERS)
         if cookie_values(headers, SESSION_COOKIE):
             extra["Set-Cookie"] = clear_session_cookie()
-        return 302, LOGIN_PATH, None, extra
+        nxt = safe_next(path)
+        target = LOGIN_PATH if nxt == HOME else f"{LOGIN_PATH}?next={quote(nxt, safe='/')}"
+        return 302, target, None, extra
 
     async def _manifest(self, query: dict[str, str]) -> Any:
         return webapp.manifest_response()
@@ -607,14 +651,18 @@ class Dashboard:
         return handler
 
     def _login_form(self, headers: dict[str, str], status: int, notice: tuple[str, str] | None = None, *,
-                    cross_site: bool = False, retry_after: int | None = None) -> Any:
-        """로그인 화면 + CSRF 난수 쿠키 (받은 난수 쿠키가 있으면 그대로, 없으면 새로) — 폼에는 지금 시각으로 새 서명."""
+                    cross_site: bool = False, retry_after: int | None = None, next_path: str = "") -> Any:
+        """로그인 화면 + CSRF 난수 쿠키 (받은 난수 쿠키가 있으면 그대로, 없으면 새로) — 폼에는 지금 시각으로 새 서명.
+        앱의 로그인 시트(Accept: application/json)에는 화면 대신 {"t": 서명} 만 (같은 폼·같은 제한으로 로그인)."""
         nonce, field = self.csrf.issue(cookie_values(headers, LOGIN_COOKIE))
-        headers = {**SECURITY_HEADERS, "Set-Cookie": login_cookie(nonce)}
+        out = {**SECURITY_HEADERS, "Set-Cookie": login_cookie(nonce)}
         if retry_after is not None:
-            headers["Retry-After"] = str(retry_after)
-        return status, login_page(title=self.cfg.title, field_token=field, notice=notice, cross_site=cross_site), \
-            "text/html; charset=utf-8", headers
+            out["Retry-After"] = str(retry_after)
+        if "application/json" in (headers.get("accept") or ""):
+            body = {"t": field} if status == 200 else {"t": field, "code": "login_failed", "text": notice[0] if notice else ""}
+            return status, json.dumps(body, ensure_ascii=False), "application/json; charset=utf-8", {**out, "Cache-Control": "no-store"}
+        return status, login_page(title=self.cfg.title, field_token=field, notice=notice, cross_site=cross_site,
+                                  next_path=next_path), "text/html; charset=utf-8", out
 
     @staticmethod
     def _locked_notice(wait: int) -> tuple[str, str]:
@@ -622,14 +670,15 @@ class Dashboard:
 
     async def _login_page(self, query: dict[str, str], headers: dict[str, str]) -> Any:
         """GET /dashboard/login. 이미 로그인한 기기면 바로 대시보드로."""
-        if self.sessions.any_valid(cookie_values(headers, SESSION_COOKIE)):
-            return 303, "/dashboard", None, SECURITY_HEADERS
+        nxt = safe_next(query.get("next"))
+        if self.sessions.any_valid(cookie_values(headers, SESSION_COOKIE)) and "application/json" not in (headers.get("accept") or ""):
+            return 303, nxt, None, SECURITY_HEADERS
         notice = LOGIN_NOTICES.get(query.get("msg", ""))
         wait = self.limiter.blocked(client_key(headers))
         if wait is not None:
             notice = self._locked_notice(wait)
         cross = (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site"
-        return self._login_form(headers, 200, notice, cross_site=cross)
+        return self._login_form(headers, 200, notice, cross_site=cross, next_path=nxt)
 
     async def _login(self, form: dict[str, str], headers: dict[str, str]) -> Any:
         """POST /dashboard/login: 1분 한도(429) → 틀린 시도 막힘(429) → CSRF(403) → 아이디·비밀번호(상수 시간 비교) →
@@ -646,12 +695,15 @@ class Dashboard:
             return self._login_form(headers, 403, ("화면이 오래됐어요 — 아이디와 비밀번호를 다시 넣어 주세요.", "bad"))
         given_user = (form.get("user") or "").strip().encode("utf-8")
         given_password = (form.get("password") or "").encode("utf-8")
+        nxt = safe_next(form.get("next"))
         if check_credentials(given_user, given_password, self._user, self._password):
             self.limiter.success(client)
             token = self.sessions.create()
             log.info("dashboard: 로그인 — 이 기기는 %d일 동안 로그인 유지 (값은 기록하지 않음)", SESSION_DAYS)
-            return 303, "/dashboard", None, {**SECURITY_HEADERS, "Set-Cookie": session_cookie(token)}
+            self._audit_login(headers, "done")
+            return 303, nxt, None, {**SECURITY_HEADERS, "Set-Cookie": session_cookie(token)}
         self._failed(client)
+        self._audit_login(headers, "failed")
         wait = self.limiter.blocked(client)
         if wait is not None:
             return self._login_form(headers, 429, self._locked_notice(wait), retry_after=wait)
@@ -663,7 +715,21 @@ class Dashboard:
             return self._forbidden()
         for token in cookie_values(headers, SESSION_COOKIE):
             self.sessions.revoke(token)
-        return 303, f"{LOGIN_PATH}?msg=out", None, {**SECURITY_HEADERS, "Set-Cookie": clear_session_cookie()}
+        self._audit_login(headers, "logout", action="logout")
+        # "cache" 만 — "storage" 는 서비스 워커를 지워 이 기기의 푸시가 소리 없이 끊긴다 (구독은 그대로, 연결에서 끌 수 있음)
+        return 303, f"{LOGIN_PATH}?msg=out", None, {**SECURITY_HEADERS, "Set-Cookie": clear_session_cookie(),
+                                                    "Clear-Site-Data": '"cache"'}
+
+    def _audit_login(self, headers: dict[str, str], code: str, *, action: str = "login") -> None:
+        """로그인 성공·실패·로그아웃 기록 (넣은 값은 남기지 않음)."""
+        if self.api is None:
+            return
+        try:
+            caller = self.api.caller(headers)[0]
+            self.api.audit(session8=caller.session if action == "logout" else "", client8=caller.client8, action=action,
+                           target="", args={}, code=code, action_id=None)
+        except Exception as e:  # noqa: BLE001
+            log.debug("login audit failed: %s", e)
 
     def _notice(self, query: dict[str, str]) -> tuple[tuple[str, str] | None, str | None]:
         """((문구, 종류), 안내를 넣을 카드 키 | None)."""
@@ -679,11 +745,28 @@ class Dashboard:
 
     def _back(self, code: str, key: str | None = None, *, queue_id: int | None = None, status: int = 302) -> tuple[int, str]:
         q = f"&q={queue_id}" if queue_id is not None else ""
-        if key and key in self.by_key:
+        if key and key in self.by_key:  # 예전 한 장 화면의 폼 (/dashboard → /dashboard/ 로 이어지고 msg 가 있으면 예전 화면)
             return status, f"/dashboard?msg={code}&src={key}{q}#card-{key}"
         return status, f"/dashboard?msg={code}{q}"
 
-    async def _page(self, query: dict[str, str]) -> Any:
+    async def _root(self, query: dict[str, str]) -> Any:
+        """/dashboard → /dashboard/ (앱의 범위·서비스 워커가 /dashboard/ 아래라서). 쿼리는 그대로."""
+        rest = "&".join(f"{quote(k)}={quote(v)}" for k, v in query.items())
+        return 301, "/dashboard/" + (f"?{rest}" if rest else ""), None, SECURITY_HEADERS
+
+    async def _page(self, query: dict[str, str], headers: dict[str, str] | None = None) -> Any:
+        """앱 화면 (C 의 shell.page — 첫 화면 값을 boot JSON 으로). 앱이 아직 없거나 ?view=classic 이면 예전 한 장 화면."""
+        headers = headers or {}
+        shell = None
+        if self.api is not None and query.get("view") != CLASSIC and query.get("msg") not in NOTICES:
+            try:
+                from dealbot.dashboard import shell  # type: ignore[attr-defined, no-redef]
+            except ImportError:
+                shell = None
+        if shell is not None:
+            state = self.api.state_body(headers)
+            extra = {**SECURITY_HEADERS, **self.api.renew_headers(headers)}
+            return 200, shell.page(state, self.cfg.title), "text/html; charset=utf-8", extra
         notice, src = self._notice(query)
         return 200, self.page_html(notice, notice_src=src), "text/html; charset=utf-8", SECURITY_HEADERS
 

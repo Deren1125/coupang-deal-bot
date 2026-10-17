@@ -8,14 +8,19 @@
   (기본 인증, 틀리면 401 + WWW-Authenticate, 너무 많이 틀리면 429 + Retry-After). 앞부분 아래에서 정확히 적은 경로만
   인증 없이 열 수 있고(public — 로그인 화면·앱 아이콘), 막힌 요청을 401 대신 다른 응답(로그인 화면으로 보내기)으로 바꿀 수 있다.
 
-의존성 없이 asyncio 로만 만들었고, 보통은 요청 한 줄과 헤더만 읽는다. 본문은 route_post 로 연 경로만 읽는다
-(작은 폼 하나: application/x-www-form-urlencoded, 경로마다 정한 크기까지, 다른 사이트에서 보낸 폼은 403).
+의존성 없이 asyncio 로만 만들었고, 보통은 요청 한 줄과 헤더만 읽는다. 본문은 연 경로만 읽는다:
+- route_post: 작은 폼 하나 (application/x-www-form-urlencoded, 경로마다 정한 크기까지, 다른 사이트에서 보낸 폼은 403)
+- route_json: JSON 본문 하나 (application/json, 경로마다 정한 크기까지, 다른 사이트에서 보낸 요청은 403) — 대시보드 앱 API
+- route_stream: 큰 본문(사진 파일 하나)을 정한 임시 파일로 256KB 씩 받아 둔다 (멈춘 채 30초·통째로 300초 넘으면 끊음).
+  인증(guard_prefix)을 먼저 통과해야 받기 시작한다 — 로그인 전엔 한 바이트도 디스크에 쓰지 않음
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html
+import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
@@ -47,14 +52,59 @@ PEER_HEADER = ":peer"
 _STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".mp4": "video/mp4"}
 
 _STATUS_TEXT = {
-    200: "OK", 302: "Found", 303: "See Other", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-    405: "Method Not Allowed", 411: "Length Required", 413: "Content Too Large", 415: "Unsupported Media Type",
-    429: "Too Many Requests", 500: "Internal Server Error",
+    200: "OK", 202: "Accepted", 301: "Moved Permanently", 302: "Found", 303: "See Other", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    405: "Method Not Allowed", 408: "Request Timeout", 409: "Conflict", 411: "Length Required", 413: "Content Too Large", 415: "Unsupported Media Type",
+    429: "Too Many Requests", 500: "Internal Server Error", 503: "Service Unavailable",
 }
 _MAX_HEADER_BYTES = 16 * 1024
 _READ_TIMEOUT = 10.0
 FORM_TYPE = "application/x-www-form-urlencoded"
+JSON_TYPE = "application/json"
 MAX_FORM_FIELDS = 20
+STREAM_CHUNK = 256 * 1024
+STREAM_IDLE = 30.0  # 받는 중 이만큼 아무것도 안 오면 끊음
+STREAM_TOTAL = 300.0  # 받기 전체 시간 상한
+# route_json 핸들러: (JSON 객체, 요청 헤더) / route_stream 핸들러: (쿼리, 요청 헤더, 받은 임시 파일)
+JsonHandler = Callable[[dict, dict[str, str]], Awaitable[Response]]
+StreamHandler = Callable[[dict[str, str], dict[str, str], Path], Awaitable[Response]]
+
+
+class StreamTimeout(Exception):
+    """본문을 받다가 멈춤 (STREAM_IDLE) 또는 너무 오래 걸림 (STREAM_TOTAL)."""
+
+
+async def read_to_file(reader: asyncio.StreamReader, path: Path, length: int, *, idle: float = STREAM_IDLE,
+                       total: float = STREAM_TOTAL, chunk: int = STREAM_CHUNK) -> int:
+    """본문 length 바이트를 path 에 받는다 (0600). 끝까지 못 받으면 파일을 지우고 예외 (StreamTimeout·IncompleteReadError)."""
+    import os
+    import time
+
+    started = time.monotonic()
+    got = 0
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            while got < length:
+                left_total = total - (time.monotonic() - started)
+                if left_total <= 0:
+                    raise StreamTimeout("total")
+                try:
+                    data = await asyncio.wait_for(reader.read(min(chunk, length - got)), timeout=min(idle, left_total))
+                except TimeoutError:
+                    raise StreamTimeout("idle") from None
+                if not data:
+                    raise asyncio.IncompleteReadError(b"", length - got)
+                f.write(data)
+                got += len(data)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+        raise
+    return got
+
+
+def _json_error(code: str, text: str) -> str:
+    return json.dumps({"status": "error", "code": code, "text": text}, ensure_ascii=False)
 
 
 def page(title: str, body: str) -> str:
@@ -120,6 +170,10 @@ class WebServer:
         self.guard_denied: dict[str, DeniedHook] = {}  # 앞부분 → 막혔을 때 401 대신 쓸 응답을 정하는 함수
         self.header_get: set[str] = set()  # 핸들러가 요청 헤더도 받는 GET 경로 (with_headers=True)
         self.header_post: set[str] = set()  # 핸들러가 요청 헤더도 받는 POST 경로
+        self.header_prefix: set[str] = set()  # 핸들러가 요청 헤더도 받는 앞부분 경로
+        self.json_routes: dict[str, tuple[JsonHandler, int]] = {}  # POST JSON 경로 → (핸들러, 본문 최대 바이트)
+        # POST 로 큰 본문을 파일로 받는 경로 → (핸들러, 요청 헤더 → 받을 수 있는 최대 바이트(0 이면 안 받음), 임시 파일 경로 만들기)
+        self.stream_routes: dict[str, tuple[StreamHandler, Callable[[dict[str, str]], int], Callable[[], Path]]] = {}
         self.auth_realm = "dashboard"
         self._server: asyncio.AbstractServer | None = None
 
@@ -148,8 +202,21 @@ class WebServer:
         else:
             self.header_post.discard(path)
 
-    def route_prefix(self, prefix: str, handler: Handler) -> None:
-        self.prefixes[prefix] = handler
+    def route_prefix(self, prefix: str, handler: Handler | HeaderHandler, *, with_headers: bool = False) -> None:
+        self.prefixes[prefix] = handler  # type: ignore[assignment]
+        if with_headers:
+            self.header_prefix.add(prefix)
+        else:
+            self.header_prefix.discard(prefix)
+
+    def route_json(self, path: str, handler: JsonHandler, *, max_body: int = 64 * 1024) -> None:
+        """JSON 객체 하나를 POST 로 받는 경로 (Content-Type: application/json 만). 핸들러는 (객체, 요청 헤더)."""
+        self.json_routes[path] = (handler, max_body)
+
+    def route_stream(self, path: str, handler: StreamHandler, *, max_body: Callable[[dict[str, str]], int],
+                     tmp_path: Callable[[], Path]) -> None:
+        """큰 본문을 임시 파일로 받는 POST 경로 (Content-Length 필수). 핸들러가 파일을 맡는다 (지우기도)."""
+        self.stream_routes[path] = (handler, max_body, tmp_path)
 
     def guard_prefix(self, prefix: str, check: AuthCheck | None, *, public: Iterable[str] = (),
                      on_denied: DeniedHook | None = None) -> None:
@@ -235,13 +302,29 @@ class WebServer:
             if isinstance(peer, tuple) and peer:
                 headers[PEER_HEADER] = str(peer[0])
             form_body: bytes | None = None
+            body_path: Path | None = None
+            early: Response | None = None
             if method == "POST":
-                route = self.post_routes.get(urlsplit(target).path or "/")
+                rpath = urlsplit(target).path or "/"
+                route = self.post_routes.get(rpath) or self.json_routes.get(rpath)
                 length = content_length(headers)
                 # POST 로 연 경로이고 크기가 정한 만큼 안이면 그만큼만 읽는다 (아니면 읽지 않고 dispatch 가 405·411·413)
                 if route is not None and length is not None and length <= route[1]:
                     form_body = await asyncio.wait_for(reader.readexactly(length), timeout=_READ_TIMEOUT) if length else b""
-            result = await self.dispatch(method, target, headers, form_body)
+                stream = self.stream_routes.get(rpath)
+                if stream is not None:
+                    early = self._precheck(method, rpath, headers)  # 로그인·같은 사이트를 먼저 — 그 전엔 받지 않음
+                    limit = stream[1](headers)
+                    if early is None and length is not None and 0 < length <= limit:
+                        body_path = stream[2]()
+                        try:
+                            await read_to_file(reader, body_path, length)
+                        except (StreamTimeout, asyncio.IncompleteReadError, OSError) as e:
+                            log.info("web upload %s cut: %s", rpath, type(e).__name__)
+                            body_path = None
+                            early = 408, json.dumps({"status": "error", "code": "timeout", "text": "보내다 끊겼어요 — 다시 올려 주세요"},
+                                                    ensure_ascii=False), "application/json; charset=utf-8", {}
+            result = early if early is not None else await self.dispatch(method, target, headers, form_body, body_path=body_path)
             status, body = result[0], result[1]
             ctype = result[2] if len(result) >= 3 else None  # type: ignore[misc]
             extra = result[3] if len(result) >= 4 else None  # type: ignore[misc]
@@ -253,31 +336,51 @@ class WebServer:
         except Exception:  # noqa: BLE001
             pass
 
+    def _precheck(self, method: str, path: str, headers: dict[str, str]) -> Response | None:
+        """지키는 앞부분의 인증 (dispatch 와 같은 규칙). 통과하면 None, 아니면 막는 응답."""
+        guarded, guard, prefix = self._guard_for(path)
+        if not guarded:
+            return None
+        if guard is None:
+            return 404, page("없는 주소", "이 주소는 쓰지 않습니다.")
+        if path in self.guard_public.get(prefix, ()):
+            return None
+        denied = self._auth_denied(guard, headers or {})
+        if denied is not None:
+            hook = self.guard_denied.get(prefix)
+            if denied[0] == 401 and hook is not None:
+                try:
+                    denied = hook(method, path, headers or {}) or denied
+                except Exception:  # noqa: BLE001 — 바꾸다 터지면 그대로 401
+                    log.exception("web denied hook %s failed", prefix)
+        return denied
+
     async def dispatch(self, method: str, target: str, headers: dict[str, str] | None = None,
-                       body: bytes | None = None) -> Response:
+                       body: bytes | None = None, *, body_path: Path | None = None) -> Response:
         """테스트에서도 바로 부를 수 있게 분리. headers 는 이름을 소문자로 (인증이 필요한 경로만 봄).
-        body 는 POST 본문 (route_post 경로만 씀. None 이면 크기를 넘었거나 길이를 몰라 읽지 않은 것)."""
+        body 는 POST 본문 (route_post·route_json 경로만 씀. None 이면 크기를 넘었거나 길이를 몰라 읽지 않은 것).
+        body_path 는 route_stream 경로가 받아 둔 임시 파일 (None 이면 받지 않음)."""
         split = urlsplit(target)
         path = split.path or "/"
         if path in ("/health", "/healthz"):
             return 200, "ok"
         post = self.post_routes.get(path)
-        if method not in ("GET", "HEAD", "POST") or (method == "POST" and post is None):
+        jroute = self.json_routes.get(path)
+        sroute = self.stream_routes.get(path)
+        if method not in ("GET", "HEAD", "POST") or (method == "POST" and post is None and jroute is None and sroute is None):
             return 405, page("허용되지 않는 방식", "GET 만 받습니다.")
-        guarded, guard, prefix = self._guard_for(path)
-        if guarded:  # 지키는 앞부분 아래는 경로가 있든 없든 먼저 확인 (없는 경로도 로그인 전엔 401)
-            if guard is None:
-                return 404, page("없는 주소", "이 주소는 쓰지 않습니다.")
-            if path not in self.guard_public.get(prefix, ()):
-                denied = self._auth_denied(guard, headers or {})
-                if denied is not None:
-                    hook = self.guard_denied.get(prefix)
-                    if denied[0] == 401 and hook is not None:
-                        try:
-                            denied = hook(method, path, headers or {}) or denied
-                        except Exception:  # noqa: BLE001 — 바꾸다 터지면 그대로 401
-                            log.exception("web denied hook %s failed", prefix)
-                    return denied
+        denied = self._precheck(method, path, headers or {})  # 지키는 앞부분 아래는 경로가 있든 없든 먼저 확인
+        if denied is not None:
+            if body_path is not None:
+                with contextlib.suppress(OSError):
+                    body_path.unlink()
+            return denied
+        if method == "POST" and jroute is not None:
+            return await self._dispatch_json(path, jroute, headers or {}, body)
+        if method == "POST" and sroute is not None:
+            return await self._dispatch_stream(path, sroute, split.query, headers or {}, body_path)
+        if (jroute is not None or sroute is not None) and path not in self.routes:
+            return 405, _json_error("method", "POST 만 받아요"), "application/json; charset=utf-8", {"Allow": "POST"}
         if post is not None:
             if method != "POST" and path not in self.routes:
                 return 405, page("허용되지 않는 방식", "POST 만 받습니다."), "text/html; charset=utf-8", {"Allow": "POST"}
@@ -288,11 +391,13 @@ class WebServer:
                 return self._static(directory, path[len(prefix):])
         query = {k: v for k, v in parse_qsl(split.query, keep_blank_values=True)}
         handler = self.routes.get(path)
+        with_headers = path in self.header_get
         if handler is None:
             for prefix, h in self.prefixes.items():
                 if path.startswith(prefix):
                     handler = h
                     query["path"] = path[len(prefix):]
+                    with_headers = prefix in self.header_prefix
                     break
         if handler is None:
             if path == "/":
@@ -304,7 +409,7 @@ class WebServer:
             if denied is not None:
                 return denied
         try:
-            if path in self.header_get:
+            if with_headers:
                 return await handler(query, headers or {})  # type: ignore[call-arg]
             return await handler(query)
         except Exception as e:  # noqa: BLE001
@@ -342,6 +447,60 @@ class WebServer:
         except Exception as e:  # noqa: BLE001
             log.exception("web handler %s failed: %s", path, e)
             return 500, page("오류", html.escape(str(e)))
+
+    async def _dispatch_json(self, path: str, route: tuple[JsonHandler, int], headers: dict[str, str],
+                             body: bytes | None) -> Response:
+        """POST JSON 하나: 다른 사이트(Sec-Fetch-Site: cross-site)·JSON 이 아닌 본문·너무 큰 본문은 핸들러까지 가지 않는다."""
+        handler, max_body = route
+        jt = "application/json; charset=utf-8"
+        if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
+            return 403, _json_error("cross_site", "다른 사이트에서 보낸 요청은 받지 않아요"), jt, {}
+        if (headers.get("content-type") or "").split(";", 1)[0].strip().lower() != JSON_TYPE:
+            return 415, _json_error("bad_type", "JSON 으로만 보내 주세요"), jt, {}
+        if body is None:
+            if content_length(headers) is None:
+                return 411, _json_error("length", "요청 길이를 알 수 없어요"), jt, {}
+            return 413, _json_error("too_big", "보낸 내용이 너무 커요"), jt, {}
+        if len(body) > max_body:
+            return 413, _json_error("too_big", "보낸 내용이 너무 커요"), jt, {}
+        try:
+            data = json.loads(body.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, ValueError):
+            return 400, _json_error("bad_json", "보낸 내용을 읽을 수 없어요"), jt, {}
+        if not isinstance(data, dict):
+            return 400, _json_error("bad_json", "보낸 내용을 읽을 수 없어요"), jt, {}
+        try:
+            return await handler(data, headers)
+        except Exception as e:  # noqa: BLE001
+            log.exception("web handler %s failed: %s", path, e)
+            return 500, _json_error("failed", "서버에서 처리하지 못했어요"), jt, {}
+
+    async def _dispatch_stream(self, path: str, route: tuple[StreamHandler, Callable[[dict[str, str]], int], Callable[[], Path]],
+                               query: str, headers: dict[str, str], body_path: Path | None) -> Response:
+        handler, max_body, _tmp = route
+        jt = "application/json; charset=utf-8"
+        try:
+            if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
+                return 403, _json_error("cross_site", "다른 사이트에서 보낸 요청은 받지 않아요"), jt, {}
+            if body_path is None:
+                length = content_length(headers)
+                if length is None:
+                    return 411, _json_error("length", "요청 길이를 알 수 없어요"), jt, {}
+                limit = max_body(headers)
+                if limit <= 0:
+                    return 415, _json_error("bad_type", "받지 않는 종류예요"), jt, {}
+                return 413, _json_error("too_big", "파일이 너무 커요"), jt, {}
+            q = {k: v for k, v in parse_qsl(query, keep_blank_values=True)}
+            got = await handler(q, headers, body_path)
+            body_path = None  # 핸들러가 맡음
+            return got
+        except Exception as e:  # noqa: BLE001
+            log.exception("web handler %s failed: %s", path, e)
+            return 500, _json_error("failed", "서버에서 처리하지 못했어요"), jt, {}
+        finally:
+            if body_path is not None:
+                with contextlib.suppress(OSError):
+                    body_path.unlink()
 
     @staticmethod
     def _static(directory: Path, name: str) -> Response:

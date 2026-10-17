@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import functools
 import html
 import json
@@ -354,6 +355,59 @@ def is_stale_message(sent_at: datetime | None, now: datetime | None = None, max_
     return now - sent_at > max_age
 
 
+# 주인 명령을 처리하는 동안 (텔레그램 비상용 길): 관리자 챗 알림을 끈 때에도 그 명령의 결과로 보내는 메시지(/test 미리보기·
+# '#12 번으로 받아요' 등)는 보낸다. drop_stale(모든 업데이트의 맨 앞)이 관리자 챗 업데이트마다 켠다
+_OWNER_COMMAND: contextvars.ContextVar[bool] = contextvars.ContextVar("owner_command", default=False)
+
+
+def mark_owner_command(on: bool = True) -> None:
+    _OWNER_COMMAND.set(on)
+
+
+@contextlib.contextmanager
+def owner_command():  # type: ignore[no-untyped-def]
+    token = _OWNER_COMMAND.set(True)
+    try:
+        yield
+    finally:
+        _OWNER_COMMAND.reset(token)
+
+
+# 주인 10/18: 할 일 글의 '→ 텔레그램 핫딜봇 …' 줄 대신 대시보드에서 할 일 (푸시·카톡 예비에 씀 — legacy 길은 예전 글 그대로)
+DASH_TAILS = {
+    "link_request": "→ 대시보드 '할 일'에서 링크를 넣어 주세요",
+    "review_auth": "→ 대시보드 '할 일'에서 올리기 또는 안 올리기",
+    "review_info": "→ 대시보드 '할 일'에서 올리기 또는 안 올리기",
+    "publish_unsure": "→ 대시보드 '할 일'에서 채널에 있는지 알려 주세요",
+    "photo_need": "→ 대시보드 '할 일'에서 사진 올리기 (없으면 블로그는 글자 카드)",
+    "publish_broken": "→ 대시보드 '연결' → 봇 상태·오류",
+    "publisher_stuck": "→ 서버 점검 필요 · 대시보드 '연결' → 오류",
+    "collector_stuck": "→ 서버 점검 필요 · 대시보드 '연결' → 오류",
+    "selfcheck": "→ 대시보드 '연결' → 봇 상태",
+    "sns_auth": "→ 대시보드 '연결' → 인스타 · 스레드에서 다시 연결",
+    "threads_replies": "→ 대시보드 '할 일' → 스레드 답글 (봇은 답글을 달지 않아요)",
+    "autolink_stop": "→ 대시보드 '연결' → 봇 상태",
+}
+_MARKERS = ("⛔[멈춤]", "🔥[핫]", "⚠️[할 일]", "🔔[할 일]", "ℹ️")
+_HHMM_UNTIL = re.compile(r"([0-2][0-9]:[0-5][0-9]) ?까지")
+
+
+def dash_text(kind: str, text: str) -> str:
+    """카톡 글(첫 줄 + '→ 텔레그램 …' 줄) → 대시보드 말: 표시를 떼고, 텔레그램을 가리키는 줄은 대시보드에서 할 일로."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    out = []
+    for ln in lines:
+        for m in _MARKERS:
+            if ln.startswith(m):
+                ln = ln[len(m):].strip()
+        if ln.startswith("→") and ("텔레그램" in ln or "/" in ln):
+            tail = DASH_TAILS.get(kind, "→ 대시보드에서 확인해 주세요")
+            until = _HHMM_UNTIL.search(ln)
+            ln = tail.replace("→ ", f"→ {until.group(1)} 까지 ", 1) if until else tail
+        out.append(ln.replace("텔레그램 핫딜봇", "대시보드"))
+    return "\n".join(out)
+
+
 KAKAO_LIMIT = 200  # 카카오 텍스트 한 통
 KAKAO_SHORT = 48  # 카톡 묶음 알림의 한 줄
 STATUS_FRESH = timedelta(minutes=15)  # Blog-Auto 생존 신호가 이보다 오래되면 카톡을 못 믿고 텔레그램으로 소리 내서
@@ -453,11 +507,51 @@ class AdminNotifier:
         self._final_fails: list[datetime] = []  # 채널 발행 최종 실패 (성공하면 비움) — 3번 이어지면 '발행 막힘'
         self._err_since: dict[str, datetime] = {}  # 오류 종류별로 실패가 이어진 첫 시각 (성공하면 지움)
         self._err_recent: dict[str, list[datetime]] = {}
+        # 주인 10/18: 주인 알림 한 곳 (notify.router: push). 넣어 주면 할 일·요약·해결은 여기로, 관리자 챗 알림은 끔
+        # (monitoring.telegram_owner_notices). None 이면 예전 그대로 (legacy)
+        self.router: Any = None
 
     @property
     def silent_policy(self) -> bool:
-        """주인 결정 10/11: 관리자 챗 알림은 소리 없이, 할 일은 카톡으로 (monitoring.telegram_silent)."""
-        return bool(getattr(self.cfg, "telegram_silent", False))
+        """주인 결정 10/11: 관리자 챗 알림은 소리 없이, 할 일은 카톡으로 (monitoring.telegram_silent).
+        10/18 부터는 알림 길(router)이 있으면 늘 이 정책 (할 일은 대시보드 앱 푸시)."""
+        return self.router is not None or bool(getattr(self.cfg, "telegram_silent", False))
+
+    @property
+    def tg_quiet(self) -> bool:
+        """관리자 챗 알림을 보내지 않음 (주인 10/18): 알림 길이 push 이고 telegram_owner_notices 가 꺼져 있고, 주인 명령을 처리하는
+        중이 아닐 때. 명령 답장(reply_text)·채널 발행은 이것과 상관없음."""
+        return (self.router is not None and not getattr(self.cfg, "telegram_owner_notices", False)
+                and not _OWNER_COMMAND.get())
+
+    def _last_resort(self) -> bool:
+        """마지막 수단 (monitoring.telegram_last_resort): 푸시 기기가 하나도 없고 카톡도 안 될 때만 텔레그램으로 소리 내서."""
+        if not getattr(self.cfg, "telegram_last_resort", False) or self.router is None:
+            return False
+        try:
+            return self.router.nowhere(kakao_down=not self.blogauto_ok())
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _notice_from_note(self, note: dict[str, Any]) -> dict[str, Any]:
+        """owner_notice v2 줄 → 알림 길(router) 한 줄 (src=dealbot). 글은 대시보드 말로 (dash_text)."""
+        from dealbot.notify import iid as iidmod
+        from dealbot.notify.router import sev_of, urgency
+
+        kind = str(note.get("kind") or "")
+        key = str(note.get("key") or kind)
+        text = str(note.get("text") or "")
+        lines = [ln for ln in dash_text(kind, text).split("\n") if ln.strip()] or [str(note.get("short") or kind)]
+        short = str(note.get("short") or lines[0])[:KAKAO_SHORT]
+        emoji = next((m[:2].rstrip("[") for m in _MARKERS if text.lstrip().startswith(m)), "🔔").strip()
+        title = truncate(f"{emoji} {lines[0]}", 40)  # 푸시 제목: '🔔 링크 필요 #12 [토스] 무선청소기…'
+        body = " ".join(lines[1:]) or short  # 푸시 글: 어디서 할지 ('→ 대시보드 할 일에서 …')
+        return {
+            "src": "dealbot", "key": key, "kind": kind, "blog": "", "iid": iidmod.iid_for(key, src="dealbot"),
+            "sev": sev_of(text), "urgent": urgency(kind) == "URGENT" or bool(note.get("urgent") and urgency(kind) != "DIGEST"),
+            "quiet": False, "title": title, "body": truncate(body, 120), "short": short,
+            "ttl_h": float(note.get("ttl_h") or 24), "group": str(note.get("group") or "")[:40], "at": time.time(),
+        }
 
     def blogauto_ok(self) -> bool:
         """Blog-Auto 가 살아 있고(15분 안 생존 신호) 카톡이 되는가 — 아니면 할 일 알림은 텔레그램으로 소리 내서."""
@@ -481,6 +575,13 @@ class AdminNotifier:
     def owner_line(self, note: dict[str, Any]) -> bool:
         """Blog-Auto 받은편지함에 owner_notice v2 한 줄 (카톡 알림·해결·저녁 요약). 실패해도 텔레그램은 그대로.
         한 줄을 남겼으면 True — 못 남겼으면(카톡 넘기기 꺼짐·파일 오류) 할 일 알림은 텔레그램으로 소리 내서 (alert)."""
+        if self.router is not None:  # 주인 10/18: 알림 길 한 곳 (대시보드 앱 푸시 → 안 되면 카톡)
+            try:
+                self.router.open(self._notice_from_note(note))
+                return True
+            except Exception as e:  # noqa: BLE001
+                log.warning("owner notice (router) failed: %s", e)
+                return False
         if self.owner_inbox is None or not getattr(self.cfg, "kakao_relay", True):
             return False
         try:
@@ -491,12 +592,25 @@ class AdminNotifier:
 
     def resolve(self, *keys: str) -> None:
         """주인이 처리함 (링크 붙임·/skip·/ok·품절) — Blog-Auto 가 아직 안 보낸 카톡은 보내지 않게."""
+        if self.router is not None:
+            if keys:
+                try:
+                    self.router.resolve("dealbot", list(keys))
+                except Exception as e:  # noqa: BLE001
+                    log.warning("owner notice resolve failed: %s", e)
+            return
         if self.silent_policy and keys and self.blogauto_reads_v2():  # 예전 Blog-Auto 는 해결 줄을 모른다
             self.owner_line({"resolve": list(keys)})
 
     def summary(self, cat: str, text: str, *, replace: bool = False) -> None:
         """저녁 요약(카톡)에 넣을 한 줄 — 딜봇 몫 (Blog-Auto 가 21~22시에 문장으로 보냄)."""
         # replace 에 빈 글이면 그 줄을 비움 (기다리는 일이 없어짐). 예전 Blog-Auto 는 요약 줄을 바로 카톡으로 보내서 남기지 않는다
+        if self.router is not None:  # 주인 10/18: 아침·저녁 정리(notify/digest.py)가 읽는다
+            try:
+                self.router.summary(cat, text, replace=replace)
+            except Exception as e:  # noqa: BLE001
+                log.warning("owner summary failed: %s", e)
+            return
         if self.silent_policy and (text or replace) and self.blogauto_reads_v2():
             self.owner_line({"kind": "summary", "cat": cat, "text": text, "replace": replace})
 
@@ -506,6 +620,17 @@ class AdminNotifier:
         """주인이 해야 할 일: 텔레그램 자세한 내용(답장할 자리) + Blog-Auto 가 보낼 카톡 한 통(v2).
         Blog-Auto 가 살아 있고 카톡이 되면 텔레그램은 소리 없이, 아니면 소리 내서(같은 일은 6시간에 한 번) — 그래도 카톡 줄은 남긴다
         (Blog-Auto 가 곧 살아나면 보내고, 같은 키라 두 번 가지 않음)."""
+        if self.router is not None:  # 주인 10/18: 할 일은 알림 길로 (대시보드 앱 푸시 → 안 되면 카톡), 관리자 챗은 보내지 않음
+            self.owner_line({"kind": kind, "key": key, "group": group, "text": kakao_fit(kakao_text),
+                             "short": short[:KAKAO_SHORT], "urgent": urgent, "link": link, "ttl_h": ttl_h})
+            if self._last_resort():
+                now = utcnow()
+                last = self._loud_sent.get(key)
+                if last is None or now - last >= LOUD_AGAIN:
+                    self._loud_sent[key] = now
+                    text = f"{tg_text or html.escape(kakao_text)}{FALLBACK_NOTE}"
+                    return await self.send_with_id(text, loud=True, kind=msg_kind, queue_id=queue_id)
+            return await self.send_with_id(tg_text, kind=msg_kind, queue_id=queue_id) if tg_text else None
         if not self.silent_policy:
             return await self.send_with_id(tg_text, kind=msg_kind, queue_id=queue_id) if tg_text else None
         # 카톡 줄을 먼저 남긴다 — 못 남겼으면 Blog-Auto 가 살아 있어도 카톡이 안 가니 텔레그램으로 소리 내서 (할 일을 잃지 않게)
@@ -525,7 +650,7 @@ class AdminNotifier:
 
     def _relay(self, kind: str, text: str) -> None:
         """주인에게 카톡으로도 (예전 v1: 링크 요청·링크 완료·올렸어요 — telegram_silent 를 끈 경우). 실패해도 텔레그램 알림은 그대로."""
-        if self.owner_relay is None or not getattr(self.cfg, "kakao_relay", True):
+        if self.owner_relay is None or not getattr(self.cfg, "kakao_relay", True) or self.router is not None:
             return
         try:
             self.owner_relay(kind, text)
@@ -552,6 +677,9 @@ class AdminNotifier:
                            queue_id: int | None = None) -> int | None:
         """보내고 텔레그램 message_id 를 돌려준다 (나중에 고치거나 지우려고). 조각마다 보낸 메시지 기록에 남긴다.
         소리: telegram_silent(주인 결정 10/11)면 소리 없이, loud=True(카톡 대신 알림)만 소리와 함께."""
+        if self.tg_quiet and not loud:  # 주인 10/18: 관리자 챗 알림 끔 — 할 일은 대시보드 (글은 기록에 남기지 않음)
+            log.debug("관리자 챗 알림 보내지 않음 (대시보드로): kind=%s #%s", kind or "-", queue_id or "-")
+            return None
         if not self.enabled:
             log.warning(
                 "관리자 알림을 보낼 수 없어 건너뜁니다 (봇 토큰/관리자 챗 ID 확인 필요): %s",
@@ -578,7 +706,7 @@ class AdminNotifier:
 
     async def edit(self, message_id: int, text: str) -> bool:
         """내가 보낸 관리자 챗 메시지를 고친다 (예: 품절된 링크 요청)."""
-        if not self.enabled:
+        if not self.enabled or self.tg_quiet:
             return False
         assert self.bot is not None
         try:
@@ -590,7 +718,7 @@ class AdminNotifier:
 
     async def pin(self, message_id: int) -> bool:
         """관리자 챗 맨 위에 고정한다 (예: 내 링크 기다리는 글 목록)."""
-        if not self.enabled:
+        if not self.enabled or self.tg_quiet:
             return False
         assert self.bot is not None
         try:
@@ -668,6 +796,10 @@ class AdminNotifier:
             f"{head} [{html.escape(self.shop_label(p.shop))}]\n{html.escape(truncate(p.name, 80))}\n이유: <code>{html.escape(error[:500])}</code>"
         )
         if final:
+            if self.router is not None:  # 주인 10/18: 정리의 '소식' 한 줄 (3번 이어지면 publish_broken 이 따로 급한 일)
+                self.owner_line({"kind": "publish_failed", "key": f"publish_failed:{p.product_id}"[:120], "urgent": False,
+                                 "text": f"채널에 못 올린 딜 {truncate(p.name, 40)}", "short": f"채널 발행 실패 {truncate(p.name, 20)}",
+                                 "ttl_h": 24})
             await self._push("publish_failed", f"채널에 올리지 못함 [{self.shop_label(p.shop)}]", f"{truncate(p.name, 60)}\n{error[:200]}")
 
     async def notify_publish_unsure(self, queue_id: int, deal: Deal, error: str) -> None:
@@ -828,6 +960,8 @@ class AdminNotifier:
         """내 링크를 기다리던 글이 품절됨: 보냈던 링크 요청 메시지를 고쳐서 헛수고를 막는다."""
         p = item.deal.product
         self.resolve(f"link:{item.id}")  # 링크를 만들 필요가 없어졌으니 아직 안 보낸 카톡은 취소
+        if self.router is not None:
+            self.summary("soldout", truncate(p.name, 40))  # 주인 10/18: 저녁 정리에 한 줄
         text = (
             f"⛔ <b>품절되어 취소했습니다 #{item.id}</b> [{html.escape(self.shop_label(p.shop))}]\n"
             f"{html.escape(truncate(p.name, 80))}\n"
@@ -1470,6 +1604,10 @@ def register_admin_handlers(
     async def drop_stale(update: object, _: ContextTypes.DEFAULT_TYPE) -> None:
         # 봇이 꺼져 있던 동안 쌓인 오래된 명령은 실행하지 않는다 (재배포 직후 옛 /run, /post 가 다시 도는 것 방지)
         # 버튼은 예외: 버튼의 effective_message 는 버튼이 달린 (오래전에 보낸) 메시지라 5분 넘은 버튼이 조용히 버려졌다
+        chat = getattr(update, "effective_chat", None)
+        # 주인 명령·버튼 처리 중: 관리자 챗 알림을 꺼 둬도 그 결과 메시지는 보낸다 (텔레그램 비상용 길). 업데이트마다 다시 정함
+        mark_owner_command(chat is not None and (getattr(chat, "id", None) == chat_id or (
+            isinstance(chat_id, str) and getattr(chat, "username", None) == chat_id.lstrip("@"))))
         if getattr(update, "callback_query", None) is not None:
             return
         msg = getattr(update, "effective_message", None)
@@ -1502,7 +1640,11 @@ def register_admin_handlers(
         await reply(update, reporter.queue_text())
 
     async def cmd_pending(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
-        await reply(update, reporter.pending_text())
+        # 고정 공지(📌)를 보내지 않는 동안(주인 10/18) 이 답이 그 자리 — 일괄 줄('12 https…'·'12 ok')로 답장하면 그대로 처리
+        text = reporter.pending_text()
+        msg = update.effective_message
+        if msg is not None:
+            await send_chunks(msg.reply_text, text, on_sent=lambda m: _track(m, text, "pending_notice"))
 
     async def cmd_recent(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, reporter.recent_text())

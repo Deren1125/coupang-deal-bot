@@ -38,7 +38,7 @@ APPROVED_ICONS = {  # 주인이 고른 아이콘 파일 그대로 (바꾸면 여
     "icon-maskable-512.png": "520759c2e3ded4b65b184c17641d9be12873102b232720d9e32861edfb640944",
     "icon.svg": "eb027b384d1239501ce68e3d37deff8d0b2b6470be7e3ea951c3e69204aef87d",
 }
-SESSION_FLAGS = "; Max-Age=2592000; Path=/dashboard; Secure; HttpOnly; SameSite=Strict"
+SESSION_FLAGS = "; Max-Age=2592000; Path=/dashboard; Secure; HttpOnly; SameSite=Lax"  # 10/18: 카톡·알림 링크로 열 때도 실리게
 
 
 class Clock:
@@ -112,7 +112,7 @@ async def post_login(srv: WebServer, *, ip: str = "203.0.113.5", user: str = USE
 
 async def login(srv: WebServer, ip: str = "203.0.113.5", password: str = PASSWORD) -> str:
     res = await post_login(srv, ip=ip, password=password)
-    assert res[:2] == (303, "/dashboard"), res[:2]
+    assert res[:2] == (303, "/dashboard/"), res[:2]
     token = cookie_value(set_cookie(res), "dash_session")
     assert token
     return token
@@ -215,11 +215,11 @@ async def test_guard_public_paths_must_sit_under_the_prefix() -> None:
     srv.route("/dashboard/x", secret)
     srv.guard_prefix("/dashboard", lambda h: False, public=["/dashboard", "/other", "dashboard/x", "/dashboardx/y"])
     assert srv.guard_public["/dashboard"] == frozenset()  # 앞부분 자체·바깥 경로·모양이 다른 경로는 공개 목록에 안 들어감
-    assert (await srv.dispatch("GET", "/dashboard", {}))[0] == 401
+    assert (await srv.dispatch("GET", "/dashboard/", {}))[0] == 401
     assert (await srv.dispatch("GET", "/dashboard/x", {}))[0] == 401
     srv.guard_prefix("/dashboard", lambda h: False, public=["/dashboard/x"], on_denied=lambda m, p, h: None)
     assert (await srv.dispatch("GET", "/dashboard/x", {}))[:2] == (200, "secret")
-    assert (await srv.dispatch("GET", "/dashboard", {}))[0] == 401  # on_denied 가 None 이면 그대로 401
+    assert (await srv.dispatch("GET", "/dashboard/", {}))[0] == 401  # on_denied 가 None 이면 그대로 401
     srv.guard_prefix("/dashboard", None, public=["/dashboard/x"])  # 꺼지면 공개 경로도 404
     assert (await srv.dispatch("GET", "/dashboard/x", {}))[0] == 404
 
@@ -228,9 +228,11 @@ async def test_guard_public_paths_must_sit_under_the_prefix() -> None:
 async def test_page_and_login_have_app_head_tags_and_a_minimal_csp(db: Database, tmp_path: Path) -> None:
     dash, srv = make(db, tmp_path, title="<b>채널</b> 대시보드")
     csp = SECURITY_HEADERS["Content-Security-Policy"]
-    assert csp.startswith("default-src 'none';") and "img-src 'self' data:" in csp and "manifest-src 'self'" in csp
-    assert "script-src" not in csp and "connect-src" not in csp and "frame-ancestors 'none'" in csp
-    page = await srv.dispatch("GET", "/dashboard", frm(authorization=basic(USER, PASSWORD)))
+    assert csp == ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+                   "connect-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; "
+                   "frame-ancestors 'none'")  # 10/18 앱: 스크립트는 이 서버 파일만 (페이지 안 스크립트 없음)
+    assert "unsafe-eval" not in csp and "script-src 'self';" in csp
+    page = await srv.dispatch("GET", "/dashboard/", frm(authorization=basic(USER, PASSWORD)))
     login = await srv.dispatch("GET", "/dashboard/login", frm())
     for res in (page, login):
         status, body, ctype, headers = res
@@ -272,7 +274,7 @@ async def test_login_sets_a_strict_session_cookie_and_stores_only_its_hash(db: D
     assert nonce and len(nonce) >= 43
     assert set_cookie(res) == f"dash_login={nonce}; Max-Age=7200; Path=/dashboard/login; Secure; HttpOnly; SameSite=Strict"
     res = await post_login(srv)
-    assert res[:2] == (303, "/dashboard")
+    assert res[:2] == (303, "/dashboard/")
     header = set_cookie(res)
     token = cookie_value(header, "dash_session")
     assert token and header == f"dash_session={token}{SESSION_FLAGS}"
@@ -288,19 +290,19 @@ async def test_login_sets_a_strict_session_cookie_and_stores_only_its_hash(db: D
     assert "로그인 — 이 기기는 30일 동안 로그인 유지" in caplog.text
 
     # 세션 쿠키로: 화면·JSON·다시 읽기·링크 넣기(POST) 모두 통과, 로그인 화면은 바로 대시보드로
-    page = await srv.dispatch("GET", "/dashboard", with_session(token))
+    page = await srv.dispatch("GET", "/dashboard/", with_session(token))
     assert page[0] == 200 and "카카오 오픈채팅" in page[1]
     assert (await srv.dispatch("GET", "/dashboard/data.json", with_session(token)))[0] == 200
     assert (await srv.dispatch("GET", f"/dashboard/refresh?src=kakao&t={dash.form_token}", with_session(token)))[0] == 302
-    assert (await srv.dispatch("GET", "/dashboard/login", with_session(token)))[:2] == (303, "/dashboard")
+    assert (await srv.dispatch("GET", "/dashboard/login", with_session(token)))[:2] == (303, "/dashboard/")
     body = urlencode({"t": dash.form_token, "q": "7", "url": "https://link.coupang.com/a/x"}).encode()
     res = await srv.dispatch("POST", "/dashboard/link", with_session(
         token, **{"content-type": FORM_TYPE, "content-length": str(len(body))}), body)
     assert res[:2] == (303, "/dashboard?msg=link_off&q=7")  # 인증은 통과 (링크 넣기 자체는 이 테스트에선 꺼짐)
     # 같은 이름 쿠키가 여럿이어도 맞는 게 하나 있으면 통과, 모양이 이상한 값은 그냥 로그인 안 한 것
-    assert (await srv.dispatch("GET", "/dashboard", frm(cookie=f"x=1; dash_session=bogus; dash_session={token}")))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", frm(cookie=f"x=1; dash_session=bogus; dash_session={token}")))[0] == 200
     for bad in ("", "bogus", "a" * 43, token[:-1], token + "x", '"' + "b" * 43 + '"', "../../etc", token.upper()):
-        res = await srv.dispatch("GET", "/dashboard", frm(cookie=f"dash_session={bad}"))
+        res = await srv.dispatch("GET", "/dashboard/", frm(cookie=f"dash_session={bad}"))
         assert res[:2] == (302, "/dashboard/login"), bad
 
 
@@ -311,7 +313,7 @@ async def test_login_failures_csrf_and_cross_site(db: Database, tmp_path: Path) 
     res = await post_login(srv, password=PASSWORD + " ")
     assert res[0] == 200 and "아이디나 비밀번호가 맞지 않아요." in res[1] and "dash_session" not in set_cookie(res)
     assert (await post_login(srv, user="Owner"))[0] == 200  # 아이디도 정확히
-    assert (await post_login(srv, user=f"  {USER} "))[:2] == (303, "/dashboard")  # 아이디 앞뒤 빈칸만 지움
+    assert (await post_login(srv, user=f"  {USER} "))[:2] == (303, "/dashboard/")  # 아이디 앞뒤 빈칸만 지움
     nonce, field = await open_login(srv)
     other_nonce, _ = await open_login(srv)
     for kwargs in ({"field": ""}, {"field": "nope"}, {"nonce": other_nonce, "field": field},  # 다른 화면의 쿠키
@@ -364,7 +366,7 @@ async def test_login_rate_limit_and_lockout_backoff(db: Database, tmp_path: Path
     res = await post_login(srv, ip="203.0.113.7")  # 막힌 동안은 맞는 비밀번호도 확인 안 함
     assert res[0] == 429 and "dash_session" not in set_cookie(res)
     # 기본 인증과 같은 기록 (한쪽에서 막히면 다른 쪽도)
-    assert (await srv.dispatch("GET", "/dashboard", frm("203.0.113.7", authorization=basic(USER, PASSWORD))))[0] == 429
+    assert (await srv.dispatch("GET", "/dashboard/", frm("203.0.113.7", authorization=basic(USER, PASSWORD))))[0] == 429
     page = await srv.dispatch("GET", "/dashboard/login", frm("203.0.113.7"))
     assert page[0] == 200 and "막아 두었어요" in page[1]
     assert (await post_login(srv, ip="198.51.100.20"))[0] == 303  # 다른 곳은 그대로
@@ -415,11 +417,11 @@ async def test_session_expires_after_30_days(db: Database, tmp_path: Path) -> No
     _, srv = make(db, tmp_path, clock=clock)
     token = await login(srv)
     clock.t = NOW + timedelta(days=30, minutes=-1)
-    assert (await srv.dispatch("GET", "/dashboard", with_session(token)))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", with_session(token)))[0] == 200
     clock.t = NOW + timedelta(days=30, minutes=1)
-    res = await srv.dispatch("GET", "/dashboard", with_session(token))
+    res = await srv.dispatch("GET", "/dashboard/", with_session(token))
     assert res[:2] == (302, "/dashboard/login")
-    assert set_cookie(res) == "dash_session=; Max-Age=0; Path=/dashboard; Secure; HttpOnly; SameSite=Strict"  # 지난 쿠키는 지움
+    assert set_cookie(res) == "dash_session=; Max-Age=0; Path=/dashboard; Secure; HttpOnly; SameSite=Lax"  # 지난 쿠키는 지움
     assert sessions_in_db(db) == {}  # 만료된 세션은 DB 에서도 지움
     assert (await srv.dispatch("GET", "/dashboard/data.json", with_session(token)))[0] == 401
 
@@ -437,13 +439,13 @@ async def test_logout_revokes_the_session(db: Database, tmp_path: Path) -> None:
 
     assert (await logout({}, token))[0] == 403  # 폼 토큰 없이는 안 됨
     assert (await logout({"t": dash.form_token}, token, **{"sec-fetch-site": "cross-site"}))[0] == 403
-    assert (await srv.dispatch("GET", "/dashboard", with_session(token)))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", with_session(token)))[0] == 200
     res = await logout({"t": dash.form_token}, token)
     assert res[:2] == (303, "/dashboard/login?msg=out")
-    assert set_cookie(res) == "dash_session=; Max-Age=0; Path=/dashboard; Secure; HttpOnly; SameSite=Strict"
+    assert set_cookie(res) == "dash_session=; Max-Age=0; Path=/dashboard; Secure; HttpOnly; SameSite=Lax"
     assert len(sessions_in_db(db)) == 1
-    assert (await srv.dispatch("GET", "/dashboard", with_session(token)))[:2] == (302, "/dashboard/login")
-    assert (await srv.dispatch("GET", "/dashboard", with_session(keep, "198.51.100.30")))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", with_session(token)))[:2] == (302, "/dashboard/login")
+    assert (await srv.dispatch("GET", "/dashboard/", with_session(keep, "198.51.100.30")))[0] == 200
     page = await srv.dispatch("GET", "/dashboard/login?msg=out", frm())
     assert "로그아웃했어요." in page[1]
     assert "&lt;" not in (await srv.dispatch("GET", "/dashboard/login?msg=<script>", frm()))[1]  # 정해진 문구만
@@ -456,20 +458,20 @@ async def test_changing_the_password_or_user_logs_every_device_out(db: Database,
     token = await login(srv)
     # 재시작(같은 아이디·비밀번호)은 그대로 로그인
     _, same = make(db, tmp_path)
-    assert (await same.dispatch("GET", "/dashboard", with_session(token)))[0] == 200
+    assert (await same.dispatch("GET", "/dashboard/", with_session(token)))[0] == 200
     assert PASSWORD not in all_kv_text(db)  # 지문만 (scrypt + 소금), 비밀번호는 저장 안 함
     # 서버에서 DASHBOARD_PASSWORD 를 바꾸면 모든 세션이 풀림
     _, changed = make(db, tmp_path, password="new-river-cactus-77")
-    assert (await changed.dispatch("GET", "/dashboard", with_session(token)))[:2] == (302, "/dashboard/login")
+    assert (await changed.dispatch("GET", "/dashboard/", with_session(token)))[:2] == (302, "/dashboard/login")
     assert sessions_in_db(db) == {}
     _, back = make(db, tmp_path)  # 예전 비밀번호로 되돌려도 지운 세션은 돌아오지 않음
-    assert (await back.dispatch("GET", "/dashboard", with_session(token)))[0] == 302
+    assert (await back.dispatch("GET", "/dashboard/", with_session(token)))[0] == 302
     token = await login(back)
     _, renamed = make(db, tmp_path, user="owner2")  # 아이디를 바꿔도 마찬가지
-    assert (await renamed.dispatch("GET", "/dashboard", with_session(token)))[0] == 302
+    assert (await renamed.dispatch("GET", "/dashboard/", with_session(token)))[0] == 302
     # 새 비밀번호로는 다시 로그인하면 됨
     fresh = await login(changed, password="new-river-cactus-77")
-    assert (await changed.dispatch("GET", "/dashboard", with_session(fresh)))[0] == 200
+    assert (await changed.dispatch("GET", "/dashboard/", with_session(fresh)))[0] == 200
 
 
 def test_session_store_purges_expired_and_caps_live_sessions(db: Database) -> None:
@@ -493,18 +495,19 @@ def test_session_store_purges_expired_and_caps_live_sessions(db: Database) -> No
 async def test_basic_auth_still_works_and_redirect_vs_401(db: Database, tmp_path: Path) -> None:
     dash, srv = make(db, tmp_path)
     good = frm(authorization=basic(USER, PASSWORD))
-    for path in ("/dashboard", "/dashboard/", "/dashboard/data.json"):
+    for path in ("/dashboard/", "/dashboard/data.json"):
         assert (await srv.dispatch("GET", path, good))[0] == 200, path
+    assert (await srv.dispatch("GET", "/dashboard", good))[:2] == (301, "/dashboard/")  # 앱의 범위가 /dashboard/ 아래
     assert (await srv.dispatch("GET", f"/dashboard/input?src=kakao&members=3&t={dash.form_token}", good))[0] == 302
     assert db.metric_latest("kakao", "members")["value"] == 3
     # 로그인 없이 브라우저로 연 화면 → 로그인 화면 (HEAD 도)
-    for method, path in (("GET", "/dashboard"), ("GET", "/dashboard/"), ("HEAD", "/dashboard"),
+    for method, path in (("GET", "/dashboard/"), ("GET", "/dashboard/"), ("HEAD", "/dashboard"),
                          ("GET", "/dashboard/refresh?src=kakao"), ("GET", "/dashboard/input?src=kakao&members=9")):
         res = await srv.dispatch(method, path, frm())
         assert res[:2] == (302, "/dashboard/login") and "Set-Cookie" not in res[3], (method, path)
     assert db.metric_latest("kakao", "members")["value"] == 3  # 로그인 없이는 아무것도 안 바뀜
     # 기본 인증을 넣었는데 틀리면 그대로 401 (브라우저가 다시 묻게), data.json·POST·없는 경로도 401
-    res = await srv.dispatch("GET", "/dashboard", frm(authorization=basic(USER, "wrong")))
+    res = await srv.dispatch("GET", "/dashboard/", frm(authorization=basic(USER, "wrong")))
     assert res[0] == 401 and res[3]["WWW-Authenticate"].startswith('Basic realm="dashboard"')
     for path in ("/dashboard/data.json", "/dashboard/nope"):
         res = await srv.dispatch("GET", path, frm())
@@ -523,7 +526,7 @@ async def test_full_login_flow_over_real_http(db: Database, tmp_path: Path) -> N
     await srv.start()
     try:
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{srv.port}") as c:
-            r = await c.get("/dashboard")
+            r = await c.get("/dashboard/")
             assert r.status_code == 302 and r.headers["location"] == "/dashboard/login"
             r = await c.get("/dashboard/login")
             assert r.status_code == 200 and "default-src 'none'" in r.headers["content-security-policy"]
@@ -533,17 +536,17 @@ async def test_full_login_flow_over_real_http(db: Database, tmp_path: Path) -> N
             # Secure 쿠키라 http 로는 클라이언트가 다시 보내지 않으므로 직접 넣는다 (실제는 Caddy 뒤 https)
             r = await c.post("/dashboard/login", data={"t": field, "user": USER, "password": PASSWORD},
                              headers={"Cookie": f"dash_login={nonce}"})
-            assert r.status_code == 303 and r.headers["location"] == "/dashboard"
+            assert r.status_code == 303 and r.headers["location"] == "/dashboard/"
             assert len(r.headers.get_list("set-cookie")) == 1
             token = cookie_value(r.headers["set-cookie"], "dash_session")
             assert r.headers["set-cookie"] == f"dash_session={token}{SESSION_FLAGS}"
             c.cookies.clear()
-            r = await c.get("/dashboard", headers={"Cookie": f"dash_session={token}"})
+            r = await c.get("/dashboard/", headers={"Cookie": f"dash_session={token}"})
             assert r.status_code == 200 and "<title>Sns-board</title>" in r.text and "로그아웃" in r.text
             r = await c.post("/dashboard/logout", data={"t": dash.form_token}, headers={"Cookie": f"dash_session={token}"})
             assert r.status_code == 303 and r.headers["location"] == "/dashboard/login?msg=out"
             c.cookies.clear()
-            r = await c.get("/dashboard", headers={"Cookie": f"dash_session={token}"})
+            r = await c.get("/dashboard/", headers={"Cookie": f"dash_session={token}"})
             assert r.status_code == 302
     finally:
         await srv.stop()

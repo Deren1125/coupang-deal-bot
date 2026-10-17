@@ -424,7 +424,7 @@ async def test_link_post_over_http_checks_method_type_size_and_origin(db: Databa
             r = await c.post("/dashboard/link", data=form, auth=(USER, PASSWORD), headers={"sec-fetch-site": "same-origin"})
             assert r.status_code == 303 and r.headers["location"] == f"/dashboard?msg=linked&src=links&q={qid}#card-links"
             assert desk.calls == [(qid, "https://naver.me/abc")]
-            r = await c.get(r.headers["location"], auth=(USER, PASSWORD))
+            r = await c.get(r.headers["location"], auth=(USER, PASSWORD), follow_redirects=True)  # /dashboard → /dashboard/
             assert r.status_code == 200
             csp = r.headers["content-security-policy"]
             assert "default-src 'none'" in csp and "form-action 'self'" in csp  # 폼은 같은 서버로만

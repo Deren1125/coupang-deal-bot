@@ -88,7 +88,7 @@ async def test_dashboard_routes_require_auth_over_http(db: Database, tmp_path: P
                 r = await c.get(path, auth=(USER, "wrong"))
                 assert r.status_code == 401 and "www-authenticate" in r.headers, path  # 넣은 값이 틀리면 다시 묻게
             assert db.metric_latest("kakao", "members") is None  # 인증 없이는 아무것도 안 바뀜
-            r = await c.get("/dashboard", auth=(USER, PASSWORD))
+            r = await c.get("/dashboard/", auth=(USER, PASSWORD))  # /dashboard 는 /dashboard/ 로 (10/18 앱 화면)
             assert r.status_code == 200 and "text/html" in r.headers["content-type"]
             assert "카카오 오픈채팅" in r.text and "채널 대시보드" in r.text
             assert "default-src 'none'" in r.headers["content-security-policy"] and r.headers["x-frame-options"] == "DENY"
@@ -104,7 +104,7 @@ async def test_dashboard_routes_require_auth_over_http(db: Database, tmp_path: P
             r = await c.get("/dashboard/input", params={"src": "kakao", "members": "57", "t": dash.form_token}, auth=(USER, PASSWORD))
             assert r.status_code == 302 and r.headers["location"] == "/dashboard?msg=saved&src=kakao#card-kakao"
             assert db.metric_latest("kakao", "members")["value"] == 57
-            r = await c.get(r.headers["location"], auth=(USER, PASSWORD))
+            r = await c.get(r.headers["location"], auth=(USER, PASSWORD), follow_redirects=True)  # /dashboard → /dashboard/
             # 돌아가면 그 카드로 내려가므로 안내는 그 카드 안(머리 밑)에
             card = r.text.split('id="card-kakao"', 1)[1].split("</article>", 1)[0]
             assert '<div class="notice" role="status">저장했어요.</div>' in card
@@ -128,7 +128,7 @@ async def test_dealbot_wires_dashboard_routes_and_self_check(settings: Settings,
     settings.collectors = []
     bot = DealBot(settings)
     try:
-        assert (await bot.web.dispatch("GET", "/dashboard", GOOD))[0] == 404
+        assert (await bot.web.dispatch("GET", "/dashboard/", GOOD))[0] == 404
         lines = await bot.self_check()
         assert (None, "채널 대시보드 페이지: 꺼짐 (DASHBOARD_USER·DASHBOARD_PASSWORD 미설정 — 숫자는 계속 모음)") in lines
         assert bot.dashboard is not None and [s.key for s in bot.dashboard.sources][:5] == [
@@ -141,10 +141,11 @@ async def test_dealbot_wires_dashboard_routes_and_self_check(settings: Settings,
     settings.secrets.public_domain = "52-79-136-64.sslip.io"
     bot = DealBot(settings)
     try:
-        assert (await bot.web.dispatch("GET", "/dashboard"))[:2] == (302, "/dashboard/login")
+        assert (await bot.web.dispatch("GET", "/dashboard/"))[:2] == (302, "/dashboard/login")
         assert (await bot.web.dispatch("GET", "/dashboard/data.json"))[0] == 401
         assert (await bot.web.dispatch("GET", "/dashboard/login"))[0] == 200
-        res = await bot.web.dispatch("GET", "/dashboard", {"authorization": basic(USER, STRONG)})
+        assert (await bot.web.dispatch("GET", "/dashboard", {"authorization": basic(USER, STRONG)}))[:2] == (301, "/dashboard/")
+        res = await bot.web.dispatch("GET", "/dashboard/?view=classic", {"authorization": basic(USER, STRONG)})
         assert res[0] == 200 and "텔레그램 채널" in res[1] and "Deren의 아카이브" in res[1]  # type: ignore[operator]
         lines = await bot.self_check()
         assert (True, "채널 대시보드 https://52-79-136-64.sslip.io/dashboard (카드 11개, 비밀번호 보호)") in lines
@@ -290,33 +291,33 @@ async def test_wrong_passwords_are_throttled_per_client_and_overall(db: Database
     bad, good = basic(USER, "guess"), basic(USER, PASSWORD)
     caplog.set_level("INFO", logger="dealbot.dashboard.service")
     for _ in range(10):
-        assert (await srv.dispatch("GET", "/dashboard", _from("203.0.113.7", bad)))[0] == 401
-    res = await srv.dispatch("GET", "/dashboard", _from("203.0.113.7", good))
+        assert (await srv.dispatch("GET", "/dashboard/", _from("203.0.113.7", bad)))[0] == 401
+    res = await srv.dispatch("GET", "/dashboard/", _from("203.0.113.7", good))
     assert res[0] == 429 and 1 <= int(res[3]["Retry-After"]) <= 601  # type: ignore[misc]  # 막힌 동안은 맞는 비밀번호도 확인 안 함
     assert (await srv.dispatch("GET", "/dashboard/data.json", _from("203.0.113.7", bad)))[0] == 429
     # 다른 곳(주인)은 그대로, 비밀번호 없이 온 첫 요청(브라우저가 묻기 전)은 틀린 시도로 안 셈
-    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.2", good)))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", _from("198.51.100.2", good)))[0] == 200
     for _ in range(30):
-        assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.3")))[:2] == (302, "/dashboard/login")
+        assert (await srv.dispatch("GET", "/dashboard/", _from("198.51.100.3")))[:2] == (302, "/dashboard/login")
         assert (await srv.dispatch("GET", "/dashboard/data.json", _from("198.51.100.3")))[0] == 401
     # 60번 왔어도 셈에 안 들어갔으니 같은 곳에서 맞는 비밀번호로 바로 열림 (셌다면 막혀서 429)
     assert dash.limiter.blocked("198.51.100.3") is None
-    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.3", good)))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", _from("198.51.100.3", good)))[0] == 200
     # X-Forwarded-For 는 접속이 이 서버 안(Caddy)에서 왔을 때만 믿는다 — 바깥에서 바로 오면 접속 주소로 셈
     direct = {":peer": "192.0.2.50", "x-forwarded-for": "198.51.100.2", "authorization": bad}
     assert dash_auth.client_key(direct) == "192.0.2.50" and dash_auth.client_key(_from("1.2.3.4, 203.0.113.9")) == "203.0.113.9"
     # 창(10분)이 지나면 풀림
     clock.t += 601
-    assert (await srv.dispatch("GET", "/dashboard", _from("203.0.113.7", good)))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", _from("203.0.113.7", good)))[0] == 200
     # 주소를 바꿔 가며 넣어 보면 전체 한도(여기선 25)에서 모두 막힘
     for i in range(25):
-        assert (await srv.dispatch("GET", "/dashboard", _from(f"10.0.0.{i}", bad)))[0] == 401
-    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.2", good)))[0] == 429
+        assert (await srv.dispatch("GET", "/dashboard/", _from(f"10.0.0.{i}", bad)))[0] == 401
+    assert (await srv.dispatch("GET", "/dashboard/", _from("198.51.100.2", good)))[0] == 429
     # 실패 로그는 1분에 한 줄 (값은 남기지 않음)
     fails = [r for r in caplog.records if "인증 실패" in r.getMessage()]
     assert len(fails) == 2 and "guess" not in caplog.text and PASSWORD not in caplog.text
     clock.t += 601
-    assert (await srv.dispatch("GET", "/dashboard", _from("198.51.100.2", good)))[0] == 200
+    assert (await srv.dispatch("GET", "/dashboard/", _from("198.51.100.2", good)))[0] == 200
 
 
 async def test_throttle_over_real_http_uses_the_peer_address(db: Database, tmp_path: Path) -> None:
@@ -328,10 +329,10 @@ async def test_throttle_over_real_http_uses_the_peer_address(db: Database, tmp_p
     try:
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{srv.port}") as c:
             for _ in range(3):
-                assert (await c.get("/dashboard", auth=(USER, "nope"), headers={"X-Forwarded-For": "203.0.113.1"})).status_code == 401
-            r = await c.get("/dashboard", auth=(USER, PASSWORD), headers={"X-Forwarded-For": "203.0.113.1"})
+                assert (await c.get("/dashboard/", auth=(USER, "nope"), headers={"X-Forwarded-For": "203.0.113.1"})).status_code == 401
+            r = await c.get("/dashboard/", auth=(USER, PASSWORD), headers={"X-Forwarded-For": "203.0.113.1"})
             assert r.status_code == 429 and r.headers["retry-after"].isdigit()
-            r = await c.get("/dashboard", auth=(USER, PASSWORD), headers={"X-Forwarded-For": "203.0.113.2"})
+            r = await c.get("/dashboard/", auth=(USER, PASSWORD), headers={"X-Forwarded-For": "203.0.113.2"})
             assert r.status_code == 200
     finally:
         await srv.stop()

@@ -3,7 +3,10 @@
 아이폰·아이패드 바탕화면 앱은 기본 인증(브라우저가 묻는 아이디·비밀번호 창)을 잘 못 다뤄 열 때마다 묻거나 열리지 않는다.
 그래서 /dashboard/login 에서 한 번 넣으면 30일 동안 그 기기에서 그대로 열리게 한다 (기본 인증도 그대로 됨 — 예전 즐겨찾기용).
 
-- 세션: 32바이트 난수를 쿠키(dash_session; Secure·HttpOnly·SameSite=Strict·Path=/dashboard·30일)로 주고,
+- 세션: 32바이트 난수를 쿠키(dash_session; Secure·HttpOnly·SameSite=Lax·Path=/dashboard·30일)로 주고,
+  (10/18: Strict → Lax — 카톡·알림을 눌러 열면 Strict 쿠키가 안 실려 로그인 화면으로 가서. 상태를 바꾸는 요청은 모두 POST +
+  세션마다 다른 CSRF 머리글(X-Dash-Token) + Origin·Sec-Fetch-Site 확인이라 Lax 로도 다른 사이트가 바꿀 수 없다)
+  남은 기간이 7일보다 짧으면 화면·state 를 열 때 30일로 다시 늘린다 (쓰는 기기는 로그아웃되지 않게)
   DB(kv)에는 그 SHA-256 과 만료 시각, 아이디·비밀번호 지문만 둔다 (쿠키 값 자체는 어디에도 남기지 않음)
 - 지문: 아이디·비밀번호를 scrypt(무작위 소금)로 줄인 값. 서버의 DASHBOARD_PASSWORD(또는 아이디)를 바꾸면 지문이 달라져
   그전 세션이 모두 풀린다
@@ -47,16 +50,61 @@ _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{43,64}$")
 _NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
 
 
-def _cookie(name: str, value: str, *, path: str, max_age: int) -> str:
-    return f"{name}={value}; Max-Age={max_age}; Path={path}; Secure; HttpOnly; SameSite=Strict"
+RENEW_DAYS = 7  # 남은 기간이 이보다 짧으면 다시 30일로
+KV_CSRF = "dash:csrf_key"
+NEXT_RE = re.compile(r"^/dashboard(/(go/[a-z0-9-]{1,64})?)?$")  # 로그인 뒤 돌아갈 곳 (이것만 — 나머지는 /dashboard/)
+HOME = "/dashboard/"
+
+
+def _cookie(name: str, value: str, *, path: str, max_age: int, same_site: str = "Strict") -> str:
+    return f"{name}={value}; Max-Age={max_age}; Path={path}; Secure; HttpOnly; SameSite={same_site}"
 
 
 def session_cookie(token: str) -> str:
-    return _cookie(SESSION_COOKIE, token, path="/dashboard", max_age=SESSION_DAYS * 86400)
+    return _cookie(SESSION_COOKIE, token, path="/dashboard", max_age=SESSION_DAYS * 86400, same_site="Lax")
 
 
 def clear_session_cookie() -> str:
-    return _cookie(SESSION_COOKIE, "", path="/dashboard", max_age=0)
+    return _cookie(SESSION_COOKIE, "", path="/dashboard", max_age=0, same_site="Lax")
+
+
+def safe_next(value: str | None) -> str:
+    """로그인 뒤 돌아갈 곳: /dashboard · /dashboard/ · /dashboard/go/<항목> 만 그대로, 그 밖은 /dashboard/ (다른 곳으로 보내지 않게)."""
+    from dealbot.web import redirect_target_ok
+
+    v = value or ""
+    if NEXT_RE.fullmatch(v) and redirect_target_ok(v):
+        return HOME if v in ("/dashboard", HOME) else v
+    return HOME
+
+
+def session_hash(token: str) -> str:
+    """세션을 가리키는 이름 (쿠키 값의 SHA-256 16진수 — 기록에는 앞 8자만)."""
+    return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+class SessionCsrf:
+    """대시보드 앱 API 의 X-Dash-Token: HMAC-SHA256(kv dash:csrf_key, 세션 해시) base64url. 기본 인증은 'basic:'+지문."""
+
+    def __init__(self, db: Any) -> None:
+        self.db = db
+        self._key: bytes | None = None
+
+    def _secret(self) -> bytes:
+        if self._key is None:
+            key = self.db.kv_get(KV_CSRF)
+            if not key:
+                key = secrets.token_hex(32)
+                self.db.kv_set(KV_CSRF, key)
+            self._key = bytes.fromhex(key)
+        return self._key
+
+    def token(self, ident: str) -> str:
+        mac = hmac.new(self._secret(), ident.encode("utf-8"), hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+
+    def check(self, ident: str, given: str | None) -> bool:
+        return bool(given) and hmac.compare_digest(self.token(ident).encode(), str(given).encode())
 
 
 def login_cookie(nonce: str) -> str:
@@ -141,6 +189,23 @@ class SessionStore:
 
     def any_valid(self, tokens: list[str]) -> bool:
         return any(self.valid(t) for t in tokens)
+
+    def first_valid(self, tokens: list[str]) -> str | None:
+        return next((t for t in tokens if self.valid(t)), None)
+
+    def renew(self, token: str) -> bool:
+        """남은 기간이 RENEW_DAYS 보다 짧으면 다시 days 로 (True 면 쿠키도 다시 줘야 함)."""
+        if not self.valid(token):
+            return False
+        key = KV_SESSION + _sha(token)
+        data = self._load(key) or {}
+        exp = from_iso(str(data.get("exp") or ""))
+        now = self.now()
+        if exp is None or exp - now >= timedelta(days=RENEW_DAYS):
+            return False
+        data["exp"] = to_iso(now + timedelta(days=self.days))
+        self.db.kv_set(key, json.dumps(data))
+        return True
 
     def revoke(self, token: str | None) -> bool:
         if not token or not _TOKEN_RE.match(token):
@@ -284,7 +349,8 @@ button:active{opacity:.9}
 """
 
 
-def login_page(*, title: str, field_token: str, notice: tuple[str, str] | None = None, cross_site: bool = False) -> str:
+def login_page(*, title: str, field_token: str, notice: tuple[str, str] | None = None, cross_site: bool = False,
+               next_path: str = "") -> str:
     """로그인 화면 (스크립트 없음). title 은 설정의 대시보드 이름 (작은 글씨). 값은 모두 이스케이프."""
     parts = []
     if notice is not None:
@@ -299,7 +365,8 @@ def login_page(*, title: str, field_token: str, notice: tuple[str, str] | None =
         + "".join(parts)
         + f'<form method="post" action="{LOGIN_PATH}">'
         f'<input type="hidden" name="t" value="{escape(field_token, quote=True)}">'
-        '<label for="user">아이디<input id="user" name="user" autocomplete="username" autocapitalize="none" autocorrect="off" '
+        + (f'<input type="hidden" name="next" value="{escape(next_path, quote=True)}">' if next_path and next_path != HOME else "")
+        + '<label for="user">아이디<input id="user" name="user" autocomplete="username" autocapitalize="none" autocorrect="off" '
         'spellcheck="false" required></label>'
         '<label for="password">비밀번호<input id="password" name="password" type="password" autocomplete="current-password" '
         'required></label>'

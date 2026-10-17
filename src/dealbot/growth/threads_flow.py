@@ -184,6 +184,10 @@ class ThreadsFlow:
             if result.error:  # 올라가긴 했지만 사진이 빠졌거나 (선택) 답글이 실패한 경우
                 bot.db.log_event("WARNING", "threads", f"{pid}: {result.error}")
                 if result.error.startswith("답글"):
+                    if getattr(bot, "router", None) is not None:  # 주인 10/18: 정리의 '소식' 한 줄 (관리자 챗 대신)
+                        bot.notifier.owner_line({"kind": "sns_failed", "key": f"threads_reply_fail:{pid}"[:120], "urgent": False,
+                                                 "text": "스레드 글은 올라갔지만 답글이 실패했어요", "short": "스레드 답글 실패",
+                                                 "ttl_h": 24})
                     await bot.notifier.send(f"⚠️ <b>스레드 글은 올라갔지만 답글이 실패했습니다</b> (링크는 본문에 있음)\n"
                                             f"<code>{html.escape(result.error)}</code>")
             return result
@@ -305,6 +309,23 @@ class ThreadsFlow:
             f"{NO_AUTO_REPLY}"
         )
 
+    def store_reply(self, router: Any, job: ThreadsJob, reply: dict[str, Any], now: datetime) -> bool:
+        """대시보드 '스레드 답글' 시트에 한 줄 (원글 요약·답글·답변 초안 2개·스레드에서 열기). 봇은 답글을 달지 않는다."""
+        if job.kind == KIND_DEAL:
+            p = Deal.from_dict(job.payload["deal"]).product
+            head = f"{truncate(clean_name(p.name), 50)}" + (f" {p.price:,}원" if p.has_price else "")
+        elif job.kind == KIND_POLL:
+            head = f"투표: {job.payload.get('question') or ''}"
+        else:
+            head = truncate(str(job.payload.get("name") or "정보 글"), 50)
+        text = str(reply.get("text") or "").strip()
+        d1, d2 = self.drafts(job, text)
+        link = reply.get("permalink") if isinstance(reply.get("permalink"), str) else None
+        return router.store.add_reply(reply_id=str(reply.get("id")), post_id=str(job.post_id), post_excerpt=head,
+                                      reply_text=truncate(text, 300), username=str(reply.get("username") or "")[:40],
+                                      drafts=[d1, d2], open_url=link if link and link.startswith("https://") else None,
+                                      now=now.timestamp())
+
     async def collect_replies(self, now: datetime | None = None, *, slot: str = "") -> int:
         """내 최근 글의 새 답글 → 관리자 챗 (소리 없이 한 통씩) + 주인 할 일 한 줄. 권한(threads_read_replies)이 없으면 조용히 0."""
         bot = self.bot
@@ -333,8 +354,13 @@ class ThreadsFlow:
                     continue
                 fresh.append((job, r))
         sent = 0
+        router = getattr(bot, "router", None)
         for job, r in fresh[: rc.max_messages]:
-            if await bot.notifier.send(self.reply_message(job, r), silent=True):
+            if router is not None:  # 주인 10/18: 관리자 챗 대신 대시보드 '스레드 답글' (답글마다 한 줄 + 초안 2개, 7일)
+                self.store_reply(router, job, r, now)
+                bot.db.mark_reply_seen(str(r.get("id")), str(job.post_id), now)
+                sent += 1
+            elif await bot.notifier.send(self.reply_message(job, r), silent=True):
                 bot.db.mark_reply_seen(str(r.get("id")), str(job.post_id), now)
                 sent += 1
         if sent:
