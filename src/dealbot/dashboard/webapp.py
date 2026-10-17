@@ -1,6 +1,7 @@
 """휴대폰 바탕화면에 앱처럼 (주인 10/15 — "갤럭시 휴대폰이랑 아이패드, 아이폰에서도 앱처럼 바탕화면에 추가할 수 있나?").
 
-- /dashboard/manifest.webmanifest: 이름 'Sns-board'(주인이 고른 표기 — 아이폰에서 잘리지 않게), 시작 주소·범위 /dashboard,
+- /dashboard/manifest.webmanifest: 이름 'Sns-board'(주인이 고른 표기 — 아이폰에서 잘리지 않게), 시작 주소 /dashboard/
+  (앱 화면 — 서비스 워커 범위 /dashboard/ 안), 범위 /dashboard, id 는 예전 그대로 /dashboard (이미 깐 앱이 둘이 되지 않게),
   주소창 없는 화면(standalone), 아이콘 192·512(모서리 투명) + 512 maskable(가장자리까지 꽉 참)
 - /dashboard/static/<파일>: 주인이 고른 아이콘 그대로 (static 폴더). 휴대폰(과 크롬의 앱 만들기 서버)이 로그인 없이 받아 가야 해서
   이 두 가지(매니페스트·아이콘)만 인증 없이 연다 — 정확한 경로만, 그 밖은 그대로 로그인
@@ -20,7 +21,8 @@ from typing import Any
 
 APP_NAME = "Sns-board"  # 매니페스트 name·short_name, apple-mobile-web-app-title, application-name, <title> 모두 이것
 APP_DESCRIPTION = "채널 숫자와 지금 할 일을 한 화면에"
-START_URL = "/dashboard"
+APP_ID = "/dashboard"  # 바꾸면 휴대폰에 이미 깐 앱과 다른 앱이 된다 — 그대로 둔다
+START_URL = "/dashboard/"
 SCOPE = "/dashboard"
 MANIFEST_PATH = "/dashboard/manifest.webmanifest"
 STATIC_PREFIX = "/dashboard/static/"
@@ -84,7 +86,7 @@ def static_response(name: str) -> Any:
 
 def manifest() -> dict[str, Any]:
     return {
-        "id": START_URL,
+        "id": APP_ID,
         "name": APP_NAME,
         "short_name": APP_NAME,
         "description": APP_DESCRIPTION,

@@ -143,7 +143,7 @@ async def test_manifest_and_icons_are_public_with_right_types_and_long_cache(db:
             assert "set-cookie" not in r.headers
             m = r.json()
             assert (m["name"], m["short_name"]) == ("Sns-board", "Sns-board")  # 주인이 고른 표기 그대로
-            assert (m["start_url"], m["scope"], m["id"], m["display"]) == ("/dashboard", "/dashboard", "/dashboard", "standalone")
+            assert (m["start_url"], m["scope"], m["id"], m["display"]) == ("/dashboard/", "/dashboard", "/dashboard", "standalone")
             assert m["background_color"] == m["theme_color"] == "#f4f5f7" and "--bg:#f4f5f7" in render.CSS  # 화면 바탕과 같은 색
             assert [(i["sizes"], i["purpose"], i["type"]) for i in m["icons"]] == [
                 ("192x192", "any", "image/png"), ("512x512", "any", "image/png"), ("512x512", "maskable", "image/png")]

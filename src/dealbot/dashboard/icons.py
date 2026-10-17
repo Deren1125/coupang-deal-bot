@@ -64,3 +64,20 @@ CHECK = (
     '<path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="#1a8a4a" stroke-width="2.6" stroke-linecap="round" '
     'stroke-linejoin="round"/></svg>'
 )
+
+
+# ---------------------------------------------------------------- 앱 아래 탭 (Sns-board, 주인 10/18) — 선 아이콘, 글자색(currentColor)
+def _tab(body: str) -> str:
+    return (f'<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" fill="none" '
+            f'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">{body}</svg>')
+
+
+TAB_TODO = _tab('<rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8 9.5l2 2 4-4M8 15.5h8"/>')
+TAB_DEAL = _tab('<path d="M3.5 12.6V5a1.5 1.5 0 0 1 1.5-1.5h7.6l8 8a1.5 1.5 0 0 1 0 2.1l-6.4 6.4a1.5 1.5 0 0 1-2.1 0z"/>'
+                '<circle cx="8.3" cy="8.3" r="1.4"/>')
+TAB_BLOG = _tab('<path d="M14.5 4.5l5 5L9 20H4v-5z"/><path d="M12.5 6.5l5 5"/>')
+TAB_STATS = _tab('<path d="M4 20h16"/><rect x="5.5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="6" width="3" height="11" rx="1"/>'
+                 '<rect x="15.5" y="9" width="3" height="8" rx="1"/>')
+TAB_CONNECT = _tab('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>')
+TABS = (("todo", "할 일", TAB_TODO), ("deal", "딜", TAB_DEAL), ("blog", "블로그", TAB_BLOG), ("stats", "통계", TAB_STATS),
+        ("connect", "연결", TAB_CONNECT))

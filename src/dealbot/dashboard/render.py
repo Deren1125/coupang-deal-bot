@@ -430,12 +430,16 @@ def _form(v: CardView, token: str, today: date, min_day: date | None = None, *, 
 
 
 def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int, min_day: date | None = None,
-              notice: tuple[str, str] | None = None) -> str:
-    """카드 하나. notice 가 있으면(이 카드에서 저장·다시 읽기를 누르고 돌아왔을 때) 머리 바로 밑에."""
+              notice: tuple[str, str] | None = None, app: bool = False) -> str:
+    """카드 하나. notice 가 있으면(이 카드에서 저장·다시 읽기를 누르고 돌아왔을 때) 머리 바로 밑에.
+    app=True 는 앱의 통계 탭 조각: 링크·폼 대신 data-action 단추 (app.js 가 세션마다 다른 토큰으로 JSON 으로 보냄)."""
     status = v.status
     chip = f'<span class="chip {e(status)}">{e(CHIP_LABELS[status])}</span>' if status else ""
     btn = ""
-    if v.refreshable:
+    if v.refreshable and app:
+        btn = (f'<button type="button" class="btn" data-action="stats.refresh" data-src="{e(v.key)}" '
+               f'aria-label="{e(v.title)} 다시 읽기">{icons.REFRESH}<span class="btn-text">다시 읽기</span></button>')
+    elif v.refreshable:
         href = "/dashboard/refresh?" + urlencode({"src": v.key, "t": token})
         # 좁은 폰에서는 ↻ 만 (글자는 화면 읽기용으로 남김) — 카드 이름이 잘리지 않게
         btn = (f'<a class="btn" href="{e(href)}" title="다시 읽기" aria-label="{e(v.title)} 다시 읽기">'
@@ -465,9 +469,82 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
     if v.note:
         parts.append(f'<p class="note">{e(v.note)}</p>')
     parts.extend(f'<p class="hint">{e(h)}</p>' for h in v.hints)
-    parts.append(_form(v, token, today, min_day, open_=bool(notice and notice[1] == "bad")))
+    parts.append(_app_input(v, today) if app else _form(v, token, today, min_day, open_=bool(notice and notice[1] == "bad")))
     parts.append("</article>")
     return "".join(parts)
+
+
+def _app_input(v: CardView, today: date) -> str:
+    """앱의 '직접 넣기' 단추 (칸은 앱이 시트로 띄움 — 조각에는 폼이 없다). 지난 값은 단추 옆 작은 글로."""
+    if not v.manual:
+        return ""
+    fields = json.dumps([{"metric": f.metric, "label": f.label} for f in v.manual], ensure_ascii=False)
+    last = []
+    for f in v.manual:
+        cur, day = v.manual_values.get(f.metric), v.manual_days.get(f.metric)
+        if cur is not None:
+            last.append(f"{f.label} {fmt_num(cur)}" + (f" · {fmt_short_day(day)}" if day else ""))
+    what = " · ".join(last) if last else "·".join(f.label for f in v.manual)
+    return (f'<div class="manual-app"><button type="button" class="mbtn" data-action="stats.input" data-src="{e(v.key)}" '
+            f'data-title="{e(v.title)} 직접 넣기" data-today="{e(today.isoformat())}" data-fields="{e(fields)}">직접 넣기</button>'
+            f'<span class="what">{e(what)}</span></div>')
+
+
+# 앱 통계 탭에 넣지 않는 카드: 할 일·딜 탭·연결과 겹치는 것 (한 번만 보이게)
+STATS_SKIP = ("dealbot_links", "blog_waiting", "dealbot")
+# 앱 안에서만 쓰는 카드 꾸밈 (색은 app.css 의 토큰 — 어두운 모드도 그대로). .stx 아래로만
+STATS_CSS = """
+.stx{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+@media (min-width:760px){.stx{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stx .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px 16px;min-width:0}
+.stx .head{display:flex;align-items:center;justify-content:space-between;gap:6px 8px;min-height:44px}
+.stx .name{display:flex;align-items:center;gap:8px;min-width:0}.stx h2{font-size:16px;margin:0}
+.stx .icon{display:inline-flex;flex:none}.stx .actions{display:flex;align-items:center;gap:6px;margin-left:auto}
+.stx .chip{font-size:12px;padding:2px 8px;border-radius:6px;font-weight:700;white-space:nowrap;background:var(--grey);color:var(--sub)}
+.stx .chip.unmet{background:var(--or-soft);color:var(--or)}.stx .chip.met{background:var(--gr-soft);color:var(--gr)}
+.stx .btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:44px;min-width:44px;border:1px solid var(--fline);
+border-radius:10px;background:var(--card);color:var(--text);padding:0 10px;font-size:14px}
+.stx .read,.stx .stats-note,.stx .note{color:var(--muted);font-size:13px;margin:4px 0 10px}
+.stx .stats{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.stx .stat{background:var(--grey);border-radius:10px;padding:10px 12px;min-width:0}
+.stx .stat .label{color:var(--sub);font-size:13px;margin:0 0 2px}.stx .stat .value{font-size:20px;font-weight:700;margin:0;line-height:1.3}
+.stx .stat .value.missing{font-size:15px;color:var(--muted)}.stx .unit{font-size:12px;color:var(--sub);margin-left:2px}
+.stx .stat .sub{font-size:12px;color:var(--muted);margin:2px 0 0}.stx .num{white-space:nowrap}
+.stx .delta{font-size:12px;font-weight:700;margin-left:6px}.stx .delta.up{color:var(--gr)}.stx .delta.down{color:var(--red)}
+.stx .delta small{font-weight:500;color:var(--muted);margin-left:2px}.stx .stat.stale .value{color:var(--muted)}
+.stx .spark{display:block;width:100%;max-width:260px;height:46px;margin:12px auto 4px}.stx .spark path{stroke:var(--ac-ink)}
+.stx .spark path[stroke-dasharray]{stroke:var(--line)}
+@media (max-width:420px){.stx .btn-text{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}}
+.stx .links{display:flex;flex-wrap:wrap;gap:6px 12px;margin:10px 0 0}
+.stx .ext{color:var(--ac-ink);font-size:14px;text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
+.stx .ext.primary{flex:1 1 auto;justify-content:center;border-radius:10px;background:var(--ac-soft);font-weight:600;padding:0 14px}
+.stx h3{font-size:13px;color:var(--sub);margin:14px 0 8px}
+.stx .row{display:block;min-height:0;border:0;padding:0;margin:0 0 10px}
+.stx .row-top{display:flex;justify-content:space-between;gap:8px;font-size:14px}.stx .rv{color:var(--sub);white-space:nowrap}
+.stx .bar{height:6px;background:var(--grey);border-radius:3px;overflow:hidden;margin-top:5px}
+.stx .bar i{display:block;height:100%;background:var(--ac)}.stx .bar.met i{background:var(--gr)}.stx .bar.over i{background:var(--or)}
+.stx .activity{font-size:13px;color:var(--sub);background:var(--grey);border-radius:8px;padding:8px 10px;margin:10px 0 0}
+.stx .it{display:inline-block;max-width:100%}.stx .hint{color:var(--or);font-size:13px;margin:8px 0 0}
+.stx .manual-app{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:12px 0 0;border-top:1px dashed var(--line);padding-top:8px}
+.stx .mbtn{min-height:44px;border:0;background:none;color:var(--ac-ink);font-size:15px;font-weight:700;padding:0}
+.stx .what{font-size:13px;color:var(--muted)}
+"""
+
+
+def stats_fragment(*, views: list[CardView], today: date, tz: str, spark_days: int) -> str:
+    """앱의 통계 탭 (GET /dashboard/api/stats.html): 예전 카드 그대로 한 줄씩 (텔레그램·인스타·스레드·블로그 셋·오픈채팅·쿠팡).
+    폼·스크립트 없음 — 단추는 data-action. 카드 하나가 깨져도 나머지는 뜬다."""
+    cards = []
+    for v in views:
+        if v.type in STATS_SKIP:
+            continue
+        try:
+            cards.append(card_html(v, token="", today=today, tz=tz, spark_days=spark_days, app=True))
+        except Exception as err:  # noqa: BLE001
+            log.exception("dashboard stats card %s render failed", v.key)
+            cards.append(_broken_card(v, err))
+    body = "".join(cards) or '<p class="empty">보여 줄 카드가 없어요</p>'
+    return f"<style>{STATS_CSS}</style>{body}"
 
 
 def _broken_card(v: CardView, err: BaseException) -> str:
