@@ -1871,6 +1871,8 @@ class DealBot:
                         self.db.kv_set(f"soldout_marked:{pid}", to_iso(utcnow()))
                         out["marked"] = True
                         await self.notifier.send(f"⛔ 채널 글에 품절 표시를 붙였습니다: {product.name[:60]} ({via})", silent=True)
+                        if self.router is not None:  # 관리자 챗이 조용하면 위 줄은 안 가니 정리의 딜봇 문장으로 (spec §3.7)
+                            self.notifier.summary("soldout", truncate(product.name, 40))
         if out["cancelled"] or out["marked"] or out["exported"]:
             self.db.log_event(
                 "INFO", "soldout", f"{pid} via={via} cancelled={out['cancelled']} marked={out['marked']} exported={out['exported']}"

@@ -142,7 +142,10 @@ class Uploads:
         buf = io.BytesIO()
         if fmt == "PNG":
             keep = im if im.mode in ("RGB", "RGBA", "L", "LA", "P") else im.convert("RGBA")
-            keep.save(buf, "PNG", optimize=True)  # pnginfo·icc 를 넘기지 않아 글·색 정보는 빠짐
+            # PNG 저장은 im.info 의 icc_profile 을 그대로 다시 넣는다 — 기기·회사 이름이 든 ICC 까지 빼려면 info 를 비움 (투명색만 남김)
+            tr = keep.info.get("transparency")
+            keep.info.clear()
+            keep.save(buf, "PNG", optimize=True, **({"transparency": tr} if tr is not None else {}))  # pnginfo 도 넘기지 않음
             ext = "png"
         else:
             _rgb(im).save(buf, "JPEG", quality=92, optimize=True)  # exif·icc 를 넘기지 않음 → 메타데이터 없음

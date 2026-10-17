@@ -44,7 +44,21 @@ if [ "${1:-}" = "disable" ]; then
   exit 0
 fi
 
-notify() {  # 관리자 챗으로 알림 (토큰은 .env 에서 읽기만, 출력하지 않음)
+tg_owner_on() {  # 주인 10/18: 관리자 챗 알림은 끔 — 봇이 대시보드 앱 알림으로 돌고 있으면(데이터 폴더의 dashboard_status.json 이
+  # 15분 안, push_router) 보내지 않는다 (막힘은 owner_notice → 대시보드 할 일 ⛔ + 앱 알림). config.yaml 에
+  # telegram_owner_notices: true 를 적었거나 예전 길(router: legacy — 그 파일을 쓰지 않음)이면 예전처럼 보냄
+  grep -Eq '^[[:space:]]+telegram_owner_notices:[[:space:]]*true' config.yaml 2>/dev/null && return 0
+  local dir st
+  dir="$(grep -E '^DEALBOT_DATA_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"
+  st="${dir:-data}/dashboard_status.json"
+  if [ -f "$st" ] && grep -q '"push_router"' "$st" 2>/dev/null && [ -n "$(find "$st" -mmin -15 2>/dev/null)" ]; then
+    return 1
+  fi
+  return 0
+}
+
+notify() {  # 관리자 챗으로 알림 (토큰은 .env 에서 읽기만, 출력하지 않음). 꺼져 있으면(기본) 보내지 않음 — 막힘은 owner_notice 로 대시보드 앱 알림
+  tg_owner_on || return 0
   local tok chat
   tok="$(grep -E '^TELEGRAM_BOT_TOKEN=' .env | tail -1 | cut -d= -f2-)"
   chat="$(grep -E '^TELEGRAM_ADMIN_CHAT_ID=' .env | tail -1 | cut -d= -f2-)"

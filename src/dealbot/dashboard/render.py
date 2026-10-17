@@ -29,6 +29,7 @@ from dealbot.dashboard.model import (
     ListEntry,
     ListGroup,
     Stat,
+    explain,
     fmt_num,
     fmt_short_day,
     fmt_signed,
@@ -434,6 +435,10 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
     """카드 하나. notice 가 있으면(이 카드에서 저장·다시 읽기를 누르고 돌아왔을 때) 머리 바로 밑에.
     app=True 는 앱의 통계 탭 조각: 링크·폼 대신 data-action 단추 (app.js 가 세션마다 다른 토큰으로 JSON 으로 보냄)."""
     status = v.status
+    # 앱: 목표를 아직 판단할 수 없으면 '판단 불가' 칩·빈 목표 막대·설명 문단을 빼고 '아직 읽은 값이 없어요' 한 줄만 (같은 말 세 번 X)
+    goal_unknown = app and bool(v.rows) and all(r.met is None for r in v.rows)
+    if app and status == UNKNOWN:
+        status = ""
     chip = f'<span class="chip {e(status)}">{e(CHIP_LABELS[status])}</span>' if status else ""
     btn = ""
     if v.refreshable and app:
@@ -462,16 +467,31 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
         sparkline(v.spark, days=spark_days, today=today, label=v.spark_label),
         _lists(v, token),
     ]
-    if v.rows:
+    if v.rows and not goal_unknown:
         parts.append(f"<h3>{e(v.program or '목표')}</h3>")
         parts.extend(_row(r) for r in v.rows)
     parts.extend(_activity(line) for line in v.activity)
-    if v.note:
-        parts.append(f'<p class="note">{e(v.note)}</p>')
+    note = v.note
+    if goal_unknown and note == explain(v.program, v.rows):
+        note = ""
+    if note:
+        parts.append(f'<p class="note">{e(haeyo(note) if app else note)}</p>')
     parts.extend(f'<p class="hint">{e(h)}</p>' for h in v.hints)
     parts.append(_app_input(v, today) if app else _form(v, token, today, min_day, open_=bool(notice and notice[1] == "bad")))
     parts.append("</article>")
     return "".join(parts)
+
+
+HAEYO = (("남았습니다.", "남았어요."), ("많습니다.", "많아요."), ("채웠습니다.", "채웠어요."),
+         ("판단할 수 없습니다.", "판단할 수 없어요."), ("아직 확인할 수 없습니다.", "아직 확인 못 했어요."), ("없습니다.", "없어요."),
+         ("있습니다.", "있어요."), ("합니다.", "해요."), ("됩니다.", "돼요."))
+
+
+def haeyo(text: str) -> str:
+    """앱 안내 문장은 해요체로 ('…남았습니다.' → '…남았어요.')."""
+    for a, b in HAEYO:
+        text = text.replace(a, b)
+    return text
 
 
 def _app_input(v: CardView, today: date) -> str:

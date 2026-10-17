@@ -269,7 +269,8 @@ CREATE TABLE IF NOT EXISTS dash_actions (
     error          TEXT,
     cid            TEXT,
     session        TEXT NOT NULL DEFAULT '',
-    updated_at     REAL NOT NULL
+    updated_at     REAL NOT NULL,
+    args_hash      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_dash_actions_cid ON dash_actions(cid);
 CREATE INDEX IF NOT EXISTS idx_dash_actions_status ON dash_actions(status, ts);
@@ -412,6 +413,8 @@ class Database(SnsStoreMixin):
                               ("updated_at", "TEXT"), ("comments", "INTEGER"))),
             # 대조한 상품의 분류(식품 판정 — 기억한 값도 처음 찾은 값과 같게)·네이버 탈락 기준 등 (JSON)
             ("market_quotes", (("meta", "TEXT"),)),
+            # 같은 일·같은 항목이 아직 안 끝났을 때 args 까지 같아야 '같은 일' (사진 두 번째 묶음이 첫 묶음 id 로 사라지지 않게)
+            ("dash_actions", (("args_hash", "TEXT"),)),
         )
         for table, columns in adds:
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}

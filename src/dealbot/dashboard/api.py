@@ -97,12 +97,12 @@ class DashApi:
         self.csrf = SessionCsrf(dash.db)
         self.uploads = Uploads(dash.db, bot.settings.data_dir)
         key = hashlib.sha256(b"ctoken|" + self.csrf._secret()).digest()
-        self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,
-                               facts=self._facts)
         self.state_rate = RateWindow(60, 60.0)
         self.upload_rate = RateWindow(60, 600.0)
         self.sub_rate = RateWindow(10, 3600.0)
-        self.test_rate = RateWindow(5, 600.0)
+        self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
+        self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,
+                               facts=self._facts, test_rate=self.test_rate)
 
     # ---------------------------------------------------------- 누가
     def caller(self, headers: dict[str, str]) -> tuple[Caller, str, str | None]:
@@ -324,9 +324,14 @@ class DashApi:
                        code="bad_endpoint", action_id=None)
             return err(400, "bad_endpoint", "이 브라우저의 알림 주소는 받을 수 없어요")
         try:
+            from cryptography.hazmat.primitives.asymmetric import ec
+
             from dealbot.notify.vapid import b64u_decode
 
-            ok = len(b64u_decode(str(p256dh))) == 65 and len(b64u_decode(str(auth))) == 16
+            point = b64u_decode(str(p256dh))
+            ok = len(point) == 65 and point[0] == 0x04 and len(b64u_decode(str(auth))) == 16
+            if ok:  # P-256 위의 점인지 (아니면 보낼 때마다 암호화가 깨진다)
+                ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), point)
         except (ValueError, TypeError):
             ok = False
         if not ok:
@@ -430,9 +435,12 @@ class DashApi:
         if (headers.get("sec-fetch-site") or "").strip().lower() not in ("", "same-origin") or platform not in ("threads", "instagram"):
             return 403, "다른 곳에서 연 링크는 받지 않아요", "text/plain; charset=utf-8", {}
         url = await (self.bot.threads_auth_link() if platform == "threads" else self.bot.instagram_auth_link())
+        caller = self.caller(headers)[0]
+        self.audit(session8=caller.session, client8=caller.client8, action="connect", target=platform, args={},
+                   code="redirect" if url else "failed", action_id=None)  # 주소(state 포함)는 남기지 않는다
         if not url:
             return 302, "/dashboard/#/connect"
-        log.info("%s auth redirect", platform)  # 주소(state 포함)는 남기지 않는다
+        log.info("%s auth redirect", platform)
         return 302, url, None, {"Referrer-Policy": "no-referrer", "Cache-Control": "no-store"}
 
     async def sw(self, query: dict[str, str]) -> Any:

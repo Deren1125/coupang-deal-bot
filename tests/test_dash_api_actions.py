@@ -235,13 +235,14 @@ async def test_photos_map_upload_ids_to_paths_inside_the_upload_dir(bot: DealBot
     blogauto_status(settings)
     h = session_headers(bot)
     uid = photo_upload(bot, h)
-    status, body = await act(bot, "blog.photos", {"blog": "issue", "pid": 46, "uploads": [uid], "slot": 3}, h)
+    # 블로그 모드를 모르면(기록 파일 없음) 바로 공개될 수도 있으니 확인 창 한 번 (MAY_PUBLISH)
+    status, body = await confirmed(bot, "blog.photos", {"blog": "issue", "pid": 46, "uploads": [uid], "slot": 3}, h)
     assert status == 202
     f = spool.read(spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new" / f"{body['id']}.json")
     [path] = f["args"]["uploads"]  # type: ignore[index]
     assert path.startswith(str(settings.data_dir / "dash_uploads" / "files")) and path.endswith(f"{uid}.jpg")
     assert f["args"]["mode"] == "slot" and f["args"]["slot"] == 3  # type: ignore[index]
-    status, body = await act(bot, "blog.photos", {"blog": "issue", "pid": 46, "uploads": ["0" * 32]}, h)
+    status, body = await confirmed(bot, "blog.photos", {"blog": "issue", "pid": 46, "uploads": ["0" * 32]}, h)
     assert status == 400 and body["code"] == "bad_upload"
 
 
@@ -269,7 +270,7 @@ async def test_secret_args_never_reach_the_db_or_the_audit(bot: DealBot, setting
 
 async def test_unclaimed_actions_expire_and_secret_files_are_deleted(bot: DealBot, settings: Settings) -> None:
     blogauto_status(settings)
-    _s, a = await act(bot, "blog.retry", {"blog": "issue", "pid": 3})
+    _s, a = await confirmed(bot, "blog.retry", {"blog": "issue", "pid": 3})
     _s, k = await act(bot, "blog.kakao_connect", {"url": "https://localhost/k?code=SECRET"})
     out = bot.actions_out
     out.clock = lambda: time.time() + 700
@@ -282,7 +283,7 @@ async def test_unclaimed_actions_expire_and_secret_files_are_deleted(bot: DealBo
 
 async def test_running_without_news_for_20min_becomes_unknown(bot: DealBot, settings: Settings) -> None:
     blogauto_status(settings)
-    _s, a = await act(bot, "blog.retry", {"blog": "issue", "pid": 3})
+    _s, a = await confirmed(bot, "blog.retry", {"blog": "issue", "pid": 3})
     r = bot.actions_out.root()
     spool.claim(r, a["id"])
     t0 = time.time()

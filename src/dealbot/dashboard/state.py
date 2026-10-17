@@ -15,12 +15,19 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard.actions import BLOG_NAMES, needs_confirm
+from dealbot.dashboard.actions import (
+    BLOG_NAMES,
+    MAY_PUBLISH,
+    dismissible,
+    needs_confirm,
+    publish_blog,
+)
 from dealbot.dashboard.todo import ago, left, link_target
 from dealbot.notify import iid as iidmod
 from dealbot.utils.text import clean_name, truncate
@@ -114,6 +121,17 @@ class StateBuilder:
         if supported is None:
             return actions
         return [a for a in actions if not a["action"].startswith("blog.") or a["action"][5:] in supported]
+
+    @staticmethod
+    def _modes(v2: dict[str, Any]) -> dict[str, str]:
+        blogs = (v2.get("status") or {}).get("blogs") or {}
+        return {b: str((blogs.get(b) or {}).get("mode") or "") for b in ("finance", "issue", "hotdeal")}
+
+    @staticmethod
+    def _mark_publish(a: dict[str, Any], modes: dict[str, str]) -> None:
+        """자동 발행 모드 블로그의 MAY_PUBLISH 일은 확인 창이 있다고 표시 (서버 ActionDesk 가 같은 기준으로 409)."""
+        if a.get("action") in MAY_PUBLISH:
+            a["confirm"] = modes.get(publish_blog(a["action"], a.get("args") or {}) or "") != "draft"
 
     def _hhmm(self, dt: datetime) -> str:
         return dt.astimezone(ZoneInfo(self.tz)).strftime("%H:%M")
@@ -253,6 +271,13 @@ class StateBuilder:
             status = f"질문 {len(post['questions'])}개"
         if first == "publish" and post and post.get("popular"):
             status = "발행 대기 · 인기 예상"
+        # 끝나는 시간 (질문 마감·사진 부탁 마감) → 줄에 '· 18:00까지' + 정렬·경고색 (딜 줄과 같은 기준으로 앞에)
+        pr = (post or {}).get("photo_request") if isinstance((post or {}).get("photo_request"), dict) else {}
+        exp = (_iso_ts((post or {}).get("deadline"), self.tz) or _iso_ts(pr.get("deadline"), self.tz)) if needs else None
+        if exp is not None and first in ("answers", "photos", "publish"):
+            when = datetime.fromtimestamp(exp, ZoneInfo(self.tz))
+            same_day = when.date() == datetime.now(ZoneInfo(self.tz)).date()
+            status = f"{status} · {when:%H:%M}까지" if same_day else f"{status} · {when.month}/{when.day} {when:%H:%M}까지"
         questions = list((post or {}).get("questions") or [])
         if not long:
             questions = [{"n": q["n"], "q": truncate(q["q"], 60)} for q in questions]
@@ -260,7 +285,7 @@ class StateBuilder:
         iid = iidmod.post_iid(blog, pid)
         return {"iid": iid, "src": "blog", "blog": blog, "kind": first or "waiting", "sev": "todo", "urgent": bool(needs),
                 "title": (post or {}).get("title") or title or f"{CHIPS[blog]} #{pid}", "chip": CHIPS[blog], "status": status,
-                "since": None, "expires_at": None, "primary": primary, "more": more,
+                "since": _iso_ts((post or {}).get("saved_at"), self.tz), "expires_at": exp, "primary": primary, "more": more,
                 "detail": {"needs": needs, "photo_request": (post or {}).get("photo_request"), "slots": slots,
                            "questions": questions, "deadline": (post or {}).get("deadline"),
                            "owner_edited": bool((post or {}).get("owner_edited")),
@@ -272,9 +297,11 @@ class StateBuilder:
         key = first.key
         head = key.split(":", 1)[0]
         dismiss = act("todo.dismiss", "다 했어요", {"iid": iid, "key": key})
+        can_dismiss = dismissible(iid, key, dealbot_row=first.src == "dealbot")
         more: list[dict[str, Any]] = []
         if iid.startswith("sys-"):
-            primary = goto("자세히", "#/connect")
+            primary = goto("자세히", f"#/i/{iid}")  # 무엇이 멈췄는지는 그 시트에 (연결 탭은 그다음)
+            more.append(goto("연결 보기", "#/connect"))
             if first.sev == "info":
                 more.append(dismiss)
         elif iid.startswith("conn-naver-"):
@@ -292,10 +319,14 @@ class StateBuilder:
             primary = goto("글감 보기", f"#/blog/{iid.split('-')[1]}") if iid.endswith("-scan") else goto("블로그 보기", f"#/blog/{iid.split('-')[1]}")
             more.append(dismiss)
         else:
-            primary = goto("자세히", "#/connect")
+            primary = goto("자세히", f"#/i/{iid}")
+            more.append(goto("연결 보기", "#/connect"))
+        if not can_dismiss:
+            more = [a for a in more if a["action"] != "todo.dismiss"]
+        when = ago(datetime.fromtimestamp(first.opened_at, UTC), datetime.fromtimestamp(now, UTC))
         return {"iid": iid, "src": "dealbot" if first.src == "dealbot" else "blog", "blog": first.blog, "kind": first.kind,
                 "sev": first.sev, "urgent": any(n.urgent for n in rows), "title": first.title or first.short,
-                "status": ago(datetime.fromtimestamp(first.opened_at, UTC), datetime.fromtimestamp(now, UTC)),
+                "status": notice_status(first.body, first.title) or when,
                 "since": first.opened_at, "expires_at": None, "primary": primary, "more": more,
                 "detail": {"lines": [n.body for n in rows if n.body][:6], "key": head}}
 
@@ -377,11 +408,15 @@ class StateBuilder:
             out[iid] = {"iid": iid, "src": "blog", "blog": blog, "kind": t.kind, "sev": sev, "urgent": t.urgent, "title": t.short,
                         "status": truncate(t.what, 60) if t.what and t.what != t.short else (ago(t.since, now_dt) if t.since else ""),
                         "since": _ts(t.since), "expires_at": None, "primary": primary,
-                        "more": [act("todo.dismiss", "다 했어요", {"iid": iid, "key": t.key})], "detail": {"lines": []}}
+                        "more": [act("todo.dismiss", "다 했어요", {"iid": iid, "key": t.key})]
+                        if dismissible(iid, t.key, dealbot_row=False) else [], "detail": {"lines": []}}
         items = list(out.values())
         supported = self._supported(self._ba_status())
+        modes = self._modes(v2)
         for it in items:
             it["more"] = self._filter(it["more"], supported)
+            for a in (it["primary"], *it["more"]):
+                self._mark_publish(a, modes)
             if supported is not None and it["primary"]["action"].startswith("blog.") and it["primary"]["action"][5:] not in supported:
                 it["primary"] = dict(it["primary"], disabled=True, note="블로그 프로그램 업데이트를 기다리는 중")
             it.setdefault("chip", CHIPS.get(it.get("blog") or "", "딜" if it["src"] == "deal" else ""))
@@ -505,6 +540,8 @@ class StateBuilder:
                                               "action": act("blog.pick", "이걸로 쓰기", {"sid": scan["sid"], "n": x["n"]})}
                                              for x in scan["items"]]} if scan else None),
                          "actions": self._filter(acts, supported)}
+            for a in out[blog]["actions"] + [x["action"] for x in (out[blog]["scan"] or {}).get("items", [])]:
+                self._mark_publish(a, self._modes(v2))
         return out
 
     def sns(self) -> dict[str, Any]:
@@ -532,11 +569,13 @@ class StateBuilder:
         router = getattr(bot, "router", None)
         replies = router.store.open_replies(time.time(), 20) if router is not None else []
         out["replies"] = [self._reply(r) for r in replies]
-        out["actions"] = [act("sns.token", "토큰 직접 넣기", {"sns": "threads"}, input="secret"),
-                          act("sns.token", "토큰 직접 넣기", {"sns": "instagram"}, input="secret"),
-                          act("sns.code", "코드 넣기", {"sns": "threads"}, input="secret"),
-                          act("sns.code", "코드 넣기", {"sns": "instagram"}, input="secret"),
-                          act("sns.test", "스레드 테스트 글", {"sns": "threads", "qid": None}),
+        # 토큰·코드 직접 넣기는 '다시 연결'(승인 화면)이 안 될 때의 예비 — 끊겼거나 곧 끝나는 쪽만, 이름을 붙여서
+        acts: list[dict[str, Any]] = []
+        for name, label in (("threads", "스레드"), ("instagram", "인스타")):
+            if out[name]["state"] in ("broken", "expiring"):
+                acts += [act("sns.token", f"{label} 토큰 넣기", {"sns": name}, input="secret", placeholder=f"{label} 토큰 붙여넣기"),
+                         act("sns.code", f"{label} 코드 넣기", {"sns": name}, input="secret", placeholder=f"{label} 승인 코드 붙여넣기")]
+        out["actions"] = [*acts, act("sns.test", "스레드 테스트 글", {"sns": "threads", "qid": None}),
                           act("sns.test", "인스타 테스트 글", {"sns": "instagram", "qid": None}),
                           act("sns.invites", "초대 링크 새로 만들기")]
         return out
@@ -572,15 +611,16 @@ class StateBuilder:
                      "action": act("blog.login_check", "지금 확인", {"blog": b})} for b in ("finance", "issue", "hotdeal")}
         kakao_actions = [act("blog.kakao_test", "테스트 카톡")]
         if k_state in ("down", "expiring") or st.kakao_relink:
-            kakao_actions = [act("blog.kakao_auth_url", "다시 연결"), act("blog.kakao_connect", "돌아온 주소 붙여넣기", input="secret",
-                                                                       placeholder="https://…"), *kakao_actions]
+            kakao_actions = [act("blog.kakao_auth_url", "다시 연결"),
+                             act("blog.kakao_connect", "연결하기", input="secret", placeholder="카카오에서 돌아온 주소",
+                                 hint="카카오에서 동의한 뒤 바뀐 주소를 복사해 여기 붙여넣어 주세요"), *kakao_actions]
         oauth = self._take_oauth_note()
         return {
             "push": {"devices": devices, "key_ok": router is not None and router.key_error is None,
                      "actions": [act("push.test", "테스트 알림")]},
             "kakao": {"state": k_state, "expires_in_days": exp_days, "actions": self._filter(kakao_actions, self._supported(st))},
             "naver": naver,
-            "bots": {"dealbot": {"ok": True, "paused": bot.state.paused, "version": self._version(),
+            "bots": {"dealbot": {"ok": True, "paused": bot.state.paused, "version": self._version(), "updated": self._updated(),
                                  "collectors": self._collectors()},
                      "blogauto": {"ok": st.fresh(now), "seen_at": st.at, "bridge": st.bridge, "actions": st.actions,
                                   "version": st.version}},
@@ -596,6 +636,14 @@ class StateBuilder:
             return version_label()
         except Exception:  # noqa: BLE001
             return ""
+
+    @staticmethod
+    def _updated() -> str:
+        """화면에 보일 코드 시각만 ('10/17 19:24') — 버전 번호·커밋 해시는 보이지 않는다."""
+        from dealbot.monitoring.admin import CODE_VERSION
+
+        parts = str(CODE_VERSION or "").split(" ", 1)
+        return parts[1] if len(parts) == 2 else ""
 
     def _collectors(self) -> list[dict[str, Any]]:
         out = []
@@ -620,12 +668,16 @@ class StateBuilder:
         return {"ok": bool(note.get("ok")), "text": str(note.get("text") or "")[:80]}
 
     def audit_lines(self, limit: int = 20) -> list[dict[str, Any]]:
-        rows = self.bot.db._q("SELECT ts, action, target, result_code FROM dash_audit WHERE action NOT IN ('state', 'login', 'logout') "
-                              "ORDER BY ts DESC LIMIT ?", (limit,))
+        # 로그인 실패는 남긴다 (대시보드가 발행까지 하니 가장 쓸모 있는 보안 신호) — 성공·로그아웃은 뺌
+        rows = self.bot.db._q("SELECT ts, action, target, result_code, client8 FROM dash_audit WHERE action NOT IN ('state', 'logout') "
+                              "AND NOT (action = 'login' AND result_code != 'failed') ORDER BY ts DESC LIMIT ?", (limit,))
         tz = ZoneInfo(self.tz)
         out = []
         for r in rows:
             when = datetime.fromtimestamp(r["ts"], tz).strftime("%H:%M")
+            if r["action"] == "login":
+                out.append({"at": r["ts"], "text": f"{when} 로그인 실패 — 접속 {(r['client8'] or '?')[:8]}", "bad": True})
+                continue
             what = ACTION_LABELS.get(r["action"], "대시보드 일")
             target = _target_label(r["target"] or "")
             res = RESULT_LABELS.get(r["result_code"] or "", "안 됨")
@@ -692,10 +744,23 @@ ACTION_LABELS = {
     "blog.mode": "모드 바꾸기", "blog.pause": "블로그 멈춤", "blog.resume": "블로그 다시 시작", "blog.drafts_cleanup": "임시저장 정리",
     "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
     "blog.kakao_connect": "카톡 연결", "blog.kakao_test": "테스트 카톡", "blog.dismiss": "다 했어요",
+    "connect": "다시 연결 시작",
 }
 RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "linked_twin": "완료", "approved": "완료", "skipped": "완료",
                  "posted": "완료", "paused": "완료", "resumed": "완료", "run": "완료", "connected": "완료", "pushed": "완료",
-                 "no_device": "카톡으로", "ok": "완료"}
+                 "no_device": "카톡으로", "ok": "완료", "redirect": "승인 화면으로"}
+
+
+TAIL_RE = re.compile(r"\s*(?:→|—|-|·)\s*(?:대시보드|텔레그램|/[a-z]).*$")
+
+
+def notice_status(body: str, title: str = "") -> str:
+    """알림 줄의 상태 한 줄: 본문 첫 줄에서 '→ 대시보드 …' 꼬리를 떼고 40자 (제목과 같으면 빈 글 — 그때는 시각)."""
+    line = next((ln.strip() for ln in (body or "").splitlines() if ln.strip()), "")
+    line = TAIL_RE.sub("", line).strip()
+    if not line or line == (title or "").strip():
+        return ""
+    return truncate(line, 40)
 
 
 def _target_label(target: str) -> str:
@@ -705,4 +770,4 @@ def _target_label(target: str) -> str:
         return f"{CHIPS[p[0]]} #{p[1]}"
     if target.startswith("blog-"):
         return BLOG_NAMES.get(target.split("-")[1], "")
-    return ""
+    return {"threads": "스레드", "instagram": "인스타"}.get(target, "")

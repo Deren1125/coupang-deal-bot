@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -307,6 +308,30 @@ def test_bad_update_is_silent_on_telegram_and_asks_blogauto_for_a_kakao(server: 
     server.age_markers(30)
     server.run()  # 같은 커밋은 다시 안 받음 → 줄도 하나 그대로
     assert len((server.srv / "data" / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_push_mode_bot_keeps_the_admin_chat_silent_but_still_hands_over_the_notice(server: Server) -> None:
+    """주인 10/18: 봇이 대시보드 앱 알림으로 돌면(dashboard_status.json 15분 안) 관리자 챗에는 아무것도 보내지 않는다.
+    막힌 업데이트는 owner_notice 한 줄 → 대시보드 할 일 ⛔. config.yaml 에 telegram_owner_notices: true 면 예전처럼 보냄."""
+    import json
+
+    data = server.srv / "data"
+    data.mkdir()
+    (data / "dashboard_status.json").write_text(json.dumps({"at": time.time(), "v": 1, "push_router": 1}), encoding="utf-8")
+    server.commit("bad", {"BROKEN": "x"})
+    assert server.run().returncode != 0
+    assert server.messages() == [] and server.log("curl_flags.log") == ""
+    rows = [json.loads(x)["owner_notice"] for x in (data / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1 and rows[0]["kind"] == "update_bad"
+    server.commit("fixed", {"BROKEN": None})
+    assert server.run().returncode == 0
+    assert server.messages() == []  # 다시 시도해서 바꿨다는 줄도 보내지 않음
+    # 예전 길로 되돌리면(그 파일이 오래됨) 다시 보낸다
+    old = time.time() - 3600
+    os.utime(data / "dashboard_status.json", (old, old))
+    server.commit("bad2", {"BROKEN": "y"})
+    server.run()
+    assert len(server.notices()) == 1
 
 
 def test_crash_after_restart_rolls_back_to_the_running_version(server: Server) -> None:

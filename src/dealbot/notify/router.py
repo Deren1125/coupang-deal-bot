@@ -51,7 +51,12 @@ URGENCY: dict[str, str] = {**{k: "DIGEST" for k in (*DIGEST_DEALBOT, *DIGEST_BLO
                            **{k: "URGENT" for k in (*URGENT_DEALBOT, *URGENT_BLOGAUTO)}}
 # 딜봇만 쓰는 정리 종류 (두 저장소 표에는 없음 — 모르는 종류처럼 정리에만, 기록 없이)
 LOCAL_DIGEST = ("soldout", "publish_failed", "sns_failed")
+# 딜봇만 여는 급한 종류 (두 저장소 표에는 없음 — Blog-Auto 는 이 알림을 내지 않는다): 블로그 프로그램 신호가 끊김
+LOCAL_URGENT = ("blogauto_down",)
+BLOGAUTO_DOWN_S = 20 * 60  # 생존 신호(60초마다)가 이만큼 없으면 멈춘 것 (자동 업데이트 재시작은 이보다 짧다)
+BLOGAUTO_SEEN_KV = "notify:blogauto_bridge_seen"
 SEVS = ("stop", "hot", "todo", "info")
+SEV_RANK = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
 ESCALATE_HEADS = ("err", "loop")
 ESCALATE_N, ESCALATE_S = 3, 6 * 3600
 
@@ -68,12 +73,15 @@ KIND_VERBS = {"link_request": "링크 넣기", "photo_need": "사진", "pick_pho
               "owner_edit": "직접 고친 글", "share_confirm": "보내기", "channel_ask": "채널", "channel_review": "채널",
               "upload_fail": "다시 올리기", "login": "로그인", "sns_auth": "다시 연결", "kakao_expiring": "카톡 연결"}
 
-_quiet: contextvars.ContextVar[bool] = contextvars.ContextVar("dash_quiet", default=False)
+# 대시보드에서 주인이 누른 일의 항목 (iid). 그 안에서 같은 항목에 열린 알림만 quiet ("*" = 모두 — 예전 쓰임)
+_quiet: contextvars.ContextVar[str | None] = contextvars.ContextVar("dash_quiet", default=None)
 
 
 def urgency(kind: str) -> str:
     """종류 → URGENT | DIGEST. 모르는 종류는 DIGEST (기록만)."""
     u = URGENCY.get(kind)
+    if u is None and kind in LOCAL_URGENT:
+        return "URGENT"
     if u is None and kind in LOCAL_DIGEST:
         return "DIGEST"
     if u is None:
@@ -148,9 +156,11 @@ class NotifyRouter:
 
     # ------------------------------------------------------------ 대시보드에서 한 일 (조용히)
     @contextlib.contextmanager
-    def quiet(self) -> Iterator[None]:
-        """이 안에서 열린 알림은 quiet — 주인이 화면을 보고 있으니 푸시하지 않는다 (할 일 줄은 그대로)."""
-        token = _quiet.set(True)
+    def quiet(self, iid: str | None = None) -> Iterator[None]:
+        """이 안에서 그 항목(iid)에 열린 알림은 quiet — 주인이 그 줄을 보고 있으니 푸시하지 않는다 (할 일 줄은 그대로).
+        다른 항목에 열린 알림(다른 딜 사진 부탁·SNS 연결 끊김 …)은 그대로 푸시. iid 가 빈 일(대상 없는 일)은 아무것도 조용히 하지 않음.
+        iid=None 은 모두 (예전 쓰임)."""
+        token = _quiet.set("*" if iid is None else iid)
         try:
             yield
         finally:
@@ -161,7 +171,8 @@ class NotifyRouter:
         """알림 하나 (걸러 둔 모양: src·key·kind·iid·title·body …). 적용 결과 ('new'·'updated'·'stale' …)."""
         now = self.clock()
         n = dict(n)
-        if _quiet.get():
+        q = _quiet.get()
+        if q is not None and (q == "*" or (q and n.get("iid") == q)):
             n["quiet"] = True
         if n.get("urgent") is None:
             n["urgent"] = urgency(str(n.get("kind") or "")) == "URGENT"
@@ -185,13 +196,37 @@ class NotifyRouter:
         self.db.kv_set(kv, json.dumps({"t": times[-10:], "done": now if promote else done}))
         return promote
 
-    def resolve(self, src: str, keys: list[str] | tuple[str, ...]) -> int:
-        """같은 src 의 줄만 닫는다 (':' 로 끝나면 앞부분). 카톡에 맡긴 것은 취소 파일."""
-        gone = self.store.resolve(src, list(keys), self.clock())
+    def resolve(self, src: str, keys: list[str] | tuple[str, ...], *, at: float | None = None) -> int:
+        """같은 src 의 줄만 닫는다 (':' 로 끝나면 앞부분). 카톡에 맡긴 것은 취소 파일.
+        at: 해결한 시각을 그 알림을 낸 프로그램의 시계로 (Blog-Auto 파일) — 없으면 지금."""
+        gone = self.store.resolve(src, list(keys), self.clock(), resolved_at=at)
         handed = [n.key for n in gone if n.kakao_at is not None]
         if handed and src == "dealbot":
             self.kakao.resolve(handed)
         return len(gone)
+
+    def watch_blogauto(self, st: Any, now: float | None = None) -> str | None:
+        """1분마다: Blog-Auto 생존 신호가 20분 넘게 없으면 ⛔ 급한 일 하나 (세 블로그 자동 작업이 멈춤 — 텔레그램 경고 대신),
+        다시 오면 닫는다. 다리(bridge ≥ 1)를 한 번이라도 본 뒤에만 (예전 판·처음 설치에서 잘못 울리지 않게). 'open'·'resolve'·None."""
+        now = self.clock() if now is None else now
+        if st.at is not None and st.bridge >= 1 and now - st.at <= BLOGAUTO_DOWN_S:
+            if not self.db.kv_get(BLOGAUTO_SEEN_KV):
+                self.db.kv_set(BLOGAUTO_SEEN_KV, "1")
+            cur = self.store.get("dealbot", "blogauto_down")
+            if cur is not None and cur.resolved_at is None:
+                self.resolve("dealbot", ["blogauto_down"])
+                return "resolve"
+            return None
+        if not self.db.kv_get(BLOGAUTO_SEEN_KV):
+            return None
+        cur = self.store.get("dealbot", "blogauto_down")
+        if cur is not None and cur.open_at(now):
+            return None
+        self.open({"src": "dealbot", "key": "blogauto_down", "kind": "blogauto_down", "blog": "", "iid": "sys-blogauto",
+                   "sev": "stop", "urgent": True, "title": "⛔ 블로그 프로그램이 멈췄어요",
+                   "body": "세 블로그 자동 작업이 멈춰 있어요 — 서버 점검이 필요해요",
+                   "short": "블로그 프로그램 멈춤", "ttl_h": 24})
+        return "open"
 
     def summary(self, cat: str, text: str, *, replace: bool = False) -> None:
         """저녁 정리에 들어갈 딜봇 한 줄 (오늘·cat 마다 — replace 면 마지막 것만)."""
@@ -274,18 +309,25 @@ class NotifyRouter:
 
     def _payload(self, rows: list[Notice], now: float, *, short: bool = False) -> tuple[dict[str, Any], str]:
         badge = self.badge() if self.badge is not None else len(self.store.open_rows(now))
-        if len(rows) == 1:
-            n = rows[0]
+        # 항목(iid)마다 하나 — 같은 글의 🔥 키워드 + 사진 부탁처럼 한 일에 알림 둘이면 그 일 하나로 (가장 급한 줄의 글)
+        by_iid: dict[str, Notice] = {}
+        for n in rows:
+            cur = by_iid.get(n.iid)
+            if cur is None or SEV_RANK.get(n.sev, 2) < SEV_RANK.get(cur.sev, 2):
+                by_iid[n.iid] = n
+        items = list(by_iid.values())
+        if len(items) == 1:
+            n = items[0]
             body = n.body if not short else n.body[:60]
             p = {"v": 1, "type": "item", "title": n.title or n.short, "body": body, "tag": n.iid,
                  "url": f"/dashboard/go/{n.iid}", "urgent": True, "badge": badge, "ts": int(now)}
             return p, n.iid
         counts: dict[str, int] = {}
-        for n in rows:
+        for n in items:
             verb = KIND_VERBS.get(n.kind, "할 일")
             counts[verb] = counts.get(verb, 0) + 1
         body = " · ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1]))
-        p = {"v": 1, "type": "batch", "title": f"할 일 {len(rows)}개", "body": body[:120], "tag": "todo-batch",
+        p = {"v": 1, "type": "batch", "title": f"할 일 {len(items)}개", "body": body[:120], "tag": "todo-batch",
              "url": f"/dashboard/go/{iidmod.TODO_IID}", "urgent": True, "badge": badge, "ts": int(now)}
         return p, "todo-batch"
 
@@ -298,18 +340,26 @@ class NotifyRouter:
         if not self.load_key():
             return 0, len(devices), False, None
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        short = dict(payload, title=str(payload.get("title") or "")[:40], body=str(payload.get("body") or "")[:40])
+        raw2 = json.dumps(short, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(raw) > webpush.MAX_PLAINTEXT:  # 암호화 한도를 넘으면 처음부터 줄인 글로
+            raw = raw2
         sent = failed = 0
         retry = False
         retry_after: float | None = None
         now = self.clock()
         for s in devices:
-            res = await webpush.send(self.http, self._key, self.public_url + "/dashboard", endpoint=s["endpoint"],
-                                     p256dh=s["p256dh"], auth=s["auth"], payload=raw, urgent=urgent, ttl=ttl, tag=tag)
-            if res.status == 413:  # 너무 큼 → 글을 줄여 한 번 더
-                short = dict(payload, body=str(payload.get("body") or "")[:40])
-                raw2 = json.dumps(short, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            try:
                 res = await webpush.send(self.http, self._key, self.public_url + "/dashboard", endpoint=s["endpoint"],
-                                         p256dh=s["p256dh"], auth=s["auth"], payload=raw2, urgent=urgent, ttl=ttl, tag=tag)
+                                         p256dh=s["p256dh"], auth=s["auth"], payload=raw, urgent=urgent, ttl=ttl, tag=tag)
+                if res.status == 413:  # 너무 큼 → 글을 줄여 한 번 더
+                    res = await webpush.send(self.http, self._key, self.public_url + "/dashboard", endpoint=s["endpoint"],
+                                             p256dh=s["p256dh"], auth=s["auth"], payload=raw2, urgent=urgent, ttl=ttl, tag=tag)
+            except (ValueError, TypeError) as e:  # 이 기기 키가 망가짐 (암호화 불가) — 그 기기만 빼고 나머지는 그대로 보낸다
+                failed += 1
+                self.store.drop_sub(s["id"])
+                log.warning("web push: 키가 맞지 않는 구독을 지움 (%s, %s)", webpush.log_name(s["endpoint"]), type(e).__name__)
+                continue
             if res.ok:
                 sent += 1
                 self.store.sub_result(s["id"], ok=True, code=res.status, now=now)
@@ -330,13 +380,33 @@ class NotifyRouter:
         return f"{n.title}\n{n.body}" if n.body and n.body != n.title else (n.title or n.short)
 
     def _to_kakao(self, rows: list[Notice], now: float) -> int:
-        """푸시가 안 간 급한 일 → 카톡 (키마다 한 번). Blog-Auto 가 아직 다리를 모르면 받은편지함 줄로 (kakao_out.py)."""
-        done = 0
+        """푸시가 안 간 급한 일 → 카톡 (키마다 한 번). Blog-Auto 가 아직 다리를 모르면 받은편지함 줄로 (kakao_out.py).
+        한 번에 여러 일(항목 2개 이상)이면 카톡 한 통으로 묶는다 ('할 일 3개 — 링크 넣기 2 · 사진 1: …', 할 일 화면 링크) —
+        알림을 켜기 전·푸시가 다 실패할 때 카톡이 여러 통 쏟아져 하루 한도를 먹지 않게."""
+        rows = [n for n in rows if n.kakao_at is None]
+        if not rows:
+            return 0
+        items: dict[str, Notice] = {}
         for n in rows:
-            if n.kakao_at is not None:
-                continue
+            if n.iid not in items or SEV_RANK.get(n.sev, 2) < SEV_RANK.get(items[n.iid].sev, 2):
+                items[n.iid] = n
+        done = 0
+        if len(items) == 1:
+            n = next(iter(items.values()))
             if self.kakao.send("urgent", key=n.key, text=self._kakao_text(n), link=self.link(n.iid), short=n.short, ttl_h=n.ttl_h):
-                done += 1
+                done = 1
+        else:
+            counts: dict[str, int] = {}
+            for n in items.values():
+                verb = KIND_VERBS.get(n.kind, "할 일")
+                counts[verb] = counts.get(verb, 0) + 1
+            what = " · ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1]))
+            names = ", ".join((n.short or n.title)[:16] for n in list(items.values())[:3]) + (" …" if len(items) > 3 else "")
+            text = f"🔔 할 일 {len(items)}개 — {what}: {names}\n대시보드 '할 일'에서 처리해 주세요"
+            if self.kakao.send("urgent", key=f"todo-batch:{int(now)}", text=text, link=self.link(iidmod.TODO_IID),
+                               short=f"할 일 {len(items)}개", ttl_h=max(n.ttl_h for n in rows)):
+                done = 1
+        for n in rows:
             self.store.set_push([n.ref], kakao_at=now, push_ok=0, pushed_at=n.pushed_at or now)
         return done
 

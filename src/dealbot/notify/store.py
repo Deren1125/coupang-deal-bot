@@ -113,9 +113,11 @@ class NotifyStore:
         self.db._conn.execute(f"UPDATE owner_notices SET {sets}, {extra} WHERE src = ? AND key = ?",
                               (*fields.values(), *extra_params, src, key))
 
-    def resolve(self, src: str, keys: list[str], now: float) -> list[Notice]:
-        """같은 src 의 열린 줄만 닫는다. ':' 로 끝나는 키는 앞부분. 닫은 줄들 (닫기 전 상태)."""
+    def resolve(self, src: str, keys: list[str], now: float, *, resolved_at: float | None = None) -> list[Notice]:
+        """같은 src 의 열린 줄만 닫는다. ':' 로 끝나는 키는 앞부분. 닫은 줄들 (닫기 전 상태).
+        resolved_at: 해결 시각 (그 알림을 낸 쪽 시계 — 다시 열림의 at 과 비교하는 값). 없으면 now."""
         done: list[Notice] = []
+        when = now if resolved_at is None else resolved_at
         for key in keys:
             if not key:
                 continue
@@ -129,7 +131,7 @@ class NotifyStore:
                 n = _notice(r)
                 with self.db._lock:
                     self.db._conn.execute("UPDATE owner_notices SET resolved_at = ?, updated_at = ? WHERE src = ? AND key = ?",
-                                          (now, now, n.src, n.key))
+                                          (when, now, n.src, n.key))
                 done.append(n)
         return done
 

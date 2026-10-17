@@ -25,7 +25,9 @@ from dealbot.notify.router import SEVS, NotifyRouter
 
 log = logging.getLogger(__name__)
 
-KEY_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_:.\-]{0,119}$")
+# 알림 키: Blog-Auto 의 진짜 키에는 한글·빈칸·'+' 가 들어간다 ('hot:26fw+안효섭+준지:', 'err:main:스캔:TimeoutError').
+# 제어 글자·줄바꿈만 막고 120자까지 (키는 DB 에 매개변수로만 들어가고 화면에는 보이지 않는다)
+KEY_RE = re.compile(r"^[^\s\x00-\x1f\x7f][^\x00-\x1f\x7f]{0,119}\Z")
 KIND_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 BLOGS = ("finance", "issue", "hotdeal", "")
 TTL_MAX_H = 24 * 30
@@ -77,7 +79,7 @@ def clean_open(raw: dict[str, Any]) -> dict[str, Any] | None:
 def clean_keys(raw: Any) -> list[str]:
     if not isinstance(raw, list):
         return []
-    return [k for k in raw[:50] if isinstance(k, str) and (KEY_RE.match(k) or KEY_RE.match(k.rstrip(":")))]
+    return [k for k in raw[:50] if isinstance(k, str) and KEY_RE.match(k)]
 
 
 def ingest(data_dir: Path | str, router: NotifyRouter, *, limit: int = MAX_PER_TICK) -> dict[str, int]:
@@ -111,7 +113,10 @@ def ingest(data_dir: Path | str, router: NotifyRouter, *, limit: int = MAX_PER_T
             out["stale" if what == "stale" else "open"] += 1
         elif op == "resolve":
             # ':' 로 끝나는 키만 앞부분 (notify.resolve 와 같은 뜻 — prefix 칸은 그런 키가 있다는 표시일 뿐)
-            router.resolve("blogauto", clean_keys(data.get("keys")))
+            # 해결 시각은 Blog-Auto 가 쓴 시각 (지금보다 늦으면 지금) — 다시 열림(open.at, Blog-Auto 시각)과 같은 시계로 비교해야
+            # 해결 → 다시 열림이 한 번에 들어와도(2초 안·재시작 동안) 다시 열린 일이 'stale' 로 사라지지 않는다
+            at = _num(data.get("at"), 0, 1e11)
+            router.resolve("blogauto", clean_keys(data.get("keys")), at=min(at, now) if at else None)
             out["resolve"] += 1
         else:
             spool.expire(r, path, "bad op")

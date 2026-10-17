@@ -95,16 +95,19 @@ def write(r: Path, name: str, obj: Any, sub: str = "new") -> Path:
     return target
 
 
-def expire(r: Path, path: Path, why: str = "") -> None:
-    """못 쓰는 파일은 expired/ 로 (지우지 않고 — 나중에 볼 수 있게). 기록만 (파일 내용은 남기지 않음)."""
+def expire(r: Path, path: Path, why: str = "") -> bool:
+    """못 쓰는 파일은 expired/ 로 (지우지 않고 — 나중에 볼 수 있게). 기록만 (파일 내용은 남기지 않음).
+    옮겼으면 True — 그 사이 상대가 맡아 가 파일이 없으면 False."""
     (r / "expired").mkdir(parents=True, exist_ok=True)
     try:
         os.replace(path, r / "expired" / path.name)
         log.warning("다리 파일 %s → expired (%s)", path.name[:40], why)
+        return True
     except FileNotFoundError:
-        pass
+        return False
     except OSError as e:
         log.warning("다리 파일 %s 옮기기 실패: %s", path.name[:40], e)
+        return False
 
 
 def names(r: Path, sub: str = "new") -> list[str]:
@@ -154,6 +157,10 @@ def read(path: Path) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
-def remove(path: Path) -> None:
-    with contextlib.suppress(FileNotFoundError):
+def remove(path: Path) -> bool:
+    """지웠으면 True (이미 없으면 False)."""
+    try:
         os.unlink(path)
+    except FileNotFoundError:
+        return False
+    return True

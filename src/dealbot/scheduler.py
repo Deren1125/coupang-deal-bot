@@ -371,6 +371,7 @@ async def notify_loop(bot: DealBot, stop: asyncio.Event) -> None:
                 if router is not None:
                     bridge_status.write_dashboard(bot.settings.data_dir, push_devices=len(router.devices()),
                                                   push_ok_at=router.store.last_push_ok())
+                    router.watch_blogauto(bridge_status.read_blogauto(bot.settings.data_dir))  # 블로그 프로그램 멈춤 → ⛔
                 if outbox is not None:
                     outbox.sweep()
                 digests = getattr(bot, "digests", None)

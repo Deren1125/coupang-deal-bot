@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -37,10 +38,15 @@ WAIT_LABELS = (
     (("review_auth", "review_info"), "확인을 기다리는 딜"),
     (("publish_unsure",), "채널에 올라갔는지 확인할 딜"),
     (("photo_need",), "사진을 기다리는 딜"),
-    (("draft_ready",), "발행을 기다리는 글"),
-    (("ask",), "답을 기다리는 글"),
+    (("draft_ready", "publish"), "발행을 기다리는 글"),  # 글 줄의 kind 는 할 일 이름 (state.NEED_ORDER) 이기도 하다
+    (("ask", "answers"), "답을 기다리는 글"),
     (("pick_photos", "hot", "photos"), "사진을 기다리는 글"),
+    (("upload_fail", "retry"), "업로드가 실패한 글"),
 )
+# Blog-Auto 기록 파일 digest.waiting 중 글 이야기 (할 일 목록이 이미 같은 글을 말함 — 두 번 말하지 않게 뺀다)
+POST_SENTENCE = re.compile(r"(기다려요|실패한 채로)")
+MARKS = re.compile(r"^(?:[⛔🔥ℹ🔔✅❌⚠📌\ufe0f]|\[[^\]]{0,8}\]|\s)+")  # 앞머리 표시 (⛔[멈춤] · ℹ️ …)
+CMD_TAIL = re.compile(r"\s*[—-]\s*/[a-z_]+\s*로\s*")  # '— /kakao 로 다시 연결해 주세요' → 대시보드 말로
 
 
 def plan_minutes(rng: random.Random | Any) -> dict[str, str]:
@@ -70,6 +76,28 @@ def waiting_sentences(items: list[dict[str, Any]]) -> list[str]:
     if left:
         out.append(f"그 밖의 할 일 {len(left)}개({_names([str(it.get('title') or '') for it in left])})가 있어요.")
     return out
+
+
+def system_sentences(lines: Any) -> list[str]:
+    """Blog-Auto digest.waiting → 글 이야기는 빼고 (로그인 풀림·자동 발행 대기열·카톡 연결 만료처럼 할 일 목록에 없는 것만),
+    텔레그램 명령은 대시보드 말로."""
+    out = []
+    for s in lines if isinstance(lines, list) else []:
+        if not isinstance(s, str) or not s.strip() or POST_SENTENCE.search(s):
+            continue
+        s = CMD_TAIL.sub(" — 대시보드 '연결'에서 ", s.strip())
+        if re.search(r"/[a-z]", s):  # 다른 명령이 남았으면 그 문장은 뺀다 (대시보드에는 명령을 보이지 않음)
+            continue
+        out.append(s)
+    return out[:6]
+
+
+def news_sentence(text: str, n: int = 1) -> str:
+    """알림 한 줄 → 문장 ('스레드 답글 3개' → '스레드 답글 3개 소식이 있었어요.'). 같은 종류가 여러 번이면 한 문장으로."""
+    t = MARKS.sub("", text.strip()).strip().rstrip(".")
+    if n > 1:
+        return f"{t} 같은 소식이 {n}번 있었어요."
+    return f"{t}." if t.endswith(("요", "다")) else f"{t} 소식이 있었어요."
 
 
 def dealbot_sentences(entries: list[dict[str, Any]]) -> list[str]:
@@ -156,7 +184,7 @@ class Digests:
         dig = v2.get("digest") if isinstance(v2.get("digest"), dict) else {}
         # 1) 기다리는 일
         wait = waiting_sentences(self.todo() if self.todo is not None else [])
-        wait += [s for s in dig.get("waiting", []) if isinstance(s, str) and s.strip()][:6]
+        wait += system_sentences(dig.get("waiting", []))
         if wait:
             sections.append({"label": "기다리는 일", "sentences": wait})
         # 2) 딜봇 (아침은 밤사이만)
@@ -175,13 +203,13 @@ class Digests:
                 if lines:
                     sections.append({"label": label, "sentences": lines})
         # 4) 소식 (급하지 않은 알림)
-        news = []
+        groups: dict[str, list[str]] = {}
         for n in self.router.store.since(since, now + 1, urgent=False):
             text = (n.short or n.title).strip()
-            if text and text not in news:
-                news.append(text)
-        if news:
-            sections.append({"label": "소식", "sentences": [f"「{t}」 알림이 있었어요." for t in news[:NEWS_MAX]]})
+            if text:
+                groups.setdefault(n.kind or text, []).append(text)
+        if groups:
+            sections.append({"label": "소식", "sentences": [news_sentence(ts[0], len(ts)) for ts in list(groups.values())[:NEWS_MAX]]})
         did = iidmod.digest_iid(day, slot)
         lines = [s for sec in sections for s in sec["sentences"]]
         return {"id": did, "title": TITLES[slot], "at": now, "sections": sections, "lines": lines}

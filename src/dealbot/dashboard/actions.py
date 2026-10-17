@@ -8,7 +8,7 @@
 
 - 확인 창(★) 목록은 CONFIRM 이 하나뿐인 기준. ctoken = HMAC(세션 | 일 | 정리한 args | 시각), 5분 · 한 번만
 - 같은 cid(누를 때마다 화면이 만든 난수)는 10분 동안 같은 결과 (두 번 눌러도 한 번)
-- 딜봇 일은 텔레그램 명령과 같은 DealBot 함수를 같은 검사로 부른다. 그동안 새로 열린 알림은 quiet (주인이 화면을 보는 중)
+- 딜봇 일은 텔레그램 명령과 같은 DealBot 함수를 같은 검사로 부른다. 그동안 그 줄(target)에 새로 열린 알림만 quiet (주인이 그 줄을 보는 중)
 - 대시보드는 force 를 넘기지 않는다 — Blog-Auto 의 '직접 고친 글' 지킴(A-37)이 그대로 막는다. 덮어쓰기는 oedit_redo(★★) 하나
 """
 
@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from dealbot.bridge import spool
-from dealbot.bridge.actions_out import ActionsOut, ActionStore, redact, status_of
+from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
 from dealbot.dashboard.model import safe_text
 from dealbot.notify import iid as iidmod
 from dealbot.utils.text import truncate
@@ -45,6 +45,8 @@ ACTION_RE = re.compile(r"^[a-z]+\.[a-z_]+$")
 ACTION_RATE = 30  # 세션마다 1분에
 URL_MAX = 2000
 SECRET_MAX = 600
+CREDIT_MAX = 60  # Blog-Auto 와 같은 한도 (넘으면 사진을 다 올린 뒤에야 거절되지 않게 여기서 바로)
+CHANNEL_URL_MAX = 300
 
 # ★ 확인 창 (spec §4.5 — 하나뿐인 기준). blog.mode 는 발행 모드로 바꿀 때만, push.unsubscribe 는 다른 기기일 때만
 CONFIRM = frozenset({
@@ -53,6 +55,10 @@ CONFIRM = frozenset({
     "blog.mode", "blog.pause", "blog.drafts_cleanup", "blog.ledger", "push.unsubscribe",
 })
 DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
+# 그 블로그가 자동 발행 모드면 바로 네이버에 공개되는 일 (Blog-Auto nl.CATALOG 의 may_publish 와 같게) — 그때만 ★
+MAY_PUBLISH = frozenset({"blog.retry", "blog.photos", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic"})
+FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
+              "blog.fixpic": "finance"}
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
@@ -64,6 +70,20 @@ DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.ok", "deal.ok_text", "deal.poste
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
 DISMISS_POST_HEADS = ("dup", "cards", "openchat")
 REAL_WORK_HEADS = ("link", "review", "unsure", "photo", "ask", "draft", "oedit", "fail", "chan", "share", "hot")
+# Blog-Auto 가 닫아 주는 키 머리 (blogauto/bridge.py DISMISS_HEADS 와 같게) — 이 밖의 Blog-Auto 줄은 '다 했어요'를 보이지 않는다
+BLOGAUTO_DISMISS_HEADS = ("dup", "cards", "openchat", "cq", "buddy", "stalled", "scan", "err", "loop", "neighbors", "restyle_once")
+REPLIES_KEY = "threads_replies:"
+
+
+def dismissible(iid: str, key: str, *, dealbot_row: bool) -> bool:
+    """'다 했어요'를 보여 줄·받을 줄인가. dealbot_row: 딜봇이 연 알림 줄 (딜봇이 바로 닫음) — 아니면 Blog-Auto 가 닫을 수 있는 머리만."""
+    if iid == "sns-replies":
+        return True
+    head = key.split(":", 1)[0]
+    kind_ok = (iid.startswith("post-") and head in DISMISS_POST_HEADS) or iid.startswith(("blog-", "sys-")) or iid == "sns-status"
+    if not kind_ok or head in REAL_WORK_HEADS or not key or key.endswith(":"):
+        return False
+    return dealbot_row or head in BLOGAUTO_DISMISS_HEADS
 
 # 화면 안내 (코드 → 한 줄). 화면은 코드로 고르고, text 는 대신 쓸 글
 TEXTS = {
@@ -94,6 +114,7 @@ TEXTS = {
     "unsupported": "블로그 프로그램 업데이트를 기다리는 중이에요",
     "blogauto_down": "블로그 프로그램이 응답하지 않아요",
     "not_dismissible": "이 일은 직접 처리해야 닫혀요",
+    "busy": "앞의 작업이 아직 하는 중이에요 — 끝나면 다시 눌러 주세요",
     "rate": "너무 자주 눌렀어요 — 조금 뒤에 다시",
     "confirm_expired": "확인 창이 오래됐어요 — 다시 눌러 주세요",
     "off": "지금은 대시보드에서 할 수 없어요",
@@ -255,9 +276,9 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
             if mode not in ("add", "replace", "slot"):
                 raise ActionError("bad_args")
             out.update(mode=mode, slot=_int(g("slot"), 1, 40) if mode == "slot" else 0, in_order=g("in_order") is True,
-                       crop=g("crop") is True, credit=_str(g("credit"), 80, required=False))
+                       crop=g("crop") is True, credit=_str(g("credit"), CREDIT_MAX, required=False))
         if name == "channel":
-            url = _str(g("url"), URL_MAX, required=False)
+            url = _str(g("url"), CHANNEL_URL_MAX, required=False)
             if url and not own_blog_url(url, blog_ids.get(out["blog"])):
                 raise ActionError("bad_args")
             out["url"] = url
@@ -303,7 +324,18 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
     raise ActionError("bad_args")
 
 
-def needs_confirm(action: str, args: dict[str, Any], *, this_device: bool = True) -> bool:
+def publish_blog(action: str, args: dict[str, Any]) -> str | None:
+    """MAY_PUBLISH 일이 걸린 블로그 (그 블로그 모드를 보고 ★ 를 정한다). 아니면 None."""
+    if action not in MAY_PUBLISH:
+        return None
+    blog = args.get("blog")
+    return str(blog) if blog in BLOGS else FIXED_BLOG.get(action)
+
+
+def needs_confirm(action: str, args: dict[str, Any], *, this_device: bool = True, publish_mode: bool = False) -> bool:
+    """★ 확인 창이 필요한가. publish_mode: 그 일이 걸린 블로그가 자동 발행 모드(또는 모름)라 MAY_PUBLISH 일이 바로 공개되는 때."""
+    if action in MAY_PUBLISH:
+        return publish_mode
     if action not in CONFIRM:
         return False
     if action == "blog.mode":
@@ -368,6 +400,17 @@ def confirm_text(action: str, args: dict[str, Any], facts: dict[str, Any]) -> di
         "blog.ledger": ("정리본을 바꿀까요?", "올린 파일로 아카이브 정리본을 바꿔요. 지금 정리본은 백업해 둬요.", "바꾸기"),
         "push.unsubscribe": (f"{facts.get('device') or '그 기기'} 알림을 끌까요?", "그 기기에는 알림이 더 가지 않아요.", "끄기"),
     }
+    pub = "자동 발행 모드라 바로 네이버에 공개돼요."
+    blog_p = BLOG_NAMES.get(publish_blog(action, args) or "", blog)
+    c.update({
+        "blog.retry": (f"{blog}{num} 글을 다시 올릴까요?", pub, "공개로 올리기"),
+        "blog.photos": (f"{blog}{num} 글에 사진을 넣을까요?", "사진을 넣고 " + pub, "넣고 발행"),
+        "blog.fixpic": (f"{blog_p}{num} 글 사진을 바꿀까요?", "사진을 바꾸고 " + pub, "바꾸고 발행"),
+        "blog.write": (f"{blog_p} 새 글을 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
+        "blog.issue": (f"{blog_p} 새 글을 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
+        "blog.pick": (f"이 글감으로 {blog_p} 글을 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
+        "blog.hotdeal_now": (f"{blog_p} 글을 지금 한 편 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
+    })
     title, body, ok = c.get(action, ("이대로 할까요?", "되돌리기 어려운 일이에요.", "하기"))
     return {"title": title, "body": body, "ok": ok, "danger": action in DANGER}
 
@@ -433,7 +476,8 @@ class ActionDesk:
     """딜봇 쪽 일은 바로, 블로그 일은 Blog-Auto 에 맡긴다. bot = app.DealBot (가짜로 바꿔 끼울 수 있게 Any)."""
 
     def __init__(self, bot: Any, *, outbox: ActionsOut, uploads: Any, key: bytes, audit: Callable[..., None],
-                 facts: Callable[[str], dict[str, Any]] | None = None, clock: Callable[[], float] = time.time) -> None:
+                 facts: Callable[[str], dict[str, Any]] | None = None, clock: Callable[[], float] = time.time,
+                 test_rate: RateWindow | None = None) -> None:
         self.bot = bot
         self.outbox = outbox
         self.store: ActionStore = outbox.store
@@ -443,6 +487,7 @@ class ActionDesk:
         self.facts = facts or (lambda _iid: {})
         self.clock = clock
         self.rate = RateWindow(ACTION_RATE, 60.0)
+        self.test_rate = test_rate  # 테스트 알림 한도 (POST /api/push/test 와 같은 셈 — 기기가 없으면 카톡 한 통이라)
 
     # 바깥에서 부르는 하나
     async def run(self, body: dict[str, Any], caller: Caller) -> tuple[int, dict[str, Any]]:
@@ -461,10 +506,15 @@ class ActionDesk:
             return self._replay(prev)
         if not self.rate.hit(caller.session):
             return 429, self._err("rate")
+        if action == "push.test" and self.test_rate is not None and not self.test_rate.hit(caller.session):
+            return 429, self._err("rate")
         if not getattr(getattr(self.bot.settings, "dashboard", None), "actions_enabled", True):
             return 403, self._err("off")
+        if action.startswith("blog.") and (down := self._blog_down(action[5:], caller, target, args)) is not None:
+            return down  # 확인 창을 띄우기 전에 (맡길 곳이 없는데 '발행할까요?'를 묻지 않게)
         this_device = True
-        if needs_confirm(action, args, this_device=this_device):
+        need = needs_confirm(action, args, this_device=this_device, publish_mode=self._publish_mode(action, args))
+        if need:
             if body.get("ctoken") is None:
                 facts = self.facts(target) if target else {}
                 tok = self.tokens.issue(caller.session, action, args)
@@ -472,8 +522,26 @@ class ActionDesk:
             if not self.tokens.check(body.get("ctoken"), caller.session, action, args):
                 return 409, {**self._err("confirm_expired"), "status": "confirm_expired"}
         if action.startswith("blog."):
-            return self._queue(action, args, target, caller, cid)
+            return self._queue(action, args, target, caller, cid, confirmed=need)
         return await self._deal(action, args, target, caller, cid)
+
+    def _publish_mode(self, action: str, args: dict[str, Any]) -> bool:
+        """MAY_PUBLISH 일의 블로그가 자동 발행 모드인가 (모르면 True — 확인 창 한 번이 더 안전).
+        Blog-Auto 도 실행할 때 모드를 다시 보고 confirmed 가 없으면 받지 않는다 (누른 뒤 모드가 바뀌어도)."""
+        blog = publish_blog(action, args)
+        if blog is None:
+            return False
+        return self.modes().get(blog) != "draft"
+
+    def modes(self) -> dict[str, str]:
+        """블로그마다 지금 모드 (Blog-Auto 기록 파일 status.blogs.*.mode)."""
+        try:
+            st = self.bot.dash_state
+            export = st._export() if st is not None else None
+            blogs = ((getattr(export, "v2", None) or {}).get("status") or {}).get("blogs") or {}
+            return {b: str((blogs.get(b) or {}).get("mode") or "") for b in BLOGS}
+        except Exception:  # noqa: BLE001
+            return {}
 
     def _blog_ids(self) -> dict[str, str]:
         try:
@@ -500,15 +568,22 @@ class ActionDesk:
             log.warning("dashboard audit failed: %s", type(e).__name__)
 
     # ---------------------------------------------------------- 블로그 일 (Blog-Auto)
-    def _queue(self, action: str, args: dict[str, Any], target: str, caller: Caller, cid: str | None) -> tuple[int, dict[str, Any]]:
-        name = action[5:]
+    def _blog_down(self, name: str, caller: Caller, target: str, args: dict[str, Any]) -> tuple[int, dict[str, Any]] | None:
+        """Blog-Auto 에 맡길 수 없으면 503 (신호 없음·다리 없음·모르는 일)."""
         st = self.outbox.status()
         if not st.bridge_ok(self.clock()):
-            self._audit(caller, action, target, args, "blogauto_down")
+            self._audit(caller, f"blog.{name}", target, args, "blogauto_down")
             return 503, self._err("blogauto_down")
         if st.actions and not st.supports(name):
-            self._audit(caller, action, target, args, "unsupported")
+            self._audit(caller, f"blog.{name}", target, args, "unsupported")
             return 503, self._err("unsupported")
+        return None
+
+    def _queue(self, action: str, args: dict[str, Any], target: str, caller: Caller, cid: str | None, *,
+               confirmed: bool = False) -> tuple[int, dict[str, Any]]:
+        name = action[5:]
+        if (down := self._blog_down(name, caller, target, args)) is not None:
+            return down
         spool_args = dict(args)
         ups = args.get("uploads") or []
         if ups:
@@ -520,9 +595,21 @@ class ActionDesk:
                     self._audit(caller, action, target, args, "bad_upload")
                     return 400, self._err("bad_upload")
                 paths.append(str(p))
-            spool_args["uploads"] = paths
-        aid, existed = self.outbox.submit(action=name, blog=args.get("blog"), args=spool_args, target=target,
-                                          confirmed=action in CONFIRM, session=caller.session, cid=cid)
+            if name == "ledger":  # Blog-Auto x_ledger 는 {"upload": 경로} 하나 (계약 §2.4 ledger: {upload})
+                spool_args.pop("uploads", None)
+                spool_args["upload"] = paths[0]
+            else:
+                spool_args["uploads"] = paths
+        try:
+            aid, existed = self.outbox.submit(action=name, blog=args.get("blog"), args=spool_args, target=target,
+                                              confirmed=confirmed, session=caller.session, cid=cid)
+        except ActionsBusy:  # 같은 글에 같은 일이 다른 값으로 아직 하는 중 → 올린 사진은 화면에 그대로 (다시 누르면 됨)
+            self._audit(caller, action, target, args, "busy")
+            return 409, self._err("busy")
+        except (OSError, ValueError) as e:
+            log.warning("dashboard action spool write failed: %s", type(e).__name__)
+            self._audit(caller, action, target, args, "failed")
+            return 503, self._err("failed")
         if ups and not existed:
             self.uploads.mark_used(ups, aid)
         self._audit(caller, action, target, args, "queued", aid)
@@ -531,7 +618,7 @@ class ActionDesk:
     # ---------------------------------------------------------- 딜봇 일 (바로)
     async def _deal(self, action: str, args: dict[str, Any], target: str, caller: Caller, cid: str | None) -> tuple[int, dict[str, Any]]:
         router = getattr(self.bot, "router", None)
-        quiet = router.quiet() if router is not None else contextlib.nullcontext()
+        quiet = router.quiet(target) if router is not None else contextlib.nullcontext()  # 그 줄에 열린 알림만 조용히
         try:
             with quiet:
                 code, text = await self._do(action, args, caller)
@@ -666,23 +753,22 @@ class ActionDesk:
     def _dismiss(self, args: dict[str, Any], caller: Caller) -> tuple[str, str]:
         """다 했어요: 밖에서 끝낸 일만 (두 번 발행·구매 링크 빠짐·서로이웃·멈춤·스레드 답글·시스템 참고)."""
         iid, key = args["iid"], args["key"]
-        head = key.split(":", 1)[0]
-        kind_ok = (iid.startswith("post-") and head in DISMISS_POST_HEADS) or iid.startswith("blog-") or iid == "sns-replies" \
-            or iid.startswith("sys-") or iid == "sns-status"
-        if not kind_ok or head in REAL_WORK_HEADS or key.endswith(":"):
-            raise ActionError("not_dismissible")
         bot = self.bot
         router = getattr(bot, "router", None)
+        row = router.store.get("dealbot", key) if router is not None and key else None
+        dealbot_row = row is not None and row.iid == iid
+        if not dismissible(iid, key, dealbot_row=dealbot_row):
+            raise ActionError("not_dismissible")
         if iid == "sns-replies":
             if router is not None:
                 router.store.replies_done(self.clock())
-                router.resolve("dealbot", ["threads_replies:"])
+                router.resolve("dealbot", [REPLIES_KEY])
             return "done", "다 했어요"
-        row = router.store.get("dealbot", key) if router is not None else None
-        if row is not None and row.iid == iid:
+        if dealbot_row:
             router.resolve("dealbot", [key])
             return "done", "다 했어요"
-        # Blog-Auto 키 (알림 또는 Blog-Auto 가 셈한 줄) → Blog-Auto 가 닫는다
+        # Blog-Auto 키 (알림 또는 Blog-Auto 가 셈한 줄) → Blog-Auto 가 닫는다. 여기까지 오는 건 Blog-Auto 가 닫아 주는 머리뿐
+        # (dismissible — BLOGAUTO_DISMISS_HEADS) 이라 화면 줄은 바로 뺀다
         code, body = self._queue("blog.dismiss", {"key": key}, iid, caller, None)
         if code == 202:
             if router is not None:

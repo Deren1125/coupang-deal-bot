@@ -7,7 +7,9 @@ DashResult (Blog-Auto 가 results/<id>.json 에, 끝날 때까지 고쳐 씀):
     {"v":1,"id":"a_…","status":"running|ok|error|rejected","code":"…","text":"≤120","post":{"blog","pid","status"},
      "started_at":…,"updated_at":…,"done_at":…}
 
-- 같은 일(action + target)이 아직 안 끝났으면 새로 쓰지 않고 그 id 를 돌려준다 (두 기기·오래된 화면에서 두 번 눌러도 한 번)
+- 같은 일(action + target + 같은 args)이 아직 안 끝났으면 새로 쓰지 않고 그 id 를 돌려준다 (두 기기·오래된 화면에서 두 번 눌러도 한 번).
+  args 가 다르면(사진 두 번째 묶음·다른 답) ActionsBusy — 앞의 일이 끝난 뒤 다시 (조용히 사라지지 않게)
+- 표에 먼저 넣고 파일을 쓴다 (표가 없으면 Blog-Auto 결과를 받을 데가 없음). 파일을 못 쓰면 그 줄은 error
 - 결과는 DB 에 넣은 뒤(끝난 것만) 파일을 지운다. 10분 안에 Blog-Auto 가 안 맡으면 expired/ 로 옮기고 'expired'
   (비밀이 든 파일 — kakao_connect — 은 옮기지 않고 지운다), 20분 넘게 running 이면 'unknown'(확인 필요, 실패 아님)
 - args 는 DB 에 비밀값을 가려서 (토큰·코드·카카오 주소는 "[비밀]"). kakao_auth_url 결과의 주소는 DB 에 넣지 않고
@@ -16,6 +18,7 @@ DashResult (Blog-Auto 가 results/<id>.json 에, 끝날 때까지 고쳐 씀):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -42,6 +45,22 @@ INFO_TEXT_MAX = 1500
 RESULT_STATUSES = ("running", "ok", "error", "rejected")
 
 
+class ActionsBusy(Exception):
+    """같은 항목에 같은 일이 다른 값으로 아직 하는 중."""
+
+    def __init__(self, aid: str) -> None:
+        super().__init__(aid)
+        self.aid = aid
+
+
+def args_hash(action: str, args: dict[str, Any]) -> str | None:
+    """같은 일인지 셀 지문 (args 전체). 비밀이 든 일은 지문도 남기지 않는다 (None — 늘 '다른 일')."""
+    if action.split(".")[-1] in SECRET_ACTIONS:
+        return None
+    canon = json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:24]
+
+
 def redact(action: str, args: dict[str, Any]) -> dict[str, Any]:
     """DB·기록에 남길 args: 비밀값은 '[비밀]'. 사진 경로는 파일 이름만."""
     out: dict[str, Any] = {}
@@ -65,13 +84,14 @@ class ActionStore:
         self.db = db
 
     def insert(self, *, aid: str, ts: float, blog: str | None, action: str, target: str, args: dict[str, Any], status: str,
-               cid: str | None, session: str, result: dict[str, Any] | None = None, error: str | None = None) -> None:
+               cid: str | None, session: str, result: dict[str, Any] | None = None, error: str | None = None,
+               ahash: str | None = None) -> None:
         with self.db._lock:
             self.db._conn.execute(
-                "INSERT INTO dash_actions (id, ts, blog, action, target, args, status, result, error, cid, session, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO dash_actions (id, ts, blog, action, target, args, status, result, error, cid, session, updated_at, "
+                "args_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (aid, ts, blog, action, target, json.dumps(redact(action, args), ensure_ascii=False), status,
-                 json.dumps(result, ensure_ascii=False) if result is not None else None, error, cid, session, ts))
+                 json.dumps(result, ensure_ascii=False) if result is not None else None, error, cid, session, ts, ahash))
 
     def update(self, aid: str, *, status: str, result: dict[str, Any] | None, now: float, error: str | None = None) -> None:
         with self.db._lock:
@@ -136,17 +156,24 @@ class ActionsOut:
         """Blog-Auto 에 맡긴다 → (id, 이미 같은 일이 있어 그 id 를 돌려줬는지). action 은 Blog-Auto 이름 (publish …).
         표의 action 은 'blog.publish' 처럼."""
         full = f"blog.{action}"
+        ahash = args_hash(full, args)
         if target:
             cur = self.store.open_for(full, target)
             if cur is not None:
-                return cur["id"], True
+                if ahash is not None and cur.get("args_hash") == ahash:
+                    return cur["id"], True
+                raise ActionsBusy(cur["id"])
         now = self.clock()
         aid = spool.new_id("a", now)
         obj = {"v": 1, "id": aid, "ts": now, "expires_at": now + EXPIRE_S, "action": action, "blog": blog, "args": args,
                "target": target, "confirmed": bool(confirmed), "origin": {"via": "dashboard", "session": session, "cid": cid or ""}}
-        spool.write(self.root(), aid, obj)
         self.store.insert(aid=aid, ts=now, blog=blog, action=full, target=target, args=args, status="queued", cid=cid,
-                          session=session)
+                          session=session, ahash=ahash)
+        try:
+            spool.write(self.root(), aid, obj)
+        except (OSError, ValueError):
+            self.store.update(aid, status="error", result={"code": "failed", "text": "", "done_at": now}, now=now)
+            raise
         return aid, False
 
     def take_url(self, aid: str) -> str | None:
@@ -192,9 +219,10 @@ class ActionsOut:
                 spool.expire(r, path, "bad result")
                 continue
             status, res = self._clean_result(row, data)
-            if row["status"] in TERMINAL:
+            if row["status"] in TERMINAL and row["status"] != "expired":
                 spool.remove(path)  # 이미 끝난 일 (같은 결과를 다시 씀)
                 continue
+            # 'expired' 였어도 Blog-Auto 가 결과를 썼다면 맡아서 한 일 (기한 직전에 맡음) — 그 결과가 맞다
             same = json.dumps(res, ensure_ascii=False) == row.get("result")
             if not (same and (status == row["status"] or row["status"] == "unknown")):  # 그대로면 쓰지 않음 ('확인 필요'도 그대로)
                 self.store.update(name, status=status, result=res, now=now)
@@ -210,14 +238,19 @@ class ActionsOut:
         out = {"expired": 0, "unknown": 0, "pruned": 0}
         for name in spool.names(r, "new"):
             path = r / "new" / f"{name}.json"
-            data = spool.read(path) or {}
+            data = spool.read(path)
+            if data is None and not path.exists():
+                continue  # 목록을 본 뒤 Blog-Auto 가 맡아 감 — 만료가 아님
+            data = data or {}
             exp = data.get("expires_at")
             if isinstance(exp, int | float) and now <= exp:
                 continue
             if data.get("action") in SECRET_ACTIONS:
-                spool.remove(path)  # 비밀값이 든 파일은 남기지 않는다
+                gone = spool.remove(path)  # 비밀값이 든 파일은 남기지 않는다
             else:
-                spool.expire(r, path, "not claimed in time")
+                gone = spool.expire(r, path, "not claimed in time")
+            if not gone:
+                continue  # 옮기기 직전에 Blog-Auto 가 맡음 — 결과를 기다린다
             if (row := self.store.get(name)) is not None and row["status"] == "queued":
                 self.store.update(name, status="expired", result={"code": "expired", "text": "", "done_at": now}, now=now)
             out["expired"] += 1
