@@ -128,9 +128,8 @@ function render() {
   m.replaceChildren(...v);
   head();
   if (NEXT) {
-    const f = NEXT; NEXT = null;
-    const it = [...m.querySelectorAll('.itm')].find(x => x.dataset.iid !== f && x.querySelector('input[data-url]'));
-    if (it) { it.scrollIntoView({block: 'center', behavior: 'smooth'}); it.querySelector('input[data-url]').focus({preventScroll: true}); }
+    const it = $('i-' + NEXT), f = it && it.querySelector('input[data-url]'); NEXT = null;
+    if (f) { it.scrollIntoView({block: 'center', behavior: 'smooth'}); f.focus({preventScroll: true}); }
   }
 }
 D.addEventListener('focusout', () => setTimeout(() => DIRTY && render(), 50));
@@ -166,7 +165,7 @@ function sheet(title, body, onclose) {
   $('sheets').append(bd);
   SH.push({bd, onclose, from: D.activeElement});
   history.pushState({sh: SH.length}, '');
-  D.body.style.overflow = 'hidden';
+  D.body.style.overflow = 'hidden'; D.body.classList.add('shon');
   sh.focus({preventScroll: true});
   return sh.querySelector('.shb');
 }
@@ -174,7 +173,7 @@ function back() { if (SH.length) history.back(); }
 function closeTop() {
   const s = SH.pop();
   s.bd.remove();
-  if (!SH.length) D.body.style.overflow = '';
+  if (!SH.length) { D.body.style.overflow = ''; D.body.classList.remove('shon'); }
   if (s.onclose) s.onclose();
   if (s.from && s.from.focus && D.contains(s.from)) s.from.focus({preventScroll: true});
 }
@@ -261,7 +260,11 @@ async function exec(a, extra, ctx = {}) {
   if (r.status === 200 && d.status === 'ok') {
     if (ctx.key) { delete P[ctx.key]; delete OPEN[ctx.iid]; }
     if (ctx.keys) ctx.keys.forEach(k => delete VAL[k]);
-    if (a.action === 'deal.link') NEXT = ctx.iid;
+    if (a.action === 'deal.link') {  // 여러 개 한 번에: 다음 링크 줄을 열어 둔다
+      const ls = S.todo.filter(i => i.primary && i.primary.action === 'deal.link'), at = ls.findIndex(i => i.iid === ctx.iid);
+      const nx = ls[at + 1] || ls.find(i => i.iid !== ctx.iid);
+      if (nx) { OPEN[nx.iid] = pk(nx.iid, nx.primary); NEXT = nx.iid; }
+    }
     toast(d.text || MSG.done);
     if (ctx.close) back();
     load();
@@ -388,7 +391,6 @@ function primary(it, a) {
   if (a.input === 'open') return ext('pb soft', a.label, a.url);
   if (a.input === 'goto') return btn('pb soft', a.label, () => go('#' + a.goto.replace(/^#/, '')));
   const key = pk(it.iid, a);
-  if (a.input === 'url' && !a.optional) return panel(it, a, key, {});
   if (OPEN[it.iid] === key) return panel(it, a, key, {});
   return btn('pb', a.label, e => act(it, a, e.currentTarget, true));
 }
@@ -409,8 +411,13 @@ function act(it, a, b, inline) {
     });
     return;
   }
-  if (inline) { OPEN[it.iid] = key; render(); const f = D.querySelector(`[data-k="${CSS.escape(key)}"]`); if (f) f.focus(); }
-  else inputSheet(it, a, key);
+  if (!inline) { inputSheet(it, a, key); return; }
+  if (a.input === 'url') for (const k in OPEN) if (OPEN[k].includes('|deal.link|')) delete OPEN[k];
+  OPEN[it.iid] = key; render();
+  const f = D.querySelector(`[data-k="${CSS.escape(key)}"]`); if (f) f.focus();
+  if (a.input === 'url' && !IOS && !VAL[key] && N.clipboard && N.clipboard.readText) {
+    N.clipboard.readText().then(t => { t = (t || '').trim(); if (/^https?:\/\/\S+$/.test(t) && f && !f.value) { f.value = t; VAL[key] = t; } }).catch(() => {});
+  }
 }
 function inputSheet(it, a, key) {
   const box = el('div');
@@ -433,18 +440,14 @@ function panel(it, a, key, ctx) {
   const st = P[key] || (P[key] = {files: [], opt: {}});
   const box = el('div', {class: 'ip'});
   const kids = [], keys = [];
-  const cancel = ctx.sheet || ctx.fixed || (a.input === 'url' && !a.optional) ? null
-    : btn('lnk mute', '취소', () => { delete P[key]; delete OPEN[it.iid]; render(); });
+  const cancel = ctx.sheet || ctx.fixed ? null : btn('lnk mute', '접기', () => { delete P[key]; delete OPEN[it.iid]; render(); });
   let f = null;
   if (a.input === 'url') {
     f = field(key, a, {type: 'text', inputmode: 'url', 'data-url': a.optional ? null : '1', enterkeyhint: 'go',
       onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); go1(); } }});
     keys.push(key);
     const tools = el('div', {class: 'tools'},
-      a.url ? ext('lnk', '상품 열기', a.url) : null,
-      btn('lnk', '붙여넣기', async () => {
-        try { const t = await N.clipboard.readText(); if (t) { f.value = t; VAL[key] = t; } else throw 0; } catch (e) { f.focus(); toast('길게 눌러 붙여넣기'); }
-      }),
+      a.url ? ext('lnk', '상품 열기', a.url) : null, paste(),
       a.photo_optional ? btn('lnk', st.files.length ? '사진 바꾸기' : '사진 추가 (선택)', () => pick(a.accept || 'image/*', false, fs => { if (fs.length) { st.files = fs.slice(0, 1); redraw(); } })) : null);
     kids.push(tools, f);
   } else if (a.input === 'answers' && (it.detail && it.detail.questions || []).length) {
@@ -457,7 +460,8 @@ function panel(it, a, key, ctx) {
     f = field(key, a, {rows: 4}); keys.push(key); kids.push(f);
     if (a.photos_optional) kids.push(btn('lnk', st.files.length ? `사진 ${st.files.length}장 · 다시 고르기` : '사진 추가 (선택)', () => pick('image/*', true, fs => { st.files = fs.slice(0, 20); redraw(); })));
   } else if (a.input === 'secret') {
-    f = field(key, a, {type: 'password', autocomplete: 'off'}); keys.push(key); kids.push(f);
+    f = field(key, a, {type: 'password', autocomplete: 'off'}); keys.push(key);
+    kids.push(a.hint ? el('p', {class: 'note'}, a.hint) : null, el('div', {class: 'tools'}, paste()), f);
   } else if (a.input === 'file') {
     kids.push(el('p', {}, st.files.length ? st.files[0].name : '파일을 골라 주세요'), btn('lnk', '다시 고르기', () => pick(a.accept, false, fs => { if (fs.length) { st.files = fs; redraw(); } })));
   }
@@ -479,7 +483,12 @@ function panel(it, a, key, ctx) {
   kids.push(send);
   if (a.note) kids.push(el('p', {class: 'note'}, a.note));
   if (cancel) kids.push(el('div', {class: 'foot'}, cancel));
-  box.append(...kids);
+  box.append(...kids.filter(Boolean));
+  function paste() {
+    return btn('lnk', '붙여넣기', async () => {
+      try { const t = await N.clipboard.readText(); if (t) { f.value = t; VAL[key] = t; } else throw 0; } catch (e) { f.focus(); toast('길게 눌러 붙여넣기'); }
+    });
+  }
   function redraw() { if (ctx.sheet) box.replaceWith(panel(it, a, key, ctx)); else render(); }
   async function go1() {
     const extra = {};
@@ -577,7 +586,7 @@ function detail(it) {
   const d = it.detail || {}, out = [];
   const more = (it.more || []).filter(a => !a.disabled);
   out.push(el('div', {class: 'ih'}, chip(it), d.owner_edited ? el('span', {class: 'cp info'}, '직접 고친 글') : null),
-    it.status ? el('p', {class: 'st'}, it.status) : null);
+    it.status && !(d.lines || []).some(l => l.startsWith(it.status)) ? el('p', {class: 'st'}, it.status) : null);
   if (d.how) out.push(el('p', {text: d.how}));
   if (d.search) out.push(el('div', {class: 'kv'}, el('code', {text: d.search}), btn('sm', '복사', () => copy(d.search))));
   if (d.note) out.push(el('p', {class: 'note'}, d.note));
@@ -600,7 +609,7 @@ function detail(it) {
       r.open ? ext('lnk', '스레드에서 열기', r.open) : null));
   }
   if (d.replies && !d.replies.length) out.push(el('p', {class: 'empty'}, '답글 없어요'));
-  out.push(el('div', {style: 'margin:12px 0'}, primary(it, it.primary)));
+  if (!(it.primary && it.primary.goto === '#/i/' + it.iid)) out.push(el('div', {style: 'margin:12px 0'}, primary(it, it.primary)));
   for (const o of d.open || []) out.push(ext('mr', o.label, o.url));
   out.push(...more.map(a => a.input === 'open' ? ext('mr', a.label, a.url)
     : btn('mr' + (a.danger ? ' red' : ''), a.label, () => act(it, a, null, false))));
@@ -645,12 +654,17 @@ function banner() {
   return el('div', {class: 'bn'}, el('span', {}, '알림을 켜면 할 일이 바로 와요'), btn('pb', '알림 켜기', pushOn), later);
 }
 function vTodo() {
-  const all = S.todo, items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, out = [];
+  const all = S.todo, out = [];
+  let items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, k = 0, rest = 0;
+  if (R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
   const b = banner(); if (b) out.push(b);
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
   if (!items.length) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
-  const n = ALL ? items.length : 8;
-  out.push(...items.slice(0, n).map(x => item(x)));
+  const n = ALL ? items.length : 10;
+  const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');
+  const more = rest ? el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`) : null;
+  shown.forEach((x, i) => { out.push(item(x)); if (more && i === last) out.push(more); });
+  if (more && last < 0) out.push(more);
   if (items.length > n) out.push(btn('pb ghost', `더 보기 (${items.length - n})`, () => { ALL = true; render(); }));
   if (S.digest && S.digest.latest) out.push(el('p', {class: 'foot'}, btn('lnk', '오늘 정리 보기', () => digestSheet(S.digest.latest))));
   return out;
@@ -685,8 +699,10 @@ function vBlog() {
   const write = acts.find(a => a.action === 'blog.write');
   const more = acts.filter(a => !idea.includes(a) && a !== write);
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
-    b.login === 'needed' ? el('a', {class: 'cp stop', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
+    b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
+  const pubs = b.waiting.filter(x => x.primary.action === 'blog.publish' && !x.primary.disabled && !pendingOf(x.iid));
+  if (pubs.length > 1) out.push(btn('pb soft', `발행 대기 ${pubs.length}편 한 번에`, () => pubAll(pubs), {style: 'margin-bottom:12px'}));
   out.push(...(b.waiting.length ? b.waiting.map(x => item(x, true)) : [el('p', {class: 'empty'}, '기다리는 글 없어요')]));
   if (idea.length || (b.scan && b.scan.items.length)) {
     out.push(el('p', {class: 'h3'}, '글감'));
@@ -710,6 +726,20 @@ function vBlog() {
       open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))), r.url ? ext('sm', '네이버', r.url) : null)) : null));
   }
   return out;
+}
+
+// 모아서 검수한 뒤 한 번에 발행 (주인 10/18): 확인 창은 제목 목록으로 한 번, 그다음 글마다 같은 발행 요청
+async function pubAll(xs) {
+  if (!await confirmSheet({title: `${xs.length}편을 발행할까요?`, ok: '모두 발행',
+    body: xs.map(x => '· ' + title(x)).join('\n') + '\n네이버 블로그에 바로 올라가요.'})) return;
+  for (const x of xs) {
+    const a = x.primary, body = {action: a.action, args: a.args, cid: 'c_' + rnd(), ctoken: null};
+    let r = await api('/dashboard/api/action', {method: 'POST', body});
+    if (r.status === 409 && r.data.ctoken) { body.ctoken = r.data.ctoken; r = await api('/dashboard/api/action', {method: 'POST', body}); }
+    if (r.status === 202) POLL[r.data.id] = {iid: x.iid, action: a.action, args: a.args, t: Date.now()};
+    else toast(r.data.text || MSG[r.data.code] || MSG.failed);
+  }
+  render(); poll();
 }
 
 // ------------------------------------------------------------ 탭: 통계 (서버가 그린 카드 조각 — 폼·스크립트 없음)
@@ -806,7 +836,7 @@ function vConnect() {
   out.push(...sec('카톡 (예비)', (k.actions || []).filter(a => a !== kAuth && a !== kConn), row('카톡', KS[k.state] || KS.unknown,
     kAuth ? (KURL ? el('a', {class: 'sm ac', href: KURL, target: '_blank', rel: 'noopener noreferrer', onclick: () => { KSTEP = true; setTimeout(render, 300); }}, '카카오 열기 ↗')
       : btn('sm ac', kAuth.label, e => { KSTEP = true; exec(kAuth, {}, {btn: e.currentTarget, iid: 'conn-kakao'}); })) : null, k.state === 'down'),
-  kConn && KSTEP ? panel(kKid, Object.assign({}, kConn, {label: '연결하기'}), pk(kKid.iid, kConn), {fixed: true}) : null));
+  kConn && KSTEP ? panel(kKid, kConn, pk(kKid.iid, kConn), {fixed: true}) : null));
   const sns = S.sns, conn = (name, x) => row(name, x.text, x.fix ? el('a', {class: 'sm ac', href: x.connect_url}, '다시 연결') : null, x.state === 'broken');
   out.push(...sec('인스타 · 스레드', sns.actions, conn('인스타그램', sns.instagram), conn('스레드', sns.threads),
     sns.invites.length ? fold(`초대 링크 ${sns.invites.length}개`, () => listSheet('초대 링크', sns.invites.map(v => el('div', {class: 'box'},
@@ -816,9 +846,9 @@ function vConnect() {
     const x = nv[b] || {};
     const t = {ok: '정상', needed: '필요', unknown: '모름'}[x.login] || '모름';
     return row(l, `${t}${x.checked_at ? ` · 확인 ${hhmm(x.checked_at)}` : ''}`, x.action ? btn('sm', '지금 확인', e => exec(x.action, {}, {btn: e.currentTarget, iid: 'conn-naver-' + b})) : null, x.login === 'needed');
-  }), need ? el('p', {class: 'note'}, 'QR 로그인: 컴퓨터나 태블릿에서 원격 화면을 열고 네이버 앱으로 QR 을 찍어 주세요. 끝나면 "지금 확인"을 눌러요.') : null));
+  }), need ? el('p', {class: 'note'}, 'PC에서 다시 로그인해야 해요 — 끝나면 지금 확인') : null));
   const bd = c.bots.dealbot, ba = c.bots.blogauto, cols = bd.collectors || [];
-  out.push(...sec('봇 상태', null, row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.version ? ' · ' + bd.version : ''}`, null, bd.paused),
+  out.push(...sec('봇 상태', null, row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.updated ? ` · ${bd.updated} 업데이트` : ''}`, null, bd.paused),
     row('블로그 프로그램', ba.ok ? `정상 · ${ago(ba.seen_at)} 신호` : `응답 없음${ba.seen_at ? ' · ' + ago(ba.seen_at) : ''}`, null, !ba.ok),
     cols.length ? fold(`수집기 ${cols.length}개`, () => listSheet('수집기', cols.map(x => row(x.label, `${x.enabled ? (x.ok ? '정상' : '오류') : '꺼짐'} · ${x.text}`, null, !x.ok)))) : null));
   out.push(el('div', {class: 'box', style: 'margin-top:20px'},
