@@ -1,0 +1,15 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0t",
+ "status": "ok",
+ "code": "published",
+ "text": "발행했어요",
+ "post": {
+  "blog": "issue",
+  "pid": 31,
+  "status": "published"
+ },
+ "started_at": 1760772003.0,
+ "updated_at": 1760772190.0,
+ "done_at": 1760772190.0
+}

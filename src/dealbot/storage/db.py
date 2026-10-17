@@ -177,6 +177,146 @@ CREATE TABLE IF NOT EXISTS ig_posts (
 CREATE INDEX IF NOT EXISTS idx_ig_posts_time ON ig_posts(posted_at);
 """
 
+# 대시보드 앱(Sns-board)·주인 알림 표 (주인 10/18 — 대시보드에서 다 처리, 알림은 웹 푸시가 먼저). 시각은 모두 epoch 초(REAL).
+# 쓰는 곳: src/dealbot/notify/store.py (알림·푸시·정리·스레드 답글) · src/dealbot/dashboard/{actions,uploads}.py
+DASH_SCHEMA = """
+-- 주인 할 일·소식 알림 (두 프로그램). (src, key) 하나가 한 알림 — 해결(resolve)은 같은 src 안에서만
+CREATE TABLE IF NOT EXISTS owner_notices (
+    src            TEXT NOT NULL,
+    key            TEXT NOT NULL,
+    kind           TEXT NOT NULL DEFAULT '',
+    blog           TEXT NOT NULL DEFAULT '',
+    iid            TEXT NOT NULL,
+    sev            TEXT NOT NULL DEFAULT 'todo',
+    urgent         INTEGER NOT NULL DEFAULT 0,
+    quiet          INTEGER NOT NULL DEFAULT 0,
+    title          TEXT NOT NULL DEFAULT '',
+    body           TEXT NOT NULL DEFAULT '',
+    short          TEXT NOT NULL DEFAULT '',
+    ttl_h          REAL NOT NULL DEFAULT 24,
+    grp            TEXT NOT NULL DEFAULT '',
+    wait_s         REAL,
+    wait_n         INTEGER,
+    delay_s        REAL NOT NULL DEFAULT 0,
+    opened_at      REAL NOT NULL,
+    updated_at     REAL NOT NULL,
+    resolved_at    REAL,
+    pushed_at      REAL,
+    push_ok        INTEGER,
+    push_tries     INTEGER NOT NULL DEFAULT 0,
+    next_try       REAL,
+    kakao_at       REAL,
+    digest_slot    TEXT,
+    PRIMARY KEY (src, key)
+);
+CREATE INDEX IF NOT EXISTS idx_owner_notices_open ON owner_notices(resolved_at, urgent, pushed_at);
+CREATE INDEX IF NOT EXISTS idx_owner_notices_iid ON owner_notices(iid);
+
+-- Blog-Auto 가 보낸 알림 파일 id (같은 파일을 두 번 적용하지 않게, 7일)
+CREATE TABLE IF NOT EXISTS owner_notice_seen (
+    id             TEXT PRIMARY KEY,
+    at             REAL NOT NULL
+);
+
+-- 웹 푸시 구독 (기기마다 하나). endpoint 는 그 기기로 보내는 열쇠라 화면·기록에 내보내지 않는다
+CREATE TABLE IF NOT EXISTS push_subs (
+    id             TEXT PRIMARY KEY,
+    endpoint       TEXT NOT NULL,
+    endpoint_hash  TEXT NOT NULL UNIQUE,
+    p256dh         TEXT NOT NULL,
+    auth           TEXT NOT NULL,
+    label          TEXT NOT NULL DEFAULT '',
+    session        TEXT NOT NULL DEFAULT '',
+    created        REAL NOT NULL,
+    last_ok        REAL,
+    last_err_code  INTEGER,
+    fails          INTEGER NOT NULL DEFAULT 0,
+    enabled        INTEGER NOT NULL DEFAULT 1
+);
+
+-- 보낸 푸시 (한 시간 8번 셈 — 재시작해도 이어서)
+CREATE TABLE IF NOT EXISTS push_log (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    at             REAL NOT NULL,
+    type           TEXT NOT NULL,
+    tag            TEXT NOT NULL,
+    sent           INTEGER NOT NULL DEFAULT 0,
+    failed         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_push_log_at ON push_log(at);
+
+-- 아침·저녁 정리 (digest-YYYYMMDD-am|pm)
+CREATE TABLE IF NOT EXISTS owner_digests (
+    id             TEXT PRIMARY KEY,
+    at             REAL NOT NULL,
+    title          TEXT NOT NULL,
+    lines          TEXT NOT NULL,
+    sections       TEXT NOT NULL,
+    pushed         INTEGER NOT NULL DEFAULT 0,
+    kakao          INTEGER NOT NULL DEFAULT 0
+);
+
+-- 대시보드에서 누른 일 (딜봇에서 바로 한 것 + Blog-Auto 에 맡긴 것). args 는 비밀값을 가린 것
+CREATE TABLE IF NOT EXISTS dash_actions (
+    id             TEXT PRIMARY KEY,
+    ts             REAL NOT NULL,
+    blog           TEXT,
+    action         TEXT NOT NULL,
+    target         TEXT NOT NULL DEFAULT '',
+    args           TEXT NOT NULL DEFAULT '{}',
+    status         TEXT NOT NULL,
+    result         TEXT,
+    error          TEXT,
+    cid            TEXT,
+    session        TEXT NOT NULL DEFAULT '',
+    updated_at     REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dash_actions_cid ON dash_actions(cid);
+CREATE INDEX IF NOT EXISTS idx_dash_actions_status ON dash_actions(status, ts);
+
+-- 대시보드로 받은 사진·정리본 파일 (이름은 서버가 만든 32자 16진수)
+CREATE TABLE IF NOT EXISTS dash_uploads (
+    id             TEXT PRIMARY KEY,
+    ts             REAL NOT NULL,
+    kind           TEXT NOT NULL,
+    ext            TEXT NOT NULL,
+    bytes          INTEGER NOT NULL,
+    w              INTEGER,
+    h              INTEGER,
+    sha256         TEXT NOT NULL,
+    session        TEXT NOT NULL DEFAULT '',
+    used_by        TEXT,
+    deleted        INTEGER NOT NULL DEFAULT 0
+);
+
+-- 대시보드 기록 (90일). 비밀값·코드·카카오 주소는 남기지 않는다
+CREATE TABLE IF NOT EXISTS dash_audit (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             REAL NOT NULL,
+    session8       TEXT NOT NULL DEFAULT '',
+    client8        TEXT NOT NULL DEFAULT '',
+    action         TEXT NOT NULL,
+    target         TEXT NOT NULL DEFAULT '',
+    args_redacted  TEXT NOT NULL DEFAULT '{}',
+    result_code    TEXT NOT NULL DEFAULT '',
+    action_id      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dash_audit_ts ON dash_audit(ts);
+
+-- 스레드 답글 (관리자 챗 대신 대시보드 '스레드 답글' 에서 봄, 7일). 봇은 답글을 달지 않는다
+CREATE TABLE IF NOT EXISTS threads_replies (
+    reply_id       TEXT PRIMARY KEY,
+    post_id        TEXT NOT NULL DEFAULT '',
+    post_excerpt   TEXT NOT NULL DEFAULT '',
+    reply_text     TEXT NOT NULL DEFAULT '',
+    username       TEXT NOT NULL DEFAULT '',
+    drafts         TEXT NOT NULL DEFAULT '[]',
+    open_url       TEXT,
+    at             REAL NOT NULL,
+    done_at        REAL
+);
+"""
+
 # 링크 요청 자리가 다 차서 점수가 더 높은 새 딜에 자리를 내준 글의 last_error 머리말 ('replaced by #12 (score 8→20)').
 # 주인이 넘긴 것이 아니므로 다시 묻지 않는 기록(declined_since)에 넣지 않고, 유효 시간 안에 /link 가 오면 다시 받는다
 REPLACED = "replaced by"
@@ -256,6 +396,7 @@ class Database(SnsStoreMixin):
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._conn.executescript(DASH_SCHEMA)  # 대시보드 앱·주인 알림 (notify/store.py)
         self._init_sns()  # 스레드 대기열·답글·투표·SNS 발행 기록·초대 링크 가입 (storage/sns_store.py)
         self._migrate()
         if self.kv_get("db_created_at") is None:

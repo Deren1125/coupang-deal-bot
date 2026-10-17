@@ -1,0 +1,182 @@
+{
+ "version": 2,
+ "written_at": "2026-10-18T09:20:05+09:00",
+ "day": "2026-10-18",
+ "blogs": {
+  "issue": {
+   "name": "issue",
+   "blog_id": "derenpick",
+   "posts_published_today": 1,
+   "posts_published_total": 23,
+   "drafts_saved_today": 2,
+   "neighbor_requests_today": 0,
+   "neighbor_requests_7d": 0,
+   "comments_today": 0,
+   "replies_today": 0
+  }
+ },
+ "waiting": {
+  "threshold": 70,
+  "blogs": {
+   "issue": {
+    "count": 1,
+    "popular": 1,
+    "top": [
+     {
+      "id": 46,
+      "title": "안효섭 준지 26FW 공항패션",
+      "score": 82,
+      "saved_at": "2026-10-18T09:12:00+09:00",
+      "category": "공항 패션"
+     }
+    ]
+   }
+  }
+ },
+ "own_stats": {},
+ "todo": {
+  "generated_at": "2026-10-18T09:20:05+09:00",
+  "items": [
+   {
+    "key": "photo:issue:46",
+    "marker": "🔔[할 일]",
+    "blog": "issue",
+    "kind": "pick_photos",
+    "short": "Pick #46 사진 9장",
+    "text": "🔔[할 일] [Deren's Pick] #46 「안효섭 준지 26FW」 사진 9장 필요",
+    "since": "2026-10-18T09:12:00+09:00",
+    "urgent": false,
+    "link": "",
+    "group": "pick_photos",
+    "count": 1,
+    "iid": "post-issue-46"
+   }
+  ]
+ },
+ "posts": {
+  "issue": [
+   {
+    "pid": 46,
+    "title": "안효섭 준지 26FW 공항패션",
+    "status": "saved",
+    "stage": "임시저장 · 발행 대기",
+    "saved_at": "2026-10-18T09:12:00+09:00",
+    "score": 82,
+    "popular": true,
+    "owner_edited": false,
+    "needs": [
+     "photos"
+    ],
+    "photo_request": {
+     "must": [
+      "정면 전신 1장",
+      "신발 클로즈업 1장"
+     ],
+     "links": [
+      {
+       "label": "네이버 이미지 「안효섭 공항패션」",
+       "url": "https://m.search.naver.com/search.naver?where=m_image&query=%EC%95%88%ED%9A%A8%EC%84%AD"
+      }
+     ],
+     "target": 9
+    },
+    "slots": [
+     {
+      "slot": 1,
+      "label": "정면 전신",
+      "thumb": "post-issue-46-1-ab12cd34.jpg"
+     },
+     {
+      "slot": 2,
+      "label": "신발",
+      "thumb": null
+     }
+    ],
+    "questions": [],
+    "deadline": null,
+    "naver_url": null
+   }
+  ],
+  "finance": [
+   {
+    "pid": 12,
+    "title": "토스 이벤트",
+    "status": "needs_input",
+    "stage": "질문 대기",
+    "saved_at": null,
+    "score": 65,
+    "popular": false,
+    "owner_edited": false,
+    "needs": [
+     "answers"
+    ],
+    "photo_request": null,
+    "slots": [],
+    "questions": [
+     {
+      "n": 1,
+      "q": "언제 받으셨나요?"
+     }
+    ],
+    "deadline": null,
+    "naver_url": null
+   }
+  ],
+  "hotdeal": []
+ },
+ "recent": {
+  "issue": [
+   {
+    "pid": 40,
+    "title": "제니 공항패션",
+    "url": "https://m.blog.naver.com/derenpick/224000000001",
+    "at": "2026-10-18T09:10:00"
+   }
+  ],
+  "finance": [],
+  "hotdeal": []
+ },
+ "scan": {
+  "sid": "261018084012",
+  "at": "2026-10-18T08:40:12",
+  "items": [
+   {
+    "n": 1,
+    "title": "청년 지원금",
+    "code": "A1",
+    "score": 90,
+    "recommend": 1,
+    "done": false
+   }
+  ]
+ },
+ "status": {
+  "blogs": {
+   "issue": {
+    "mode": "draft",
+    "paused": false,
+    "today": 2,
+    "login": "ok",
+    "login_checked": "2026-10-18T09:00:00"
+   }
+  },
+  "kakao": {
+   "state": "ok",
+   "expires_at": "2026-12-09T09:00:00"
+  }
+ },
+ "digest": {
+  "day": "2026-10-18",
+  "generated_at": "2026-10-18T09:20:05+09:00",
+  "blogs": {
+   "finance": [],
+   "issue": [
+    "「장원영 공항패션」 1편을 발행했어요."
+   ],
+   "hotdeal": []
+  },
+  "waiting": [
+   "Pick 「안효섭 준지 26FW」 1편이 사진을 기다려요."
+  ]
+ }
+}

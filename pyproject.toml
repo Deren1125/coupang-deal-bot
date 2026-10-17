@@ -16,6 +16,8 @@ dependencies = [
     "tzdata>=2024.1",
     "anthropic>=1.5,<2",
     "Pillow>=10.1",
+    # 대시보드 앱 웹 푸시 암호화·VAPID 서명 (주인 10/18 — notify/webpush.py · vapid.py). pywebpush 는 aiohttp·requests 를 더 끌어와서 안 씀
+    "cryptography>=42,<50",
     # 막힌 네이버 스토어 페이지를 발행 직전 한 번 실제 크롬으로 (10/10). 서버는 블로그 봇과 같은 버전 → 같은 크롬(chromium-1243)을 함께 씀
     "playwright==1.63.0",
 ]

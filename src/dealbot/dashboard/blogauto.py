@@ -49,7 +49,7 @@ from zoneinfo import ZoneInfo
 
 from dealbot.dashboard.model import OK, STALE, UNAVAILABLE, https_url, safe_text
 
-MAX_BYTES = 1_000_000
+MAX_BYTES = 4_000_000  # v2 (글·사진 자리·질문까지) — 4MB 까지
 
 # 대시보드 지표 이름 → 파일에서 찾을 이름들 (중첩은 '_' 로 이어 붙여 찾음, 소문자)
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
@@ -90,6 +90,7 @@ class WaitingPost:
     score: int | None  # 0~100 인기 예상 (모르면 None)
     saved_at: datetime | None = None
     category: str | None = None
+    id: int | None = None  # Blog-Auto 글 번호 (v2 부터 읽음 — 대시보드 글 항목 post-<블로그>-<번호>)
 
 
 @dataclass(slots=True)
@@ -176,6 +177,9 @@ class BlogAutoExport:
     waiting: WaitingExport | None = None  # 파일에 "waiting" 이 없거나 모양이 다르면 None ('발행 대기 글' 은 판단 불가)
     own_stats: dict[str, OwnStats] = field(default_factory=dict)  # 이름(소문자)·blog_id → 자기 통계 (없으면 직접 입력만)
     todo: TodoExport | None = None  # 파일에 "todo" 가 없거나 모양이 다르면 None ('지금 할 일' 은 딜봇 것만 + 안내)
+    version: int = 1
+    # v2 (주인 10/18 대시보드 앱): posts·recent·scan·status·digest — 걸러 둔 사전 (parse_v2). 없으면 빈 사전
+    v2: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -278,8 +282,9 @@ def _waiting_post(v: Any, tz: str) -> WaitingPost | None:
     title = _one_line(v.get("title"), WAITING_TITLE_MAX)
     if title is None:
         return None
+    pid = _count(v.get("id"), top=10**9)
     return WaitingPost(title=title, score=_count(v.get("score"), top=100), saved_at=_parse_time(v.get("saved_at"), tz),
-                       category=_one_line(v.get("category"), WAITING_CATEGORY_MAX))
+                       category=_one_line(v.get("category"), WAITING_CATEGORY_MAX), id=pid if pid else None)
 
 
 def _post_order(p: WaitingPost) -> tuple[int, float]:
@@ -450,6 +455,114 @@ def parse_todo(data: Any, tz: str) -> TodoExport | None:
     return TodoExport(generated_at=_parse_time(data.get("generated_at"), tz), items=items)
 
 
+# ---------------------------------------------------------------- v2 (spec §5.2)
+V2_BLOGS = ("finance", "issue", "hotdeal")
+POST_STATUSES = ("saved", "needs_input", "drafting", "failed", "published")
+POST_NEEDS = ("photos", "publish", "answers", "retry", "owner_edit", "share", "channel")
+THUMB_RE = re.compile(r"^[a-z0-9-]{1,64}\.(jpg|webp)$")
+V2_POSTS_MAX = 60
+_NAVER_HOSTS = ("blog.naver.com", "m.blog.naver.com")
+
+
+def _naver_url(v: Any) -> str | None:
+    u = https_url(v)
+    if u is None:
+        return None
+    from urllib.parse import urlsplit
+
+    return u if (urlsplit(u).hostname or "").lower() in _NAVER_HOSTS else None
+
+
+def _str_list(v: Any, n: int, limit: int) -> list[str]:
+    if not isinstance(v, list):
+        return []
+    return [x for x in (_one_line(safe_text(i, limit * 2), limit) if isinstance(i, str) else None for i in v[:n]) if x]
+
+
+def _links(v: Any, n: int = 8) -> list[dict[str, str]]:
+    out = []
+    for x in v[:n] if isinstance(v, list) else []:
+        if isinstance(x, dict) and (u := https_url(x.get("url"))) is not None:
+            out.append({"label": _one_line(x.get("label"), 40) or "열기", "url": u})
+    return out
+
+
+def _export_post(v: Any) -> dict[str, Any] | None:
+    if not isinstance(v, dict):
+        return None
+    pid = _count(v.get("pid"), top=10**9)
+    title = _one_line(v.get("title"), 80)
+    if not pid or title is None:
+        return None
+    pr = v.get("photo_request")
+    photo_request = None
+    if isinstance(pr, dict):
+        photo_request = {"must": _str_list(pr.get("must"), 12, 80), "links": _links(pr.get("links"))}
+    slots = []
+    for x in v.get("slots")[:40] if isinstance(v.get("slots"), list) else []:
+        if isinstance(x, dict) and (n := _count(x.get("slot"), top=40)):
+            thumb = x.get("thumb") if isinstance(x.get("thumb"), str) and THUMB_RE.match(x.get("thumb")) else None
+            slots.append({"slot": n, "label": _one_line(x.get("label"), 40) or f"자리 {n}", "thumb": thumb})
+    questions = []
+    for x in v.get("questions")[:10] if isinstance(v.get("questions"), list) else []:
+        if isinstance(x, dict) and isinstance(x.get("q"), str) and x["q"].strip():
+            questions.append({"n": _count(x.get("n"), top=50) or len(questions) + 1, "q": safe_text(x["q"], 400)})
+    needs = [n for n in v.get("needs", []) if n in POST_NEEDS] if isinstance(v.get("needs"), list) else []
+    return {
+        "pid": pid, "title": title, "status": v.get("status") if v.get("status") in POST_STATUSES else "saved",
+        "stage": _one_line(v.get("stage"), 40) or "", "saved_at": _one_line(v.get("saved_at"), 40),
+        "score": _count(v.get("score"), top=100), "popular": v.get("popular") is True, "owner_edited": v.get("owner_edited") is True,
+        "needs": list(dict.fromkeys(needs)), "photo_request": photo_request, "slots": slots, "questions": questions,
+        "deadline": _one_line(v.get("deadline"), 40), "naver_url": _naver_url(v.get("naver_url")),
+    }
+
+
+def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
+    """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
+    out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {}}
+    posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
+    for blog in V2_BLOGS:
+        rows = posts.get(blog) if isinstance(posts.get(blog), list) else []
+        out["posts"][blog] = [p for p in (_export_post(x) for x in rows[:V2_POSTS_MAX]) if p]
+    recent = data.get("recent") if isinstance(data.get("recent"), dict) else {}
+    for blog in V2_BLOGS:
+        rows = recent.get(blog) if isinstance(recent.get(blog), list) else []
+        out["recent"][blog] = [
+            {"pid": _count(x.get("pid"), top=10**9), "title": _one_line(x.get("title"), 80) or "",
+             "url": _naver_url(x.get("url")), "at": _one_line(x.get("at"), 40)}
+            for x in rows[:10] if isinstance(x, dict) and _one_line(x.get("title"), 80)]
+    scan = data.get("scan")
+    if isinstance(scan, dict) and isinstance(scan.get("items"), list):
+        items = []
+        for x in scan["items"][:20]:
+            if isinstance(x, dict) and (n := _count(x.get("n"), top=50)) and (t := _one_line(x.get("title"), 80)):
+                items.append({"n": n, "title": t, "code": _one_line(x.get("code"), 10) or "", "score": _count(x.get("score"), top=100),
+                              "recommend": _count(x.get("recommend"), top=100)})
+        sid = scan.get("sid") if isinstance(scan.get("sid"), str) and re.fullmatch(r"[A-Za-z0-9_:-]{1,40}", scan.get("sid")) else None
+        out["scan"] = {"sid": sid, "at": _one_line(scan.get("at"), 40), "items": items} if sid else None
+    st = data.get("status") if isinstance(data.get("status"), dict) else {}
+    blogs = st.get("blogs") if isinstance(st.get("blogs"), dict) else {}
+    for blog in V2_BLOGS:
+        b = blogs.get(blog)
+        if isinstance(b, dict):
+            out["status"]["blogs"][blog] = {
+                "mode": b.get("mode") if b.get("mode") in ("draft", "publish") else "draft", "paused": b.get("paused") is True,
+                "today": _count(b.get("today"), top=1000) or 0,
+                "login": b.get("login") if b.get("login") in ("ok", "needed", "unknown") else "unknown",
+                "login_checked": _one_line(b.get("login_checked"), 40),
+                "blog_id": b.get("blog_id") if isinstance(b.get("blog_id"), str) and re.fullmatch(r"[a-z0-9_-]{2,40}", b.get("blog_id")) else None,
+            }
+    k = st.get("kakao") if isinstance(st.get("kakao"), dict) else {}
+    out["status"]["kakao"] = {"state": k.get("state") if k.get("state") in ("ok", "down", "expiring", "unknown") else "unknown",
+                              "expires_at": _one_line(k.get("expires_at"), 40)}
+    dg = data.get("digest") if isinstance(data.get("digest"), dict) else {}
+    out["digest"] = {"day": _one_line(dg.get("day"), 10), "generated_at": _one_line(dg.get("generated_at"), 40),
+                     "blogs": {b: _str_list((dg.get("blogs") or {}).get(b) if isinstance(dg.get("blogs"), dict) else None, 8, 200)
+                               for b in V2_BLOGS},
+                     "waiting": _str_list(dg.get("waiting"), 8, 200)}
+    return out
+
+
 def parse_export(data: Any, tz: str) -> BlogAutoExport:
     if not isinstance(data, dict):
         return BlogAutoExport(UNAVAILABLE, "Blog-Auto 활동 기록의 모양이 달라 읽지 못함")
@@ -468,8 +581,10 @@ def parse_export(data: Any, tz: str) -> BlogAutoExport:
         for n in names:
             if isinstance(n, str) and n.strip():
                 blogs.setdefault(n.strip().lower(), metrics)
+    version = data.get("version") if data.get("version") in (1, 2) else 1
     return BlogAutoExport(OK, written_at=written, blogs=blogs, waiting=parse_waiting(data.get("waiting"), tz),
-                          own_stats=parse_own_stats(data.get("own_stats"), tz), todo=parse_todo(data.get("todo"), tz))
+                          own_stats=parse_own_stats(data.get("own_stats"), tz), todo=parse_todo(data.get("todo"), tz),
+                          version=version, v2=parse_v2(data) if version == 2 else {})
 
 
 class BlogAutoReader:
@@ -511,5 +626,7 @@ class BlogAutoReader:
                 waiting=parsed.waiting,
                 own_stats=parsed.own_stats,  # 자기 통계는 읽은 시각(read_at)으로 따로 오래됐는지 본다
                 todo=parsed.todo,  # '지금 할 일' 은 그대로 보이고 '몇 시간 전 것' 안내만 붙는다
+                version=parsed.version,
+                v2=parsed.v2,
             )
         return parsed

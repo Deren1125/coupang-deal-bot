@@ -1,0 +1,15 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0x",
+ "status": "rejected",
+ "code": "owner_edited",
+ "text": "직접 고친 글이라 멈췄어요 — 할 일에서 정해 주세요",
+ "post": {
+  "blog": "issue",
+  "pid": 12,
+  "status": "saved"
+ },
+ "started_at": 1760772003.0,
+ "updated_at": 1760772004.0,
+ "done_at": 1760772004.0
+}

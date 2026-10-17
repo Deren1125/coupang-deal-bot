@@ -782,6 +782,17 @@ class DashboardConfig(BaseModel):
     blogauto_metrics_path: str = "/home/ubuntu/Blog-Auto/var/metrics/blogauto.json"  # Blog-Auto 가 한 시간마다 쓰는 활동 기록
     blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
     cards: list[DashboardCardConfig] = Field(default_factory=list)
+    # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
+    public_url: str = "https://52-79-136-64.sslip.io"
+    actions_enabled: bool = True  # false 면 대시보드는 보기만 (누르는 일은 모두 텔레그램으로)
+
+    @field_validator("public_url")
+    @classmethod
+    def _public_url(cls, v: str) -> str:
+        v = (v or "").strip().rstrip("/")
+        if not re.fullmatch(r"https://[a-z0-9.-]+(:[0-9]{1,5})?", v):
+            raise ValueError("dashboard.public_url 은 https://호스트 (경로 없이)")
+        return v
 
     @field_validator("collect_times")
     @classmethod
@@ -894,6 +905,11 @@ class MonitoringConfig(BaseModel):
     owner_summary_time: str = "20:50"  # 저녁 요약(카톡, Blog-Auto 가 21~22시에 보냄)에 넣을 딜봇 하루 정리를 넘기는 시각
     # 텔레그램엔 딜을 올렸는데 인스타·스레드가 24시간 동안 0개면 주인 할 일 한 통 (안 올린 이유 요약과 함께, 하루 한 번까지)
     sns_zero_alert: bool = True
+    # 주인 10/18: 관리자 챗 알림은 보내지 않는다 (할 일은 대시보드 앱 푸시 → 안 되면 카톡). 명령 답장은 그대로.
+    # notify.router 가 legacy 면 이 값과 상관없이 예전 그대로
+    telegram_owner_notices: bool = False
+    # 마지막 수단: 푸시 기기가 하나도 없고 카톡도 끊겼을 때만 텔레그램으로 소리 내서 (기본 끔)
+    telegram_last_resort: bool = False
     heartbeat_minutes: int = 0  # 관리자 챗이 N분 동안 조용하면 "정상 가동 중" 짧은 상태를 보냄 (0 = 끔). 특가 알림이 있으면 그걸로 대신함
 
     @field_validator("daily_summary_time", "owner_summary_time")
@@ -902,6 +918,30 @@ class MonitoringConfig(BaseModel):
         hh, mm = v.split(":")
         if not (0 <= int(hh) < 24 and 0 <= int(mm) < 60):
             raise ValueError("daily_summary_time must be HH:MM")
+        return v
+
+
+class NotifyConfig(BaseModel):
+    """주인 알림 길 (주인 10/18): push = 대시보드 앱 웹 푸시가 먼저(카톡은 예비, 텔레그램 관리자 챗은 조용히),
+    legacy = 예전 그대로 (Blog-Auto 카톡 + 텔레그램). 되돌릴 때만 legacy."""
+
+    router: str = "push"
+    push_quiet_hours: str = ""  # 예: "00:00-07:00" — 그 시간엔 ⛔ 말고는 끝날 때까지 기다림 (기본 없음)
+
+    @field_validator("router")
+    @classmethod
+    def _router(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in ("push", "legacy"):
+            raise ValueError("notify.router 는 push 또는 legacy")
+        return v
+
+    @field_validator("push_quiet_hours")
+    @classmethod
+    def _quiet(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not re.fullmatch(r"[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]", v):
+            raise ValueError("notify.push_quiet_hours 는 HH:MM-HH:MM 또는 빈칸")
         return v
 
 
@@ -1044,6 +1084,7 @@ class Settings(BaseModel):
     info_posts: InfoPostsConfig = Field(default_factory=InfoPostsConfig)
     blog_digest: BlogDigestConfig = Field(default_factory=BlogDigestConfig)
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
+    notify: NotifyConfig = Field(default_factory=NotifyConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     secrets: Secrets = Field(default_factory=Secrets)
 

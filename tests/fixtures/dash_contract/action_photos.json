@@ -1,0 +1,26 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0v",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "photos",
+ "blog": "issue",
+ "args": {
+  "pid": 46,
+  "uploads": [
+   "/home/ubuntu/dealbot-data/dash_uploads/files/9f0e1d2c3b4a59687766554433221100.jpg"
+  ],
+  "mode": "slot",
+  "slot": 3,
+  "in_order": false,
+  "crop": false,
+  "credit": ""
+ },
+ "target": "post-issue-46",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_8b1f2f"
+ }
+}

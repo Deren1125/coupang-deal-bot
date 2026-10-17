@@ -1,0 +1,19 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0t",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "publish",
+ "blog": "issue",
+ "args": {
+  "blog": "issue",
+  "pid": 31
+ },
+ "target": "post-issue-31",
+ "confirmed": true,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_8b1f2e"
+ }
+}

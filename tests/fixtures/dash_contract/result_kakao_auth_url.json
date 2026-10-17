@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0y",
+ "status": "ok",
+ "code": "done",
+ "text": "카카오 열기를 눌러 로그인해 주세요",
+ "post": null,
+ "started_at": 1760772003.0,
+ "updated_at": 1760772003.5,
+ "done_at": 1760772003.5,
+ "url": "https://kauth.kakao.com/oauth/authorize?client_id=FAKE&redirect_uri=http%3A%2F%2Flocalhost%2Fkakao&response_type=code&scope=talk_message"
+}

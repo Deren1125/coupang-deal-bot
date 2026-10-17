@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "id": "k_01jc3w1v9e8k4m2n6p7q8r9s0t",
+ "at": 1760772000.0,
+ "op": "send",
+ "kind": "urgent",
+ "key": "link:123",
+ "text": "🔔 링크 필요 #123 [토스] 무선청소기 129,000원\n대시보드 '할 일'에서 링크를 넣어 주세요 (24시간 안에)",
+ "link": "https://52-79-136-64.sslip.io/dashboard/go/deal-123",
+ "button": "대시보드 열기"
+}
