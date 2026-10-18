@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import random
+import re
 import time
 from pathlib import Path
 
@@ -108,7 +109,8 @@ async def test_single_push_has_one_action_button_and_batch_has_none(env: Env) ->
 
 def test_service_worker_handles_the_action_and_keeps_the_dashboard_tap() -> None:
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
-    assert "sb-v8" in sw
+    sw_v = re.search(r"'sb-v(\d+)'", sw)
+    assert sw_v and int(sw_v.group(1)) >= 8  # 이 일로 올린 캐시 판 (그 뒤로 더 올라가도 됨)
     assert "d.type === 'item' && d.open" in sw and "actions: o ? [{action: 'open'" in sw
     assert "/^https?:\\/\\//.test(d.open.url" in sw  # http(s) 주소만 버튼으로
     assert "e.action === 'open' && e.notification.data && e.notification.data.open" in sw
