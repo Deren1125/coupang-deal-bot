@@ -298,6 +298,39 @@ def visits(r: Run, base: str) -> None:
     r.shot("visits-blog-sheet")
 
 
+def today(r: Run, base: str) -> None:
+    """'오늘 한 일' (주인 10/18): 할 일 한 줄 → 칸별 시트 (위·아래) · 어제 보기 · 연결 탭에서 같은 시트."""
+    p = r.page
+    p.goto(base + "/dashboard/")
+    p.wait_for_selector("main .itm, main .empty")
+    row = p.locator("main .fold", has_text="오늘 한 일")
+    row.scroll_into_view_if_needed()
+    p.evaluate("scrollBy(0, 200)")
+    r.shot("today-todo-row")
+    row.click()
+    p.wait_for_selector(".sh .grp, .sh .empty:not(:has-text('불러오는'))")
+    p.wait_for_timeout(300)
+    r.shot("today-sheet")
+    for i, frac in enumerate((0.33, 0.66, 1.0), start=1):
+        p.evaluate(f"(() => {{ const b = document.querySelector('.sh .shb'); b.scrollTop = b.scrollHeight * {frac}; }})()")
+        r.shot(f"today-sheet-{i}")
+    print("today title:", p.text_content(".sh h2"), "| groups:", p.eval_on_selector_all(".sh .grp", "gs => gs.map(g => g.textContent)"))
+    print("links:", p.eval_on_selector_all(".sh a.sm", "as => as.map(a => [a.textContent, a.target, a.rel, a.href.slice(0, 40)])"))
+    p.locator(".sh .foot .lnk", has_text="어제 보기").click()
+    p.wait_for_timeout(600)
+    r.shot("today-yesterday")
+    p.click(".sh .shh .lnk")
+    p.wait_for_timeout(300)
+    p.goto(base + "/dashboard/#/connect")
+    p.wait_for_timeout(600)
+    p.evaluate("scrollTo(0, document.body.scrollHeight)")
+    r.shot("today-connect")
+    p.locator("main .fold", has_text="오늘 한 일").click()
+    p.wait_for_selector(".sh .grp, .sh .empty:not(:has-text('불러오는'))")
+    p.wait_for_timeout(300)
+    r.shot("today-connect-sheet")
+
+
 def extra(r: Run, base: str, ctx: Any, token: str, host: str) -> None:
     """로그인이 끝났을 때 로그인 시트 → 다시 로그인."""
     p = r.page
@@ -329,6 +362,7 @@ def main() -> int:
     ap.add_argument("--extra", action="store_true", help="오프라인·로그인 시트")
     ap.add_argument("--sched", action="store_true", help="간격 두고 발행 화면만")
     ap.add_argument("--visits", action="store_true", help="오늘 들를 이웃 글 화면만")
+    ap.add_argument("--today", action="store_true", help="오늘 한 일 화면만")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -353,6 +387,8 @@ def main() -> int:
                 sched(r, a.base)
             elif a.visits:
                 visits(r, a.base)
+            elif a.today:
+                today(r, a.base)
             else:
                 scenario(r, a.base, name in a.flows.split(","))
             problems += r.problems + [f"{name}: js error {e}" for e in errors]

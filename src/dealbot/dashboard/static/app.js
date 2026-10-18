@@ -720,7 +720,7 @@ function vTodo() {
   if (R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
   const b = banner(); if (b) out.push(b);
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
-  if (!items.length) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
+  if (!items.length) out.push(doneRow(), el('p', {class: 'empty'}, '할 일 없어요'));
   const n = ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');
   const more = rest ? el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`) : null;
@@ -729,6 +729,7 @@ function vTodo() {
   shown.forEach((x, i) => { if (gs && x.group !== g) out.push(el('p', {class: 'grp'}, g = x.group)); out.push(item(x)); if (more && i === last) out.push(more); });
   if (more && last < 0) out.push(more);
   if (items.length > n) out.push(btn('pb ghost', `더 보기 (${items.length - n})`, () => { ALL = true; render(); }));
+  if (items.length) out.push(doneRow());
   if (S.digest && S.digest.latest) out.push(el('p', {class: 'foot'}, btn('lnk', '오늘 정리 보기', () => digestSheet(S.digest.latest))));
   return out;
 }
@@ -930,6 +931,21 @@ const sec = (title, moreActs, ...kids) => [el('div', {class: 'top', style: 'marg
 const row = (t, s, right, bad) => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, t), s ? el('span', {class: 's' + (bad ? ' bad' : '')}, s) : null), right);
 const fold = (label, fn) => btn('fold', label, fn);
 function listSheet(title, rows) { sheet(title, el('div', {}, rows.length ? rows : el('p', {class: 'empty'}, '없어요'))); }
+// 오늘 한 일 (주인 10/18): 링크·사진·발행… 칸마다 새것 먼저 · 결과 칩 · 글·채널·상품 링크 (서버가 정한 주소만)
+const RC = {ok: 'ok', run: 'info', bad: 'stop'};
+const doneRow = () => el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, fold(`오늘 한 일 ${(S.counts || {}).done_today || 0}개`, todaySheet));
+function todaySheet() {
+  const box = sheet('오늘 한 일', el('p', {class: 'empty'}, '불러오는 중…')), h = box.parentNode.querySelector('h2');
+  const fill = async b => {
+    const r = await api('/dashboard/api/today' + (b ? '?day=yesterday' : '')), d = r.data || {}, w = b ? '어제' : '오늘';
+    h.textContent = `${w} 한 일${d.count ? ' ' + d.count + '개' : ''}`;
+    box.replaceChildren(...[r.status !== 200 ? el('p', {class: 'empty'}, d.text || MSG.net) : d.groups.length ? d.groups.map(g => [el('p', {class: 'grp'}, g.label),
+      el('div', {class: 'box'}, g.rows.map(x => row(x.title, [el('span', {class: 'cp ' + RC[x.res]}, x.chip), ' ', [x.when, x.blog, x.title !== x.what && x.what, x.why || x.note].filter(Boolean).join(' · ')],
+        x.link && ext('sm', x.link.label, x.link.url), x.res === 'bad')))]) : el('p', {class: 'empty'}, `${w} 한 일이 아직 없어요`),
+    el('p', {class: 'foot'}, btn('lnk mute', b ? '오늘 보기' : '어제 보기', () => fill(!b)), S.connect && S.connect.audit.length ? btn('lnk mute', '접속 기록', () => listSheet('접속 기록', S.connect.audit.map(x => el('p', {text: x.text})))) : null)].flat(9));
+  };
+  fill(0);
+}
 function vConnect() {
   const c = S.connect, out = [], push = c.push, me = push.devices.find(d => d.this), others = push.devices.filter(d => !d.this);
   let s = me ? '켜짐' : '꺼짐', right = null;
@@ -964,7 +980,7 @@ function vConnect() {
     cols.length ? fold(`수집기 ${cols.length}개`, () => listSheet('수집기', cols.map(x => row(x.label, `${x.enabled ? (x.ok ? '정상' : '오류') : '꺼짐'} · ${x.text}`, null, !x.ok)))) : null));
   out.push(el('div', {class: 'box', style: 'margin-top:20px'},
     c.errors.length ? fold(`오류 ${c.errors.length}개`, () => listSheet('오류', c.errors.map(x => row(x.where || '오류', `${hhmm(x.at)} · ${x.text}`)))) : row('오류', '없어요'),
-    el('div', {class: 'row', style: 'padding:0'}, fold('최근 한 일', () => listSheet('최근 한 일', c.audit.map(x => el('p', {text: x.text})))))));
+    el('div', {class: 'row', style: 'padding:0'}, fold('오늘 한 일', todaySheet))));
   out.push(el('form', {method: 'post', action: '/dashboard/logout', class: 'foot', onsubmit: () => {
     try { N.serviceWorker && N.serviceWorker.controller && N.serviceWorker.controller.postMessage({type: 'logout'}); } catch (e) { /* */ }
     try { localStorage.clear(); } catch (e) { /* */ }

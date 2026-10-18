@@ -6,6 +6,7 @@
   GET  /dashboard/api/item/<iid>        Item 하나 (긴 칸까지)
   POST /dashboard/api/action            {"action","args","cid","ctoken"} → actions.ActionDesk
   GET  /dashboard/api/actions?ids=a_1,a_2   {"actions":[ActionStatus]} (20개까지)
+  GET  /dashboard/api/today[?day=yesterday] 오늘 한 일 시트 (today.TodayView — 열 때만). 1분 30번
   POST /dashboard/api/upload            본문 = 파일 하나 (X-Upload-Kind: photo|ledger) → {"upload_id","w","h","bytes","thumb"}
   GET  /dashboard/upload/<id>/thumb     받은 사진 썸네일 · GET /dashboard/thumb/<이름>  Blog-Auto 사진 자리 썸네일
   POST /dashboard/api/push/subscribe    {"endpoint","keys":{"p256dh","auth"},"label"} → {"id"}
@@ -98,6 +99,7 @@ class DashApi:
         self.uploads = Uploads(dash.db, bot.settings.data_dir)
         key = hashlib.sha256(b"ctoken|" + self.csrf._secret()).digest()
         self.state_rate = RateWindow(60, 60.0)
+        self.today_rate = RateWindow(30, 60.0)
         self.upload_rate = RateWindow(60, 600.0)
         self.sub_rate = RateWindow(10, 3600.0)
         self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
@@ -165,6 +167,7 @@ class DashApi:
         web.route_prefix(f"{API}/item/", self.item, with_headers=True)
         web.route_json(f"{API}/action", self.action, max_body=ACTION_BODY_MAX)
         web.route(f"{API}/actions", self.actions, with_headers=True)
+        web.route(f"{API}/today", self.today, with_headers=True)
         web.route_stream(f"{API}/upload", self.upload, max_body=lambda h: max_bytes((h.get("x-upload-kind") or "").strip()),
                          tmp_path=self.uploads.tmp_path)
         web.route_prefix("/dashboard/upload/", self.upload_thumb)
@@ -250,6 +253,20 @@ class DashApi:
                     st["url"] = url  # 한 번만 (저장하지 않음)
             out.append(st)
         return jresp(200, {"actions": out}, {"Cache-Control": "no-store"})
+
+    async def today(self, query: dict[str, str], headers: dict[str, str]) -> Any:
+        """오늘 한 일 (주인 10/18) — 로그인(guard_prefix) 아래, 읽기만이라 state 처럼 CSRF 없이."""
+        from dealbot.dashboard.today import TodayView
+
+        caller, _ident, _tok = self.caller(headers)
+        if not self.today_rate.hit(caller.session):
+            return err(429, "rate")
+        try:
+            self.bot.actions_out.ingest()  # Blog-Auto 결과를 먼저 읽는다 (진행 중 → 완료)
+        except Exception as e:  # noqa: BLE001
+            log.warning("dashboard today ingest failed: %s", e)
+        back = 1 if query.get("day") == "yesterday" else 0
+        return jresp(200, TodayView(self.bot).view(now=time.time(), back=back), {"Cache-Control": "no-store"})
 
     # ---------------------------------------------------------- 파일
     async def upload(self, query: dict[str, str], headers: dict[str, str], path: Path) -> Any:
