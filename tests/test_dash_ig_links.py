@@ -89,7 +89,7 @@ def test_app_js_has_the_link_control_for_pick_only_and_never_loads_instagram() -
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
     assert "인스타 링크 넣기" in js and "(a.args || {}).blog !== 'issue'" in js and "extra.links = links" in js
     assert "fetch('https://www.instagram" not in js and "src: 'https://www.instagram" not in js
-    assert "sb-v7" in (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
+    assert "sb-v8" in (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- 핫딜 오픈채팅 문구 (recent[].share)

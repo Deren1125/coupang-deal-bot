@@ -3131,7 +3131,8 @@ class DealBot:
                 return None, why or PHOTO_NOT_RECEIVED
         else:
             data = photo
-        return await asyncio.to_thread(owner_photo, data, min_side=self.settings.publish.photo_min_side)
+        # 휴대폰 화면 캡처면 상품 사진 부분을 알아서 잘라 본다 (주인 10/18 — 그래도 안 되면 그때 이유)
+        return await asyncio.to_thread(owner_photo, data, min_side=self.settings.publish.photo_min_side, crop=True)
 
     def _take_owner_photo(self, item: QueueItem, jpeg: bytes | None, *, sent: bool = False) -> tuple[str | None, str]:
         """검사를 마친 사진(jpeg)을 그 딜의 상품 사진으로 저장 (네이버 상품 딜만). 링크를 붙이기 바로 전에 부른다 (await 없음).

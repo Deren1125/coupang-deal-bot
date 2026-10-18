@@ -357,6 +357,14 @@ def wants_owner_photo(shop_key: str, p: Product) -> bool:
     return shop_key == "naver" and p.deal_kind != "info"
 
 
+def product_links(p: Product) -> list[dict[str, str]]:
+    """딜 사진 부탁에 붙일 '사진 받을 곳': 상품 페이지 (원래 상품 주소 — 제휴 링크가 아님). https 가 아니면 없음 (주인 10/18)."""
+    from dealbot.dashboard.todo import link_target
+
+    url = link_target(p.url)
+    return [{"label": "상품 페이지", "url": url}] if url and len(url) <= 500 else []
+
+
 def photo_refused(queue_id: int, why: str) -> str:
     """주인이 링크와 같이 보낸 사진을 못 씀: 링크도 붙이지 않고 이유와 다시 보내는 법 (주인 결정 10/15)."""
     return (f"⚠️ #{queue_id} 사진을 쓸 수 없어 링크도 아직 안 붙였어요: {html.escape(why, quote=False)}\n"
@@ -554,6 +562,7 @@ class AdminNotifier:
     def _notice_from_note(self, note: dict[str, Any]) -> dict[str, Any]:
         """owner_notice v2 줄 → 알림 길(router) 한 줄 (src=dealbot). 글은 대시보드 말로 (dash_text)."""
         from dealbot.notify import iid as iidmod
+        from dealbot.notify.links import clean_links
         from dealbot.notify.router import sev_of, urgency
 
         kind = str(note.get("kind") or "")
@@ -569,6 +578,7 @@ class AdminNotifier:
             "sev": sev_of(text), "urgent": urgency(kind) == "URGENT" or bool(note.get("urgent") and urgency(kind) != "DIGEST"),
             "quiet": False, "title": title, "body": truncate(body, 120), "short": short,
             "ttl_h": float(note.get("ttl_h") or 24), "group": str(note.get("group") or "")[:40], "at": time.time(),
+            "links": clean_links(note.get("links")),
         }
 
     def blogauto_ok(self) -> bool:
@@ -634,13 +644,15 @@ class AdminNotifier:
 
     async def alert(self, kind: str, tg_text: str | None, kakao_text: str, *, key: str, short: str, group: str = "",
                     urgent: bool = False, link: str = "", ttl_h: float = 24, msg_kind: str = "",
-                    queue_id: int | None = None) -> int | None:
+                    queue_id: int | None = None, links: list[dict[str, str]] | None = None) -> int | None:
         """주인이 해야 할 일: 텔레그램 자세한 내용(답장할 자리) + Blog-Auto 가 보낼 카톡 한 통(v2).
         Blog-Auto 가 살아 있고 카톡이 되면 텔레그램은 소리 없이, 아니면 소리 내서(같은 일은 6시간에 한 번) — 그래도 카톡 줄은 남긴다
-        (Blog-Auto 가 곧 살아나면 보내고, 같은 키라 두 번 가지 않음)."""
+        (Blog-Auto 가 곧 살아나면 보내고, 같은 키라 두 번 가지 않음).
+        links: 사진 부탁의 '사진 받을 곳' [{label, url}] (알림 길에서만 — 푸시 버튼·카톡 끝 줄·할 일 줄 버튼, notify/links.py)."""
         if self.router is not None:  # 주인 10/18: 할 일은 알림 길로 (대시보드 앱 푸시 → 안 되면 카톡), 관리자 챗은 보내지 않음
             self.owner_line({"kind": kind, "key": key, "group": group, "text": kakao_fit(kakao_text),
-                             "short": short[:KAKAO_SHORT], "urgent": urgent, "link": link, "ttl_h": ttl_h})
+                             "short": short[:KAKAO_SHORT], "urgent": urgent, "link": link, "ttl_h": ttl_h,
+                             **({"links": links} if links else {})})
             if self._last_resort():
                 now = utcnow()
                 last = self._loud_sent.get(key)
@@ -895,6 +907,7 @@ class AdminNotifier:
                           (f"🔎 짧게: {short}\n" if short else "") + (f"{ask}\n" if ask else "")
                           + f"→ 텔레그램 핫딜봇 #{item.id} 에 답장"),
                 key=f"link:{item.id}", short=f"핫딜 링크 #{item.id}", group="link_request", msg_kind="link", queue_id=item.id,
+                links=product_links(p) if ask else None,  # 네이버 딜: 상품 사진도 부탁 → 상품 페이지 (주인 10/18)
             )
         else:
             message_id = await self.send_with_id(text, kind="link", queue_id=item.id)

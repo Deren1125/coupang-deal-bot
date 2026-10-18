@@ -121,13 +121,17 @@ SCREENSHOT_ASPECT = 1.6  # 이보다 길쭉한 사진은 휴대폰 화면 캡처
 SCREENSHOT_HINT = "화면 캡처면 상품 부분만 잘라서, 또는 파일로 보내 주세요"
 
 
-def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 2.2, max_side: int = 1280) -> tuple[bytes | None, str]:
+def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 2.2, max_side: int = 1280,
+                crop: bool = False) -> tuple[bytes | None, str]:
     """주인이 보낸 상품 사진을 검사해 (JPEG 바이트, "") 또는 (None, 주인에게 보일 이유).
     상품 사진 규칙은 clean_image 와 같다 (짧은 변 min_side 이상, 비율 max_aspect 이하, 긴 변 max_side 이하로 줄임, EXIF 방향 반영).
     단 줄인 뒤에도 짧은 변이 min_side 아래로 내려가지 않게 한다 — 길쭉한 사진(화면 캡처 1179×2556 등)을 긴 변 1280 으로 줄이면
     590×1280 이 되어, 저장한 사진이 발행 때 600px 검사에서 떨어지고 글만 올라갔다 (그런 사진은 긴 변을 조금 더 둠).
     다시 저장하므로 EXIF(위치·기기 정보)는 남지 않는다. 열기 전에 파일 크기·형식·화소 수를 먼저 본다 (큰 그림으로 서버가 멈추지 않게).
-    저장한 사진을 발행 때 다시 볼 때도 이 함수로 (같은 규칙 — clean_image 로 보면 위의 길쭉한 사진이 다시 줄어 떨어짐)."""
+    저장한 사진을 발행 때 다시 볼 때도 이 함수로 (같은 규칙 — clean_image 로 보면 위의 길쭉한 사진이 다시 줄어 떨어짐).
+    crop=True (주인이 막 보낸 사진 — 대시보드 올리기·텔레그램 답장, 주인 10/18): 길쭉한 휴대폰 화면 캡처면 먼저 다듬는다
+    (상품 사진 부분을 확신하면 그 부분만, 아니면 상태바·아래 막대·여백만 — media/screenshot.py). 그다음 같은 검사를 하고,
+    그래도 안 되면 그때 이유를 말한다. 발행 때 다시 볼 때는 crop=False (이미 다듬어 저장한 사진)."""
     if not data:
         return None, OWNER_PHOTO_NOT_IMAGE
     if len(data) > OWNER_PHOTO_MAX_BYTES:
@@ -149,9 +153,19 @@ def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 
     if w * h > OWNER_PHOTO_MAX_PIXELS:
         return None, f"사진 해상도가 너무 커요 ({w}×{h})"
     aspect = max(w, h) / max(1, min(w, h))
+    shot = aspect >= SCREENSHOT_ASPECT  # 휴대폰 화면 캡처일 가능성 (다듬은 뒤에도 '작아요' 에 방법을 같이)
+    if crop and shot:
+        from dealbot.media.screenshot import tidy_bytes
+
+        tidied, what = tidy_bytes(data)
+        if what:
+            data = tidied
+            with Image.open(io.BytesIO(data)) as img:
+                w, h = img.size
+            aspect = max(w, h) / max(1, min(w, h))
     if min(w, h) < min_side:
         # 텔레그램이 줄인 휴대폰 화면 캡처(590×1280 등)는 '작다'만 들으면 왜인지 모름 → 자르거나 파일로 보내는 법을 같이
-        hint = f" ({SCREENSHOT_HINT})" if aspect >= SCREENSHOT_ASPECT else ""
+        hint = f" ({SCREENSHOT_HINT})" if shot else ""
         return None, f"사진이 너무 작아요 ({w}×{h}) — 짧은 변이 {min_side}px 이상이어야 해요{hint}"
     if aspect > max_aspect:
         return None, f"사진이 너무 길쭉해요 ({w}×{h}) — 가로세로 {max_aspect:g}배 이하로 (화면 캡처면 상품 부분만 잘라서)"

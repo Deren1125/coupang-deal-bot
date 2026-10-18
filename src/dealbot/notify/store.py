@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import json
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+from dealbot.notify.links import clean_links
 
 REOPEN_SAME_S = 30 * 60
 SEEN_DAYS = 7
@@ -45,6 +47,7 @@ class Notice:
     push_tries: int
     next_try: float | None
     kakao_at: float | None
+    links: list[dict[str, str]] = field(default_factory=list)  # 사진 받을 곳 [{label, url}] (notify/links.py)
 
     def open_at(self, now: float) -> bool:
         return self.resolved_at is None and now < self.opened_at + self.ttl_h * 3600
@@ -61,8 +64,20 @@ def _notice(r: Any) -> Notice:
         wait_s=r["wait_s"], wait_n=r["wait_n"], delay_s=float(r["delay_s"] or 0), opened_at=float(r["opened_at"]),
         updated_at=float(r["updated_at"]), resolved_at=r["resolved_at"], pushed_at=r["pushed_at"],
         push_ok=None if r["push_ok"] is None else bool(r["push_ok"]), push_tries=int(r["push_tries"] or 0),
-        next_try=r["next_try"], kakao_at=r["kakao_at"],
+        next_try=r["next_try"], kakao_at=r["kakao_at"], links=_links(r),
     )
+
+
+def _links(r: Any) -> list[dict[str, str]]:
+    try:
+        raw = r["links"]
+    except (IndexError, KeyError):
+        return []
+    try:
+        data = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    return clean_links(data)
 
 
 class NotifyStore:
@@ -83,12 +98,13 @@ class NotifyStore:
                       urgent=int(bool(n.get("urgent"))), quiet=int(bool(n.get("quiet"))), title=n.get("title", ""),
                       body=n.get("body", ""), short=n.get("short", ""), ttl_h=float(n.get("ttl_h") or 24),
                       grp=n.get("group", "") or "", wait_s=n.get("wait_s"), wait_n=n.get("wait_n"),
-                      delay_s=float(n.get("delay_s") or 0))
+                      delay_s=float(n.get("delay_s") or 0),
+                      links=json.dumps(clean_links(n.get("links")), ensure_ascii=False) if n.get("links") else None)
         with self.db._lock:
             if cur is None:
                 self.db._conn.execute(
                     "INSERT INTO owner_notices (src, key, kind, blog, iid, sev, urgent, quiet, title, body, short, ttl_h, grp, "
-                    "wait_s, wait_n, delay_s, opened_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "wait_s, wait_n, delay_s, links, opened_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (src, key, *fields.values(), now, now))
                 return "new", self.get(src, key)
             if cur.resolved_at is not None:

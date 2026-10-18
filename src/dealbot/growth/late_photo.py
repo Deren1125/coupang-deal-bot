@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.monitoring.admin import kakao_fit
+from dealbot.monitoring.admin import kakao_fit, product_links
 from dealbot.utils.text import clean_name, truncate
 from dealbot.utils.timeutil import from_iso, to_iso
 
@@ -68,6 +68,7 @@ class LatePhoto:
             kakao_fit(f"🔔[할 일] 사진 필요 #{queue_id} {truncate(clean_name(deal.product.name), 50)}",
                       f"→ {hhmm} 까지 텔레그램 핫딜봇 📷 메시지에 사진 답장 (없으면 블로그는 글자 카드)"),
             key=f"photo:{queue_id}", short=f"딜 사진 #{queue_id}", group="photo_need", ttl_h=self.hours,
+            links=product_links(deal.product),  # 상품 페이지 — 알림에서 바로 열어 사진을 받게 (주인 10/18)
         )
         bot.db.log_event("INFO", "late_photo", f"#{queue_id} 사진 요청 (until {to_iso(until)})")
         return mid is not None

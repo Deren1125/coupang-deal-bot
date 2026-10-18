@@ -1,0 +1,31 @@
+{
+ "v": 1,
+ "id": "n_01jc3w1v9e8k4m2n6p7q8r9s0v",
+ "at": 1760772000.0,
+ "src": "blogauto",
+ "op": "open",
+ "key": "photo:issue:52",
+ "kind": "pick_photos",
+ "blog": "issue",
+ "iid": "post-issue-52",
+ "urgent": true,
+ "quiet": false,
+ "sev": "todo",
+ "title": "Pick #52 사진 6장 필요",
+ "body": "「윤아 밀라노 출국 공항패션」 → 대시보드 할 일에서 사진 올리기",
+ "short": "Pick #52 사진 6장",
+ "ttl_h": 168.0,
+ "group": "",
+ "wait": null,
+ "delay_s": 0,
+ "links": [
+  {
+   "label": "사진 출처 1",
+   "url": "https://www.news1.kr/entertain/celebrity-topic/5900001"
+  },
+  {
+   "label": "네이버 이미지 「윤아 공항패션」",
+   "url": "https://m.search.naver.com/search.naver?where=m_image&query=%EC%9C%A4%EC%95%84"
+  }
+ ]
+}
