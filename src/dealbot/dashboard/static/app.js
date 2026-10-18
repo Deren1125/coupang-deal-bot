@@ -30,7 +30,7 @@ const MSG = {published: '발행했어요', saved: '저장했어요', done: '했�
   login_needed: '네이버 로그인이 필요해요 — 연결에서 확인해 주세요', unsupported: '블로그 프로그램 업데이트를 기다리는 중이에요',
   blogauto_down: '블로그 프로그램이 응답하지 않아요', rate: '너무 자주 눌렀어요 — 조금 뒤에 다시', net: '인터넷 연결을 확인해 주세요',
   unknown: '확인이 필요해요 — 잠시 뒤 상태를 봐 주세요', confirm_expired: '확인 창이 오래됐어요 — 다시 눌러 주세요'};
-const SCH = /^blog\.(un)?schedule/;
+const SCH = /^blog\.(un)?schedule/, PIX = /^blog\.pics_/;
 const SECRET_KEY = {'sns.token': 'token', 'sns.code': 'code', 'blog.kakao_connect': 'url'};
 
 let S = null, OLD = false, R = {tab: 'todo', sub: ''}, loading = null, ALL = false, DIRTY = false, NEXT = null;
@@ -139,7 +139,7 @@ function route() {
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog') { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && R.sub !== 'pics') { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -277,7 +277,7 @@ async function exec(a, extra, ctx = {}) {
   if (r.status === 202) {
     POLL[d.id] = {iid: ctx.iid || '', action: a.action, args: body.args, t: Date.now()};
     if (ctx.key) { delete P[ctx.key]; delete OPEN[ctx.iid]; }
-    toast(SCH.test(a.action) ? '예약하는 중이에요' : a.action === 'blog.visit_done' ? '했어요로 표시했어요' : a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
+    toast(SCH.test(a.action) ? '예약하는 중이에요' : a.action === 'blog.visit_done' ? '했어요로 표시했어요' : PIX.test(a.action) ? (/fetch/.test(a.action) ? '사진 찾는 중이에요 — 다 되면 알려 드릴게요' : '지우는 중이에요') : a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
     render(); poll();
     return d;
   }
@@ -327,14 +327,17 @@ function finish(s, p) {
   const a = p.args || {};
   if (ok && s.action === 'blog.fix' && a.blog === 'finance') {
     toast(text, '사진도 바꾸기', () => exec({action: 'blog.fixpic', args: {pid: a.pid, blog: 'finance'}}, {}, {iid: s.target}));
-  } else toast(text);
+  } else if (ok && s.action === 'blog.pics_fetch') toast(text, '보기', () => s.target ? openItem(s.target) : go('#/blog/pics'));
+  else toast(text);
 }
 function pendingOf(iid) {
   if (!iid) return null;
-  const mine = Object.values(POLL).find(p => p.iid === iid);
+  const mine = Object.values(POLL).find(p => p.iid === iid && !PIX.test(p.action));
   if (mine) return mine;
-  return (S.pending || []).find(p => p.target === iid && (p.status === 'queued' || p.status === 'running'));
+  return (S.pending || []).find(p => p.target === iid && !PIX.test(p.action) && (p.status === 'queued' || p.status === 'running'));
 }
+const fetching = iid => Object.values(POLL).some(p => p.iid === iid && /pics_fetch/.test(p.action)) ||
+  (S.pending || []).some(p => (p.target || 'pics') === iid && /pics_fetch/.test(p.action) && /queued|running/.test(p.status));
 
 // ------------------------------------------------------------ 올리기 (사진 · 정리본)
 async function prep(f) {
@@ -407,6 +410,7 @@ function item(it, plain) {
     el('div', {class: 'ih'}, plain && it.sev === 'todo' ? null : chip(it), btn('ti', title(it), () => openItem(it.iid, it)),
       more.length ? btn('lnk mute', '더보기', () => moreSheet(it, more)) : null),
     it.status ? el('p', {class: 'st' + (warn ? ' warn' : '')}, it.status) : null,
+    it.primary && it.primary.input === 'pics' && !pendingOf(it.iid) ? btn('pks', picks(it).slice(0, 5).map(x => el('img', {src: x.thumb, alt: ''})), () => openItem(it.iid, it), {'aria-label': '추천 사진 보기'}) : null,
     primary(it, it.primary));
 }
 
@@ -448,6 +452,7 @@ function act(it, a, b, inline) {
   if (a.input === 'open') { W.open(a.url, '_blank', 'noopener'); return; }
   if (a.input === 'goto') { go('#' + a.goto.replace(/^#/, '')); return; }
   if (a.input === 'none' || !a.input) { exec(a, {}, {btn: b, iid: it.iid}); return; }
+  if (a.input === 'pics') { exec(a, picks(it, 1), {btn: b, iid: it.iid}); return; }
   if (a.input === 'choice') { choiceSheet(a); return; }
   if (a.input === 'search') { searchSheet(a); return; }
   const key = pk(it.iid, a);
@@ -495,7 +500,7 @@ function panel(it, a, key, ctx) {
       onkeydown: e => { if (e.key === 'Enter') { e.preventDefault(); go1(); } }});
     keys.push(key);
     const tools = el('div', {class: 'tools'},
-      a.url ? ext('lnk', '상품 열기', a.url) : null, paste(),
+      a.url ? ext('lnk', '상품 열기', a.url) : null, paste(f, key),
       a.photo_optional ? btn('lnk', st.files.length ? '사진 바꾸기' : '사진 추가 (선택)', () => pick(a.accept || 'image/*', false, fs => { if (fs.length) { st.files = fs.slice(0, 1); redraw(); } })) : null);
     kids.push(tools, f);
   } else if (a.input === 'answers' && (it.detail && it.detail.questions || []).length) {
@@ -509,7 +514,7 @@ function panel(it, a, key, ctx) {
     if (a.photos_optional) kids.push(btn('lnk', st.files.length ? `사진 ${st.files.length}장 · 다시 고르기` : '사진 추가 (선택)', () => pick('image/*', true, fs => { st.files = fs.slice(0, 20); redraw(); })));
   } else if (a.input === 'secret') {
     f = field(key, a, {type: 'password', autocomplete: 'off'}); keys.push(key);
-    kids.push(a.hint ? el('p', {class: 'note'}, a.hint) : null, el('div', {class: 'tools'}, paste()), f);
+    kids.push(a.hint ? el('p', {class: 'note'}, a.hint) : null, el('div', {class: 'tools'}, paste(f, key)), f);
   } else if (a.input === 'file') {
     kids.push(el('p', {}, st.files.length ? st.files[0].name : '파일을 골라 주세요'), btn('lnk', '다시 고르기', () => pick(a.accept, false, fs => { if (fs.length) { st.files = fs; redraw(); } })));
   }
@@ -544,11 +549,6 @@ function panel(it, a, key, ctx) {
   if (a.note) kids.push(el('p', {class: 'note'}, a.note));
   if (cancel) kids.push(el('div', {class: 'foot'}, cancel));
   box.append(...kids.filter(Boolean));
-  function paste() {
-    return btn('lnk', '붙여넣기', async () => {
-      try { const t = await N.clipboard.readText(); if (t) { f.value = t; VAL[key] = t; } else throw 0; } catch (e) { f.focus(); toast('길게 눌러 붙여넣기'); }
-    });
-  }
   function redraw() { if (ctx.sheet && box.isConnected) box.replaceWith(panel(it, a, key, ctx)); else { if (!ctx.sheet) OPEN[it.iid] = key; render(); } }
   async function go1() {
     const extra = {};
@@ -595,6 +595,83 @@ function panel(it, a, key, ctx) {
     if (d) { keys.forEach(k => delete VAL[k]); delete P[key]; if (ctx.sheet) { ctx.done = true; back(); } }
   }
   return box;
+}
+
+function paste(f, key) {
+  return btn('lnk', '붙여넣기', async () => {
+    try { const t = await N.clipboard.readText(); if (t) { f.value = t; VAL[key] = t; } else throw 0; } catch (e) { f.focus(); toast('길게 눌러 붙여넣기'); }
+  });
+}
+
+// ------------------------------------------------------------ 링크에서 사진 고르기 (10/18): AI 고른 것 미리 · 누르면 넣기·빼기 · 꾹 = 크게
+const PS = {};
+function sel(it) {
+  const p = it.detail.pics, o = PS[it.iid];
+  if (o && o.at === p.at) return o.m;
+  return (PS[it.iid] = {at: p.at, m: new Map(p.items.filter(x => x.slot != null).map(x => [x.id, x.slot]))}).m;
+}
+function picks(it, ids) {
+  const m = sel(it), xs = it.detail.pics.items.filter(x => m.has(x.id)).map(x => ({id: x.id, slot: m.get(x.id), thumb: x.thumb}))
+    .sort((a, b) => !a.slot - !b.slot || a.slot - b.slot);
+  return ids ? {pics: xs.map(x => ({id: x.id, slot: x.slot}))} : xs;
+}
+function hold(b, tap, long) {
+  let t = 0, held = 0;
+  const stop = () => clearTimeout(t);
+  b.addEventListener('pointerdown', () => { held = 0; stop(); t = setTimeout(() => { held = 1; long(); }, 550); });
+  for (const n of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(n, stop);
+  b.addEventListener('contextmenu', e => { e.preventDefault(); if (!held) { stop(); held = 1; long(); } });
+  b.addEventListener('click', () => { if (held) held = 0; else tap(); });
+}
+function tile(x, badge, tap) {
+  const b = btn('pt' + (badge != null ? ' on' : ''), [el('img', {src: x.thumb, alt: x.why || '', draggable: 'false'}), badge != null ? el('b', {}, badge) : null], null,
+    tap ? {'aria-pressed': badge != null ? 'true' : 'false'} : null);
+  hold(b, tap || (() => big(x)), () => big(x));
+  return b;
+}
+function big(x) {
+  sheet(x.why || '사진', el('div', {class: 'big'}, el('img', {src: x.full, alt: x.why || ''}),
+    el('p', {class: 'note'}, ['꾹 눌러 저장 · 복사', x.host && '출처 ' + x.host].filter(Boolean).join(' · ')), ext('mr', '새 창에서 열기', x.full)));
+}
+function picsBox(it) {
+  const p = (it.detail || {}).pics, n = p && p.items.length;
+  if (!p) return [];
+  const out = [el('p', {class: 'h3'}, p.state === 'ready' && n ? `추천 사진 ${n}장` : '링크에서 사진')];
+  if (p.state === 'working' || fetching(it.iid)) return out.concat(el('p', {class: 'note'}, '사진 찾는 중…'));
+  if (p.state === 'failed') out.push(el('p', {class: 'st warn'}, p.text || '사진을 찾지 못했어요'));
+  if (p.state === 'ready' && n) {
+    const m = sel(it), box = el('div');
+    const draw = () => box.replaceChildren(el('p', {class: 'note'}, '누르면 넣기·빼기 · 꾹 누르면 크게'),
+      el('div', {class: 'pk'}, p.items.map(x => tile(x, m.has(x.id) ? m.get(x.id) || '✓' : null, () => { if (!m.delete(x.id)) m.set(x.id, 0); draw(); }))),
+      btn('pb', m.size ? `이대로 넣기 · ${m.size}장` : '넣을 사진을 눌러 주세요', async e => {
+        if (await exec(p.put, picks(it, 1), {btn: e.currentTarget, iid: it.iid}) && SH.length) back();
+      }, {disabled: !m.size}));
+    draw(); out.push(box);
+  }
+  const x = (a, c) => a && btn(c, a.label, e => exec(a, {}, {btn: e.currentTarget, iid: it.iid}));
+  out.push(n ? el('div', {class: 'tools'}, x(p.fetch, 'lnk'), x(p.clear, 'lnk mute')) : x(p.fetch, 'pb ghost'));
+  return out;
+}
+// 블로그 탭 '링크에서 사진 뽑기' (웹은 한 번에 저장 불가 → 크게 열어 꾹)
+function vPics() {
+  const t = S.pics, out = [el('div', {class: 'top'}, el('h2', {}, '링크에서 사진 뽑기'), el('a', {class: 'lnk', href: '#/blog/' + (LS.g('blog') || 'finance')}, '블로그로'))];
+  if (!t) return out.concat(el('p', {class: 'empty'}, MSG.unsupported));
+  const a = t.fetch, k = 'pics|url', w = 'pics|want';
+  const u = field(k, a, {type: 'text', inputmode: 'url', enterkeyhint: 'next'}), want = field(w, {placeholder: '원하는 사진 (선택) 예: 제품 정면'}, {maxlength: 100, enterkeyhint: 'go'});
+  out.push(el('div', {class: 'box'}, el('div', {class: 'tools'}, paste(u, k)), u, want, btn('pb', a.label, async e => {
+    const v = u.value.trim();
+    if (!/^https?:\/\/\S+$/i.test(v)) { u.focus(); toast('링크를 넣어 주세요'); return; }
+    if (await exec(a, {url: v, want: want.value.trim()}, {btn: e.currentTarget, iid: 'pics'})) { delete VAL[k]; delete VAL[w]; render(); }
+  })));
+  const busy = fetching('pics') && !t.jobs.some(j => j.state === 'working');
+  if (busy) out.push(el('p', {class: 'note'}, '사진 찾는 중…'));
+  if (!t.jobs.length && !busy) out.push(el('p', {class: 'empty'}, '아직 뽑은 사진이 없어요'));
+  for (const j of t.jobs) {
+    out.push(el('div', {class: 'box'}, el('div', {class: 'ih'}, el('b', {class: 'ti'}, j.host || '링크'), btn('lnk mute', j.clear.label, e => exec(j.clear, {}, {btn: e.currentTarget, iid: 'pics'}))),
+      el('p', {class: 'st' + (j.state === 'failed' ? ' warn' : '')}, [j.want, j.state === 'working' ? '사진 찾는 중…' : j.text, ago(j.at)].filter(Boolean).join(' · ')),
+      j.items.length ? [el('div', {class: 'pk'}, j.items.map(x => tile(x))), el('p', {class: 'note'}, '사진을 누르면 크게 · 꾹 눌러 저장')] : null));
+  }
+  return out;
 }
 
 // ------------------------------------------------------------ 시트들: 더보기 · 자세히 · 고르기 · 찾기 · 정리
@@ -661,6 +738,7 @@ function detail(it) {
   const pr = d.photo_request;
   if (pr && (pr.must || []).length) out.push(el('p', {class: 'h3'}, '필요한 사진'), el('ul', {class: 'ls'}, pr.must.map(t => el('li', {text: t}))));
   if (pr && (pr.links || []).length) out.push(el('div', {class: 'tools'}, pr.links.map(l => ext('lnk', l.label, l.url))));
+  out.push(...picsBox(it));
   if ((d.slots || []).length) {
     out.push(el('p', {class: 'h3'}, '사진 자리'), el('div', {class: 'slots'}, d.slots.map(s => btn('slot' + (s.thumb ? '' : ' empty'),
       s.thumb ? [el('img', {src: s.thumb, alt: `자리 ${s.slot}`}), el('b', {}, s.slot)] : `자리 ${s.slot}: ${s.label || '빈 자리'}`, () => slotSheet(it, s)))));
@@ -674,7 +752,7 @@ function detail(it) {
       r.open ? ext('lnk', '스레드에서 열기', r.open) : null));
   }
   if (d.replies && !d.replies.length) out.push(el('p', {class: 'empty'}, '답글 없어요'));
-  if (!(it.primary && it.primary.goto === '#/i/' + it.iid)) out.push(el('div', {style: 'margin:12px 0'}, primary(it, it.primary)));
+  if (!(it.primary && (it.primary.goto === '#/i/' + it.iid || it.primary.input === 'pics'))) out.push(el('div', {style: 'margin:12px 0'}, primary(it, it.primary)));
   for (const o of d.open || []) out.push(ext('mr', o.label, o.url));
   out.push(...more.map(a => a.input === 'open' ? ext('mr', a.label, a.url)
     : btn('mr' + (a.danger ? ' red' : ''), a.label, () => act(it, a, null, false))));
@@ -761,6 +839,7 @@ const IDEA = ['blog.scan', 'blog.issue', 'blog.hotdeal_now'];
 function vBlog() {
   const key = R.sub, b = S.blogs[key];
   const out = [el('div', {class: 'seg', role: 'group'}, BLOGS.map(([k, l]) => btn('', l, () => { location.hash = '#/blog/' + k; }, {'aria-pressed': k === key ? 'true' : 'false'})))];
+  if (key === 'pics') return out.concat(vPics());
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -768,6 +847,7 @@ function vBlog() {
   const more = acts.filter(a => !idea.includes(a) && a !== write);
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
+  if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
   const sc = b.schedule, want = sc ? 'blog.schedule' : 'blog.publish';
   const pubs = b.waiting.filter(x => x.primary && x.primary.action === want && !x.primary.disabled && x.kind !== 'sched_blocked' && !pendingOf(x.iid));

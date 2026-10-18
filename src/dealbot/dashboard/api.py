@@ -8,6 +8,7 @@
   GET  /dashboard/api/actions?ids=a_1,a_2   {"actions":[ActionStatus]} (20개까지)
   POST /dashboard/api/upload            본문 = 파일 하나 (X-Upload-Kind: photo|ledger) → {"upload_id","w","h","bytes","thumb"}
   GET  /dashboard/upload/<id>/thumb     받은 사진 썸네일 · GET /dashboard/thumb/<이름>  Blog-Auto 사진 자리 썸네일
+  GET  /dashboard/pic/<이름>            링크에서 고른 후보 사진 원본 (blog_view/pics — 꾹 눌러 저장·복사)
   POST /dashboard/api/push/subscribe    {"endpoint","keys":{"p256dh","auth"},"label"} → {"id"}
   POST /dashboard/api/push/unsubscribe  {"id"} 또는 {"endpoint"}   ·  POST /dashboard/api/push/test {} → {"sent","failed"}
   GET  /dashboard/api/push/key          {"key": VAPID 공개 키}
@@ -36,6 +37,7 @@ from urllib.parse import quote
 from dealbot.dashboard import webapp
 from dealbot.dashboard.actions import TEXTS, ActionDesk, Caller, RateWindow
 from dealbot.dashboard.auth import client_key
+from dealbot.dashboard.blogauto import PIC_FILE_RE
 from dealbot.dashboard.login import (
     SESSION_COOKIE,
     SessionCsrf,
@@ -53,6 +55,7 @@ log = logging.getLogger(__name__)
 JT = "application/json; charset=utf-8"
 API = "/dashboard/api"
 THUMB_RE = re.compile(r"^[a-z0-9-]{1,64}\.(jpg|webp)$")
+PIC_MAX_BYTES = 8_000_000
 APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8", "badge-72.png": "image/png"}
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -169,6 +172,7 @@ class DashApi:
                          tmp_path=self.uploads.tmp_path)
         web.route_prefix("/dashboard/upload/", self.upload_thumb)
         web.route_prefix("/dashboard/thumb/", self.blog_thumb)
+        web.route_prefix("/dashboard/pic/", self.blog_pic)
         web.route_json(f"{API}/push/subscribe", self.push_subscribe, max_body=PUSH_BODY_MAX)
         web.route_json(f"{API}/push/unsubscribe", self.push_unsubscribe, max_body=PUSH_BODY_MAX)
         web.route_json(f"{API}/push/test", self.push_test, max_body=TEST_BODY_MAX)
@@ -288,17 +292,32 @@ class DashApi:
             return self._file(None, "")
         return self._file(self.uploads.thumb_path(uid), "image/jpeg")
 
+    def _blog_view(self, sub: str, name: str) -> Path | None:
+        """blog_view/<sub>/<이름> — 그 폴더 바로 아래의 진짜 파일만 (바로가기·밖으로 나가는 이름은 None)."""
+        base = (Path(self.bot.settings.data_dir) / "blog_view" / sub).resolve()
+        p = base / name
+        try:
+            return p if p.is_file() and not p.is_symlink() and p.resolve().parent == base else None
+        except OSError:
+            return None
+
     async def blog_thumb(self, query: dict[str, str]) -> Any:
         name = query.get("path", "")
         if not THUMB_RE.match(name):
             return self._file(None, "")
-        base = (Path(self.bot.settings.data_dir) / "blog_view" / "thumbs").resolve()
-        p = base / name
+        return self._file(self._blog_view("thumbs", name), "image/webp" if name.endswith(".webp") else "image/jpeg")
+
+    async def blog_pic(self, query: dict[str, str]) -> Any:
+        """후보 사진 원본 (로그인 아래 · 이름 규칙 PIC_FILE_RE · 개인 캐시). 크면 휴대폰이 받는 데 오래 걸려 8MB 까지."""
+        name = query.get("path", "")
+        p = self._blog_view("pics", name) if PIC_FILE_RE.match(name) else None
         try:
-            ok = p.is_file() and not p.is_symlink() and p.resolve().is_relative_to(base)
+            if p is not None and p.stat().st_size > PIC_MAX_BYTES:
+                p = None
         except OSError:
-            ok = False
-        return self._file(p if ok else None, "image/webp" if name.endswith(".webp") else "image/jpeg")
+            p = None
+        ext = name.rsplit(".", 1)[-1]
+        return self._file(p, {"png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg"))
 
     # ---------------------------------------------------------- 푸시
     async def push_key(self, query: dict[str, str]) -> Any:

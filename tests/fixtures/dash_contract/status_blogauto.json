@@ -40,7 +40,9 @@
   "schedule",
   "unschedule",
   "unschedule_all",
-  "visit_done"
+  "visit_done",
+  "pics_fetch",
+  "pics_clear"
  ],
  "kakao": {
   "state": "ok",

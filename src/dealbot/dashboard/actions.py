@@ -31,7 +31,7 @@ from urllib.parse import urlparse
 
 from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
-from dealbot.dashboard.blogauto import VISIT_ID
+from dealbot.dashboard.blogauto import PIC_ID, PIC_JOB_ID, VISIT_ID
 from dealbot.dashboard.model import safe_text
 from dealbot.notify import iid as iidmod
 from dealbot.utils.text import truncate
@@ -51,6 +51,10 @@ CREDIT_MAX = 60  # Blog-Auto 와 같은 한도 (넘으면 사진을 다 올린 �
 CHANNEL_URL_MAX = 300
 IG_LINKS_MAX, IG_URL_MAX = 12, 300  # Blog-Auto bridge._ig_links 와 같은 한도
 IG_CODE_RE = re.compile(r"[\w-]{5,40}")
+# 링크에서 사진 고르기 (주인 10/18): 열지 않는 곳 — Blog-Auto llm_router.NO_FETCH 와 같게 (메타 SNS · 남의 네이버 블로그·카페)
+NO_FETCH = ("instagram.com", "instagr.am", "cdninstagram.com", "facebook.com", "fb.com", "fb.me", "fbcdn.net",
+            "threads.net", "threads.com", "blog.naver.com", "blog.me", "cafe.naver.com")
+PICS_URL_MAX, PICS_WANT_MAX, PICS_PICK_MAX = 500, 200, 24
 
 # ★ 확인 창 (spec §4.5 — 하나뿐인 기준). blog.mode 는 발행 모드로 바꿀 때만, push.unsubscribe 는 다른 기기일 때만
 CONFIRM = frozenset({
@@ -67,7 +71,7 @@ FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "is
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
-                "dismiss", "schedule", "unschedule", "unschedule_all", "visit_done")
+                "dismiss", "schedule", "unschedule", "unschedule_all", "visit_done", "pics_fetch", "pics_clear")
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input")
@@ -126,6 +130,7 @@ TEXTS = {
     "no_device": "알림 켠 기기가 없어 테스트 카톡을 보냈어요",
     "scheduled": "간격 두고 발행 예약했어요",
     "spaced_only": "이 블로그는 간격 두고 발행만 돼요 — 블로그 프로그램 업데이트를 기다리는 중이에요",
+    "no_fetch": "인스타·페이스북·스레드·네이버 블로그·카페 링크는 열지 않아요 — 기사나 쇼핑몰 링크를 넣어 주세요",
 }
 
 
@@ -219,6 +224,39 @@ def _ig_links(v: Any) -> list[dict[str, Any]]:
             raise ActionError("bad_args")
         out.append({"slot": _int(x.get("slot") or 0, 0, 40), "url": url})
     return out
+
+
+def fetchable(url: str) -> bool:
+    """사진을 뽑으러 열어 봐도 되는 주소인가 (http(s) · NO_FETCH 가 아님). 주소 글자만 본다 — 여기서 열지 않는다."""
+    try:
+        p = urlparse(url)
+        host = (p.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    return p.scheme in ("http", "https") and bool(host) and not any(host == d or host.endswith("." + d) for d in NO_FETCH)
+
+
+def _pics_url(v: Any) -> str:
+    url = _str(v, PICS_URL_MAX)
+    if not re.match(r"^https?://\S+$", url, re.I):
+        raise ActionError("bad_args")
+    if not fetchable(url):
+        raise ActionError("bad_args", text=TEXTS["no_fetch"])
+    return url
+
+
+def _pic_picks(v: Any) -> list[dict[str, Any]]:
+    """고른 후보 사진 [{id: pk-xxxxxxxx, slot: 0~40 (0 = 빈 자리에)}] 최대 24개 (같은 사진은 한 번)."""
+    if v is None:
+        return []
+    if not isinstance(v, list) or len(v) > PICS_PICK_MAX:
+        raise ActionError("bad_args")
+    out: dict[str, int] = {}
+    for x in v:
+        if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not PIC_ID.match(x["id"]):
+            raise ActionError("bad_args")
+        out.setdefault(x["id"], _int(x.get("slot") or 0, 0, 40))
+    return [{"id": k, "slot": n} for k, n in out.items()]
 
 
 def _pids(v: Any, *, allow_all: bool = False) -> list[int] | str:
@@ -315,12 +353,13 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         if name == "photo_clear":
             out["slot"] = _int(g("slot"), 1, 40)
         if name == "photos":
-            links = _ig_links(g("links"))
+            links, pics = _ig_links(g("links")), _pic_picks(g("pics"))
             if links and out["blog"] != "issue":
                 raise ActionError("bad_args")
-            if links and not g("uploads"):  # 링크만 (사진 없이 그 자리에 게시물) — Blog-Auto 도 사진 칸 값은 보지 않는다
+            if links and not pics and not g("uploads"):  # 링크만 (사진 없이 그 자리에 게시물) — Blog-Auto 도 사진 칸 값은 보지 않는다
                 return {**out, "links": links}
-            out["uploads"] = _uploads(g("uploads"), 1, 20)
+            # 고른 후보(pics)는 올린 사진과 같은 길 (자리·자르기·출처 — 계약 action_photos_pics.json: 올린 사진 없으면 uploads [])
+            out["uploads"] = _uploads(g("uploads"), 0 if pics else 1, 20)
             mode = g("mode") or ("slot" if g("slot") else "add")
             if mode not in ("add", "replace", "slot"):
                 raise ActionError("bad_args")
@@ -328,6 +367,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
                        crop=g("crop") is True, credit=_str(g("credit"), CREDIT_MAX, required=False))
             if links:  # 사진만 보낼 때의 args 는 전과 같다 (links 없음)
                 out["links"] = links
+            if pics:
+                out["pics"] = pics
         if name == "channel":
             url = _str(g("url"), CHANNEL_URL_MAX, required=False)
             if url and not own_blog_url(url, blog_ids.get(out["blog"])):
@@ -387,6 +428,25 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"blog": _blog(g("blog")), "pid": _int(g("pid"))}
     if name == "unschedule_all":
         return {"blog": _blog(g("blog"))}
+    if name in ("pics_fetch", "pics_clear"):  # 링크에서 사진 고르기 (주인 10/18) — 글 하나(blog+pid) 또는 붙여 넣은 링크 하나
+        out = {}
+        if g("pid") is not None:
+            out = {"blog": _blog(g("blog")), "pid": _int(g("pid"))}
+        if name == "pics_clear":
+            job = g("job")
+            if job is not None:
+                if not isinstance(job, str) or not PIC_JOB_ID.match(job):
+                    raise ActionError("bad_args")
+                out["job"] = job
+            if not out:
+                raise ActionError("bad_args")
+            return out
+        if g("url") not in (None, "") or not out:
+            out["url"] = _pics_url(g("url"))
+        want = _str(g("want"), PICS_WANT_MAX, required=False)
+        if want:
+            out["want"] = " ".join(want.split())
+        return out
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
@@ -582,7 +642,7 @@ class ActionDesk:
             args = clean_args(action, body.get("args") or {}, blog_ids=self._blog_ids())
         except ActionError as e:
             self._audit(caller, action, "", {}, e.code)
-            return e.status, self._err(e.code)
+            return e.status, self._err(e.code, e.text)
         action, args = self._spaced(action, args)
         target = target_of(action, args)
         if cid is not None and (prev := self.store.by_cid(cid, self.clock() - CID_S)) is not None:
