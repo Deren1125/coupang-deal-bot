@@ -194,6 +194,24 @@ def _uploads(v: Any, lo: int, hi: int) -> list[str]:
     return list(dict.fromkeys(v))
 
 
+ANSWER_Q_MAX, ANSWER_PHOTOS_MAX = 40, 20
+
+
+def _answer_photos(v: Any) -> list[dict[str, Any]] | None:
+    """답하기에 붙인 사진 (주인 10/18 — 공식 페이지 캡처 같은 '근거'): 질문마다 {n, text, uploads}.
+    사진이 하나도 없으면 None (args 는 전과 같은 {pid, blog, text} — 계약 action_answer_photos.json)."""
+    if v is None:
+        return None
+    if not isinstance(v, list) or not 1 <= len(v) <= ANSWER_Q_MAX or not all(isinstance(x, dict) for x in v):
+        raise ActionError("bad_args")
+    out = [{"n": _int(x.get("n"), 1, ANSWER_Q_MAX), "text": _str(x.get("text"), 2000, required=False),
+            "uploads": _uploads(x.get("uploads"), 0, 10)} for x in v]
+    ids = [u for x in out for u in x["uploads"]]
+    if len({x["n"] for x in out}) < len(out) or len(set(ids)) < len(ids) or len(ids) > ANSWER_PHOTOS_MAX:
+        raise ActionError("bad_args")
+    return out if ids else None
+
+
 def instagram_post(url: str) -> bool:
     """인스타그램 '게시물' 주소인가 (Blog-Auto issue.sns_post 의 인스타 갈래와 같게: /p/·/reel/·/reels/·/tv/ 코드, 앞에 /계정/ 가능).
     프로필·스토리·다른 사이트는 아님. 주소 글자만 본다 — 인스타그램에 접속하지 않는다."""
@@ -385,6 +403,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
             out["blog"] = _blog(g("blog"))
         if name == "answer":
             out["text"] = _str(g("text"), 4000)
+            if (per := _answer_photos(g("answers"))) is not None:
+                out["answers"] = per
         return out
     if name in ("scan", "hotdeal_now", "kakao_auth_url", "kakao_test"):
         return {}
@@ -789,7 +809,17 @@ class ActionDesk:
             return down
         spool_args = dict(args)
         ups = args.get("uploads") or []
-        if ups:
+        if name == "answer" and args.get("answers"):  # 질문마다 붙인 사진 → 그 자리에서 경로로 (Blog-Auto 는 id 를 모른다)
+            per = []
+            for x in args["answers"]:
+                paths = [self.uploads.path(uid, kind="photo") for uid in x["uploads"]]
+                if None in paths:
+                    self._audit(caller, action, target, args, "bad_upload")
+                    return 400, self._err("bad_upload")
+                per.append({**x, "uploads": [str(p) for p in paths]})
+                ups = [*ups, *x["uploads"]]
+            spool_args["answers"] = per
+        elif ups:
             kind = "ledger" if name == "ledger" else "photo"
             paths = []
             for uid in ups:
