@@ -678,6 +678,9 @@ class NaverAutoLinkConfig(BaseModel):
     not_found_days: float = 7
     # 정품·공식 판매처 확인이 안 된 딜: manual = 예전처럼 주인에게 링크 요청(주인이 판매처를 보고 만듦), auto = 그래도 자동으로
     unverified: Literal["manual", "auto"] = "manual"
+    # 주인이 '쇼핑 커넥트에 없음'을 누른 판매처(sc_stores)의 새 네이버 딜은 링크를 묻지 않고 원본 주소로, 제휴 고지 없이 바로 (주인 10/18).
+    # 자동 링크(enabled)와 따로 켜고 끈다. 판매처 확인이 안 된 딜은 unverified 를 따른다 (manual 이면 예전처럼 링크 요청)
+    no_link_autopost: bool = True
 
 
 class AutoLinkConfig(BaseModel):

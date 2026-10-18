@@ -1316,6 +1316,11 @@ class Database(SnsStoreMixin):
                 (key, value),
             )
 
+    def kv_items(self, prefix: str) -> list[tuple[str, str | None]]:
+        """prefix 로 시작하는 kv (키, 값) — 키 순서."""
+        rows = self._q("SELECT key, value FROM kv WHERE key LIKE ? ORDER BY key", (prefix.replace("%", "") + "%",))
+        return [(str(r["key"]), r["value"]) for r in rows if str(r["key"]).startswith(prefix)]  # LIKE 의 '_' 는 아무 글자
+
     def kv_take(self, key: str) -> str | None:
         """읽고 바로 지운다 (버튼을 두 번 눌러도 한 번만 처리)."""
         with self._lock:

@@ -27,7 +27,7 @@ import httpx
 from telegram import Bot, BotCommand, Update
 from telegram.ext import Application
 
-from dealbot import __version__, autolink
+from dealbot import __version__, autolink, sc_stores
 from dealbot.authenticity import AuthResult, check_authenticity
 from dealbot.bridge.actions_out import ActionsOut
 from dealbot.bridge.kakao_out import KakaoOut
@@ -782,6 +782,7 @@ class DealBot:
         if (item.last_error or "").startswith(MAYBE_POSTED):
             self.notifier.resolve(f"unsure:{queue_id}")  # 채널에 없어서 다시 올림 — 아직 안 보낸 '채널 확인' 카톡은 취소
         self.db.set_queue_link(queue_id, url.strip())
+        self._sc_store_joined(item, url)
         # 상품 1개에 내 링크 1개 (네이버 쇼핑 커넥트·토스 쉐어링크는 만료 없음) → 같은 상품이 또 나오면 다시 묻지 않고 재사용
         self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
         self.db.log_event("INFO", "manual_link", f"#{queue_id} {url}" + (" + 상품 사진" if photo_note == "ok" else ""))
@@ -952,6 +953,7 @@ class DealBot:
         if problem or item is None:
             return problem or "no item"
         self.db.set_queue_link(queue_id, url.strip(), auto=True)
+        self._sc_store_joined(item, url)
         self.db.kv_set(f"mylink:{item.deal.product.product_id}", url.strip())
         self.db.log_event("INFO", "autolink", f"#{queue_id} {url}")
         return None
@@ -2530,6 +2532,60 @@ class DealBot:
             return True
         return False
 
+    # ------------------------------------------------- 쇼핑 커넥트 없는 판매처 (주인 10/18)
+    def _sc_store_known(self, deal: Deal, shop: Any, auth: AuthResult) -> bool:
+        """주인이 '쇼핑 커넥트에 없음'으로 표시한 판매처의 네이버 딜이라 링크를 묻지 않고 원본 주소로 올릴 딜인가.
+        설정(autolink.naver.no_link_autopost)을 끄면 늘 False. 판매처 확인이 안 된 딜은 자동 링크와 같은 기준(unverified):
+        manual 이면 예전처럼 주인에게 링크 요청 (주인이 판매처를 보고 정함 — '쇼핑 커넥트에 없음'을 또 누르면 됨)."""
+        cfg = self.settings.autolink.naver
+        if not cfg.no_link_autopost or shop is None or shop.key != "naver" or deal.product.deal_kind == "info":
+            return False
+        if auth.status != "ok" and cfg.unverified != "auto":
+            return False
+        return sc_stores.known(self.db, deal.product) is not None
+
+    def no_connect(self, queue_id: int, *, post: bool) -> tuple[str, str]:
+        """대시보드 '쇼핑 커넥트에 없음' (주인 10/18). post: '링크 없이 올리기' — 원본 주소로, 제휴 고지 없이
+        (가격 확인·사진 규칙·품절 확인은 여느 딜처럼 발행 때). 아니면 '안 올리기' (건너뛰기와 같음).
+        어느 쪽이든 그 판매처를 '쇼핑 커넥트에 없음'으로 적는다 → 다음 딜부터 묻지 않음. (코드, 화면 글)."""
+        item = self.db.get_queue_item(queue_id)
+        if item is None:
+            return "not_found", ""
+        p = item.deal.product
+        if item.status != "awaiting_link" or p.shop != "naver" or p.deal_kind == "info" or item.deal.affiliate_url:
+            return "wrong_state", "지금은 링크를 기다리는 네이버 딜이 아니에요"
+        label = sc_stores.remember(self.db, p, via="post" if post else "skip", qid=queue_id)
+        self.db.log_event("INFO", "manual_link", f"#{queue_id} 주인: 쇼핑 커넥트에 없음 → {'링크 없이 올림' if post else '안 올림'}"
+                          + (f" (판매처 {label} 기억)" if label else " (판매처 모름)"))
+        if post:
+            self.notifier.resolve(f"link:{queue_id}")  # 아직 안 보낸 링크 요청 카톡은 취소
+            self._post_raw_link(item, item.deal, "주인: 쇼핑 커넥트에 없음", reason="owner_no_sc")
+            code, text = "nolink", "링크 없이 올릴 차례에 넣었어요 (제휴 고지 없이)"
+        else:
+            self.skip_item(queue_id)
+            code, text = "skipped", "안 올리기로 했어요"
+        if label and self.settings.autolink.naver.no_link_autopost:
+            text += " · 이 판매처는 다음부터 묻지 않고 링크 없이 올려요"
+        return code, text
+
+    def sc_store_view(self) -> list[dict[str, Any]]:
+        """대시보드 딜 탭: '쇼핑 커넥트 없는 판매처' (키, 이름)."""
+        return [{"key": e["key"], "label": e["label"]} for e in sc_stores.entries(self.db)]
+
+    def sc_store_forget(self, key: str) -> bool:
+        """대시보드에서 판매처 하나를 목록에서 뺀다 (다음 딜부터 다시 링크를 물음)."""
+        done = sc_stores.forget(self.db, key)
+        if done:
+            self.db.log_event("INFO", "manual_link", f"쇼핑 커넥트 없는 판매처에서 뺌: {key}")
+        return done
+
+    def _sc_store_joined(self, item: QueueItem, url: str) -> None:
+        """주인(또는 자동 링크)이 쇼핑 커넥트 링크를 넣은 딜: 그 판매처가 '없음' 목록에 있으면 뺀다 (쇼핑 커넥트에 들어옴)."""
+        label = sc_stores.joined(self.db, item.deal.product, url)
+        if label:
+            self.db.log_event("INFO", "manual_link", f"#{item.id} 쇼핑 커넥트 링크가 생겨 '없는 판매처'에서 뺌: {label}")
+            log.info("queue #%d: store %s joined Shopping Connect — removed from the no-link list", item.id, label)
+
     # ------------------------------------------------- 네이버 쇼핑커넥트 자동 링크 (Blog-Auto 가 브라우저 일)
     def _autolink_product_no(self, deal: Deal, shop: Any, auth: AuthResult) -> str | None:
         """자동 링크를 시도할 네이버 딜이면 스토어 상품번호, 아니면 None (→ 예전처럼 주인에게 링크 요청)."""
@@ -2601,10 +2657,12 @@ class DealBot:
             job = (json.loads(raw) or {}).get("job")
             self.relay_to_blog({"connect_cancel": {"id": queue_id, "job": job, "at": time.time()}})
 
-    def _post_raw_link(self, item: QueueItem, deal: Deal, why: str) -> None:
-        """쇼핑커넥트에 없는 네이버 상품: 내 링크 없이 원본 주소로, 제휴 고지 없이 올린다 (주인 결정 10/11). 주인에게 묻지 않음."""
+    def _post_raw_link(self, item: QueueItem, deal: Deal, why: str, *, reason: str = "sc_not_found") -> None:
+        """쇼핑커넥트에 없는 네이버 상품: 내 링크 없이 원본 주소로, 제휴 고지 없이 올린다 (주인 결정 10/11). 주인에게 묻지 않음.
+        reason (extra['raw_link'] — 고지 도우미·블로그 내보내기가 보는 '제휴 링크 아님' 표시): sc_not_found 자동 링크가 못 찾음 ·
+        owner_no_sc 주인이 '쇼핑 커넥트에 없음 → 링크 없이 올리기' · sc_store 주인이 그렇게 표시한 판매처의 새 딜 (주인 10/18)."""
         deal.affiliate_url = deal.product.url
-        deal.product.extra["raw_link"] = "sc_not_found"
+        deal.product.extra["raw_link"] = reason
         self.db.update_queue_item(item.id, status="pending", error=None, deal=deal, reset_created=True)
         self.db.log_event("INFO", "autolink", f"#{item.id} {why} → 원본 주소로")
         log.info("queue #%d %s → 원본 주소로 (고지 없이)", item.id, why)
@@ -2811,6 +2869,12 @@ class DealBot:
                 log.info("queue #%d sold out before link request — skipped", item.id)
                 return True
             shop = self.registry.get(err or "")
+            if self._sc_store_known(deal, shop, auth):
+                # 주인이 '쇼핑 커넥트에 없음'으로 표시한 판매처: 묻지 않고 링크 없이 (주인 10/18). 가격이 안 맞는 딜은 보류
+                if await self._held_before_autolink(item, deal):
+                    return True
+                self._post_raw_link(item, deal, "쇼핑 커넥트 없는 판매처 (주인 표시)", reason="sc_store")
+                return True
             product_no = self._autolink_product_no(deal, shop, auth)
             if product_no:
                 # 네이버: 주인에게 묻기 전에 쇼핑커넥트에서 자동으로 (주인 결정 10/11). 안 되면 아래와 같은 링크 요청으로 돌아온다

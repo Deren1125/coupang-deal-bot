@@ -546,8 +546,8 @@ function moreSheet(it, more) {
 }
 function choiceSheet(a) {
   const box = el('div');
-  sheet(a.label, box);
-  box.append(...(a.choices || []).map(c => btn('mr', c.label, () => { back(); exec(a, {name: c.value}); })));
+  sheet(a.title || a.label, box);
+  box.append(a.note ? el('p', {class: 'note'}, a.note) : '', ...(a.choices || []).map(c => btn(c.primary ? 'pb' : 'mr', c.label, () => { back(); exec(a, {name: c.value}); })));
 }
 async function searchSheet(a) {
   const box = el('div'), out = el('div');
@@ -683,6 +683,7 @@ function vDeal() {
   const out = [el('div', {class: 'top'}, el('span', {class: 'cp ' + (st.paused ? 'stop' : 'ok')}, st.paused ? '멈춤' : st.dry_run ? '연습' : '정상'),
     el('span', {class: 'sub'}, `오늘 ${st.today}개 올림`), (d.actions || []).length ? btn('lnk', '더보기', () => moreSheet(pseudo, d.actions)) : null)];
   if (n) out.push(el('a', {class: 'bn', href: '#/todo/deal'}, `할 일에 딜 ${n}개 →`));
+  if (d.nolink) out.push(el('p', {class: 'note'}, btn('lnk mute', d.nolink.label, () => choiceSheet(d.nolink))));
   out.push(el('div', {class: 'seg', role: 'group'}, [['today', '오늘 올림'], ['queue', '대기열']].map(([k, l]) =>
     btn('', l, () => { LS.s('dseg', k); render(); }, {'aria-pressed': seg === k ? 'true' : 'false'}))));
   const rows = seg === 'queue' ? d.queue : d.today;

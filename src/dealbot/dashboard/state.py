@@ -182,6 +182,12 @@ class StateBuilder:
                 detail["search"], short = naver_queries(p.name, p.shop, p.category)
                 if short:  # 긴 이름이 0건이면 이걸로 (주인 10/18)
                     detail["short"] = short
+                # 쇼핑 커넥트에서 못 찾음 → 한 번에 빠지게 (주인 10/18). 판매처를 기억해 다음 딜부터 묻지 않음
+                more.insert(0, act("deal.nolink", "쇼핑 커넥트에 없음", {"qid": it.id}, input="choice",
+                                   note="이 판매처는 기억해 두고, 다음 딜부터 묻지 않고 링크 없이 올려요"
+                                   if bot.settings.autolink.naver.no_link_autopost else None,
+                                   choices=[{"value": "post", "label": "링크 없이 올리기", "primary": True},
+                                            {"value": "skip", "label": "안 올리기"}]))
                 detail["how"] = "쇼핑 커넥트 '상품 찾기'에서 아래 검색어로 찾아 링크를 만들어 주세요 · 상품 사진도 같이 넣으면 채널·블로그에 써요"
             if (hold := p.extra.get("price_hold_note")) and isinstance(hold, str):
                 detail["note"] = truncate(hold, 120)
@@ -490,7 +496,19 @@ class StateBuilder:
                                                                                for n in bot.collector_names()]),
                             act("deal.find", "찾기", input="search", url="/dashboard/api/deal/find"),
                             act("deal.hot", "추천 많은 글", input="search", url="/dashboard/api/deal/hot"),
-                            act("bot.resume", "다시 시작") if bot.state.paused else act("bot.pause", "딜봇 멈추기")]}
+                            act("bot.resume", "다시 시작") if bot.state.paused else act("bot.pause", "딜봇 멈추기")],
+                "nolink": self._nolink_stores()}
+
+    def _nolink_stores(self) -> dict[str, Any] | None:
+        """딜 탭 조용한 한 줄 '쇼핑 커넥트 없는 판매처 N곳 — 링크 없이 바로 올려요' → 누르면 하나씩 빼는 시트. 없으면 None."""
+        stores = self.bot.sc_store_view()
+        if not stores:
+            return None
+        on = self.bot.settings.autolink.naver.no_link_autopost
+        return act("deal.sc_forget", f"쇼핑 커넥트 없는 판매처 {len(stores)}곳 — " + ("링크 없이 바로 올려요" if on else "자동 올리기 꺼짐"),
+                   input="choice", title="쇼핑 커넥트 없는 판매처",
+                   note="누르면 목록에서 빠지고, 다음 딜부터 다시 링크를 물어요",
+                   choices=[{"value": e["key"], "label": e["label"]} for e in stores[:50]])
 
     def blogs(self, export: Any, todo: list[dict[str, Any]]) -> dict[str, Any]:
         v2 = getattr(export, "v2", None) or {}
