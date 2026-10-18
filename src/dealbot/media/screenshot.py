@@ -6,7 +6,10 @@
   ② 가장 큰 '사진 덩어리'(배경이 아닌 칸이 화면 폭 절반 넘게 쭉 이어진 줄들 — 글자·메뉴는 띄엄띄엄)를 확신하면 그 부분만.
      쇼핑몰 사진 보기 화면(위·아래 검은 띠, 어둡게 눌린 사진, 아래 미리보기 사진 줄 — 주인 10/18 #81)은 가운데 사진만
   ③ 못 찾았거나 애매하면 가장자리 흰색·검정 여백만 걷는다
-진짜 사진(가장자리까지 그림이 꽉 참)·가로가 긴 그림은 그대로. 길쭉한 그림(세로/가로 ≥ 1.6)만 본다.
+  ④ 사진 원칙 (주인 10/18): 사진에는 주인공(인물·상품)만 남긴다 — 쇼핑몰·앱 화면 요소(화살표·썸네일 줄·버튼·상태바·
+     검은/흰 띠·글자 띠·워터마크 띠)는 걷어내고, 주인공 둘레 배경은 조금(가로세로 8~12% 정도) 남겨 꽉 끼게 자르지 않는다.
+     주인공을 자르지 않는다. 확실하지 않으면 덜 자른다. (focus_subject — 화면 캡처가 아닌 주인 사진에도)
+진짜 사진(가장자리까지 그림이 꽉 참)·복잡한 장면은 그대로. ①~③ 은 길쭉한 그림(세로/가로 ≥ 1.6)만 본다.
 Blog-Auto blogauto/media.py 의 crop_screenshot·phone_ui_bounds·_photo_box·trim_margins 를 옮긴 것 (파일이 아니라 그림으로) —
 고칠 때는 두 곳을 같이. Pillow 만 쓴다.
 """
@@ -17,11 +20,13 @@ import io
 import logging
 from collections import Counter
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 
 log = logging.getLogger(__name__)
 
 SCREEN_ASPECT = 1.6  # 이보다 길쭉하면 휴대폰 화면 캡처로 보고 다듬어 본다
+SUBJECT_MARGIN = 0.10  # 사진 원칙: 주인공 둘레 여백 (가로세로 각 8~12% 의 가운데)
+SUBJECT_MIN_SIDE = 600  # 주인공 자르기로 짧은 변을 이보다 줄이지 않음 (딜봇 주인 사진 검사 600px)
 
 
 def _runs(flags) -> list[tuple[int, int]]:
@@ -140,18 +145,274 @@ def _lightbox_box(img: Image.Image) -> tuple[int, int, int, int] | None:
     return box
 
 
+def _arrow_glyphs(img: Image.Image) -> tuple[list[tuple[int, int, int, int]], tuple[int, int] | None]:
+    """사진 보기 화면의 넘김 화살표(‹ ›) 자리 [(x0, y0, x1, y1), …] 와 주인공(상품·사람) 세로줄 범위 (원본 좌표).
+    화살표 모양: 사진 왼쪽·오른쪽 끝 18% 안, 높이 가운데쯤(30~70%)에 있는 작고 가는 글자 모양(흰색이나 검은색, 둘레와 밝기가
+    또렷이 다름) — 둘레(배경지)는 고르고, 주인공 세로줄 밖에 있다. 반투명 동그라미 안 화살표도 (동그라미째).
+    셔츠 위 흰 로고처럼 주인공 위에 있거나, 꽉 찬 덩어리(네모 로고·물건)이거나, 둘레가 복잡하면 화살표가 아니다."""
+    w, h = img.size
+    s = min(1.0, 540 / w)
+    g = img.convert("L")
+    if s < 1:
+        g = g.resize((max(1, round(w * s)), max(1, round(h * s))), Image.BOX)
+    W, H = g.size
+    px = g.load()
+    y0, y1 = int(H * 0.25), int(H * 0.75)
+    found: list[tuple[int, int, int, int, list]] = []
+    for side in ("left", "right"):
+        xa, xb = (0, int(W * 0.18)) if side == "left" else (W - int(W * 0.18), W)
+        vals = sorted(px[x, y] for y in range(y0, y1, 2) for x in range(xa, xb, 2))
+        med = vals[len(vals) // 2]
+        on = {(x, y) for y in range(y0, y1) for x in range(xa, xb) if abs(px[x, y] - med) > 45}
+        seen: set = set()
+        for start in sorted(on):
+            if start in seen:
+                continue
+            comp, stack = [], [start]
+            seen.add(start)
+            while stack:  # 이웃(2칸 안)끼리 한 덩어리 — 안티에일리어싱으로 끊긴 획도 잇는다
+                x, y = stack.pop()
+                comp.append((x, y))
+                for dx in (-2, -1, 0, 1, 2):
+                    for dy in (-2, -1, 0, 1, 2):
+                        q = (x + dx, y + dy)
+                        if q in on and q not in seen:
+                            seen.add(q)
+                            stack.append(q)
+            cx0, cx1 = min(p[0] for p in comp), max(p[0] for p in comp)
+            cy0, cy1 = min(p[1] for p in comp), max(p[1] for p in comp)
+            bw, bh = cx1 - cx0 + 1, cy1 - cy0 + 1
+            if not (0.025 * H <= bh <= 0.16 * H and 0.012 * W <= bw <= 0.12 * W):
+                continue
+            if not 0.3 * H <= (cy0 + cy1) / 2 <= 0.7 * H:
+                continue
+            fill = len(comp) / (bw * bh)
+            holes = bw * bh - len(comp)
+            round_ = 0.8 <= bw / bh <= 1.25 and 0.6 <= fill <= 0.9 and holes >= 0.04 * bw * bh
+            if fill > 0.45 and not round_:
+                continue  # 꽉 찬 덩어리 (네모 로고·물건)
+            # 둘레가 고르고 다른 무늬가 없어야 (따로 떨어진 작은 모양)
+            mx, my = max(3, bw // 2), max(3, bh // 2)
+            rx0, ry0, rx1, ry1 = max(0, cx0 - mx), max(0, cy0 - my), min(W - 1, cx1 + mx), min(H - 1, cy1 + my)
+            ring = [px[x, y] for y in range(ry0, ry1 + 1) for x in range(rx0, rx1 + 1)
+                    if not (cx0 - 1 <= x <= cx1 + 1 and cy0 - 1 <= y <= cy1 + 1)]
+            if not ring:
+                continue
+            stray = sum(1 for v in ring if abs(v - med) > 45) / len(ring)
+            mean = sum(ring) / len(ring)
+            std = (sum((v - mean) ** 2 for v in ring) / len(ring)) ** 0.5
+            if stray > 0.02 or std > 20:
+                continue
+            found.append((cx0, cy0, cx1, cy1, comp))
+    if not found:
+        return [], None
+    # 주인공 세로줄: 화살표 줄을 뺀 나머지 줄에서 밝기가 크게 흔들리는 세로줄 (배경지는 고름)
+    skip = set()
+    for _, a, _, b, _ in found:
+        skip.update(range(max(0, a - 3), min(H, b + 4)))
+    rows = [y for y in range(0, H, 2) if y not in skip]
+    std = []
+    for x in range(W):
+        col = [px[x, y] for y in rows]
+        m = sum(col) / len(col)
+        std.append((sum((v - m) ** 2 for v in col) / len(col)) ** 0.5)
+    edge = sorted(std[: int(W * 0.06)] + std[W - int(W * 0.06):])
+    base = edge[len(edge) // 2]
+    busy = [x for x in range(W) if std[x] > 1.6 * base + 6]
+    subject = (busy[0], busy[-1]) if busy else None
+    glyphs = []
+    for cx0, cy0, cx1, cy1, _ in found:
+        if subject and not (cx1 < subject[0] or cx0 > subject[1]):
+            continue  # 주인공 위 (셔츠 로고 등)
+        glyphs.append((int(cx0 / s), int(cy0 / s), min(w, round((cx1 + 1) / s)), min(h, round((cy1 + 1) / s))))
+    sub = (int(subject[0] / s), min(w, round((subject[1] + 1) / s))) if subject else None
+    return glyphs, sub
 
-def _photo_box(img: Image.Image, force: bool = False) -> tuple[int, int, int, int] | None:
-    """화면 캡처에서 가장 큰 '사진 덩어리' 영역 (원본 좌표). 못 찾으면 None.
-    배경색은 화면 가장자리에서 가장 많은 색으로 정한다 (흰 화면·회색 화면·다크 모드 모두).
-    먼저 쇼핑몰 사진 보기 화면(검은 띠 + 어둡게 눌린 사진 + 미리보기 줄, 주인 10/18 #81 폴햄)인지 본다 (_lightbox_box)."""
+
+def strip_arrows(img: Image.Image) -> Image.Image:
+    """넘김 화살표를 걷는다: 양옆을 똑같이 화살표 바로 바깥까지 잘라(주인공은 가운데 그대로, 폭 70% 넘게 남김),
+    그러면 너무 많이 잘리거나 주인공이 잘리면 화살표 자리를 둘레 배경으로 메운다. 화살표가 없으면 그대로."""
+    glyphs, subject = _arrow_glyphs(img)
+    if not glyphs:
+        return img
+    w, h = img.size
+    pad = max(4, w // 80)
+    cut = max(max(gx1 + pad if gx0 < w / 2 else w - gx0 + pad for gx0, _, gx1, _ in glyphs), 0)
+    lo, hi = subject or (w // 2, w // 2)
+    if w - 2 * cut >= 0.7 * w and cut <= lo and w - cut >= hi:
+        return img.crop((cut, 0, w - cut, h))
+    out = img.copy()
+    for gx0, gy0, gx1, gy1 in glyphs:
+        m = max(8, (gx1 - gx0) // 2)
+        box = (max(0, gx0 - m), max(0, gy0 - m), min(w, gx1 + m), min(h, gy1 + m))
+        patch = out.crop(box)
+        fill = patch.filter(ImageFilter.MedianFilter(size=min(27, (max(gx1 - gx0, gy1 - gy0) // 2) * 2 + 1)))
+        fill = fill.filter(ImageFilter.GaussianBlur(4))
+        mask = Image.new("L", patch.size, 0)
+        mask.paste(255, (gx0 - box[0] - 3, gy0 - box[1] - 3, gx1 - box[0] + 3, gy1 - box[1] + 3))
+        mask = mask.filter(ImageFilter.GaussianBlur(2))
+        out.paste(Image.composite(fill, patch, mask), box[:2])
+    return out
+
+
+def _med(vals):
+    vals = sorted(vals)
+    return vals[len(vals) // 2]
+
+
+def subject_box(img: Image.Image, margin: float = SUBJECT_MARGIN, min_side: int = SUBJECT_MIN_SIDE) -> tuple[int, int, int, int] | None:
+    """사진 원칙(주인 10/18)의 주인공 자르기 영역 (원본 좌표). 확실하지 않으면 None (그대로 둠).
+    주인공 = 고른 배경 위에서 윤곽이 또렷한 가장 큰 덩어리(들) — 인물은 머리부터 보이는 발·다리까지 한 덩어리.
+    둘레 여백은 주인공 가로세로의 margin(10%)씩, 그림 밖으로는 안 나감. 가로세로 비율은 0.5~2 안으로 (넘으면 옆·위아래를 넓힘),
+    짧은 변은 min_side(600, 딜봇 주인 사진 검사) 아래로 줄이지 않음 (그림이 더 작으면 그림 크기까지) — 넓히기만 하니 주인공은 안 잘림.
+    그대로 두는 때: 배경이 고르지 않음(왼쪽·오른쪽 끝 띠가 얼룩덜룩하거나 윤곽이 많음 — 복잡한 장면·꽉 찬 사진),
+    주인공 밖에도 윤곽이 많음, 주인공이 그림의 80% 넘게 차지하거나 3% 안 됨, 잘라도 90% 넘게 남음."""
+    w, h = img.size
+    if w < 120 or h < 120:
+        return None
+    s = min(1.0, 200 / max(w, h))
+    g = img.convert("L")
+    if s < 1:
+        g = g.resize((max(1, round(w * s)), max(1, round(h * s))), Image.BOX)
+    W, H = g.size
+    gp = g.load()
+    b = max(3, round(0.04 * W))
+    # 배경이 고른가: 왼쪽·오른쪽 끝 띠의 칸이 그 줄 띠의 가운데값과 비슷해야 (복잡한 장면·꽉 찬 사진은 여기서 그대로)
+    off = []
+    for y in range(H):
+        for xs in (range(b), range(W - b, W)):
+            vals = [gp[x, y] for x in xs]
+            m = _med(vals)
+            off += [abs(v - m) for v in vals]
+    calm = sum(1 for d in off if d <= 16) / len(off)
+    # 윤곽(밝기가 바뀌는 곳): 배경지의 결·그라데이션은 약하고, 인물·상품의 윤곽은 또렷하다
+    e = g.filter(ImageFilter.GaussianBlur(1)).filter(ImageFilter.FIND_EDGES)
+    ep = e.load()
+    strip = sorted(ep[x, y] for y in range(1, H - 1) for x in (*range(1, b), *range(W - b, W - 1)))
+    thr = max(10, int(1.6 * strip[int(len(strip) * 0.99)]))
+    raw = e.point(lambda v: 255 if v > thr else 0)
+    raw.paste(0, (0, 0, W, 1))  # 그림 끝 줄은 FIND_EDGES 가 늘 밝게 냄
+    raw.paste(0, (0, H - 1, W, H))
+    raw.paste(0, (0, 0, 1, H))
+    raw.paste(0, (W - 1, 0, W, H))
+    busy = sum(1 for y in range(1, H - 1) for x in (*range(1, b), *range(W - b, W - 1)) if raw.getpixel((x, y))) / len(strip)
+    if calm < 0.85 or busy > 0.03:
+        return None
+    mask = raw.filter(ImageFilter.MaxFilter(5))  # 윤곽선을 이어 한 덩어리로
+    data = mask.load()
+    seen = [[False] * W for _ in range(H)]
+    comps = []
+    for y in range(H):
+        for x in range(W):
+            if data[x, y] and not seen[y][x]:
+                stack, n, box = [(x, y)], 0, [x, y, x, y]
+                seen[y][x] = True
+                while stack:
+                    cx, cy = stack.pop()
+                    n += 1
+                    box = [min(box[0], cx), min(box[1], cy), max(box[2], cx), max(box[3], cy)]
+                    for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                        if 0 <= nx < W and 0 <= ny < H and data[nx, ny] and not seen[ny][nx]:
+                            seen[ny][nx] = True
+                            stack.append((nx, ny))
+                comps.append((n, box))
+    if not comps:
+        return None
+    big = max(n for n, _ in comps)
+    keep = [c for c in comps if c[0] >= max(0.01 * W * H, 0.15 * big)]
+    if not keep:
+        return None  # 큰 덩어리가 없음 (잔무늬뿐)
+    # MaxFilter(5) 로 2칸씩 부푼 만큼 되돌림
+    x0, y0 = min(c[1][0] for c in keep) + 2, min(c[1][1] for c in keep) + 2
+    x1, y1 = max(c[1][2] for c in keep) - 1, max(c[1][3] for c in keep) - 1
+    if x1 <= x0 or y1 <= y0:
+        return None
+    rd = raw.load()
+    total = sum(1 for y in range(H) for x in range(W) if rd[x, y])
+    outside = total - sum(1 for y in range(y0, y1) for x in range(x0, x1) if rd[x, y])
+    if outside > 0.15 * total:
+        return None  # 주인공 밖에도 윤곽이 많음 → 애매
+    sw, sh = x1 - x0, y1 - y0
+    if sw * sh >= 0.8 * W * H or sw * sh < 0.03 * W * H:
+        return None
+    # 원본 좌표 + 둘레 여백 (가로세로 각 margin)
+    bx0, by0, bx1, by1 = x0 / s, y0 / s, x1 / s, y1 / s
+    mw, mh = (bx1 - bx0) * margin, (by1 - by0) * margin
+    bx0, by0, bx1, by1 = bx0 - mw, by0 - mh, bx1 + mw, by1 + mh
+
+    def grow(a, z, want, limit):
+        """[a, z] 를 가운데 그대로 want 길이로 넓힘 (그림 밖으로 나가면 반대쪽으로 밀어줌)."""
+        if z - a >= want:
+            return a, z
+        c = (a + z) / 2
+        a, z = c - want / 2, c + want / 2
+        if a < 0:
+            a, z = 0, z - a
+        if z > limit:
+            a, z = a - (z - limit), limit
+        return max(0, a), min(limit, z)
+
+    bx0, bx1 = max(0, bx0), min(w, bx1)
+    by0, by1 = max(0, by0), min(h, by1)
+    bw, bh = bx1 - bx0, by1 - by0
+    if bh > 2.0 * bw:  # 너무 길쭉하면 옆을 넓힘
+        bx0, bx1 = grow(bx0, bx1, bh / 2.0, w)
+    elif bw > 2.0 * bh:
+        by0, by1 = grow(by0, by1, bw / 2.0, h)
+    bx0, bx1 = grow(bx0, bx1, min(min_side, w), w)
+    by0, by1 = grow(by0, by1, min(min_side, h), h)
+    box = (int(bx0), int(by0), min(w, round(bx1)), min(h, round(by1)))
+    if (box[2] - box[0]) * (box[3] - box[1]) > 0.9 * w * h:
+        return None  # 거의 그대로
+    return box
+
+def focus_subject(img: Image.Image) -> Image.Image:
+    """주인공 둘레만 남긴 그림 (subject_box). 확실하지 않거나 실패하면 그대로 (같은 객체).
+    사진 원칙 (주인 10/18): 사진에는 주인공(인물·상품)만 남긴다 — 쇼핑몰·앱 화면 요소(화살표·썸네일 줄·버튼·상태바·
+    검은/흰 띠·글자 띠·워터마크 띠)는 걷어내고, 주인공 둘레 배경은 조금(가로세로 8~12% 정도) 남겨 꽉 끼게 자르지 않는다.
+    주인공을 자르지 않는다. 확실하지 않으면 덜 자른다."""
+    try:
+        box = subject_box(img)
+    except Exception as e:  # noqa: BLE001 — 애매하면 자르지 않는다
+        log.info("subject box failed: %s", type(e).__name__)
+        return img
+    return img.crop(box) if box else img
+
+
+def _strip_arrows_safe(img: Image.Image) -> Image.Image:
+    try:
+        return strip_arrows(img)
+    except Exception as e:  # noqa: BLE001
+        log.info("arrow strip failed: %s", type(e).__name__)
+        return img
+
+
+def _cuts_through(img: Image.Image, box: tuple[int, int, int, int]) -> bool:
+    """사진 덩어리 위·아래 경계 조금 바깥 줄이 배경(한 가지 색)이 아니면 그림이 이어지는 것 — 화면 캡처 속 사진이 아니라
+    주인공(배경 위 상품 등)을 가로지른 영역이라 믿지 않는다 (사진 원칙: 주인공을 자르지 않는다)."""
+    w, h = img.size
+    x0, y0, x1, y1 = box
+    d = max(6, h // 150)
+    for y in (y0 - d, y1 - 1 + d):
+        if 0 <= y < h and not all(hi - lo <= 24 for lo, hi in img.crop((x0, y, x1, y + 1)).getextrema()):
+            return True
+    return False
+
+
+def _lightbox_crop(img: Image.Image) -> Image.Image | None:
+    """사진 보기 화면 캡처면 가운데 사진만 (넘김 화살표까지 걷은 것), 아니면 None."""
     try:
         box = _lightbox_box(img)
     except Exception as e:  # noqa: BLE001 — 애매하면 원래 방법으로
         log.info("lightbox photo box failed: %s", type(e).__name__)
-        box = None
-    if box:
-        return box
+        return None
+    return _strip_arrows_safe(img.crop(box)) if box else None
+
+
+def _photo_box(img: Image.Image, force: bool = False) -> tuple[int, int, int, int] | None:
+    """화면 캡처에서 가장 큰 '사진 덩어리' 영역 (원본 좌표). 못 찾으면 None.
+    배경색은 화면 가장자리에서 가장 많은 색으로 정한다 (흰 화면·회색 화면·다크 모드 모두).
+    쇼핑몰 사진 보기 화면(검은 띠 + 어둡게 눌린 사진 + 미리보기 줄)은 이보다 먼저 _lightbox_crop 이 본다 (tidy)."""
     w, h = img.size
     scale = 240 / w if w > 240 else 1.0
     small = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
@@ -428,20 +689,35 @@ def trim_margins(img: Image.Image, tolerance: int = 22, pad: int = 6) -> Image.I
 
 
 def tidy(img: Image.Image) -> tuple[Image.Image, str]:
-    """휴대폰 화면 캡처면 다듬은 그림과 한 일 ('photo' 사진 부분만 · 'bars' 상태바·막대·여백만 · '' 그대로).
+    """주인 사진 다듬기 (사진 원칙, 주인 10/18): 다듬은 그림과 한 일
+    ('photo' 화면 캡처에서 사진 부분만 · 'bars' 캡처의 상태바·막대·여백만 · 'subject' 주인공 둘레만 · '' 그대로).
+    휴대폰 화면 캡처(세로/가로 ≥ 1.6): 상태바·아래 막대 → 사진 보기 화면이면 가운데 사진(띠·미리보기 줄·넘김 화살표 걷음),
+    아니면 가장 큰 사진 덩어리(+ 넘김 화살표, 주인공을 가로지르면 안 씀) → 주인공 둘레만 (focus_subject).
+    사진을 못 찾으면 (상태바·막대가 없는 사진일 때만) 주인공 둘레만, 그것도 애매하면 상태바·여백만.
+    그 밖의 사진: 주인공 둘레만 (배경이 고르고 확실할 때만 — 복잡한 장면·꽉 찬 사진은 그대로).
     img 는 RGB (EXIF 방향을 이미 반영한 것)."""
     w, h = img.size
     if h < SCREEN_ASPECT * w or w < 200:
-        return img, ""
+        out = focus_subject(img)
+        return (out, "subject") if out is not img else (img, "")
     top, bottom = phone_ui_bounds(img)
     out = img.crop((0, top, w, bottom)) if top or bottom < h else img
-    try:
-        box = _photo_box(out)
-    except Exception as e:  # noqa: BLE001 — 애매하면 자르지 않는다
-        log.info("screenshot photo box failed: %s", type(e).__name__)
-        box = None
-    if box:
-        return out.crop(box), "photo"
+    photo = _lightbox_crop(out)
+    if photo is None:
+        try:
+            box = _photo_box(out)
+        except Exception as e:  # noqa: BLE001 — 애매하면 자르지 않는다
+            log.info("screenshot photo box failed: %s", type(e).__name__)
+            box = None
+        if box and _cuts_through(out, box):
+            box = None
+        photo = _strip_arrows_safe(out.crop(box)) if box else None
+    if photo is not None:
+        return focus_subject(photo), "photo"
+    if out is img:  # 상태바·막대가 없는 길쭉한 사진(배경 위 상품·인물)은 주인공 둘레만 (글만 있는 화면 캡처는 아래처럼 덜 자름)
+        fo = focus_subject(img)
+        if fo is not img:
+            return fo, "subject"
     trimmed = trim_margins(out)
     return trimmed, "bars" if trimmed is not img else ""
 
@@ -469,5 +745,5 @@ def tidy_bytes(data: bytes) -> tuple[bytes, str]:
         return data, ""
     buf = io.BytesIO()
     out.save(buf, "PNG")
-    log.info("owner photo looks like a phone screenshot: %s %sx%s → %sx%s", what, img.width, img.height, out.width, out.height)
+    log.info("owner photo tidied: %s %sx%s → %sx%s", what, img.width, img.height, out.width, out.height)
     return buf.getvalue(), what

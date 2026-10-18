@@ -129,8 +129,9 @@ def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 
     590×1280 이 되어, 저장한 사진이 발행 때 600px 검사에서 떨어지고 글만 올라갔다 (그런 사진은 긴 변을 조금 더 둠).
     다시 저장하므로 EXIF(위치·기기 정보)는 남지 않는다. 열기 전에 파일 크기·형식·화소 수를 먼저 본다 (큰 그림으로 서버가 멈추지 않게).
     저장한 사진을 발행 때 다시 볼 때도 이 함수로 (같은 규칙 — clean_image 로 보면 위의 길쭉한 사진이 다시 줄어 떨어짐).
-    crop=True (주인이 막 보낸 사진 — 대시보드 올리기·텔레그램 답장, 주인 10/18): 길쭉한 휴대폰 화면 캡처면 먼저 다듬는다
-    (상품 사진 부분을 확신하면 그 부분만, 아니면 상태바·아래 막대·여백만 — media/screenshot.py). 그다음 같은 검사를 하고,
+    crop=True (주인이 막 보낸 사진 — 대시보드 올리기·텔레그램 답장, 주인 10/18): 먼저 다듬는다 — 길쭉한 휴대폰 화면 캡처면
+    상품 사진 부분을 확신하면 그 부분만(사진 보기 화면의 띠·미리보기 줄·넘김 화살표도 걷음), 아니면 상태바·아래 막대·여백만,
+    그리고 사진 원칙대로 주인공(인물·상품) 둘레만 조금 남김 (확실할 때만 — media/screenshot.py tidy). 그다음 같은 검사를 하고,
     그래도 안 되면 그때 이유를 말한다. 발행 때 다시 볼 때는 crop=False (이미 다듬어 저장한 사진)."""
     if not data:
         return None, OWNER_PHOTO_NOT_IMAGE
@@ -154,7 +155,7 @@ def owner_photo(data: bytes | None, *, min_side: int = 600, max_aspect: float = 
         return None, f"사진 해상도가 너무 커요 ({w}×{h})"
     aspect = max(w, h) / max(1, min(w, h))
     shot = aspect >= SCREENSHOT_ASPECT  # 휴대폰 화면 캡처일 가능성 (다듬은 뒤에도 '작아요' 에 방법을 같이)
-    if crop and shot:
+    if crop:  # 사진 원칙(주인 10/18): 화면 캡처는 사진 부분만, 모든 주인 사진은 주인공 둘레만 (확실할 때만)
         from dealbot.media.screenshot import tidy_bytes
 
         tidied, what = tidy_bytes(data)
