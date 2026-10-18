@@ -8,7 +8,7 @@ tests/fixtures/dash_contract/iid_map.json 이 두 저장소에서 같아야 한�
     sns:threadsauth · sns:instaauth                → sns-threads · sns-instagram
     sns_zero · sns_scope                           → sns-status
     threads_replies:…                              → sns-replies
-    글 draft:B:N·fail:B:N·photo:B:N               → post-B-N
+    글 draft:B:N·fail:B:N·photo:B:N·sched:B:N     → post-B-N
        ask:N·chan:N·share:N·oedit:N:…·dup:N·cards:N·openchat:N → post-<그 글의 블로그>-N (블로그는 알림을 낸 쪽이 줌)
     hot:…                                          → post-issue-N (글 번호를 알 때), 아니면 blog-issue
     login:B·kz:B·ownstats:B:…·login_down:B·own_stats_block:B → conn-naver-B
@@ -55,7 +55,7 @@ def iid_for(key: str, blog: str = "", pid: int | None = None, *, src: str = "dea
         return "sns-replies"
     if head in DEAL_HEADS and len(parts) == 2 and parts[1].isdigit():
         return f"deal-{parts[1]}"
-    if head in ("draft", "fail", "photo") and len(parts) == 3 and parts[1] in BLOGS and parts[2].isdigit():
+    if head in ("draft", "fail", "photo", "sched") and len(parts) == 3 and parts[1] in BLOGS and parts[2].isdigit():
         return f"post-{parts[1]}-{parts[2]}"
     if head == "photo" and len(parts) == 2 and parts[1].isdigit():
         return f"deal-{parts[1]}"

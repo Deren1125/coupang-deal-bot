@@ -36,7 +36,10 @@
   "kakao_auth_url",
   "kakao_connect",
   "kakao_test",
-  "dismiss"
+  "dismiss",
+  "schedule",
+  "unschedule",
+  "unschedule_all"
  ],
  "kakao": {
   "state": "ok",

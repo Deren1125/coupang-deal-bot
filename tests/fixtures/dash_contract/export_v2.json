@@ -94,7 +94,52 @@
     ],
     "questions": [],
     "deadline": null,
-    "naver_url": null
+    "naver_url": null,
+    "schedule": null
+   },
+   {
+    "pid": 47,
+    "title": "차은우 가을 니트 코디",
+    "status": "saved",
+    "stage": "임시저장 · 발행 대기",
+    "saved_at": "2026-10-18T08:30:00+09:00",
+    "score": 75,
+    "popular": true,
+    "owner_edited": false,
+    "needs": [],
+    "photo_request": null,
+    "slots": [],
+    "questions": [],
+    "deadline": null,
+    "naver_url": null,
+    "schedule": {
+     "scheduled_at": "2026-10-18T14:20:00+09:00",
+     "status": "scheduled",
+     "reason": ""
+    }
+   },
+   {
+    "pid": 48,
+    "title": "수지 공항패션",
+    "status": "saved",
+    "stage": "임시저장 · 발행 대기",
+    "saved_at": "2026-10-18T08:40:00+09:00",
+    "score": 60,
+    "popular": false,
+    "owner_edited": false,
+    "needs": [
+     "photos"
+    ],
+    "photo_request": null,
+    "slots": [],
+    "questions": [],
+    "deadline": null,
+    "naver_url": null,
+    "schedule": {
+     "scheduled_at": null,
+     "status": "blocked",
+     "reason": "사진이 아직 없어요"
+    }
    }
   ],
   "finance": [
@@ -119,7 +164,8 @@
      }
     ],
     "deadline": null,
-    "naver_url": null
+    "naver_url": null,
+    "schedule": null
    }
   ],
   "hotdeal": []
@@ -178,5 +224,100 @@
   "waiting": [
    "Pick 「안효섭 준지 26FW」 1편이 사진을 기다려요."
   ]
+ },
+ "schedule": {
+  "rules": {
+   "gap_minutes": [
+    120,
+    180
+   ],
+   "window": [
+    "08:00",
+    "22:00"
+   ],
+   "morning": [
+    "08:00",
+    "09:30"
+   ],
+   "tz": "Asia/Seoul"
+  },
+  "blogs": {
+   "issue": {
+    "spaced_only": true,
+    "gap_minutes": [
+     120,
+     180
+    ],
+    "window": [
+     "08:00",
+     "22:00"
+    ],
+    "morning": [
+     "08:00",
+     "09:30"
+    ],
+    "next_at": "2026-10-18T14:20:00+09:00",
+    "count": 1,
+    "blocked": 1,
+    "tail_at": "2026-10-18T14:20:00+09:00",
+    "last_pub": "2026-10-18T09:10:00+09:00",
+    "items": [
+     {
+      "pid": 47,
+      "scheduled_at": "2026-10-18T14:20:00+09:00",
+      "status": "scheduled",
+      "reason": ""
+     },
+     {
+      "pid": 48,
+      "scheduled_at": null,
+      "status": "blocked",
+      "reason": "사진이 아직 없어요"
+     }
+    ]
+   },
+   "finance": {
+    "spaced_only": false,
+    "gap_minutes": [
+     120,
+     180
+    ],
+    "window": [
+     "08:00",
+     "22:00"
+    ],
+    "morning": [
+     "08:00",
+     "09:30"
+    ],
+    "next_at": null,
+    "count": 0,
+    "blocked": 0,
+    "tail_at": null,
+    "last_pub": null,
+    "items": []
+   },
+   "hotdeal": {
+    "spaced_only": false,
+    "gap_minutes": [
+     120,
+     180
+    ],
+    "window": [
+     "08:00",
+     "22:00"
+    ],
+    "morning": [
+     "08:00",
+     "09:30"
+    ],
+    "next_at": null,
+    "count": 0,
+    "blocked": 0,
+    "tail_at": null,
+    "last_pub": null,
+    "items": []
+   }
+  }
  }
 }

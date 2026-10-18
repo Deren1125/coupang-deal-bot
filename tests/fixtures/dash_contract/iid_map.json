@@ -223,5 +223,10 @@
   "neighbors:config",
   "finance",
   "sys-blogauto"
+ ],
+ [
+  "sched:issue:31",
+  "",
+  "post-issue-31"
  ]
 ]

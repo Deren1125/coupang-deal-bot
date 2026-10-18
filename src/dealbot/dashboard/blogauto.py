@@ -514,12 +514,57 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         "score": _count(v.get("score"), top=100), "popular": v.get("popular") is True, "owner_edited": v.get("owner_edited") is True,
         "needs": list(dict.fromkeys(needs)), "photo_request": photo_request, "slots": slots, "questions": questions,
         "deadline": _one_line(v.get("deadline"), 40), "naver_url": _naver_url(v.get("naver_url")),
+        "schedule": _sched_post(v.get("schedule")),
     }
+
+
+SCHED_STATUSES = ("scheduled", "blocked", "publishing")
+
+
+def _sched_post(v: Any) -> dict[str, Any] | None:
+    """글의 간격 두고 발행 상태 {scheduled_at, status, reason} (Blog-Auto schedule.post_view) — 없거나 모르면 None."""
+    if not isinstance(v, dict) or v.get("status") not in SCHED_STATUSES:
+        return None
+    return {"scheduled_at": _one_line(v.get("scheduled_at"), 40), "status": v["status"], "reason": _one_line(v.get("reason"), 80) or ""}
+
+
+def _hhmm_pair(v: Any, default: list[str]) -> list[str]:
+    if isinstance(v, list) and len(v) == 2 and all(isinstance(x, str) and re.fullmatch(r"\d{2}:\d{2}", x) for x in v):
+        return list(v)
+    return list(default)
+
+
+def _sched(data: Any) -> dict[str, Any] | None:
+    """기록 파일 schedule 칸 (간격 두고 발행 — Blog-Auto schedule.export). 예전 Blog-Auto 면 None (화면이 그 기능을 숨김)."""
+    if not isinstance(data, dict) or not isinstance(data.get("blogs"), dict):
+        return None
+    out: dict[str, Any] = {"blogs": {}}
+    for blog in V2_BLOGS:
+        b = data["blogs"].get(blog)
+        if not isinstance(b, dict):
+            continue
+        gm = b.get("gap_minutes")
+        items = []
+        for x in b.get("items")[:60] if isinstance(b.get("items"), list) else []:
+            if isinstance(x, dict) and (pid := _count(x.get("pid"), top=10**9)) and x.get("status") in SCHED_STATUSES:
+                items.append({"pid": pid, "scheduled_at": _one_line(x.get("scheduled_at"), 40), "status": x["status"],
+                              "reason": _one_line(x.get("reason"), 80) or ""})
+        out["blogs"][blog] = {
+            "spaced_only": b.get("spaced_only") is True,
+            "gap_minutes": [int(g) for g in gm] if isinstance(gm, list) and len(gm) == 2 and all(isinstance(g, int) and 30 <= g <= 600 for g in gm)
+            else [120, 180],
+            "window": _hhmm_pair(b.get("window"), ["08:00", "22:00"]), "morning": _hhmm_pair(b.get("morning"), ["08:00", "09:30"]),
+            "next_at": _one_line(b.get("next_at"), 40), "tail_at": _one_line(b.get("tail_at"), 40),
+            "last_pub": _one_line(b.get("last_pub"), 40), "count": _count(b.get("count"), top=1000) or 0,
+            "blocked": _count(b.get("blocked"), top=1000) or 0, "items": items,
+        }
+    return out
 
 
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
-    out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {}}
+    out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
+                           "schedule": _sched(data.get("schedule"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

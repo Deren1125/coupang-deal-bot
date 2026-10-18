@@ -129,7 +129,7 @@ def test_export_v1_still_parses_and_v2_drops_bad_rows() -> None:
     e = parse_export(bad, "Asia/Seoul")
     p7 = [p for p in e.v2["posts"]["issue"] if p["pid"] == 7][0]
     assert p7["naver_url"] is None and p7["needs"] == ["publish"] and p7["slots"][0]["thumb"] is None
-    assert len(e.v2["posts"]["issue"]) == 2
+    assert len(e.v2["posts"]["issue"]) == len(fixture("export_v2.json")["posts"]["issue"]) + 1  # 'x' 줄만 빠짐
 
 
 def test_reader_size_cap_is_4mb(tmp_path: Path) -> None:

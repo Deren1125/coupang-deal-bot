@@ -42,7 +42,8 @@ log = logging.getLogger(__name__)
 URGENT_DEALBOT = ("link_request", "review_auth", "review_info", "publish_unsure", "photo_need", "publish_broken",
                   "publisher_stuck", "autolink_stop", "sns_auth", "selfcheck", "claude_login", "update_bad")
 URGENT_BLOGAUTO = ("login", "upload_fail", "draft_ready", "ask", "pick_photos", "hot", "owner_edit", "share_confirm",
-                   "channel_ask", "channel_review", "double_pub", "link_cards", "own_stats_blocked", "kakao_expiring")
+                   "channel_ask", "channel_review", "double_pub", "link_cards", "own_stats_blocked", "kakao_expiring",
+                   "sched_blocked")  # sched_blocked: 간격 두고 발행 차례에 올리지 못함 (주인 10/18) — 예약대로 발행된 것은 정리에만
 DIGEST_DEALBOT = ("collector_stuck", "linkprice", "sns_zero", "sns_scope", "domain_dns", "ig_ffmpeg", "threads_replies",
                   "published", "link_done", "held", "day", "waiting")
 DIGEST_BLOGAUTO = ("job_error", "loop_error", "scan", "scan_auto", "channel_fail", "openchat_fail", "neighbors_config",

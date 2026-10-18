@@ -25,6 +25,7 @@
  "own_stats_blocked": "URGENT",
  "kakao_expiring": "URGENT",
  "update_bad": "URGENT",
+ "sched_blocked": "URGENT",
  "collector_stuck": "DIGEST",
  "linkprice": "DIGEST",
  "sns_zero": "DIGEST",
