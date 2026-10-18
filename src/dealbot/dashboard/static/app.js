@@ -253,7 +253,7 @@ async function exec(a, extra, ctx = {}) {
   if (r.status === 202) {
     POLL[d.id] = {iid: ctx.iid || '', action: a.action, args: body.args, t: Date.now()};
     if (ctx.key) { delete P[ctx.key]; delete OPEN[ctx.iid]; }
-    toast('요청했어요 — 끝나면 알려 드릴게요');
+    toast(a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
     render(); poll();
     return d;
   }
@@ -296,7 +296,7 @@ function finish(s, p) {
   const ok = s.status === 'ok';
   if (s.action === 'blog.kakao_auth_url' && ok && s.url) { KURL = s.url; toast('카카오 화면을 열어 주세요'); return; }
   if (s.action === 'blog.info' && ok) { infoSheet(s.text); return; }
-  let text = ok ? (s.code === 'done' && s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : MSG[s.code] || s.text || MSG.failed;
+  let text = ok ? (s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : MSG[s.code] || s.text || MSG.failed;
   if (s.status === 'unknown') text = MSG.unknown;
   if (s.status === 'expired') text = MSG.expired;
   const a = p.args || {};
@@ -358,9 +358,11 @@ async function uploadAll(files, kind, onp) {
   }
   return ids;
 }
+let PICK = 0;
 function pick(accept, multiple, done) {
   const f = el('input', {type: 'file', accept, multiple: multiple || null, hidden: true});
-  f.addEventListener('change', () => { done([...f.files]); f.remove(); });
+  PICK = Date.now();
+  f.addEventListener('change', () => { PICK = 0; done([...f.files]); f.remove(); });
   D.body.append(f);
   f.click();
 }
@@ -387,7 +389,8 @@ const title = it => { const c = it.chip && `[${it.chip}]`; return c && it.title.
 function primary(it, a) {
   if (!a) return null;
   const pend = pendingOf(it.iid);
-  if (pend) return btn('pb', [el('span', {class: 'spin'}), pend.status === 'running' ? ' 하는 중' : ' 요청함'], null, {disabled: true});
+  if (pend) return el('div', {}, btn('pb', [el('span', {class: 'spin'}), pend.status === 'running' ? ' 하는 중' : ' 요청함'], null, {disabled: true}),
+    it.src === 'blog' ? el('p', {class: 'note'}, '블로그에 넣는 중이에요 · 1~2분') : null);
   if (a.disabled) return el('div', {}, btn('pb', a.label, null, {disabled: true}), el('p', {class: 'note'}, a.note || ''));
   if (a.input === 'open') return ext('pb soft', a.label, a.url);
   if (a.input === 'goto') return btn('pb soft', a.label, () => go('#' + a.goto.replace(/^#/, '')));
@@ -490,7 +493,7 @@ function panel(it, a, key, ctx) {
       try { const t = await N.clipboard.readText(); if (t) { f.value = t; VAL[key] = t; } else throw 0; } catch (e) { f.focus(); toast('길게 눌러 붙여넣기'); }
     });
   }
-  function redraw() { if (ctx.sheet) box.replaceWith(panel(it, a, key, ctx)); else render(); }
+  function redraw() { if (ctx.sheet && box.isConnected) box.replaceWith(panel(it, a, key, ctx)); else { if (!ctx.sheet) OPEN[it.iid] = key; render(); } }
   async function go1() {
     const extra = {};
     if (a.input === 'url') {
@@ -890,7 +893,7 @@ function start() {
   try { S = JSON.parse($('boot').textContent); } catch (e) { S = null; }
   $('rf').addEventListener('click', refresh);
   W.addEventListener('hashchange', route);
-  D.addEventListener('visibilitychange', () => D.visibilityState === 'visible' && load());
+  D.addEventListener('visibilitychange', () => D.visibilityState === 'visible' && Date.now() - PICK > 120000 && load());
   setInterval(() => { if (D.visibilityState === 'visible' && (R.tab === 'todo' || Object.keys(POLL).length)) load(); }, 60000);
   ptr();
   route();
