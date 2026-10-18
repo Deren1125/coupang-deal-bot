@@ -196,7 +196,7 @@ function confirmSheet(d) {
   });
 }
 
-// 간격 두고 발행 확인: 제목과 올라갈 시각 + '첫 글은 지금' (켜고 끄면 서버가 시각을 다시 계산)
+// 간격 두고 발행 확인: 제목·시각 + '첫 글은 지금'
 function planSheet(d, body) {
   return new Promise(res => {
     let ok = false, cur = d;
@@ -268,7 +268,7 @@ async function exec(a, extra, ctx = {}) {
     const c = r.data.plan ? await planSheet(r.data, body) : await confirmSheet(r.data) && r.data;
     if (!c) return null;
     body.ctoken = c.ctoken;
-    if (c.args) body.args = c.args;  // 확인 창에 보여 준 시각 그대로 (서버가 묶어 둔 값)
+    if (c.args) body.args = c.args;  // 보여 준 시각 그대로
     if (b) { b.disabled = true; b.prepend(el('span', {class: 'spin'})); }
     r = await api('/dashboard/api/action', {method: 'POST', body});
   }
@@ -570,8 +570,8 @@ function moreSheet(it, more) {
 }
 function choiceSheet(a) {
   const box = el('div');
-  sheet(a.label, box);
-  box.append(...(a.choices || []).map(c => btn('mr', c.label, () => { back(); exec(a, {name: c.value}); })));
+  sheet(a.title || a.label, box);
+  box.append(a.note ? el('p', {class: 'note'}, a.note) : '', ...(a.choices || []).map(c => btn(c.primary ? 'pb' : 'mr', c.label, () => { back(); exec(a, {name: c.value}); })));
 }
 async function searchSheet(a) {
   const box = el('div'), out = el('div');
@@ -616,7 +616,7 @@ function detail(it) {
   out.push(el('div', {class: 'ih'}, chip(it), d.owner_edited ? el('span', {class: 'cp info'}, '직접 고친 글') : null),
     it.status && !(d.lines || []).some(l => l.startsWith(it.status)) ? el('p', {class: 'st'}, it.status) : null);
   if (d.how) out.push(el('p', {text: d.how}));
-  if (d.search) out.push(el('div', {class: 'kv'}, el('code', {text: d.search}), btn('sm', '복사', () => copy(d.search))));
+  for (const [k, l] of [['search'], ['short', '짧게']]) if (d[k]) out.push(el('div', {class: 'kv'}, l ? el('span', {class: 'note'}, l) : null, el('code', {text: d[k]}), btn('sm', '복사', () => copy(d[k]))));
   if (d.note) out.push(el('p', {class: 'note'}, d.note));
   if (d.reason) out.push(el('p', {text: d.reason}));
   if (d.replaced_by) out.push(el('p', {text: `${d.replaced_by} 딜로 바뀌었어요`}));
@@ -707,6 +707,7 @@ function vDeal() {
   const out = [el('div', {class: 'top'}, el('span', {class: 'cp ' + (st.paused ? 'stop' : 'ok')}, st.paused ? '멈춤' : st.dry_run ? '연습' : '정상'),
     el('span', {class: 'sub'}, `오늘 ${st.today}개 올림`), (d.actions || []).length ? btn('lnk', '더보기', () => moreSheet(pseudo, d.actions)) : null)];
   if (n) out.push(el('a', {class: 'bn', href: '#/todo/deal'}, `할 일에 딜 ${n}개 →`));
+  if (d.nolink) out.push(el('p', {class: 'note'}, btn('lnk mute', d.nolink.label, () => choiceSheet(d.nolink))));
   out.push(el('div', {class: 'seg', role: 'group'}, [['today', '오늘 올림'], ['queue', '대기열']].map(([k, l]) =>
     btn('', l, () => { LS.s('dseg', k); render(); }, {'aria-pressed': seg === k ? 'true' : 'false'}))));
   const rows = seg === 'queue' ? d.queue : d.today;
@@ -768,7 +769,7 @@ function vBlog() {
   return out;
 }
 
-// 최근 글 검색 등록: 구글(키자드)은 주소를 복사하고 열기 — 창은 누른 그 자리에서 열어야 막히지 않는다
+// 검색 등록: 구글은 주소 복사 + 키자드 (창은 누른 자리에서 열기)
 function submitSheet(r) {
   const box = el('div');
   sheet(r.title, box);

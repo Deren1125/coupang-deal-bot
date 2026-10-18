@@ -137,6 +137,9 @@ def compare_line(info: CardInfo) -> str:
 
 
 def ad_of(info: CardInfo) -> str:
+    """카드 안 고지 줄. 수수료 없는 딜 하나짜리 카드(info.ad_free)는 '' (고지·'광고' 칩 없음)."""
+    if info.ad_free:
+        return ""
     return info.ad or (f"광고 · {info.disclosure}" if info.disclosure else GENERIC_AD)
 
 
@@ -203,8 +206,9 @@ def _band(card: DealCard, d: ImageDraw.ImageDraw, spec: SlideSpec, width: int) -
     d.rectangle((0, 0, width, BAND), fill=INK)
     tf = card.font(30)
     tag_w = _w(d, spec.tag, tf) + 24 if spec.tag else 0
-    af = _fit(d, spec.ad, card.font, 30, width - 2 * SIDE - tag_w, min_size=20)
-    d.text((SIDE, (BAND - _size(af)) // 2 - 2), spec.ad, font=af, fill="#FFFFFF")
+    head = spec.ad or BRAND  # 수수료 없는 딜(고지 없음)은 띠에 채널 이름만
+    af = _fit(d, head, card.font, 30, width - 2 * SIDE - tag_w, min_size=20)
+    d.text((SIDE, (BAND - _size(af)) // 2 - 2), head, font=af, fill="#FFFFFF")
     if spec.tag:
         d.text((width - SIDE - _w(d, spec.tag, tf), (BAND - 30) // 2 - 2), spec.tag, font=tf, fill="#FFFFFF")
 

@@ -90,6 +90,71 @@ def search_queries(name: str) -> list[str]:
     return out
 
 
+# ---------------------------------------------------------------- 짧은 검색어 (주인 10/18)
+# 쇼핑 커넥트 '상품 찾기'는 판매처가 붙인 상품명으로 찾는다 → 게시판 제목 그대로(긴 이름)는 0건이 잦다.
+# 그래서 브랜드 + 핵심 낱말 2~4개만 ('폴햄 여성 에코베로 라운드 긴팔티' → '폴햄 에코베로 긴팔티'). 규칙만 (AI 안 부름).
+# 괄호 앞머리에 쓰는 쇼핑몰 이름 (브랜드가 아님)
+_SHOP_TAGS = frozenset({
+    "네이버", "네이버쇼핑", "네이버플러스", "스마트스토어", "브랜드스토어", "n플러스", "naver", "쇼핑라이브", "네이버페이",
+    "쿠팡", "지마켓", "g마켓", "옥션", "11번가", "롯데온", "ssg", "쓱", "토스", "토스쇼핑", "카카오", "카카오톡", "톡딜",
+})
+# 뺄 낱말: 성별·나이, 색, 크기, 계절, 홍보·배송·옵션 말, 모양을 꾸미는 말 (핵심 상품 낱말은 남는다)
+_SHORT_DROP = frozenset("""
+여성 남성 여자 남자 여성용 남성용 남녀 남녀공용 공용 유니섹스 아동 아동용 키즈 주니어 성인 성인용 여아 남아 유아 우먼 맨즈
+블랙 화이트 네이비 그레이 차콜 베이지 아이보리 브라운 카키 레드 블루 핑크 그린 옐로우 퍼플 오렌지 민트 크림 실버 골드 와인
+버건디 라벤더 멜란지 오트밀 연청 중청 흑청 검정 흰색 투명 black white navy gray grey beige ivory brown khaki red blue pink green
+s m l xl xxl xxxl 2xl 3xl 4xl free 프리 프리사이즈 빅사이즈 소형 중형 대형 특대 사이즈
+봄 여름 가을 겨울 간절기 사계절 봄가을 ss fw 신학기
+무료배송 무배 당일발송 당일출고 빠른배송 로켓배송 특가 초특가 최저가 정품 정식수입 공식 공식몰 공식판매 본사 직영 신상 신상품 신제품
+인기 베스트 best 추천 단독 한정 할인 세일 sale 핫딜 행사 증정 사은품 이벤트 쿠폰 택1 택일 옵션 옵션선택 선택 모음 모음전 균일가
+외 등 무료 국내 국내산 정가 런칭 기획 기획전 대용량 초대용량 1위 브랜드 신규 new 고급 프리미엄 데일리 기본 베이직 단품 세트 종
+라운드 브이넥 오버핏 루즈핏 세미오버핏 슬림핏 레귤러핏 와이드 박시 크롭 롱 숏 미디 맥시
+""".split())
+_SHORT_PATTERNS = (
+    re.compile(r"^\d+(?:[.,]\d+)?[a-z가-힣%]{0,4}$", re.I),  # 수·용량·개수·연도 ('31cm', '2개', '500ml', '2026')
+    re.compile(r"^[x×*]\d+", re.I),  # 곱수 ('x2')
+    re.compile(r"\d\s*[가-힣a-z]{0,3}\+\d", re.I),  # 덤 ('1+1', '10캔+2캔')
+    re.compile(r"^(?=[a-z0-9-]*\d)(?=[a-z0-9-]*[a-z])[a-z0-9-]{5,}$", re.I),  # 모델 번호 ('PHE3TR3501', 'SM-R630')
+    re.compile(r"^[가-힣]{1,3}색$"),  # '검정색'·'회색'
+    re.compile(r"^[가-힣]{2,}(?:한|운|는)$"),  # 꾸미는 말 ('따뜻한'·'부드러운'·'가벼운')
+)
+
+
+def _short_word_ok(w: str) -> bool:
+    if len(w) < 2 or w.lower() in _SHORT_DROP:
+        return False
+    return not any(p.search(w) for p in _SHORT_PATTERNS)
+
+
+def short_query(name: str, category: str | None = None) -> str:
+    """쇼핑 커넥트 짧은 검색어: 브랜드(첫 낱말 또는 앞머리 [괄호] 안 브랜드) + 가운데 낱말 최대 2개 + 핵심 상품 낱말(마지막 낱말).
+    크기·색·개수·옵션·홍보 말·모델 번호는 뺀다. 한 낱말만 남으면 분류 끝 칸(category)을 핵심 낱말로, 그래도 모자라면 ''."""
+    s = clean_name(name or "")
+    brand = ""
+    m = re.match(r"^\s*[\[(【]([^\])】]{1,20})[\])】]", s)  # '[폴햄] 여성 …' 처럼 앞머리 괄호 안이 브랜드일 때
+    if m:
+        inner = m.group(1).strip()
+        if inner.lower().replace(" ", "") not in _SHOP_TAGS and _short_word_ok(inner) and re.search(r"[가-힣a-zA-Z]", inner):
+            brand = inner
+    s = re.sub(r"\([^()]*\)|\[[^\[\]]*\]|【[^【】]*】", " ", s)
+    words: list[str] = []
+    for w in re.split(r"[^\w+-]+", s):
+        w = w.strip("-")
+        if w and _short_word_ok(w) and w.lower() not in {x.lower() for x in words}:
+            words.append(w)
+    if brand:
+        words = [brand] + [w for w in words if w.lower() != brand.lower()]
+    if len(words) == 1 and category:
+        leaf = re.split(r"[>/]", category)[-1].replace(" ", "")
+        if _short_word_ok(leaf) and leaf.lower() != words[0].lower():
+            words.append(leaf)
+    if len(words) < 2:
+        return ""
+    if len(words) > 4:
+        words = [words[0], *words[1:3], words[-1]]
+    return " ".join(words)[:40].strip()
+
+
 class NaverShopSearch:
     def __init__(
         self,

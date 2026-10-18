@@ -64,7 +64,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
                 "dismiss", "schedule", "unschedule", "unschedule_all")
-DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
+DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input")
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
@@ -221,6 +221,12 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         return out
     if action in ("deal.skip", "deal.ok", "deal.repost"):
         return {"qid": _int(g("qid"))}
+    if action == "deal.nolink":  # 쇼핑 커넥트에 없음: post = 링크 없이 올리기 · skip = 안 올리기
+        if g("name") not in ("post", "skip"):
+            raise ActionError("bad_args")
+        return {"qid": _int(g("qid")), "name": g("name")}
+    if action == "deal.sc_forget":  # 쇼핑 커넥트 없는 판매처 하나 빼기
+        return {"name": _str(g("name"), 80)}
     if action == "deal.ok_text":
         return {"qid": _int(g("qid")), "text": _str(g("text"), 4000)}
     if action == "deal.posted":
@@ -750,6 +756,18 @@ class ActionDesk:
             reply = bot.skip_item(args["qid"])
             after = db.get_queue_item(args["qid"])
             return ("skipped", TEXTS["skipped"]) if after is not None and after.status == "skipped" else ("wrong_state", plain(reply))
+        if action == "deal.nolink":
+            code, text = bot.no_connect(args["qid"], post=args["name"] == "post")
+            if code in ("nolink", "skipped"):
+                try:
+                    await bot.refresh_pending_notice()  # 텔레그램 고정 공지('내 링크 기다리는 글')에서 빠지게
+                except Exception as e:  # noqa: BLE001 — 공지를 못 고쳐도 한 일은 됐다
+                    log.warning("dashboard nolink: pending notice refresh failed: %s", type(e).__name__)
+            return code, text or TEXTS.get(code, TEXTS["failed"])
+        if action == "deal.sc_forget":
+            if not bot.sc_store_forget(args["name"]):
+                return "not_found", TEXTS["not_found"]
+            return "done", "목록에서 뺐어요 — 다음 딜부터 다시 링크를 물어요"
         if action in ("deal.ok", "deal.ok_text"):
             item = db.get_queue_item(args["qid"])
             if item is None:
@@ -863,5 +881,5 @@ class ActionDesk:
         return str(body.get("code") or "failed"), str(body.get("text") or TEXTS["failed"])
 
 
-OK_CODES = frozenset({"done", "linked", "linked_twin", "approved", "skipped", "posted", "queued", "paused", "resumed", "run",
+OK_CODES = frozenset({"done", "linked", "linked_twin", "nolink", "approved", "skipped", "posted", "queued", "paused", "resumed", "run",
                       "connected", "pushed", "no_device"})

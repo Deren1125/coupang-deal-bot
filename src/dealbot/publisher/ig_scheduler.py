@@ -510,7 +510,7 @@ class InstagramScheduler:
         for it in self._published(day_start, now):
             shop = bot.registry.get(it.deal.product.shop)
             info = insta_style.card_info(it.deal, bot.renderer, shop=shop, deal_no=bot._page_deal_no(it.id))
-            info = self.own_before(it.deal, info)
+            info = replace(self.own_before(it.deal, info), ad_free=False)  # 묶은 글은 글 전체가 광고 → 모든 장에 고지
             if need_drop and not ((info.ref_price and info.ref_pct) or info.low_label):
                 continue
             cands.append((it, info))

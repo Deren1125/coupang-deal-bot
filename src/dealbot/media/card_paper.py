@@ -624,6 +624,11 @@ def disclosure_bottom(ad: str, right: str = "") -> float:
 def disclosure(d: ImageDraw.ImageDraw, ad: str, paper_col: tuple[int, int, int], *, right: str = "") -> float:
     """맨 위 첫 줄 고지: 검은 '광고' 칩 + 나머지 ('광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다' 를 그대로 나눠).
     오른쪽에 장 번호('2/7')가 있으면 그만큼 비우고, 안 들어가면 두 줄로 (MIN_TEXT 보다 작게 줄이지 않음). 고지 줄 바닥 y."""
+    if not ad:  # 수수료 없는 딜 (원본 주소, CardInfo.ad_free): '광고' 칩·고지 없이 자리만 — 배치는 그대로
+        if right:
+            fr = F("num", 34)
+            text(d, W - M - tw(fr, right), DISC_TY + 12, right, fr, SUB)
+        return disclosure_bottom(ad, right)
     _, x, size, lines = _disc_layout(ad, right)
     f_tag = F("sb", 31)
     ty = DISC_TY

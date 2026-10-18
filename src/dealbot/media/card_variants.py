@@ -182,6 +182,8 @@ def _cta(info: CardInfo) -> str:
 
 def _ad(info: CardInfo) -> str:
     """카드 안 고지 줄 '광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다' (몰 고지가 없으면 '광고 · 제휴 링크로 수수료를 받아요')."""
+    if info.ad_free:  # 수수료 없는 딜 (원본 주소) — 고지 없음
+        return ""
     return info.ad or (f"광고 · {info.disclosure}" if info.disclosure else "광고 · 제휴 링크로 수수료를 받아요")
 
 
