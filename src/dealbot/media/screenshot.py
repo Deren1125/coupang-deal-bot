@@ -3,7 +3,8 @@
 네이버 딜(#80 폴햄 …)은 주인이 상품 페이지를 휴대폰으로 캡처해 올리는 일이 많다. 예전에는 길쭉한 캡처를 '상품 부분만 잘라서'
 라며 받지 않았는데, 이제는 먼저 다듬고 그다음 원래 검사(짧은 변·비율)를 한다:
   ① 위 상태바(시각·배터리)·아래 탐색 막대(제스처 막대·버튼 줄·앱 아래 탭)는 또렷하게 보일 때만 걷는다 (내용은 자르지 않음)
-  ② 가장 큰 '사진 덩어리'(배경이 아닌 칸이 화면 폭 절반 넘게 쭉 이어진 줄들 — 글자·메뉴는 띄엄띄엄)를 확신하면 그 부분만
+  ② 가장 큰 '사진 덩어리'(배경이 아닌 칸이 화면 폭 절반 넘게 쭉 이어진 줄들 — 글자·메뉴는 띄엄띄엄)를 확신하면 그 부분만.
+     쇼핑몰 사진 보기 화면(위·아래 검은 띠, 어둡게 눌린 사진, 아래 미리보기 사진 줄 — 주인 10/18 #81)은 가운데 사진만
   ③ 못 찾았거나 애매하면 가장자리 흰색·검정 여백만 걷는다
 진짜 사진(가장자리까지 그림이 꽉 참)·가로가 긴 그림은 그대로. 길쭉한 그림(세로/가로 ≥ 1.6)만 본다.
 Blog-Auto blogauto/media.py 의 crop_screenshot·phone_ui_bounds·_photo_box·trim_margins 를 옮긴 것 (파일이 아니라 그림으로) —
@@ -16,16 +17,141 @@ import io
 import logging
 from collections import Counter
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 log = logging.getLogger(__name__)
 
 SCREEN_ASPECT = 1.6  # 이보다 길쭉하면 휴대폰 화면 캡처로 보고 다듬어 본다
 
 
+def _runs(flags) -> list[tuple[int, int]]:
+    """참인 칸이 이어진 구간들 [(시작, 끝), …]."""
+    out, start = [], None
+    for i, f in enumerate(list(flags) + [False]):
+        if f and start is None:
+            start = i
+        elif not f and start is not None:
+            out.append((start, i - 1))
+            start = None
+    return out
+
+
+def _lightbox_box(img: Image.Image) -> tuple[int, int, int, int] | None:
+    """쇼핑몰 사진 보기 화면(라이트박스)을 캡처한 그림에서 가운데 큰 사진 영역 (원본 좌표). 확신이 없으면 None.
+    모양: 위·아래가 한 가지 색(대개 검정·어두운 회색, 흰색도)의 넓은 띠이고, 가운데에 화면 폭을 거의 채운 사진 한 장,
+    그 위·아래에 닫기 단추·'1/5' 쪽수·작은 미리보기 사진 줄(띠 색 틈으로 나뉜 짧은 덩어리)이 있을 수 있다.
+    사진이 어둡게 눌려 있어도(라이트박스 덮개) 띠는 거의 똑같은 색이라 띠 색과 조금만 달라도 사진으로 본다.
+    진짜 상품 사진을 자르지 않게: 띠가 또렷하고(화면 높이 3% 넘게 거의 한 가지 밝기), 사진 위·아래 경계가 화면 폭에 걸친 곧은 선이고,
+    사진이 화면 폭의 85% 넘게·그림의 35% 넘게 차지하고, 바깥에 다른 큰 덩어리가 없을 때만 자른다."""
+    w, h = img.size
+    if w < 200 or h < 200:
+        return None
+    if w > 1080:  # 큰 그림은 줄여서 본다 (모양만 보면 되니 BOX 로 평균)
+        work = img.resize((1080, max(1, round(h * 1080 / w))), Image.BOX)
+    else:
+        work = img
+    s = work.width / w
+    W, H = work.size
+    px = work.load()
+    # 띠 색: 위·아래 가장자리 줄과 왼쪽·오른쪽 끝 칸에서 가장 많은 색 (비슷한 색은 한 묶음)
+    eh = max(2, H // 40)
+    edge = [px[x, y] for y in (*range(eh), *range(H - eh, H)) for x in range(0, W, 2)]
+    edge += [px[x, y] for y in range(0, H, 2) for x in (0, W - 1)]
+    q = Counter(tuple(c // 4 for c in e) for e in edge).most_common(1)[0][0]
+    bg = tuple(v * 4 + 2 for v in q)
+    r, g, b = ImageChops.difference(work, Image.new("RGB", work.size, bg)).split()
+    mask = ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 255 if v > 10 else 0)
+    data = mask.tobytes()
+    rows = [W - data[y * W:(y + 1) * W].count(0) for y in range(H)]
+    band = [n <= 0.02 * W for n in rows]  # 띠 색 줄 (끝의 얇은 테두리·잡티 2% 까지는 봐줌)
+    blocks: list[tuple[int, int]] = []
+    for a, z in _runs(not f for f in band):
+        if blocks and a - blocks[-1][1] - 1 <= 2:  # 한두 줄 끊긴 건 잇는다
+            blocks[-1] = (blocks[-1][0], z)
+        else:
+            blocks.append((a, z))
+    if not blocks:
+        return None
+    top, bottom = max(blocks, key=lambda t: t[1] - t[0])
+    tall = bottom - top + 1
+    # 바깥 덩어리(닫기 단추·쪽수·미리보기 줄·상태바)는 작아야 한다. 큰 덩어리가 또 있으면 여러 장을 이어 붙인 사진일 수 있음
+    others = [t for t in blocks if t != (top, bottom)]
+    if any(z - a + 1 > 0.35 * tall for a, z in others):
+        return None
+    outside = H - tall
+    if outside < 0.08 * H or sum(z - a + 1 for a, z in others) > 0.5 * outside:
+        return None
+    # 또렷한 띠: 사진 바로 위나 바로 아래에 띠 색 줄이 화면 높이 3% 넘게 이어져야 한다
+    need = max(12 * s, 0.03 * H)
+
+    def streak(ys) -> int:
+        n = 0
+        for y in ys:
+            if not band[y]:
+                break
+            n += 1
+        return n
+
+    up, down = streak(range(top - 1, -1, -1)), streak(range(bottom + 1, H))
+    if max(up, down) < need:
+        return None
+    # 띠는 앱이 칠한 단색이라 거의 한 가지 밝기다 (밤하늘·스튜디오 배경은 결·그라데이션이 있어 여기서 걸러짐).
+    # 사진 경계에서 번진 줄 3개는 빼고 본다
+    region = (0, top - up, W, top - 3) if up >= down else (0, bottom + 4, W, bottom + 1 + down)
+    hist = work.crop(region).convert("L").histogram()
+    peak = max(range(256), key=hist.__getitem__)
+    if sum(hist[max(0, peak - 4):peak + 5]) < 0.95 * sum(hist):
+        return None
+    # 사진 폭: 사진 줄 안에서 띠 색이 아닌 칸이 있는 세로줄
+    sub = data[top * W:(bottom + 1) * W]
+    cols = [tall - sub[x::W].count(0) for x in range(W)]
+    runs = _runs(c > 0.05 * tall for c in cols)
+    if not runs:
+        return None
+    x0, x1 = max(runs, key=lambda t: t[1] - t[0])
+    if x1 - x0 + 1 < 0.85 * W:
+        return None
+    # 곧은 경계: 사진 맨 위·맨 아래 줄(번진 줄 한두 개 안쪽)이 사진 폭의 30% 넘게 띠 색과 달라야 한다 (둥근 상품 윤곽의 끝줄은 좁음)
+    for y, edge_at in ((min(bottom, top + 2), top > 0), (max(top, bottom - 2), bottom < H - 1)):
+        if edge_at:
+            n = sum(1 for x in range(x0, x1 + 1) if data[y * W + x])
+            if n < 0.3 * (x1 - x0 + 1):
+                return None
+    # 남은 단색 테두리(얇은 회색 줄 등)는 걷는다 — 한 가지 색이고 어둡거나 밝은 세로줄·가로줄, 한쪽에 5% 까지만
+    def flat(box) -> bool:
+        ext = work.crop(box).getextrema()
+        lo, hi = min(a for a, _ in ext), max(z for _, z in ext)
+        return all(z - a <= 12 for a, z in ext) and (hi <= 40 or lo >= 215)
+
+    lim_x, lim_y = int(0.05 * W), int(0.02 * H)
+    while x0 < lim_x and flat((x0, top, x0 + 1, bottom + 1)):
+        x0 += 1
+    while x1 > W - 1 - lim_x and flat((x1, top, x1 + 1, bottom + 1)):
+        x1 -= 1
+    t0, b0 = top, bottom
+    while top < t0 + lim_y and flat((x0, top, x1 + 1, top + 1)):
+        top += 1
+    while bottom > b0 - lim_y and flat((x0, bottom, x1 + 1, bottom + 1)):
+        bottom -= 1
+    box = (int(x0 / s), int(top / s), min(w, round((x1 + 1) / s)), min(h, round((bottom + 1) / s)))
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    if bw * bh > 0.92 * w * h or bw * bh < 0.35 * w * h or not 0.4 <= bh / bw <= 2.5:
+        return None
+    return box
+
+
+
 def _photo_box(img: Image.Image, force: bool = False) -> tuple[int, int, int, int] | None:
     """화면 캡처에서 가장 큰 '사진 덩어리' 영역 (원본 좌표). 못 찾으면 None.
-    배경색은 화면 가장자리에서 가장 많은 색으로 정한다 (흰 화면·회색 화면·다크 모드 모두)."""
+    배경색은 화면 가장자리에서 가장 많은 색으로 정한다 (흰 화면·회색 화면·다크 모드 모두).
+    먼저 쇼핑몰 사진 보기 화면(검은 띠 + 어둡게 눌린 사진 + 미리보기 줄, 주인 10/18 #81 폴햄)인지 본다 (_lightbox_box)."""
+    try:
+        box = _lightbox_box(img)
+    except Exception as e:  # noqa: BLE001 — 애매하면 원래 방법으로
+        log.info("lightbox photo box failed: %s", type(e).__name__)
+        box = None
+    if box:
+        return box
     w, h = img.size
     scale = 240 / w if w > 240 else 1.0
     small = img.resize((max(1, int(w * scale)), max(1, int(h * scale))))
@@ -111,8 +237,6 @@ def _dominant(img: Image.Image) -> tuple[int, int, int]:
 
 def _ink(img: Image.Image, bg) -> Image.Image:
     """바탕색과 또렷하게 다른 칸(글자·아이콘)만 255 인 흑백 그림 (세 색 중 가장 큰 차이가 40 넘음)."""
-    from PIL import ImageChops
-
     r, g, b = ImageChops.difference(img, Image.new("RGB", img.size, bg)).split()
     return ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 255 if v > 40 else 0)
 
