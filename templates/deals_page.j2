@@ -1,6 +1,6 @@
 {#
   봇의 공개 도메인 "/" — 최근 채널 딜 목록 (인스타 프로필 링크용). 변수: title, items[] (id, name, price, original_price,
-  discount_rate, shop, rocket, free_shipping), hours, disclosures[], channels{telegram_url, instagram_url, threads_url, ...},
+  discount_rate, shop, rocket, free_shipping, plain — 제휴 링크가 아닌 원본 주소), hours, disclosures[], channels{telegram_url, instagram_url, threads_url, ...},
   past (기간 안 딜이 없어 최근 past_days 일 딜을 보여 주는 중), ad_top (맨 위 광고 표시 한 줄), telegram_join (채널 버튼 주소 —
   /invitelinks 의 deals_page 초대 링크, 없으면 채널 주소). 주인 결정 10/15: 광고 표시는 맨 위(첫 부분)에, 전체 고지는 아래에 그대로.
 #}
@@ -56,7 +56,7 @@
     {% if it.price %}
     <div><span class="price">{{ "{:,}".format(it.price) }}원</span>{% if it.original_price %}<span class="orig">{{ "{:,}".format(it.original_price) }}원</span>{% endif %}{% if it.discount_rate %}<span class="rate">{{ it.discount_rate | round | int }}%↓</span>{% endif %}</div>
     {% endif %}
-    <p class="meta">{{ it.shop }}{% if it.rocket %} · 로켓배송{% elif it.free_shipping %} · 무료배송{% endif %}</p>
+    <p class="meta">{{ it.shop }}{% if it.rocket %} · 로켓배송{% elif it.free_shipping %} · 무료배송{% endif %}{% if it.plain %} · 제휴 아님{% endif %}</p>
     <a class="btn" href="/d/{{ it.id }}" rel="nofollow">구매하러 가기</a>
   </article>
 {% else %}

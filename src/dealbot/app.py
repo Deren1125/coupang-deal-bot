@@ -2991,6 +2991,10 @@ class DealBot:
             "tier": tier, "discount_rate": v.discount_rate, "shipping": p.shipping, "rating": p.rating,
             "review_count": p.review_count, "category": p.category, "shop": p.shop, "shop_name": shop.name if shop else p.shop,
             "disclosure": deal_disclosure(shop, p.extra) or "", "link": link, "product_url": p.url,
+            # Blog-Auto 와의 약속 (주인 10/18): affiliate=False 면 link 가 제휴 링크가 아닌 원본 상품 주소 (쇼핑 커넥트에 없는 네이버 딜 등)
+            # — 수수료가 없으니 이 딜 몫의 대가성 문구·[광고] 를 붙이지 않는다. no_affiliate: 까닭 (sc_not_found·owner_no_sc·sc_store)
+            "affiliate": bool(deal_disclosure(shop, p.extra)),
+            "no_affiliate": str(p.extra.get("raw_link") or "") if not deal_disclosure(shop, p.extra) else "",
             "image_url": p.image_url, "photo_file": photo_file, "photo_kind": kind,
             "photo_src": ("owner" if p.extra.get("owner_photo") else p.image_url) if photo_file else None,
             "photo_wait_until": (posted_at + timedelta(hours=self.settings.publish.late_photo_hours)).isoformat(timespec="seconds")
@@ -3744,6 +3748,7 @@ class DealBot:
         disclosures: list[str] = list(self.settings.blog_digest.always_disclosures)
         items = self._page_items()
         past = False
+        plain_links = False
         if not items:
             items = self._past_items()
             past = bool(items)
@@ -3753,6 +3758,7 @@ class DealBot:
             disc = deal_disclosure(shop, p.extra)
             if disc and disc not in disclosures:
                 disclosures.append(disc)
+            plain_links = plain_links or not disc
             rows.append(
                 {
                     "id": it.id,
@@ -3763,6 +3769,7 @@ class DealBot:
                     "shop": shop.name if shop else p.shop,
                     "rocket": bool(p.is_rocket),
                     "free_shipping": bool(p.is_free_shipping),
+                    "plain": not disc,  # 제휴 링크가 아닌 원본 주소 (수수료 없음) — 페이지에 '제휴 아님'
                 }
             )
         programs = list(dict.fromkeys(p for d in disclosures if (p := disclosure_program(d))))
@@ -3778,7 +3785,8 @@ class DealBot:
             show_numbers=self.settings.instagram.style != "current",
             past=past,
             past_days=cfg.past_days,
-            ad_top=("광고 · 이 페이지의 구매 링크는 제휴 링크라, 구매하면 "
+            ad_top=(("광고 · 이 페이지의 구매 링크는 제휴 아님 표시가 없으면 제휴 링크라, 구매하면 " if plain_links
+                     else "광고 · 이 페이지의 구매 링크는 제휴 링크라, 구매하면 ")
                     + ("·".join(programs) if programs else "판매처") + " 수수료를 받아요"),
             # 텔레그램 버튼: /invitelinks 로 만든 deals_page 초대 링크 (가입 경로를 셈), 없으면 채널 주소
             telegram_join=self.db.kv_get(f"{invites.KV_PREFIX}deals_page") or channels.get("telegram_url") or "",

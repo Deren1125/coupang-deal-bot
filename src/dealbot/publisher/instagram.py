@@ -465,7 +465,13 @@ class InstagramPublisher:
         from dealbot.publisher import insta_style
 
         caption, allowed, _ = self._render(deal, deal_no=deal_no)
-        return insta_style.validate(caption, slides=slides, allowed=allowed)
+        return insta_style.validate(caption, slides=slides, allowed=allowed, ad_free=self._ad_free(deal))
+
+    def _ad_free(self, deal: Deal) -> bool:
+        """수수료 없는 딜 (쇼핑 커넥트에 없어 원본 주소로 올린 네이버 딜 등 — 몰 고지가 없음): 고지 없이, 수수료 말이 없어야 통과."""
+        from dealbot.shops import deal_disclosure
+
+        return not deal_disclosure(self.registry.get(deal.product.shop), deal.product.extra)
 
     async def publish(self, deal: Deal, image_url: str | None, *, deal_no: int | None = None) -> PublishResult:
         from dealbot.publisher import insta_style
@@ -473,7 +479,7 @@ class InstagramPublisher:
         if not self.enabled:
             return PublishResult(ok=False, error="instagram disabled")
         caption, allowed, alt = self._render(deal, deal_no=deal_no)
-        problems = insta_style.validate(caption, allowed=allowed)
+        problems = insta_style.validate(caption, allowed=allowed, ad_free=self._ad_free(deal))
         if problems:
             return PublishResult(ok=False, error=f"{CHECK_FAILED}: {'; '.join(problems)}")
         if self.dry_run:

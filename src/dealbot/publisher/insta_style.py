@@ -3,8 +3,10 @@
 - 숫자는 모두 데이터에서: 가격, 글 첫 줄과 같은 비교 근거(TemplateRenderer.reference — 쿠팡 최저가·믿을 만한 평소 가격,
   10% 이상일 때만), 기록 최저(low_text), 표시 정가(근거가 없을 때만 보조), 단가, 배송, 평점.
 - 고지(공정위 추천·보증 심사지침 2024-12-01): 본문 첫 줄에 '광고 · {몰 짧은 고지}' ('더보기' 아래·댓글 표기는 인정 안 됨),
-  카드·캐러셀 모든 장·릴스 화면 안에도 같은 줄, 본문 끝엔 몰의 고지 문구 그대로. 몰 고지가 없는 딜(쇼핑커넥트에 없는 네이버 원본 링크)도
-  인스타 글엔 '광고 · 제휴 링크로 수수료를 받아요' (프로필 링크 페이지가 제휴 링크라서) — 고지 없는 인스타 글은 없다.
+  카드·캐러셀 모든 장·릴스 화면 안에도 같은 줄, 본문 끝엔 몰의 고지 문구 그대로.
+  몰 고지가 없는 딜 하나짜리 글(쇼핑 커넥트에 없어 원본 주소로 올린 네이버 딜 — 수수료 없음)은 고지·'광고' 칩 없이 (주인 10/18:
+  수수료가 없는데 '수수료를 받습니다'는 틀린 말), 검사도 거꾸로 '수수료' 말이 없어야 통과. 여러 딜을 묶은 글(TOP5·릴스·단가표)은
+  글 전체가 광고라 예전처럼 모든 장에 고지 ('광고 · 제휴 링크로 수수료를 받아요' — 프로필 링크 페이지가 제휴 링크라서).
 - 기록 최저는 '우리가 본 최근 N일 중 가장 낮음 (MM/DD HH시 기준)' — 'N일 최저가'·'역대 최저' 라고 쓰지 않는다 (주인 결정 10/15).
 - 첫 줄 다음은 사실만 ('이름 가격 · 비교 가격'). '역대급'·'강추' 같은 말, 느낌표, 링크 주소는 안 쓴다 (인스타 본문 링크는 눌리지 않음).
   '저장해 두세요'·'보내 주세요' 같은 부탁 줄도 안 쓴다 (인스타가 저장·공유를 조르는 글은 추천에서 뺄 수 있다고 함 — 10/15 조사).
@@ -139,7 +141,8 @@ def card_info(deal: Deal, renderer: TemplateRenderer, *, shop: Shop | None, deal
         category=(p.category or "").split(">")[-1].strip(),
         deal_no=deal_no,
         disclosure=short_disclosure(mall),
-        ad=ad_line([mall]),
+        ad=ad_line([mall]) if mall else "",
+        ad_free=not mall,  # 수수료 없는 딜 (원본 주소) — 카드에 고지·'광고' 칩을 그리지 않음
     )
 
 
@@ -209,7 +212,7 @@ def caption_context(deal: Deal, info: CardInfo, *, shop: Shop | None, style: str
     else:
         cta = "구매 링크: 프로필 링크 → 핫딜 페이지"
     return {
-        "first_line": info.ad or ad_line([deal_disclosure(shop, p.extra)]),
+        "first_line": "" if info.ad_free else (info.ad or ad_line([deal_disclosure(shop, p.extra)])),
         "hook": hook,
         "name": name,
         "compare": compare,
@@ -409,14 +412,18 @@ def unit_caption(rows_by_title: dict[str, list[UnitRow]], baselines: list[tuple[
 
 
 # ---------------------------------------------------------------- 올리기 전 검사
-def validate(caption: str, *, slides: Sequence[Any] = (), allowed: Iterable[str] = ()) -> list[str]:
+def validate(caption: str, *, slides: Sequence[Any] = (), allowed: Iterable[str] = (), ad_free: bool = False) -> list[str]:
     """올리기 전 검사. 문제 목록 (비면 통과).
     - 본문 첫 줄이 '광고 · …수수료…' 고지가 아니면 실패 ('더보기' 아래·끝에만 있는 고지는 인정 안 됨), 본문에 링크 주소가 있어도 실패
     - 카드·캐러셀·릴스의 어느 장이든 그 장에 그리는 글(slide.texts())에 고지 줄이 없으면 실패
+    - ad_free (수수료 없는 딜 하나짜리 글 — 원본 주소로 올린 네이버 딜): 거꾸로 본문·카드 어디에도 '수수료' 말이 있으면 실패
     - '역대' 는 늘, '최저가' 는 데이터로 확인된 비교(allowed — '쿠팡 최저가' 같은 시중가 대조 이름)가 아니면 실패"""
     problems: list[str] = []
     first = next((line.strip() for line in caption.strip().splitlines()), "")
-    if not _AD_LINE.search(first):
+    if ad_free:
+        if "수수료" in caption or any("수수료" in (t or "") for s in slides for t in s.texts()):
+            problems.append("수수료 없는 딜(원본 주소)인데 수수료 고지가 있음")
+    elif not _AD_LINE.search(first):
         problems.append(f"본문 첫 줄에 광고·수수료 고지가 없음: {first[:40]!r}")
     if re.search(r"https?://", caption):
         problems.append("본문에 링크 주소가 있음 (인스타 본문 링크는 눌리지 않음 — 프로필 링크로)")
@@ -424,7 +431,7 @@ def validate(caption: str, *, slides: Sequence[Any] = (), allowed: Iterable[str]
     texts = [("본문", caption)]
     for i, slide in enumerate(slides, 1):
         drawn = list(slide.texts())
-        if not any(_AD_LINE.search(t or "") for t in drawn):
+        if not ad_free and not any(_AD_LINE.search(t or "") for t in drawn):
             problems.append(f"{i}번째 장에 광고·수수료 고지가 없음")
         texts.append((f"{i}번째 장", "\n".join(drawn)))
     for where, text in texts:
