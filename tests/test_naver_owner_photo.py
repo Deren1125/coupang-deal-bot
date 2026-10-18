@@ -56,6 +56,7 @@ def bot(settings: Settings):  # type: ignore[no-untyped-def]
     settings.secrets.public_domain = "bot.example.com"
     settings.threads.enabled = False
     settings.copy_cfg.enabled = False
+    settings.publish.good_deal_min_discount_pct = 0  # 사진 흐름 테스트: 모든 딜이 인스타 딜 하나짜리 글 후보 (주인 10/18 기준은 test_ig_good_deals.py)
     b = DealBot(settings)
     yield b
     b.db.close()

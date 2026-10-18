@@ -374,6 +374,9 @@ publish:
   # 글의 강조 단계: 평소 가격(30일 평균·쿠팡 시중가) 대비 50% 이상 싸면 "꼭 담으세요", 70% 이상이면 "역대급". 그 미만은 짧게만
   emphasis_must_pct: 50
   emphasis_top_pct: 70
+  # 주인 10/18: '할인 괜찮은 딜' = 강조 단계 top·must 이거나 할인율 30% 이상 (평소 가격 근거 대비 % 와 표시 할인율 중 큰 값).
+  # 이 딜들은 플랫폼 무관하게 인스타(딜 하나짜리 글)·스레드에 다 올림 — 시간 텀·횟수는 너무 남발하지 않을 정도의 안전 한도만
+  good_deal_min_discount_pct: 30
   queue_ttl_hours: 6             # 자동 발행 대기 항목 유효 시간
   manual_link_ttl_hours: 24      # 내 링크 입력을 기다리는 항목 유효 시간 (주인 결정 10/15: 12 → 24시간)
   review_ttl_hours: 12           # 정보 글·정품 확인(/ok)·쇼핑커넥트 자동 링크를 기다리는 항목 유효 시간 (링크 요청과 따로, 예전 그대로 12시간)
@@ -415,8 +418,12 @@ threads:
   rhythm:
     enabled: true
     hours: "07:00-24:00"
-    min_gap_minutes: 45
-    max_deal_posts_per_day: 10
+    min_gap_minutes: 45            # 보통 딜·정보 글 (예전 그대로)
+    max_deal_posts_per_day: 10     # 보통 딜은 그날 딜 글이 10개 되기 전까지만 (예전 그대로)
+    # 주인 10/18: 할인 괜찮은 딜은 글 사이 15~30분 무작위, 딜 글 하루 20개까지 (안전 상한 — 스레드 API 한도 24시간 250개)
+    good_min_gap_minutes: 15
+    good_max_gap_minutes: 30
+    good_max_deal_posts_per_day: 20
     queue_ttl_hours: 8
     recheck_after_minutes: 10
   topic_tag_default: 핫딜                  # 분류별 주제 태그 (topic_tags 기본: 주방·식품 집밥 / 생활용품 살림 / 운동 헬스 / 패션 패션)
@@ -440,9 +447,13 @@ instagram:
   style: P                                # 카드·본문 양식: P 종이 카드(주인 결정 10/16 — 종이 결·테이프·포스트잇 '#번호'·세리프 가격 + 빨간 펜 밑줄, TOP5·단가표도 같은 그림) | B 가격 정보 카드(표 — 되돌릴 때) | current | A 사진+큰 가격 | C 사진+가격 스티커 (A·C·current 는 카드 첫 부분에 고지 띠가 없어 딜 하나짜리 글이 올리기 전 검사에서 막힘)
   no_photo: text_card                     # 확인된 상품 사진이 없는 딜: text_card(글자 카드로 올림, 주인 결정 10/15) | skip(인스타엔 안 올림, 기록만). 로고는 절대 안 씀
   # ---- 인스타 전용 대기열 (주인 결정 10/15): 텔레그램에 올린 딜을 바로 올리지 않고 줄 세워 두었다가 골라 올림
-  daily_singles: 3                        # 딜 하나짜리 글 하루 최대 (점수 높은 순). 캐러셀·릴스·단가표는 따로 셈
+  # 주인 10/18: 딜 하나짜리 글은 할인 괜찮은 딜(publish.good_deal_min_discount_pct·top/must)만, 하루 개수·간격은 안전 한도만.
+  # 보통 딜은 점심 릴스·저녁 TOP5 에만. 인스타 API 게시 한도(24시간 100개)보다 한참 아래
+  daily_singles: 10                       # 딜 하나짜리 글 하루 안전 상한 (주인 10/18: 3 → 10, 점수 높은 순). 캐러셀·릴스·단가표는 따로 셈
   hours: "07:00-23:00"                    # 인스타에 올리는 시간 (한국 시각)
-  min_gap_minutes: 120                    # 인스타 글 사이 간격 (딜 하나짜리 글은 캐러셀·릴스·단가표와도 2시간 띄움)
+  min_gap_minutes: 30                     # 인스타 글 사이 간격 30~50분 무작위 (주인 10/18: 120 → 30~50)
+  min_gap_max_minutes: 50
+  slot_guard_minutes: 30                  # 릴스·TOP5·단가표 시각 앞 30분은 딜 하나짜리 글을 비워 둠 (주인 10/18: 2시간 → 30분)
   queue_expire_hours: 12                  # 대기열에서 12시간 넘게 기다린 딜은 안 올림. 올리기 직전엔 품절·가격 오름을 다시 확인
   carousel:                               # 저녁 '오늘 가격 내려간 딜 TOP5' 캐러셀 (하루 1개, 구간 안 무작위 분)
     enabled: true

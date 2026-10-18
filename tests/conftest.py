@@ -140,6 +140,7 @@ def ig_post_now():  # type: ignore[no-untyped-def]
         bot.settings.instagram.hours = "00:00-24:00"
         if not gap:
             bot.settings.instagram.min_gap_minutes = 0
+            bot.settings.instagram.min_gap_max_minutes = 0  # 주인 10/18: 간격은 min~max 무작위
         day = utcnow().astimezone(ZoneInfo(bot.settings.app.timezone)).date().isoformat()
         bot.db.kv_set(f"ig_plan:{day}", "{}")
         return await bot.ig.tick()

@@ -70,12 +70,14 @@ def _pub(r: TemplateRenderer) -> InstagramPublisher:
 # ---------------------------------------------------------------- 설정
 def test_config_keeps_the_current_style_until_the_owner_picks() -> None:
     """예전엔 no_photo: skip. 주인 결정 10/15: 확인된 사진이 없는 딜도 건너뛰지 않고 글자 카드로 (text_card).
-    인스타 전용 대기열 설정: 하루 3개·07~23시·2시간 간격·12시간 지나면 버림, 저녁 TOP5 캐러셀·점심 릴스·화금 단가표.
+    인스타 전용 대기열 설정: 주인 10/18 — 하루 10개(안전 상한)·07~23시·30~50분 간격·묶음 글 앞 30분 비움·12시간 지나면 버림,
+    저녁 TOP5 캐러셀·점심 릴스·화금 단가표.
     양식은 주인 결정 10/16 으로 B(가격 정보 카드) → P(종이 카드 '1+2 섞은 안'). B 는 되돌리기용으로 남음."""
     s = load_settings(ROOT / "config.yaml", load_env=False)
     ig = s.instagram
     assert ig.style == "P" and ig.no_photo == "text_card" and ig.info_posts is False
-    assert (ig.daily_singles, ig.hours, ig.min_gap_minutes, ig.queue_expire_hours) == (3, "07:00-23:00", 120, 12)
+    assert (ig.daily_singles, ig.hours, ig.min_gap_minutes, ig.queue_expire_hours) == (10, "07:00-23:00", 30, 12)
+    assert (ig.min_gap_max_minutes, ig.slot_guard_minutes, s.publish.good_deal_min_discount_pct) == (50, 30, 30)
     assert (ig.carousel.enabled, ig.carousel.window, ig.carousel.max_deals, ig.carousel.min_deals) == (True, "20:00-21:00", 5, 2)
     assert (ig.reels.enabled, ig.reels.window, ig.reels.max_deals, ig.reels.min_deals) == (True, "12:00-13:00", 3, 2)
     assert ig.unit_carousel.enabled and ig.unit_carousel.days == ["tue", "fri"] and ig.unit_carousel.window == "19:00-20:00"

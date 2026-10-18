@@ -2,15 +2,16 @@
 
 텔레그램 채널에 올린 딜은 바로 인스타에 올리지 않고 인스타 대기열(DB ig_queue — 재시작해도 남음)에 넣는다. 1분마다 tick():
 - 시간: 07:00~23:00 (instagram.hours) 에만. 한 번 볼 때 많아야 글 하나.
-- 딜 하나짜리 글: 하루 3개까지(daily_singles), 점수 높은 순, 인스타 글 사이 2시간 이상(min_gap_minutes) — 캐러셀·릴스·단가표가
-  잡힌 시각 앞 2시간도 비워 둔다. 올리기 직전에 품절·가격 오름을 다시 확인하고(채널 품절 기록 → 그 뒤 수집기가 본 가격 → 상품 페이지),
+- 딜 하나짜리 글 (주인 10/18): '할인 괜찮은 딜'(publisher/good_deal — top·must 또는 할인율 30% 이상)만, 가벼운 안전 한도로 —
+  하루 10개까지(daily_singles), 점수 높은 순, 인스타 글 사이 30~50분 무작위(min_gap_minutes~min_gap_max_minutes), 캐러셀·릴스·단가표가
+  잡힌 시각 앞 30분(slot_guard_minutes)은 비워 둔다. 보통 딜은 줄은 서되(사진 사본 — 릴스·TOP5 가 씀) 'bundle' 로 두고 단일 글로는 안 올린다. 올리기 직전에 품절·가격 오름을 다시 확인하고(채널 품절 기록 → 그 뒤 수집기가 본 가격 → 상품 페이지),
   품절이거나 값이 올랐으면 건너뛴다(사유 기록). 12시간(queue_expire_hours) 넘게 기다린 딜은 안 올린다.
   사진 없이 줄 선 딜은 주인 사진을 기다리는 동안(growth/late_photo — 발행 뒤 4시간) 미루고 사진 있는 딜을 먼저 올린다
   (사진이 오면 그 사진으로, 안 오면 그 뒤 글자 카드로). 같은 상품이 더 싸게 다시 올라오면 기다리던 줄을 새 딜·번호로 바꾼다.
   카드에 그리는 글도 올리기 전에 검사한다 (첫 부분 고지 — B 카드의 위 띠).
 - 점심 릴스(12~13시 아무 분): 그날 텔레그램에 올린 딜 중 점수 위 3개 → 10~15초 세로 영상 (서버 ffmpeg).
 - 저녁 캐러셀(20~21시 아무 분): '오늘 가격 내려간 딜 TOP5' — 비교 근거(쿠팡 최저가·평소 가격·우리 기록 최저)가 있는 딜만.
-- 화·금 단가표(19~20시 아무 분, TOP5 와 min_gap_minutes(2시간) 넘게 — 구간이 붙어 있어 안 되면 적어도 한 시간 떨어지게.
+- 화·금 단가표(19~20시 아무 분, TOP5 와 min_gap_minutes 와 한 시간 중 큰 값 넘게 — 안 되면 적어도 한 시간 떨어지게.
   되는 분 중에서 바로 고른다): '이번 주 생필품 1개당 가격' — 봇이 기록한 가격만. 장(목록) 하나엔 한 단위만('휴지 1롤당'·'물티슈 1매당'은
   따로), 그 단위의 기준선은 우리가 올린 딜이 3건 이상일 때만 그 장에.
 릴스·캐러셀·단가표는 날마다 한 번 (kv ig_done:종류:날짜). 딜이 모자라면 그날은 건너뛴다. 하루 시각표는 kv ig_plan:날짜 (재시작해도 같은 시각).
@@ -41,6 +42,7 @@ from dealbot.models import Deal, PublishResult
 from dealbot.monitoring.admin import kakao_fit
 from dealbot.page_price import check_page_price
 from dealbot.publisher import insta_style
+from dealbot.publisher.good_deal import good_deal_reason
 from dealbot.publisher.insta_style import Pick, UnitRow
 from dealbot.publisher.instagram import CHECK_FAILED, REEL_TIMEOUT
 from dealbot.shops import deal_disclosure
@@ -62,6 +64,7 @@ UNIT_LISTING = 4  # 단가표 한 장(한 단위)에 넣는 딜 수
 OWN_DROP_DAYS = 30  # 릴스 취소선의 '바로 앞 가격'은 우리 가격 기록에서 이 안의 것만
 OWN_DROP_MIN_PCT = 10  # 바로 앞 가격보다 이만큼 이상 내렸을 때만 '전 → 지금' (비교 근거와 같은 10% 기준)
 SCHEDULED_GAP_MINUTES = 60  # 단가표와 TOP5 캐러셀은 적어도 이만큼 떨어지게 (되면 min_gap_minutes 만큼)
+BUNDLE_ONLY = "bundle"  # ig_queue 상태: 보통 딜 (단일 글 없이 릴스·TOP5 사진 사본만 — 주인 10/18)
 KV_BACKOFF = "ig_backoff_until"
 KV_FFMPEG = "ig_ffmpeg_alerted"
 KV_KEEP_DAYS = 7
@@ -150,12 +153,21 @@ class InstagramScheduler:
                 photo_file = str(path)
             except OSError as e:
                 log.warning("instagram queue: photo copy failed (%s) — text card later", e)
-        item_id = self.db.ig_enqueue(deal, queue_id=queue_id, score=deal.verdict.score, photo_file=photo_file, now=now)
+        good = self._good(deal)
+        if not good and queue_id is not None and self.db.ig_items_for(queue_id):
+            item_id = None  # 같은 채널 글은 한 번만 (보통 딜은 사진 사본만 있으면 됨)
+        else:
+            item_id = self.db.ig_enqueue(deal, queue_id=queue_id, score=deal.verdict.score, photo_file=photo_file, now=now)
         if item_id is None:
             if photo_file:
                 Path(photo_file).unlink(missing_ok=True)
             log.info("instagram queue: %s is already waiting", pid)
             return None
+        if not good:
+            # 주인 10/18: 보통 딜은 딜 하나짜리 글로 안 올림 — 릴스·TOP5 만 (사진 사본은 그쪽이 씀). 대기열 시간이 지나 '버림'으로 남지 않게 따로 둔다
+            self.db.ig_update(item_id, status=BUNDLE_ONLY, reason="not a good-discount deal (reel/TOP5 only)", now=now)
+            log.info("instagram: %s kept for reel/TOP5 only (not a good-discount deal)", pid)
+            return item_id
         self.db.log_event("INFO", "instagram", f"{pid} queued for instagram (#{item_id}, score {deal.verdict.score:.0f})")
         log.info("instagram queued #%d: %s", item_id, deal.product.name[:40])
         return item_id
@@ -309,17 +321,20 @@ class InstagramScheduler:
         day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
         if len(self.db.ig_posts_since(day_start, kind="single")) >= cfg.daily_singles:
             return None
-        gap = timedelta(minutes=cfg.min_gap_minutes)
         last = self.db.ig_last_post_at()
-        if last is not None and now - last < gap:
+        if last is not None and now - last < self.gap_after(last):
             return None
+        guard = timedelta(minutes=cfg.slot_guard_minutes)
         for kind, slot in plan.items():
             if self._done(kind, local):
                 continue  # 이미 올렸거나 건너뛴 묶음 글 (올리다 끊긴 것도 — 같은 날 다시 안 올림)
-            if _at(local, _minutes(slot)) - local < gap:
-                return None  # 곧 캐러셀·릴스·단가표 차례 — 그 앞 2시간은 비워 둔다
+            if _at(local, _minutes(slot)) - local < guard:
+                return None  # 곧 캐러셀·릴스·단가표 차례 — 그 앞 30분은 비워 둔다
         tries = 0
         for item in self.db.ig_queued(QUEUE_LOOK):
+            if not self._good(item["deal"]):  # 이 규칙 전에 줄 선 보통 딜 (주인 10/18) — 릴스·TOP5 에만
+                self.db.ig_update(item["id"], status=BUNDLE_ONLY, reason="not a good-discount deal (reel/TOP5 only)", now=now)
+                continue
             if self._photo_hold(item, now):
                 continue  # 주인 사진을 기다리는 사진 없는 딜 — 사진 있는 딜이 먼저
             if tries >= RECHECK_TRIES:
@@ -334,6 +349,16 @@ class InstagramScheduler:
                 continue
             return await self._post_single(item, now)
         return None
+
+    def _good(self, deal: Deal) -> bool:
+        """할인 괜찮은 딜인가 (publisher/good_deal — 주인 10/18). 아니면 딜 하나짜리 글로 안 올림."""
+        return good_deal_reason(deal, getattr(self.bot, "renderer", None), self.bot.settings.publish.good_deal_min_discount_pct) is not None
+
+    def gap_after(self, last: datetime) -> timedelta:
+        """인스타 글 사이 간격 (주인 10/18: 30~50분 무작위). 직전 글 시각으로 정해서 1분마다 볼 때 같은 값 (재시작해도)."""
+        lo = self.cfg.min_gap_minutes
+        hi = max(lo, self.cfg.min_gap_max_minutes)
+        return timedelta(minutes=random.Random(f"ig_gap|{last.isoformat()}").randint(lo, hi))
 
     def _photo_hold(self, item: dict[str, Any], now: datetime) -> bool:
         """사진 없이 줄 선 딜이고 주인 사진을 기다리는 중이면(growth/late_photo, 발행 뒤 4시간) True — 그동안 딜 글을 미룬다.

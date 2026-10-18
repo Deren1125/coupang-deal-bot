@@ -1,7 +1,8 @@
 """스레드 리듬·주제 태그·품절 업데이트 답글·답글 초안·투표 (주인 결정 10/15).
 
 - 리듬: 텔레그램에 올린 딜(·정보 글)은 스레드 대기열(threads_jobs)에 넣고, 07:00~24:00 에만 · 글 사이 45분 이상 ·
-  딜 글은 하루 10개까지, 점수 높은 것부터 올린다. 오래(8시간) 기다린 글은 내리고, 10분 넘게 기다린 딜은 올리기 직전에 품절을 다시 본다.
+  딜 글은 하루 10개까지, 점수 높은 것부터 올린다. 주인 10/18: '할인 괜찮은 딜'(publisher/good_deal — top·must 또는 할인율 30% 이상)은
+  먼저, 가벼운 안전 한도로만 — 글 사이 15~30분 무작위 · 딜 글 하루 20개까지 (스레드 API 한도 24시간 250개보다 한참 아래). 오래(8시간) 기다린 글은 내리고, 10분 넘게 기다린 딜은 올리기 직전에 품절을 다시 본다.
 - 사진: 확인된 상품 사진이 있으면 그 사진, 없으면 봇이 만든 4:5 글자 카드 (글만 올리지 않음). 정보 글은 게시판 사진을 쓰지 않는다.
 - 주제 태그: 분류별 (config threads.topic_tags — 주방·식품 '집밥', 생활용품 '살림', 운동 '헬스', 패션 '패션', 기본 '핫딜').
 - 품절: 내 스레드 글 아래에만 '업데이트) HH:MM 기준 품절됐어' 답글 하나 (글마다 한 번). 남의 글·남의 답글에는 아무것도 안 단다.
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import html
 import logging
+import random
 from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,6 +25,7 @@ from dealbot.config import ThreadsConfig
 from dealbot.media.card import NEUTRAL_CTA
 from dealbot.models import Deal, Product, PublishResult
 from dealbot.monitoring.admin import kakao_fit
+from dealbot.publisher.good_deal import is_good_deal
 from dealbot.publisher.scopes import THREADS_READ_REPLIES
 from dealbot.publisher.threads import KV_USERNAME, POLL_OPTION_KEYS
 from dealbot.storage.sns_store import ThreadsJob
@@ -79,7 +82,7 @@ class ThreadsFlow:
     # ------------------------------------------------------------ 넣기
     def enqueue_deal(self, deal: Deal, *, queue_id: int | None, has_photo: bool) -> int | None:
         """채널에 올린 딜을 스레드 대기열에. has_photo: 텔레그램 글에 확인된 상품 사진이 있었는지 (없으면 글자 카드로 올림)."""
-        payload = {"deal": deal.to_dict(), "has_photo": has_photo}
+        payload = {"deal": deal.to_dict(), "has_photo": has_photo, "good": is_good_deal(self.bot, deal)}
         return self.bot.db.threads_enqueue(KIND_DEAL, deal.product.product_id, payload, queue_id=queue_id,
                                            score=float(deal.verdict.score or 0.0), now=self.bot.clock())
 
@@ -91,27 +94,58 @@ class ThreadsFlow:
 
     # ------------------------------------------------------------ 리듬
     def rhythm_block(self, now: datetime) -> str | None:
-        """지금 올리면 안 되는 이유 (리듬). 괜찮으면 None."""
+        """지금 아무 글도 올리면 안 되는 이유 (시간대·가장 짧은 간격). 괜찮으면 None. 글마다 간격·하루 개수는 next_job 이 본다."""
         rc = self.cfg.rhythm
         if not rc.enabled:
             return None
         if not in_time_window(now.astimezone(ZoneInfo(self.tz)), rc.hours):
             return f"시간대 밖 ({rc.hours})"
         last = self.bot.db.threads_last_posted_at()
-        if last is not None and now - last < timedelta(minutes=rc.min_gap_minutes):
-            return f"글 사이 {rc.min_gap_minutes:g}분"
+        shortest = min(rc.min_gap_minutes, rc.good_min_gap_minutes)
+        if last is not None and now - last < timedelta(minutes=shortest):
+            return f"글 사이 {shortest:g}분"
         return None
 
-    def deal_cap_reached(self, now: datetime) -> bool:
+    def good_gap(self, last: datetime) -> timedelta:
+        """괜찮은 딜 앞 간격 (주인 10/18: 15~30분 무작위). 직전 글 시각으로 정해서 1분마다 볼 때 같은 값 (재시작해도)."""
         rc = self.cfg.rhythm
-        if not rc.enabled or not rc.max_deal_posts_per_day:
+        lo, hi = rc.good_min_gap_minutes, max(rc.good_min_gap_minutes, rc.good_max_gap_minutes)
+        return timedelta(minutes=random.Random(f"th_gap|{last.isoformat()}").uniform(lo, hi))
+
+    def is_good(self, job: ThreadsJob) -> bool:
+        if job.kind != KIND_DEAL:
             return False
-        return self.bot.db.threads_posted_count(day_start_utc(now, self.tz), kind=KIND_DEAL) >= rc.max_deal_posts_per_day
+        if "good" in job.payload:
+            return bool(job.payload["good"])
+        try:  # 이 규칙 전에 줄 선 글
+            return is_good_deal(self.bot, Deal.from_dict(job.payload["deal"]))
+        except (KeyError, TypeError, ValueError):
+            return False
+
+    def deal_cap_reached(self, now: datetime, *, good: bool = False) -> bool:
+        """그날 딜 글이 상한에 닿았나. 보통 딜은 max_deal_posts_per_day(10), 괜찮은 딜은 good_max_deal_posts_per_day(20) — 둘 다 그날 딜 글 전체로 셈."""
+        rc = self.cfg.rhythm
+        cap = rc.good_max_deal_posts_per_day if good else rc.max_deal_posts_per_day
+        if not rc.enabled or not cap:
+            return False
+        return self.bot.db.threads_posted_count(day_start_utc(now, self.tz), kind=KIND_DEAL) >= cap
 
     def next_job(self, now: datetime) -> ThreadsJob | None:
-        cap = self.deal_cap_reached(now)
-        for job in self.bot.db.threads_waiting(50):
-            if job.kind == KIND_DEAL and cap:
+        """올릴 글: 괜찮은 딜 먼저(점수 순), 그다음 보통 딜·정보 글(점수 순). 글마다 간격·하루 개수를 본다."""
+        rc = self.cfg.rhythm
+        jobs = self.bot.db.threads_waiting(50)
+        if not rc.enabled:
+            return jobs[0] if jobs else None
+        last = self.bot.db.threads_last_posted_at()
+        since = now - last if last is not None else None
+        caps = {g: self.deal_cap_reached(now, good=g) for g in (False, True)}
+        flagged = [(self.is_good(j), j) for j in jobs]
+        flagged.sort(key=lambda gj: not gj[0])  # 안정 정렬 — 같은 쪽 안에서는 점수 순 그대로
+        for good, job in flagged:
+            if job.kind == KIND_DEAL and caps[good]:
+                continue
+            gap = self.good_gap(last) if good and last is not None else timedelta(minutes=rc.min_gap_minutes)
+            if since is not None and since < gap:
                 continue
             return job
         return None

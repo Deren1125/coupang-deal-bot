@@ -1,6 +1,6 @@
 """인스타그램 대기열·시간표 (주인 결정 10/15).
 
-- 텔레그램에 올린 딜은 인스타 대기열(DB — 재시작해도 남음)에 줄 서고, 시간표가 하루 3개까지·07~23시·2시간 간격·점수 순으로 올린다
+- 텔레그램에 올린 딜은 인스타 대기열(DB — 재시작해도 남음)에 줄 서고, 시간표가 하루 10개까지·07~23시·30~50분 간격·점수 순으로 올린다 (주인 10/18 — 할인 괜찮은 딜만)
 - 올리기 직전에 품절·가격 오름을 다시 보고 건너뛴다 (사유 기록), 12시간 넘게 기다린 딜은 버린다
 - 저녁 TOP5 캐러셀(공식 흐름: is_carousel_item 컨테이너 → CAROUSEL → 게시), 점심 릴스(가짜 ffmpeg, REELS → 처리 끝 → 게시),
   화·금 생필품 1개당 가격 캐러셀
@@ -71,6 +71,8 @@ def bot(settings: Settings, clock: dict[str, datetime]):  # type: ignore[no-unty
     settings.secrets.public_domain = "bot.example.com"
     settings.threads.enabled = False
     settings.copy_cfg.enabled = False
+    # 흐름 테스트: 모든 딜을 '할인 괜찮은 딜'로 (주인 10/18 — 고르는 기준·보통 딜은 test_ig_good_deals.py 가 30% 로 본다)
+    settings.publish.good_deal_min_discount_pct = 0
     b = DealBot(settings)
     b.ig.rng = random.Random(7)
     assert b.instagram.dry_run  # 연습 모드: 인스타 게시기는 기록만
@@ -153,39 +155,51 @@ async def test_published_deal_waits_in_the_instagram_queue_and_survives_a_restar
 
 
 async def test_singles_follow_hours_gap_daily_cap_and_score(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """주인 10/18: 딜 하나짜리 글 하루 10개(안전 상한)·글 사이 30~50분 무작위·07~23시·점수 순."""
     _plan(bot, {})
-    for i, score in enumerate([10, 50, 30, 40, 20], 1):
+    scores = [10, 50, 30, 40, 20, 15, 25, 35, 45, 55, 5, 60]
+    for i, score in enumerate(scores, 1):
         qid, deal = published(bot, f"coupang:{i}", f"상품 {i}호 500ml 2개", 9900, when=at(6, i), score=score)
         await to_instagram(bot, clock, qid, deal)
+    order = [f"coupang:{i}" for _, i in sorted(((sc, i) for i, sc in enumerate(scores, 1)), reverse=True)]
     assert await tick(bot, clock, at(6, 50)) is None  # 07시 전
-    assert await tick(bot, clock, at(7, 0)) == "single: coupang:2"  # 점수 가장 높은 것
-    assert await tick(bot, clock, at(8, 30)) is None  # 2시간 안
-    assert await tick(bot, clock, at(9, 0)) == "single: coupang:4"
-    assert await tick(bot, clock, at(11, 5)) == "single: coupang:3"
-    assert await tick(bot, clock, at(13, 30)) is None  # 하루 3개
-    assert singles(bot) == ["coupang:2", "coupang:4", "coupang:3"]
+    assert await tick(bot, clock, at(7, 0)) == f"single: {order[0]}"  # 점수 가장 높은 것
+    assert await tick(bot, clock, at(7, 29)) is None  # 30분 안
+    when = at(7, 0)
+    for k in range(1, 10):
+        when += timedelta(minutes=50)  # 30~50분 무작위 간격의 끝 — 늘 지남
+        assert await tick(bot, clock, when) == f"single: {order[k]}", k
+    assert await tick(bot, clock, when + timedelta(minutes=50)) is None  # 하루 10개 (안전 상한)
+    assert singles(bot) == order[:10]
     assert await tick(bot, clock, at(23, 10)) is None  # 23시 뒤
 
 
+def test_single_gap_is_a_random_30_to_50_minutes_kept_per_post(bot) -> None:  # type: ignore[no-untyped-def]
+    gaps = {bot.ig.gap_after(at(9) + timedelta(minutes=i)) for i in range(200)}
+    assert min(gaps) >= timedelta(minutes=30) and max(gaps) <= timedelta(minutes=50) and len(gaps) > 5
+    assert bot.ig.gap_after(at(9)) == bot.ig.gap_after(at(9))  # 1분마다 볼 때(재시작해도) 같은 간격
+
+
 async def test_singles_keep_clear_of_the_evening_carousel(bot, clock) -> None:  # type: ignore[no-untyped-def]
+    """주인 10/18: 릴스·TOP5·단가표 시각 앞 30분만 비워 둔다 (예전 2시간)."""
     _plan(bot, {"top5": "20:30"})
     for i in (1, 2):
         qid, deal = published(bot, f"coupang:{i}", f"상품 {i}호", 9900, when=at(17, i))
         await to_instagram(bot, clock, qid, deal)
-    assert await tick(bot, clock, at(18, 40)) is None  # 캐러셀 2시간 앞
-    assert await tick(bot, clock, at(18, 20)) == "single: coupang:1"
-    # 캐러셀이 20:30 에 올라감 (딜이 모자라 건너뛴 게 아니라) → 그 뒤 2시간도 비움
+    assert await tick(bot, clock, at(20, 1)) is None  # 캐러셀 30분 앞
+    assert await tick(bot, clock, at(19, 59)) == "single: coupang:1"
+    # 캐러셀이 20:30 에 올라감 (딜이 모자라 건너뛴 게 아니라) → 그 뒤도 글 사이 간격(30~50분)
     bot.db.kv_set(f"ig_done:top5:{DAY.date().isoformat()}", "posted 1 (3 deals)")
     bot.db.ig_record_post("top5", media_id="1", items=[], now=at(20, 30))
-    assert await tick(bot, clock, at(22, 0)) is None
-    assert await tick(bot, clock, at(22, 31)) == "single: coupang:2"
+    assert await tick(bot, clock, at(20, 59)) is None
+    assert await tick(bot, clock, at(21, 21)) == "single: coupang:2"
 
 
 async def test_skipped_carousel_frees_the_evening_for_singles(bot, clock) -> None:  # type: ignore[no-untyped-def]
     _plan(bot, {"top5": "20:10"})
     qid, deal = published(bot, "coupang:1", "상품", 9900, when=at(19))  # 비교 근거 없음 → TOP5 후보 아님
     await to_instagram(bot, clock, qid, deal)
-    assert await tick(bot, clock, at(19, 0)) is None  # 캐러셀 앞 2시간
+    assert await tick(bot, clock, at(19, 45)) is None  # 캐러셀 앞 30분
     assert (await tick(bot, clock, at(20, 11)) or "").startswith("top5: skipped: 0 deal(s)")
     assert bot.db.kv_get(f"ig_done:top5:{DAY.date().isoformat()}").startswith("skipped")
     assert await tick(bot, clock, at(20, 12)) == "single: coupang:1"
@@ -773,7 +787,7 @@ def test_scheduler_module_constants() -> None:
 
 # ---------------------------------------------------------------- 스레드 쪽(sns-th)과 합친 뒤: 대기열은 따로, 기록·사진은 같이
 async def test_threads_and_instagram_keep_their_own_queues(bot, clock) -> None:  # type: ignore[no-untyped-def]
-    """채널 글 하나 → 스레드 대기열(threads_jobs, 07~24시·45분)과 인스타 대기열(ig_queue, 하루 3개·2시간)에 따로 줄 선다."""
+    """채널 글 하나 → 스레드 대기열(threads_jobs, 07~24시·45분)과 인스타 대기열(ig_queue, 하루 10개·30~50분 — 주인 10/18)에 따로 줄 선다."""
     bot.settings.threads.enabled = True
     bot.clock = lambda: at(6)  # 스레드 리듬 밖 (07시 전) — 스레드도 기다림
     qid, deal = published(bot, "coupang:1", "도브 샴푸 680ml 2개", 15900, when=at(6))
@@ -815,7 +829,7 @@ async def test_sns_zero_alert_counts_the_instagram_queue_as_waiting(bot, clock) 
     bot.db.record_post(deal, channel_id="-100", message_id=qid + 100, dry_run=False, now=at(8))  # 실제로 채널에 올라간 글
     await to_instagram(bot, clock, qid, deal)
     assert await alerts.sns_zero_check(bot, at(9))
-    assert "인스타 0개 (대기 중 (하루 3개·07:00-23:00·120분 간격) 1)" in sent[0]
+    assert "인스타 0개 (대기 중 (하루 10개·07:00-23:00·30~50분 간격) 1)" in sent[0]
 
 
 async def test_late_owner_photo_reaches_the_waiting_instagram_item(bot, clock) -> None:  # type: ignore[no-untyped-def]
