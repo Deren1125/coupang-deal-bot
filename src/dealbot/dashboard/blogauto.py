@@ -652,6 +652,21 @@ def _share(v: Any) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()[:SHARE_MAX]
 
 
+DEAL_KEY_RE = re.compile(r"^[A-Za-z0-9_.:/?=&%+-]{3,200}$")  # 딜봇 product_id ('coupang:123:456' · 'naver:…' · 'coupang:url:해시')
+POST_DEALS_MAX = 12
+
+
+def _post_deals(v: Any) -> list[dict[str, str | None]]:
+    """핫딜 최근 글에 들어간 딜 (recent.hotdeal[].deals — 딜봇 published_deals.jsonl 의 product_id·posted_at 그대로).
+    대시보드 딜 줄의 '블로그 ↗' 를 이것으로만 잇는다 (제목으로는 잇지 않음). 글자 목록(product_id 만)도 받는다."""
+    out: list[dict[str, str | None]] = []
+    for x in v[:POST_DEALS_MAX] if isinstance(v, list) else []:
+        key, at = (x, None) if isinstance(x, str) else ((x.get("product_id"), x.get("posted_at")) if isinstance(x, dict) else (None, None))
+        if isinstance(key, str) and DEAL_KEY_RE.match(key):
+            out.append({"product_id": key, "posted_at": _one_line(at, 40)})
+    return out
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -667,7 +682,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
         out["recent"][blog] = [
             {"pid": _count(x.get("pid"), top=10**9), "title": _one_line(x.get("title"), 80) or "",
              "url": _naver_url(x.get("url")), "at": _one_line(x.get("at"), 40),
-             **({"share": sh} if blog == "hotdeal" and (sh := _share(x.get("share"))) else {})}
+             **({"share": sh} if blog == "hotdeal" and (sh := _share(x.get("share"))) else {}),
+             **({"deals": ds} if blog == "hotdeal" and (ds := _post_deals(x.get("deals"))) else {})}
             for x in rows[:10] if isinstance(x, dict) and _one_line(x.get("title"), 80)]
     scan = data.get("scan")
     if isinstance(scan, dict) and isinstance(scan.get("items"), list):

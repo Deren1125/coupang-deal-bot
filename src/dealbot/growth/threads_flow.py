@@ -181,6 +181,8 @@ class ThreadsFlow:
             bot.db.sns_log_add("threads", "posted", product_id=pid, now=now)
             bot.db.log_event("INFO", "threads", f"{pid} {'dry-run' if result.dry_run else post_id}")
             log.info("threads posted (%s): %s", job.kind, pid)
+            if job.kind == KIND_DEAL and post_id and not result.dry_run:
+                await self._keep_permalink(job.id, result.message_id)
             if result.error:  # 올라가긴 했지만 사진이 빠졌거나 (선택) 답글이 실패한 경우
                 bot.db.log_event("WARNING", "threads", f"{pid}: {result.error}")
                 if result.error.startswith("답글"):
@@ -201,6 +203,18 @@ class ThreadsFlow:
         log.warning("threads post failed: %s", error)
         await bot._sns_failed("스레드", "threadsauth", f"⚠️ <b>스레드 발행 실패</b>\n<code>{html.escape(error)}</code>", error)
         return result
+
+    async def _keep_permalink(self, job_id: int, message_id: int | None) -> None:
+        """올린 딜 글의 주소를 남긴다 (대시보드 딜 줄 '스레드 ↗'). 못 읽어도 발행은 그대로 — 그 줄에 버튼만 없음."""
+        lookup = getattr(self.bot, "_threads_permalink", None)
+        if lookup is None:
+            return
+        try:
+            link = await lookup(message_id)
+            if link:
+                self.bot.db.threads_set_permalink(job_id, link)
+        except Exception as e:  # noqa: BLE001
+            log.info("threads permalink not kept for job %s: %s", job_id, e)
 
     async def _post_deal(self, job: ThreadsJob, now: datetime) -> PublishResult | None:
         bot = self.bot

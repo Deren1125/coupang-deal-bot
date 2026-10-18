@@ -1202,6 +1202,16 @@ class DealBot:
             log.warning("threads permalink lookup failed: %s", e)
             return None
 
+    async def _instagram_permalink(self, message_id: int | None) -> str | None:
+        token = self.instagram.stored_token()
+        if token is None or message_id is None:
+            return None
+        try:
+            return await self.instagram.client.permalink(token, str(message_id))
+        except InstagramError as e:
+            log.warning("instagram permalink lookup failed: %s", e)
+            return None
+
     async def push_test(self) -> str:
         """휴대폰 푸시(ntfy/Pushover) 연결 확인용 테스트 알림."""
         pcfg = self.settings.monitoring.push
@@ -3691,13 +3701,7 @@ class DealBot:
         result = await self.instagram.publish(deal, card_url, deal_no=deal_no)
         if not result.ok:
             return preview + f"\n\n❌ 올리지 못했습니다: <code>{html.escape(result.error or '')}</code>"
-        link = None
-        token = self.instagram.stored_token()
-        if token is not None and result.message_id is not None:
-            try:
-                link = await self.instagram.client.permalink(token, str(result.message_id))
-            except InstagramError as e:
-                log.warning("instagram permalink lookup failed: %s", e)
+        link = await self._instagram_permalink(result.message_id)
         lines = [preview, "", "✅ 인스타그램에 올렸습니다" + (f": {link}" if link else "")]
         if queue_id is None:
             lines.append("샘플 글이니 확인한 뒤 인스타그램 앱에서 지워 주세요.")

@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS threads_jobs (
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL,
     posted_at        TEXT,
-    soldout_reply_at TEXT
+    soldout_reply_at TEXT,
+    permalink        TEXT                        -- 올린 글 주소 (https://www.threads.com/@…/post/…) — 대시보드 딜 줄 '스레드 ↗'
 );
 CREATE INDEX IF NOT EXISTS idx_threads_jobs_status ON threads_jobs(status, score DESC, created_at);
 CREATE INDEX IF NOT EXISTS idx_threads_jobs_posted ON threads_jobs(posted_at);
@@ -229,6 +230,19 @@ class SnsStoreMixin:
             (product_id, to_iso(since)),
         )
         return [self._job(r) for r in rows]
+
+    def threads_set_permalink(self, job_id: int, permalink: str) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE threads_jobs SET permalink = ? WHERE id = ?", (permalink[:500], job_id))
+
+    def threads_permalink_for(self, queue_id: int, since: datetime) -> str | None:
+        """이 대기열 번호의 딜을 올린 스레드 글 주소 (가장 최근). 연습 글·주소 없는 글은 뺌."""
+        r = self._one(
+            "SELECT permalink FROM threads_jobs WHERE queue_id = ? AND kind = 'deal' AND status = 'posted' AND dry_run = 0 "
+            "AND posted_at >= ? AND permalink IS NOT NULL AND permalink != '' ORDER BY posted_at DESC, id DESC LIMIT 1",
+            (queue_id, to_iso(since)),
+        )
+        return str(r["permalink"]) if r else None
 
     def threads_mark_soldout_reply(self, job_id: int, now: datetime | None = None) -> bool:
         """품절 업데이트 답글을 달았다고 적는다. 이미 달았으면 False (글마다 한 번)."""
