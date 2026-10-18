@@ -283,9 +283,8 @@ class StateBuilder:
             when = datetime.fromtimestamp(exp, ZoneInfo(self.tz))
             same_day = when.date() == datetime.now(ZoneInfo(self.tz)).date()
             status = f"{status} · {when:%H:%M}까지" if same_day else f"{status} · {when.month}/{when.day} {when:%H:%M}까지"
+        # 질문은 자르지 않는다 — 답하려면 전체 문장이 보여야 함 (주인 10/18: '질문이 잘려')
         questions = list((post or {}).get("questions") or [])
-        if not long:
-            questions = [{"n": q["n"], "q": truncate(q["q"], 60)} for q in questions]
         slots = [dict(s, thumb=f"/dashboard/thumb/{s['thumb']}" if s.get("thumb") else None) for s in (post or {}).get("slots") or []]
         iid = iidmod.post_iid(blog, pid)
         return {"iid": iid, "src": "blog", "blog": blog, "kind": first or "waiting", "sev": "todo", "urgent": bool(needs),

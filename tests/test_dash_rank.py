@@ -126,3 +126,13 @@ async def test_state_lists_todo_in_rank_order(bot: DealBot) -> None:
     first = body["todo"][1]
     assert first["cue"] == "급해요" and first["group"] == "지금 꼭" and body["todo"][-1]["group"] == "여유 있을 때"
     assert "_hot" not in json.dumps(body, ensure_ascii=False)
+
+
+def test_questions_are_shown_in_full_on_the_todo_list(bot: DealBot) -> None:
+    """주인 10/18: 할 일 목록의 답하기 칸에서 질문이 '…' 으로 잘려 무엇을 묻는지 몰랐다 — 질문은 자르지 않는다."""
+    from dealbot.dashboard.state import StateBuilder
+
+    long_q = "검수 중 수정: 후보 요약의 '정부기여금 6% 또는 12% 매칭'과 '중복 가입 불가 조건'은 이번에 연 소득 기준이 바뀌어 다시 확인이 필요합니다. 맞나요?"
+    post = {"needs": ["answers"], "title": "청년미래적금 2차", "questions": [{"n": 1, "q": long_q}]}
+    item = StateBuilder(bot)._post_item("finance", post, pid=7)
+    assert item["detail"]["questions"][0]["q"] == long_q
