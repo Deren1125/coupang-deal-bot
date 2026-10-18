@@ -786,6 +786,9 @@ function detail(it) {
   if (pr && (pr.must || []).length) out.push(el('p', {class: 'h3'}, '필요한 사진'), el('ul', {class: 'ls'}, pr.must.map(t => el('li', {text: t}))));
   if (pr && (pr.links || []).length) out.push(el('div', {class: 'tools'}, pr.links.map(l => ext('lnk', l.label, l.url))));
   out.push(...picsBox(it));
+  // 기사에서 찾은 인스타 게시물 · 넣기 = 인스타 링크 칸과 같은 blog.photos links
+  if ((d.ig || []).length) out.push(el('p', {class: 'h3'}, '넣으면 좋을 인스타 게시물'), ...d.ig.map(g => el('div', {class: 'box'}, el('p', {text: g.text}),
+    el('div', {class: 'tools'}, g.open && ext('lnk', '인스타 열기', g.open), g.src && ext('lnk mute', '기사', g.src), g.put && btn('lnk', g.put.label, e => exec(g.put, {}, {btn: e.currentTarget, iid: it.iid}))))));
   if ((d.slots || []).length) {
     out.push(el('p', {class: 'h3'}, '사진 자리'), el('div', {class: 'slots'}, d.slots.map(s => btn('slot' + (s.thumb ? '' : ' empty'),
       s.thumb ? [el('img', {src: s.thumb, alt: `자리 ${s.slot}`}), el('b', {}, s.slot)] : `자리 ${s.slot}: ${s.label || '빈 자리'}`, () => slotSheet(it, s)))));

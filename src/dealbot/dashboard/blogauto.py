@@ -515,8 +515,32 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         "score": _count(v.get("score"), top=100), "popular": v.get("popular") is True, "owner_edited": v.get("owner_edited") is True,
         "needs": list(dict.fromkeys(needs)), "photo_request": photo_request, "slots": slots, "questions": questions,
         "deadline": _one_line(v.get("deadline"), 40), "naver_url": _naver_url(v.get("naver_url")),
-        "schedule": _sched_post(v.get("schedule")), "pics": _pics(v.get("pics")),
+        "schedule": _sched_post(v.get("schedule")), "pics": _pics(v.get("pics")), "ig_suggest": _ig_suggest(v.get("ig_suggest")),
     }
+
+
+# 넣으면 좋을 인스타 게시물 (주인 10/18 — Blog-Auto ig_suggest: 그 글이 쓴 기사 속 임베드·링크·'인스타그램에 올렸다' 문장).
+# 주소 글자만 본다 — 인스타그램에 접속하지 않는다. url = 게시물 대표 주소만 (있으면 '넣기'), handle = 계정 이름 (없으면 None)
+IG_POST_RE = re.compile(r"^https://www\.instagram\.com/(?:p|reel)/[A-Za-z0-9_-]{5,40}/$")
+IG_HANDLE_RE = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,28}[A-Za-z0-9_])?$")
+IG_SUGGEST_MAX = 6
+
+
+def _ig_suggest(v: Any) -> list[dict[str, Any]]:
+    """[{url, handle, what, when, source, host, inserted}] 최대 6 — 설명이 없거나 열 곳(게시물·계정·기사)이 없는 줄은 뺀다."""
+    out: list[dict[str, Any]] = []
+    for x in v[:IG_SUGGEST_MAX] if isinstance(v, list) else []:
+        if not isinstance(x, dict):
+            continue
+        url = x.get("url") if isinstance(x.get("url"), str) and IG_POST_RE.match(x["url"]) else None
+        handle = x.get("handle") if isinstance(x.get("handle"), str) and IG_HANDLE_RE.match(x["handle"]) else None
+        what, src = _one_line(safe_text(x.get("what"), 200), 80), https_url(x.get("source"))
+        if not what or not (url or handle or src) or (url and any(r["url"] == url for r in out)):
+            continue
+        out.append({"url": url, "handle": handle, "what": what, "when": _one_line(safe_text(x.get("when"), 40), 20) or "",
+                    "source": src if src and len(src) <= 500 else None, "host": _one_line(x.get("host"), 60) or "",
+                    "inserted": x.get("inserted") is True})
+    return out
 
 
 # 링크에서 사진 고르기 (주인 10/18 — Blog-Auto pickphotos): 후보 사진 (썸네일 blog_view/thumbs · 원본 blog_view/pics)

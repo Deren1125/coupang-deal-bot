@@ -373,10 +373,25 @@ class StateBuilder:
                 "since": _iso_ts((post or {}).get("saved_at"), self.tz), "expires_at": exp, "primary": primary, "more": more,
                 "detail": {"needs": needs, "photo_request": (post or {}).get("photo_request"), "slots": slots,
                            "questions": questions, "deadline": (post or {}).get("deadline"),
-                           "owner_edited": bool((post or {}).get("owner_edited")), "pics": pics,
+                           "owner_edited": bool((post or {}).get("owner_edited")), "pics": pics, "ig": self._ig_view(blog, pid, post),
                            "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
                 "links": list((pr or {}).get("links") or [])[:LINKS_MAX] if "photos" in needs else [],
                 "_hot": rank.post_hot(post)}
+
+    @staticmethod
+    def _ig_view(blog: str, pid: int, post: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """사진 칸 '넣으면 좋을 인스타 게시물' (Blog-Auto ig_suggest): 줄마다 {text, open(게시물 또는 계정 주소), src(기사), put}.
+        put = 사진 올리기의 인스타 링크 칸과 같은 blog.photos links (빈 자리에) — 게시물 주소가 있고 아직 안 넣은 것만."""
+        if blog != "issue" or not post or post.get("status") == "published":
+            return []
+        out = []
+        for x in post.get("ig_suggest") or []:
+            url = x["url"] or (f"https://www.instagram.com/{x['handle']}/" if x["handle"] else None)
+            put = act("blog.photos", "넣기", {"blog": "issue", "pid": pid, "links": [{"slot": 0, "url": x["url"]}]}) \
+                if x["url"] and not x["inserted"] else None
+            out.append({"text": x["what"] + (f" · {x['when']}" if x["when"] else "") + (" · 넣음" if x["inserted"] else ""),
+                        "open": url, "src": x["source"], "put": put})
+        return out
 
     # ---------------------------------------------------------- 링크에서 사진 고르기 (주인 10/18 — Blog-Auto pickphotos)
     def _pics_ok(self) -> bool:
