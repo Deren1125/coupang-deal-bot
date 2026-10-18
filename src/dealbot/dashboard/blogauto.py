@@ -561,10 +561,43 @@ def _sched(data: Any) -> dict[str, Any] | None:
     return out
 
 
+VISIT_ID = re.compile(r"^visit-(finance|issue|hotdeal)-[0-9]{1,9}$")
+VISITS_MAX = 60  # 블로그마다 하루 10개 · 2일 (Blog-Auto dashview.visits)
+
+
+def _visits(data: Any) -> list[dict[str, Any]] | None:
+    """'오늘 들를 이웃 글' (주인 10/18 — Blog-Auto dashview.visits). 칸이 없으면(예전 Blog-Auto) None — 화면이 숨김.
+    주소는 네이버 블로그 글만 (그 밖이면 그 줄을 뺌). 순서는 Blog-Auto 그대로 (할 일 먼저 · 최근 것부터)."""
+    if not isinstance(data, list):
+        return None
+    out = []
+    for x in data[:VISITS_MAX]:
+        if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not (m := VISIT_ID.match(x["id"])):
+            continue
+        url, title = _naver_url(x.get("url")), _one_line(x.get("title"), 80)
+        if url is None or title is None or x.get("blog") != m.group(1):
+            continue
+        out.append({"id": x["id"], "blog": m.group(1), "target": _one_line(x.get("target"), 40) or "",
+                    "blog_name": _one_line(safe_text(x.get("blog_name"), 80), 40) or "", "title": title, "url": url,
+                    "comment": safe_text(x.get("comment"), 500), "created_at": _one_line(x.get("created_at"), 40),
+                    "status": "done" if x.get("status") == "done" else "todo"})
+    return out
+
+
+def _neighbors(v: Any) -> dict[str, Any] | None:
+    """status.blogs.<b>.neighbors {cap_today, cap_range, reduced, accepted_today} (주인 10/18) — 없으면 None."""
+    if not isinstance(v, dict):
+        return None
+    rng = v.get("cap_range")
+    ok = isinstance(rng, list) and len(rng) == 2 and all(_count(n, top=1000) is not None for n in rng)
+    return {"cap_today": _count(v.get("cap_today"), top=1000), "cap_range": [int(n) for n in rng] if ok else None,
+            "reduced": v.get("reduced") is True, "accepted_today": _count(v.get("accepted_today"), top=1000)}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
-                           "schedule": _sched(data.get("schedule"))}
+                           "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []
@@ -596,6 +629,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                 "login": b.get("login") if b.get("login") in ("ok", "needed", "unknown") else "unknown",
                 "login_checked": _one_line(b.get("login_checked"), 40),
                 "blog_id": b.get("blog_id") if isinstance(b.get("blog_id"), str) and re.fullmatch(r"[a-z0-9_-]{2,40}", b.get("blog_id")) else None,
+                "neighbors": _neighbors(b.get("neighbors")),
             }
     k = st.get("kakao") if isinstance(st.get("kakao"), dict) else {}
     out["status"]["kakao"] = {"state": k.get("state") if k.get("state") in ("ok", "down", "expiring", "unknown") else "unknown",

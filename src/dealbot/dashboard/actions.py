@@ -30,6 +30,7 @@ from typing import Any
 
 from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
+from dealbot.dashboard.blogauto import VISIT_ID
 from dealbot.dashboard.model import safe_text
 from dealbot.notify import iid as iidmod
 from dealbot.utils.text import truncate
@@ -63,7 +64,7 @@ FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "is
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
-                "dismiss", "schedule", "unschedule", "unschedule_all")
+                "dismiss", "schedule", "unschedule", "unschedule_all", "visit_done")
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input")
@@ -344,6 +345,11 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"blog": _blog(g("blog")), "pid": _int(g("pid"))}
     if name == "unschedule_all":
         return {"blog": _blog(g("blog"))}
+    if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
+        vid = g("id")
+        if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
+            raise ActionError("bad_args")
+        return {"blog": m.group(1), "id": vid}
     raise ActionError("bad_args")
 
 
@@ -382,6 +388,8 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return iidmod.post_iid(blog, pids[0])
     if action == "todo.dismiss":
         return str(args.get("iid") or "")
+    if action == "blog.visit_done":
+        return str(args.get("id") or "")
     if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all") and blog in BLOGS:
         return f"blog-{blog}"
     if action == "blog.login_check" and blog in BLOGS:

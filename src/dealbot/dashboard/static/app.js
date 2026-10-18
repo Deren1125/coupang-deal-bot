@@ -277,7 +277,7 @@ async function exec(a, extra, ctx = {}) {
   if (r.status === 202) {
     POLL[d.id] = {iid: ctx.iid || '', action: a.action, args: body.args, t: Date.now()};
     if (ctx.key) { delete P[ctx.key]; delete OPEN[ctx.iid]; }
-    toast(SCH.test(a.action) ? '예약하는 중이에요' : a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
+    toast(SCH.test(a.action) ? '예약하는 중이에요' : a.action === 'blog.visit_done' ? '했어요로 표시했어요' : a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
     render(); poll();
     return d;
   }
@@ -320,6 +320,7 @@ function finish(s, p) {
   const ok = s.status === 'ok';
   if (s.action === 'blog.kakao_auth_url' && ok && s.url) { KURL = s.url; toast('카카오 화면을 열어 주세요'); return; }
   if (s.action === 'blog.info' && ok) { infoSheet(s.text); return; }
+  if (s.action === 'blog.visit_done') { if (ok) return; GONE.delete(p.iid); }
   let text = ok ? (s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : MSG[s.code] || s.text || MSG.failed;
   if (s.status === 'unknown') text = MSG.unknown;
   if (s.status === 'expired') text = MSG.expired;
@@ -595,6 +596,7 @@ function infoSheet(text) {
 }
 async function openItem(iid, it) {
   if (/^digest-/.test(iid)) { digestSheet(iid); return; }
+  if (iid === 'visits') { const v = vis(((S.todo.find(x => x.iid === iid) || {}).detail || {}).visits); v.length ? visitSheet(v, 1) : toast('들를 이웃 글이 없어요'); return; }
   it = it || S && (S.todo.find(x => x.iid === iid) || Object.values(S.blogs || {}).flatMap(b => b.waiting || []).find(x => x.iid === iid));
   const box = el('div');
   const long = iid === 'sns-replies' || (it && it.kind === 'review_info') || (it && it.detail && (it.detail.questions || []).length);
@@ -658,10 +660,10 @@ async function digestSheet(id) {
   if (r.status !== 200) { toast('정리가 아직 없어요'); return; }
   sheet(r.data.title || '오늘 정리', el('div', {}, (r.data.sections || []).map(s => [el('p', {class: 'h3'}, s.label), ...(s.sentences || []).map(t => el('p', {text: t}))])));
 }
-async function copy(t) {
-  try { await N.clipboard.writeText(t); toast('복사했어요'); } catch (e) {
+async function copy(t, m = '복사했어요') {
+  try { await N.clipboard.writeText(t); toast(m); } catch (e) {
     const x = el('textarea', {style: 'position:fixed;opacity:0'}); x.value = t; D.body.append(x); x.select();
-    try { D.execCommand('copy'); toast('복사했어요'); } catch (y) { toast('길게 눌러 복사해 주세요'); }
+    try { D.execCommand('copy'); toast(m); } catch (y) { toast('길게 눌러 복사해 주세요'); }
     x.remove();
   }
 }
@@ -682,7 +684,7 @@ function banner() {
   return el('div', {class: 'bn'}, el('span', {}, '알림을 켜면 할 일이 바로 와요'), btn('pb', '알림 켜기', pushOn), later);
 }
 function vTodo() {
-  const all = S.todo, out = [];
+  const all = S.todo.flatMap(i => i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
   let items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, k = 0, rest = 0;
   if (R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
   const b = banner(); if (b) out.push(b);
@@ -766,7 +768,33 @@ function vBlog() {
       open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))),
         r.url ? ext('sm', '네이버', r.url) : null, r.google || r.daum ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
   }
+  const vs = vis(b.visits);
+  if (b.neighbors || vs.length) {
+    out.push(el('p', {class: 'h3'}, '이웃'), b.neighbors ? el('p', {class: 'note nb'}, b.neighbors.split(' · ').map((t, i) => [i ? ' · ' : '', el('span', {}, t)])) : null);
+    if (vs.length) out.push(el('div', {class: 'box'}, el('p', {class: 'vh'}, `오늘 들를 이웃 글 ${vs.length}개`), vs.slice(0, 3).map(x => visitRow(x)),
+      vs.length > 3 ? btn('pb ghost', `모두 보기 (${vs.length})`, () => visitSheet(vs)) : null));
+  }
   return out;
+}
+
+// 오늘 들를 이웃 글: 남의 블로그는 누를 때만 열고, 댓글은 주인이 직접 (했어요 → visit_done)
+const GONE = new Set(), vis = xs => (xs || []).filter(x => !GONE.has(x.id) && !pendingOf(x.id));
+function visitRow(x, all) {
+  const r = el('div', {class: 'vi'}, el('span', {class: 'vn'}, all ? `${x.name} · ${(BLOGS.find(b => b[0] === x.blog) || [])[1]}` : x.name),
+    el('span', {class: 'vt'}, x.title), x.comment ? el('div', {class: 'dr'}, x.comment) : null,
+    el('div', {class: 'va'}, x.comment ? btn('sm', '댓글 복사', () => copy(x.comment, '복사했어요 — 글에서 붙여넣기 하세요')) : null, ext('sm', '열기', x.url),
+      btn('sm', '했어요', async e => {
+        if (!await exec({action: 'blog.visit_done', args: {id: x.id}}, {}, {btn: e.currentTarget, iid: x.id})) return;
+        GONE.add(x.id);
+        const box = r.parentNode, sh = r.closest('.sh'); r.remove();
+        const n = box ? box.querySelectorAll('.vi').length : 0;
+        if (sh) { sh.querySelector('h2').textContent = `오늘 들를 이웃 글 ${n}개`; if (!n) box.prepend(el('p', {class: 'empty'}, '다 들렀어요')); }
+        render();
+      })));
+  return r;
+}
+function visitSheet(xs, all) {
+  sheet(`오늘 들를 이웃 글 ${xs.length}개`, el('div', {}, xs.map(x => visitRow(x, all)), el('p', {class: 'note'}, '글을 읽고 초안을 고쳐서 직접 달아 주세요')));
 }
 
 // 검색 등록: 구글은 주소 복사 + 키자드 (창은 누른 자리에서 열기)

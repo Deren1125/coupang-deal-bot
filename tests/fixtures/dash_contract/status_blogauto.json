@@ -39,7 +39,8 @@
   "dismiss",
   "schedule",
   "unschedule",
-  "unschedule_all"
+  "unschedule_all",
+  "visit_done"
  ],
  "kakao": {
   "state": "ok",

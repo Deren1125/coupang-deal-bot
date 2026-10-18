@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 STATE_V = 1
 BLOG_LABELS = {"finance": "Deren의 아카이브", "issue": "Deren's Pick", "hotdeal": "오늘의 핫딜"}
 CHIPS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
+VISITS_IID = "visits"  # 할 일 '오늘 들를 이웃 글' 한 줄
 SEV_ORDER = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
 UNSURE_DAYS = 7
 NAME_MAX = 40
@@ -487,6 +488,8 @@ class StateBuilder:
                         "since": _ts(t.since), "expires_at": None, "primary": primary,
                         "more": [act("todo.dismiss", "다 했어요", {"iid": iid, "key": t.key})]
                         if dismissible(iid, t.key, dealbot_row=False) else [], "detail": {"lines": []}}
+        if (vrow := self._visits_item(v2.get("visits"))) is not None:
+            out[vrow["iid"]] = vrow
         items = list(out.values())
         supported = self._supported(self._ba_status())
         modes = self._modes(v2)
@@ -500,6 +503,27 @@ class StateBuilder:
                 it["primary"] = dict(it["primary"], disabled=True, note="블로그 프로그램 업데이트를 기다리는 중")
             it.setdefault("chip", CHIPS.get(it.get("blog") or "", "딜" if it["src"] == "deal" else ""))
         return rank.order(items, now)  # 중요한·핫한 순 (rank.py)
+
+    # ---------------------------------------------------------- 오늘 들를 이웃 글 (주인 10/18 — Blog-Auto visits)
+    @staticmethod
+    def _visits(visits: list[dict[str, Any]] | None, blog: str = "") -> list[dict[str, Any]] | None:
+        """할 일(todo)인 것만, Blog-Auto 순서 그대로. 기록 파일에 visits 칸이 없으면(예전 Blog-Auto) None."""
+        if visits is None:
+            return None
+        return [{"id": x["id"], "blog": x["blog"], "name": x["blog_name"] or x["target"], "title": x["title"], "url": x["url"],
+                 "comment": x["comment"]} for x in visits if x["status"] == "todo" and (not blog or x["blog"] == blog)]
+
+    def _visits_item(self, visits: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+        """할 일 한 줄 '오늘 들를 이웃 글 N개' (참고 — 맨 아래 쪽, 급하지 않음) → 누르면 목록 시트. 없으면 None."""
+        xs = self._visits(visits) or []
+        if not xs:
+            return None
+        n = {b: sum(x["blog"] == b for x in xs) for b in CHIPS}
+        status = " · ".join(f"{CHIPS[b]} {k}" for b, k in n.items() if k) if sum(bool(k) for k in n.values()) > 1 else "댓글 초안 있어요"
+        since = max((_iso_ts(x.get("created_at"), self.tz) or 0.0 for x in visits or []), default=0.0) or None
+        return {"iid": VISITS_IID, "src": "blog", "blog": "", "kind": "visits", "sev": "info", "urgent": False,
+                "title": f"오늘 들를 이웃 글 {len(xs)}개", "status": status, "since": since, "expires_at": None,
+                "primary": goto("보기", f"#/i/{VISITS_IID}"), "more": [], "detail": {"visits": xs}}
 
     def item(self, iid: str) -> dict[str, Any] | None:
         """/api/item/<iid> — 긴 칸까지. 스레드 답글·정리 시트도 여기."""
@@ -619,6 +643,7 @@ class StateBuilder:
                                               "action": act("blog.pick", "이걸로 쓰기", {"sid": scan["sid"], "n": x["n"]})}
                                              for x in scan["items"]]} if scan else None),
                          "actions": self._filter(acts, supported),
+                         "visits": self._visits(v2.get("visits"), blog), "neighbors": neighbors_line(st.get("neighbors")),
                          "schedule": self._sched_blog(blog, v2, planned) if self._sctx["ok"] else None}
             for r in out[blog]["recent"]:
                 r.update(self._submit_links(r))
@@ -854,6 +879,23 @@ RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "l
 
 
 TAIL_RE = re.compile(r"\s*(?:→|—|-|·)\s*(?:대시보드|텔레그램|/[a-z]).*$")
+
+
+def neighbors_line(n: dict[str, Any] | None) -> str | None:
+    """블로그 탭 조용한 한 줄 (주인 10/18): '이웃 신청 오늘 18건까지 · 받은 신청 수락 3건 · 줄인 기간'. 칸이 없으면 None."""
+    if not n:
+        return None
+    bits = []
+    if n.get("cap_today") is not None:
+        bits.append(f"이웃 신청 오늘 {n['cap_today']}건까지")
+    elif n.get("cap_range"):
+        lo, hi = n["cap_range"]
+        bits.append(f"이웃 신청 오늘 {lo}~{hi}건" if lo != hi else f"이웃 신청 오늘 {lo}건까지")
+    if n.get("accepted_today") is not None:
+        bits.append(f"받은 신청 수락 {n['accepted_today']}건")
+    if n.get("reduced"):
+        bits.append("줄인 기간")
+    return " · ".join(bits) or None
 
 
 def notice_status(body: str, title: str = "") -> str:

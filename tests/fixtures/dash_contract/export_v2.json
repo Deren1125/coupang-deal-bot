@@ -203,7 +203,16 @@
     "paused": false,
     "today": 2,
     "login": "ok",
-    "login_checked": "2026-10-18T09:00:00"
+    "login_checked": "2026-10-18T09:00:00",
+    "neighbors": {
+     "cap_today": 18,
+     "cap_range": [
+      15,
+      25
+     ],
+     "reduced": false,
+     "accepted_today": 2
+    }
    }
   },
   "kakao": {
@@ -319,5 +328,18 @@
     "items": []
    }
   }
- }
+ },
+ "visits": [
+  {
+   "id": "visit-issue-12",
+   "blog": "issue",
+   "target": "stylenote_mi",
+   "blog_name": "미니의 스타일 노트",
+   "title": "가을 트렌치코트 코디 세 가지",
+   "url": "https://m.blog.naver.com/stylenote_mi/224030000001",
+   "comment": "트렌치코트에 니트 겹쳐 입으신 코디가 차분해 보여서 좋았어요. 색 조합도 참고하고 싶네요.",
+   "created_at": "2026-10-18T14:02:11+09:00",
+   "status": "todo"
+  }
+ ]
 }

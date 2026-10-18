@@ -257,6 +257,47 @@ def sched(r: Run, base: str) -> None:
     print("schedule toast:", p.text_content("#toast"))
 
 
+def visits(r: Run, base: str) -> None:
+    """'오늘 들를 이웃 글' (주인 10/18): 할 일 한 줄 · 목록 시트(댓글 복사·열기·했어요) · 블로그 탭 이웃 칸 (서로이웃 한 줄)."""
+    p = r.page
+    p.goto(base + "/dashboard/")
+    p.wait_for_selector("main .itm")
+    if p.locator("main > button.pb.ghost").count():
+        p.click("main > button.pb.ghost")
+    row = p.locator('[data-iid="visits"]')
+    row.scroll_into_view_if_needed()
+    p.evaluate("scrollBy(0, -160)")
+    r.shot("visits-todo-row")
+    row.locator(".pb").click()
+    p.wait_for_selector(".sh .vi")
+    r.shot("visits-sheet")
+    links = p.eval_on_selector_all(".sh .vi a.sm", "as => as.map(a => [a.target, a.rel, a.href.slice(0, 26)])")
+    print("open links:", links[:2], "auto-opened pages:", len(p.context.pages) - 1)
+    p.locator(".sh .vi .sm", has_text="댓글 복사").first.click()
+    p.wait_for_selector("#toast:not([hidden])")
+    r.shot("visits-copied")
+    print("copy toast:", p.text_content("#toast"), "| clipboard:", p.evaluate("navigator.clipboard.readText()")[:20])
+    p.locator(".sh .vi .sm", has_text="했어요").first.click()
+    p.wait_for_timeout(600)
+    r.shot("visits-done")
+    print("done toast:", p.text_content("#toast"), "| left in sheet:", p.locator(".sh .vi").count())
+    p.click(".sh .shh .lnk")
+    p.wait_for_timeout(4000)
+    print("todo row after done:", p.text_content('[data-iid="visits"] .ti'))
+    for key in ("issue", "finance"):
+        p.goto(base + f"/dashboard/#/blog/{key}")
+        p.wait_for_timeout(600)
+        p.locator("main .h3", has_text="이웃").scroll_into_view_if_needed()
+        p.evaluate("scrollBy(0, -60)")
+        r.shot(f"visits-blog-{key}")
+    p.goto(base + "/dashboard/#/blog/issue")
+    p.wait_for_timeout(600)
+    r.shot("visits-blog-issue-full", full=True)
+    p.locator("main .pb.ghost", has_text="모두 보기").click()
+    p.wait_for_selector(".sh .vi")
+    r.shot("visits-blog-sheet")
+
+
 def extra(r: Run, base: str, ctx: Any, token: str, host: str) -> None:
     """로그인이 끝났을 때 로그인 시트 → 다시 로그인."""
     p = r.page
@@ -287,6 +328,7 @@ def main() -> int:
     ap.add_argument("--tag", default="", help="파일 이름 뒤에 붙일 말 (예: empty)")
     ap.add_argument("--extra", action="store_true", help="오프라인·로그인 시트")
     ap.add_argument("--sched", action="store_true", help="간격 두고 발행 화면만")
+    ap.add_argument("--visits", action="store_true", help="오늘 들를 이웃 글 화면만")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -309,6 +351,8 @@ def main() -> int:
                 extra(r, a.base, ctx, token, host)
             elif a.sched:
                 sched(r, a.base)
+            elif a.visits:
+                visits(r, a.base)
             else:
                 scenario(r, a.base, name in a.flows.split(","))
             problems += r.problems + [f"{name}: js error {e}" for e in errors]
