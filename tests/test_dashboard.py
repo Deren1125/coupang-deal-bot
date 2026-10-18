@@ -1087,7 +1087,7 @@ def test_page_design_details(db: Database, tmp_path: Path) -> None:
     assert "@media (max-width:420px){.btn .btn-text{position:absolute" in CSS
     assert "@container (max-width:344px){.btn .btn-text{position:absolute" in CSS  # 2열(태블릿)의 좁은 카드도
     # 숫자 칸은 옅은 회색 바탕·둥근 모서리, 카드는 옅은 그림자 (참고 화면)
-    assert ".stat{background:var(--tile);border:1px solid var(--line);border-radius:10px" in CSS and "--tile:#f8f9fb" in CSS
+    assert ".stat{background:var(--tile);border:1px solid var(--line);border-radius:10px" in CSS and "--tile:#f9fafb" in CSS
     assert ".card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 16px 18px;min-width:0;\nbox-shadow" in CSS
     # 큰 숫자는 숫자 가운데서 줄이 바뀌지 않음
     assert '<span class="num">12,345,678</span><span class="unit">원</span>' in page_text and ".num{white-space:nowrap}" in CSS

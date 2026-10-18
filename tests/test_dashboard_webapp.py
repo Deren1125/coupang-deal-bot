@@ -144,7 +144,7 @@ async def test_manifest_and_icons_are_public_with_right_types_and_long_cache(db:
             m = r.json()
             assert (m["name"], m["short_name"]) == ("Sns-board", "Sns-board")  # 주인이 고른 표기 그대로
             assert (m["start_url"], m["scope"], m["id"], m["display"]) == ("/dashboard/", "/dashboard", "/dashboard", "standalone")
-            assert m["background_color"] == m["theme_color"] == "#f4f5f7" and "--bg:#f4f5f7" in render.CSS  # 화면 바탕과 같은 색
+            assert m["background_color"] == m["theme_color"] == "#f6f7f9" and "--bg:#f6f7f9" in render.CSS  # 화면 바탕과 같은 색
             assert [(i["sizes"], i["purpose"], i["type"]) for i in m["icons"]] == [
                 ("192x192", "any", "image/png"), ("512x512", "any", "image/png"), ("512x512", "maskable", "image/png")]
             for icon in m["icons"]:
@@ -246,8 +246,8 @@ async def test_page_and_login_have_app_head_tags_and_a_minimal_csp(db: Database,
                     '<meta name="apple-mobile-web-app-capable" content="yes">',
                     '<meta name="mobile-web-app-capable" content="yes">',
                     '<meta name="apple-mobile-web-app-status-bar-style" content="default">',
-                    '<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f4f5f7">',
-                    '<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#151a2d">',
+                    '<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7f9">',
+                    '<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111318">',
                     f'<link rel="apple-touch-icon" href="{webapp.icon_url("apple-touch-icon.png")}" sizes="180x180">',
                     f'<link rel="icon" href="{webapp.icon_url("favicon-64.png")}" type="image/png" sizes="64x64">'):
             assert tag in head, tag

@@ -29,7 +29,7 @@ INSTAGRAM = _mark(
     '<circle cx="15.9" cy="8.1" r="1" fill="#fff"/>'
 )
 THREADS = _letter("#000000", "#ffffff", "@", size=15)
-COUPANG = _letter("#ffffff", "#E4252A", "c", size=17, stroke="#e6e8eb")
+COUPANG = _letter("#ffffff", "#E4252A", "c", size=17, stroke="#e5e7eb")
 DEALBOT = _mark(
     '<rect width="24" height="24" rx="6" fill="#FF6B00"/>'
     '<path d="M13.2 4.5L6.8 13h4.4l-1 6.5 6.6-8.6h-4.5z" fill="#fff"/>'
@@ -40,9 +40,9 @@ KAKAO = _mark(
     '<path d="M12 6c-4 0-7.3 2.6-7.3 5.7 0 2 1.4 3.8 3.4 4.8l-.7 2.6c-.1.3.2.5.4.3l3.1-2.1h1.1c4 0 7.3-2.6'
     ' 7.3-5.7S16 6 12 6z" fill="#3C1E1E"/>'
 )
-# 발행 대기 글: 보라 바탕에 쌓인 글 세 줄
+# 발행 대기 글: 짙은 회색 바탕에 쌓인 글 세 줄
 WAITING = _mark(
-    '<rect width="24" height="24" rx="6" fill="#5b4fd6"/>'
+    '<rect width="24" height="24" rx="6" fill="#374151"/>'
     '<path d="M7 8h10M7 12h10M7 16h6" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none"/>'
 )
 # 링크 기다리는 딜: 주황 바탕에 사슬 고리
@@ -51,7 +51,7 @@ LINK = _mark(
     '<path d="M10.6 13.4a3 3 0 0 0 4.2 0l2.4-2.4a3 3 0 0 0-4.2-4.2l-1 1M13.4 10.6a3 3 0 0 0-4.2 0L6.8 13a3 3 0 0 0 4.2 4.2l1-1"'
     ' stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none"/>'
 )
-GENERIC = _mark('<rect width="24" height="24" rx="6" fill="#8b95a1"/><circle cx="12" cy="12" r="4" fill="#fff"/>')
+GENERIC = _mark('<rect width="24" height="24" rx="6" fill="#9ca3af"/><circle cx="12" cy="12" r="4" fill="#fff"/>')
 
 REFRESH = (
     '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">'
@@ -61,7 +61,7 @@ REFRESH = (
 )
 CHECK = (
     '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" focusable="false">'
-    '<path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="#1a8a4a" stroke-width="2.6" stroke-linecap="round" '
+    '<path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="#15803d" stroke-width="2.6" stroke-linecap="round" '
     'stroke-linejoin="round"/></svg>'
 )
 

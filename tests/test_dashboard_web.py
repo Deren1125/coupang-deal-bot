@@ -257,7 +257,7 @@ def test_page_renders_reference_layout(db: Database, tmp_path: Path) -> None:
     assert '<span class="chip unmet">조건 미충족</span>' in html_text
     assert '<span class="chip unknown">판단 불가</span>' in html_text
     assert html_text.count('<span class="btn-text">다시 읽기</span></a>') == 2 and "읽은 시각 10. 14. 18:00" in html_text
-    assert 'stroke="#5b4fd6"' in html_text and "<h3>네이버 애드포스트</h3>" in html_text
+    assert 'stroke="#4a6fa5"' in html_text and "<h3>네이버 애드포스트</h3>" in html_text
     assert "14 / 1,000 명" in html_text and 'style="width:1.5%"' in html_text
     assert 'action="/dashboard/input"' in html_text and 'name="neighbors"' in html_text and 'name="visitors"' in html_text
     assert 'max="2026-10-14" min="2026-08-15"' in html_text  # 미래·60일보다 전 날짜는 고를 수 없음

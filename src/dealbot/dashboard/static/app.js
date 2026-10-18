@@ -115,7 +115,7 @@ function head() {
   o.hidden = !(OLD && S && R.tab === 'todo');
   if (!o.hidden) o.textContent = `저장된 정보 · ${ago(S.at)}`;
   const b = $('bdg'), n = S ? S.counts.todo : 0;
-  b.hidden = !n; b.textContent = n > 99 ? '99+' : n;
+  b.hidden = !n; b.textContent = n > 99 ? '99+' : n; b.classList.toggle('urg', !!S && S.todo.some(i => i.sev === 'stop'));
   D.querySelectorAll('.tab').forEach(a => a.dataset.tab === R.tab ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
 }
 
@@ -205,7 +205,7 @@ function toast(text, act, fn) {
   toastT = setTimeout(() => { t.hidden = true; }, act ? 8000 : 3000);
 }
 
-// ------------------------------------------------------------ 로그인 시트 (세션이 끝났을 때 — 하던 일은 그대로)
+// ------------------------------------------------------------ 로그인 시트 (하던 일은 그대로)
 let LOGIN = null;
 function login() {
   if (LOGIN) return LOGIN;
@@ -367,6 +367,7 @@ function pick(accept, multiple, done) {
 
 // ------------------------------------------------------------ 줄 하나 (칩 · 제목 · 상태 한 줄 · 누를 것 하나)
 function chip(it) {
+  if (it.cue) return el('span', {class: 'cp ' + (it.cue === '급해요' ? 'stop' : 'hot')}, it.cue);
   const [mk, lab] = SEV[it.sev] || SEV.todo;
   if (!mk && !it.chip) return null;
   const text = it.sev === 'todo' || !mk ? (it.chip || lab) : `${mk} ${it.chip || lab}`;
@@ -663,7 +664,9 @@ function vTodo() {
   const n = ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');
   const more = rest ? el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`) : null;
-  shown.forEach((x, i) => { out.push(item(x)); if (more && i === last) out.push(more); });
+  const gs = new Set(shown.map(i => i.group)).size > 1;
+  let g = null;
+  shown.forEach((x, i) => { if (gs && x.group !== g) out.push(el('p', {class: 'grp'}, g = x.group)); out.push(item(x)); if (more && i === last) out.push(more); });
   if (more && last < 0) out.push(more);
   if (items.length > n) out.push(btn('pb ghost', `더 보기 (${items.length - n})`, () => { ALL = true; render(); }));
   if (S.digest && S.digest.latest) out.push(el('p', {class: 'foot'}, btn('lnk', '오늘 정리 보기', () => digestSheet(S.digest.latest))));
@@ -728,7 +731,7 @@ function vBlog() {
   return out;
 }
 
-// 모아서 검수한 뒤 한 번에 발행 (주인 10/18): 확인 창은 제목 목록으로 한 번, 그다음 글마다 같은 발행 요청
+// 한 번에 발행: 확인 창은 제목 목록으로 한 번, 그다음 글마다 발행 요청
 async function pubAll(xs) {
   if (!await confirmSheet({title: `${xs.length}편을 발행할까요?`, ok: '모두 발행',
     body: xs.map(x => '· ' + title(x)).join('\n') + '\n네이버 블로그에 바로 올라가요.'})) return;

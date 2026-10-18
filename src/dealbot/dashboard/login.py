@@ -323,7 +323,7 @@ LOGIN_NOTICES = {
 }
 
 LOGIN_CSS = """
-:root{--bg:#f4f5f7;--card:#fff;--line:#e6e8eb;--text:#191f28;--sub:#6b7684;--purple:#5b4fd6;--orange:#b45309}
+:root{--bg:#f6f7f9;--card:#fff;--line:#e5e7eb;--text:#111827;--sub:#6b7280;--ink:#374151;--accent:#111827;--focus:#6b7280;--orange:#b45309}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--text);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
@@ -335,15 +335,15 @@ font-family:Pretendard,"Pretendard Variable",-apple-system,BlinkMacSystemFont,"A
 .brand img{flex:none;width:52px;height:52px;border-radius:12px}
 .brand h1{font-size:20px;line-height:1.25;margin:0;font-weight:700;letter-spacing:-.01em}
 .brand p{margin:2px 0 0;color:var(--sub);font-size:13px}
-.notice{border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13.5px;background:#eef0ff;color:#3f35a8;border:1px solid #dcdffc}
-.notice.bad{background:#fff4e5;color:var(--orange);border-color:#fde7c7}
+.notice{border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13.5px;background:#f9fafb;color:var(--text);border:1px solid var(--line)}
+.notice.bad{background:#fff7e6;color:var(--orange);border-color:#fde7c7}
 .notice a{color:inherit;font-weight:700}
-label{display:block;font-size:13px;font-weight:600;color:#4e5968;margin:0 0 12px}
-input{display:block;width:100%;margin:6px 0 0;font:inherit;font-size:16px;font-weight:400;padding:11px 12px;min-height:46px;border:1px solid #d1d6db;
+label{display:block;font-size:13px;font-weight:600;color:var(--ink);margin:0 0 12px}
+input{display:block;width:100%;margin:6px 0 0;font:inherit;font-size:16px;font-weight:400;padding:11px 12px;min-height:46px;border:1px solid #d1d5db;
 border-radius:10px;background:#fff;color:var(--text)}
-input:focus{outline:2px solid var(--purple);outline-offset:1px;border-color:var(--purple)}
+input:focus{outline:2px solid var(--focus);outline-offset:1px;border-color:var(--focus)}
 button{display:block;width:100%;margin:18px 0 0;font:inherit;font-size:16px;font-weight:700;min-height:48px;border:0;border-radius:10px;
-background:var(--purple);color:#fff;cursor:pointer}
+background:var(--accent);color:#fff;cursor:pointer}
 button:active{opacity:.9}
 .hint{margin:16px 0 0;color:var(--sub);font-size:12.5px}
 """

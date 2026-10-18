@@ -27,10 +27,10 @@ SCOPE = "/dashboard"
 MANIFEST_PATH = "/dashboard/manifest.webmanifest"
 STATIC_PREFIX = "/dashboard/static/"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-# 화면 바탕(render.CSS 의 --bg)과 아이콘 바탕(어두운 남색). 페이지는 밝은 화면 하나라 매니페스트는 밝은 색,
-# 휴대폰이 어두운 모드면 상태 표시줄만 아이콘 바탕색으로
-PAGE_BG = "#f4f5f7"
-DARK_BG = "#151a2d"
+# 화면 바탕(render.CSS · app.css 의 --bg, 무채색 옅은 회색)과 어두운 모드 바탕(app.css 어두운 --bg). 매니페스트는 밝은 색,
+# 휴대폰이 어두운 모드면 상태 표시줄만 어두운 바탕색으로
+PAGE_BG = "#f6f7f9"
+DARK_BG = "#111318"
 
 # 파일 이름 → Content-Type (여기 적은 파일만 열림)
 STATIC_TYPES: dict[str, str] = {

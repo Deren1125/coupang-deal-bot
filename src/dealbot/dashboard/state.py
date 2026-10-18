@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from dealbot.dashboard import rank
 from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
@@ -151,9 +152,12 @@ class StateBuilder:
                  detail: dict[str, Any], *, expires: datetime | None = None, since: datetime | None = None) -> None:
             iid = iidmod.deal_iid(it.id)
             p = it.deal.product
+            v = it.deal.verdict
+            hot = rank.deal_hot(it.score, price=p.price, low_price=v.low_price, discount=p.effective_discount_rate(),
+                                recommend=p.recommend_count)
             items[iid] = {"iid": iid, "src": "deal", "blog": "", "kind": kind, "sev": "todo", "urgent": True,
                           "title": f"#{it.id} {_name(p.name)}", "status": status, "since": _ts(since or it.created_at),
-                          "expires_at": _ts(expires), "primary": primary, "more": more, "detail": detail}
+                          "expires_at": _ts(expires), "primary": primary, "more": more, "detail": detail, "_hot": hot}
 
         for it in db.awaiting_items(max(50, bot.settings.publish.max_awaiting_links)):
             p = it.deal.product
@@ -290,7 +294,8 @@ class StateBuilder:
                 "detail": {"needs": needs, "photo_request": (post or {}).get("photo_request"), "slots": slots,
                            "questions": questions, "deadline": (post or {}).get("deadline"),
                            "owner_edited": bool((post or {}).get("owner_edited")),
-                           "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []}}
+                           "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
+                "_hot": rank.post_hot(post)}
 
     # ---------------------------------------------------------- 알림 줄 (owner_notices · 기록 파일 todo)
     def _notice_item(self, iid: str, rows: list[Any], now: float) -> dict[str, Any] | None:
@@ -421,24 +426,7 @@ class StateBuilder:
             if supported is not None and it["primary"]["action"].startswith("blog.") and it["primary"]["action"][5:] not in supported:
                 it["primary"] = dict(it["primary"], disabled=True, note="블로그 프로그램 업데이트를 기다리는 중")
             it.setdefault("chip", CHIPS.get(it.get("blog") or "", "딜" if it["src"] == "deal" else ""))
-        items.sort(key=self._sort_key)
-        return items
-
-    @staticmethod
-    def _sort_key(it: dict[str, Any]) -> tuple[Any, ...]:
-        """⛔ 먼저, 그다음 급함·🔥, 끝나는 시간이 가까운 것, 오래된 것. ℹ️ 은 맨 뒤."""
-        sev = it.get("sev") or "todo"
-        exp = it.get("expires_at")
-        since = it.get("since") or float("inf")
-        if sev == "stop":
-            return 0, 0, since
-        if sev == "info":
-            return 4, 0, since
-        if it.get("urgent") or sev == "hot":
-            return 1, exp if exp is not None else float("inf"), since
-        if exp is not None:
-            return 2, exp, since
-        return 3, 0, since
+        return rank.order(items, now)  # 중요한·핫한 순 (rank.py)
 
     def item(self, iid: str) -> dict[str, Any] | None:
         """/api/item/<iid> — 긴 칸까지. 스레드 답글·정리 시트도 여기."""
@@ -458,7 +446,7 @@ class StateBuilder:
             export = self._export()
             p = next((x for x in (getattr(export, "v2", None) or {}).get("posts", {}).get(post[0], []) if x["pid"] == post[1]), None)
             if p is not None:
-                return self._post_item(post[0], p, pid=post[1], long=True)
+                return rank.public(self._post_item(post[0], p, pid=post[1], long=True))
         return None
 
     @staticmethod
@@ -513,7 +501,7 @@ class StateBuilder:
             for p in v2.get("posts", {}).get(blog, []):
                 iid = iidmod.post_iid(blog, p["pid"])
                 if iid not in have and p.get("status") != "published":
-                    waiting.append(self._post_item(blog, p, pid=p["pid"]))
+                    waiting.append(rank.public(self._post_item(blog, p, pid=p["pid"])))
             acts: list[dict[str, Any]] = []
             if blog == "finance":
                 acts += [act("blog.scan", "다시 찾기"), act("blog.write", "새 글 쓰기", input="text", placeholder="어떤 글을 쓸지",
