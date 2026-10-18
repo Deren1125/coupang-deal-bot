@@ -172,7 +172,8 @@ CREATE TABLE IF NOT EXISTS ig_posts (
     media_id       TEXT,
     items          TEXT,
     dry_run        INTEGER NOT NULL DEFAULT 0,
-    posted_at      TEXT NOT NULL
+    posted_at      TEXT NOT NULL,
+    permalink      TEXT                -- 올린 글 주소 (https://www.instagram.com/p/…) — 대시보드 딜 줄 '인스타 ↗'
 );
 CREATE INDEX IF NOT EXISTS idx_ig_posts_time ON ig_posts(posted_at);
 """
@@ -418,6 +419,9 @@ class Database(SnsStoreMixin):
             ("dash_actions", (("args_hash", "TEXT"),)),
             # 사진 부탁 알림의 '사진 받을 곳' 링크 [{label, url}] (JSON, 주인 10/18 — notify/links.py)
             ("owner_notices", (("links", "TEXT"),)),
+            # 올린 인스타·스레드 글 주소 (주인 10/18 — 대시보드 딜 줄의 '인스타 ↗'·'스레드 ↗')
+            ("ig_posts", (("permalink", "TEXT"),)),
+            ("threads_jobs", (("permalink", "TEXT"),)),
         )
         for table, columns in adds:
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -1267,12 +1271,32 @@ class Database(SnsStoreMixin):
         return [r["photo_file"] for r in rows]
 
     def ig_record_post(self, kind: str, *, media_id: str | None, items: list[Any], dry_run: bool = False,
-                       now: datetime | None = None) -> None:
+                       now: datetime | None = None) -> int:
         with self._lock:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "INSERT INTO ig_posts (kind, media_id, items, dry_run, posted_at) VALUES (?, ?, ?, ?, ?)",
                 (kind, media_id, json.dumps(items, ensure_ascii=False), 1 if dry_run else 0, to_iso(now or utcnow())),
             )
+            return int(cur.lastrowid or 0)
+
+    def ig_set_permalink(self, post_id: int, permalink: str) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE ig_posts SET permalink = ? WHERE id = ?", (permalink[:500], post_id))
+
+    def ig_permalink_for(self, queue_id: int, since: datetime) -> str | None:
+        """이 대기열 번호의 딜이 들어간 인스타 글 주소 (딜 하나짜리 글 먼저, 없으면 TOP5·릴스 묶음 글). 연습 글·주소 없는 글은 뺌."""
+        rows = self._q("SELECT kind, items, permalink FROM ig_posts WHERE posted_at >= ? AND dry_run = 0 AND permalink IS NOT NULL "
+                       "AND permalink != '' ORDER BY posted_at DESC, id DESC", (to_iso(since),))
+        found = []
+        for r in rows:
+            try:
+                items = json.loads(r["items"] or "[]")
+            except ValueError:
+                continue
+            if any(isinstance(i, dict) and i.get("queue_id") == queue_id and not i.get("maybe") for i in items):
+                found.append(r)
+        best = next((r for r in found if r["kind"] == "single"), found[0] if found else None)
+        return str(best["permalink"]) if best else None
 
     def ig_posts_since(self, since: datetime, *, kind: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM ig_posts WHERE posted_at >= ?"

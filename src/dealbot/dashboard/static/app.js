@@ -878,8 +878,15 @@ function vDeal() {
   else out.push(el('div', {class: 'box'}, rows.map(r => el('div', {class: 'row'},
     el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, [[r.shop && `[${r.shop}]`, r.price].filter(Boolean).join(' '), seg === 'today' ? hhmm(r.at) : ''].filter(Boolean).join(' · '))),
     r.photo_wait ? btn('sm', `사진 기다림 · ${hhmm(r.photo_wait.until)}까지`, () => openItem(r.photo_wait.iid))
-      : r.url && seg === 'today' ? ext('sm', '채널 글', r.url) : null))));
+      : seg === 'today' ? dealLinks(r) : null))));
   return out;
+}
+
+// 같은 딜이 간 곳 (채널·핫딜 블로그·인스타·스레드) — 아는 주소만, 휴대폰에선 넘치면 둘째 줄로
+const DEAL_LINKS = [['url', '채널'], ['blog_url', '블로그'], ['ig_url', '인스타'], ['th_url', '스레드']];
+function dealLinks(r) {
+  const a = DEAL_LINKS.filter(([k]) => r[k]).map(([k, l]) => ext('sm', l, r[k]));
+  return a.length ? el('span', {class: 'dl'}, a) : null;
 }
 
 // ------------------------------------------------------------ 탭: 블로그

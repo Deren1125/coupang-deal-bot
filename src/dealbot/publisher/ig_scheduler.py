@@ -420,14 +420,27 @@ class InstagramScheduler:
         if result.ok:
             media = "dry-run" if result.dry_run else str(result.message_id or "")
             self._mark(item, "posted", media_id=media or None, now=now)
-            self.db.ig_record_post("single", media_id=media or None, items=[{"product_id": pid, "queue_id": item["queue_id"]}],
-                                   dry_run=result.dry_run, now=now)
+            row = self.db.ig_record_post("single", media_id=media or None, items=[{"product_id": pid, "queue_id": item["queue_id"]}],
+                                         dry_run=result.dry_run, now=now)
+            await self._keep_permalink(row, result)
             self.db.log_event("INFO", "instagram", f"{pid} {media}")
             log.info("instagram posted: %s", deal.product.name[:40])
             return f"single: {pid}"
         self._mark(item, "failed", reason=(result.error or "")[:300], now=now)
         await self._failed(result, now, what=pid)
         return f"single failed: {pid}"
+
+    async def _keep_permalink(self, row: int, result: PublishResult) -> None:
+        """올린 글의 주소를 남긴다 (대시보드 딜 줄 '인스타 ↗'). 못 읽어도 발행은 그대로 — 그 줄에 버튼만 없음."""
+        lookup = getattr(self.bot, "_instagram_permalink", None)
+        if result.dry_run or not row or result.message_id is None or lookup is None:
+            return
+        try:
+            link = await lookup(result.message_id)
+            if link:
+                self.db.ig_set_permalink(row, link)
+        except Exception as e:  # noqa: BLE001
+            log.info("instagram permalink not kept for post %s: %s", row, e)
 
     def single_slide(self, deal: Deal, photo: bytes | None, *, deal_no: int | None) -> Any | None:
         """딜 하나짜리 글의 카드에 그리는 글 (검사용). 카드가 없으면 None (그땐 카드를 못 만들어 어차피 안 올림)."""
@@ -472,7 +485,8 @@ class InstagramScheduler:
             media = "dry-run" if result.dry_run else str(result.message_id or "")
             items = [{"product_id": pk.deal.product.product_id, "queue_id": pk.queue_id} if isinstance(pk, Pick)
                      else {"product_id": pk.product_id, "deal_no": pk.deal_no} for pk in picks]  # 단가표 줄은 대기열 번호가 아니라 페이지 번호
-            self.db.ig_record_post(kind, media_id=media or None, items=items, dry_run=result.dry_run, now=now)
+            row = self.db.ig_record_post(kind, media_id=media or None, items=items, dry_run=result.dry_run, now=now)
+            await self._keep_permalink(row, result)
             self.db.sns_log_add("instagram", "posted", reason=kind, now=now)  # 묶음 글 (TOP5·릴스·단가표)
             return f"posted {media} ({len(picks)} deals)"
         if result.error == REEL_TIMEOUT:

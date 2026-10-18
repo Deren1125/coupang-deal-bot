@@ -646,7 +646,7 @@ class StateBuilder:
                 "at": r.get("at")}
 
     # ---------------------------------------------------------- 탭별 값
-    def _deal_row(self, it: Any) -> dict[str, Any]:
+    def _deal_row(self, it: Any, hotdeal_recent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         p = it.deal.product
         shop = self._shop(p.shop)
         post = self.bot.db.latest_post(p.product_id) or {}
@@ -654,15 +654,22 @@ class StateBuilder:
         url = f"{base}/{post['message_id']}" if base and post.get("message_id") and not post.get("dry_run") else None
         kind = "owner" if p.extra.get("owner_photo") else ("verified" if p.extra.get("photo_ok") or p.extra.get("photo_kind") == "verified" else "none")
         until = self.bot.late_photo.until(it.id) if hasattr(self.bot, "late_photo") else None
+        at = _iso_ts(post.get("posted_at"), self.tz) or _ts(it.created_at)
         row = {"qid": it.id, "title": _name(p.name), "shop": shop.name if shop else p.shop,
-               "price": f"{p.price:,}원" if p.has_price else "", "at": _iso_ts(post.get("posted_at"), self.tz) or _ts(it.created_at),
-               "url": url, "photo": kind}
+               "price": f"{p.price:,}원" if p.has_price else "", "at": at, "url": url, "photo": kind}
+        # 같은 딜이 간 다른 곳 (주인 10/18 '왜 링크가 텔레그램 밖에 없어?'): 핫딜 블로그 글·인스타·스레드 — 아는 주소만
+        since = datetime.fromtimestamp(at, UTC) - timedelta(hours=1) if at else self._now() - timedelta(days=2)
+        links = {"blog_url": blog_url_for(p.product_id, at, hotdeal_recent, self.tz),
+                 "ig_url": sns_url(self.bot.db.ig_permalink_for(it.id, since), IG_HOSTS),
+                 "th_url": sns_url(self.bot.db.threads_permalink_for(it.id, since), THREADS_HOSTS)}
+        row.update({k: v for k, v in links.items() if v})
         if until is not None and until > self._now() and self.bot.late_photo_waiting(it.id):
             row["photo_wait"] = {"until": _ts(until), "iid": iidmod.deal_iid(it.id)}
         return row
 
-    def deal(self) -> dict[str, Any]:
+    def deal(self, export: Any = None) -> dict[str, Any]:
         bot = self.bot
+        hotdeal = ((getattr(export, "v2", None) or {}).get("recent") or {}).get("hotdeal") or []
         now = self._now()
         tz = ZoneInfo(self.tz)
         start = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
@@ -670,7 +677,7 @@ class StateBuilder:
         recent = sorted(bot.db.published_items_between(now - timedelta(hours=24), now + timedelta(minutes=1),
                                                        include_dry_run=bot.state.dry_run), key=lambda x: x.id, reverse=True)[:10]
         return {"status": {"paused": bot.state.paused, "ok": not bot.state.paused, "today": len(today), "dry_run": bot.state.dry_run},
-                "today": [self._deal_row(it) for it in recent], "queue": bot.queue_view(10), "collectors": bot.collector_names(),
+                "today": [self._deal_row(it, hotdeal) for it in recent], "queue": bot.queue_view(10), "collectors": bot.collector_names(),
                 "actions": [act("deal.post", "새 딜 직접 올리기", input="text", placeholder="몰 주소\n상품명\n가격"),
                             act("bot.run", "지금 수집", input="choice",
                                 choices=[{"value": "all", "label": "전부"}] + [{"value": n, "label": bot.notifier.source_label(n)}
@@ -926,7 +933,7 @@ class StateBuilder:
             "banner": banner,
             "counts": {"todo": len(todo), "done_today": today_count(bot, now=time.time())},  # 오늘 한 일 (목록은 /api/today)
             "todo": todo,
-            "deal": self.deal(),
+            "deal": self.deal(export),
             "blogs": self.blogs(export, todo),
             "sns": self.sns(),
             "connect": connect,
@@ -975,6 +982,40 @@ RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "l
 
 
 TAIL_RE = re.compile(r"\s*(?:→|—|-|·)\s*(?:대시보드|텔레그램|/[a-z]).*$")
+
+
+IG_HOSTS = ("instagram.com", "www.instagram.com")
+THREADS_HOSTS = ("threads.net", "www.threads.net", "threads.com", "www.threads.com")
+BLOG_MATCH_SLACK = 15 * 60  # 딜봇이 published_deals.jsonl 에 적은 posted_at 과 채널 글 시각의 차이 (같은 발행)
+
+
+def sns_url(url: Any, hosts: tuple[str, ...]) -> str | None:
+    """딜봇이 남긴 인스타·스레드 글 주소 — https 이고 그 서비스 주소일 때만."""
+    from urllib.parse import urlsplit
+
+    u = link_target(url)
+    return u if u is not None and (urlsplit(u).hostname or "").lower() in hosts else None
+
+
+def blog_url_for(product_id: str, at: float | None, recent: list[dict[str, Any]] | None, tz: str) -> str | None:
+    """이 딜이 들어간 핫딜 블로그 글 (기록 파일 recent.hotdeal[].deals 의 product_id 로만 — 제목으로는 잇지 않음).
+    posted_at 이 있으면 채널 글 시각과 BLOG_MATCH_SLACK 안이어야 같은 발행 (같은 상품을 다시 올린 딜에 예전 글을 잇지 않게),
+    없으면 블로그 글이 그 딜보다 뒤에 쓰였어야 함. url 은 parse_v2 가 네이버 블로그 주소만 남긴 것. 최근 글부터."""
+    for post in recent or []:
+        if not post.get("url"):
+            continue
+        for d in post.get("deals") or []:
+            if d.get("product_id") != product_id:
+                continue
+            t = _iso_ts(d.get("posted_at"), tz)
+            if t is not None:
+                ok = at is None or abs(t - at) <= BLOG_MATCH_SLACK
+            else:
+                wrote = _iso_ts(post.get("at"), tz)
+                ok = at is None or (wrote is not None and wrote >= at - BLOG_MATCH_SLACK)
+            if ok:
+                return str(post["url"])
+    return None
 
 
 def neighbors_line(n: dict[str, Any] | None) -> str | None:
