@@ -636,10 +636,12 @@ function big(x) {
 function picsBox(it) {
   const p = (it.detail || {}).pics, n = p && p.items.length;
   if (!p) return [];
-  const out = [el('p', {class: 'h3'}, p.state === 'ready' && n ? `추천 사진 ${n}장` : '링크에서 사진')];
+  const ok = p.state === 'ready' || p.state === 'inserted';
+  const out = [el('p', {class: 'h3'}, p.state === 'ready' && n ? `추천 사진 ${n}장` : p.state === 'inserted' ? '기사 사진 자동으로 넣음' : '링크에서 사진')];
   if (p.state === 'working' || fetching(it.iid)) return out.concat(el('p', {class: 'note'}, '사진 찾는 중…'));
   if (p.state === 'failed') out.push(el('p', {class: 'st warn'}, p.text || '사진을 찾지 못했어요'));
-  if (p.state === 'ready' && n) {
+  if (p.state === 'inserted') out.push(el('p', {class: 'note'}, (p.text || '사진을 자동으로 넣었어요') + (n ? ` · 남은 후보 ${n}장` : '')));
+  if (ok && n) {
     const m = sel(it), box = el('div');
     const draw = () => box.replaceChildren(el('p', {class: 'note'}, '누르면 넣기·빼기 · 꾹 누르면 크게'),
       el('div', {class: 'pk'}, p.items.map(x => tile(x, m.has(x.id) ? m.get(x.id) || '✓' : null, () => { if (!m.delete(x.id)) m.set(x.id, 0); draw(); }))),

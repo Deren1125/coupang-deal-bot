@@ -116,6 +116,21 @@
      "scheduled_at": "2026-10-18T14:20:00+09:00",
      "status": "scheduled",
      "reason": ""
+    },
+    "pics": {
+     "state": "inserted",
+     "text": "사진 2장 자동으로 넣었어요 · 출처 표기됨",
+     "at": "2026-10-18T08:25:00+09:00",
+     "items": [
+      {
+       "id": "pk-2c4e6a8b",
+       "thumb": "pk-2c4e6a8b.jpg",
+       "full": "pk-2c4e6a8b.jpg",
+       "why": "",
+       "slot": null,
+       "host": "news1.kr"
+      }
+     ]
     }
    },
    {
@@ -416,5 +431,55 @@
     }
    ]
   }
- ]
+ ],
+ "engage": {
+  "blogs": {
+   "finance": {
+    "enabled": true,
+    "dry": false,
+    "mode": "live",
+    "cap_today": 8,
+    "liked_today": 3,
+    "commented_today": 2
+   },
+   "issue": {
+    "enabled": true,
+    "dry": true,
+    "mode": "dry",
+    "cap_today": null,
+    "liked_today": 0,
+    "commented_today": 0
+   },
+   "hotdeal": {
+    "enabled": true,
+    "dry": true,
+    "mode": "dry",
+    "cap_today": null,
+    "liked_today": 0,
+    "commented_today": 0
+   }
+  },
+  "items": [
+   {
+    "id": "engage-finance-moneyday_j-224031000002",
+    "blog": "finance",
+    "target": "moneyday_j",
+    "title": "10월 카드사 캐시백 이벤트 정리",
+    "url": "https://m.blog.naver.com/moneyday_j/224031000002",
+    "liked": true,
+    "comment": "카드사별로 캐시백 조건을 표로 정리해 주셔서 한눈에 보기 편했어요.",
+    "at": "2026-10-18T15:20:41+09:00"
+   },
+   {
+    "id": "engage-finance-applife_k-224031000417",
+    "blog": "finance",
+    "target": "applife_k",
+    "title": "앱테크 일주일 기록",
+    "url": "https://m.blog.naver.com/applife_k/224031000417",
+    "liked": true,
+    "comment": "",
+    "at": "2026-10-18T13:02:09+09:00"
+   }
+  ]
+ }
 }

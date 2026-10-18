@@ -523,7 +523,7 @@ def _export_post(v: Any) -> dict[str, Any] | None:
 PIC_ID = re.compile(r"^pk-[0-9a-f]{8}$")
 PIC_JOB_ID = re.compile(r"^pj-[0-9a-f]{8}$")
 PIC_FILE_RE = re.compile(r"^[a-z0-9-]{1,80}\.(jpg|jpeg|png|webp)$")
-PIC_STATES = ("working", "ready", "failed", "none")
+PIC_STATES = ("working", "ready", "failed", "none", "inserted")  # inserted: Pick 자동으로 넣음 (남은 후보는 골라 넣기)
 PICS_MAX, PIC_JOBS_MAX = 24, 5
 
 
