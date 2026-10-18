@@ -153,3 +153,4 @@ animation:sp .8s linear infinite;flex:none}
 @media (min-width:760px){.bd{align-items:center}.sh{border-radius:16px;max-height:86dvh}.tabs{padding-left:calc(50% - 300px);
 padding-right:calc(50% - 300px)}main{padding-top:20px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+.ig{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 2px;align-items:center;margin:0 0 12px}.ig+.ig{border-top:1px solid var(--line);padding-top:12px}.tools.sub{margin:2px 0 -12px -6px}

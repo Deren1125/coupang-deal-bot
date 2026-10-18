@@ -461,6 +461,7 @@ POST_STATUSES = ("saved", "needs_input", "drafting", "failed", "published")
 POST_NEEDS = ("photos", "publish", "answers", "retry", "owner_edit", "share", "channel")
 THUMB_RE = re.compile(r"^[a-z0-9-]{1,64}\.(jpg|webp)$")
 V2_POSTS_MAX = 60
+SHARE_MAX = 1500  # 핫딜 오픈채팅 문구 (recent[].share)
 _NAVER_HOSTS = ("blog.naver.com", "m.blog.naver.com")
 
 
@@ -594,6 +595,14 @@ def _neighbors(v: Any) -> dict[str, Any] | None:
             "reduced": v.get("reduced") is True, "accepted_today": _count(v.get("accepted_today"), top=1000)}
 
 
+def _share(v: Any) -> str:
+    """핫딜 최근 글의 오픈채팅 문구 (주인 10/18 — 카톡 대신 대시보드에서 복사). 줄바꿈은 두고 줄마다 safe_text, 전체 SHARE_MAX."""
+    if not isinstance(v, str):
+        return ""
+    lines = [safe_text(x, SHARE_MAX) for x in v.replace("\r", "").split("\n")[:60]]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()[:SHARE_MAX]
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -607,7 +616,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
         rows = recent.get(blog) if isinstance(recent.get(blog), list) else []
         out["recent"][blog] = [
             {"pid": _count(x.get("pid"), top=10**9), "title": _one_line(x.get("title"), 80) or "",
-             "url": _naver_url(x.get("url")), "at": _one_line(x.get("at"), 40)}
+             "url": _naver_url(x.get("url")), "at": _one_line(x.get("at"), 40),
+             **({"share": sh} if blog == "hotdeal" and (sh := _share(x.get("share"))) else {})}
             for x in rows[:10] if isinstance(x, dict) and _one_line(x.get("title"), 80)]
     scan = data.get("scan")
     if isinstance(scan, dict) and isinstance(scan.get("items"), list):

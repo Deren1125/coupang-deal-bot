@@ -1,0 +1,31 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0w",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "photos",
+ "blog": "issue",
+ "args": {
+  "blog": "issue",
+  "pid": 46,
+  "uploads": [
+   "/home/ubuntu/dealbot-data/dash_uploads/files/9f0e1d2c3b4a59687766554433221100.jpg"
+  ],
+  "mode": "add",
+  "slot": 0,
+  "in_order": false,
+  "crop": false,
+  "credit": "",
+  "links": [
+   {"slot": 2, "url": "https://www.instagram.com/p/DPq7x2aE1bc/"},
+   {"slot": 4, "url": "https://www.instagram.com/reel/DPq9z3bF2cd/"}
+  ]
+ },
+ "target": "post-issue-46",
+ "confirmed": true,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_8b1f2g"
+ }
+}

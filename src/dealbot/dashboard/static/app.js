@@ -421,7 +421,22 @@ function primary(it, a) {
   if (a.input === 'goto') return btn('pb soft', a.label, () => go('#' + a.goto.replace(/^#/, '')));
   const key = pk(it.iid, a);
   if (OPEN[it.iid] === key) return panel(it, a, key, {});
-  return btn('pb', a.label, e => act(it, a, e.currentTarget, true));
+  const b = btn('pb', a.label, e => act(it, a, e.currentTarget, true)), sl = igSlots(it, a);
+  return sl.length ? el('div', {}, b, el('div', {class: 'tools sub'}, btn('lnk', '인스타 링크 넣기', () => {
+    igAdd(P[key] = {files: [], opt: {}}, sl);
+    if (SH.length) inputSheet(it, a, key); else { OPEN[it.iid] = key; render(); }
+  }))) : b;
+}
+// 인스타 링크 (Pick 사진 자리 — 주소 글자만 보고 Blog-Auto 가 링크 카드로): 빈 자리(설명 한 줄), 자리 정보가 없으면 1..N
+const IGRE = /^https?:\/\/(www\.|m\.)?instagram\.com\/([\w.]+\/)?(p|reels?)\/[\w-]{5,40}([/?#]|$)/i;
+function igSlots(it, a) {
+  if (a.input !== 'photos' || !a.options || (a.args || {}).blog !== 'issue') return [];
+  const d = it.detail || {};
+  return d.slots && d.slots.length ? d.slots.filter(x => !x.thumb) : Array.from({length: ((d.photo_request || {}).must || []).length || 6}, (_, i) => ({slot: i + 1}));
+}
+function igAdd(st, sl) {
+  const rows = st.ig = st.ig || [], u = rows.map(r => r.slot);
+  rows.push({slot: (sl.find(x => !u.includes(x.slot)) || sl[0]).slot, url: ''});
 }
 
 // 누를 것: 입력이 없으면 바로, 있으면 그 자리에(inline) 또는 시트로
@@ -498,8 +513,19 @@ function panel(it, a, key, ctx) {
     kids.push(el('div', {class: 'pv'}, st.files.map((x, i) => el('figure', {'data-i': i}, el('img', {src: st.url && st.url[i] || (st.url = st.url || [], st.url[i] = URL.createObjectURL(x)), alt: ''}), el('i')))));
   }
   if (a.input === 'photos') {
-    kids.push(el('div', {class: 'tools'}, btn('lnk', '다시 고르기', () => pick(a.accept || 'image/*', a.multiple, fs => { if (fs.length) { st.files = fs.slice(0, a.multiple ? 20 : 1); st.url = null; redraw(); } })),
-      a.options && !st.more ? btn('lnk', '옵션', () => { st.more = 1; redraw(); }) : null));
+    const sl = igSlots(it, a), rows = st.ig || [];
+    kids.push(el('div', {class: 'tools'}, btn('lnk', st.files.length ? '다시 고르기' : '사진 고르기', () => pick(a.accept || 'image/*', a.multiple, fs => { if (fs.length) { st.files = fs.slice(0, a.multiple ? 20 : 1); st.url = null; redraw(); } })),
+      a.options && !st.more && st.files.length ? btn('lnk', '옵션', () => { st.more = 1; redraw(); }) : null,
+      rows.length < sl.length ? btn('lnk', rows.length ? '링크 더 넣기' : '인스타 링크 넣기', () => { igAdd(st, sl); redraw(); }) : null));
+    rows.forEach((r, i) => {
+      const u = el('input', {class: 'fl', type: 'url', inputmode: 'url', placeholder: 'instagram.com/p/… 게시물 주소', autocomplete: 'off', oninput: e => { r.url = e.target.value; }});
+      u.value = r.url;
+      kids.push(el('div', {class: 'ig'}, el('select', {class: 'fl', 'aria-label': '사진 자리', onchange: e => { r.slot = +e.target.value; }},
+        sl.map(x => el('option', {value: x.slot, selected: x.slot === r.slot}, `자리 ${x.slot}` + (x.label && x.label !== '자리 ' + x.slot ? ' · ' + x.label : '')))),
+      btn('lnk mute', '빼기', () => { rows.splice(i, 1); redraw(); }), u, btn('lnk', '붙여넣기', async () => {
+        try { const t = ((await N.clipboard.readText()) || '').trim(); if (!t) throw 0; u.value = r.url = t; } catch (e) { u.focus(); toast('길게 눌러 붙여넣기'); }
+      })));
+    });
     if (a.options && st.more) {
       const T = {replace: '전부 바꿔 넣기', in_order: '순서대로', crop: '자르기', credit: '출처 적기'};
       kids.push(el('div', {class: 'opts'}, a.options.map(o => btn('tg', T[o] || o, () => { st.opt[o] = !st.opt[o]; redraw(); }, {'aria-pressed': st.opt[o] ? 'true' : 'false'}))));
@@ -507,7 +533,8 @@ function panel(it, a, key, ctx) {
     }
   }
   const n = st.files.length;
-  const label = a.input === 'photos' ? (n ? `${n}장 올리기` : a.label) : a.label;
+  const k = (st.ig || []).length;
+  const label = a.input !== 'photos' ? a.label : k ? `${n ? n + '장 · ' : ''}링크 ${k}개 넣기` : n ? `${n}장 올리기` : a.label;
   const send = btn('pb', label, () => go1());
   kids.push(send);
   if (a.note) kids.push(el('p', {class: 'note'}, a.note));
@@ -535,7 +562,11 @@ function panel(it, a, key, ctx) {
       if (a.input === 'secret') extra[SECRET_KEY[a.action] || 'token'] = v;
       else if (a.action === 'blog.issue') extra.keyword = v; else extra.text = v;
     }
-    if ((a.input === 'photos' || a.input === 'file') && !n) { act(it, a, null, !ctx.sheet); return; }
+    const links = (st.ig || []).map(r => ({slot: r.slot, url: r.url.trim()}));
+    if (links.some(l => !IGRE.test(l.url))) { toast('인스타 게시물 주소(…/p/·…/reel/)만 넣을 수 있어요'); return; }
+    if (new Set(links.map(l => l.slot)).size < k) { toast('같은 자리를 두 번 골랐어요'); return; }
+    if (k) extra.links = links;
+    else if ((a.input === 'photos' || a.input === 'file') && !n) { act(it, a, null, !ctx.sheet); return; }
     let ids = [];
     if (n) {
       send.disabled = true; send.textContent = '올리는 중…';
@@ -766,7 +797,7 @@ function vBlog() {
     const open = OPEN['recent-' + key];
     out.push(el('div', {class: 'box', style: 'margin-top:12px'}, btn('fold', `최근 글 ${b.recent.length}개`, () => { OPEN['recent-' + key] = !open; render(); }, {'aria-expanded': open ? 'true' : 'false'}),
       open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))),
-        r.url ? ext('sm', '네이버', r.url) : null, r.google || r.daum ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
+        r.url ? ext('sm', '네이버', r.url) : null, r.google || r.daum || r.share ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
   }
   const vs = vis(b.visits);
   if (b.neighbors || vs.length) {
@@ -804,7 +835,8 @@ function submitSheet(r) {
   box.append(r.google ? btn('mr', '구글 등록', () => {
     W.open(r.google.url, '_blank', 'noopener');
     N.clipboard.writeText(r.google.copy).then(() => toast('글 주소를 복사했어요 — 붙여넣고 등록하세요'), () => toast('길게 눌러 복사해 주세요: ' + r.google.copy));
-  }) : null, r.daum ? ext('mr', '다음 확인', r.daum) : null, el('p', {class: 'note'}, '다음은 블로그를 한 번 등록해 두면 새 글이 알아서 들어가요'));
+  }) : null, r.daum ? ext('mr', '다음 확인', r.daum) : null, r.share ? btn('mr', '오픈채팅 문구 복사', () => copy(r.share, '복사했어요 — 오픈채팅에 붙여넣기 하세요')) : null,
+  r.daum ? el('p', {class: 'note'}, '다음은 블로그를 한 번 등록해 두면 새 글이 알아서 들어가요') : null);
 }
 
 // 한 번에 발행: 확인 창은 제목 목록으로 한 번, 그다음 글마다 발행 요청

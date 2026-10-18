@@ -27,6 +27,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
@@ -48,6 +49,8 @@ URL_MAX = 2000
 SECRET_MAX = 600
 CREDIT_MAX = 60  # Blog-Auto 와 같은 한도 (넘으면 사진을 다 올린 뒤에야 거절되지 않게 여기서 바로)
 CHANNEL_URL_MAX = 300
+IG_LINKS_MAX, IG_URL_MAX = 12, 300  # Blog-Auto bridge._ig_links 와 같은 한도
+IG_CODE_RE = re.compile(r"[\w-]{5,40}")
 
 # ★ 확인 창 (spec §4.5 — 하나뿐인 기준). blog.mode 는 발행 모드로 바꿀 때만, push.unsubscribe 는 다른 기기일 때만
 CONFIRM = frozenset({
@@ -186,6 +189,38 @@ def _uploads(v: Any, lo: int, hi: int) -> list[str]:
     return list(dict.fromkeys(v))
 
 
+def instagram_post(url: str) -> bool:
+    """인스타그램 '게시물' 주소인가 (Blog-Auto issue.sns_post 의 인스타 갈래와 같게: /p/·/reel/·/reels/·/tv/ 코드, 앞에 /계정/ 가능).
+    프로필·스토리·다른 사이트는 아님. 주소 글자만 본다 — 인스타그램에 접속하지 않는다."""
+    try:
+        p = urlparse("https:" + url if url.startswith("//") else url)
+        host = re.sub(r"^(?:www|m|mobile)\.", "", (p.hostname or "").lower())
+    except ValueError:
+        return False
+    if p.scheme not in ("http", "https") or host not in ("instagram.com", "instagr.am"):
+        return False
+    parts = [x for x in p.path.split("/") if x]
+    return any(len(parts) > i + 1 and parts[i] in ("p", "reel", "reels", "tv") and IG_CODE_RE.fullmatch(parts[i + 1])
+               and parts[i + 1] != "audio" for i in (0, 1))
+
+
+def _ig_links(v: Any) -> list[dict[str, Any]]:
+    """사진 올리기의 인스타 링크 (Pick, 계약: Blog-Auto bridge._ig_links): [{slot: 0~40 (0 = 빈 자리에), url}] 최대 12개."""
+    if v is None:
+        return []
+    if not isinstance(v, list) or len(v) > IG_LINKS_MAX:
+        raise ActionError("bad_args")
+    out = []
+    for x in v:
+        if not isinstance(x, dict):
+            raise ActionError("bad_args")
+        url = _str(x.get("url"), IG_URL_MAX)
+        if not instagram_post(url):
+            raise ActionError("bad_args")
+        out.append({"slot": _int(x.get("slot") or 0, 0, 40), "url": url})
+    return out
+
+
 def _pids(v: Any, *, allow_all: bool = False) -> list[int] | str:
     if allow_all and v == "all":
         return "all"
@@ -280,12 +315,19 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         if name == "photo_clear":
             out["slot"] = _int(g("slot"), 1, 40)
         if name == "photos":
+            links = _ig_links(g("links"))
+            if links and out["blog"] != "issue":
+                raise ActionError("bad_args")
+            if links and not g("uploads"):  # 링크만 (사진 없이 그 자리에 게시물) — Blog-Auto 도 사진 칸 값은 보지 않는다
+                return {**out, "links": links}
             out["uploads"] = _uploads(g("uploads"), 1, 20)
             mode = g("mode") or ("slot" if g("slot") else "add")
             if mode not in ("add", "replace", "slot"):
                 raise ActionError("bad_args")
             out.update(mode=mode, slot=_int(g("slot"), 1, 40) if mode == "slot" else 0, in_order=g("in_order") is True,
                        crop=g("crop") is True, credit=_str(g("credit"), CREDIT_MAX, required=False))
+            if links:  # 사진만 보낼 때의 args 는 전과 같다 (links 없음)
+                out["links"] = links
         if name == "channel":
             url = _str(g("url"), CHANNEL_URL_MAX, required=False)
             if url and not own_blog_url(url, blog_ids.get(out["blog"])):
@@ -440,10 +482,11 @@ def confirm_text(action: str, args: dict[str, Any], facts: dict[str, Any]) -> di
         "blog.unschedule_all": (f"{blog} 예약을 모두 취소할까요?", "예약된 글은 발행하지 않고 기다리는 글로 돌아가요.", "모두 취소"),
     }
     pub = "자동 발행 모드라 바로 네이버에 공개돼요."
+    ph = "사진" if args.get("uploads") or not args.get("links") else "인스타 게시물"
     blog_p = BLOG_NAMES.get(publish_blog(action, args) or "", blog)
     c.update({
         "blog.retry": (f"{blog}{num} 글을 다시 올릴까요?", pub, "공개로 올리기"),
-        "blog.photos": (f"{blog}{num} 글에 사진을 넣을까요?", "사진을 넣고 " + pub, "넣고 발행"),
+        "blog.photos": (f"{blog}{num} 글에 {ph}을 넣을까요?", f"{ph}을 넣고 " + pub, "넣고 발행"),
         "blog.fixpic": (f"{blog_p}{num} 글 사진을 바꿀까요?", "사진을 바꾸고 " + pub, "바꾸고 발행"),
         "blog.write": (f"{blog_p} 새 글을 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
         "blog.issue": (f"{blog_p} 새 글을 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
