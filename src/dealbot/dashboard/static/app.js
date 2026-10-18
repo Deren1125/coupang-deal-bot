@@ -386,6 +386,11 @@ async function uploadAll(files, kind, onp) {
   }
   return ids;
 }
+const prog = figs => (i, x, done) => {  // 올리는 칸 아래 막대 · 끝나면 초록 / 실패 빨강
+  const fg = figs[i]; if (!fg) return;
+  fg.querySelector('i').style.width = Math.round(x * 100) + '%';
+  if (done === true) fg.classList.add('ok'); else if (done === false) fg.classList.add('bad');
+};
 let PICK = 0;
 function pick(accept, multiple, done) {
   const f = el('input', {type: 'file', accept, multiple: multiple || null, hidden: true});
@@ -492,7 +497,7 @@ function field(key, a, x) {
 function panel(it, a, key, ctx) {
   const st = P[key] || (P[key] = {files: [], opt: {}});
   const box = el('div', {class: 'ip'});
-  const kids = [], keys = [];
+  const kids = [], keys = [], qs = a.input === 'answers' && (it.detail && it.detail.questions) || [], qf = st.q = st.q || {};
   const cancel = ctx.sheet || ctx.fixed ? null : btn('lnk mute', '접기', () => { delete P[key]; delete OPEN[it.iid]; render(); });
   let f = null;
   if (a.input === 'url') {
@@ -503,11 +508,17 @@ function panel(it, a, key, ctx) {
       a.url ? ext('lnk', '상품 열기', a.url) : null, paste(f, key),
       a.photo_optional ? btn('lnk', st.files.length ? '사진 바꾸기' : '사진 추가 (선택)', () => pick(a.accept || 'image/*', false, fs => { if (fs.length) { st.files = fs.slice(0, 1); redraw(); } })) : null);
     kids.push(tools, f);
-  } else if (a.input === 'answers' && (it.detail && it.detail.questions || []).length) {
-    for (const q of it.detail.questions) {
-      const k = `${key}|${q.n}`;
+  } else if (qs.length) {
+    // 답마다 사진 첨부 (10/18: 공식 페이지 캡처 같은 근거 — Blog-Auto 가 읽고 고친다, 글에 넣지는 않음). ✕ 는 기호 — 읽는 글자는 aria-label
+    for (const q of qs) {
+      const k = `${key}|${q.n}`, fs = qf[q.n] || [];
       keys.push(k);
-      kids.push(el('label', {class: 'lab'}, `${q.n}. ${q.q}`), field(k, {input: 'text', placeholder: '답'}, {rows: 2, class: 'fl short'}));
+      kids.push(el('label', {class: 'lab'}, `${q.n}. ${q.q}`), field(k, {input: 'text', placeholder: '답'}, {rows: 2, class: 'fl short'}),
+        fs.length ? el('div', {class: 'pv', 'data-q': q.n}, fs.map((x, i) => el('figure', {}, el('img', {src: x.u || (x.u = URL.createObjectURL(x.f)), alt: ''}), el('i'),
+          btn('x', ['✕'], () => { URL.revokeObjectURL(x.u); fs.splice(i, 1); redraw(); }, {'aria-label': '사진 빼기'})))) : null,
+        el('div', {class: 'tools'}, btn('lnk', fs.length ? `사진 ${fs.length}장 · 더 첨부` : '사진 첨부', () => pick('image/*', true, more => {
+          if (more.length) { qf[q.n] = fs.concat(more.map(f => ({f}))).slice(0, 10); redraw(); }
+        }))));
     }
   } else if (a.input === 'text' || a.input === 'answers') {
     f = field(key, a, {rows: 4}); keys.push(key); kids.push(f);
@@ -556,10 +567,19 @@ function panel(it, a, key, ctx) {
       const v = (f.value || '').trim();
       if (!v && !a.optional) { f.focus(); toast('링크를 넣어 주세요'); return; }
       extra.url = v;
-    } else if (a.input === 'answers' && keys.length > 1) {
-      const vals = keys.map(k => (VAL[k] || '').trim());
-      if (!vals.some(Boolean)) { toast('답을 적어 주세요'); return; }
-      extra.text = vals.map((v, i) => `${i + 1}) ${v || '-'}`).join('\n');
+    } else if (qs.length) {
+      const vals = keys.map(k => (VAL[k] || '').trim()), ph = qs.map(q => qf[q.n] || []);
+      if (!vals.some(Boolean) && !ph.some(x => x.length)) { toast('답을 적어 주세요'); return; }
+      extra.text = vals.map((v, i) => `${i + 1}) ${v || (ph[i].length ? '(사진 참고)' : '-')}`).join('\n');
+      if (ph.some(x => x.length)) {
+        const per = qs.map((q, i) => ({n: q.n, text: vals[i], uploads: []}));
+        send.disabled = true; send.textContent = '올리는 중…';
+        try {
+          for (let i = 0; i < qs.length; i++) if (ph[i].length) per[i].uploads = await uploadAll(ph[i].map(x => x.f), 'photo', prog(box.querySelectorAll(`.pv[data-q="${qs[i].n}"] figure`)));
+        } catch (e) { send.disabled = false; send.textContent = label; toast(e.message || MSG.bad_upload); return; }
+        send.disabled = false; send.textContent = label;
+        extra.answers = per;
+      }
     } else if (f && (a.input === 'text' || a.input === 'answers' || a.input === 'secret')) {
       const v = (f.value || '').trim();
       if (!v && !a.optional) { f.focus(); toast('내용을 적어 주세요'); return; }
@@ -574,13 +594,8 @@ function panel(it, a, key, ctx) {
     let ids = [];
     if (n) {
       send.disabled = true; send.textContent = '올리는 중…';
-      const figs = box.querySelectorAll('.pv figure');
       try {
-        ids = await uploadAll(st.files, a.input === 'file' ? 'ledger' : 'photo', (i, x, done) => {
-          const fg = figs[i]; if (!fg) return;
-          fg.querySelector('i').style.width = Math.round(x * 100) + '%';
-          if (done === true) fg.classList.add('ok'); else if (done === false) fg.classList.add('bad');
-        });
+        ids = await uploadAll(st.files, a.input === 'file' ? 'ledger' : 'photo', prog(box.querySelectorAll('.pv figure')));
       } catch (e) { send.disabled = false; send.textContent = label; toast(e.message || MSG.bad_upload); return; }
       send.disabled = false; send.textContent = label;
     }

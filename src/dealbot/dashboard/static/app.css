@@ -76,6 +76,7 @@ textarea.fl{min-height:96px;resize:vertical;line-height:1.5}textarea.short{min-h
 .pv img{width:100%;height:100%;object-fit:cover;display:block}
 .pv i{position:absolute;left:0;bottom:0;height:4px;background:var(--chart);width:0;transition:width .2s}
 .pv figure.ok i{background:var(--gr);width:100%}.pv figure.bad{outline:2px solid var(--red)}
+.pv .x{position:absolute;top:4px;right:4px;width:32px;height:32px;border:0;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:14px;padding:0}
 .opts{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px}
 .tg{min-height:44px;border:1px solid var(--line);border-radius:20px;background:var(--card);padding:0 14px;font-size:14px}
 .tg[aria-pressed=true]{background:var(--ac-soft);border-color:var(--text);color:var(--text);font-weight:600}
