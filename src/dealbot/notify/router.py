@@ -31,8 +31,9 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from dealbot.bridge.kakao_out import KakaoOut
+from dealbot.bridge.kakao_out import TEXT_MAX, KakaoOut
 from dealbot.notify import iid as iidmod
+from dealbot.notify import links as linksmod
 from dealbot.notify import vapid, webpush
 from dealbot.notify.store import Notice, NotifyStore
 
@@ -78,6 +79,14 @@ KIND_VERBS = {"link_request": "링크 넣기", "photo_need": "사진", "pick_pho
 
 # 대시보드에서 주인이 누른 일의 항목 (iid). 그 안에서 같은 항목에 열린 알림만 quiet ("*" = 모두 — 예전 쓰임)
 _quiet: contextvars.ContextVar[str | None] = contextvars.ContextVar("dash_quiet", default=None)
+
+
+def kakao_fit(text: str, tail: str, limit: int = TEXT_MAX) -> str:
+    """카톡 한 통(200자): 끝 줄(링크)은 그대로, 앞 글만 '…' 로 줄인다."""
+    room = limit - len(tail) - 1
+    if len(text) > room:
+        text = text[: max(1, room - 1)].rstrip() + "…"
+    return f"{text}\n{tail}"
 
 
 def urgency(kind: str) -> str:
@@ -324,6 +333,10 @@ class NotifyRouter:
             body = n.body if not short else n.body[:60]
             p = {"v": 1, "type": "item", "title": n.title or n.short, "body": body, "tag": n.iid,
                  "url": f"/dashboard/go/{n.iid}", "urgent": True, "badge": badge, "ts": int(now)}
+            # 사진 부탁: 첫 링크는 알림 버튼 하나로 (안드로이드 크롬 — 누르면 그 주소, 알림 자체를 누르면 그 할 일). iOS 는 버튼이 없음
+            first = next((r.links[0] for r in rows if r.iid == n.iid and r.links), None)
+            if first is not None:
+                p["open"] = {"title": linksmod.action_title(n.src, n.blog), "url": first["url"]}
             return p, n.iid
         counts: dict[str, int] = {}
         for n in items:
@@ -380,7 +393,10 @@ class NotifyRouter:
         return sent, failed, retry and sent == 0, retry_after
 
     def _kakao_text(self, n: Notice) -> str:
-        return f"{n.title}\n{n.body}" if n.body and n.body != n.title else (n.title or n.short)
+        """카톡 예비 한 통. 사진 부탁이면 첫 링크를 끝 줄에 따로 (200자 안 — 넘치면 앞 글을 줄이고 주소는 그대로)."""
+        text = f"{n.title}\n{n.body}" if n.body and n.body != n.title else (n.title or n.short)
+        url = linksmod.kakao_url(n.links)
+        return kakao_fit(text, url) if url else text
 
     def _to_kakao(self, rows: list[Notice], now: float) -> int:
         """푸시가 안 간 급한 일 → 카톡 (키마다 한 번). Blog-Auto 가 아직 다리를 모르면 받은편지함 줄로 (kakao_out.py).
@@ -406,6 +422,9 @@ class NotifyRouter:
             what = " · ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1]))
             names = ", ".join((n.short or n.title)[:16] for n in list(items.values())[:3]) + (" …" if len(items) > 3 else "")
             text = f"🔔 할 일 {len(items)}개 — {what}: {names}\n대시보드 '할 일'에서 처리해 주세요"
+            with_links = [n for n in items.values() if n.links]
+            if len(with_links) == 1 and (url := linksmod.kakao_url(with_links[0].links)):  # 링크가 한 일에만 있으면 헷갈리지 않음
+                text = kakao_fit(text, f"{(with_links[0].short or with_links[0].title)[:20]}: {url}")
             if self.kakao.send("urgent", key=f"todo-batch:{int(now)}", text=text, link=self.link(iidmod.TODO_IID),
                                short=f"할 일 {len(items)}개", ttl_h=max(n.ttl_h for n in rows)):
                 done = 1

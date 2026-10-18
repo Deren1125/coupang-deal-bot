@@ -421,11 +421,15 @@ function primary(it, a) {
   if (a.input === 'goto') return btn('pb soft', a.label, () => go('#' + a.goto.replace(/^#/, '')));
   const key = pk(it.iid, a);
   if (OPEN[it.iid] === key) return panel(it, a, key, {});
-  const b = btn('pb', a.label, e => act(it, a, e.currentTarget, true)), sl = igSlots(it, a);
-  return sl.length ? el('div', {}, b, el('div', {class: 'tools sub'}, btn('lnk', '인스타 링크 넣기', () => {
+  let b = btn('pb', a.label, e => act(it, a, e.currentTarget, true));
+  const sl = igSlots(it, a), L = a.input === 'photos' ? it.links || [] : [];
+  // 사진 부탁: 사진 받을 곳 (첫 링크) — 큰 버튼 옆 테두리 버튼, 링크가 더 있으면 시트에서 모두
+  if (L.length) b = el('div', {class: 'two'}, b, ext('pb soft', it.src === 'deal' || it.blog === 'hotdeal' ? '상품 열기' : '사진 찾을 곳', L[0].url));
+  const t = [sl.length ? btn('lnk', '인스타 링크 넣기', () => {
     igAdd(P[key] = {files: [], opt: {}}, sl);
     if (SH.length) inputSheet(it, a, key); else { OPEN[it.iid] = key; render(); }
-  }))) : b;
+  }) : null, L.length > 1 && !SH.length ? btn('lnk', `링크 ${L.length}개 모두`, () => openItem(it.iid, it)) : null].filter(Boolean);
+  return t.length ? el('div', {}, b, el('div', {class: 'tools sub'}, ...t)) : b;
 }
 // 인스타 링크 (Pick 사진 자리 — 주소 글자만 보고 Blog-Auto 가 링크 카드로): 빈 자리(설명 한 줄), 자리 정보가 없으면 1..N
 const IGRE = /^https?:\/\/(www\.|m\.)?instagram\.com\/([\w.]+\/)?(p|reels?)\/[\w-]{5,40}([/?#]|$)/i;

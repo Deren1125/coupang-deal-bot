@@ -2,7 +2,8 @@
 
     {"v":1,"id":"n_…","at":…,"src":"blogauto","op":"open","key":"draft:issue:31","kind":"draft_ready","blog":"issue",
      "iid":"post-issue-31","urgent":true,"quiet":false,"sev":"todo","title":"≤40","body":"≤120","short":"≤48",
-     "ttl_h":168,"group":"","wait":null|[초, 개수],"delay_s":300}
+     "ttl_h":168,"group":"","wait":null|[초, 개수],"delay_s":300,"links":[{"label":"사진 출처 1","url":"https://…"}]}
+    links 는 선택 칸 (사진 부탁에만 — 사진 받을 곳, 최대 3개 · http(s) · 500자 안, notify/links.py). 없거나 틀리면 [] (알림은 그대로)
     {"v":1,"id":"n_…","at":…,"src":"blogauto","op":"resolve","keys":["draft:issue:31"],"prefix":false}
 
 - 파일은 id 순서(=시간 순서)로 적용하고, DB 에 넣은 뒤 지운다. 같은 id 는 한 번만 (7일 기억)
@@ -21,6 +22,7 @@ from typing import Any
 from dealbot.bridge import spool
 from dealbot.dashboard.model import safe_text
 from dealbot.notify import iid as iidmod
+from dealbot.notify.links import clean_links
 from dealbot.notify.router import SEVS, NotifyRouter
 
 log = logging.getLogger(__name__)
@@ -75,6 +77,7 @@ def clean_open(raw: dict[str, Any]) -> dict[str, Any] | None:
         "short": _text(raw.get("short"), 48) or title[:48], "ttl_h": _num(raw.get("ttl_h"), 0.05, TTL_MAX_H) or 24,
         "group": group if re.fullmatch(r"[a-z0-9_:\-]*", group or "") else "", "wait_s": wait_s, "wait_n": wait_n,
         "delay_s": _num(raw.get("delay_s"), 0, 86400) or 0, "at": _num(raw.get("at"), 0, 1e11) or 0,
+        "links": clean_links(raw.get("links")),
     }
 
 

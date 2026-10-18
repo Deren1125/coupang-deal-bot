@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS owner_notices (
     next_try       REAL,
     kakao_at       REAL,
     digest_slot    TEXT,
+    links          TEXT,
     PRIMARY KEY (src, key)
 );
 CREATE INDEX IF NOT EXISTS idx_owner_notices_open ON owner_notices(resolved_at, urgent, pushed_at);
@@ -415,6 +416,8 @@ class Database(SnsStoreMixin):
             ("market_quotes", (("meta", "TEXT"),)),
             # 같은 일·같은 항목이 아직 안 끝났을 때 args 까지 같아야 '같은 일' (사진 두 번째 묶음이 첫 묶음 id 로 사라지지 않게)
             ("dash_actions", (("args_hash", "TEXT"),)),
+            # 사진 부탁 알림의 '사진 받을 곳' 링크 [{label, url}] (JSON, 주인 10/18 — notify/links.py)
+            ("owner_notices", (("links", "TEXT"),)),
         )
         for table, columns in adds:
             cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})").fetchall()}

@@ -42,6 +42,7 @@ CHIPS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
 VISITS_IID = "visits"  # 할 일 '오늘 들를 이웃 글' 한 줄
 SEV_ORDER = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
 UNSURE_DAYS = 7
+LINKS_MAX = 3  # 사진 부탁 줄의 '사진 받을 곳' (카드 버튼은 첫 링크, 시트에 모두)
 NAME_MAX = 40
 # 알림 종류 → 글의 할 일 (기록 파일 posts[] 가 아직 없을 때)
 KIND_NEED = {"draft_ready": "publish", "ask": "answers", "pick_photos": "photos", "hot": "photos", "upload_fail": "retry",
@@ -257,9 +258,14 @@ class StateBuilder:
             it = db.get_queue_item(qid)
             if it is None or it.status != "published":
                 continue
+            from dealbot.monitoring.admin import product_links
+
+            links = product_links(it.deal.product)  # 상품 페이지 — 사진 올리기 옆 '상품 열기 ↗' (주인 10/18)
             base(it, "photo_need", f"사진 필요 · {self._hhmm(until)}까지",
                  act("deal.late_photo", "사진 올리기", {"qid": qid}, input="photos", accept="image/*", multiple=False), [],
-                 {"how": "상품이 잘 보이는 사진 한 장 (블로그·인스타에 써요)"}, expires=until)
+                 {"how": "상품이 잘 보이는 사진 한 장 (블로그·인스타에 써요) · 화면 캡처면 상품 사진 부분을 알아서 잘라요"},
+                 expires=until)  # 상품 페이지는 사진 올리기 옆 버튼 (줄·시트 모두 — 같은 링크를 두 번 그리지 않음)
+            items[iidmod.deal_iid(qid)]["links"] = links
         return items
 
     def _channel_url(self) -> str | None:
@@ -361,6 +367,7 @@ class StateBuilder:
                            "questions": questions, "deadline": (post or {}).get("deadline"),
                            "owner_edited": bool((post or {}).get("owner_edited")),
                            "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
+                "links": list((pr or {}).get("links") or [])[:LINKS_MAX] if "photos" in needs else [],
                 "_hot": rank.post_hot(post)}
 
     # ---------------------------------------------------------- 알림 줄 (owner_notices · 기록 파일 todo)
@@ -445,6 +452,12 @@ class StateBuilder:
                     url = (p or {}).get("naver_url")
                     item["primary"] = open_link("네이버에서 보기", url) if url else goto("자세히", f"#/i/{iid}")
                     item["more"] = [act("todo.dismiss", "다 했어요", {"iid": iid, "key": extra[0].key})]
+                if item["detail"]["needs"] and "photos" in item["detail"]["needs"] and not item.get("links"):
+                    # 기록 파일에 사진 출처가 없으면(예전 Blog-Auto·아직 안 씀) 알림이 가져온 링크로 (사진 받을 곳)
+                    nl = next((r.links for r in rows if r.links), [])
+                    if nl:
+                        item["links"] = nl[:LINKS_MAX]
+                        item["detail"]["photo_request"] = dict(item["detail"]["photo_request"] or {"must": []}, links=nl)
                 item["since"] = min(r.opened_at for r in rows)
                 item["urgent"] = any(r.urgent for r in rows) or item["urgent"]
                 item["sev"] = min((r.sev for r in rows), key=lambda s: SEV_ORDER.get(s, 2))
