@@ -54,6 +54,8 @@ def clean_open(raw: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if not isinstance(iid, str) or not iidmod.ok(iid) or blog not in BLOGS:
         return None
+    if iid == "sys-blogauto":  # 예전 Blog-Auto iid 표 (새 키를 아직 모름 — 예: neighbors:protect:B:…) → 이쪽 표가 아는 줄로
+        iid = iidmod.iid_for(key, blog, src="blogauto")
     sev = raw.get("sev") if raw.get("sev") in SEVS else "todo"
     title = _text(raw.get("title"), 40) or _text(raw.get("short"), 40)
     if not title:

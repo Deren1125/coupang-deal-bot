@@ -43,7 +43,8 @@ URGENT_DEALBOT = ("link_request", "review_auth", "review_info", "publish_unsure"
                   "publisher_stuck", "autolink_stop", "sns_auth", "selfcheck", "claude_login", "update_bad")
 URGENT_BLOGAUTO = ("login", "upload_fail", "draft_ready", "ask", "pick_photos", "hot", "owner_edit", "share_confirm",
                    "channel_ask", "channel_review", "double_pub", "link_cards", "own_stats_blocked", "kakao_expiring",
-                   "sched_blocked")  # sched_blocked: 간격 두고 발행 차례에 올리지 못함 (주인 10/18) — 예약대로 발행된 것은 정리에만
+                   "sched_blocked",  # sched_blocked: 간격 두고 발행 차례에 올리지 못함 (주인 10/18) — 예약대로 발행된 것은 정리에만
+                   "neighbors_protect")  # 서로이웃 신청에 네이버 보호조치·비정상 활동 문구 (주인 10/18) — 멈추고 줄였다고 바로
 DIGEST_DEALBOT = ("collector_stuck", "linkprice", "sns_zero", "sns_scope", "domain_dns", "ig_ffmpeg", "threads_replies",
                   "published", "link_done", "held", "day", "waiting")
 DIGEST_BLOGAUTO = ("job_error", "loop_error", "scan", "scan_auto", "channel_fail", "openchat_fail", "neighbors_config",
@@ -72,7 +73,8 @@ PAYLOAD_MAX = 3000
 KIND_VERBS = {"link_request": "링크 넣기", "photo_need": "사진", "pick_photos": "사진", "hot": "사진", "review_auth": "확인",
               "review_info": "확인", "publish_unsure": "채널 확인", "draft_ready": "발행", "ask": "답하기",
               "owner_edit": "직접 고친 글", "share_confirm": "보내기", "channel_ask": "채널", "channel_review": "채널",
-              "upload_fail": "다시 올리기", "login": "로그인", "sns_auth": "다시 연결", "kakao_expiring": "카톡 연결"}
+              "upload_fail": "다시 올리기", "login": "로그인", "sns_auth": "다시 연결", "kakao_expiring": "카톡 연결",
+              "neighbors_protect": "서로이웃 확인"}
 
 # 대시보드에서 주인이 누른 일의 항목 (iid). 그 안에서 같은 항목에 열린 알림만 quiet ("*" = 모두 — 예전 쓰임)
 _quiet: contextvars.ContextVar[str | None] = contextvars.ContextVar("dash_quiet", default=None)

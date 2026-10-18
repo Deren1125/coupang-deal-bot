@@ -26,6 +26,7 @@
  "kakao_expiring": "URGENT",
  "update_bad": "URGENT",
  "sched_blocked": "URGENT",
+ "neighbors_protect": "URGENT",
  "collector_stuck": "DIGEST",
  "linkprice": "DIGEST",
  "sns_zero": "DIGEST",

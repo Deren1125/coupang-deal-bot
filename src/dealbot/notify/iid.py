@@ -16,6 +16,7 @@ tests/fixtures/dash_contract/iid_map.json 이 두 저장소에서 같아야 한�
     scan:…                                         → blog-finance-scan
     cq:B:…                                         → blog-B-comments
     buddy:B · stalled:B · waiting:B                → blog-B-buddy · blog-B-stall · blog-B-waiting
+    neighbors:protect:B:…                          → blog-B-buddy (서로이웃 보호조치 문구 — 주인 10/18)
     err:…·loop:…·neighbors:config·album:…          → sys-blogauto
     정리                                            → digest-YYYYMMDD-am|pm      묶음 알림 → todo (할 일 화면)
 모르는 키는 그 프로그램의 시스템 줄 (sys-dealbot · sys-blogauto — 잃지 않게)."""
@@ -45,6 +46,8 @@ def iid_for(key: str, blog: str = "", pid: int | None = None, *, src: str = "dea
     head = parts[0]
     if key in SYS_DEALBOT_EXACT or head in SYS_DEALBOT_HEADS:
         return "sys-dealbot"
+    if head == "neighbors" and len(parts) >= 3 and parts[1] == "protect" and parts[2] in BLOGS:
+        return f"blog-{parts[2]}-buddy"
     if head in SYS_BLOGAUTO_HEADS:
         return "sys-blogauto"
     if head == "sns" and len(parts) > 1:

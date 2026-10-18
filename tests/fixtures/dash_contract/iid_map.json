@@ -228,5 +228,10 @@
   "sched:issue:31",
   "",
   "post-issue-31"
+ ],
+ [
+  "neighbors:protect:issue:2026-10-18",
+  "issue",
+  "blog-issue-buddy"
  ]
 ]
