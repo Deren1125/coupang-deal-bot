@@ -139,7 +139,7 @@ function route() {
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog' && R.sub !== 'pics') { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -691,6 +691,35 @@ function vPics() {
   return out;
 }
 
+// 구글 검색 등록 (주인 10/18 22:20): 주소 복사 + 키자드 열기는 누른 그 자리에서 한 번에, 등록함은 확인 없이 (다시 누르면 되돌림)
+const CHK = {}, isOn = x => x.auto || (x.url in CHK ? CHK[x.url] : x.done);
+async function mark(urls, on) {
+  urls.forEach(u => { CHK[u] = on; }); render();
+  const ok = await exec({action: 'search.check', args: {urls, done: on}});
+  await loading;  // 서버 값이 오면 화면 표시는 지운다 (다른 기기에서 바꾼 것도 보이게)
+  urls.forEach(u => delete CHK[u]); render();
+  if (ok) toast(on ? '등록함으로 표시했어요' : '되돌렸어요', '되돌리기', () => mark(urls, !on));
+}
+function vSearch() {
+  const s = S.search, out = [el('div', {class: 'top'}, el('h2', {}, '구글 검색 등록'), el('a', {class: 'lnk', href: '#/blog/' + (LS.g('blog') || 'finance')}, '블로그로'))];
+  if (!s || !s.days.length) return out.concat(el('p', {class: 'empty'}, '새로 발행한 글이 아직 없어요'));
+  const kz = () => W.open(s.keyzard, '_blank', 'noopener');
+  out.push(el('p', {class: 'note'}, '주소를 키자드에 붙여넣고 등록함을 눌러 주세요 · 다음은 할 일 없어요'));
+  for (const g of s.days) {
+    const left = g.items.filter(x => !isOn(x)).map(x => x.url);
+    out.push(el('div', {class: 'top hs'}, el('p', {class: 'h3'}, `${g.label} · ${left.length ? left.length + '개 남음' : '다 했어요'}`),
+      left.length ? btn('lnk', '전부 복사', () => copy(left.join('\n'), `${left.length}개 복사했어요 — 키자드에 붙여넣기 하세요`, '키자드 열기', kz)) : null,
+      left.length > 1 ? btn('lnk mute', '모두 등록함', () => mark(left, true)) : null),
+    el('div', {class: 'box'}, g.items.map(x => {
+      const on = isOn(x);
+      return el('div', {class: 'vi' + (on ? ' ok' : '')}, el('span', {class: 'vn'}, x.chip), el('span', {class: 'vt'}, x.title),
+        el('div', {class: 'va k'}, Object.assign(ext('sm' + (on ? '' : ' ac'), '복사하고 키자드 열기', s.keyzard), {onclick: () => copy(x.url, '주소를 복사했어요 — 키자드에 붙여넣기 하세요')}),
+          x.auto ? el('span', {class: 'cp ok'}, '자동 등록됨') : btn('sm', on ? '등록함 ✓' : '등록함', () => mark([x.url], !on), {'aria-pressed': on ? 'true' : 'false'})));
+    })));
+  }
+  return out;
+}
+
 // ------------------------------------------------------------ 시트들: 더보기 · 자세히 · 고르기 · 찾기 · 정리
 function moreSheet(it, more) {
   const box = el('div');
@@ -725,6 +754,7 @@ function infoSheet(text) {
 }
 async function openItem(iid, it) {
   if (/^digest-/.test(iid)) { digestSheet(iid); return; }
+  if (iid === 'search') { go('#/blog/search'); return; }
   if (iid === 'visits') { const v = vis(((S.todo.find(x => x.iid === iid) || {}).detail || {}).visits); v.length ? visitSheet(v, 1) : toast('들를 이웃 글이 없어요'); return; }
   it = it || S && (S.todo.find(x => x.iid === iid) || Object.values(S.blogs || {}).flatMap(b => b.waiting || []).find(x => x.iid === iid));
   const box = el('div');
@@ -790,10 +820,10 @@ async function digestSheet(id) {
   if (r.status !== 200) { toast('정리가 아직 없어요'); return; }
   sheet(r.data.title || '오늘 정리', el('div', {}, (r.data.sections || []).map(s => [el('p', {class: 'h3'}, s.label), ...(s.sentences || []).map(t => el('p', {text: t}))])));
 }
-async function copy(t, m = '복사했어요') {
-  try { await N.clipboard.writeText(t); toast(m); } catch (e) {
+async function copy(t, m = '복사했어요', a, f) {
+  try { await N.clipboard.writeText(t); toast(m, a, f); } catch (e) {
     const x = el('textarea', {style: 'position:fixed;opacity:0'}); x.value = t; D.body.append(x); x.select();
-    try { D.execCommand('copy'); toast(m); } catch (y) { toast('길게 눌러 복사해 주세요'); }
+    try { D.execCommand('copy'); toast(m, a, f); } catch (y) { toast('길게 눌러 복사해 주세요'); }
     x.remove();
   }
 }
@@ -858,6 +888,7 @@ function vBlog() {
   const key = R.sub, b = S.blogs[key];
   const out = [el('div', {class: 'seg', role: 'group'}, BLOGS.map(([k, l]) => btn('', l, () => { location.hash = '#/blog/' + k; }, {'aria-pressed': k === key ? 'true' : 'false'})))];
   if (key === 'pics') return out.concat(vPics());
+  if (key === 'search') return out.concat(vSearch());
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -866,6 +897,8 @@ function vBlog() {
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
+  const sr = S.search;
+  if (sr && sr.days.length) out.push(el('a', {class: 'bn', href: '#/blog/search'}, sr.left ? `구글 검색 등록 ${sr.left}개 →` : '구글 검색 등록 →'));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
   const sc = b.schedule, want = sc ? 'blog.schedule' : 'blog.publish';
   const pubs = b.waiting.filter(x => x.primary && x.primary.action === want && !x.primary.disabled && x.kind !== 'sched_blocked' && !pendingOf(x.iid));

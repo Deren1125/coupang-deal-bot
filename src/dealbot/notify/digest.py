@@ -43,6 +43,7 @@ WAIT_LABELS = (
     (("pick_photos", "hot", "photos"), "사진을 기다리는 글"),
     (("upload_fail", "retry"), "업로드가 실패한 글"),
 )
+SEARCH_KIND = "search_reg"  # 할 일 '구글 검색 등록 N개' (dashboard/state.py — n = 아직 등록 안 한 글 수)
 # Blog-Auto 기록 파일 digest.waiting 중 글 이야기 (할 일 목록이 이미 같은 글을 말함 — 두 번 말하지 않게 뺀다)
 POST_SENTENCE = re.compile(r"(기다려요|실패한 채로)")
 MARKS = re.compile(r"^(?:[⛔🔥ℹ🔔✅❌⚠📌\ufe0f]|\[[^\]]{0,8}\]|\s)+")  # 앞머리 표시 (⛔[멈춤] · ℹ️ …)
@@ -64,8 +65,10 @@ def _names(titles: list[str]) -> str:
 
 
 def waiting_sentences(items: list[dict[str, Any]]) -> list[str]:
-    """할 일 목록 → '링크를 기다리는 딜 2개(무선청소기, 텀블러)가 있어요.'"""
-    left = list(items)
+    """할 일 목록 → '링크를 기다리는 딜 2개(무선청소기, 텀블러)가 있어요.'
+    구글 검색 등록 줄 (주인 10/18 22:20)은 한 줄로 따로: '구글 검색 등록할 글 N개가 있어요.' (맨 뒤 — 급하지 않음)"""
+    search = sum(int(it.get("n") or 0) for it in items if it.get("kind") == SEARCH_KIND)
+    left = [it for it in items if it.get("kind") != SEARCH_KIND]
     out = []
     for kinds, label in WAIT_LABELS:
         mine = [it for it in left if it.get("kind") in kinds]
@@ -75,6 +78,8 @@ def waiting_sentences(items: list[dict[str, Any]]) -> list[str]:
         out.append(f"{label} {len(mine)}개({_names([str(it.get('title') or '') for it in mine])})가 있어요.")
     if left:
         out.append(f"그 밖의 할 일 {len(left)}개({_names([str(it.get('title') or '') for it in left])})가 있어요.")
+    if search > 0:
+        out.append(f"구글 검색 등록할 글 {search}개가 있어요.")
     return out
 
 

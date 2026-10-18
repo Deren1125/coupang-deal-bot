@@ -667,7 +667,10 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
         out["recent"][blog] = [
             {"pid": _count(x.get("pid"), top=10**9), "title": _one_line(x.get("title"), 80) or "",
              "url": _naver_url(x.get("url")), "at": _one_line(x.get("at"), 40),
-             **({"share": sh} if blog == "hotdeal" and (sh := _share(x.get("share"))) else {})}
+             **({"share": sh} if blog == "hotdeal" and (sh := _share(x.get("share"))) else {}),
+             # 검색 등록 체크리스트 (주인 10/18): 발행 시각 · Blog-Auto 가 구글 등록을 마친 글 (자동 등록을 켠 경우) — 없으면 칸 없음
+             **({"published_at": pa} if (pa := _one_line(x.get("published_at"), 40)) else {}),
+             **({"google_done": True} if x.get("google_done") is True or x.get("google") == "done" else {})}
             for x in rows[:10] if isinstance(x, dict) and _one_line(x.get("title"), 80)]
     scan = data.get("scan")
     if isinstance(scan, dict) and isinstance(scan.get("items"), list):

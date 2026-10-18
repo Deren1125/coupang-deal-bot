@@ -29,6 +29,7 @@ from dealbot.dashboard.actions import (
     needs_confirm,
     publish_blog,
 )
+from dealbot.dashboard.searchreg import SearchReg
 from dealbot.dashboard.today import count as today_count
 from dealbot.dashboard.todo import ago, left, link_target
 from dealbot.notify import iid as iidmod
@@ -40,6 +41,7 @@ STATE_V = 1
 BLOG_LABELS = {"finance": "Deren의 아카이브", "issue": "Deren's Pick", "hotdeal": "오늘의 핫딜"}
 CHIPS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
 VISITS_IID = "visits"  # 할 일 '오늘 들를 이웃 글' 한 줄
+SEARCH_IID = "search"  # 할 일 '구글 검색 등록 N개' 한 줄 (주인 10/18 22:20)
 SEV_ORDER = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
 UNSURE_DAYS = 7
 LINKS_MAX = 3  # 사진 부탁 줄의 '사진 받을 곳' (카드 버튼은 첫 링크, 시트에 모두)
@@ -557,6 +559,8 @@ class StateBuilder:
                         if dismissible(iid, t.key, dealbot_row=False) else [], "detail": {"lines": []}}
         if (vrow := self._visits_item(v2.get("visits"))) is not None:
             out[vrow["iid"]] = vrow
+        if (srow := self._search_item(self.search_view(v2))) is not None:
+            out[srow["iid"]] = srow
         items = list(out.values())
         supported = self._supported(self._ba_status())
         modes = self._modes(v2)
@@ -591,6 +595,28 @@ class StateBuilder:
         return {"iid": VISITS_IID, "src": "blog", "blog": "", "kind": "visits", "sev": "info", "urgent": False,
                 "title": f"오늘 들를 이웃 글 {len(xs)}개", "status": status, "since": since, "expires_at": None,
                 "primary": goto("보기", f"#/i/{VISITS_IID}"), "more": [], "detail": {"visits": xs}}
+
+    # ---------------------------------------------------------- 구글 검색 등록 체크리스트 (주인 10/18 22:20 — searchreg.py)
+    def search_reg(self) -> SearchReg:
+        return SearchReg(self.bot.db, tz=self.tz, now=lambda: self._now().timestamp())
+
+    def search_view(self, v2: dict[str, Any] | None) -> dict[str, Any] | None:
+        try:
+            return self.search_reg().view(v2)
+        except Exception as e:  # noqa: BLE001 — 못 읽어도 나머지 화면은 그대로
+            log.warning("dashboard state: 검색 등록 목록을 못 읽음: %s", e)
+            return None
+
+    @staticmethod
+    def _search_item(view: dict[str, Any] | None) -> dict[str, Any] | None:
+        """할 일 한 줄 '구글 검색 등록 N개' (참고 — 주인을 막는 일보다 아래) → 누르면 블로그 탭 체크리스트. 다 했으면 None."""
+        n = (view or {}).get("left") or 0
+        if not n:
+            return None
+        since = max((x["at"] for g in view["days"] for x in g["items"] if not x["done"]), default=None)  # type: ignore[index]
+        return {"iid": SEARCH_IID, "src": "blog", "blog": "", "kind": "search_reg", "sev": "info", "urgent": False, "n": n,
+                "title": f"구글 검색 등록 {n}개", "status": "주소 복사 → 키자드에 붙여넣기", "since": since, "expires_at": None,
+                "primary": goto("보기", "#/blog/search"), "more": [], "detail": {"lines": []}}
 
     def item(self, iid: str) -> dict[str, Any] | None:
         """/api/item/<iid> — 긴 칸까지. 스레드 답글·정리 시트도 여기."""
@@ -908,6 +934,7 @@ class StateBuilder:
             "digest": {"latest": router.store.latest_digest() if router is not None else None},
             "blogauto": {"bridge": st.bridge, "fresh": st.fresh()},
             "pics": self.pics_tool(export),
+            "search": self.search_view(getattr(export, "v2", None) or {}),
         }
         return body
 
@@ -939,7 +966,7 @@ ACTION_LABELS = {
     "blog.mode": "모드 바꾸기", "blog.pause": "블로그 멈춤", "blog.resume": "블로그 다시 시작", "blog.drafts_cleanup": "임시저장 정리",
     "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
     "blog.kakao_connect": "카톡 연결", "blog.kakao_test": "테스트 카톡", "blog.dismiss": "다 했어요",
-    "blog.pics_fetch": "사진 찾기", "blog.pics_clear": "사진 후보 지우기",
+    "blog.pics_fetch": "사진 찾기", "blog.pics_clear": "사진 후보 지우기", "search.check": "검색 등록 표시",
     "connect": "다시 연결 시작",
 }
 RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "linked_twin": "완료", "approved": "완료", "skipped": "완료",

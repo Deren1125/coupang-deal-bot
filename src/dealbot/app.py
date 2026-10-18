@@ -936,7 +936,8 @@ class DealBot:
         if self.dash_state is None:
             return []
         try:
-            return [{"kind": it.get("kind"), "title": it.get("title"), "iid": it.get("iid")} for it in self.dash_state.items()]
+            return [{"kind": it.get("kind"), "title": it.get("title"), "iid": it.get("iid"), **({"n": it["n"]} if "n" in it else {})}
+                    for it in self.dash_state.items()]
         except Exception as e:  # noqa: BLE001
             log.warning("todo brief failed: %s", e)
             return []

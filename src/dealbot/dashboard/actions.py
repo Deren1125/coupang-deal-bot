@@ -55,6 +55,7 @@ IG_CODE_RE = re.compile(r"[\w-]{5,40}")
 NO_FETCH = ("instagram.com", "instagr.am", "cdninstagram.com", "facebook.com", "fb.com", "fb.me", "fbcdn.net",
             "threads.net", "threads.com", "blog.naver.com", "blog.me", "cafe.naver.com")
 PICS_URL_MAX, PICS_WANT_MAX, PICS_PICK_MAX = 500, 200, 24
+SEARCH_URLS_MAX = 60
 
 # ★ 확인 창 (spec §4.5 — 하나뿐인 기준). blog.mode 는 발행 모드로 바꿀 때만, push.unsubscribe 는 다른 기기일 때만
 CONFIRM = frozenset({
@@ -74,7 +75,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "dismiss", "schedule", "unschedule", "unschedule_all", "visit_done", "pics_fetch", "pics_clear")
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
-                "todo.dismiss", "stats.refresh", "stats.input")
+                "todo.dismiss", "stats.refresh", "stats.input", "search.check")
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
 DISMISS_POST_HEADS = ("dup", "cards", "openchat")
 REAL_WORK_HEADS = ("link", "review", "unsure", "photo", "ask", "draft", "oedit", "fail", "chan", "share", "hot", "sched")
@@ -301,6 +302,16 @@ def own_blog_url(url: str, blog_id: str | None) -> bool:
     return bool(blog_id) and first == str(blog_id).lower()
 
 
+def _naver_post(url: str) -> bool:
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return parts.scheme == "https" and (parts.hostname or "").lower() in ("blog.naver.com", "m.blog.naver.com") and bool(parts.path.strip("/"))
+
+
 def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | None = None) -> dict[str, Any]:
     """일마다 받을 수 있는 args 만 (모양이 다르면 ActionError bad_args). 모르는 키는 버린다."""
     a = args if isinstance(args, dict) else {}
@@ -351,6 +362,14 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         return {"iid": iid, "key": _str(g("key"), 120)}
     if action == "stats.refresh":
         return {"src": _str(g("src"), 40)}
+    if action == "search.check":  # 구글 검색 등록 '등록함' (주인 10/18 22:20) — url 하나 또는 그날 urls 한 번에, done=False 는 되돌림
+        raw = g("urls") if g("urls") is not None else [g("url")]
+        if not isinstance(raw, list) or not 1 <= len(raw) <= SEARCH_URLS_MAX or not isinstance(g("done"), bool):
+            raise ActionError("bad_args")
+        urls = [_str(u, 300) for u in raw]
+        if not all(_naver_post(u) for u in urls):
+            raise ActionError("bad_args")
+        return {"urls": list(dict.fromkeys(urls)), "done": g("done")}
     if action == "stats.input":
         values = g("values")
         if not isinstance(values, dict) or len(values) > 10 or not all(isinstance(k, str) and isinstance(v, str | int) for k, v in values.items()):
@@ -512,6 +531,8 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return str(args.get("iid") or "")
     if action == "blog.visit_done":
         return str(args.get("id") or "")
+    if action == "search.check":
+        return "search"
     if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all") and blog in BLOGS:
         return f"blog-{blog}"
     if action == "blog.login_check" and blog in BLOGS:
@@ -986,6 +1007,15 @@ class ActionDesk:
             got = await dash.refresh(args["src"])
             return ("done" if got in ("refreshed", "reread") else got), {"refreshed": "다시 읽었어요", "reread": "다시 읽었어요"}.get(
                 got, TEXTS.get(got, "읽지 못했어요"))
+        if action == "search.check":
+            st = bot.dash_state
+            if st is None:
+                raise ActionError("off")
+            n = st.search_reg().check(args["urls"], args["done"])
+            if not n:
+                return "not_found", TEXTS["not_found"]
+            what = f"{n}개를 " if n > 1 else ""
+            return "done", f"{what}등록함으로 표시했어요" if args["done"] else f"{what}등록 안 함으로 되돌렸어요"
         if action == "stats.input":
             dash = bot.dashboard
             query = dict(args["values"])

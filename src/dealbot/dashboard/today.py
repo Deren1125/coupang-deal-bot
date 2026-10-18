@@ -53,6 +53,7 @@ LABELS = {
     "blog.scan": "글감 찾기", "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기",
     "blog.hotdeal_now": "한 편 쓰기", "blog.mode": "모드 바꾸기", "blog.pause": "블로그 멈춤", "blog.resume": "블로그 다시 시작",
     "blog.drafts_cleanup": "임시저장 정리", "blog.ledger": "정리본 바꾸기", "blog.dismiss": "다 했어요", "blog.visit_done": "이웃 글 들름",
+    "search.check": "검색 등록",
 }
 CHIP = {"ok": "완료", "run": "진행 중", "bad": "실패"}
 OPEN = ("queued", "running")

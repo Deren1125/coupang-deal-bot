@@ -164,3 +164,5 @@ background:var(--ac);color:var(--ac-on);font-size:13px;line-height:24px;padding:
 .pks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;width:100%;border:0;background:none;padding:0;margin:0 0 10px}.pks img{aspect-ratio:1;border-radius:8px}
 .big img{display:block;width:100%;max-height:66dvh;object-fit:contain;border-radius:10px;background:var(--grey);margin:0 0 8px}
 .pk+.pb{position:sticky;bottom:0;box-shadow:0 6px 0 var(--card),0 -6px 0 var(--card)}b.ti{display:flex;align-items:center}
+.va.k{grid-template-columns:2fr 1fr;align-items:center}.va .cp{justify-self:center}.vi.ok .vt{color:var(--sub);font-weight:500}
+.sm[aria-pressed=true]{background:var(--gr-soft);border-color:var(--gr-soft);color:var(--gr);font-weight:600}
