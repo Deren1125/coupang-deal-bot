@@ -423,7 +423,7 @@ async def test_weekly_top5_and_poll_results_on_sunday(bot) -> None:  # type: ign
         d = _deal(f"{shop}:w{i}", shop=shop, price=price, score=score, name=f"상품 {i}")
         assert bot.db.enqueue(d, score=score, now=sunday - timedelta(days=2))
         qid = max(it.id for it in bot.db.pending_items(10))
-        bot.db.update_queue_item(qid, status="published", deal=d)
+        bot.db.update_queue_item(qid, status="published", deal=d, now=sunday - timedelta(days=2))
         bot.db.record_post(d, channel_id="-1001", message_id=i + 1, now=sunday - timedelta(days=2))
     bot.db.poll_add("777", "다음 주 뭐부터 찾아볼까?", ["주방·식품", "반려동물"], now=sunday - timedelta(days=3))
     bot.fake.poll = {"option_a_votes_percentage": 0.25, "option_b_votes_percentage": 0.75, "total_votes": 12}
@@ -892,7 +892,7 @@ async def test_weekly_top_leaves_out_deals_marked_sold_out(bot) -> None:  # type
         d = _deal(pid, score=50 - i, name=f"상품 {i}")
         assert bot.db.enqueue(d, score=50 - i, now=sunday - timedelta(days=2))
         qid = max(it.id for it in bot.db.pending_items(10))
-        bot.db.update_queue_item(qid, status="published", deal=d)
+        bot.db.update_queue_item(qid, status="published", deal=d, now=sunday - timedelta(days=2))
         bot.db.record_post(d, channel_id="-1001", message_id=i + 1, now=sunday - timedelta(days=2))
     bot.db.kv_set("soldout_marked:coupang:s0", (sunday - timedelta(days=1)).isoformat())  # 채널 글에 품절 표시
     bot.mark_sold_out_seen("coupang:s2", sunday - timedelta(hours=3))  # 스레드가 올리기 직전에 품절을 봄
