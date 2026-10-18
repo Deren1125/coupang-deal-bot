@@ -515,8 +515,57 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         "score": _count(v.get("score"), top=100), "popular": v.get("popular") is True, "owner_edited": v.get("owner_edited") is True,
         "needs": list(dict.fromkeys(needs)), "photo_request": photo_request, "slots": slots, "questions": questions,
         "deadline": _one_line(v.get("deadline"), 40), "naver_url": _naver_url(v.get("naver_url")),
-        "schedule": _sched_post(v.get("schedule")),
+        "schedule": _sched_post(v.get("schedule")), "pics": _pics(v.get("pics")),
     }
+
+
+# 링크에서 사진 고르기 (주인 10/18 — Blog-Auto pickphotos): 후보 사진 (썸네일 blog_view/thumbs · 원본 blog_view/pics)
+PIC_ID = re.compile(r"^pk-[0-9a-f]{8}$")
+PIC_JOB_ID = re.compile(r"^pj-[0-9a-f]{8}$")
+PIC_FILE_RE = re.compile(r"^[a-z0-9-]{1,80}\.(jpg|jpeg|png|webp)$")
+PIC_STATES = ("working", "ready", "failed", "none")
+PICS_MAX, PIC_JOBS_MAX = 24, 5
+
+
+def _pic_items(v: Any) -> list[dict[str, Any]]:
+    """후보 사진 [{id, thumb, full, why, slot, host}] (최대 24, Blog-Auto 순서 그대로). 파일 이름이 이상한 줄은 뺀다."""
+    out: list[dict[str, Any]] = []
+    for x in v[:PICS_MAX] if isinstance(v, list) else []:
+        if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not PIC_ID.match(x["id"]):
+            continue
+        thumb, full = x.get("thumb"), x.get("full")
+        if not (isinstance(thumb, str) and THUMB_RE.match(thumb) and isinstance(full, str) and PIC_FILE_RE.match(full)):
+            continue
+        if any(p["id"] == x["id"] for p in out):
+            continue
+        slot = x.get("slot")
+        out.append({"id": x["id"], "thumb": thumb, "full": full, "why": _one_line(safe_text(x.get("why"), 40), 20) or "",
+                    "slot": slot if isinstance(slot, int) and not isinstance(slot, bool) and 0 <= slot <= 40 else None,
+                    "host": _one_line(x.get("host"), 60) or ""})
+    return out
+
+
+def _pics(v: Any) -> dict[str, Any] | None:
+    """글의 후보 사진 상태 {state, text, at, items} — 없거나 모르는 상태면 None (화면은 '링크에서 사진 찾기')."""
+    if not isinstance(v, dict) or v.get("state") not in PIC_STATES:
+        return None
+    return {"state": v["state"], "text": _one_line(safe_text(v.get("text"), 160), 80) or "", "at": _one_line(v.get("at"), 40),
+            "items": _pic_items(v.get("items"))}
+
+
+def _pic_jobs(v: Any) -> list[dict[str, Any]] | None:
+    """링크만 붙여 넣은 사진 뽑기 (최근 것 먼저, 5개까지). 칸이 없으면(예전 Blog-Auto) None."""
+    if not isinstance(v, list):
+        return None
+    out = []
+    for x in v[:PIC_JOBS_MAX]:
+        if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not PIC_JOB_ID.match(x["id"]):
+            continue
+        p = _pics(x)
+        url = x.get("url") if isinstance(x.get("url"), str) and re.match(r"^https?://", x["url"]) and len(x["url"]) <= 500 else ""
+        if p is not None:
+            out.append({"id": x["id"], "url": url, "want": _one_line(safe_text(x.get("want"), 200), 100) or "", **p})
+    return out
 
 
 SCHED_STATUSES = ("scheduled", "blocked", "publishing")
@@ -606,7 +655,8 @@ def _share(v: Any) -> str:
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
-                           "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits"))}
+                           "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits")),
+                           "pics_jobs": _pic_jobs(data.get("pics_jobs"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

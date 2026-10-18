@@ -144,7 +144,7 @@ min-height:48px;box-shadow:0 4px 14px rgba(17,24,39,.18);animation:up .2s ease-o
 .toast,.toast span{pointer-events:none}.toast button{pointer-events:auto}
 .shon .toast{top:calc(12px + var(--top));bottom:auto}
 .toast span{flex:1;min-width:0}
-.toast button{flex:none;min-height:40px;border:0;border-radius:8px;background:rgba(255,255,255,.16);color:#fff;padding:0 12px;font-weight:600}
+.toast button{flex:none;min-height:44px;border:0;border-radius:8px;background:rgba(255,255,255,.16);color:#fff;padding:0 12px;font-weight:600}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
 animation:sp .8s linear infinite;flex:none}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -155,3 +155,11 @@ padding-right:calc(50% - 300px)}main{padding-top:20px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 .ig{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 2px;align-items:center;margin:0 0 12px}.ig+.ig{border-top:1px solid var(--line);padding-top:12px}.tools.sub{margin:2px 0 -12px -6px}
 .two{display:flex;gap:8px}.two>.pb{flex:1 1 0;min-width:0;margin:0}.two>a.pb{flex:0 1 auto;width:auto;padding:0 14px;white-space:nowrap}
+.pk{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0 0 10px}
+.pt{position:relative;aspect-ratio:1;border:0;border-radius:10px;padding:0;overflow:hidden;background:var(--grey);-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.pt img,.pks img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}.pt[aria-pressed=false] img{opacity:.5}
+.pt.on{outline:3px solid var(--ac);outline-offset:-3px}.pt b{position:absolute;right:5px;top:5px;min-width:24px;height:24px;border-radius:12px;
+background:var(--ac);color:var(--ac-on);font-size:13px;line-height:24px;padding:0 6px}
+.pks{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;width:100%;border:0;background:none;padding:0;margin:0 0 10px}.pks img{aspect-ratio:1;border-radius:8px}
+.big img{display:block;width:100%;max-height:66dvh;object-fit:contain;border-radius:10px;background:var(--grey);margin:0 0 8px}
+.pk+.pb{position:sticky;bottom:0;box-shadow:0 6px 0 var(--card),0 -6px 0 var(--card)}b.ti{display:flex;align-items:center}

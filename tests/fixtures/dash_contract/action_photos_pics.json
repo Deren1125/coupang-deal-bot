@@ -1,0 +1,39 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s1b",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "photos",
+ "blog": "issue",
+ "args": {
+  "blog": "issue",
+  "pid": 48,
+  "uploads": [],
+  "mode": "add",
+  "slot": 0,
+  "in_order": false,
+  "crop": false,
+  "credit": "",
+  "pics": [
+   {
+    "id": "pk-3fa9c2d1",
+    "slot": 1
+   },
+   {
+    "id": "pk-8b1f2f0a",
+    "slot": 2
+   },
+   {
+    "id": "pk-c0ffee12",
+    "slot": 0
+   }
+  ]
+ },
+ "target": "post-issue-48",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_8b1f3b"
+ }
+}

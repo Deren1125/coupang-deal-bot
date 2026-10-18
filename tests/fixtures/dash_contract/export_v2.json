@@ -139,6 +139,45 @@
      "scheduled_at": null,
      "status": "blocked",
      "reason": "사진이 아직 없어요"
+    },
+    "pics": {
+     "state": "ready",
+     "text": "사진 12장 중 3장 골라 뒀어요 · 자리 2곳 추천",
+     "at": "2026-10-18T09:15:00+09:00",
+     "items": [
+      {
+       "id": "pk-3fa9c2d1",
+       "thumb": "pk-3fa9c2d1.jpg",
+       "full": "pk-3fa9c2d1.jpg",
+       "why": "트렌치코트 전신",
+       "slot": 1,
+       "host": "news1.kr"
+      },
+      {
+       "id": "pk-8b1f2f0a",
+       "thumb": "pk-8b1f2f0a.jpg",
+       "full": "pk-8b1f2f0a.jpg",
+       "why": "로퍼 클로즈업",
+       "slot": 2,
+       "host": "news1.kr"
+      },
+      {
+       "id": "pk-c0ffee12",
+       "thumb": "pk-c0ffee12.jpg",
+       "full": "pk-c0ffee12.png",
+       "why": "공항 출국 상반신",
+       "slot": null,
+       "host": "osen.co.kr"
+      },
+      {
+       "id": "pk-0badf00d",
+       "thumb": "pk-0badf00d.jpg",
+       "full": "pk-0badf00d.jpg",
+       "why": "",
+       "slot": null,
+       "host": "news1.kr"
+      }
+     ]
     }
    }
   ],
@@ -348,6 +387,34 @@
    "comment": "트렌치코트에 니트 겹쳐 입으신 코디가 차분해 보여서 좋았어요. 색 조합도 참고하고 싶네요.",
    "created_at": "2026-10-18T14:02:11+09:00",
    "status": "todo"
+  }
+ ],
+ "pics_jobs": [
+  {
+   "id": "pj-5e6f7a8b",
+   "url": "https://www.news1.kr/entertain/movie/5900000",
+   "want": "코트 입은 전신 사진",
+   "state": "ready",
+   "text": "사진 9장 중 2장 골라 뒀어요",
+   "at": "2026-10-18T09:18:00+09:00",
+   "items": [
+    {
+     "id": "pk-1a2b3c4d",
+     "thumb": "pk-1a2b3c4d.jpg",
+     "full": "pk-1a2b3c4d.jpg",
+     "why": "롱코트 전신",
+     "slot": null,
+     "host": "news1.kr"
+    },
+    {
+     "id": "pk-5e6f7a80",
+     "thumb": "pk-5e6f7a80.jpg",
+     "full": "pk-5e6f7a80.jpg",
+     "why": "체크 코트 스틸컷",
+     "slot": null,
+     "host": "news1.kr"
+    }
+   ]
   }
  ]
 }

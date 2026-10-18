@@ -331,6 +331,112 @@ def today(r: Run, base: str) -> None:
     r.shot("today-connect-sheet")
 
 
+def pics(r: Run, base: str) -> None:
+    """링크에서 사진 고르기 (주인 10/18 — 손이 아파요): 할 일 카드 '이대로 넣기'(추천 사진 줄) · 자세히 시트 그리드(누르면 넣기·빼기,
+    꾹 누르면 크게) · 찾는 중·못 찾음·없음 · 자동 발행 블로그는 확인 창 · 블로그 탭 '링크에서 사진 뽑기' (막는 링크·뽑은 사진·크게)."""
+    p = r.page
+
+    def todo(iid: str) -> None:
+        p.goto(base + "/dashboard/")
+        p.wait_for_selector("main .itm")
+        if p.locator("main > button.pb.ghost").count():
+            p.click("main > button.pb.ghost")
+        p.locator(f'[data-iid="{iid}"]').scroll_into_view_if_needed()
+        p.evaluate("scrollBy(0, -140)")
+
+    def close() -> None:
+        p.click(".sh .shh .lnk >> nth=-1")
+        p.wait_for_timeout(300)
+
+    def press(sel: str) -> None:  # 꾹 누르기 (손가락을 0.7초 대고 있음)
+        box = p.locator(sel).bounding_box()
+        assert box is not None
+        p.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        p.mouse.down()
+        p.wait_for_timeout(750)
+        p.mouse.up()
+
+    todo("post-issue-46")
+    r.shot("pics-todo-card")
+    print("card primary:", p.text_content('[data-iid="post-issue-46"] .pb'), "| status:", p.text_content('[data-iid="post-issue-46"] .st'))
+    p.click('[data-iid="post-issue-46"] .ti')
+    p.wait_for_selector(".sh .pk")
+    r.shot("pics-detail")
+    p.locator(".sh .pk").scroll_into_view_if_needed()
+    r.shot("pics-detail-grid")
+    tiles = p.locator(".sh .pk .pt")
+    tiles.nth(2).click()  # 넣기 (빈 자리에)
+    tiles.nth(0).click()  # 빼기 (AI 가 고른 것)
+    p.wait_for_timeout(200)
+    r.shot("pics-toggled")
+    print("put label after toggles:", p.text_content(".sh .pk + .pb"))
+    press(".sh .pk .pt >> nth=1")
+    p.wait_for_selector(".sh .big img")
+    p.wait_for_timeout(300)
+    r.shot("pics-full")
+    close()
+    p.click(".sh .pk + .pb")
+    p.wait_for_selector("#toast:not([hidden])")
+    r.shot("pics-put-sent")
+    print("put toast:", p.text_content("#toast"), "| sheets open:", p.locator(".sh").count())
+    p.wait_for_timeout(5000)
+    r.shot("pics-put-done")
+    print("put final:", p.text_content("#toast"))
+    # 자동 발행 블로그(핫딜): 할 일에서 한 번에 → 확인 창
+    todo("post-hotdeal-8")
+    r.shot("pics-hotdeal-card")
+    p.locator('[data-iid="post-hotdeal-8"] .pb').click()
+    p.wait_for_selector(".sh .cf")
+    r.shot("pics-hotdeal-confirm")
+    p.click(".sh .cf .ghost")
+    p.wait_for_timeout(300)
+    # 찾는 중 · 못 찾음 (다시 찾기) · 없음 (링크에서 사진 찾기)
+    todo("post-issue-53")
+    r.shot("pics-working-card")
+    todo("post-issue-55")
+    p.click('[data-iid="post-issue-55"] .ti')
+    p.wait_for_selector(".sh")
+    r.shot("pics-failed")
+    p.locator(".sh .pb.ghost", has_text="다시 찾기").click()
+    p.wait_for_selector("#toast:not([hidden])")
+    print("refetch toast:", p.text_content("#toast"))
+    close()
+    p.wait_for_timeout(6500)
+    r.shot("pics-refetch-done")
+    print("refetch final:", p.text_content("#toast"))
+    todo("post-issue-58")
+    p.click('[data-iid="post-issue-58"] .ti')
+    p.wait_for_selector(".sh")
+    r.shot("pics-none")
+    close()
+    # 블로그 탭 → 링크에서 사진 뽑기
+    p.goto(base + "/dashboard/#/blog/issue")
+    p.wait_for_timeout(600)
+    r.shot("pics-blog-entry")
+    p.click("main a.bn[href='#/blog/pics']")
+    p.wait_for_timeout(500)
+    r.shot("pics-tool")
+    p.fill("main input[data-k='pics|url']", "https://www.instagram.com/p/DPq7x2aE1bc/")
+    p.locator("main .box .pb", has_text="사진 뽑기").click()
+    p.wait_for_selector("#toast:not([hidden])")
+    r.shot("pics-tool-refused")
+    print("refused toast:", p.text_content("#toast"))
+    p.fill("main input[data-k='pics|url']", "https://www.29cm.co.kr/products/1234567")
+    p.fill("main input[data-k='pics|want']", "착용 사진")
+    p.locator("main .box .pb", has_text="사진 뽑기").click()
+    p.wait_for_selector("#toast:not([hidden])")
+    p.wait_for_timeout(500)
+    r.shot("pics-tool-working")
+    p.wait_for_timeout(6500)
+    r.shot("pics-tool-done", full=True)
+    print("tool final:", p.text_content("#toast"), "| jobs:", p.locator("main .box .pk").count())
+    p.locator("main .pk .pt").first.click()
+    p.wait_for_selector(".sh .big img")
+    p.wait_for_timeout(300)
+    r.shot("pics-tool-full")
+    print("full src:", p.get_attribute(".sh .big img", "src"), "natural:", p.evaluate("document.querySelector('.sh .big img').naturalWidth"))
+
+
 def extra(r: Run, base: str, ctx: Any, token: str, host: str) -> None:
     """로그인이 끝났을 때 로그인 시트 → 다시 로그인."""
     p = r.page
@@ -363,6 +469,7 @@ def main() -> int:
     ap.add_argument("--sched", action="store_true", help="간격 두고 발행 화면만")
     ap.add_argument("--visits", action="store_true", help="오늘 들를 이웃 글 화면만")
     ap.add_argument("--today", action="store_true", help="오늘 한 일 화면만")
+    ap.add_argument("--pics", action="store_true", help="링크에서 사진 고르기 화면만")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -389,6 +496,8 @@ def main() -> int:
                 visits(r, a.base)
             elif a.today:
                 today(r, a.base)
+            elif a.pics:
+                pics(r, a.base)
             else:
                 scenario(r, a.base, name in a.flows.split(","))
             problems += r.problems + [f"{name}: js error {e}" for e in errors]

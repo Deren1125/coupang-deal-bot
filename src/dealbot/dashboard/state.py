@@ -105,7 +105,7 @@ class StateBuilder:
         supported = self._supported(self._ba_status())
         ok = isinstance(sch, dict) and (supported is None or {"schedule", "unschedule"} <= supported)
         self._sctx = {"ok": ok, "spaced": {b: bool((x or {}).get("spaced_only")) for b, x in ((sch or {}).get("blogs") or {}).items()}
-                      if ok else {}}
+                      if ok else {}, "sup": supported}
 
     @staticmethod
     def queued(post: dict[str, Any] | None) -> bool:
@@ -357,6 +357,12 @@ class StateBuilder:
             status = f"예약 발행 멈춤 · {sch.get('reason') or '확인이 필요해요'}"
             kind, exp = "sched_blocked", None
         # 질문은 자르지 않는다 — 답하려면 전체 문장이 보여야 함 (주인 10/18: '질문이 잘려')
+        pics = self._pics_view(blog, pid, post, needs)
+        if pics and pics.get("put") and pics["put"]["args"]["pics"] and "photos" in needs and (primary or {}).get("action") == "blog.photos":
+            more.insert(0, primary)  # 추천 사진이 준비됐으면 큰 버튼은 '이대로 넣기' (주인 10/18 — 한 번에), 직접 올리기는 더보기로
+            primary = pics["put"]
+        if pics and kind == "photos" and pics["state"] in ("working", "ready"):
+            status += " · 사진 찾는 중…" if pics["state"] == "working" else f" · 추천 사진 {len(pics['items'])}장"
         questions = list((post or {}).get("questions") or [])
         slots = [dict(s, thumb=f"/dashboard/thumb/{s['thumb']}" if s.get("thumb") else None) for s in (post or {}).get("slots") or []]
         iid = iidmod.post_iid(blog, pid)
@@ -365,10 +371,57 @@ class StateBuilder:
                 "since": _iso_ts((post or {}).get("saved_at"), self.tz), "expires_at": exp, "primary": primary, "more": more,
                 "detail": {"needs": needs, "photo_request": (post or {}).get("photo_request"), "slots": slots,
                            "questions": questions, "deadline": (post or {}).get("deadline"),
-                           "owner_edited": bool((post or {}).get("owner_edited")),
+                           "owner_edited": bool((post or {}).get("owner_edited")), "pics": pics,
                            "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
                 "links": list((pr or {}).get("links") or [])[:LINKS_MAX] if "photos" in needs else [],
                 "_hot": rank.post_hot(post)}
+
+    # ---------------------------------------------------------- 링크에서 사진 고르기 (주인 10/18 — Blog-Auto pickphotos)
+    def _pics_ok(self) -> bool:
+        sup = self._sctx.get("sup")
+        return sup is None or "pics_fetch" in sup
+
+    @staticmethod
+    def _pic_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [dict(x, thumb=f"/dashboard/thumb/{x['thumb']}", full=f"/dashboard/pic/{x['full']}") for x in items]
+
+    def _pics_view(self, blog: str, pid: int, post: dict[str, Any] | None, needs: list[str]) -> dict[str, Any] | None:
+        """글의 사진 칸 '추천 사진 N장' — AI 가 고른 것(slot)은 미리 골라 둠 · '이대로 넣기' = 그 자리 순서대로 blog.photos pics.
+        후보가 없고 사진도 필요 없는 글은 None."""
+        p = (post or {}).get("pics")
+        if p is None and "photos" not in needs:
+            return None
+        p = p or {"state": "none", "text": "", "items": []}
+        a = {"blog": blog, "pid": pid}
+        items = self._pic_items(p["items"])
+        chosen = sorted((x for x in items if x["slot"] is not None), key=lambda x: (x["slot"] == 0, x["slot"]))
+        ok = self._pics_ok()
+        return {"state": p["state"], "text": p["text"], "items": items,
+                "fetch": act("blog.pics_fetch", "링크에서 사진 찾기" if p["state"] == "none" else "다시 찾기", a) if ok else None,
+                "clear": act("blog.pics_clear", "후보 지우기", a) if ok and items else None,
+                "put": act("blog.photos", f"이대로 넣기 · {len(chosen)}장", dict(a, pics=[{"id": x["id"], "slot": x["slot"]} for x in chosen]),
+                           input="pics") if p["state"] == "ready" and items else None}
+
+    def pics_tool(self, export: Any) -> dict[str, Any] | None:
+        """블로그 탭 '링크에서 사진 뽑기': 링크(+원하는 사진)를 붙여 넣으면 Blog-Auto 가 사진을 골라 둠 (pics_jobs, 최근 것 먼저).
+        Blog-Auto 가 이 일을 모르면 None (화면이 숨김)."""
+        v2 = getattr(export, "v2", None) or {}
+        sup = self._supported(self._ba_status())
+        jobs = v2.get("pics_jobs")
+        if (sup is not None and "pics_fetch" not in sup) or (sup is None and jobs is None):
+            return None
+        from urllib.parse import urlsplit
+
+        out = []
+        for j in jobs or []:
+            try:
+                host = (urlsplit(j["url"]).hostname or "").removeprefix("www.")
+            except ValueError:
+                host = ""
+            out.append({"id": j["id"], "url": j["url"], "host": host, "want": j["want"], "state": j["state"], "text": j["text"],
+                        "at": _iso_ts(j.get("at"), self.tz), "items": self._pic_items(j["items"]),
+                        "clear": act("blog.pics_clear", "지우기", {"job": j["id"]})})
+        return {"jobs": out, "fetch": act("blog.pics_fetch", "사진 뽑기", {}, input="url", placeholder="기사·쇼핑몰 링크 붙여넣기")}
 
     # ---------------------------------------------------------- 알림 줄 (owner_notices · 기록 파일 todo)
     def _notice_item(self, iid: str, rows: list[Any], now: float) -> dict[str, Any] | None:
@@ -854,6 +907,7 @@ class StateBuilder:
             "pending": pending,
             "digest": {"latest": router.store.latest_digest() if router is not None else None},
             "blogauto": {"bridge": st.bridge, "fresh": st.fresh()},
+            "pics": self.pics_tool(export),
         }
         return body
 
@@ -885,6 +939,7 @@ ACTION_LABELS = {
     "blog.mode": "모드 바꾸기", "blog.pause": "블로그 멈춤", "blog.resume": "블로그 다시 시작", "blog.drafts_cleanup": "임시저장 정리",
     "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
     "blog.kakao_connect": "카톡 연결", "blog.kakao_test": "테스트 카톡", "blog.dismiss": "다 했어요",
+    "blog.pics_fetch": "사진 찾기", "blog.pics_clear": "사진 후보 지우기",
     "connect": "다시 연결 시작",
 }
 RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "linked_twin": "완료", "approved": "완료", "skipped": "완료",
