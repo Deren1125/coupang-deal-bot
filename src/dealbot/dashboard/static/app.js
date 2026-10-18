@@ -592,7 +592,7 @@ function detail(it) {
   out.push(el('div', {class: 'ih'}, chip(it), d.owner_edited ? el('span', {class: 'cp info'}, '직접 고친 글') : null),
     it.status && !(d.lines || []).some(l => l.startsWith(it.status)) ? el('p', {class: 'st'}, it.status) : null);
   if (d.how) out.push(el('p', {text: d.how}));
-  if (d.search) out.push(el('div', {class: 'kv'}, el('code', {text: d.search}), btn('sm', '복사', () => copy(d.search))));
+  for (const [k, l] of [['search'], ['short', '짧게']]) if (d[k]) out.push(el('div', {class: 'kv'}, l ? el('span', {class: 'note'}, l) : null, el('code', {text: d[k]}), btn('sm', '복사', () => copy(d[k]))));
   if (d.note) out.push(el('p', {class: 'note'}, d.note));
   if (d.reason) out.push(el('p', {text: d.reason}));
   if (d.replaced_by) out.push(el('p', {text: `${d.replaced_by} 딜로 바뀌었어요`}));

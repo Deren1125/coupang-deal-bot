@@ -311,18 +311,36 @@ BOT_COMMANDS: list[tuple[str, str]] = [
 ]
 
 
+def naver_queries(name: str, shop_key: str, category: str | None = None) -> tuple[str, str]:
+    """네이버 쇼핑 커넥트 '상품 찾기' 검색어 (긴 것, 짧은 것). 긴 것 = 쇼핑몰 꼬리표·괄호(가격·배송)를 걷은 상품명 40자
+    (자동 링크가 Blog-Auto 에 주는 첫 검색어와 같음), 짧은 것 = 브랜드 + 핵심 낱말 (주인 10/18, 긴 것과 같으면 '').
+    네이버 딜이 아니면 ('', '')."""
+    if shop_key != "naver":
+        return "", ""
+    from dealbot.autolink import job_queries
+    from dealbot.naver_shop import short_query
+    from dealbot.utils.text import clean_name
+
+    long = next(iter(job_queries(name)), "") or truncate(clean_name(name), 40)
+    short = short_query(name, category)
+    return long, ("" if short == long else short)
+
+
+def naver_short_query(name: str, shop_key: str, category: str | None = None) -> str:
+    return naver_queries(name, shop_key, category)[1]
+
+
 def naver_search_help(name: str, url: str, shop_key: str) -> str:
     """네이버 쇼핑 커넥트는 상품 주소가 아니라 상품명·스토어명으로 찾는다 → 눌러서 복사할 검색어를 같이 준다."""
     if shop_key != "naver":
         return ""
     import re
 
-    from dealbot.utils.text import clean_name
-
     store = re.search(r"(?:smartstore|brand)\.naver\.com/([^/?#]+)", url or "")
-    query = truncate(clean_name(name), 40)
+    query, short = naver_queries(name, shop_key)  # 긴 이름이 0건이면 짧게 (주인 10/18)
     return ("\n🔎 쇼핑 커넥트 '상품 찾기' 검색어 (눌러서 복사)\n"
             f"<code>{html.escape(query)}</code>\n"
+            + (f"짧게: <code>{html.escape(short)}</code>\n" if short else "")
             + (f"스토어: <code>{html.escape(store.group(1))}</code>\n" if store else "")
             + "바로가기: https://brandconnect.naver.com/\n")
 
@@ -851,6 +869,7 @@ class AdminNotifier:
         hint = shop.manual_hint or "앱/사이트에서 내 제휴 링크를 만들어 보내주세요"
         # 네이버 딜 (주인 결정 10/15): 가격·옵션을 휴대폰으로 확인하고 상품 사진도 같이 — 그 사진이 채널·블로그·인스타 상품 사진
         ask = photo_ask(p) if wants_owner_photo(shop.key, p) else ""
+        short = naver_short_query(p.name, shop.key, p.category)
         how_photo = (
             f"{ask}\n"
             f"사진을 <b>이 메시지에 답장</b>으로 보내며 설명 칸에 링크를 넣거나, 사진 설명 칸에 <code>/link {item.id} https://...</code>\n"
@@ -873,14 +892,16 @@ class AdminNotifier:
             message_id = await self.alert(
                 "link_request", text,
                 kakao_fit(f"🔔[할 일] 링크 필요 #{item.id} [{shop.name}] {truncate(p.name, 60)}{price}",
-                          (f"{ask}\n" if ask else "") + f"→ 텔레그램 핫딜봇 #{item.id} 에 답장"),
+                          (f"🔎 짧게: {short}\n" if short else "") + (f"{ask}\n" if ask else "")
+                          + f"→ 텔레그램 핫딜봇 #{item.id} 에 답장"),
                 key=f"link:{item.id}", short=f"핫딜 링크 #{item.id}", group="link_request", msg_kind="link", queue_id=item.id,
             )
         else:
             message_id = await self.send_with_id(text, kind="link", queue_id=item.id)
             if ask:  # 200자 한 통: 주소·사진 부탁은 잘리지 않는 쪽에, 넘치면 상품명이 줄어든다
                 v1 = kakao_fit(f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}",
-                               f"{_short_url(p.url)}\n{ask}\n→ 텔레그램 딜봇 링크 요청에 링크·사진을 답장해 주세요")
+                               f"{_short_url(p.url)}\n" + (f"🔎 짧게: {short}\n" if short else "")
+                               + f"{ask}\n→ 텔레그램 딜봇 링크 요청에 링크·사진을 답장해 주세요")
             else:
                 v1 = (f"🔗 내 링크가 필요해요 #{item.id} [{shop.name}]\n{truncate(p.name, 60)}{price}\n{_short_url(p.url)}\n"
                       "→ 텔레그램 딜봇의 링크 요청 메시지에 답장으로 링크를 보내 주세요")
@@ -888,7 +909,7 @@ class AdminNotifier:
         await self._push(
             "manual_link",
             f"내 링크가 필요합니다 #{item.id} [{shop.name}]",
-            f"{truncate(p.name, 70)}{price}\n{p.url}\n\n{hint}" + (f"\n{ask}" if ask else ""),
+            f"{truncate(p.name, 70)}{price}\n{p.url}\n\n{hint}" + (f"\n🔎 짧게: {short}" if short else "") + (f"\n{ask}" if ask else ""),
             priority="high",
             tags=["link"],
         )

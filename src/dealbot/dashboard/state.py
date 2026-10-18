@@ -177,7 +177,11 @@ class StateBuilder:
             detail: dict[str, Any] = {"how": (shop.manual_hint if shop and shop.manual_hint else "그 몰 앱에서 내 링크를 만들어 넣어 주세요"),
                                       "open": [{"label": "상품 열기", "url": prod}] if prod else []}
             if p.shop == "naver":
-                detail["search"] = truncate(clean_name(p.name), 40)
+                from dealbot.monitoring.admin import naver_queries
+
+                detail["search"], short = naver_queries(p.name, p.shop, p.category)
+                if short:  # 긴 이름이 0건이면 이걸로 (주인 10/18)
+                    detail["short"] = short
                 detail["how"] = "쇼핑 커넥트 '상품 찾기'에서 아래 검색어로 찾아 링크를 만들어 주세요 · 상품 사진도 같이 넣으면 채널·블로그에 써요"
             if (hold := p.extra.get("price_hold_note")) and isinstance(hold, str):
                 detail["note"] = truncate(hold, 120)
