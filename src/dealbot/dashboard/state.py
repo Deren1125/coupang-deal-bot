@@ -93,6 +93,31 @@ class StateBuilder:
 
     def __init__(self, bot: Any) -> None:
         self.bot = bot
+        # 간격 두고 발행 (주인 10/18): ok = Blog-Auto 기록 파일에 schedule 칸이 있고 schedule 일을 앎 (아니면 예전 '발행' 그대로),
+        # spaced = 간격 두고만 발행하는 블로그 (Pick — '지금 발행' 없음). items()·blogs() 가 기록 파일을 읽을 때 정함
+        self._sctx: dict[str, Any] = {"ok": False, "spaced": {}}
+
+    def _sched_ctx(self, v2: dict[str, Any]) -> None:
+        sch = v2.get("schedule")
+        supported = self._supported(self._ba_status())
+        ok = isinstance(sch, dict) and (supported is None or {"schedule", "unschedule"} <= supported)
+        self._sctx = {"ok": ok, "spaced": {b: bool((x or {}).get("spaced_only")) for b, x in ((sch or {}).get("blogs") or {}).items()}
+                      if ok else {}}
+
+    @staticmethod
+    def queued(post: dict[str, Any] | None) -> bool:
+        """간격 두고 발행으로 예약된 글 (예약·올리는 중) — 주인 할 일이 아니라 할 일 목록에 넣지 않는다 (멈춘 예약은 넣음)."""
+        return ((post or {}).get("schedule") or {}).get("status") in ("scheduled", "publishing")
+
+    def _when(self, t: float) -> str:
+        """'오늘 14:20' · '내일 08:47' · '10/21 08:47'."""
+        tz = ZoneInfo(self.tz)
+        d, n = datetime.fromtimestamp(t, tz), datetime.now(tz)
+        if d.date() == n.date():
+            return f"오늘 {d:%H:%M}"
+        if d.date() == (n + timedelta(days=1)).date():
+            return f"내일 {d:%H:%M}"
+        return f"{d.month}/{d.day} {d:%H:%M}"
 
     # ---------------------------------------------------------- 공통
     @property
@@ -128,12 +153,13 @@ class StateBuilder:
         blogs = (v2.get("status") or {}).get("blogs") or {}
         return {b: str((blogs.get(b) or {}).get("mode") or "") for b in ("finance", "issue", "hotdeal")}
 
-    @staticmethod
-    def _mark_publish(a: dict[str, Any], modes: dict[str, str]) -> None:
+    def _mark_publish(self, a: dict[str, Any], modes: dict[str, str]) -> None:
         """자동 발행 모드 블로그의 MAY_PUBLISH 일은 확인 창이 있다고 표시 (서버 ActionDesk 가 같은 기준으로 409)."""
         if a.get("action") in MAY_PUBLISH:
-            # (blog.fix 처럼 원래 ★ 인 일은 임시저장 모드여도 ★ 그대로)
-            a["confirm"] = bool(a.get("confirm")) or modes.get(publish_blog(a["action"], a.get("args") or {}) or "") != "draft"
+            # (blog.fix 처럼 원래 ★ 인 일은 임시저장 모드여도 ★ 그대로). 간격 두고만 발행하는 블로그(Pick)는 바로 공개되지 않음
+            blog = publish_blog(a["action"], a.get("args") or {}) or ""
+            spaced = bool(self._sctx["spaced"].get(blog))
+            a["confirm"] = bool(a.get("confirm")) or (not spaced and modes.get(blog) != "draft")
 
     def _hhmm(self, dt: datetime) -> str:
         return dt.astimezone(ZoneInfo(self.tz)).strftime("%H:%M")
@@ -229,7 +255,7 @@ class StateBuilder:
         return link_target(base) if base else None
 
     # ---------------------------------------------------------- 글 (기록 파일)
-    def _post_actions(self, blog: str, pid: int, needs: list[str], post: dict[str, Any] | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def _post_actions(self, blog: str, pid: int, needs: list[str], post: dict[str, Any] | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         a = {"blog": blog, "pid": pid}
         acts: dict[str, dict[str, Any]] = {
             "owner_edit": act("blog.oedit_keep", "그대로 두기", {"pid": pid, "blog": blog}),
@@ -241,9 +267,29 @@ class StateBuilder:
             "share": act("blog.share", "보내기", a),
             "channel": act("blog.channel", "채널에 올리기", a),
         }
+        sch = (post or {}).get("schedule") or {}
+        sched_ok, spaced = self._sctx["ok"], bool(self._sctx["spaced"].get(blog))
+        now_pub = act("blog.publish", "지금 발행", a)  # 확인 창(★) 그대로
+        if sched_ok and sch.get("status") in ("scheduled", "publishing"):
+            # 예약된 글: 차분한 상태 한 줄만 (누를 것 없음) · 더보기 → 예약 취소 / 지금 발행
+            more = [act("blog.unschedule", "예약 취소", a)] if sch["status"] == "scheduled" else []
+            if not spaced and sch["status"] == "scheduled":
+                more.append(now_pub)
+            if (url := (post or {}).get("naver_url")):
+                more.append(open_link("네이버에서 보기", url))
+            return None, more
+        if sched_ok:  # 간격 두고 발행 (주인 10/18) — 큰 버튼은 예약, '지금 발행' 은 더보기로 (Pick 은 없음)
+            acts["publish"] = act("blog.schedule", "다시 예약" if sch.get("status") == "blocked" else "간격 두고 발행",
+                                  {"blog": blog, "pids": [pid]})
         order = [n for n in NEED_ORDER if n in needs]
+        if sched_ok and sch.get("status") == "blocked" and "publish" not in order:
+            order.append("publish")  # 멈춘 예약: 고칠 일(사진·답 …)이 먼저, 없으면 '다시 예약'
         primary = acts[order[0]] if order else goto("자세히", f"#/i/{iidmod.post_iid(blog, pid)}")
         more = [acts[n] for n in order[1:]]
+        if sched_ok and sch.get("status") == "blocked":
+            more.append(act("blog.unschedule", "예약 취소", a))
+        if sched_ok and "publish" in order and not spaced:
+            more.insert(0, now_pub)
         if "owner_edit" in needs:
             more.append(act("blog.oedit_redo", "봇 글로 덮어쓰기", {"pid": pid, "blog": blog}, danger=True))
         if "answers" in needs:
@@ -269,6 +315,8 @@ class StateBuilder:
         primary, more = self._post_actions(blog, pid, needs, post)
         first = next((n for n in NEED_ORDER if n in needs), "")
         status = NEED_STATUS.get(first, "기다리는 글")
+        sch = ((post or {}).get("schedule") or {}) if self._sctx["ok"] else {}
+        kind = first or "waiting"
         if first == "photos" and post and post.get("photo_request"):
             n = len(post["photo_request"].get("must") or [])
             status = f"사진 {n}장 필요" if n else status
@@ -283,11 +331,18 @@ class StateBuilder:
             when = datetime.fromtimestamp(exp, ZoneInfo(self.tz))
             same_day = when.date() == datetime.now(ZoneInfo(self.tz)).date()
             status = f"{status} · {when:%H:%M}까지" if same_day else f"{status} · {when.month}/{when.day} {when:%H:%M}까지"
+        if sch.get("status") in ("scheduled", "publishing"):  # 예약됨 — 주인 할 일이 아님 (할 일 목록에는 넣지 않는다)
+            at = _iso_ts(sch.get("scheduled_at"), self.tz)
+            status = "지금 발행하는 중" if sch["status"] == "publishing" or at is None else f"{self._when(at)} 발행 예정"
+            kind, exp = "scheduled", None
+        elif sch.get("status") == "blocked":  # 차례에 올리지 못함 — 이유와 고칠 일 (멈춘 주인 일과 같은 순서)
+            status = f"예약 발행 멈춤 · {sch.get('reason') or '확인이 필요해요'}"
+            kind, exp = "sched_blocked", None
         # 질문은 자르지 않는다 — 답하려면 전체 문장이 보여야 함 (주인 10/18: '질문이 잘려')
         questions = list((post or {}).get("questions") or [])
         slots = [dict(s, thumb=f"/dashboard/thumb/{s['thumb']}" if s.get("thumb") else None) for s in (post or {}).get("slots") or []]
         iid = iidmod.post_iid(blog, pid)
-        return {"iid": iid, "src": "blog", "blog": blog, "kind": first or "waiting", "sev": "todo", "urgent": bool(needs),
+        return {"iid": iid, "src": "blog", "blog": blog, "kind": kind, "sev": "todo", "urgent": bool(needs) or kind == "sched_blocked",
                 "title": (post or {}).get("title") or title or f"{CHIPS[blog]} #{pid}", "chip": CHIPS[blog], "status": status,
                 "since": _iso_ts((post or {}).get("saved_at"), self.tz), "expires_at": exp, "primary": primary, "more": more,
                 "detail": {"needs": needs, "photo_request": (post or {}).get("photo_request"), "slots": slots,
@@ -342,6 +397,8 @@ class StateBuilder:
         export = export if export is not None else self._export()
         v2 = getattr(export, "v2", None) or {}
         posts = {b: {p["pid"]: p for p in v2.get("posts", {}).get(b, [])} for b in ("finance", "issue", "hotdeal")}
+        self._sched_ctx(v2)
+        queued = {iidmod.post_iid(b, pid) for b, rows in posts.items() for pid, p in rows.items() if self._sctx["ok"] and self.queued(p)}
         out: dict[str, dict[str, Any]] = {}
         try:
             out.update(self._deal_items(now_dt, long=long))
@@ -359,6 +416,8 @@ class StateBuilder:
                     out[iid]["urgent"] = out[iid]["urgent"] or any(r.urgent for r in rows)
                 continue
             post = iidmod.post_of(iid)
+            if iid in queued and not any(r.key.split(":", 1)[0] in ("dup", "cards", "openchat") for r in rows):
+                continue  # 예약된 글 — 차례가 되면 봇이 발행 (예전에 열린 '발행 대기' 알림이 남아 있어도)
             if post is not None:
                 blog, pid = post
                 p = posts[blog].get(pid)
@@ -386,7 +445,10 @@ class StateBuilder:
         for blog, rows in posts.items():
             for pid, p in rows.items():
                 iid = iidmod.post_iid(blog, pid)
-                if iid not in out and p.get("needs") and p.get("status") != "published":
+                if iid in queued:
+                    continue
+                blocked = self._sctx["ok"] and (p.get("schedule") or {}).get("status") == "blocked"
+                if iid not in out and (p.get("needs") or blocked) and p.get("status") != "published":
                     out[iid] = self._post_item(blog, p, pid=pid, long=long)
         # 기록 파일 todo (알림 줄이 없는 것: 셈한 일 · 예전 길로 열린 일)
         known = {(n.src, n.key) for n in notices}
@@ -397,7 +459,7 @@ class StateBuilder:
                 continue
             blog = t.blog if t.blog in ("finance", "issue", "hotdeal") else ""
             iid = iidmod.iid_for(t.key, blog, src="blogauto")
-            if iid in out or iid.startswith("deal-"):
+            if iid in out or iid in queued or iid.startswith("deal-"):
                 continue
             if iidmod.post_of(iid) is not None:
                 b, pid = iidmod.post_of(iid)  # type: ignore[misc]
@@ -421,8 +483,10 @@ class StateBuilder:
         for it in items:
             it["more"] = self._filter(it["more"], supported)
             for a in (it["primary"], *it["more"]):
-                self._mark_publish(a, modes)
-            if supported is not None and it["primary"]["action"].startswith("blog.") and it["primary"]["action"][5:] not in supported:
+                if a is not None:
+                    self._mark_publish(a, modes)
+            if it["primary"] is not None and supported is not None and it["primary"]["action"].startswith("blog.") \
+                    and it["primary"]["action"][5:] not in supported:
                 it["primary"] = dict(it["primary"], disabled=True, note="블로그 프로그램 업데이트를 기다리는 중")
             it.setdefault("chip", CHIPS.get(it.get("blog") or "", "딜" if it["src"] == "deal" else ""))
         return rank.order(items, now)  # 중요한·핫한 순 (rank.py)
@@ -492,14 +556,19 @@ class StateBuilder:
         v2 = getattr(export, "v2", None) or {}
         st_blogs = (v2.get("status") or {}).get("blogs") or {}
         supported = self._supported(self._ba_status())
+        self._sched_ctx(v2)
         out = {}
         for blog in ("finance", "issue", "hotdeal"):
             st = st_blogs.get(blog) or {}
             waiting = [it for it in todo if it.get("blog") == blog and it["iid"].startswith("post-")]
             have = {it["iid"] for it in waiting}
+            planned: list[tuple[float, dict[str, Any]]] = []
             for p in v2.get("posts", {}).get(blog, []):
                 iid = iidmod.post_iid(blog, p["pid"])
-                if iid not in have and p.get("status") != "published":
+                if self._sctx["ok"] and self.queued(p):  # 예약된 글은 '예약된 글' 칸에만 (두 번 보이지 않게)
+                    at = _iso_ts((p.get("schedule") or {}).get("scheduled_at"), self.tz) or 0.0
+                    planned.append((at, rank.public(self._post_item(blog, p, pid=p["pid"]))))
+                elif iid not in have and p.get("status") != "published":
                     waiting.append(rank.public(self._post_item(blog, p, pid=p["pid"])))
             acts: list[dict[str, Any]] = []
             if blog == "finance":
@@ -527,10 +596,33 @@ class StateBuilder:
                                    "items": [{"n": x["n"], "title": x["title"], "why": "인기 예상" if x.get("recommend") else "",
                                               "action": act("blog.pick", "이걸로 쓰기", {"sid": scan["sid"], "n": x["n"]})}
                                              for x in scan["items"]]} if scan else None),
-                         "actions": self._filter(acts, supported)}
+                         "actions": self._filter(acts, supported),
+                         "schedule": self._sched_blog(blog, v2, planned) if self._sctx["ok"] else None}
+            for r in out[blog]["recent"]:
+                r.update(self._submit_links(r))
             for a in out[blog]["actions"] + [x["action"] for x in (out[blog]["scan"] or {}).get("items", [])]:
                 self._mark_publish(a, self._modes(v2))
         return out
+
+    def _sched_blog(self, blog: str, v2: dict[str, Any], planned: list[tuple[float, dict[str, Any]]]) -> dict[str, Any]:
+        """블로그 탭 '예약된 글 N편' (다음 차례 먼저) · 모두 취소(★) · 간격 두고만 발행하는 블로그인지."""
+        info = ((v2.get("schedule") or {}).get("blogs") or {}).get(blog) or {}
+        items = [it for _, it in sorted(planned, key=lambda x: x[0])]
+        return {"spaced_only": bool(info.get("spaced_only")), "count": len(items),
+                "next_at": _iso_ts(info.get("next_at"), self.tz), "items": items,
+                "cancel_all": act("blog.unschedule_all", "모두 취소", {"blog": blog}, danger=True) if items else None}
+
+    @staticmethod
+    def _submit_links(r: dict[str, Any]) -> dict[str, Any]:
+        """최근 글 줄의 검색 등록 (주인 10/18 — 구글 자동 등록은 꺼져 있음): 구글 = 글 주소를 복사하고 키자드 열기 ·
+        다음 = 블로그 검색으로 들어갔는지 보기 (다음은 블로그를 한 번 등록해 두면 새 글이 RSS 로 들어감)."""
+        from urllib.parse import quote
+
+        url = r.get("url") or ""
+        title = (r.get("title") or "").strip()
+        return {"google": {"copy": url.replace("https://m.blog.naver.com/", "https://blog.naver.com/"),
+                           "url": "https://keyzard.cc/nb"} if url else None,
+                "daum": f"https://search.daum.net/search?w=fusion&col=blog&q={quote(title)}" if title else None}
 
     def sns(self) -> dict[str, Any]:
         bot = self.bot

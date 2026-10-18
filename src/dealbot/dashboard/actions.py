@@ -52,7 +52,7 @@ CHANNEL_URL_MAX = 300
 CONFIRM = frozenset({
     "deal.skip", "deal.repost", "deal.post", "bot.pause", "sns.test", "sns.disconnect",
     "blog.publish", "blog.drop", "blog.fix", "blog.rewrite", "blog.restyle", "blog.share", "blog.channel", "blog.oedit_redo",
-    "blog.mode", "blog.pause", "blog.drafts_cleanup", "blog.ledger", "push.unsubscribe",
+    "blog.mode", "blog.pause", "blog.drafts_cleanup", "blog.ledger", "push.unsubscribe", "blog.unschedule_all",
 })
 DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 # 그 블로그가 자동 발행 모드면 바로 네이버에 공개되는 일 (Blog-Auto nl.CATALOG 의 may_publish 와 같게) — 그때만 ★
@@ -63,13 +63,13 @@ FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "is
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
-                "dismiss")
+                "dismiss", "schedule", "unschedule", "unschedule_all")
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input")
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
 DISMISS_POST_HEADS = ("dup", "cards", "openchat")
-REAL_WORK_HEADS = ("link", "review", "unsure", "photo", "ask", "draft", "oedit", "fail", "chan", "share", "hot")
+REAL_WORK_HEADS = ("link", "review", "unsure", "photo", "ask", "draft", "oedit", "fail", "chan", "share", "hot", "sched")
 # Blog-Auto 가 닫아 주는 키 머리 (blogauto/bridge.py DISMISS_HEADS 와 같게) — 이 밖의 Blog-Auto 줄은 '다 했어요'를 보이지 않는다
 BLOGAUTO_DISMISS_HEADS = ("dup", "cards", "openchat", "cq", "buddy", "stalled", "scan", "err", "loop", "neighbors", "restyle_once")
 REPLIES_KEY = "threads_replies:"
@@ -120,6 +120,8 @@ TEXTS = {
     "off": "지금은 대시보드에서 할 수 없어요",
     "pushed": "테스트 알림을 보냈어요",
     "no_device": "알림 켠 기기가 없어 테스트 카톡을 보냈어요",
+    "scheduled": "간격 두고 발행 예약했어요",
+    "spaced_only": "이 블로그는 간격 두고 발행만 돼요 — 블로그 프로그램 업데이트를 기다리는 중이에요",
 }
 
 
@@ -321,6 +323,21 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"url": url}
     if name == "dismiss":
         return {"key": _str(g("key"), 120)}
+    if name == "schedule":  # 간격 두고 발행 (주인 10/18): 준 순서대로 그 블로그 예약 줄 끝에
+        out = {"blog": _blog(g("blog")), "pids": _pids(g("pids") if g("pids") is not None else g("pid"))}
+        if g("first_now") is True:
+            out["first_now"] = True
+        at = g("at")  # 확인 창에 보여 준 시각 (서버가 넣고 ctoken 이 묶음 — 확인 없는 일에서는 버림)
+        if at is not None:
+            if not isinstance(at, list) or len(at) != len(out["pids"]) or not all(
+                    isinstance(x, int | float) and not isinstance(x, bool) and 1e9 < x < 1e10 for x in at):
+                raise ActionError("bad_args")
+            out["at"] = [round(float(x), 1) for x in at]
+        return out
+    if name == "unschedule":
+        return {"blog": _blog(g("blog")), "pid": _int(g("pid"))}
+    if name == "unschedule_all":
+        return {"blog": _blog(g("blog"))}
     raise ActionError("bad_args")
 
 
@@ -336,6 +353,8 @@ def needs_confirm(action: str, args: dict[str, Any], *, this_device: bool = True
     """★ 확인 창이 필요한가. publish_mode: 그 일이 걸린 블로그가 자동 발행 모드(또는 모름)라 MAY_PUBLISH 일이 바로 공개되는 때."""
     if action in MAY_PUBLISH and publish_mode:
         return True
+    if action == "blog.schedule":  # 여러 편(시각 목록을 보여 줌)·첫 글은 지금만 ★ — 한 편 예약은 언제든 취소할 수 있다
+        return len(args.get("pids") or []) > 1 or args.get("first_now") is True
     if action not in CONFIRM:  # (blog.fix 처럼 원래 ★ 인 일은 임시저장 모드여도 ★)
         return False
     if action == "blog.mode":
@@ -357,7 +376,7 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return iidmod.post_iid(blog, pids[0])
     if action == "todo.dismiss":
         return str(args.get("iid") or "")
-    if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup") and blog in BLOGS:
+    if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all") and blog in BLOGS:
         return f"blog-{blog}"
     if action == "blog.login_check" and blog in BLOGS:
         return f"conn-naver-{blog}"
@@ -401,6 +420,10 @@ def confirm_text(action: str, args: dict[str, Any], facts: dict[str, Any]) -> di
         "blog.drafts_cleanup": (f"{blog} 임시저장 글을 정리할까요?", "봇이 만든 오래된 임시저장 글만 지워요. 직접 쓰신 글은 그대로 둬요.", "정리하기"),
         "blog.ledger": ("정리본을 바꿀까요?", "올린 파일로 아카이브 정리본을 바꿔요. 지금 정리본은 백업해 둬요.", "바꾸기"),
         "push.unsubscribe": (f"{facts.get('device') or '그 기기'} 알림을 끌까요?", "그 기기에는 알림이 더 가지 않아요.", "끄기"),
+        "blog.schedule": (f"{blog} {len(pids or [])}편을 간격 두고 발행할까요?" if isinstance(pids, list) and len(pids) > 1
+                          else f"{blog}{num} 글을 간격 두고 발행할까요?",
+                          "2~3시간 간격으로 08~22시에 한 편씩 올라가요. 블로그 탭에서 언제든 취소할 수 있어요.", "예약하기"),
+        "blog.unschedule_all": (f"{blog} 예약을 모두 취소할까요?", "예약된 글은 발행하지 않고 기다리는 글로 돌아가요.", "모두 취소"),
     }
     pub = "자동 발행 모드라 바로 네이버에 공개돼요."
     blog_p = BLOG_NAMES.get(publish_blog(action, args) or "", blog)
@@ -503,6 +526,7 @@ class ActionDesk:
         except ActionError as e:
             self._audit(caller, action, "", {}, e.code)
             return e.status, self._err(e.code)
+        action, args = self._spaced(action, args)
         target = target_of(action, args)
         if cid is not None and (prev := self.store.by_cid(cid, self.clock() - CID_S)) is not None:
             return self._replay(prev)
@@ -517,7 +541,13 @@ class ActionDesk:
         this_device = True
         pub = self._publish_mode(action, args)
         need = needs_confirm(action, args, this_device=this_device, publish_mode=pub)
+        if action == "blog.schedule" and not need:
+            args.pop("at", None)  # 확인 창에서 보여 준 시각만 넘긴다 (한 편 예약은 Blog-Auto 가 정함)
         if need:
+            if body.get("ctoken") is None and action == "blog.schedule":
+                args, extra = self._plan(args, caller)
+                tok = self.tokens.issue(caller.session, action, args)
+                return 409, {"status": "confirm", "ctoken": tok, **confirm_text(action, args, {}), **extra, "args": args}
             if body.get("ctoken") is None:
                 facts = self.facts(target) if target else {}
                 if pub:
@@ -532,11 +562,62 @@ class ActionDesk:
 
     def _publish_mode(self, action: str, args: dict[str, Any]) -> bool:
         """MAY_PUBLISH 일의 블로그가 자동 발행 모드인가 (모르면 True — 확인 창 한 번이 더 안전).
-        Blog-Auto 도 실행할 때 모드를 다시 보고 confirmed 가 없으면 받지 않는다 (누른 뒤 모드가 바뀌어도)."""
+        Blog-Auto 도 실행할 때 모드를 다시 보고 confirmed 가 없으면 받지 않는다 (누른 뒤 모드가 바뀌어도).
+        간격 두고만 발행하는 블로그(Pick)는 바로 공개되지 않고 예약 줄로 가니 False."""
         blog = publish_blog(action, args)
-        if blog is None:
+        if blog is None or self.spaced_only(blog):
             return False
         return self.modes().get(blog) != "draft"
+
+    def schedules(self) -> dict[str, dict[str, Any]]:
+        """블로그마다 간격 두고 발행 상태 (기록 파일 schedule.blogs — 예전 Blog-Auto 면 빈 사전)."""
+        try:
+            st = self.bot.dash_state
+            export = st._export() if st is not None else None
+            return dict(((getattr(export, "v2", None) or {}).get("schedule") or {}).get("blogs") or {})
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def spaced_only(self, blog: str) -> bool:
+        return bool((self.schedules().get(blog) or {}).get("spaced_only"))
+
+    def _spaced(self, action: str, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """간격 두고만 발행하는 블로그 (주인 10/18: Pick 은 무조건): '발행' 은 예약 줄 끝으로, '첫 글은 지금' 은 없음.
+        Blog-Auto 도 같은 규칙으로 막는다 (bridge.x_publish · schedule.add) — 여기는 확인 창·화면을 맞추려고."""
+        blog = str(args.get("blog") or "")
+        if action == "blog.publish" and self.spaced_only(blog):
+            return "blog.schedule", {"blog": blog, "pids": [args["pid"]]}
+        if action == "blog.schedule" and self.spaced_only(blog):
+            args = {k: v for k, v in args.items() if k != "first_now"}
+        return action, args
+
+    def _plan(self, args: dict[str, Any], caller: Caller) -> tuple[dict[str, Any], dict[str, Any]]:
+        """여러 편 예약 확인 창: Blog-Auto 와 같은 규칙으로 미리 계산한 시각 (확인하면 이 시각 그대로 — args.at, ctoken 이 묶음).
+        같은 세션·같은 글·같은 선택이면 10분 동안 같은 시각 ('첫 글은 지금' 을 켰다 꺼도 그대로)."""
+        from dealbot.dashboard import schedule as sch
+
+        blog, pids, first = args["blog"], list(args["pids"]), args.get("first_now") is True
+        info = self.schedules().get(blog) or {}
+        now = self.clock()
+        tail, last = sch.iso_ts(info.get("tail_at")), sch.iso_ts(info.get("last_pub"))
+        rng = sch.seeded(caller.session, blog, pids, first, tail, last, int(now // 600))
+        times = sch.plan(len(pids), now=now, r=sch.rules_of(info), rng=rng, tail=tail, last_pub=last, first_now=first)
+        titles = self._titles(blog)
+        rows = [{"pid": p, "title": titles.get(p) or f"#{p}", "at": round(t, 1),
+                 "when": "지금" if first and i == 0 and t <= now + 60 else sch.when_text(t, now)} for i, (p, t) in enumerate(zip(pids, times, strict=True))]
+        # '첫 글은 지금' 은 지금 바로 올릴 수 있을 때만 보인다: 예약 줄이 비었고 · 마지막 발행에서 2시간이 지났고 · 08~22시 안
+        # (아니면 켜도 시각이 같아 헷갈림). Pick 은 늘 간격 두고라 없음
+        can_now = not self.spaced_only(blog) and sch.plan(1, now=now, r=sch.rules_of(info), rng=sch.seeded(now), tail=tail,
+                                                           last_pub=last, first_now=True)[0] <= now + 60
+        toggle = {"key": "first_now", "label": "첫 글은 지금", "on": first} if can_now else None
+        return dict(args, at=[round(t, 1) for t in times]), {"plan": rows, "toggle": toggle}
+
+    def _titles(self, blog: str) -> dict[int, str]:
+        try:
+            export = self.bot.dash_state._export()
+            return {p["pid"]: p["title"] for p in ((getattr(export, "v2", None) or {}).get("posts") or {}).get(blog, [])}
+        except Exception:  # noqa: BLE001
+            return {}
 
     def modes(self) -> dict[str, str]:
         """블로그마다 지금 모드 (Blog-Auto 기록 파일 status.blogs.*.mode)."""

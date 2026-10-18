@@ -51,7 +51,7 @@ CHECK_JS = """() => {
   for (const t of document.querySelectorAll('.tab span')) if (t.scrollWidth > t.clientWidth + 1) out.push('tab label cut: ' + t.textContent);
   for (const it of document.querySelectorAll('main .itm')) {
     const n = it.querySelectorAll(':scope > .pb, :scope > div > .pb, :scope > .ip > .pb, :scope > a.pb').length;
-    if (n !== 1) out.push('item primary count ' + n + ': ' + it.dataset.iid);
+    if (n > 1 || (n === 0 && !it.querySelector('.st'))) out.push('item primary count ' + n + ': ' + it.dataset.iid);
   }
   return out;
 }"""
@@ -134,11 +134,8 @@ def scenario(r: Run, base: str, flows: bool) -> None:
     p.wait_for_timeout(5500)
     r.shot("photos-done")
     print("photo final:", p.text_content("#toast"))
-    # 발행 확인 창 (★)
+    # 간격 두고 발행 (Pick — 확인 없이 예약 줄 끝으로)
     p.locator('[data-iid="post-issue-31"] .pb').click()
-    p.wait_for_selector(".sh .cf")
-    r.shot("publish-confirm")
-    p.click(".sh .cf .pb:not(.ghost)")
     p.wait_for_selector("#toast:not([hidden])")
     r.shot("publish-queued")
     p.wait_for_timeout(5000)
@@ -194,13 +191,70 @@ def scenario(r: Run, base: str, flows: bool) -> None:
     # Pick 발행 대기 여러 편 → 한 번에 (제목 목록 확인 창)
     p.goto(base + "/dashboard/#/blog/issue")
     p.wait_for_timeout(400)
-    batch = p.locator("main > .pb", has_text="한 번에")
+    batch = p.locator("main > .pb", has_text="간격 두고 발행")
     if batch.count():
         batch.click()
         p.wait_for_selector(".sh .cf")
         r.shot("pick-batch-confirm")
         p.click(".sh .cf .ghost")
         p.wait_for_timeout(300)
+
+
+def sched(r: Run, base: str) -> None:
+    """간격 두고 발행 (주인 10/18): 준비된 글 · 여러 편 확인 창(시각 목록·첫 글은 지금) · 예약된 글 · 블로그 탭 '예약된 글' · 멈춘 예약 ·
+    최근 글 검색 등록."""
+    p = r.page
+    p.goto(base + "/dashboard/")
+    p.wait_for_selector("main .itm")
+    if p.locator("main > button.pb.ghost").count():
+        p.click("main > button.pb.ghost")
+    p.locator('[data-iid="post-finance-15"]').scroll_into_view_if_needed()
+    p.evaluate("scrollBy(0, -120)")
+    r.shot("sched-ready-todo")
+    p.locator('[data-iid="post-issue-58"]').scroll_into_view_if_needed()
+    p.evaluate("scrollBy(0, -120)")
+    r.shot("sched-blocked-todo")
+    p.click('[data-iid="post-finance-15"] .ih .lnk')
+    p.wait_for_selector(".sh")
+    r.shot("sched-ready-more")
+    p.click(".sh .shh .lnk")
+    p.wait_for_timeout(300)
+    p.goto(base + "/dashboard/#/blog/finance")
+    p.wait_for_timeout(500)
+    r.shot("sched-blog-finance")
+    p.locator("main > .pb", has_text="간격 두고 발행").click()
+    p.wait_for_selector(".sh .cf ul.pl")
+    r.shot("sched-batch-confirm")
+    p.click(".sh .cf .tg")
+    p.wait_for_timeout(700)
+    r.shot("sched-batch-first-now")
+    p.click(".sh .cf .ghost")
+    p.wait_for_timeout(300)
+    p.goto(base + "/dashboard/#/blog/issue")
+    p.wait_for_timeout(500)
+    r.shot("sched-blog-issue", full=True)
+    p.locator("main .top.hs").scroll_into_view_if_needed()
+    p.evaluate("scrollBy(0, 120)")
+    r.shot("sched-section-issue")
+    p.locator('[data-iid="post-issue-57"] .ih .lnk').click()
+    p.wait_for_selector(".sh")
+    r.shot("sched-scheduled-more")
+    p.click(".sh .shh .lnk")
+    p.wait_for_timeout(300)
+    p.locator("main .fold").click()
+    p.wait_for_timeout(300)
+    p.locator("main .row .lnk", has_text="더보기").first.click()
+    p.wait_for_selector(".sh")
+    r.shot("sched-recent-submit")
+    p.click(".sh .shh .lnk")
+    p.wait_for_timeout(300)
+    p.goto(base + "/dashboard/#/blog/finance")
+    p.wait_for_timeout(500)
+    p.locator('[data-iid="post-finance-15"] .pb').click()
+    p.wait_for_selector("#toast:not([hidden])")
+    p.wait_for_timeout(5500)
+    r.shot("sched-single-done")
+    print("schedule toast:", p.text_content("#toast"))
 
 
 def extra(r: Run, base: str, ctx: Any, token: str, host: str) -> None:
@@ -232,6 +286,7 @@ def main() -> int:
     ap.add_argument("--deny", action="store_true", help="알림 권한을 막힌 상태로")
     ap.add_argument("--tag", default="", help="파일 이름 뒤에 붙일 말 (예: empty)")
     ap.add_argument("--extra", action="store_true", help="오프라인·로그인 시트")
+    ap.add_argument("--sched", action="store_true", help="간격 두고 발행 화면만")
     a = ap.parse_args()
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -252,6 +307,8 @@ def main() -> int:
             r = Run(page, out, name + ("-dark" if a.dark else "") + (f"-{a.tag}" if a.tag else ""))
             if a.extra:
                 extra(r, a.base, ctx, token, host)
+            elif a.sched:
+                sched(r, a.base)
             else:
                 scenario(r, a.base, name in a.flows.split(","))
             problems += r.problems + [f"{name}: js error {e}" for e in errors]

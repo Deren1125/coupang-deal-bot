@@ -30,6 +30,7 @@ const MSG = {published: '발행했어요', saved: '저장했어요', done: '했�
   login_needed: '네이버 로그인이 필요해요 — 연결에서 확인해 주세요', unsupported: '블로그 프로그램 업데이트를 기다리는 중이에요',
   blogauto_down: '블로그 프로그램이 응답하지 않아요', rate: '너무 자주 눌렀어요 — 조금 뒤에 다시', net: '인터넷 연결을 확인해 주세요',
   unknown: '확인이 필요해요 — 잠시 뒤 상태를 봐 주세요', confirm_expired: '확인 창이 오래됐어요 — 다시 눌러 주세요'};
+const SCH = /^blog\.(un)?schedule/;
 const SECRET_KEY = {'sns.token': 'token', 'sns.code': 'code', 'blog.kakao_connect': 'url'};
 
 let S = null, OLD = false, R = {tab: 'todo', sub: ''}, loading = null, ALL = false, DIRTY = false, NEXT = null;
@@ -195,6 +196,27 @@ function confirmSheet(d) {
   });
 }
 
+// 간격 두고 발행 확인: 제목과 올라갈 시각 + '첫 글은 지금' (켜고 끄면 서버가 시각을 다시 계산)
+function planSheet(d, body) {
+  return new Promise(res => {
+    let ok = false, cur = d;
+    const box = el('div', {class: 'cf'});
+    const draw = () => box.replaceChildren(el('p', {text: cur.body || ''}),
+      el('ul', {class: 'pl'}, cur.plan.map(x => el('li', {}, el('span', {}, x.title), el('b', {}, x.when)))),
+      cur.toggle ? btn('tg', cur.toggle.label, flip, {'aria-pressed': cur.toggle.on ? 'true' : 'false'}) : null,
+      btn('pb', cur.ok || '예약하기', () => { ok = true; back(); }), btn('pb ghost', '취소', back));
+    async function flip(e) {
+      e.currentTarget.disabled = true;
+      const args = Object.assign({}, body.args, {first_now: !cur.toggle.on}); delete args.at;
+      const r = await api('/dashboard/api/action', {method: 'POST', body: {action: body.action, args, cid: 'c_' + rnd(), ctoken: null}});
+      if (r.status === 409 && r.data.plan) cur = r.data; else toast(r.data.text || MSG.failed);
+      draw();
+    }
+    draw();
+    sheet(cur.title, box, () => res(ok && cur));
+  });
+}
+
 // ------------------------------------------------------------ 알림 줄 (토스트)
 let toastT = null;
 function toast(text, act, fn) {
@@ -243,8 +265,10 @@ async function exec(a, extra, ctx = {}) {
   let r = await api('/dashboard/api/action', {method: 'POST', body});
   if (r.status === 409 && r.data.status === 'confirm') {
     if (b) { b.disabled = false; b.querySelector('.spin') && b.querySelector('.spin').remove(); }
-    if (!await confirmSheet(r.data)) return null;
-    body.ctoken = r.data.ctoken;
+    const c = r.data.plan ? await planSheet(r.data, body) : await confirmSheet(r.data) && r.data;
+    if (!c) return null;
+    body.ctoken = c.ctoken;
+    if (c.args) body.args = c.args;  // 확인 창에 보여 준 시각 그대로 (서버가 묶어 둔 값)
     if (b) { b.disabled = true; b.prepend(el('span', {class: 'spin'})); }
     r = await api('/dashboard/api/action', {method: 'POST', body});
   }
@@ -253,7 +277,7 @@ async function exec(a, extra, ctx = {}) {
   if (r.status === 202) {
     POLL[d.id] = {iid: ctx.iid || '', action: a.action, args: body.args, t: Date.now()};
     if (ctx.key) { delete P[ctx.key]; delete OPEN[ctx.iid]; }
-    toast(a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
+    toast(SCH.test(a.action) ? '예약하는 중이에요' : a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
     render(); poll();
     return d;
   }
@@ -390,7 +414,7 @@ function primary(it, a) {
   if (!a) return null;
   const pend = pendingOf(it.iid);
   if (pend) return el('div', {}, btn('pb', [el('span', {class: 'spin'}), pend.status === 'running' ? ' 하는 중' : ' 요청함'], null, {disabled: true}),
-    it.src === 'blog' ? el('p', {class: 'note'}, '블로그에 넣는 중이에요 · 1~2분') : null);
+    it.src === 'blog' && !SCH.test(pend.action || '') ? el('p', {class: 'note'}, '블로그에 넣는 중이에요 · 1~2분') : null);
   if (a.disabled) return el('div', {}, btn('pb', a.label, null, {disabled: true}), el('p', {class: 'note'}, a.note || ''));
   if (a.input === 'open') return ext('pb soft', a.label, a.url);
   if (a.input === 'goto') return btn('pb soft', a.label, () => go('#' + a.goto.replace(/^#/, '')));
@@ -707,9 +731,18 @@ function vBlog() {
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
-  const pubs = b.waiting.filter(x => x.primary.action === 'blog.publish' && !x.primary.disabled && !pendingOf(x.iid));
-  if (pubs.length > 1) out.push(btn('pb soft', `발행 대기 ${pubs.length}편 한 번에`, () => pubAll(pubs), {style: 'margin-bottom:12px'}));
+  const sc = b.schedule, want = sc ? 'blog.schedule' : 'blog.publish';
+  const pubs = b.waiting.filter(x => x.primary && x.primary.action === want && !x.primary.disabled && x.kind !== 'sched_blocked' && !pendingOf(x.iid));
+  if (pubs.length > 1) {
+    out.push(sc ? btn('pb soft', `대기 ${pubs.length}편 간격 두고 발행`, e => exec({action: want, args: {blog: key, pids: pubs.map(x => x.primary.args.pids[0])}},
+      {}, {btn: e.currentTarget}), {style: 'margin-bottom:12px'}) : btn('pb soft', `발행 대기 ${pubs.length}편 한 번에`, () => pubAll(pubs), {style: 'margin-bottom:12px'}));
+  }
   out.push(...(b.waiting.length ? b.waiting.map(x => item(x, true)) : [el('p', {class: 'empty'}, '기다리는 글 없어요')]));
+  if (sc && sc.count) {
+    out.push(el('div', {class: 'top hs'}, el('p', {class: 'h3'}, `예약된 글 ${sc.count}편`),
+      sc.cancel_all ? btn('lnk mute', sc.cancel_all.label, e => exec(sc.cancel_all, {}, {btn: e.currentTarget})) : null));
+    out.push(...sc.items.map(x => item(x, true)));
+  }
   if (idea.length || (b.scan && b.scan.items.length)) {
     out.push(el('p', {class: 'h3'}, '글감'));
     const box = el('div', {class: 'box'});
@@ -729,9 +762,20 @@ function vBlog() {
   if (b.recent.length) {
     const open = OPEN['recent-' + key];
     out.push(el('div', {class: 'box', style: 'margin-top:12px'}, btn('fold', `최근 글 ${b.recent.length}개`, () => { OPEN['recent-' + key] = !open; render(); }, {'aria-expanded': open ? 'true' : 'false'}),
-      open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))), r.url ? ext('sm', '네이버', r.url) : null)) : null));
+      open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))),
+        r.url ? ext('sm', '네이버', r.url) : null, r.google || r.daum ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
   }
   return out;
+}
+
+// 최근 글 검색 등록: 구글(키자드)은 주소를 복사하고 열기 — 창은 누른 그 자리에서 열어야 막히지 않는다
+function submitSheet(r) {
+  const box = el('div');
+  sheet(r.title, box);
+  box.append(r.google ? btn('mr', '구글 등록', () => {
+    W.open(r.google.url, '_blank', 'noopener');
+    N.clipboard.writeText(r.google.copy).then(() => toast('글 주소를 복사했어요 — 붙여넣고 등록하세요'), () => toast('길게 눌러 복사해 주세요: ' + r.google.copy));
+  }) : null, r.daum ? ext('mr', '다음 확인', r.daum) : null, el('p', {class: 'note'}, '다음은 블로그를 한 번 등록해 두면 새 글이 알아서 들어가요'));
 }
 
 // 한 번에 발행: 확인 창은 제목 목록으로 한 번, 그다음 글마다 발행 요청

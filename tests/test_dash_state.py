@@ -74,7 +74,16 @@ async def test_todo_merges_deals_notices_and_export_posts(bot: DealBot, settings
     assert pick["detail"]["photo_request"]["must"] and pick["chip"] == "Pick"
     ask = by["post-finance-12"]
     assert ask["primary"]["action"] == "blog.answer" and ask["status"] == "질문 1개"
-    assert by["post-issue-31"]["primary"]["action"] == "blog.publish" and by["post-issue-31"]["primary"]["confirm"] is True
+    # Pick 은 간격 두고만 발행 (주인 10/18): 큰 버튼은 '간격 두고 발행' (확인 없이 줄 끝으로), '지금 발행' 은 없다
+    pub = by["post-issue-31"]
+    assert pub["primary"]["action"] == "blog.schedule" and pub["primary"]["label"] == "간격 두고 발행"
+    assert pub["primary"]["args"] == {"blog": "issue", "pids": [31]} and pub["primary"]["confirm"] is False
+    assert "blog.publish" not in [a["action"] for a in pub["more"]]
+    # 예약된 글(#47)은 할 일이 아니다 · 차례에 멈춘 글(#48)은 할 일 (이유와 고칠 일)
+    assert "post-issue-47" not in iids
+    blocked = by["post-issue-48"]
+    assert blocked["kind"] == "sched_blocked" and blocked["status"] == "예약 발행 멈춤 · 사진이 아직 없어요"
+    assert blocked["primary"]["action"] == "blog.photos" and "blog.unschedule" in [a["action"] for a in blocked["more"]]
     for it in todo:
         text = json.dumps({k: it[k] for k in ("title", "status", "primary", "more")}, ensure_ascii=False)
         assert "텔레그램" not in text and "/ok" not in text and "/skip" not in text, it["iid"]
@@ -92,7 +101,7 @@ async def test_primary_follows_the_need_order_and_owner_edit_wins(bot: DealBot, 
     it = next(x for x in body["todo"] if x["iid"] == "post-issue-46")
     assert it["primary"]["action"] == "blog.oedit_keep"
     more = [a["action"] for a in it["more"]]
-    assert more[:2] == ["blog.photos", "blog.publish"] and "blog.oedit_redo" in more and "blog.drop" in more
+    assert more[:2] == ["blog.photos", "blog.schedule"] and "blog.oedit_redo" in more and "blog.drop" in more
     redo = next(a for a in it["more"] if a["action"] == "blog.oedit_redo")
     assert redo["danger"] is True and redo["confirm"] is True
     assert it["detail"]["owner_edited"] is True

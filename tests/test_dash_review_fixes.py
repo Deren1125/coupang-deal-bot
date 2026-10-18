@@ -97,7 +97,8 @@ async def test_may_publish_actions_ask_first_when_the_blog_publishes_directly(bo
 async def test_fix_keeps_its_confirm_and_warns_when_the_blog_publishes_directly(bot: DealBot, settings: Settings,
                                                                                tmp_path: Path) -> None:
     """말로 고치기(Blog-Auto /fix 도 may_publish): 임시저장 모드여도 원래대로 ★, 자동 발행 모드면 바로 공개된다고 알린다."""
-    write_export(tmp_path / "blogauto.json", modes={"issue": "publish", "finance": "draft"})
+    # 간격 두고 발행을 모르는 Blog-Auto (기록 파일에 schedule 칸 없음) — 예전처럼 바로 공개된다고 알린다
+    write_export(tmp_path / "blogauto.json", modes={"issue": "publish", "finance": "draft"}, schedule=None)
     blogauto_status(settings)
     h = session_headers(bot)
     status, body = await act(bot, "blog.fix", {"blog": "finance", "pid": 4, "text": "제목 차분하게"}, h)
@@ -108,6 +109,12 @@ async def test_fix_keeps_its_confirm_and_warns_when_the_blog_publishes_directly(
     assert status == 202
     [f] = new_files(bot)
     assert f["action"] == "fix" and f["confirmed"] is True
+    # 간격 두고만 발행하는 Pick (주인 10/18): 발행 모드여도 바로 공개되지 않으니 '고치기' 그대로
+    write_export(tmp_path / "blogauto.json", modes={"issue": "publish", "finance": "draft"})
+    status, body = await act(bot, "blog.fix", {"blog": "issue", "pid": 3, "text": "제목 차분하게"}, h)
+    assert status == 409 and "공개" not in body["body"] and body["ok"] == "고치기", body
+    status, body = await act(bot, "blog.retry", {"blog": "issue", "pid": 3}, h)
+    assert status == 202, body  # 다시 올리기도 확인 없이 (바로 공개되지 않음)
 
 
 async def test_availability_is_checked_before_the_confirm_sheet(bot: DealBot, settings: Settings) -> None:
