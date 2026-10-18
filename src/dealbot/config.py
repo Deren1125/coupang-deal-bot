@@ -393,6 +393,10 @@ class PublishConfig(BaseModel):
     # 글의 강조 단계: 평소 가격(30일 평균·쿠팡 시중가) 대비 must_pct% 이상 싸면 "꼭 담으세요", top_pct% 이상이면 "역대급"
     emphasis_must_pct: float = 50
     emphasis_top_pct: float = 70
+    # '할인 괜찮은 딜' (주인 10/18 — 플랫폼 무관하게 다 올림): 강조 단계 top·must 이거나 할인율이 이 % 이상이면 인스타 딜 하나짜리 글·
+    # 스레드에 가벼운 간격으로 올린다 (publisher/good_deal.py). 할인율 = 평소 가격 근거(시중가·평균) 대비 % 와 표시 할인율 중 큰 값.
+    # 0 이면 모든 상품 딜을 '괜찮은 딜'로 본다
+    good_deal_min_discount_pct: float = Field(30, ge=0, le=100)
     queue_ttl_hours: int = 6
     manual_link_ttl_hours: int = 24  # 내 링크 입력을 기다리는 항목의 유효 시간 (주인 결정 10/15: 12 → 24)
     # 정보 글·정품 확인(/ok)과 쇼핑커넥트 자동 링크를 기다리는 항목의 유효 시간. 링크 요청만 24시간으로 늘렸으니 이것은 예전 그대로
@@ -429,8 +433,13 @@ class ThreadsRhythmConfig(BaseModel):
 
     enabled: bool = True  # false 면 예전처럼 텔레그램 발행 직후 바로 (대기열 없이)
     hours: str = "07:00-24:00"  # 이 시간대(app.timezone)에만 올림
-    min_gap_minutes: float = Field(45, ge=0)
-    max_deal_posts_per_day: int = Field(10, ge=0)  # 0 = 제한 없음
+    min_gap_minutes: float = Field(45, ge=0)  # 보통 딜·정보 글 (괜찮은 딜이 아닌 글)은 예전처럼 45분
+    max_deal_posts_per_day: int = Field(10, ge=0)  # 보통 딜은 그날 딜 글이 이만큼 되기 전까지만 (0 = 제한 없음)
+    # 주인 10/18: 할인 괜찮은 딜(publish.good_deal_min_discount_pct·top/must)은 가벼운 간격만 — 글 사이 15~30분 무작위,
+    # 딜 글 하루 20개까지 (안전 상한. 스레드 공식 API 게시 한도 24시간 250개보다 한참 아래)
+    good_min_gap_minutes: float = Field(15, ge=0)
+    good_max_gap_minutes: float = Field(30, ge=0)
+    good_max_deal_posts_per_day: int = Field(20, ge=0, le=100)  # 0 = 제한 없음
     queue_ttl_hours: float = Field(8, gt=0)  # 이보다 오래 기다린 글은 내림 (값·재고가 바뀌었을 수 있음)
     recheck_after_minutes: float = Field(10, ge=0)  # 이만큼 넘게 기다린 딜은 올리기 직전에 품절 다시 확인
 
@@ -598,9 +607,13 @@ class InstagramConfig(BaseModel):
     # skip = 인스타엔 안 올리고 기록만. 로고·기본 이미지·게시판 썸네일은 어느 쪽이든 카드에 안 넣는다
     no_photo: Literal["skip", "text_card"] = "text_card"
     # ---- 인스타 전용 대기열 (주인 결정 10/15): 텔레그램에 올린 딜을 바로 올리지 않고 줄 세워 하루 몇 개만 골라 올린다
-    daily_singles: int = Field(3, ge=0)  # 딜 하나짜리 글 하루 최대 (점수 높은 순). 캐러셀·릴스·단가표는 따로 셈
+    # 주인 10/18: 딜 하나짜리 글은 '할인 괜찮은 딜'(publish.good_deal_min_discount_pct·top/must)만, 개수·간격은 가벼운 안전 한도만.
+    # 보통 딜은 릴스·TOP5 에만. 인스타 공식 API 게시 한도(24시간 100개 — 예전 50개)보다 한참 아래로 (상한 40)
+    daily_singles: int = Field(10, ge=0, le=40)  # 딜 하나짜리 글 하루 안전 상한 (점수 높은 순). 캐러셀·릴스·단가표는 따로 셈
     hours: str = "07:00-23:00"  # 인스타에 올리는 시간 (app.timezone)
-    min_gap_minutes: int = Field(120, ge=0)  # 인스타 글 사이 간격. 딜 하나짜리 글은 캐러셀·릴스·단가표와도 이만큼 띄운다
+    min_gap_minutes: int = Field(30, ge=0)  # 인스타 글 사이 간격 (이것 ~ min_gap_max_minutes 사이 무작위)
+    min_gap_max_minutes: int = Field(50, ge=0)
+    slot_guard_minutes: int = Field(30, ge=0)  # 릴스·TOP5·단가표가 잡힌 시각 앞 이만큼은 딜 하나짜리 글을 안 올림
     queue_expire_hours: float = Field(12, gt=0)  # 대기열에서 이보다 오래 기다린 딜은 안 올림 (가격이 바뀌었을 가능성)
     carousel: InstagramCarouselConfig = Field(default_factory=lambda: InstagramCarouselConfig())
     reels: InstagramReelsConfig = Field(default_factory=lambda: InstagramReelsConfig())

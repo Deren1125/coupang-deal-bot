@@ -149,4 +149,6 @@ class LatePhoto:
             return "블로그·인스타에 이 사진을 써요"
         if statuses & {"posted", "posting"}:
             return "블로그엔 이 사진을 써요 — 인스타 딜 글은 이미 글자 카드로 올라갔어요"
+        if "bundle" in statuses:  # 보통 딜 (주인 10/18 — 인스타는 릴스·TOP5 에만)
+            return "블로그·인스타 릴스·TOP5 에 이 사진을 써요"
         return "블로그에 이 사진을 써요"
