@@ -898,7 +898,7 @@ const GONE = new Set(), vis = xs => (xs || []).filter(x => !GONE.has(x.id) && !p
 function visitRow(x, all) {
   const r = el('div', {class: 'vi'}, el('span', {class: 'vn'}, all ? `${x.name} · ${(BLOGS.find(b => b[0] === x.blog) || [])[1]}` : x.name),
     el('span', {class: 'vt'}, x.title), x.comment ? el('div', {class: 'dr'}, x.comment) : null,
-    el('div', {class: 'va'}, x.comment ? btn('sm', '댓글 복사', () => copy(x.comment, '복사했어요 — 글에서 붙여넣기 하세요')) : null, ext('sm', '열기', x.url),
+    el('div', {class: 'va'}, x.comment ? Object.assign(ext('sm ac', '복사하고 열기', x.url), {onclick: () => { copy(x.comment, '복사했어요 — 글에서 붙여넣기 하세요'); }}) : ext('sm', '열기', x.url),
       btn('sm', '했어요', async e => {
         if (!await exec({action: 'blog.visit_done', args: {id: x.id}}, {}, {btn: e.currentTarget, iid: x.id})) return;
         GONE.add(x.id);
