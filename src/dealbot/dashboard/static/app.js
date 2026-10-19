@@ -692,7 +692,7 @@ function vPics() {
   return out;
 }
 
-// 구글 검색 등록 (주인 10/18 22:20): 주소 복사 + 키자드 열기는 누른 그 자리에서 한 번에, 등록함은 확인 없이 (다시 누르면 되돌림)
+// 구글 검색 등록 (주인 10/18 22:20 · 10/19 '그냥 복사하기 버튼으로'): 주소 복사만, 등록함은 확인 없이 (다시 누르면 되돌림)
 const CHK = {}, isOn = x => x.auto || (x.url in CHK ? CHK[x.url] : x.done);
 async function mark(urls, on) {
   urls.forEach(u => { CHK[u] = on; }); render();
@@ -704,17 +704,16 @@ async function mark(urls, on) {
 function vSearch() {
   const s = S.search, out = [el('div', {class: 'top'}, el('h2', {}, '구글 검색 등록'), el('a', {class: 'lnk', href: '#/blog/' + (LS.g('blog') || 'finance')}, '블로그로'))];
   if (!s || !s.days.length) return out.concat(el('p', {class: 'empty'}, '새로 발행한 글이 아직 없어요'));
-  const kz = () => W.open(s.keyzard, '_blank', 'noopener');
   out.push(el('p', {class: 'note'}, '주소를 키자드에 붙여넣고 등록함을 눌러 주세요 · 다음은 할 일 없어요'));
   for (const g of s.days) {
     const left = g.items.filter(x => !isOn(x)).map(x => x.url);
     out.push(el('div', {class: 'top hs'}, el('p', {class: 'h3'}, `${g.label} · ${left.length ? left.length + '개 남음' : '다 했어요'}`),
-      left.length ? btn('lnk', '전부 복사', () => copy(left.join('\n'), `${left.length}개 복사했어요 — 키자드에 붙여넣기 하세요`, '키자드 열기', kz)) : null,
+      left.length ? btn('lnk', '전부 복사', () => copy(left.join('\n'), `${left.length}개 복사했어요 — 키자드에 붙여넣기 하세요`)) : null,
       left.length > 1 ? btn('lnk mute', '모두 등록함', () => mark(left, true)) : null),
     el('div', {class: 'box'}, g.items.map(x => {
       const on = isOn(x);
       return el('div', {class: 'vi' + (on ? ' ok' : '')}, el('span', {class: 'vn'}, x.chip), el('span', {class: 'vt'}, x.title),
-        el('div', {class: 'va k'}, Object.assign(ext('sm' + (on ? '' : ' ac'), '복사하고 키자드 열기', s.keyzard), {onclick: () => copy(x.url, '주소를 복사했어요 — 키자드에 붙여넣기 하세요')}),
+        el('div', {class: 'va k'}, btn('sm' + (on ? '' : ' ac'), '복사하기', () => copy(x.url, '주소를 복사했어요 — 키자드에 붙여넣기 하세요')),
           x.auto ? el('span', {class: 'cp ok'}, '자동 등록됨') : btn('sm', on ? '등록함 ✓' : '등록함', () => mark([x.url], !on), {'aria-pressed': on ? 'true' : 'false'})));
     })));
   }
@@ -994,12 +993,11 @@ function visitSheet(xs, all) {
   sheet(`오늘 들를 이웃 글 ${xs.length}개`, el('div', {}, xs.map(x => visitRow(x, all)), el('p', {class: 'note'}, '글을 읽고 초안을 고쳐서 직접 달아 주세요')));
 }
 
-// 검색 등록: 구글은 주소 복사 + 키자드 (창은 누른 자리에서 열기)
+// 검색 등록: 구글은 주소 복사만 (주인 10/19)
 function submitSheet(r) {
   const box = el('div');
   sheet(r.title, box);
-  box.append(r.google ? btn('mr', '구글 등록', () => {
-    W.open(r.google.url, '_blank', 'noopener');
+  box.append(r.google ? btn('mr', '주소 복사하기', () => {
     N.clipboard.writeText(r.google.copy).then(() => toast('글 주소를 복사했어요 — 붙여넣고 등록하세요'), () => toast('길게 눌러 복사해 주세요: ' + r.google.copy));
   }) : null, r.daum ? ext('mr', '다음 확인', r.daum) : null, r.share ? btn('mr', '오픈채팅 문구 복사', () => copy(r.share, '복사했어요 — 오픈채팅에 붙여넣기 하세요')) : null,
   r.daum ? el('p', {class: 'note'}, '다음은 블로그를 한 번 등록해 두면 새 글이 알아서 들어가요') : null);

@@ -789,7 +789,7 @@ class StateBuilder:
 
     @staticmethod
     def _submit_links(r: dict[str, Any]) -> dict[str, Any]:
-        """최근 글 줄의 검색 등록 (주인 10/18 — 구글 자동 등록은 꺼져 있음): 구글 = 글 주소를 복사하고 키자드 열기 ·
+        """최근 글 줄의 검색 등록 (주인 10/18 — 구글 자동 등록은 꺼져 있음): 구글 = 글 주소 복사하기 ·
         다음 = 블로그 검색으로 들어갔는지 보기 (다음은 블로그를 한 번 등록해 두면 새 글이 RSS 로 들어감)."""
         from urllib.parse import quote
 
