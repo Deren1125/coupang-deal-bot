@@ -65,11 +65,12 @@ CONFIRM = frozenset({
 })
 DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 # 그 블로그가 자동 발행 모드면 바로 네이버에 공개되는 일 (Blog-Auto nl.CATALOG 의 may_publish 와 같게) — 그때만 ★
-MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic"})
+MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.photos_batch", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic"})
 FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
               "blog.fixpic": "finance"}
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
+                "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
                 "dismiss", "schedule", "unschedule", "unschedule_all", "visit_done", "pics_fetch", "pics_clear")
@@ -278,6 +279,50 @@ def _pic_picks(v: Any) -> list[dict[str, Any]]:
     return [{"id": k, "slot": n} for k, n in out.items()]
 
 
+PHOTO_OPS_MAX = 40  # Blog-Auto photo_batch.OPS_MAX 와 같게
+
+
+def _photo_blog(v: Any) -> str:
+    if v not in ("finance", "issue"):
+        raise ActionError("bad_args")
+    return str(v)
+
+
+def _photo_ops(v: Any) -> list[dict[str, Any]]:
+    """사진 일괄 수정 (주인 10/19 — 계약 action_photos_batch.json): [{op: remove, slot} | {op: put, slot, upload|pic, credit, edited}
+    | {op: move, from, to}] 1~40개, 적은 순서대로. upload 는 올린 사진 id (보낼 때 경로로 바꾼다), pic 은 고른 후보 id."""
+    if not isinstance(v, list) or not 1 <= len(v) <= PHOTO_OPS_MAX:
+        raise ActionError("bad_args")
+    out: list[dict[str, Any]] = []
+    for x in v:
+        if not isinstance(x, dict):
+            raise ActionError("bad_args")
+        op = x.get("op")
+        if op == "remove":
+            out.append({"op": op, "slot": _int(x.get("slot"), 1, 40)})
+        elif op == "move":
+            a, b = _int(x.get("from"), 1, 40), _int(x.get("to"), 1, 40)
+            if a == b:
+                raise ActionError("bad_args")
+            out.append({"op": op, "from": a, "to": b})
+        elif op == "put":
+            put: dict[str, Any] = {"op": op, "slot": _int(x.get("slot"), 1, 40)}
+            up, pic = x.get("upload"), x.get("pic")
+            if (up is None) == (pic is None) or not isinstance(x.get("edited", False), bool):
+                raise ActionError("bad_args")
+            if pic is not None:
+                if not isinstance(pic, str) or not PIC_ID.match(pic):
+                    raise ActionError("bad_args")
+                put["pic"] = pic
+            else:
+                put.update(upload=_uploads([up], 1, 1)[0], credit=_str(x.get("credit"), CREDIT_MAX, required=False),
+                           edited=x.get("edited") is True)
+            out.append(put)
+        else:
+            raise ActionError("bad_args")
+    return out
+
+
 def _pids(v: Any, *, allow_all: bool = False) -> list[int] | str:
     if allow_all and v == "all":
         return "all"
@@ -412,6 +457,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
                 raise ActionError("bad_args")
             out["url"] = url
         return out
+    if name == "photos_batch":
+        return {"blog": _photo_blog(g("blog")), "pid": _int(g("pid")), "ops": _photo_ops(g("ops"))}
     if name == "drop":
         return {"blog": _blog(g("blog")), "pids": _pids(g("pids") if g("pids") is not None else g("pid"))}
     if name in ("rewrite", "restyle"):
@@ -588,6 +635,7 @@ def confirm_text(action: str, args: dict[str, Any], facts: dict[str, Any]) -> di
     c.update({
         "blog.retry": (f"{blog}{num} 글을 다시 올릴까요?", pub, "공개로 올리기"),
         "blog.photos": (f"{blog}{num} 글에 {ph}을 넣을까요?", f"{ph}을 넣고 " + pub, "넣고 발행"),
+        "blog.photos_batch": (f"{blog}{num} 글 사진을 한 번에 바꿀까요?", "바꾼 사진을 넣고 " + pub, "바꾸고 발행"),
         "blog.fixpic": (f"{blog_p}{num} 글 사진을 바꿀까요?", "사진을 바꾸고 " + pub, "바꾸고 발행"),
         "blog.write": (f"{blog_p} 새 글을 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
         "blog.issue": (f"{blog_p} 새 글을 쓸까요?", "다 쓰면 " + pub, "쓰고 발행"),
@@ -830,7 +878,16 @@ class ActionDesk:
             return down
         spool_args = dict(args)
         ups = args.get("uploads") or []
-        if name == "answer" and args.get("answers"):  # 질문마다 붙인 사진 → 그 자리에서 경로로 (Blog-Auto 는 id 를 모른다)
+        if name == "photos_batch":  # 바꿀 사진마다 올린 사진 id → 경로 (Blog-Auto 는 id 를 모른다)
+            ops, ups = [], [o["upload"] for o in args["ops"] if o.get("upload")]
+            for o in args["ops"]:
+                p = self.uploads.path(o["upload"], kind="photo") if o.get("upload") else None
+                if o.get("upload") and p is None:
+                    self._audit(caller, action, target, args, "bad_upload")
+                    return 400, self._err("bad_upload")
+                ops.append({**o, "upload": str(p)} if p is not None else o)
+            spool_args["ops"] = ops
+        elif name == "answer" and args.get("answers"):  # 질문마다 붙인 사진 → 그 자리에서 경로로 (Blog-Auto 는 id 를 모른다)
             per = []
             for x in args["answers"]:
                 paths = [self.uploads.path(uid, kind="photo") for uid in x["uploads"]]

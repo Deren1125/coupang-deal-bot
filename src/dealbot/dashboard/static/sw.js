@@ -1,6 +1,6 @@
 /* Sns-board 서비스 워커 (범위 /dashboard/): 앱 파일은 캐시, 화면·상태는 네트워크 먼저(3초) 그다음 마지막 캐시, 웹 푸시 알림. */
 'use strict';
-const V = 'sb-v16', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
+const V = 'sb-v17', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
 const PRE = ['/dashboard/static/icon-192.png', '/dashboard/static/badge-72.png'];
 const STATE = '/dashboard/api/state', HOME = '/dashboard/';
 
@@ -40,6 +40,7 @@ async function cached(key, mark, x) {
   return new Response(await old.blob(), {status: 200, headers: h});
 }
 // 앱 파일: 주소(?v= 포함)가 같으면 캐시, 새 주소면 받아서 같은 파일의 옛것은 지움
+// (처음 쓸 때만 받는 사진 편집기 edit.js?v= 도 여기 — 10/19. 한 번 받으면 저장돼 끊겨도 열린다)
 async function asset(req) {
   const c = await caches.open(STATIC);
   const hit = await c.match(req);
