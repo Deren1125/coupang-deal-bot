@@ -222,6 +222,25 @@ async def test_unschedule_and_cancel_all(bot: DealBot, settings: Settings, tmp_p
     assert new_files(bot)[1]["target"] == "blog-finance"
 
 
+async def test_schedule_move_is_confirm_free_and_validated(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """예약 시간 바꾸기 (주인 10/19 — "데런 픽 글 예약 시간 조정할 수 있는 기능도 넣어줘") — 계약 action_schedule_move.json."""
+    export(tmp_path / "blogauto.json")
+    blogauto_status(settings)
+    h = session_headers(bot)
+    fx = fixture("action_schedule_move.json")
+    status, _ = await act(bot, "blog.schedule_move", dict(fx["args"], pid=47), h)
+    assert status == 202
+    [f] = new_files(bot)
+    assert f["action"] == fx["action"] and f["args"] == dict(fx["args"], pid=47) and set(f) == set(fx)
+    for bad in ({"at": "25:00"}, {"at": "9:5"}, {"day": "모레"}, {"at": 1760000000}, {"day": None}):
+        status, d = await act(bot, "blog.schedule_move", dict(fx["args"], pid=47, **bad), h)
+        assert status == 400 and d["code"] == "bad_args", bad
+    # 예전 Blog-Auto (schedule_move 를 모름) — 버튼 없음
+    blogauto_status(settings, actions=[a for a in fixture("status_blogauto.json")["actions"] if a != "schedule_move"])
+    body = await state(bot)
+    assert [a["label"] for a in body["blogs"]["issue"]["schedule"]["items"][0]["more"]] == ["예약 취소"]
+
+
 async def test_old_blogauto_without_schedule_keeps_the_old_buttons(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
     export(tmp_path / "blogauto.json", schedule=False)
     blogauto_status(settings, actions=[a for a in fixture("status_blogauto.json")["actions"] if "schedule" not in a])
@@ -267,9 +286,12 @@ async def test_state_hides_scheduled_posts_from_todo_and_lists_them_in_the_blog_
     want = (datetime.now(KST) + timedelta(hours=1))
     day = "오늘" if want.date() == datetime.now(KST).date() else "내일"
     assert item["status"] == f"{day} {want:%H:%M} 발행 예정" and item["kind"] == "scheduled" and item["primary"] is None
-    assert [a["label"] for a in item["more"]] == ["예약 취소", "지금 발행"]
+    assert [a["label"] for a in item["more"]] == ["시간 바꾸기", "예약 취소", "지금 발행"]
+    mv = item["more"][0]  # 10/19: 예약 시간 바꾸기 — 시각 칸에 지금 예약 시각, 오늘/내일
+    assert mv["action"] == "blog.schedule_move" and mv["input"] == "when" and mv["confirm"] is False
+    assert mv["value"] == f"{want:%H:%M}" and mv["day"] == ("today" if day == "오늘" else "tomorrow")
     pick = body["blogs"]["issue"]["schedule"]
-    assert pick["spaced_only"] is True and [a["label"] for a in pick["items"][0]["more"]] == ["예약 취소"]  # Pick 은 '지금 발행' 없음
+    assert pick["spaced_only"] is True and [a["label"] for a in pick["items"][0]["more"]] == ["시간 바꾸기", "예약 취소"]  # Pick 은 '지금 발행' 없음
     # 블로그 탭에서도 Pick 준비된 글에 '지금 발행' 이 없다
     for it in body["blogs"]["issue"]["waiting"] + [x for x in body["todo"] if x["blog"] == "issue"]:
         assert all(a["action"] != "blog.publish" for a in it["more"]), it["iid"]

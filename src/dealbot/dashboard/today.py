@@ -30,6 +30,7 @@ GROUP_OF = {
     "deal.link": "link",
     "deal.late_photo": "photo", "blog.photos": "photo", "blog.photo_clear": "photo",
     "blog.publish": "publish", "blog.schedule": "publish", "blog.unschedule": "publish", "blog.unschedule_all": "publish",
+    "blog.schedule_move": "publish",
     "blog.retry": "publish", "blog.channel": "publish", "blog.share": "publish", "deal.ok": "publish", "deal.ok_text": "publish",
     "deal.repost": "publish", "deal.posted": "publish", "deal.post": "publish",
     "blog.answer": "answer", "blog.noanswer": "answer", "blog.fix": "answer", "blog.fixpic": "answer", "blog.rewrite": "answer",
@@ -43,6 +44,7 @@ SKIP = frozenset({"blog.info", "stats.refresh", "push.test", "push.subscribe", "
 LABELS = {
     "deal.link": "링크 넣기", "deal.late_photo": "사진 올리기", "blog.photos": "사진 올리기", "blog.photo_clear": "사진 자리 비우기",
     "blog.publish": "발행", "blog.schedule": "예약", "blog.unschedule": "예약 취소", "blog.unschedule_all": "예약 모두 취소",
+    "blog.schedule_move": "예약 시간 바꾸기",
     "blog.retry": "다시 올리기", "blog.channel": "채널에 올리기", "blog.share": "보내기", "deal.ok": "올리기",
     "deal.ok_text": "고쳐서 올리기", "deal.repost": "다시 올리기", "deal.posted": "채널에 있음", "deal.post": "새 딜 올리기",
     "blog.answer": "답하기", "blog.noanswer": "답 없이 진행", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",

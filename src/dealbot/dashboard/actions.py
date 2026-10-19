@@ -68,11 +68,12 @@ DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic"})
 FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
               "blog.fixpic": "finance"}
+HHMM = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")  # 예약 시간 바꾸기 (주인 10/19)
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
-                "dismiss", "schedule", "unschedule", "unschedule_all", "visit_done", "pics_fetch", "pics_clear")
+                "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear")
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input", "search.check")
@@ -467,6 +468,11 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"blog": _blog(g("blog")), "pid": _int(g("pid"))}
     if name == "unschedule_all":
         return {"blog": _blog(g("blog"))}
+    if name == "schedule_move":  # 예약 시간 바꾸기 (주인 10/19): 'HH:MM' + 오늘/내일 (시각 계산·규칙 확인은 Blog-Auto, KST)
+        at, day = g("at"), g("day")
+        if not isinstance(at, str) or not HHMM.match(at) or day not in ("today", "tomorrow"):
+            raise ActionError("bad_args")
+        return {"blog": _blog(g("blog")), "pid": _int(g("pid")), "at": at, "day": day}
     if name in ("pics_fetch", "pics_clear"):  # 링크에서 사진 고르기 (주인 10/18) — 글 하나(blog+pid) 또는 붙여 넣은 링크 하나
         out = {}
         if g("pid") is not None:

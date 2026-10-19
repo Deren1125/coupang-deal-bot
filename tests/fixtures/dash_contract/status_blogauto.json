@@ -40,6 +40,7 @@
   "schedule",
   "unschedule",
   "unschedule_all",
+  "schedule_move",
   "visit_done",
   "pics_fetch",
   "pics_clear"

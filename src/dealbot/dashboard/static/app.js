@@ -321,7 +321,7 @@ function finish(s, p) {
   if (s.action === 'blog.kakao_auth_url' && ok && s.url) { KURL = s.url; toast('카카오 화면을 열어 주세요'); return; }
   if (s.action === 'blog.info' && ok) { infoSheet(s.text); return; }
   if (s.action === 'blog.visit_done') { if (ok) return; GONE.delete(p.iid); }
-  let text = ok ? (s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : MSG[s.code] || s.text || MSG.failed;
+  let text = ok ? (s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : (!/move/.test(s.action) && MSG[s.code]) || s.text || MSG.failed;
   if (s.status === 'unknown') text = MSG.unknown;
   if (s.status === 'expired') text = MSG.expired;
   const a = p.args || {};
@@ -460,6 +460,7 @@ function act(it, a, b, inline) {
   if (a.input === 'pics') { exec(a, picks(it, 1), {btn: b, iid: it.iid}); return; }
   if (a.input === 'choice') { choiceSheet(a); return; }
   if (a.input === 'search') { searchSheet(a); return; }
+  if (a.input === 'when') { whenSheet(a); return; }
   const key = pk(it.iid, a);
   if (a.input === 'photos' || a.input === 'file') {
     pick(a.accept || 'image/*', a.multiple, fs => {
@@ -731,6 +732,12 @@ function choiceSheet(a) {
   const box = el('div');
   sheet(a.title || a.label, box);
   box.append(a.note ? el('p', {class: 'note'}, a.note) : '', ...(a.choices || []).map(c => btn(c.primary ? 'pb' : 'mr', c.label, () => { back(); exec(a, {name: c.value}); })));
+}
+function whenSheet(a) {  // 10/19: 예약 시간 바꾸기 — 시각 + 오늘/내일
+  const f = el('input', {class: 'fl', type: 'time', value: a.value}), K = ['today', 'tomorrow'];
+  let day = a.day;
+  const tg = K.map((k, i) => btn('tg', i ? '내일' : '오늘', () => { day = k; tg.forEach((b, j) => b.setAttribute('aria-pressed', '' + (j === i))); }, {'aria-pressed': '' + (day === k)}));
+  sheet(a.label, el('div', {}, el('div', {class: 'row'}, ...tg), f, btn('pb', '바꾸기', () => { if (f.value) { back(); exec(a, {at: f.value, day}); } })));
 }
 async function searchSheet(a) {
   const box = el('div'), out = el('div');

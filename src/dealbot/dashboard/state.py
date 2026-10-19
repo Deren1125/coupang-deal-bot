@@ -274,6 +274,17 @@ class StateBuilder:
         base = getattr(self.bot.notifier, "channel_post_base", None)
         return link_target(base) if base else None
 
+    def _move_act(self, a: dict[str, Any], sch: dict[str, Any]) -> dict[str, Any] | None:
+        """예약 시간 바꾸기 (주인 10/19 — "데런 픽 글 예약 시간 조정할 수 있는 기능도 넣어줘"): 시각 칸(지금 예약 시각) + 오늘/내일."""
+        sup = self._sctx.get("sup")
+        at = _iso_ts(sch.get("scheduled_at"), self.tz)
+        if (sup is not None and "schedule_move" not in sup) or at is None:
+            return None
+        tz = ZoneInfo(self.tz)
+        d = datetime.fromtimestamp(at, tz)
+        return act("blog.schedule_move", "시간 바꾸기", a, input="when", value=f"{d:%H:%M}",
+                   day="tomorrow" if d.date() > datetime.now(tz).date() else "today")
+
     # ---------------------------------------------------------- 글 (기록 파일)
     def _post_actions(self, blog: str, pid: int, needs: list[str], post: dict[str, Any] | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         a = {"blog": blog, "pid": pid}
@@ -293,6 +304,8 @@ class StateBuilder:
         if sched_ok and sch.get("status") in ("scheduled", "publishing"):
             # 예약된 글: 차분한 상태 한 줄만 (누를 것 없음) · 더보기 → 예약 취소 / 지금 발행
             more = [act("blog.unschedule", "예약 취소", a)] if sch["status"] == "scheduled" else []
+            if sch["status"] == "scheduled" and (mv := self._move_act(a, sch)):
+                more.insert(0, mv)
             if not spaced and sch["status"] == "scheduled":
                 more.append(now_pub)
             if (url := (post or {}).get("naver_url")):
