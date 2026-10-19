@@ -995,6 +995,7 @@ ACTION_LABELS = {
     "todo.dismiss": "다 했어요", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "upload": "사진 올림",
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
+    "blog.photos_batch": "사진 한 번에 고치기",
     "blog.answer": "답하기", "blog.noanswer": "답 없이 진행", "blog.oedit_keep": "그대로 두기", "blog.oedit_redo": "봇 글로 덮어쓰기",
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",

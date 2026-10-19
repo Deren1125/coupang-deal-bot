@@ -798,7 +798,8 @@ function detail(it) {
     el('div', {class: 'tools'}, g.open && ext('lnk', '인스타 열기', g.open), g.src && ext('lnk mute', '기사', g.src), g.put && btn('lnk', g.put.label, e => exec(g.put, {}, {btn: e.currentTarget, iid: it.iid}))))));
   if ((d.slots || []).length) {
     out.push(el('p', {class: 'h3'}, '사진 자리'), el('div', {class: 'slots'}, d.slots.map(s => btn('slot' + (s.thumb ? '' : ' empty'),
-      s.thumb ? [el('img', {src: s.thumb, alt: `자리 ${s.slot}`}), el('b', {}, s.slot)] : `자리 ${s.slot}: ${s.label || '빈 자리'}`, () => slotSheet(it, s)))));
+      s.thumb ? [el('img', {src: s.thumb, alt: `자리 ${s.slot}`}), el('b', {}, s.slot)] : `자리 ${s.slot}: ${s.label || '빈 자리'}`, () => slotSheet(it, s)))),
+      /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid) ? btn('mr', '사진 한 번에 고치기 · 빼기·교체·옮기기·편집', () => edBatch(it)) : null);
   }
   if ((d.questions || []).length) out.push(el('p', {class: 'h3'}, '질문'), ...d.questions.map(q => el('p', {class: 'q'}, `${q.n}. ${q.q}`)));
   if (d.preview) out.push(el('p', {class: 'h3'}, '올릴 글'), el('div', {class: 'dr'}, d.preview));
@@ -824,6 +825,19 @@ function slotSheet(it, s) {
   a.args = Object.assign({}, a.args, {mode: 'slot', slot: s.slot});
   box.append(btn('mr', a.label, () => act(it, a, null, false)),
     s.thumb ? btn('mr red', '이 자리 비우기', e => exec({action: 'blog.photo_clear', args: Object.assign({}, args, {slot: s.slot})}, {}, {btn: e.currentTarget, iid: it.iid})) : null);
+}
+// 사진 한 번에 고치기·편집기 (주인 10/19): edit.js 는 처음 누를 때만 받는다 (app.js 를 가볍게) — 주소는 껍데기의 meta(?v=)
+let EDJ = null;
+const edLoad = () => EDJ = EDJ || new Promise((ok, bad) => {
+  const m = D.querySelector('meta[name=sb-edit]'), s = el('script', {src: m ? m.content : '/dashboard/static/edit.js'});
+  s.onload = () => W.SBEdit ? ok(W.SBEdit) : bad(); s.onerror = () => { EDJ = null; s.remove(); bad(); };
+  D.head.append(s);
+});
+async function edBatch(it) {
+  let E;
+  try { E = await edLoad(); } catch (e) { toast(MSG.net); return; }
+  E.batch({el, btn, sheet, back, pick, uploadAll, exec, toast, slots: it.detail.slots, iid: it.iid,
+    args: {blog: it.blog, pid: Number(it.iid.split('-')[2])}});
 }
 async function digestSheet(id) {
   const r = await api('/dashboard/api/digest/' + encodeURIComponent(id));

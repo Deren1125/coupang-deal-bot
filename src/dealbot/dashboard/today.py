@@ -28,7 +28,7 @@ GROUPS = (("link", "링크 넣음"), ("photo", "사진 올림"), ("publish", "�
           ("drop", "버림·안 올림"), ("other", "기타"))
 GROUP_OF = {
     "deal.link": "link",
-    "deal.late_photo": "photo", "blog.photos": "photo", "blog.photo_clear": "photo",
+    "deal.late_photo": "photo", "blog.photos": "photo", "blog.photo_clear": "photo", "blog.photos_batch": "photo",
     "blog.publish": "publish", "blog.schedule": "publish", "blog.unschedule": "publish", "blog.unschedule_all": "publish",
     "blog.schedule_move": "publish",
     "blog.retry": "publish", "blog.channel": "publish", "blog.share": "publish", "deal.ok": "publish", "deal.ok_text": "publish",
@@ -43,6 +43,7 @@ SKIP = frozenset({"blog.info", "stats.refresh", "push.test", "push.subscribe", "
                   "logout", "state", "connect", "blog.dismiss"})  # blog.dismiss: todo.dismiss 가 맡긴 것 (두 번 세지 않게)
 LABELS = {
     "deal.link": "링크 넣기", "deal.late_photo": "사진 올리기", "blog.photos": "사진 올리기", "blog.photo_clear": "사진 자리 비우기",
+    "blog.photos_batch": "사진 한 번에 고치기",
     "blog.publish": "발행", "blog.schedule": "예약", "blog.unschedule": "예약 취소", "blog.unschedule_all": "예약 모두 취소",
     "blog.schedule_move": "예약 시간 바꾸기",
     "blog.retry": "다시 올리기", "blog.channel": "채널에 올리기", "blog.share": "보내기", "deal.ok": "올리기",

@@ -39,9 +39,13 @@ HANGUL = re.compile(r"[가-힣]")
 # 10/18 저녁: '오늘 들를 이웃 글' (할 일 한 줄 + 목록 시트 + 블로그 탭 카드: 댓글 복사·열기·했어요) + 서로이웃 한 줄 → 64 KB / 20.5 KB
 # 10/18 밤: '오늘 한 일' + 인스타 링크 칸·오픈채팅 문구 복사 + 링크에서 사진 고르기 (추천 사진 그리드·'이대로 넣기'·'링크에서 사진 뽑기')
 # 세 기능을 합친 크기 → 78 KB / 24.5 KB, css 15.5 KB
-APP_JS_MAX = 78 * 1024
-# 10/19: 예약 시간 바꾸기 (시각 칸 + 오늘/내일 시트) → gzip 24.75 KB
-APP_JS_GZIP_MAX = 24 * 1024 + 768
+# 10/19: 사진 편집·일괄 수정 — app.js 에는 '사진 한 번에 고치기' 단추와 불러오기만 (gzip 24.5 → 25 KB),
+# 편집기·일괄 수정 화면은 처음 쓸 때만 받는 edit.js (12 KB · gzip 5 KB)
+APP_JS_MAX = 79 * 1024  # 10/19: 예약 시간 바꾸기 + 사진 한 번에 고치기 버튼·로더
+# 10/19: 예약 시간 바꾸기 (시각 칸 + 오늘/내일 시트) + 사진 한 번에 고치기 버튼·로더 → gzip 25.5 KB
+APP_JS_GZIP_MAX = 25 * 1024 + 512
+EDIT_JS_MAX = 12 * 1024
+EDIT_JS_GZIP_MAX = 5 * 1024
 APP_CSS_MAX = 15 * 1024 + 512
 SW_MAX = 8 * 1024
 
@@ -87,6 +91,7 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     assert boot["me"]["csrf"] == bot.dashboard.api.csrf_token(h)  # type: ignore[union-attr]
     assert boot["me"]["logout_t"] == bot.dashboard.form_token
     assert '<link rel="stylesheet" href="/dashboard/static/app.css?v=' in html
+    assert re.search(r'<meta name="sb-edit" content="/dashboard/static/edit\.js\?v=[0-9a-f]{10}">', html)  # 편집기는 처음 쓸 때만
     assert '<link rel="manifest" href="/dashboard/manifest.webmanifest"' in html and "viewport-fit=cover" in html
     # 아래 탭 5개 (할 일 · 딜 · 블로그 · 통계 · 연결) — 이 순서, 글자가 있는 단추
     assert re.findall(r'data-tab="([a-z]+)"', html) == ["todo", "deal", "blog", "stats", "connect"]
@@ -129,7 +134,8 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
     res = await bot.web.dispatch("GET", "/dashboard/sw.js", {})
     assert res[0] == 200 and res[2].startswith("text/javascript")
     assert res[3]["Cache-Control"] == "no-cache" and res[3]["Service-Worker-Allowed"] == "/dashboard/"
-    for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css"), ("badge-72.png", "image/png")):
+    for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css"), ("badge-72.png", "image/png"),
+                        ("edit.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))
@@ -143,6 +149,8 @@ def test_asset_budgets() -> None:
     assert len(js) <= APP_JS_MAX and len(gzip.compress(js, 9)) <= APP_JS_GZIP_MAX
     assert len((STATIC / "app.css").read_bytes()) <= APP_CSS_MAX
     assert len((STATIC / "sw.js").read_bytes()) <= SW_MAX
+    ed = (STATIC / "edit.js").read_bytes()
+    assert len(ed) <= EDIT_JS_MAX and len(gzip.compress(ed, 9)) <= EDIT_JS_GZIP_MAX
     assert shell.asset_url("app.js") != shell.asset_url("app.css")
 
 
@@ -150,7 +158,8 @@ def test_app_js_is_korean_local_and_safe() -> None:
     js = (STATIC / "app.js").read_text(encoding="utf-8")
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     sw = (STATIC / "sw.js").read_text(encoding="utf-8")
-    for text in (js, css, sw):
+    ed = (STATIC / "edit.js").read_text(encoding="utf-8")
+    for text in (js, css, sw, ed):
         assert "http://" not in text and "https://" not in text  # 바깥 주소·CDN 없음
         assert "eval(" not in text and "new Function" not in text and "document.write" not in text
     assert js.count("innerHTML") == 1  # 서버가 그린 통계 조각 하나뿐
