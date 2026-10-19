@@ -243,7 +243,7 @@ class Digests:
                 body = f"{body} {s}".strip()
             sent = await self.router.push_digest(d["id"], d["title"], body or truncate(d["lines"][0], 120))
             self.router.store.mark_digest(d["id"], pushed=sent > 0)
-        if slot == "pm":
+        if slot == "pm" and self.router.kakao_daily:  # 주인 10/19: 저녁 정리 카톡은 기본 끔 (notify.kakao_daily)
             todo_n = len(self.todo()) if self.todo is not None else 0
             ok = self.router.kakao.send("daily", key=f"digest:{day:%Y%m%d}", text=self.kakao_memo(day, d, todo_n),
                                         link=self.router.link(d["id"]))

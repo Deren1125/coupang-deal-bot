@@ -133,7 +133,20 @@ async def test_late_digest_more_than_2h_is_skipped(env: Env) -> None:
     assert env.db.kv_get("digest_sent:2026-10-18:am") == "skipped"
 
 
-async def test_evening_digest_pushes_sentences_and_one_kakao_memo(env: Env) -> None:
+async def test_evening_digest_pushes_sentences_and_no_kakao_memo_by_default(env: Env) -> None:
+    await _evening(env, kakao_daily=False)
+    assert env.kakao_files() == []  # 주인 10/19: 저녁 정리 카톡은 기본 끔 (정리는 대시보드·푸시로)
+
+
+async def test_evening_digest_kakao_memo_when_turned_on(env: Env) -> None:
+    await _evening(env, kakao_daily=True)
+    [k] = env.kakao_files()
+    assert k["kind"] == "daily" and k["key"] == "digest:20261018" and len(k["text"]) <= 200
+    assert k["link"].endswith("/dashboard/go/digest-20261018-pm") and "대시보드" in k["text"] and "할 일 3개" in k["text"]
+
+
+async def _evening(env: Env, *, kakao_daily: bool) -> None:
+    env.router.kakao_daily = kakao_daily
     day = date(2026, 10, 18)
     todo = [{"kind": "link_request", "title": "무선청소기"}, {"kind": "link_request", "title": "텀블러"},
             {"kind": "draft_ready", "title": "장원영 공항패션"}]
@@ -155,9 +168,6 @@ async def test_evening_digest_pushes_sentences_and_one_kakao_memo(env: Env) -> N
     [p] = [__import__("dash_helpers").decrypt(r.content, env.ua) for r in env.server.requests]
     assert p["type"] == "digest" and p["title"] == "🌙 저녁 정리" and p["url"] == "/dashboard/go/digest-20261018-pm"
     assert len(p["body"]) <= 120
-    [k] = env.kakao_files()
-    assert k["kind"] == "daily" and k["key"] == "digest:20261018" and len(k["text"]) <= 200
-    assert k["link"].endswith("/dashboard/go/digest-20261018-pm") and "대시보드" in k["text"] and "할 일 3개" in k["text"]
 
 
 def test_sentence_builders() -> None:

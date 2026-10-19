@@ -333,14 +333,14 @@ async def test_subscribe_refuses_a_key_that_is_not_a_p256_point(bot: DealBot) ->
 
 
 async def test_kakao_backup_bundles_several_items_into_one_memo(env: Env) -> None:
-    for i in (1, 2, 3):
-        env.open(f"link:{i}", iid=f"deal-{i}", short=f"상품 {i}")
+    for i in (1, 2, 3):  # 카톡 예비는 진짜 급한 종류만 (주인 10/19) — 연결 끊김 셋
+        env.open(f"selfcheck:{i}", "selfcheck", iid=f"deal-{i}", short=f"점검 {i}")
     env.clock.tick(21)
     out = await env.router.tick()  # 기기가 없음 → 카톡 예비
     [k] = env.kakao_files()
     assert out["kakao"] == 1 and k["kind"] == "urgent" and "할 일 3개" in k["text"] and len(k["text"]) <= 200
     assert k["link"].endswith("/dashboard/go/todo")
-    assert all(env.router.store.get("dealbot", f"link:{i}").kakao_at for i in (1, 2, 3))  # type: ignore[union-attr]
+    assert all(env.router.store.get("dealbot", f"selfcheck:{i}").kakao_at for i in (1, 2, 3))  # type: ignore[union-attr]
     await env.router.tick()
     assert len(env.kakao_files()) == 1
 

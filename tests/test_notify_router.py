@@ -125,33 +125,33 @@ async def test_resolve_cancels_a_pending_push(env: Env) -> None:
 
 
 async def test_no_device_falls_back_to_kakao_once_and_resolve_cancels_it(env: Env) -> None:
-    env.open("link:12", iid="deal-12")
+    env.open("selfcheck:db", "selfcheck", iid="deal-12")
     env.clock.tick(21)
     await env.router.tick()
     await env.router.tick()
     [k] = env.kakao_files()
-    assert k["op"] == "send" and k["kind"] == "urgent" and k["key"] == "link:12" and k["button"] == "대시보드 열기"
+    assert k["op"] == "send" and k["kind"] == "urgent" and k["key"] == "selfcheck:db" and k["button"] == "대시보드 열기"
     assert k["link"] == f"{ORIGIN}/dashboard/go/deal-12" and len(k["text"]) <= 200 and k["id"].startswith("k_")
-    env.router.resolve("dealbot", ["link:12"])
+    env.router.resolve("dealbot", ["selfcheck:db"])
     files = env.kakao_files()
-    assert files[-1]["op"] == "resolve" and files[-1]["keys"] == ["link:12"]
+    assert files[-1]["op"] == "resolve" and files[-1]["keys"] == ["selfcheck:db"]
 
 
 async def test_old_blogauto_without_bridge_gets_the_v2_inbox_line(env: Env) -> None:
     env.bridge = False
-    env.open("link:12", iid="deal-12")
+    env.open("selfcheck:db", "selfcheck", iid="deal-12")
     env.clock.tick(21)
     await env.router.tick()
     assert env.kakao_files() == []
     [line] = env.inbox
     note = line["owner_notice"]
-    assert note["v"] == 2 and note["key"] == "link:12" and note["urgent"] is True and "/dashboard/go/deal-12" in note["link"]
+    assert note["v"] == 2 and note["key"] == "selfcheck:db" and note["urgent"] is True and "/dashboard/go/deal-12" in note["link"]
 
 
 async def test_5xx_retries_30s_then_2min_then_kakao(tmp_path: Path) -> None:
     env = Env(tmp_path, 500)
     env.device()
-    env.open("link:1", iid="deal-1")
+    env.open("publish_broken", "publish_broken", iid="deal-1")
     env.clock.tick(21)
     await env.router.tick()
     assert len(env.server.requests) == 1 and env.kakao_files() == []
@@ -166,7 +166,7 @@ async def test_5xx_retries_30s_then_2min_then_kakao(tmp_path: Path) -> None:
     assert len(env.server.requests) == 3
     await env.router.tick()
     [k] = env.kakao_files()
-    assert k["key"] == "link:1"
+    assert k["key"] == "publish_broken"
     env.db.close()
 
 
@@ -250,13 +250,44 @@ async def test_restart_pushes_pending_rows_once_as_a_batch(env: Env) -> None:
 
 
 async def test_failed_rows_fall_back_to_kakao_after_restart(env: Env) -> None:
-    env.open("link:1", iid="deal-1")
-    env.router.store.set_push([("dealbot", "link:1")], pushed_at=env.clock(), push_ok=0)
+    env.open("login:claude_cli", "claude_login", iid="deal-1")
+    env.router.store.set_push([("dealbot", "login:claude_cli")], pushed_at=env.clock(), push_ok=0)
     env.router = env.make()
     await env.router.tick()
-    assert [k["key"] for k in env.kakao_files()] == ["link:1"]
+    assert [k["key"] for k in env.kakao_files()] == ["login:claude_cli"]
     await env.router.tick()
     assert len(env.kakao_files()) == 1
+
+
+async def test_only_truly_urgent_kinds_fall_back_to_kakao(env: Env) -> None:
+    """주인 10/19 ("진짜 급한 거 아니면 카톡 안 오는 걸로"): 기기가 없어 푸시가 안 가도 링크·사진·확인 부탁은 카톡 예비로 넘기지 않는다
+    (대시보드 할 일에는 그대로). 로그인·연결 끊김·멈춤은 그대로 카톡."""
+    env.open("link:12", iid="deal-12")
+    env.open("photo:3", "photo_need", iid="deal-3")
+    env.open("draft:issue:5", "draft_ready", src="blogauto", iid="post-issue-5")
+    env.clock.tick(21)
+    await env.router.tick()
+    await env.router.tick()
+    assert env.kakao_files() == []
+    assert {n.key for n in env.router.store.open_rows(env.clock())} >= {"link:12", "photo:3", "draft:issue:5"}
+    env.router.resolve("dealbot", ["link:12"])  # 카톡에 넘기지 않았으니 취소 파일도 없음
+    assert env.kakao_files() == []
+    env.open("login:issue", "login", src="blogauto", iid="sys-blogauto")
+    env.clock.tick(21)
+    await env.router.tick()
+    assert [k["key"] for k in env.kakao_files()] == ["login:issue"]
+
+
+async def test_kakao_kinds_config_override(tmp_path: Path) -> None:
+    env = Env(tmp_path)
+    env.router = NotifyRouter(env.db, data_dir=env.tmp, http=env.http, public_url=ORIGIN, tz="Asia/Seoul", kakao=env.kakao,
+                              clock=env.clock, kakao_kinds=["link_request"])
+    env.open("link:12", iid="deal-12")
+    env.open("selfcheck:db", "selfcheck", iid="sys-dealbot")
+    env.clock.tick(21)
+    await env.router.tick()
+    assert [k["key"] for k in env.kakao_files()] == ["link:12"]
+    env.db.close()
 
 
 def test_repeated_digest_errors_are_promoted_once(env: Env) -> None:

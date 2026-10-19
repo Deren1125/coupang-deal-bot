@@ -9,7 +9,8 @@
 - 20초 안에 들어온 급한 일은 한 통으로 묶음 (2개 이상이면 '할 일 N개'), 한 시간에 8통까지 (넘치면 기다렸다 묶어서)
 - quiet 알림(대시보드에서 주인이 직접 한 일의 결과·예전 길로 이미 카톡이 간 것·처음 바꿀 때 옮긴 것)은 푸시하지 않음
 - Blog-Auto 의 delay_s(늦게 보내기)·group+wait(몇 개 모이거나 오래 기다리면 한 통) 은 푸시만 늦춘다 (할 일 줄은 바로)
-- 기기 하나라도 2xx 면 보낸 것. 기기가 없거나 다 실패하면(재시도 30초·2분 뒤) 그 키만 카톡으로 한 번 (kakao_out)
+- 기기 하나라도 2xx 면 보낸 것. 기기가 없거나 다 실패하면(재시도 30초·2분 뒤) 그 키만 카톡으로 한 번 (kakao_out) —
+  주인 10/19: 진짜 급한 종류(KAKAO_KINDS — 로그인·연결 끊김, 멈춤, 발행 실패)만. 나머지는 대시보드 할 일에만 (카톡 없음)
 - 해결되면 아직 안 보낸 푸시는 버리고, 카톡에 맡긴 것도 취소 파일을 쓴다
 - 재시작해도 보낼 것은 표에 남아 있어 그대로 (여러 개면 한 통으로)
 - 같은 머리(err:·loop:)의 DIGEST 가 6시간 안에 3번 오면 한 번은 급한 일로 올림
@@ -58,6 +59,13 @@ LOCAL_DIGEST = ("soldout", "publish_failed", "sns_failed")
 LOCAL_URGENT = ("blogauto_down",)
 BLOGAUTO_DOWN_S = 20 * 60  # 생존 신호(60초마다)가 이만큼 없으면 멈춘 것 (자동 업데이트 재시작은 이보다 짧다)
 BLOGAUTO_SEEN_KV = "notify:blogauto_bridge_seen"
+# 카톡 예비로 넘길 종류 (주인 10/19 — "나머지는 카카오톡 알림 진짜 급한 거 아니면 안 오는 걸로"): 푸시가 안 간 급한 일 중에서도
+# 로그인·연결 끊김, 딜봇·블로그 프로그램 멈춤, 발행 실패·멈춤만. 링크·사진·확인 부탁은 푸시와 대시보드 할 일에만 (카톡 아님 —
+# 링크 요청이 곧 만료된다고 급함을 따로 표시하는 곳이 없어서). Blog-Auto 의 notify.KAKAO_URGENT 와 같은 뜻. 설정 notify.kakao_kinds
+KAKAO_KINDS = ("sns_auth", "claude_login", "selfcheck", "publisher_stuck", "publish_broken", "autolink_stop", "update_bad",
+               "blogauto_down",
+               "login", "keyzard_login", "kakao_expiring", "upload_fail", "sched_blocked", "batch_fail", "job_error", "loop_error")
+NO_KAKAO = 0.0  # kakao_at 에 이 값 = 카톡 정책으로 넘기지 않음 (다시 보지 않게 표시만 — 취소 파일도 없음)
 SEVS = ("stop", "hot", "todo", "info")
 SEV_RANK = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
 ESCALATE_HEADS = ("err", "loop")
@@ -129,7 +137,8 @@ def _parse_quiet(spec: str) -> tuple[int, int] | None:
 class NotifyRouter:
     def __init__(self, db: Any, *, data_dir: Path | str, http: httpx.AsyncClient, public_url: str, tz: str,
                  kakao: KakaoOut, clock: Callable[[], float] = time.time, quiet_hours: str = "",
-                 badge: Callable[[], int] | None = None) -> None:
+                 badge: Callable[[], int] | None = None, kakao_kinds: tuple[str, ...] | list[str] | None = None,
+                 kakao_daily: bool = False) -> None:
         self.db = db
         self.store = NotifyStore(db)
         self.data_dir = Path(data_dir)
@@ -140,6 +149,8 @@ class NotifyRouter:
         self.clock = clock
         self.quiet_hours = _parse_quiet(quiet_hours)
         self.badge = badge
+        self.kakao_kinds = tuple(KAKAO_KINDS if kakao_kinds is None else kakao_kinds)
+        self.kakao_daily = bool(kakao_daily)  # 저녁 정리 카톡 (주인 10/19: 기본 끔 — 정리는 대시보드·푸시로)
         self._key: Any = None
         self.key_error: str | None = None
 
@@ -212,7 +223,7 @@ class NotifyRouter:
         """같은 src 의 줄만 닫는다 (':' 로 끝나면 앞부분). 카톡에 맡긴 것은 취소 파일.
         at: 해결한 시각을 그 알림을 낸 프로그램의 시계로 (Blog-Auto 파일) — 없으면 지금."""
         gone = self.store.resolve(src, list(keys), self.clock(), resolved_at=at)
-        handed = [n.key for n in gone if n.kakao_at is not None]
+        handed = [n.key for n in gone if n.kakao_at]  # NO_KAKAO(0) 은 카톡에 넘기지 않은 것
         if handed and src == "dealbot":
             self.kakao.resolve(handed)
         return len(gone)
@@ -403,6 +414,12 @@ class NotifyRouter:
         한 번에 여러 일(항목 2개 이상)이면 카톡 한 통으로 묶는다 ('할 일 3개 — 링크 넣기 2 · 사진 1: …', 할 일 화면 링크) —
         알림을 켜기 전·푸시가 다 실패할 때 카톡이 여러 통 쏟아져 하루 한도를 먹지 않게."""
         rows = [n for n in rows if n.kakao_at is None]
+        off = [n for n in rows if n.kind not in self.kakao_kinds]
+        for n in off:  # 진짜 급한 일이 아님 — 카톡 없이 대시보드 할 일에만 (다시 넘기지 않게 표시)
+            self.store.set_push([n.ref], kakao_at=NO_KAKAO, push_ok=0, pushed_at=n.pushed_at or now)
+        if off:
+            log.info("notify: 카톡 정책으로 카톡 예비 생략 %d건 (%s)", len(off), ", ".join(sorted({n.kind for n in off}))[:120])
+        rows = [n for n in rows if n.kind in self.kakao_kinds]
         if not rows:
             return 0
         items: dict[str, Notice] = {}

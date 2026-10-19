@@ -120,6 +120,7 @@ def test_service_worker_handles_the_action_and_keeps_the_dashboard_tap() -> None
 
 # ---------------------------------------------------------------- 카톡 예비
 async def test_kakao_fallback_puts_the_first_link_on_its_own_line(env: Env) -> None:
+    env.router.kakao_kinds = ("photo_need", "link_request")  # 설정으로 넓혔을 때의 문구 (기본은 카톡 없음 — 주인 10/19)
     url = "https://smartstore.naver.com/paulham/products/80?NaPm=" + "x" * 200  # 긴 추적 쿼리는 뗀다
     env.open("photo:80", "photo_need", iid="deal-80", title="🔔 사진 필요 #80 폴햄 여성 에코베로 라운드 긴팔티",
              body="→ 대시보드 할 일에서 사진 올리기 " + "가" * 150, links=[{"label": "상품 페이지", "url": url}])
@@ -133,6 +134,7 @@ async def test_kakao_fallback_puts_the_first_link_on_its_own_line(env: Env) -> N
 
 
 async def test_kakao_batch_names_the_link_only_when_one_item_has_it(env: Env) -> None:
+    env.router.kakao_kinds = ("photo_need", "link_request")  # 설정으로 넓혔을 때의 문구 (기본은 카톡 없음 — 주인 10/19)
     env.open("photo:80", "photo_need", iid="deal-80", short="딜 사진 #80",
              links=[{"label": "상품 페이지", "url": "https://smartstore.naver.com/p/products/80"}])
     env.open("link:7", iid="deal-7")

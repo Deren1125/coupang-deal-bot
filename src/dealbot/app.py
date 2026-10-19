@@ -491,7 +491,8 @@ class DealBot:
         if settings.notify.router == "push":
             self.router = NotifyRouter(self.db, data_dir=data_dir, http=self.http, public_url=settings.dashboard.public_url,
                                        tz=settings.app.timezone, kakao=self.kakao_out, quiet_hours=settings.notify.push_quiet_hours,
-                                       badge=self.todo_count)
+                                       badge=self.todo_count, kakao_kinds=settings.notify.kakao_kinds,
+                                       kakao_daily=settings.notify.kakao_daily)
             self.notifier.router = self.router
             self.digests = Digests(self.db, self.router, tz=settings.app.timezone, export=self._blog_export,
                                    todo=self._todo_brief)

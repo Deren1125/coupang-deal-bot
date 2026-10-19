@@ -943,6 +943,10 @@ class NotifyConfig(BaseModel):
 
     router: str = "push"
     push_quiet_hours: str = ""  # 예: "00:00-07:00" — 그 시간엔 ⛔ 말고는 끝날 때까지 기다림 (기본 없음)
+    # 주인 10/19 ("진짜 급한 거 아니면 카톡 안 오는 걸로"): 푸시가 안 간 급한 일 중 카톡 예비로 넘길 종류 (비우면 기본
+    # notify.router.KAKAO_KINDS — 로그인·연결 끊김, 멈춤, 발행 실패) · 저녁 정리 카톡 (기본 끔)
+    kakao_kinds: list[str] | None = None
+    kakao_daily: bool = False
 
     @field_validator("router")
     @classmethod
