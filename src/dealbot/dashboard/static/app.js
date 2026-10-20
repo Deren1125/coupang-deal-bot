@@ -522,6 +522,7 @@ function panel(it, a, key, ctx) {
         }))));
     }
   } else if (a.input === 'text' || a.input === 'answers') {
+    if (a.product) { keys.push(key + '|p'); kids.push(field(key + '|p', {placeholder: '제품 이름 (예: 샤오미 무선청소기)'}, {maxlength: 60})); }
     f = field(key, a, {rows: 4}); keys.push(key); kids.push(f);
     if (a.photos_optional) kids.push(btn('lnk', st.files.length ? `사진 ${st.files.length}장 · 다시 고르기` : '사진 추가 (선택)', () => pick('image/*', true, fs => { st.files = fs.slice(0, 20); redraw(); })));
   } else if (a.input === 'secret') {
@@ -584,6 +585,7 @@ function panel(it, a, key, ctx) {
     } else if (f && (a.input === 'text' || a.input === 'answers' || a.input === 'secret')) {
       const v = (f.value || '').trim();
       if (!v && !a.optional) { f.focus(); toast('내용을 적어 주세요'); return; }
+      if (a.product && !(extra.product = (VAL[key + '|p'] || '').trim())) { toast('제품 이름을 적어 주세요'); return; }
       if (a.input === 'secret') extra[SECRET_KEY[a.action] || 'token'] = v;
       else if (a.action === 'blog.issue') extra.keyword = v; else extra.text = v;
     }
@@ -798,9 +800,9 @@ function detail(it) {
   if ((d.slots || []).length) {
     out.push(el('p', {class: 'h3'}, '사진 자리'), el('div', {class: 'slots'}, d.slots.map(s => btn('slot' + (s.thumb ? '' : ' empty'),
       s.thumb ? [el('img', {src: s.thumb, alt: `자리 ${s.slot}`}), el('b', {}, s.slot)] : `자리 ${s.slot}: ${s.label || '빈 자리'}`,
-      () => s.thumb && ED(it) ? edPhoto(it, s) : slotSheet(it, s)))),
+      () => s.thumb ? slotView(it, s) : slotSheet(it, s)))),
       ED(it) ? btn('mr', '사진 한 번에 고치기 · 빼기·교체·옮기기·편집', () => edBatch(it)) : null,
-      ED(it) && d.slots.some(s => s.thumb) ? el('p', {class: 'note'}, '사진을 누르면 자르기·돌리기 · 사람만 남기기') : null);
+      d.slots.some(s => s.thumb) ? el('p', {class: 'note'}, '사진을 누르면 올릴 원본 · 편집·교체·비우기') : null);
   }
   if ((d.questions || []).length) out.push(el('p', {class: 'h3'}, '질문'), ...d.questions.map(q => el('p', {class: 'q'}, `${q.n}. ${q.q}`)));
   if (d.preview) out.push(el('p', {class: 'h3'}, '올릴 글'), el('div', {class: 'dr'}, d.preview));
@@ -817,15 +819,21 @@ function detail(it) {
     : btn('mr' + (a.danger ? ' red' : ''), a.label, () => act(it, a, null, false))));
   return out;
 }
-function slotSheet(it, s) {
+const slotT = s => `자리 ${s.slot}${s.label ? ': ' + s.label : ''}`;
+function slotActs(it, s, c, l1, l2) {
   const base = it.primary && it.primary.action === 'blog.photos' ? it.primary : (it.more || []).find(a => a.action === 'blog.photos');
   const args = {blog: it.blog, pid: Number(it.iid.split('-')[2])};
-  const box = el('div');
-  sheet(`자리 ${s.slot}${s.label ? ': ' + s.label : ''}`, box);
   const a = Object.assign({}, base || {action: 'blog.photos', args, input: 'photos', accept: 'image/*'}, {label: '이 자리 사진 바꾸기', multiple: false, options: null});
   a.args = Object.assign({}, a.args, {mode: 'slot', slot: s.slot});
-  box.append(btn('mr', a.label, () => act(it, a, null, false)),
-    s.thumb ? btn('mr red', '이 자리 비우기', e => exec({action: 'blog.photo_clear', args: Object.assign({}, args, {slot: s.slot})}, {}, {btn: e.currentTarget, iid: it.iid})) : null);
+  return [btn(c, l1, () => act(it, a, null, false)),
+    s.thumb ? btn(c + ' red', l2, e => exec({action: 'blog.photo_clear', args: Object.assign({}, args, {slot: s.slot})}, {}, {btn: e.currentTarget, iid: it.iid})) : null];
+}
+function slotSheet(it, s) { sheet(slotT(s), el('div', {}, slotActs(it, s, 'mr', '이 자리 사진 바꾸기', '이 자리 비우기'))); }
+// 사진을 누르면 먼저 올릴 그대로 (10/20): final(올릴 파일, 없으면 full) · 체크무늬 위 원래 비율(흰 여백이 보이게) · 픽셀 크기
+function slotView(it, s) {
+  const px = el('p', {class: 'note'}), im = el('img', {src: s.final || s.full || s.thumb, alt: slotT(s), onload: () => { px.textContent = `${im.naturalWidth} × ${im.naturalHeight}px`; }});
+  sheet(slotT(s), el('div', {}, el('div', {class: 'ck'}, im), px,
+    el('div', {class: 'two'}, ED(it) ? btn('pb soft', '편집', () => edPhoto(it, s)) : null, slotActs(it, s, 'pb soft', '교체', '비우기'))));
 }
 // 사진 한 번에 고치기·편집기 (주인 10/19): edit.js 는 처음 누를 때만 받는다 (app.js 를 가볍게) — 주소는 껍데기의 meta(?v=)
 let EDJ = null;
@@ -929,11 +937,12 @@ function trendBox(t) {
   return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '인기 검색어'), el('span', {class: 'note'}, ago(t.at))),
     el('div', {class: 'box'}, t.items.slice(0, all ? 20 : 10).map(x => el('div', {class: 'row tr'}, el('b', {}, x.rank), mv(x),
       btn('grow tw', [el('span', {class: 't'}, x.keyword), el('span', {class: 's'}, [x.sources.map(k => TSRC[k]).join('·'), TTAG[x.tag]].filter(Boolean).join(' · '))],
-        () => trendGo(t, x), {disabled: !t.write || null}), x.written ? el('span', {class: 'cp ok'}, '이미 쓴 글 있음') : null)),
+        e => trendGo(t, x, e), {disabled: !t.write || Object.values(POLL).some(p => p.args.keyword === x.keyword && p.action === t.write.action) || null}), x.written ? el('span', {class: 'cp ok'}, '이미 쓴 글 있음') : null)),
     t.items.length > 10 ? btn('fold', all ? '10위까지만' : `20위까지 보기`, () => { OPEN.trends = !all; render(); }) : null)];
 }
-async function trendGo(t, x) {
-  if (await confirmSheet({title: `「${x.keyword}」로 Pick 글을 쓸까요?`, ok: '쓰기', body: x.written ? '이 키워드로 쓴 글이 이미 있어요.' : '테마에 맞는지 보고 써요.'})) exec(t.write, {keyword: x.keyword});
+// 누르면 바로 쓰기 (10/20 — 확인 창 없이) · 쓰는 동안 그 줄은 못 누름 (POLL — 두 번 눌러 두 편 쓰지 않게)
+async function trendGo(t, x, e) {
+  if (await exec(t.write, {keyword: x.keyword}, {btn: e.currentTarget})) toast(`「${x.keyword}」 글 쓰기 시작했어요`);
 }
 function vBlog() {
   const key = R.sub, b = S.blogs[key];
@@ -944,7 +953,7 @@ function vBlog() {
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
-  const write = acts.find(a => a.action === 'blog.write');
+  const write = acts.find(a => /^blog\.(write|post_notes)$/.test(a.action));
   const more = acts.filter(a => !idea.includes(a) && a !== write);
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));

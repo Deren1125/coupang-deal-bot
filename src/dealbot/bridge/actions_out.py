@@ -68,7 +68,7 @@ def redact(action: str, args: dict[str, Any]) -> dict[str, Any]:
     for k, v in args.items():
         if k in SECRET_KEYS and (secret_action or k != "url"):
             out[k] = "[비밀]"
-        elif k == "uploads" and isinstance(v, list):
+        elif k in ("uploads", "photos") and isinstance(v, list):
             out[k] = [Path(str(x)).name[:40] for x in v][:20]
         elif isinstance(v, str):
             out[k] = safe_text(v, 200)

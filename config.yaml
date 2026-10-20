@@ -41,7 +41,7 @@ browser:
 # 오류·시간 초과·로그인·한도면 예전처럼 주인에게 링크 요청. 로그인·제한 안내로 멈추면 카톡으로 한 번 알림.
 autolink:
   naver:
-    enabled: false        # 켜기 전에 서버에서 읽기 전용 확인(probes/sc_lookup.py)부터
+    enabled: true         # 주인 결정 10/20: 켬 ("자동화. 책임도 내가 질게"). 바로 끄기: Blog-Auto 에서 python -m blogauto shopconnect stop
     wait_minutes: 30      # Blog-Auto 답을 기다리는 시간. 넘으면 링크 요청
     not_found_days: 7     # 쇼핑커넥트에 없던 상품번호는 이 기간 다시 찾지 않고 원본 주소로
     unverified: manual    # 판매처 확인이 안 된 딜: manual = 예전처럼 링크 요청 / auto = 그래도 자동

@@ -74,6 +74,7 @@ FEEDBACK_REASON_MAX = 80  # Blog-Auto learn.x_post_feedback 과 같은 한도
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
+                "post_notes",  # 내 후기 쓰기 (주인 10/20 — 핫딜 글에 주인 메모·사진 → 1인칭 후기로 다시)
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
                 "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
@@ -201,6 +202,7 @@ def _uploads(v: Any, lo: int, hi: int) -> list[str]:
 
 
 ANSWER_Q_MAX, ANSWER_PHOTOS_MAX = 40, 20
+NOTES_MAX, NOTES_PHOTOS_MAX, PRODUCT_MAX = 2000, 10, 60  # Blog-Auto bridge.x_post_notes 와 같은 한도
 
 
 def _answer_photos(v: Any) -> list[dict[str, Any]] | None:
@@ -469,6 +471,17 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return out
     if name == "photos_batch":
         return {"blog": _photo_blog(g("blog")), "pid": _int(g("pid")), "ops": _photo_ops(g("ops"))}
+    if name == "post_notes":  # 내 후기 쓰기 (주인 10/20 — 계약 action_post_notes.json): 핫딜 글(pid) 또는 새 제품(product)
+        if g("blog") not in (None, "hotdeal"):
+            raise ActionError("bad_args")
+        out = {"blog": "hotdeal"}
+        if g("pid") is not None:
+            out["pid"] = _int(g("pid"))
+        else:  # 후기 쓸 제품 고르기 — 제품 이름으로 새 제품 소개 글 (/guide 제품 과 같은 길)
+            out["product"] = " ".join(_str(g("product"), PRODUCT_MAX).split())
+        out["notes"] = _str(g("notes") if g("notes") is not None else g("text"), NOTES_MAX)  # 화면은 글 칸(text)으로 보냄
+        out["photos"] = _uploads(g("photos") if g("photos") is not None else g("uploads"), 0, NOTES_PHOTOS_MAX)
+        return out
     if name == "drop":
         return {"blog": _blog(g("blog")), "pids": _pids(g("pids") if g("pids") is not None else g("pid"))}
     if name in ("rewrite", "restyle"):
@@ -930,6 +943,13 @@ class ActionDesk:
                 per.append({**x, "uploads": [str(p) for p in paths]})
                 ups = [*ups, *x["uploads"]]
             spool_args["answers"] = per
+        elif name == "post_notes":  # 붙인 사진 id → 경로 (photos — Blog-Auto 는 id 를 모른다)
+            ups = list(args.get("photos") or [])
+            paths = [self.uploads.path(uid, kind="photo") for uid in ups]
+            if None in paths:
+                self._audit(caller, action, target, args, "bad_upload")
+                return 400, self._err("bad_upload")
+            spool_args["photos"] = [str(p) for p in paths]
         elif ups:
             kind = "ledger" if name == "ledger" else "photo"
             paths = []

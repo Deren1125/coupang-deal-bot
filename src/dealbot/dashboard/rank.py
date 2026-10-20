@@ -63,7 +63,19 @@ def _boost(hours_left: float) -> float:
     return 0
 
 
+HOT_TOP = 10  # 인기 검색어 상위 몇 위까지 '핫 글' (Blog-Auto hotfirst.HOT_TOP)
+HOT_BASE = 2000.0  # 핫 글 줄은 맨 위, 순위 순 (주인 10/20)
+
+
+def hot_rank(it: dict[str, Any]) -> int | None:
+    """핫 글 줄의 인기 순위 (안쪽 칸 _hot_rank — Blog-Auto posts[].hot_rank). 아니면 None."""
+    r = it.get("_hot_rank")
+    return r if isinstance(r, int) and not isinstance(r, bool) and 1 <= r <= HOT_TOP else None
+
+
 def rank(it: dict[str, Any], now: float) -> float:
+    if (hr := hot_rank(it)) is not None:  # 주인 10/20: 인기 상위 10 키워드 글은 다른 할 일보다 위
+        return HOT_BASE - hr
     sev = it.get("sev") or "todo"
     kind = it.get("kind") or ""
     hot = float(it.get("_hot") or 0)
@@ -114,9 +126,13 @@ def order(items: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
     out = []
     for i, (r, it) in enumerate(scored):
         hot = float(it.pop("_hot", 0) or 0)
+        hr = hot_rank(it)
+        it.pop("_hot_rank", None)
         it["group"] = next(label for floor, label in GROUPS if r >= floor)
         it["cue"] = None
-        if i < CUE_TOP and it.get("sev") not in ("stop", "info"):
+        if hr is not None:
+            it["cue"] = f"🔥 인기 {hr}위"
+        elif i < CUE_TOP and it.get("sev") not in ("stop", "info"):
             exp = it.get("expires_at")
             if exp is not None and 0 < exp - now < CUE_URGENT_H * 3600:
                 it["cue"] = "급해요"
@@ -129,4 +145,5 @@ def order(items: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
 def public(it: dict[str, Any]) -> dict[str, Any]:
     """정렬을 거치지 않는 줄 (자세히 시트·블로그 탭의 기다리는 글)에서 안쪽 칸을 뺀다."""
     it.pop("_hot", None)
+    it.pop("_hot_rank", None)
     return it
