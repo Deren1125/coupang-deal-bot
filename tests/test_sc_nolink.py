@@ -34,6 +34,7 @@ def bot(settings: Settings):  # type: ignore[no-untyped-def]
     push_settings(settings)
     settings.publish.min_interval_seconds = 0
     settings.publish.dry_run = False
+    settings.autolink.naver.enabled = False  # 이 파일은 링크 요청 흐름만 본다 (자동 링크는 test_autolink — config.yaml 은 10/20 부터 켬)
     b = DealBot(settings)
     b.state.dry_run = False
     sent: list[str] = []
