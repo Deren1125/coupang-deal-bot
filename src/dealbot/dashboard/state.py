@@ -285,6 +285,17 @@ class StateBuilder:
         return act("blog.schedule_move", "시간 바꾸기", a, input="when", value=f"{d:%H:%M}",
                    day="tomorrow" if d.date() > datetime.now(tz).date() else "today")
 
+    def _notes_act(self, blog: str, pid: int | None = None) -> dict[str, Any] | None:
+        """내 후기 쓰기 (주인 10/20 — 텔레그램을 안 써서): 핫딜 글에 메모 + 사진(선택) → Blog-Auto 가 가이드·제품 소개 글을
+        그 메모로만 1인칭 후기로 다시 씀. pid 없으면 '후기 쓸 제품 고르기' (제품 이름 칸 + 메모 → 새 제품 소개 글)."""
+        sup = self._sctx.get("sup")
+        if blog != "hotdeal" or (sup is not None and "post_notes" not in sup):
+            return None
+        a = {"blog": blog, "pid": pid} if pid else {"blog": blog}
+        return act("blog.post_notes", "내 후기 쓰기" if pid else "후기 쓸 제품 고르기", a, input="text",
+                   placeholder="직접 써 본 메모 — 여기 적은 것만 1인칭 후기로 써요", photos_optional=True, accept="image/*",
+                   multiple=True, product=None if pid else True)
+
     # ---------------------------------------------------------- 글 (기록 파일)
     def _post_actions(self, blog: str, pid: int, needs: list[str], post: dict[str, Any] | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         a = {"blog": blog, "pid": pid}
@@ -308,6 +319,8 @@ class StateBuilder:
                 more.insert(0, mv)
             if not spaced and sch["status"] == "scheduled":
                 more.append(now_pub)
+            if sch["status"] == "scheduled" and (na := self._notes_act(blog, pid)):
+                more.append(na)
             if (url := (post or {}).get("naver_url")):
                 more.append(open_link("네이버에서 보기", url))
             return None, more
@@ -333,6 +346,8 @@ class StateBuilder:
             more.append(act("blog.channel", "직접 발행한 주소 넣기", a, input="url", placeholder="내 블로그 글 주소"))
         if blog in ("finance", "issue"):
             more.append(act("blog.fix", "말로 고치기", a, input="text", placeholder="어떻게 고칠지 적어 주세요"))
+        if (post or {}).get("status") != "published" and (na := self._notes_act(blog, pid)):
+            more.append(na)
         if blog == "issue":
             more.append(act("blog.rewrite", "다시 쓰기", {"blog": "issue", "pids": [pid]}))
             more.append(act("blog.restyle", "스타일 다시", {"blog": "issue", "pids": [pid]}))
@@ -380,7 +395,7 @@ class StateBuilder:
             status += " · 사진 찾는 중…" if pics["state"] == "working" else f" · 추천 사진 {len(pics['items'])}장"
         questions = list((post or {}).get("questions") or [])
         slots = [dict(s, thumb=f"/dashboard/thumb/{s['thumb']}" if s.get("thumb") else None,
-                      **({"full": f"/dashboard/thumb/{s['full']}"} if s.get("full") else {})) for s in (post or {}).get("slots") or []]
+                      **{k: f"/dashboard/thumb/{s[k]}" for k in ("full", "final") if s.get(k)}) for s in (post or {}).get("slots") or []]
         iid = iidmod.post_iid(blog, pid)
         return {"iid": iid, "src": "blog", "blog": blog, "kind": kind, "sev": "todo", "urgent": bool(needs) or kind == "sched_blocked",
                 "title": (post or {}).get("title") or title or f"{CHIPS[blog]} #{pid}", "chip": CHIPS[blog], "status": status,
@@ -755,6 +770,8 @@ class StateBuilder:
                          act("blog.restyle", "Pick 전체 스타일 다시", {"blog": "issue", "pids": "all"})]
             if blog == "hotdeal":
                 acts.append(act("blog.hotdeal_now", "지금 한 편 쓰기"))
+                if (na := self._notes_act(blog)):
+                    acts.append(na)
             mode = st.get("mode") or "draft"
             acts.append(act("blog.mode", "발행 모드로" if mode == "draft" else "초안 모드로",
                             {"blog": blog, "mode": "publish" if mode == "draft" else "draft"}))
@@ -1007,7 +1024,7 @@ ACTION_LABELS = {
     "todo.dismiss": "다 했어요", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "upload": "사진 올림",
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
-    "blog.photos_batch": "사진 한 번에 고치기",
+    "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",
     "blog.answer": "답하기", "blog.noanswer": "답 없이 진행", "blog.oedit_keep": "그대로 두기", "blog.oedit_redo": "봇 글로 덮어쓰기",
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",
