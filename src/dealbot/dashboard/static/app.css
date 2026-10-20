@@ -171,3 +171,4 @@ background:var(--ac);color:var(--ac-on);font-size:13px;line-height:24px;padding:
 /* 10/20: Pick 인기 검색어 줄 · 블로그 이름 옆 할 일 수 */
 .tw{border:0;background:none;padding:0;text-align:left;min-height:44px}.tr b{width:20px;text-align:right;font-size:13px}
 .tr i{font-style:normal;font-size:12px;width:34px;color:var(--muted)}.tr .up{color:var(--red)}.tr .dn{color:var(--chart)}.seg .cp{margin-left:6px}
+.ck{background:repeating-conic-gradient(#ccc 0 25%,#fff 0 50%) 0 0/16px 16px;border-radius:10px;padding:8px}.ck img{display:block;max-width:100%;max-height:62dvh;margin:auto}
