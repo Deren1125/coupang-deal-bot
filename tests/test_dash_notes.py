@@ -3,7 +3,7 @@
 1) 내 후기 쓰기: 핫딜 글(임시저장·예약)에 '내 후기 쓰기' (메모 + 사진 선택) → Blog-Auto 다리 일 post_notes {blog, pid, notes, photos}
    (계약 tests/fixtures/dash_contract/action_post_notes.json — Blog-Auto 와 같은 파일) · 블로그 탭 '후기 쓸 제품 고르기' {product, notes}
 2) 인기 검색어를 누르면 확인 창 없이 바로 쓰기 · 쓰는 동안 그 줄은 못 누름
-3) 사진을 누르면 올릴 원본 보기: slots[].final (선택 칸 — 없으면 full) · 체크무늬 · 픽셀 크기 · 편집/교체/비우기 · sw sb-v21"""
+3) 사진을 누르면 올릴 원본 보기: slots[].final (선택 칸 — 없으면 full) · 체크무늬 · 픽셀 크기 · 편집/교체/비우기 · sw sb-v22"""
 
 from __future__ import annotations
 
@@ -137,4 +137,4 @@ def test_app_js_viewer_review_and_trend_tap() -> None:
     # 내 후기 쓰기: 글 칸 + 사진(답하기 사진과 같은 uploadAll) · 제품 고르기는 제품 이름 칸
     assert "a.product" in js and "extra.product" in js and "'제품 이름을 적어 주세요'" in js
     assert "blog\\.(write|post_notes)" in js
-    assert "const V = 'sb-v21'" in sw
+    assert "const V = 'sb-v22'" in sw
