@@ -296,6 +296,15 @@ class StateBuilder:
                    placeholder="직접 써 본 메모 — 여기 적은 것만 1인칭 후기로 써요", photos_optional=True, accept="image/*",
                    multiple=True, product=None if pid else True)
 
+    def _similar_act(self, blog: str, pid: int, post: dict[str, Any] | None) -> dict[str, Any] | None:
+        """비슷한 아이템 링크 넣기 (주인 10/20 — 에이블리 크리에이터 링크는 앱에서만 만들어져 주인이 붙여 넣음): Pick 패션 글
+        (Blog-Auto 가 similar 칸을 준 글)에만. 글 칸에 한 줄에 하나 '이름 | 링크' → Blog-Auto similar_links (확인 창 없음)."""
+        sup = self._sctx.get("sup")
+        if blog != "issue" or (post or {}).get("similar") is None or (sup is not None and "similar_links" not in sup):
+            return None
+        return act("blog.similar_links", "비슷한 아이템 링크 넣기", {"blog": blog, "pid": pid}, input="text",
+                   placeholder="한 줄에 하나씩 · 이름 | 링크 (이름은 선택)\n예: 베이지 트렌치코트 | https://m.a-bly.com/goods/…")
+
     # ---------------------------------------------------------- 글 (기록 파일)
     def _post_actions(self, blog: str, pid: int, needs: list[str], post: dict[str, Any] | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         a = {"blog": blog, "pid": pid}
@@ -321,6 +330,8 @@ class StateBuilder:
                 more.append(now_pub)
             if sch["status"] == "scheduled" and (na := self._notes_act(blog, pid)):
                 more.append(na)
+            if sch["status"] == "scheduled" and (sa := self._similar_act(blog, pid, post)):
+                more.append(sa)
             if (url := (post or {}).get("naver_url")):
                 more.append(open_link("네이버에서 보기", url))
             return None, more
@@ -348,6 +359,8 @@ class StateBuilder:
             more.append(act("blog.fix", "말로 고치기", a, input="text", placeholder="어떻게 고칠지 적어 주세요"))
         if (post or {}).get("status") != "published" and (na := self._notes_act(blog, pid)):
             more.append(na)
+        if (post or {}).get("status") not in ("published", "drafting") and (sa := self._similar_act(blog, pid, post)):
+            more.append(sa)
         if blog == "issue":
             more.append(act("blog.rewrite", "다시 쓰기", {"blog": "issue", "pids": [pid]}))
             more.append(act("blog.restyle", "스타일 다시", {"blog": "issue", "pids": [pid]}))
@@ -1050,6 +1063,7 @@ ACTION_LABELS = {
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",
+    "blog.similar_links": "비슷한 아이템 링크 넣기",
     "blog.answer": "답하기", "blog.noanswer": "답 없이 진행", "blog.oedit_keep": "그대로 두기", "blog.oedit_redo": "봇 글로 덮어쓰기",
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",

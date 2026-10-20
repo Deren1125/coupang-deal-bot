@@ -65,12 +65,16 @@ CONFIRM = frozenset({
 })
 DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 # 그 블로그가 자동 발행 모드면 바로 네이버에 공개되는 일 (Blog-Auto nl.CATALOG 의 may_publish 와 같게) — 그때만 ★
-MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.photos_batch", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic"})
+MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.photos_batch", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic",
+                         "blog.similar_links"})
 FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
-              "blog.fixpic": "finance"}
+              "blog.fixpic": "finance", "blog.similar_links": "issue"}
 HHMM = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")  # 예약 시간 바꾸기 (주인 10/19)
 LEARN_ID = re.compile(r"^l[pr]-[0-9a-f]{8}$")  # Blog-Auto learn.py 개선안(lp-)·규칙(lr-) id
 FEEDBACK_REASON_MAX = 80  # Blog-Auto learn.x_post_feedback 과 같은 한도
+# 비슷한 아이템 링크 넣기 (주인 10/20) — Blog-Auto bridge.x_similar_links 와 같은 한도 · 화면 글 칸은 한 줄에 '이름 | 링크'
+SIMILAR_LINKS_MAX, SIMILAR_URL_MAX, SIMILAR_NOTE_MAX, SIMILAR_TEXT_MAX = 6, 500, 40, 4000
+HTTPS_URL = re.compile(r"https://[^\s|<>\"']+")
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
@@ -78,7 +82,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
                 "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
-                "post_feedback", "learn_decide")  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
+                "post_feedback", "learn_decide",  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
+                "similar_links")  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input", "search.check")
@@ -438,6 +443,30 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
     return _clean_blog(action[5:], a, blog_ids or {})
 
 
+def _similar_url(v: Any) -> str:
+    u = _str(v, SIMILAR_URL_MAX)
+    if not HTTPS_URL.fullmatch(u) or not urlparse(u).hostname:
+        raise ActionError("bad_args")
+    return u
+
+
+def similar_lines(text: str) -> list[tuple[str, str]]:
+    """'비슷한 아이템 링크 넣기' 글 칸: 한 줄에 하나 — '이름 | 링크' · '링크' · '이름 링크'. (링크, 이름) 들 (이름은 40자)."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = HTTPS_URL.search(line)
+        if not m:
+            raise ActionError("bad_args")
+        name = " ".join((line[: m.start()] + " " + line[m.end():]).replace("|", " ").split())
+        if len(name) > SIMILAR_NOTE_MAX:
+            name = name[:SIMILAR_NOTE_MAX].rstrip()
+        out.append((_similar_url(m.group(0)), name))
+    return out
+
+
 def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[str, Any]:
     g = a.get
     if name in ("publish", "retry", "share", "noshare", "photo_clear") or name in ("fix", "photos", "channel"):
@@ -560,6 +589,26 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         want = _str(g("want"), PICS_WANT_MAX, required=False)
         if want:
             out["want"] = " ".join(want.split())
+        return out
+    if name == "similar_links":  # 비슷한 아이템 링크 (주인 10/20 — 계약 action_similar_links.json): 글 칸(text) 또는 links·notes
+        if g("blog") not in (None, "issue"):
+            raise ActionError("bad_args")
+        if g("links") is not None:
+            links, notes = g("links"), g("notes") if g("notes") is not None else []
+            if not isinstance(links, list) or not isinstance(notes, list) or len(notes) > len(links):
+                raise ActionError("bad_args")
+            pairs = [(_similar_url(u), _str(n, SIMILAR_NOTE_MAX, required=False) if n != "" else "")
+                     for u, n in zip(links, notes + [""] * (len(links) - len(notes)), strict=True)]
+        else:
+            pairs = similar_lines(_str(g("text"), SIMILAR_TEXT_MAX))
+        seen: dict[str, str] = {}
+        for u, n in pairs:
+            seen.setdefault(u, " ".join(n.split()))
+        if not 1 <= len(seen) <= SIMILAR_LINKS_MAX:
+            raise ActionError("bad_args")
+        out = {"blog": "issue", "pid": _int(g("pid")), "links": list(seen)}
+        if any(seen.values()):
+            out["notes"] = list(seen.values())
         return out
     if name == "post_feedback":  # 👍/👎 (주인 10/20 — 계약 action_post_feedback.json): vote none = 지우기, reason 한 줄
         if g("vote") not in ("up", "down", "none"):

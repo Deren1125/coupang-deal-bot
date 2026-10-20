@@ -218,7 +218,11 @@
       "source": "https://www.news1.kr/entertain/broadcast-tv/5912345",
       "host": "news1.kr"
      }
-    ]
+    ],
+    "similar": {
+     "n": 3,
+     "ably": 1
+    }
    }
   ],
   "finance": [

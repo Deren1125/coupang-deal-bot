@@ -47,7 +47,8 @@
   "pics_fetch",
   "pics_clear",
   "post_feedback",
-  "learn_decide"
+  "learn_decide",
+  "similar_links"
  ],
  "kakao": {
   "state": "ok",

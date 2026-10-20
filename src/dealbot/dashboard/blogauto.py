@@ -523,7 +523,19 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         "schedule": _sched_post(v.get("schedule")), "pics": _pics(v.get("pics")), "ig_suggest": _ig_suggest(v.get("ig_suggest")),
         # 인기 검색어 상위 10 키워드 글 (주인 10/20 — Blog-Auto hotfirst, 선택 칸: 핫 글만) → 할 일 맨 위 · '🔥 인기 N위'
         **({"hot_rank": hr} if (hr := _count(v.get("hot_rank"), top=10)) else {}),
+        # 비슷한 아이템 (주인 10/20 — Blog-Auto issue_similar, 선택 칸: Pick 패션 글만) → '비슷한 아이템 링크 넣기'
+        **({"similar": sim} if (sim := _similar(v.get("similar"))) is not None else {}),
     }
+
+
+def _similar(v: Any) -> dict[str, int] | None:
+    """{n: 넣은 수, ably: 주인 링크 수} (둘 다 0~20). 모양이 다르면 None (단추 없음)."""
+    if not isinstance(v, dict):
+        return None
+    n, ably = v.get("n"), v.get("ably")
+    if not all(isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 20 for x in (n, ably)):
+        return None
+    return {"n": n, "ably": ably}
 
 
 # 넣으면 좋을 인스타 게시물 (주인 10/18 — Blog-Auto ig_suggest: 그 글이 쓴 기사 속 임베드·링크·'인스타그램에 올렸다' 문장).
