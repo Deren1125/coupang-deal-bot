@@ -931,7 +931,7 @@ const IDEA = ['blog.scan', 'blog.issue', 'blog.hotdeal_now'];
 // 블로그 이름 옆 할 일 수 (10/20): '할 일' 탭과 같은 줄을 그 블로그만 — 하는 중·끝난 줄은 빼서 바로 줄어든다 (0 이면 숨김)
 const todoN = k => S.todo.reduce((n, i) => n + (i.kind === 'visits' ? +vis(i.detail.visits).some(x => x.blog === k) : +(i.blog === k && !pendingOf(i.iid))), 0);
 // Pick 인기 검색어 (10/20 — Blog-Auto: 구글 트렌드 · Pick 후보 · 뉴스 낱말): 순위 ▲▼ · 이미 쓴 글 · 패션/연예 · 누르면 그 키워드로 Pick 쓰기
-const TSRC = {google: '구글', pick: 'Pick', news: '뉴스'}, TTAG = {fashion: '패션', ent: '연예'};
+const TSRC = {advisor: '어드바이저', google: '구글', pick: 'Pick', news: '뉴스'}, TTAG = {fashion: '패션', ent: '연예'};
 function trendBox(t) {
   const all = OPEN.trends, mv = x => x.new ? el('i', {class: 'up'}, 'NEW') : x.change ? el('i', {class: x.change > 0 ? 'up' : 'dn'}, (x.change > 0 ? '▲' : '▼') + Math.abs(x.change)) : el('i', {}, '–');
   return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '인기 검색어'), el('span', {class: 'note'}, ago(t.at))),

@@ -711,7 +711,7 @@ def _post_deals(v: Any) -> list[dict[str, str | None]]:
 
 
 # Pick '인기 검색어' (주인 10/20 — Blog-Auto hotboard: 구글 트렌드 한국 RSS · Pick 후보 기록 · 네이버 뉴스 API 낱말)
-TREND_SOURCES = ("google", "pick", "news")
+TREND_SOURCES = ("advisor", "google", "pick", "news")  # advisor: 크리에이터 어드바이저 트렌드 (10/20)
 TRENDS_MAX = 20
 
 
