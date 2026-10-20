@@ -1,4 +1,5 @@
-/* Sns-board 사진 고치기 (주인 10/19): 사진 자리 한 번에 고치기 + 사진 편집기 (자르기·돌리기·밝기). 처음 쓸 때만 app.js 가 불러온다.
+/* Sns-board 사진 고치기 (주인 10/19·10/20): 사진 자리 한 번에 고치기 + 편집기 (자르기·비율·돌리기·밝기·사람만 남기기) +
+   대시보드 사진을 누르면 바로 편집 → 저장. 처음 쓸 때만 app.js 가 불러온다.
    바꾼 것은 이 화면에만 두고 '수정 완료'에서 한 번에 보낸다 (blog.photos_batch — 사진 올리기 → 일 하나). 라이브러리 없음. */
 'use strict';
 (() => {
@@ -10,12 +11,18 @@ const CSS = '.eb{display:flex;gap:10px;align-items:center;padding:8px 4px;border
   '.ef .pb{flex:1 1 auto}.ecv{width:100%;display:block;touch-action:none;border-radius:8px;background:#000}.er{width:100%;min-height:44px}';
 let H = null;
 function style() { if (!D.getElementById('edcss')) D.head.append(Object.assign(D.createElement('style'), {id: 'edcss', textContent: CSS})); }
+// put 하나: 편집한 사진 = edited · '사람만 남기기' = focus · 이 글 자리 N 사진을 고친 것 = retouch N (출처를 이어받음)
+const op = (slot, c) => Object.assign({op: 'put', slot, upload: null, credit: '', edited: !!c.edited}, c.f.focus ? {focus: true} : {}, c.re ? {retouch: c.re} : {});
+async function load(u) {
+  try { const r = await fetch(u, {credentials: 'same-origin'}); if (r.ok) return await r.blob(); } catch (x) { /* 아래 */ }
+  H.toast('사진을 불러오지 못했어요'); return null;
+}
 
 // ------------------------------------------------------------ 사진 자리 한 번에 고치기
 // 자리마다 지금 든 것: {o: 원래 자리 번호, src} (원래 사진) · {f: 파일, src, edited} (새 사진) · null (빈 자리)
 function batch(h) {
   H = h; style();
-  const {el, btn} = h, rows = h.slots.map(s => ({slot: s.slot, label: s.label || '', cur: s.thumb ? {o: s.slot, src: s.thumb} : null, was: !!s.thumb}));
+  const {el, btn} = h, rows = h.slots.map(s => ({slot: s.slot, label: s.label || '', full: s.full || s.thumb, cur: s.thumb ? {o: s.slot, src: s.thumb} : null, was: !!s.thumb}));
   const urls = [], list = el('div'), foot = el('div', {class: 'ef'});
   const same = r => r.cur ? r.cur.o === r.slot : !r.was;
   const changed = () => rows.filter(r => !same(r)).length;
@@ -29,7 +36,8 @@ function batch(h) {
     const out = await editor(fs[0]);
     put(r, out || fs[0], !!out);
   });
-  const edit = async r => { const out = await editor(r.cur.f); if (out) put(r, out, true); };
+  const edit = async r => { const c = r.cur, f = c.f || await load(rows.find(x => x.slot === c.o).full); if (!f) return;
+    const out = await editor(f); if (out) { put(r, out, true); r.cur.re = c.f ? c.re : c.o; } };
   function draw() {
     list.replaceChildren(...rows.map((r, i) => {
       const c = r.cur, row = el('div', {class: 'eb' + (same(r) ? '' : ' chg'), draggable: 'true'},
@@ -37,7 +45,7 @@ function batch(h) {
         el('div', {class: 'et'}, el('p', {}, el('b', {}, `자리 ${r.slot}`), r.label ? ' · ' + r.label : ''),
           el('p', {class: 'note'}, !c ? '빈 자리' : c.f ? (c.edited ? '새 사진 · 편집함' : '새 사진') : c.o !== r.slot ? `자리 ${c.o}에서 옮김` : '지금 사진'),
           el('div', {class: 'ea'}, c ? btn('sm', '✕ 빼기', () => { r.cur = null; draw(); }) : null,
-            btn('sm', c ? '교체' : '사진 추가', () => choose(r)), c && c.f ? btn('sm', '편집', () => edit(r)) : null,
+            btn('sm', c ? '교체' : '사진 추가', () => choose(r)), c ? btn('sm', '편집', () => edit(r)) : null,
             btn('sm', '↑', () => swap(i, i - 1), {disabled: i === 0 || null, 'aria-label': '위 자리로'}),
             btn('sm', '↓', () => swap(i, i + 1), {disabled: i === rows.length - 1 || null, 'aria-label': '아래 자리로'}))));
       row.addEventListener('dragstart', e => { dragAt = i; row.classList.add('drag'); e.dataTransfer.effectAllowed = 'move'; });
@@ -59,7 +67,7 @@ function batch(h) {
       const p = rows.find(x => at[x.slot] === r.cur.o).slot;
       if (p !== r.slot) { out.push({op: 'move', from: p, to: r.slot}); const t = at[p]; at[p] = at[r.slot]; at[r.slot] = t; }
     }
-    for (const r of rows) if (r.cur && r.cur.f) { out.push({op: 'put', slot: r.slot, upload: null, credit: '', edited: !!r.cur.edited}); files.push(r.cur.f); }
+    for (const r of rows) if (r.cur && r.cur.f) { out.push(op(r.slot, r.cur)); files.push(r.cur.f); }
     for (const r of rows) if (!r.cur && at[r.slot] != null) out.push({op: 'remove', slot: r.slot});
     return {out, files};
   }
@@ -81,35 +89,41 @@ function batch(h) {
   draw();
 }
 
-// ------------------------------------------------------------ 편집기: 자르기(손잡이·비율) · 90° 돌리기 · 밝기 → JPEG (긴 변 2000px, 0.9)
-const RATIOS = [['자유', 0], ['1:1', 1], ['4:5', 0.8], ['3:4', 0.75]];
+// ------------------------------------------------------------ 편집기: 자르기(손잡이·비율) · 90° 돌리기 · 밝기 · 사람만 남기기 → JPEG (긴 변 2000px, 0.9)
+// 비율 -1 = 원본 비율 (돌린 뒤 사진 모양). 사람만 남기기 = 저장할 때 서버가 주인공 둘레만 (Blog-Auto media.focus_subject · focus)
+const RATIOS = [['자유', 0], ['원본', -1], ['1:1', 1], ['4:5', 0.8], ['16:9', 16 / 9]];
 async function bitmap(f) {
   try { return await createImageBitmap(f, {imageOrientation: 'from-image'}); } catch (x) { /* 아래 */ }
   const u = URL.createObjectURL(f), im = new Image();
   try { im.src = u; await im.decode(); return im; } finally { URL.revokeObjectURL(u); }
 }
-function editor(file) {
+function editor(file, o = {}) {
   const {el, btn} = H;
   style();
   return new Promise(async done => {
     let src;
     try { src = await bitmap(file); } catch (x) { H.toast('이 사진은 열 수 없어요 — 다른 사진으로'); done(null); return; }
-    let rot = 0, ratio = 0, light = 100, c = null, drag = null, out = null;
+    let rot = 0, ratio = 0, light = 100, c = null, drag = null, out = null, focus = false;
     const cv = el('canvas', {class: 'ecv'}), g = cv.getContext('2d');
     const dims = () => rot % 2 ? [src.height, src.width] : [src.width, src.height];
+    const rt = () => ratio < 0 ? dims()[0] / dims()[1] : ratio;
+    const fb = btn('sm', '사람만 남기기', e => { focus = !focus; e.currentTarget.setAttribute('aria-pressed', String(focus)); fn.hidden = !focus; }, {'aria-pressed': 'false'});
+    const fn = el('p', {class: 'note', hidden: true}, '저장하면 서버가 사람(주인공) 둘레만 남겨요 — 확실할 때만 자르고, 애매하면 그대로');
     const rb = btn('sm', '↻ 90° 돌리기', () => { rot = (rot + 1) % 4; fit(); });
     const chips = RATIOS.map(([t, v]) => btn('sm', t, () => { ratio = v; fit(); }, {'aria-pressed': String(v === ratio)}));
     const sl = el('input', {type: 'range', min: '50', max: '150', value: '100', class: 'er', 'aria-label': '밝기'});
     sl.addEventListener('input', () => { light = +sl.value; paint(); });
-    const box = el('div', {}, cv, el('div', {class: 'ea'}, ...chips, rb), el('p', {class: 'note'}, '밝기'), sl,
-      el('div', {class: 'ef'}, btn('lnk mute', '그대로 쓰기', () => H.back()), btn('pb', '편집 완료', async e => {
-        e.currentTarget.disabled = true; out = await jpeg(); H.back();
-      })));
+    const box = el('div', {}, cv, el('div', {class: 'ea'}, ...chips, rb, fb), fn, el('p', {class: 'note'}, '밝기'), sl,
+      el('div', {class: 'ef'}, o.other ? btn('lnk mute', '교체·비우기', () => { H.back(); setTimeout(o.other, 60); }) : null,
+        btn('lnk mute', o.save ? '취소' : '그대로 쓰기', () => H.back()), btn('pb', o.save || '편집 완료', async e => {
+          e.currentTarget.disabled = true; out = await jpeg(); if (out) out.focus = focus; H.back();
+        })));
     H.sheet('사진 편집', box, () => { if (src.close) src.close(); done(out); });
     function fit() {  // 비율에 맞는 가장 큰 칸 (가운데)
       const [w, h] = dims();
       let cw = w, ch = h;
-      if (ratio) { if (w / h > ratio) cw = h * ratio; else ch = w / ratio; }
+      const q = rt();
+      if (q) { if (w / h > q) cw = h * q; else ch = w / q; }
       c = {x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch};
       chips.forEach((b, i) => b.setAttribute('aria-pressed', String(RATIOS[i][1] === ratio)));
       const k = Math.min(1, 1600 / Math.max(w, h));
@@ -149,7 +163,8 @@ function editor(file) {
       } else {
         const sx = px < drag.ax ? -1 : 1, sy = py < drag.ay ? -1 : 1;
         let cw = Math.min(Math.abs(px - drag.ax), sx < 0 ? drag.ax : w - drag.ax), ch = Math.min(Math.abs(py - drag.ay), sy < 0 ? drag.ay : h - drag.ay);
-        if (ratio) { if (cw / ratio > ch) cw = ch * ratio; else ch = cw / ratio; }
+        const q = rt();
+        if (q) { if (cw / q > ch) cw = ch * q; else ch = cw / q; }
         if (cw < min || ch < min) return;
         c = {x: sx < 0 ? drag.ax - cw : drag.ax, y: sy < 0 ? drag.ay - ch : drag.ay, w: cw, h: ch};
       }
@@ -171,5 +186,17 @@ function editor(file) {
     fit();
   });
 }
-W.SBEdit = {batch, editor};
+// ------------------------------------------------------------ 사진 한 장 바로 (10/20): 대시보드 사진을 누르면 → 편집기 → 저장
+// = photos_batch put {edited, focus?, retouch: 그 자리} (일 하나 · 봇은 다시 자르지 않음)
+async function photo(h, s, other) {
+  H = h; style();
+  const f = await load(s.full || s.thumb);
+  const out = f && await editor(f, {save: '저장', other});
+  if (!out) return;
+  try {
+    const ids = await h.uploadAll([out], 'photo', () => {});
+    await h.exec({action: 'blog.photos_batch', args: h.args}, {ops: [Object.assign(op(s.slot, {f: out, edited: true, re: s.slot}), {upload: ids[0]})]}, {iid: h.iid});
+  } catch (x) { h.toast(x.message || '하지 못했어요 — 잠시 뒤 다시'); }
+}
+W.SBEdit = {batch, editor, photo};
 })();

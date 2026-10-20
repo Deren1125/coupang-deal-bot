@@ -84,7 +84,8 @@
      {
       "slot": 1,
       "label": "정면 전신",
-      "thumb": "post-issue-46-1-ab12cd34.jpg"
+      "thumb": "post-issue-46-1-ab12cd34.jpg",
+      "full": "post-issue-46-1-ab12cd34-f.jpg"
      },
      {
       "slot": 2,
@@ -503,6 +504,15 @@
     "comment": "",
     "at": "2026-10-18T13:02:09+09:00"
    }
+  ]
+ },
+ "trends": {
+  "at": "2026-10-18T15:21:00+09:00",
+  "items": [
+   {"keyword": "제니 공항패션", "rank": 1, "sources": ["google", "pick", "news"], "change": 2, "new": false, "written": true, "tag": "fashion"},
+   {"keyword": "폭싹 속았수다", "rank": 2, "sources": ["google"], "change": null, "new": true, "written": false, "tag": "ent"},
+   {"keyword": "트렌치코트", "rank": 3, "sources": ["news"], "change": -1, "new": false, "written": false, "tag": "fashion"},
+   {"keyword": "육영수", "rank": 4, "sources": ["google"], "change": 0, "new": false, "written": false, "tag": null}
   ]
  }
 }

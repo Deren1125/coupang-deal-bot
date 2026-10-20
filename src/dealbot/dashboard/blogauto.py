@@ -503,7 +503,10 @@ def _export_post(v: Any) -> dict[str, Any] | None:
     for x in v.get("slots")[:40] if isinstance(v.get("slots"), list) else []:
         if isinstance(x, dict) and (n := _count(x.get("slot"), top=40)):
             thumb = x.get("thumb") if isinstance(x.get("thumb"), str) and THUMB_RE.match(x.get("thumb")) else None
-            slots.append({"slot": n, "label": _one_line(x.get("label"), 40) or f"자리 {n}", "thumb": thumb})
+            # full (10/20): 사진 편집기가 자를 큰 사본 (같은 thumbs 폴더 · 이름 규칙 같음) — 썸네일이 있는 자리만
+            full = x.get("full") if thumb and isinstance(x.get("full"), str) and THUMB_RE.match(x.get("full")) else None
+            slots.append({"slot": n, "label": _one_line(x.get("label"), 40) or f"자리 {n}", "thumb": thumb,
+                          **({"full": full} if full else {})})
     questions = []
     for x in v.get("questions")[:10] if isinstance(v.get("questions"), list) else []:
         if isinstance(x, dict) and isinstance(x.get("q"), str) and x["q"].strip():
@@ -691,11 +694,36 @@ def _post_deals(v: Any) -> list[dict[str, str | None]]:
     return out
 
 
+# Pick '인기 검색어' (주인 10/20 — Blog-Auto hotboard: 구글 트렌드 한국 RSS · Pick 후보 기록 · 네이버 뉴스 API 낱말)
+TREND_SOURCES = ("google", "pick", "news")
+TRENDS_MAX = 20
+
+
+def _trends(v: Any) -> dict[str, Any] | None:
+    """{at, items: [{keyword, rank, sources, change, new, written, tag}]} — 칸이 없으면(예전 Blog-Auto) None (카드를 숨김).
+    키워드는 한 줄 40자 (/issue 키워드 길이와 같게) · 같은 키워드는 한 번만 · 순위 순서."""
+    if not isinstance(v, dict) or not isinstance(v.get("items"), list):
+        return None
+    out, seen = [], set()
+    for x in v["items"][:TRENDS_MAX * 2]:
+        if not isinstance(x, dict) or not (kw := _one_line(x.get("keyword"), 40)) or kw in seen:
+            continue
+        seen.add(kw)
+        ch = x.get("change")
+        out.append({"keyword": kw, "rank": _count(x.get("rank"), top=100) or len(out) + 1,
+                    "sources": [s for s in TREND_SOURCES if isinstance(x.get("sources"), list) and s in x["sources"]],
+                    "change": ch if isinstance(ch, int) and not isinstance(ch, bool) and -100 <= ch <= 100 else None,
+                    "new": x.get("new") is True, "written": x.get("written") is True,
+                    "tag": x.get("tag") if x.get("tag") in ("fashion", "ent") else None})
+    out.sort(key=lambda x: x["rank"])
+    return {"at": _one_line(v.get("at"), 40), "items": out[:TRENDS_MAX]}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
                            "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits")),
-                           "pics_jobs": _pic_jobs(data.get("pics_jobs"))}
+                           "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

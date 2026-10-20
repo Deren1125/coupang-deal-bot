@@ -290,7 +290,7 @@ def _photo_blog(v: Any) -> str:
 
 
 def _photo_ops(v: Any) -> list[dict[str, Any]]:
-    """사진 일괄 수정 (주인 10/19 — 계약 action_photos_batch.json): [{op: remove, slot} | {op: put, slot, upload|pic, credit, edited}
+    """사진 일괄 수정 (주인 10/19 — 계약 action_photos_batch.json): [{op: remove, slot} | {op: put, slot, upload|pic, credit, edited, focus?, retouch?}
     | {op: move, from, to}] 1~40개, 적은 순서대로. upload 는 올린 사진 id (보낼 때 경로로 바꾼다), pic 은 고른 후보 id."""
     if not isinstance(v, list) or not 1 <= len(v) <= PHOTO_OPS_MAX:
         raise ActionError("bad_args")
@@ -316,8 +316,14 @@ def _photo_ops(v: Any) -> list[dict[str, Any]]:
                     raise ActionError("bad_args")
                 put["pic"] = pic
             else:
+                if not isinstance(x.get("focus", False), bool):
+                    raise ActionError("bad_args")
                 put.update(upload=_uploads([up], 1, 1)[0], credit=_str(x.get("credit"), CREDIT_MAX, required=False),
-                           edited=x.get("edited") is True)
+                           edited=x.get("edited") is True or x.get("focus") is True)
+                if x.get("focus") is True:  # '사람만 남기기' (10/20) — Blog-Auto 가 주인공 둘레만 (media.focus_subject)
+                    put["focus"] = True
+                if x.get("retouch") is not None:  # 이 글 자리 N 사진을 편집기로 고친 것 (10/20) — 출처를 이어받음
+                    put["retouch"] = _int(x.get("retouch"), 1, 40)
             out.append(put)
         else:
             raise ActionError("bad_args")

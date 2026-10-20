@@ -96,7 +96,7 @@ def test_app_js_loads_the_editor_lazily_and_edit_js_has_the_flow() -> None:
     ed = (webapp.STATIC_DIR / "edit.js").read_text(encoding="utf-8")
     assert "'사진 한 번에 고치기" in js and "meta[name=sb-edit]" in js and "SBEdit" in js
     assert "function editor" not in js and "photos_batch" not in js  # 편집기·일괄 수정은 edit.js 에만
-    for word in ("수정 완료", "취소", "바꿀 것 ", "✕ 빼기", "교체", "사진 추가", "편집", "'blog.photos_batch'", "1:1", "4:5", "3:4",
+    for word in ("수정 완료", "취소", "바꿀 것 ", "✕ 빼기", "교체", "사진 추가", "편집", "'blog.photos_batch'", "1:1", "4:5", "16:9", "원본", "사람만 남기기",
                  "자유", "90° 돌리기", "밝기", "'image/jpeg', 0.9", "2000", "edited"):
         assert word in ed, word
     assert "innerHTML" not in ed and "eval(" not in ed

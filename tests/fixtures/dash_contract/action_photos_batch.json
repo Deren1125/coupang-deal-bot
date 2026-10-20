@@ -10,7 +10,7 @@
   "pid": 46,
   "ops": [
    {"op": "remove", "slot": 2},
-   {"op": "put", "slot": 1, "upload": "/home/ubuntu/dealbot-data/dash_uploads/files/9f0e1d2c3b4a59687766554433221100.jpg", "credit": "", "edited": true},
+   {"op": "put", "slot": 1, "upload": "/home/ubuntu/dealbot-data/dash_uploads/files/9f0e1d2c3b4a59687766554433221100.jpg", "credit": "", "edited": true, "focus": true, "retouch": 1},
    {"op": "put", "slot": 3, "pic": "pk-3fa9c2d1"},
    {"op": "move", "from": 3, "to": 4}
   ]

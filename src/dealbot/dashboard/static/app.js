@@ -797,8 +797,10 @@ function detail(it) {
     el('div', {class: 'tools'}, g.open && ext('lnk', '인스타 열기', g.open), g.src && ext('lnk mute', '기사', g.src), g.put && btn('lnk', g.put.label, e => exec(g.put, {}, {btn: e.currentTarget, iid: it.iid}))))));
   if ((d.slots || []).length) {
     out.push(el('p', {class: 'h3'}, '사진 자리'), el('div', {class: 'slots'}, d.slots.map(s => btn('slot' + (s.thumb ? '' : ' empty'),
-      s.thumb ? [el('img', {src: s.thumb, alt: `자리 ${s.slot}`}), el('b', {}, s.slot)] : `자리 ${s.slot}: ${s.label || '빈 자리'}`, () => slotSheet(it, s)))),
-      /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid) ? btn('mr', '사진 한 번에 고치기 · 빼기·교체·옮기기·편집', () => edBatch(it)) : null);
+      s.thumb ? [el('img', {src: s.thumb, alt: `자리 ${s.slot}`}), el('b', {}, s.slot)] : `자리 ${s.slot}: ${s.label || '빈 자리'}`,
+      () => s.thumb && ED(it) ? edPhoto(it, s) : slotSheet(it, s)))),
+      ED(it) ? btn('mr', '사진 한 번에 고치기 · 빼기·교체·옮기기·편집', () => edBatch(it)) : null,
+      ED(it) && d.slots.some(s => s.thumb) ? el('p', {class: 'note'}, '사진을 누르면 자르기·돌리기 · 사람만 남기기') : null);
   }
   if ((d.questions || []).length) out.push(el('p', {class: 'h3'}, '질문'), ...d.questions.map(q => el('p', {class: 'q'}, `${q.n}. ${q.q}`)));
   if (d.preview) out.push(el('p', {class: 'h3'}, '올릴 글'), el('div', {class: 'dr'}, d.preview));
@@ -832,12 +834,16 @@ const edLoad = () => EDJ = EDJ || new Promise((ok, bad) => {
   s.onload = () => W.SBEdit ? ok(W.SBEdit) : bad(); s.onerror = () => { EDJ = null; s.remove(); bad(); };
   D.head.append(s);
 });
-async function edBatch(it) {
+const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
+async function edGo(it, fn) {
   let E;
   try { E = await edLoad(); } catch (e) { toast(MSG.net); return; }
-  E.batch({el, btn, sheet, back, pick, uploadAll, exec, toast, slots: it.detail.slots, iid: it.iid,
+  fn(E, {el, btn, sheet, back, pick, uploadAll, exec, toast, slots: it.detail.slots, iid: it.iid,
     args: {blog: it.blog, pid: Number(it.iid.split('-')[2])}});
 }
+const edBatch = it => edGo(it, (E, h) => E.batch(h));
+// 사진을 누르면 바로 편집기 (10/20): 자르기·비율·돌리기·사람만 남기기 → 저장 (교체·비우기는 편집기 아래 링크)
+const edPhoto = (it, s) => edGo(it, (E, h) => E.photo(h, s, () => slotSheet(it, s)));
 async function digestSheet(id) {
   const r = await api('/dashboard/api/digest/' + encodeURIComponent(id));
   if (r.status !== 200) { toast('정리가 아직 없어요'); return; }
@@ -914,9 +920,25 @@ function dealLinks(r) {
 
 // ------------------------------------------------------------ 탭: 블로그
 const IDEA = ['blog.scan', 'blog.issue', 'blog.hotdeal_now'];
+// 블로그 이름 옆 할 일 수 (10/20): '할 일' 탭과 같은 줄을 그 블로그만 — 하는 중·끝난 줄은 빼서 바로 줄어든다 (0 이면 숨김)
+const todoN = k => S.todo.reduce((n, i) => n + (i.kind === 'visits' ? +vis(i.detail.visits).some(x => x.blog === k) : +(i.blog === k && !pendingOf(i.iid))), 0);
+// Pick 인기 검색어 (10/20 — Blog-Auto: 구글 트렌드 · Pick 후보 · 뉴스 낱말): 순위 ▲▼ · 이미 쓴 글 · 패션/연예 · 누르면 그 키워드로 Pick 쓰기
+const TSRC = {google: '구글', pick: 'Pick', news: '뉴스'}, TTAG = {fashion: '패션', ent: '연예'};
+function trendBox(t) {
+  const all = OPEN.trends, mv = x => x.new ? el('i', {class: 'up'}, 'NEW') : x.change ? el('i', {class: x.change > 0 ? 'up' : 'dn'}, (x.change > 0 ? '▲' : '▼') + Math.abs(x.change)) : el('i', {}, '–');
+  return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '인기 검색어'), el('span', {class: 'note'}, ago(t.at))),
+    el('div', {class: 'box'}, t.items.slice(0, all ? 20 : 10).map(x => el('div', {class: 'row tr'}, el('b', {}, x.rank), mv(x),
+      btn('grow tw', [el('span', {class: 't'}, x.keyword), el('span', {class: 's'}, [x.sources.map(k => TSRC[k]).join('·'), TTAG[x.tag]].filter(Boolean).join(' · '))],
+        () => trendGo(t, x), {disabled: !t.write || null}), x.written ? el('span', {class: 'cp ok'}, '이미 쓴 글 있음') : null)),
+    t.items.length > 10 ? btn('fold', all ? '10위까지만' : `20위까지 보기`, () => { OPEN.trends = !all; render(); }) : null)];
+}
+async function trendGo(t, x) {
+  if (await confirmSheet({title: `「${x.keyword}」로 Pick 글을 쓸까요?`, ok: '쓰기', body: x.written ? '이 키워드로 쓴 글이 이미 있어요.' : '테마에 맞는지 보고 써요.'})) exec(t.write, {keyword: x.keyword});
+}
 function vBlog() {
   const key = R.sub, b = S.blogs[key];
-  const out = [el('div', {class: 'seg', role: 'group'}, BLOGS.map(([k, l]) => btn('', l, () => { location.hash = '#/blog/' + k; }, {'aria-pressed': k === key ? 'true' : 'false'})))];
+  const out = [el('div', {class: 'seg', role: 'group'}, BLOGS.map(([k, l]) => { const n = todoN(k);
+    return btn('', [l, n ? el('span', {class: 'cp hot', 'aria-label': `할 일 ${n}개`}, n) : null], () => { location.hash = '#/blog/' + k; }, {'aria-pressed': k === key ? 'true' : 'false'}); }))];
   if (key === 'pics') return out.concat(vPics());
   if (key === 'search') return out.concat(vSearch());
   if (!b) return out;
@@ -942,6 +964,7 @@ function vBlog() {
       sc.cancel_all ? btn('lnk mute', sc.cancel_all.label, e => exec(sc.cancel_all, {}, {btn: e.currentTarget})) : null));
     out.push(...sc.items.map(x => item(x, true)));
   }
+  if (b.trends && b.trends.items.length) out.push(...trendBox(b.trends));
   if (idea.length || (b.scan && b.scan.items.length)) {
     out.push(el('p', {class: 'h3'}, '글감'));
     const box = el('div', {class: 'box'});

@@ -379,7 +379,8 @@ class StateBuilder:
         if pics and kind == "photos" and pics["state"] in ("working", "ready"):
             status += " · 사진 찾는 중…" if pics["state"] == "working" else f" · 추천 사진 {len(pics['items'])}장"
         questions = list((post or {}).get("questions") or [])
-        slots = [dict(s, thumb=f"/dashboard/thumb/{s['thumb']}" if s.get("thumb") else None) for s in (post or {}).get("slots") or []]
+        slots = [dict(s, thumb=f"/dashboard/thumb/{s['thumb']}" if s.get("thumb") else None,
+                      **({"full": f"/dashboard/thumb/{s['full']}"} if s.get("full") else {})) for s in (post or {}).get("slots") or []]
         iid = iidmod.post_iid(blog, pid)
         return {"iid": iid, "src": "blog", "blog": blog, "kind": kind, "sev": "todo", "urgent": bool(needs) or kind == "sched_blocked",
                 "title": (post or {}).get("title") or title or f"{CHIPS[blog]} #{pid}", "chip": CHIPS[blog], "status": status,
@@ -773,11 +774,22 @@ class StateBuilder:
                          "actions": self._filter(acts, supported),
                          "visits": self._visits(v2.get("visits"), blog), "neighbors": neighbors_line(st.get("neighbors")),
                          "schedule": self._sched_blog(blog, v2, planned) if self._sctx["ok"] else None}
+            if blog == "issue":  # 인기 검색어 (10/20) — 누르면 '키워드로 쓰기'(blog.issue) 그대로 · 그 일이 없으면(예전 Blog-Auto) 보기만
+                out[blog]["trends"] = self._trends(v2.get("trends"), out[blog]["actions"])
             for r in out[blog]["recent"]:
                 r.update(self._submit_links(r))
             for a in out[blog]["actions"] + [x["action"] for x in (out[blog]["scan"] or {}).get("items", [])]:
                 self._mark_publish(a, self._modes(v2))
         return out
+
+    def _trends(self, tr: dict[str, Any] | None, acts: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Pick 블로그 화면 '인기 검색어' 카드 (주인 10/20): 순위 · 출처 · ▲▼ · 이미 쓴 글 · 패션/연예. 누르기 = blog.issue {keyword}
+        (/issue 키워드와 같은 길 — 확인 창 기준도 같음). Blog-Auto 가 칸을 안 주면 None (카드 없음)."""
+        if not tr:
+            return None
+        base = next((a for a in acts if a.get("action") == "blog.issue"), None)
+        return {"at": _iso_ts(tr.get("at"), self.tz), "items": tr["items"],
+                "write": dict(base, label="이 키워드로 Pick 쓰기") if base else None}
 
     def _sched_blog(self, blog: str, v2: dict[str, Any], planned: list[tuple[float, dict[str, Any]]]) -> dict[str, Any]:
         """블로그 탭 '예약된 글 N편' (다음 차례 먼저) · 모두 취소(★) · 간격 두고만 발행하는 블로그인지."""
