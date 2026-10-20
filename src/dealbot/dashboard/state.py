@@ -390,7 +390,7 @@ class StateBuilder:
                            "owner_edited": bool((post or {}).get("owner_edited")), "pics": pics, "ig": self._ig_view(blog, pid, post),
                            "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
                 "links": list((pr or {}).get("links") or [])[:LINKS_MAX] if "photos" in needs else [],
-                "_hot": rank.post_hot(post)}
+                "_hot": rank.post_hot(post), "_hot_rank": (post or {}).get("hot_rank")}
 
     @staticmethod
     def _ig_view(blog: str, pid: int, post: dict[str, Any] | None) -> list[dict[str, Any]]:

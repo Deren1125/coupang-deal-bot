@@ -519,6 +519,8 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         "needs": list(dict.fromkeys(needs)), "photo_request": photo_request, "slots": slots, "questions": questions,
         "deadline": _one_line(v.get("deadline"), 40), "naver_url": _naver_url(v.get("naver_url")),
         "schedule": _sched_post(v.get("schedule")), "pics": _pics(v.get("pics")), "ig_suggest": _ig_suggest(v.get("ig_suggest")),
+        # 인기 검색어 상위 10 키워드 글 (주인 10/20 — Blog-Auto hotfirst, 선택 칸: 핫 글만) → 할 일 맨 위 · '🔥 인기 N위'
+        **({"hot_rank": hr} if (hr := _count(v.get("hot_rank"), top=10)) else {}),
     }
 
 
