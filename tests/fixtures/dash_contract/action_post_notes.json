@@ -1,0 +1,23 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s2n",
+ "ts": 1760940000.12,
+ "expires_at": 1760940600.12,
+ "action": "post_notes",
+ "blog": "hotdeal",
+ "args": {
+  "blog": "hotdeal",
+  "pid": 31,
+  "notes": "원룸에서 2주 썼어요. 생각보다 가볍고 먼지통 비우기가 편했어요. 소리는 조금 커요.",
+  "photos": [
+   "/home/ubuntu/dealbot-data/dash_uploads/files/2c3d4e5f60718293a4b5c6d7e8f90a1b.jpg"
+  ]
+ },
+ "target": "post-hotdeal-31",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_7d3a5b"
+ }
+}

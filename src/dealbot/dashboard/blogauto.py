@@ -505,8 +505,10 @@ def _export_post(v: Any) -> dict[str, Any] | None:
             thumb = x.get("thumb") if isinstance(x.get("thumb"), str) and THUMB_RE.match(x.get("thumb")) else None
             # full (10/20): 사진 편집기가 자를 큰 사본 (같은 thumbs 폴더 · 이름 규칙 같음) — 썸네일이 있는 자리만
             full = x.get("full") if thumb and isinstance(x.get("full"), str) and THUMB_RE.match(x.get("full")) else None
+            # final (10/20, 선택 칸): 봇이 그대로 올릴 사진 (사진을 누르면 먼저 보여 줌) — 없는 예전 기록이면 full
+            final = x.get("final") if thumb and isinstance(x.get("final"), str) and THUMB_RE.match(x.get("final")) else None
             slots.append({"slot": n, "label": _one_line(x.get("label"), 40) or f"자리 {n}", "thumb": thumb,
-                          **({"full": full} if full else {})})
+                          **({"full": full} if full else {}), **({"final": final} if final else {})})
     questions = []
     for x in v.get("questions")[:10] if isinstance(v.get("questions"), list) else []:
         if isinstance(x, dict) and isinstance(x.get("q"), str) and x["q"].strip():
