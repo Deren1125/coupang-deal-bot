@@ -69,12 +69,15 @@ MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.photos_b
 FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
               "blog.fixpic": "finance"}
 HHMM = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")  # 예약 시간 바꾸기 (주인 10/19)
+LEARN_ID = re.compile(r"^l[pr]-[0-9a-f]{8}$")  # Blog-Auto learn.py 개선안(lp-)·규칙(lr-) id
+FEEDBACK_REASON_MAX = 80  # Blog-Auto learn.x_post_feedback 과 같은 한도
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
-                "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear")
+                "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
+                "post_feedback", "learn_decide")  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input", "search.check")
@@ -545,6 +548,22 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         if want:
             out["want"] = " ".join(want.split())
         return out
+    if name == "post_feedback":  # 👍/👎 (주인 10/20 — 계약 action_post_feedback.json): vote none = 지우기, reason 한 줄
+        if g("vote") not in ("up", "down", "none"):
+            raise ActionError("bad_args")
+        out = {"blog": _blog(g("blog")), "pid": _int(g("pid")), "vote": g("vote")}
+        reason = " ".join(_str(g("reason"), FEEDBACK_REASON_MAX * 2, required=False).split())
+        if len(reason) > FEEDBACK_REASON_MAX:
+            raise ActionError("bad_args")
+        if reason:
+            out["reason"] = reason
+        return out
+    if name == "learn_decide":  # 이번 주 개선안 ✅ 적용·❌ 빼기 (lp-) · 적용 규칙 지우기 (lr-) — 계약 action_learn_decide.json
+        lid, d = g("id"), g("decision")
+        if not isinstance(lid, str) or not LEARN_ID.match(lid) or d not in ("apply", "reject", "remove") \
+                or (d == "remove") != lid.startswith("lr-"):
+            raise ActionError("bad_args")
+        return {"id": lid, "decision": d}
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
@@ -590,6 +609,8 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return str(args.get("iid") or "")
     if action == "blog.visit_done":
         return str(args.get("id") or "")
+    if action == "blog.learn_decide":
+        return "learn"
     if action == "search.check":
         return "search"
     if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all") and blog in BLOGS:

@@ -776,11 +776,36 @@ class StateBuilder:
                          "schedule": self._sched_blog(blog, v2, planned) if self._sctx["ok"] else None}
             if blog == "issue":  # 인기 검색어 (10/20) — 누르면 '키워드로 쓰기'(blog.issue) 그대로 · 그 일이 없으면(예전 Blog-Auto) 보기만
                 out[blog]["trends"] = self._trends(v2.get("trends"), out[blog]["actions"])
+            out[blog]["learn"] = self._learn(v2.get("learn"), blog, supported)  # 이번 주 개선안·적용 규칙 (10/20)
             for r in out[blog]["recent"]:
                 r.update(self._submit_links(r))
+                if out[blog]["learn"] is not None and r.get("pid") and (supported is None or "post_feedback" in supported):
+                    r["fb"] = {"vote": (v2["learn"]["votes"]).get(str(r["pid"])),  # 👍/👎 (10/20) — 다시 누르면 지움
+                               "act": act("blog.post_feedback", "평가", {"blog": blog, "pid": r["pid"]})}
             for a in out[blog]["actions"] + [x["action"] for x in (out[blog]["scan"] or {}).get("items", [])]:
                 self._mark_publish(a, self._modes(v2))
         return out
+
+    @staticmethod
+    def _learn(lr: dict[str, Any] | None, blog: str, supported: set[str] | None) -> dict[str, Any] | None:
+        """블로그 탭 '이번 주 개선안' 카드 (주인 10/20 — Blog-Auto learn.py): 이 블로그(+모든 블로그) 개선안 ✅ 적용 / ❌ 빼기 ·
+        적용 중인 규칙 (지우기). 누르기 = blog.learn_decide (되돌릴 수 있어 확인 없음). 칸이 없으면 None (카드 없음)."""
+        if not lr:
+            return None
+        ok = supported is None or "learn_decide" in supported
+        props, rules = [], []
+        for p in lr["proposals"]:
+            if p["blog"] in (blog, "all"):
+                x = dict(p)
+                if ok and p["state"] == "open":
+                    x["apply"] = act("blog.learn_decide", "✅ 적용", {"id": p["id"], "decision": "apply"})
+                    x["reject"] = act("blog.learn_decide", "❌ 빼기", {"id": p["id"], "decision": "reject"})
+                props.append(x)
+        for r in lr["rules"]:
+            if r["blog"] in (blog, "all"):
+                rules.append(dict(r, remove=act("blog.learn_decide", "지우기", {"id": r["id"], "decision": "remove"}) if ok else None))
+        return {"week": lr["week"], "lessons_week": lr["lessons_week"], "auto_apply_days": lr["auto_apply_days"],
+                "proposals": props, "rules": rules}
 
     def _trends(self, tr: dict[str, Any] | None, acts: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Pick 블로그 화면 '인기 검색어' 카드 (주인 10/20): 순위 · 출처 · ▲▼ · 이미 쓴 글 · 패션/연예. 누르기 = blog.issue {keyword}

@@ -44,7 +44,9 @@
   "schedule_move",
   "visit_done",
   "pics_fetch",
-  "pics_clear"
+  "pics_clear",
+  "post_feedback",
+  "learn_decide"
  ],
  "kakao": {
   "state": "ok",

@@ -277,7 +277,7 @@ async function exec(a, extra, ctx = {}) {
   if (r.status === 202) {
     POLL[d.id] = {iid: ctx.iid || '', action: a.action, args: body.args, t: Date.now()};
     if (ctx.key) { delete P[ctx.key]; delete OPEN[ctx.iid]; }
-    toast(SCH.test(a.action) ? '예약하는 중이에요' : a.action === 'blog.visit_done' ? '했어요로 표시했어요' : PIX.test(a.action) ? (/fetch/.test(a.action) ? '사진 찾는 중이에요 — 다 되면 알려 드릴게요' : '지우는 중이에요') : a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
+    toast(SCH.test(a.action) ? '예약하는 중이에요' : a.action === 'blog.visit_done' ? '했어요로 표시했어요' : /feedback|learn_/.test(a.action) ? '받았어요 — 곧 반영돼요' : PIX.test(a.action) ? (/fetch/.test(a.action) ? '사진 찾는 중이에요 — 다 되면 알려 드릴게요' : '지우는 중이에요') : a.action.startsWith('blog.') ? '받았어요 — 블로그에 넣는 데 1~2분 걸려요. 끝나면 알려 드릴게요' : '요청했어요 — 끝나면 알려 드릴게요');
     render(); poll();
     return d;
   }
@@ -965,6 +965,7 @@ function vBlog() {
     out.push(...sc.items.map(x => item(x, true)));
   }
   if (b.trends && b.trends.items.length) out.push(...trendBox(b.trends));
+  if (b.learn) out.push(...learnBox(b.learn));
   if (idea.length || (b.scan && b.scan.items.length)) {
     out.push(el('p', {class: 'h3'}, '글감'));
     const box = el('div', {class: 'box'});
@@ -985,7 +986,7 @@ function vBlog() {
     const open = OPEN['recent-' + key];
     out.push(el('div', {class: 'box', style: 'margin-top:12px'}, btn('fold', `최근 글 ${b.recent.length}개`, () => { OPEN['recent-' + key] = !open; render(); }, {'aria-expanded': open ? 'true' : 'false'}),
       open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))),
-        r.url ? ext('sm', '네이버', r.url) : null, r.google || r.daum || r.share ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
+        ...fbBtns(r), r.url ? ext('sm', '네이버', r.url) : null, r.google || r.daum || r.share ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
   }
   const vs = vis(b.visits);
   if (b.neighbors || vs.length) {
@@ -994,6 +995,31 @@ function vBlog() {
       vs.length > 3 ? btn('pb ghost', `모두 보기 (${vs.length})`, () => visitSheet(vs)) : null));
   }
   return out;
+}
+
+// 배운 것으로 나아지기 (10/20 — Blog-Auto learn.py): 이번 주 개선안 ✅ 적용 / ❌ 빼기 · 적용 중인 규칙 지우기 · 최근 글 👍/👎
+const LA = {style: '문체', title: '제목', photo: '사진', tags: '태그', topic: '글감', schedule: '발행 시간'};
+const lgo = a => e => exec(a, {}, {btn: e.currentTarget});
+function learnBox(l) {
+  const ps = l.proposals.filter(p => p.state === 'open'), rs = l.rules;
+  if (!ps.length && !rs.length && !l.lessons_week) return [];
+  return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '이번 주 개선안'), el('span', {class: 'note'}, `배운 것 ${l.lessons_week}개`)),
+    el('div', {class: 'box'}, ps.length ? ps.map(p => el('div', {class: 'vi'}, el('span', {class: 'vn'}, LA[p.area] + (p.evidence ? ` · 근거 ${p.evidence}개` : '')),
+      el('span', {class: 'vt'}, p.rule_text), p.examples.length ? el('span', {class: 's'}, '예: ' + p.examples.join(' · ')) : null,
+      p.effect ? el('span', {class: 's'}, '→ ' + p.effect) : null,
+      p.apply ? el('div', {class: 'va'}, btn('sm ac', p.apply.label, lgo(p.apply)), btn('sm', p.reject.label, lgo(p.reject))) : null))
+      : el('p', {class: 'note'}, '이번 주 새 개선안은 없어요'),
+    rs.length ? [el('p', {class: 'vh'}, `적용 중인 규칙 ${rs.length}개`), ...rs.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'},
+      el('span', {class: 't'}, r.rule_text), el('span', {class: 's'}, LA[r.area] + (r.by === 'auto' ? ' · 자동 적용' : ''))),
+      r.remove ? btn('lnk mute', r.remove.label, lgo(r.remove)) : null))] : null,
+    l.auto_apply_days ? el('p', {class: 'note'}, `답이 없으면 ${l.auto_apply_days}일 뒤 저절로 적용돼요`) : null)];
+}
+const fbBtns = r => r.fb ? [['up', '👍'], ['down', '👎']].map(([v, t]) => btn('sm', t, () => r.fb.vote === v ? exec(r.fb.act, {vote: 'none'}) : fbSheet(r, v),
+  {'aria-pressed': r.fb.vote === v ? 'true' : 'false', 'aria-label': v === 'up' ? '좋았어요' : '아쉬워요'})) : [];
+function fbSheet(r, v) {
+  const f = el('input', {class: 'fl', maxlength: 80, placeholder: '한 줄 이유 (비워도 돼요)', autocomplete: 'off'});
+  sheet(v === 'up' ? '👍 좋았던 점' : '👎 아쉬운 점', el('div', {class: 'cf'}, f, btn('pb', '보내기', () => { back(); exec(r.fb.act, {vote: v, reason: f.value.trim()}); })));
+  f.focus();
 }
 
 // 오늘 들를 이웃 글: 남의 블로그는 누를 때만 열고, 댓글은 주인이 직접 (했어요 → visit_done)

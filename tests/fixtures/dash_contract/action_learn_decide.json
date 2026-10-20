@@ -1,0 +1,19 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0y",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "learn_decide",
+ "blog": null,
+ "args": {
+  "id": "lp-1a2b3c4d",
+  "decision": "apply"
+ },
+ "target": "learn",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_9a2e4f"
+ }
+}

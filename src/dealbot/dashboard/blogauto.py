@@ -719,11 +719,54 @@ def _trends(v: Any) -> dict[str, Any] | None:
     return {"at": _one_line(v.get("at"), 40), "items": out[:TRENDS_MAX]}
 
 
+LEARN_AREAS = ("style", "title", "photo", "tags", "topic", "schedule")  # Blog-Auto learn.AREAS
+LEARN_STATES = ("open", "applied", "rejected", "expired")
+LEARN_PROP_ID, LEARN_RULE_ID = re.compile(r"^lp-[0-9a-f]{8}$"), re.compile(r"^lr-[0-9a-f]{8}$")
+LEARN_PROPS_MAX, LEARN_RULES_MAX, LEARN_VOTES_MAX = 12, 40, 100
+
+
+def _learn(v: Any) -> dict[str, Any] | None:
+    """배운 것으로 나아지기 (주인 10/20 — Blog-Auto learn.export): {week, at, lessons_week, auto_apply_days, proposals, rules, votes}.
+    칸이 없으면(예전 Blog-Auto) None (카드·👍/👎 숨김). 개선안·규칙 글은 한 줄 200자, 모르는 칸·상태는 빠진다."""
+    if not isinstance(v, dict):
+        return None
+    blogs = (*V2_BLOGS, "all")
+    props = []
+    for x in v.get("proposals")[:LEARN_PROPS_MAX] if isinstance(v.get("proposals"), list) else []:
+        if not isinstance(x, dict) or not LEARN_PROP_ID.match(str(x.get("id") or "")) or x.get("blog") not in blogs \
+                or x.get("area") not in LEARN_AREAS or not (t := _one_line(safe_text(x.get("rule_text") or "", 400), 200)):
+            continue
+        props.append({"id": x["id"], "blog": x["blog"], "area": x["area"], "rule_text": t,
+                      "evidence": _count(x.get("evidence"), top=1000) or 0, "examples": _str_list(x.get("examples"), 3, 80),
+                      "effect": _one_line(safe_text(x.get("effect") or "", 240), 120) or "",
+                      "state": x.get("state") if x.get("state") in LEARN_STATES else "open"})
+    rules = []
+    for x in v.get("rules")[:LEARN_RULES_MAX] if isinstance(v.get("rules"), list) else []:
+        if not isinstance(x, dict) or not LEARN_RULE_ID.match(str(x.get("id") or "")) or x.get("blog") not in blogs \
+                or x.get("area") not in LEARN_AREAS or not (t := _one_line(safe_text(x.get("rule_text") or "", 400), 200)):
+            continue
+        c = x.get("config") if isinstance(x.get("config"), dict) else None
+        rules.append({"id": x["id"], "blog": x["blog"], "area": x["area"], "rule_text": t, "at": _one_line(x.get("at"), 40),
+                      "by": "auto" if x.get("by") == "auto" else "owner",
+                      **({"config": _one_line(f"{c.get('key')} = {json.dumps(c.get('value'), ensure_ascii=False)}", 80)}
+                         if c and isinstance(c.get("key"), str) else {})})
+    votes = {}
+    raw = v.get("votes") if isinstance(v.get("votes"), dict) else {}
+    for k, x in list(raw.items())[-LEARN_VOTES_MAX:]:
+        if isinstance(k, str) and k.isdigit() and len(k) <= 9 and x in ("up", "down"):
+            votes[k] = x
+    days = v.get("auto_apply_days")
+    return {"week": _one_line(v.get("week"), 10), "at": _one_line(v.get("at"), 40), "lessons_week": _count(v.get("lessons_week"), top=10**6) or 0,
+            "auto_apply_days": days if isinstance(days, int) and not isinstance(days, bool) and 0 < days <= 60 else None,
+            "proposals": props, "rules": rules, "votes": votes}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
                            "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits")),
-                           "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends"))}
+                           "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends")),
+                           "learn": _learn(data.get("learn"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

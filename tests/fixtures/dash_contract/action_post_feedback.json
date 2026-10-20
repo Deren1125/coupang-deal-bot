@@ -1,0 +1,21 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s0x",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "post_feedback",
+ "blog": "issue",
+ "args": {
+  "blog": "issue",
+  "pid": 40,
+  "vote": "down",
+  "reason": "사진이 너무 어두웠어요"
+ },
+ "target": "post-issue-40",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_9a2e4f"
+ }
+}

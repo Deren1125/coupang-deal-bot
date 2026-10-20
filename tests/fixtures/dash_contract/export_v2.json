@@ -514,5 +514,20 @@
    {"keyword": "트렌치코트", "rank": 3, "sources": ["news"], "change": -1, "new": false, "written": false, "tag": "fashion"},
    {"keyword": "육영수", "rank": 4, "sources": ["google"], "change": 0, "new": false, "written": false, "tag": null}
   ]
+ },
+ "learn": {
+  "week": "2026-W42",
+  "at": "2026-10-18T21:07:00+09:00",
+  "lessons_week": 9,
+  "auto_apply_days": null,
+  "proposals": [
+   {"id": "lp-1a2b3c4d", "blog": "issue", "area": "title", "rule_text": "제목 끝에 물음표를 붙이지 않는다. 궁금증은 본문 첫 문장에서 푼다.", "evidence": 3, "examples": ["…일까? → …정리"], "effect": "주인이 제목을 고치는 일이 줄어듦", "state": "open"},
+   {"id": "lp-5e6f7a8b", "blog": "finance", "area": "tags", "rule_text": "태그는 14개 이상 넣는다.", "evidence": 2, "examples": [], "effect": "검색 유입이 늘어남", "state": "rejected"}
+  ],
+  "rules": [
+   {"id": "lr-9c0d1e2f", "blog": "issue", "area": "photo", "rule_text": "전신 사진을 첫 자리에 둔다.", "at": "2026-10-11T21:30:00", "by": "owner"},
+   {"id": "lr-3a4b5c6d", "blog": "finance", "area": "tags", "rule_text": "태그는 12개로 맞춘다.", "at": "2026-10-11T21:31:00", "by": "owner", "config": {"key": "tags.min", "value": 12}}
+  ],
+  "votes": {"40": "up", "46": "down"}
  }
 }
