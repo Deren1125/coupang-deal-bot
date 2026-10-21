@@ -711,12 +711,14 @@ def _post_deals(v: Any) -> list[dict[str, str | None]]:
 
 
 # Pick '인기 검색어' (주인 10/20 — Blog-Auto hotboard: 구글 트렌드 한국 RSS · Pick 후보 기록 · 네이버 뉴스 API 낱말)
-TREND_SOURCES = ("advisor", "google", "pick", "news")  # advisor: 크리에이터 어드바이저 트렌드 (10/20)
+TREND_SOURCES = ("advisor", "google", "pick", "news", "early")  # advisor: 크리에이터 어드바이저 트렌드 (10/20) · early: 급상승 (10/21)
+TREND_BADGE_MAX = 20  # 선택 칸 badge — '⚡ 막 뜨는 중' (Blog-Auto hotboard.EARLY_BADGE, early 줄만)
 TRENDS_MAX = 20
 
 
 def _trends(v: Any) -> dict[str, Any] | None:
-    """{at, items: [{keyword, rank, sources, change, new, written, tag}]} — 칸이 없으면(예전 Blog-Auto) None (카드를 숨김).
+    """{at, items: [{keyword, rank, sources, change, new, written, tag, badge?}]} — 칸이 없으면(예전 Blog-Auto) None (카드를 숨김).
+    badge 는 선택 칸 (막 뜨는 중 줄만 — 한 줄 TREND_BADGE_MAX 자, 없으면 칸 없음)
     키워드는 한 줄 40자 (/issue 키워드 길이와 같게) · 같은 키워드는 한 번만 · 순위 순서."""
     if not isinstance(v, dict) or not isinstance(v.get("items"), list):
         return None
@@ -730,7 +732,8 @@ def _trends(v: Any) -> dict[str, Any] | None:
                     "sources": [s for s in TREND_SOURCES if isinstance(x.get("sources"), list) and s in x["sources"]],
                     "change": ch if isinstance(ch, int) and not isinstance(ch, bool) and -100 <= ch <= 100 else None,
                     "new": x.get("new") is True, "written": x.get("written") is True,
-                    "tag": x.get("tag") if x.get("tag") in ("fashion", "ent") else None})
+                    "tag": x.get("tag") if x.get("tag") in ("fashion", "ent") else None,
+                    **({"badge": b} if (b := _one_line(x.get("badge"), TREND_BADGE_MAX)) else {})})
     out.sort(key=lambda x: x["rank"])
     return {"at": _one_line(v.get("at"), 40), "items": out[:TRENDS_MAX]}
 

@@ -83,7 +83,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
                 "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
                 "post_feedback", "learn_decide",  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
-                "similar_links")  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
+                "similar_links",  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
+                "topic_seed")  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input", "search.check")
@@ -208,6 +209,7 @@ def _uploads(v: Any, lo: int, hi: int) -> list[str]:
 
 ANSWER_Q_MAX, ANSWER_PHOTOS_MAX = 40, 20
 NOTES_MAX, NOTES_PHOTOS_MAX, PRODUCT_MAX = 2000, 10, 60  # Blog-Auto bridge.x_post_notes 와 같은 한도
+SEED_MAX = 300  # 소재 넣기 (주인 10/21) — Blog-Auto early_radar.SEED_MAX 와 같은 한도
 
 
 def _answer_photos(v: Any) -> list[dict[str, Any]] | None:
@@ -511,6 +513,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         out["notes"] = _str(g("notes") if g("notes") is not None else g("text"), NOTES_MAX)  # 화면은 글 칸(text)으로 보냄
         out["photos"] = _uploads(g("photos") if g("photos") is not None else g("uploads"), 0, NOTES_PHOTOS_MAX)
         return out
+    if name == "topic_seed":  # 소재 넣기 (주인 10/21 — 계약 action_topic_seed.json): {blog, text} · 링크는 Blog-Auto 가 지우고 열지 않음
+        return {"blog": _blog(g("blog")), "text": _str(g("text"), SEED_MAX)}
     if name == "drop":
         return {"blog": _blog(g("blog")), "pids": _pids(g("pids") if g("pids") is not None else g("pid"))}
     if name in ("rewrite", "restyle"):
@@ -675,7 +679,8 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return "learn"
     if action == "search.check":
         return "search"
-    if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all") and blog in BLOGS:
+    if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all",
+                  "blog.topic_seed") and blog in BLOGS:
         return f"blog-{blog}"
     if action == "blog.login_check" and blog in BLOGS:
         return f"conn-naver-{blog}"

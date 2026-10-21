@@ -793,6 +793,9 @@ class StateBuilder:
             if blog == "finance":
                 acts.append(act("blog.ledger", "정리본 올리기", input="file", accept=".md,.txt,text/markdown,text/plain"))
             acts.append(act("blog.info", "크리에이터 키워드", {"what": "creator"}))
+            # 소재 넣기 (주인 10/21): 카페 인기글 주제·아이디어를 붙여 넣으면 다음 글감 고르기의 첫 후보 (Blog-Auto 는 카페를 열지 않음)
+            acts.append(act("blog.topic_seed", "소재 넣기", {"blog": blog}, input="text",
+                            placeholder="카페 인기글 주제나 아이디어 한두 줄 — 사실은 뉴스·공식 자료로만 확인해요"))
             scan = v2.get("scan") if blog == "finance" else None
             out[blog] = {"label": BLOG_LABELS[blog], "chip": CHIPS[blog], "mode": mode, "paused": bool(st.get("paused")),
                          "today": st.get("today") or 0, "login": st.get("login") or "unknown",
@@ -1063,7 +1066,7 @@ ACTION_LABELS = {
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",
-    "blog.similar_links": "비슷한 아이템 링크 넣기",
+    "blog.similar_links": "비슷한 아이템 링크 넣기", "blog.topic_seed": "소재 넣기",
     "blog.answer": "답하기", "blog.noanswer": "답 없이 진행", "blog.oedit_keep": "그대로 두기", "blog.oedit_redo": "봇 글로 덮어쓰기",
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",

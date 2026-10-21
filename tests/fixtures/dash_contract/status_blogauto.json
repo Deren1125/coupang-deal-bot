@@ -48,7 +48,8 @@
   "pics_clear",
   "post_feedback",
   "learn_decide",
-  "similar_links"
+  "similar_links",
+  "topic_seed"
  ],
  "kakao": {
   "state": "ok",

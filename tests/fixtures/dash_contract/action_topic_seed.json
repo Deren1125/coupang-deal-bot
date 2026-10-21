@@ -1,0 +1,19 @@
+{
+ "v": 1,
+ "id": "a_01jc5p7r2t4v6x8z0b2d4f6h8k",
+ "ts": 1761030000.25,
+ "expires_at": 1761030600.25,
+ "action": "topic_seed",
+ "blog": "issue",
+ "args": {
+  "blog": "issue",
+  "text": "카페 인기글: 요즘 다들 이야기하는 드라마 속 트렌치코트"
+ },
+ "target": "blog-issue",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_8e4b6c"
+ }
+}
