@@ -29,7 +29,7 @@ from typing import Any, Protocol
 from urllib.parse import quote
 
 from dealbot.config import DashboardConfig
-from dealbot.dashboard import render, webapp
+from dealbot.dashboard import render, threads_proxy, webapp
 from dealbot.dashboard import todo as todo_mod
 from dealbot.dashboard.auth import (
     FailureLimiter,
@@ -607,6 +607,7 @@ class Dashboard:
         web.route("/dashboard/", self._page, with_headers=True)
         if self.api is not None:
             self.api.register(web)
+            threads_proxy.register(web, self.api)  # 스레드 화면 (10/21) — threads/ 서비스로 넘김
         for path, handler in (
             ("/dashboard/refresh", self._refresh),
             ("/dashboard/input", self._input),

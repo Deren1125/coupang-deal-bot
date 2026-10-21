@@ -60,7 +60,8 @@ PIC_MAX_BYTES = 8_000_000
 APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8", "badge-72.png": "image/png",
              "edit.js": "text/javascript; charset=utf-8",  # edit.js: 사진 고치기·편집기 (10/19, 처음 쓸 때만)
              "product.js": "text/javascript; charset=utf-8",  # product.js: 제품 테스트 (10/21, 처음 열 때만)
-             "sched.js": "text/javascript; charset=utf-8"}  # sched.js: 일정 화면 (10/21, 처음 열 때만)
+             "sched.js": "text/javascript; charset=utf-8",  # sched.js: 일정 화면 (10/21, 처음 열 때만)
+             "threads.js": "text/javascript; charset=utf-8"}  # threads.js: 스레드 화면 (10/21, 처음 열 때만)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096

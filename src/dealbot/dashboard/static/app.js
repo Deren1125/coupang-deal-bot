@@ -139,7 +139,7 @@ function route() {
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched|threads)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -853,6 +853,7 @@ const scLoad = lazy('meta[name=sb-sched]', 'sched', 'SBSched');
 let SC;
 const vSC = () => SC ? SC.view(S.sched, {el, btn, render, act, open: openItem, pend: pendingOf})
   : (scLoad().then(m => { SC = m; render(); }, () => toast(MSG.net)), [el('p', {class: 'boot'}, '불러오는 중…')]);
+const thLoad = lazy('meta[name=sb-threads]', 'threads', 'SBThreads');
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {
   let E;
@@ -974,6 +975,7 @@ function vBlog() {
   if (key === 'trial') return out.concat(vTrial());
   if (key === 'ptrial') return out.concat(vPT());
   if (key === 'sched') return out.concat(vSC());
+  if (key === 'threads') { const b = el('div', {}); thLoad().then(T => T.view(b, {el, btn, api, toast, S}), () => toast(MSG.net)); return out.concat(b); }
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -983,6 +985,7 @@ function vBlog() {
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   if (S.sched && S.sched.total) out.push(el('a', {class: 'bn', href: '#/blog/sched'}, `예약 일정 보기 · ${S.sched.total}편 →`));
   if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
+  out.push(el('a', {class: 'bn', href: '#/blog/threads'}, '스레드 →'));
   if (S.photo_trial && key === 'issue') out.push(el('a', {class: 'bn', href: '#/blog/trial'}, '사진 테스트 →'));
   if (key === 'issue' && S.ptrial) out.push(el('a', {class: 'bn', href: '#/blog/ptrial'}, `제품 테스트 ${S.ptrial.posts.length}편 →`));
   const sr = S.search;
