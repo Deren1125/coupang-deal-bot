@@ -2,7 +2,7 @@
 
 블로그 탭 최근 글(발행된 글)마다 '고치기' (Blog-Auto 가 post_edit 를 켠 블로그 — 기록 파일 recent[].photos 칸이 있을 때만) →
 edit.js 시트: 글의 사진마다 빼기·교체 + '이 문장 빼기' 글 칸 → Blog-Auto 다리 일 post_edit {blog, pid, ops}
-(계약 tests/fixtures/dash_contract/action_post_edit.json — Blog-Auto 와 같은 파일). 공개된 글을 바로 바꾸니 ★ 확인 · sw sb-v29."""
+(계약 tests/fixtures/dash_contract/action_post_edit.json — Blog-Auto 와 같은 파일). 공개된 글을 바로 바꾸니 ★ 확인 · sw sb-v30."""
 
 from __future__ import annotations
 
@@ -148,5 +148,5 @@ def test_sheet_lives_in_edit_js_and_app_js_only_opens_it() -> None:
                  "op: 'replace_photo', index: x.p.n", "op: 'remove_photo', index: x.p.n", "op: 'remove_text'", "h.uploadAll(",
                  "h.exec(r.edit.act, {ops}", "카테고리·태그는 그대로", "W.SBEdit = {batch, editor, photo, fix}"):
         assert word in ed, word
-    assert "const V = 'sb-v29'" in sw  # 10/21 merge post-edit (sb-v29)
+    assert "const V = 'sb-v30'" in sw  # 10/21 merge post-edit (sb-v30)
     assert len(gzip.compress(ed.encode(), 9)) <= 7 * 1024 + 512  # 10/21 (merge post-edit): 사진 테스트 + 고치기 시트 → 7.5 KB (test_dash_shell 과 같게)

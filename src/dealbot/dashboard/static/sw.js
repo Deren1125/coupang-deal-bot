@@ -1,6 +1,6 @@
 /* Sns-board 서비스 워커 (범위 /dashboard/): 앱 파일은 캐시, 화면·상태는 네트워크 먼저(3초) 그다음 마지막 캐시, 웹 푸시 알림. */
 'use strict';
-const V = 'sb-v29', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
+const V = 'sb-v30', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
 const PRE = ['/dashboard/static/icon-192.png', '/dashboard/static/badge-72.png'];
 const STATE = '/dashboard/api/state', HOME = '/dashboard/';
 
@@ -29,7 +29,8 @@ async function fresh(req, key, mark) {
     return await timeout(net, 3000);
   } catch (x) {
     net.catch(() => {});
-    return cached(key, mark, x);
+    // 저장본이 없으면(처음·캐시를 비운 뒤) 끝까지 기다린다 — 3초 넘긴 서버에서 '열 수 없음'이 되지 않게
+    return cached(key, mark, x).catch(() => net);
   }
 }
 async function cached(key, mark, x) {

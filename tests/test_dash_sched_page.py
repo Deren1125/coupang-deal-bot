@@ -199,7 +199,7 @@ def test_app_js_entry_and_sched_js_flow() -> None:
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
     sj = (webapp.STATIC_DIR / "sched.js").read_text(encoding="utf-8")
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
-    assert "const V = 'sb-v29'" in sw  # 앱 파일은 /dashboard/static/ 아래면 모두 처음 받을 때 저장 — 목록에 넣을 파일 없음
+    assert "const V = 'sb-v30'" in sw  # 앱 파일은 /dashboard/static/ 아래면 모두 처음 받을 때 저장 — 목록에 넣을 파일 없음
     assert "/^(pics|search|trial|ptrial|sched|threads)$/" in js and "key === 'sched'" in js and "meta[name=sb-sched]" in js
     assert "href: '#/blog/sched'" in js and "S.sched && S.sched.total" in js and "예약 일정 보기" in js
     for word in ("일정", "블로그로", "전체", "시간 바꾸기", "바로 발행", "빼기", "앞으로 예약된 글이 없어요", "W.SBSched = {view}", "h.act(r, a", "h.open(r.iid)",

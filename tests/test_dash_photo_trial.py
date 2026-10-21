@@ -108,4 +108,4 @@ def test_app_and_edit_js_have_the_page() -> None:
                  "W.SBProduct = {view, photo}", "class: 'ck'", "번째 사진", "고른 이유", "class: 'sv'"):
         assert word in ed, word
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
-    assert "const V = 'sb-v29'" in sw  # 10/21 merge post-edit (sb-v29)
+    assert "const V = 'sb-v30'" in sw  # 10/21 merge post-edit (sb-v30)
