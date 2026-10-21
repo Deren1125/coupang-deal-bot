@@ -1016,7 +1016,7 @@ function vBlog() {
   if (b.recent.length) {
     const open = OPEN['recent-' + key];
     out.push(el('div', {class: 'box', style: 'margin-top:12px'}, btn('fold', `최근 글 ${b.recent.length}개`, () => { OPEN['recent-' + key] = !open; render(); }, {'aria-expanded': open ? 'true' : 'false'}),
-      open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))),
+      open ? b.recent.map(r => el('div', {class: 'row rr'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))),
         ...fbBtns(r), r.url ? ext('sm', '네이버', r.url) : null, r.edit ? btn('sm', '고치기', () => edFix(key, r)) : null,
         r.google || r.daum || r.share ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
   }
