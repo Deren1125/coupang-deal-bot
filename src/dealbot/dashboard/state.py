@@ -482,6 +482,23 @@ class StateBuilder:
                         "clear": act("blog.pics_clear", "지우기", {"job": j["id"]})})
         return {"jobs": out, "fetch": act("blog.pics_fetch", "사진 뽑기", {}, input="url", placeholder="기사·쇼핑몰 링크 붙여넣기")}
 
+    def product_trial(self, export: Any) -> dict[str, Any] | None:
+        """블로그 › Pick '제품 테스트' 화면 (주인 10/21 — Blog-Auto product_trial.py): 글마다 착장 아이템 → 후보 카드 (사진·이름·
+        판매처·가격/날짜·열기) ✅ 괜찮아 / ❌ 별로(이유 칩 + 한 줄) · 글 전체 한 줄·테스트 끝 · 맨 위 '배운 기준'.
+        누르기 = blog.product_feedback (확인 없음 — 글 본문은 바뀌지 않음). 테스트 중인 글이 없거나 Blog-Auto 가 모르면 None (숨김)."""
+        pt = (getattr(export, "v2", None) or {}).get("product_trial")
+        sup = self._supported(self._ba_status())
+        if not pt or not pt["posts"] or (sup is not None and "product_feedback" not in sup):
+            return None
+        posts = []
+        for p in pt["posts"]:
+            base = {"blog": "issue", "pid": p["pid"]}
+            posts.append({"pid": p["pid"], "title": p["title"], "pieces": p["pieces"],
+                          "items": [dict(x, img=f"/dashboard/thumb/{x['img']}" if x.get("img") else None,
+                                         act=act("blog.product_feedback", "판정", dict(base, item_id=x["id"]))) for x in p["items"]],
+                          "act": act("blog.product_feedback", "테스트 끝", base)})
+        return {"posts": posts, "learned": pt["learned"], "ok": pt["ok"], "goal": pt["goal"], "reasons": pt["reasons"]}
+
     # ---------------------------------------------------------- 알림 줄 (owner_notices · 기록 파일 todo)
     def _notice_item(self, iid: str, rows: list[Any], now: float) -> dict[str, Any] | None:
         first = sorted(rows, key=lambda n: (SEV_ORDER.get(n.sev, 2), n.opened_at))[0]
@@ -1040,6 +1057,7 @@ class StateBuilder:
             "blogauto": {"bridge": st.bridge, "fresh": st.fresh()},
             "pics": self.pics_tool(export),
             "search": self.search_view(getattr(export, "v2", None) or {}),
+            "ptrial": self.product_trial(export),  # 제품 테스트 (10/21)
         }
         return body
 
@@ -1066,7 +1084,7 @@ ACTION_LABELS = {
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",
-    "blog.similar_links": "비슷한 아이템 링크 넣기", "blog.topic_seed": "소재 넣기",
+    "blog.similar_links": "비슷한 아이템 링크 넣기", "blog.topic_seed": "소재 넣기", "blog.product_feedback": "제품 테스트",
     "blog.answer": "답하기", "blog.noanswer": "답 없이 진행", "blog.oedit_keep": "그대로 두기", "blog.oedit_redo": "봇 글로 덮어쓰기",
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",

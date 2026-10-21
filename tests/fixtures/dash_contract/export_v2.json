@@ -534,5 +534,68 @@
    {"id": "lr-3a4b5c6d", "blog": "finance", "area": "tags", "rule_text": "태그는 12개로 맞춘다.", "at": "2026-10-11T21:31:00", "by": "owner", "config": {"key": "tags.min", "value": 12}}
   ],
   "votes": {"40": "up", "46": "down"}
+ },
+ "product_trial": {
+  "posts": [
+   {
+    "pid": 41,
+    "title": "원빈 공항패션, 베이지 트렌치코트에 로퍼",
+    "pieces": [
+     {
+      "part": "아우터",
+      "desc": "베이지 트렌치코트"
+     },
+     {
+      "part": "신발",
+      "desc": "블랙 로퍼"
+     }
+    ],
+    "items": [
+     {
+      "id": "pt-1a2b3c4d",
+      "piece": 0,
+      "name": "오버핏 더블 트렌치코트 베이지",
+      "shop": "무신사 스토어",
+      "price": 129000,
+      "at": "2026-10-21",
+      "img": "pt-41-1a2b3c4d-9f8e7d6c.jpg",
+      "link": "https://smartstore.naver.com/main/products/1234567",
+      "query": "베이지 트렌치코트 아우터"
+     },
+     {
+      "id": "pt-5e6f7a8b",
+      "piece": 1,
+      "name": "소가죽 페니 로퍼 블랙",
+      "shop": "슈즈몰",
+      "price": 59000,
+      "at": "2026-10-21",
+      "img": null,
+      "link": "https://search.shopping.naver.com/catalog/87654321",
+      "query": "블랙 로퍼 신발",
+      "verdict": "bad"
+     }
+    ]
+   }
+  ],
+  "learned": [
+   "가격: 셀럽 아이템(모르면 후보 중간값)의 0.33~3배",
+   "색: 다른 색은 빼기",
+   "같은 브랜드 공식몰·브랜드스토어 먼저",
+   "자주 나온 '별로' 이유: 색 다름 2 · 싸 보임/품질 1"
+  ],
+  "ok": 3,
+  "goal": 20,
+  "reasons": [
+   "스타일 다름",
+   "색 다름",
+   "아이템 종류 다름",
+   "싸 보임/품질",
+   "브랜드·판매처 별로",
+   "가격 이상",
+   "사진 별로",
+   "너무 흔함",
+   "셀럽 느낌 아님",
+   "기타"
+  ]
  }
 }

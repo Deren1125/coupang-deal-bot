@@ -54,6 +54,9 @@ EDIT_JS_MAX = 14 * 1024
 EDIT_JS_GZIP_MAX = 5 * 1024 + 768
 APP_CSS_MAX = 15 * 1024 + 512
 SW_MAX = 8 * 1024
+# 10/21: 제품 테스트 화면 (후보 카드 ✅/❌·이유 칩·한 줄·테스트 끝·배운 기준) — 처음 열 때만 받는 product.js
+PRODUCT_JS_MAX = 6 * 1024
+PRODUCT_JS_GZIP_MAX = 2 * 1024 + 512
 
 
 @pytest.fixture
@@ -141,7 +144,7 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
     assert res[0] == 200 and res[2].startswith("text/javascript")
     assert res[3]["Cache-Control"] == "no-cache" and res[3]["Service-Worker-Allowed"] == "/dashboard/"
     for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css"), ("badge-72.png", "image/png"),
-                        ("edit.js", "text/javascript")):
+                        ("edit.js", "text/javascript"), ("product.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))
@@ -157,6 +160,8 @@ def test_asset_budgets() -> None:
     assert len((STATIC / "sw.js").read_bytes()) <= SW_MAX
     ed = (STATIC / "edit.js").read_bytes()
     assert len(ed) <= EDIT_JS_MAX and len(gzip.compress(ed, 9)) <= EDIT_JS_GZIP_MAX
+    pj = (STATIC / "product.js").read_bytes()
+    assert len(pj) <= PRODUCT_JS_MAX and len(gzip.compress(pj, 9)) <= PRODUCT_JS_GZIP_MAX
     assert shell.asset_url("app.js") != shell.asset_url("app.css")
 
 
@@ -165,7 +170,8 @@ def test_app_js_is_korean_local_and_safe() -> None:
     css = (STATIC / "app.css").read_text(encoding="utf-8")
     sw = (STATIC / "sw.js").read_text(encoding="utf-8")
     ed = (STATIC / "edit.js").read_text(encoding="utf-8")
-    for text in (js, css, sw, ed):
+    pj = (STATIC / "product.js").read_text(encoding="utf-8")
+    for text in (js, css, sw, ed, pj):
         assert "http://" not in text and "https://" not in text  # 바깥 주소·CDN 없음
         assert "eval(" not in text and "new Function" not in text and "document.write" not in text
     assert js.count("innerHTML") == 1  # 서버가 그린 통계 조각 하나뿐

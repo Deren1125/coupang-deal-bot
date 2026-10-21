@@ -31,7 +31,7 @@ from urllib.parse import urlparse
 
 from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
-from dealbot.dashboard.blogauto import PIC_ID, PIC_JOB_ID, VISIT_ID
+from dealbot.dashboard.blogauto import PIC_ID, PIC_JOB_ID, PT_ITEM_ID, PT_REASONS, VISIT_ID
 from dealbot.dashboard.model import safe_text
 from dealbot.notify import iid as iidmod
 from dealbot.utils.text import truncate
@@ -72,6 +72,7 @@ FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "is
 HHMM = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")  # 예약 시간 바꾸기 (주인 10/19)
 LEARN_ID = re.compile(r"^l[pr]-[0-9a-f]{8}$")  # Blog-Auto learn.py 개선안(lp-)·규칙(lr-) id
 FEEDBACK_REASON_MAX = 80  # Blog-Auto learn.x_post_feedback 과 같은 한도
+PT_NOTE_MAX = 200  # 제품 테스트 한 줄 (Blog-Auto product_trial.NOTE_MAX)
 # 비슷한 아이템 링크 넣기 (주인 10/20) — Blog-Auto bridge.x_similar_links 와 같은 한도 · 화면 글 칸은 한 줄에 '이름 | 링크'
 SIMILAR_LINKS_MAX, SIMILAR_URL_MAX, SIMILAR_NOTE_MAX, SIMILAR_TEXT_MAX = 6, 500, 40, 4000
 HTTPS_URL = re.compile(r"https://[^\s|<>\"']+")
@@ -84,7 +85,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
                 "post_feedback", "learn_decide",  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
                 "similar_links",  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
-                "topic_seed")  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
+                "topic_seed",  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
+                "product_feedback")  # 제품 테스트 (주인 10/21 — Pick 비슷한 아이템 후보 ✅/❌·이유 · 글마다 한 줄·테스트 끝)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input", "search.check")
@@ -613,6 +615,26 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         out = {"blog": "issue", "pid": _int(g("pid")), "links": list(seen)}
         if any(seen.values()):
             out["notes"] = list(seen.values())
+        return out
+    if name == "product_feedback":  # 제품 테스트 (주인 10/21 — 계약 action_product_feedback.json)
+        iid, v = g("item_id"), g("verdict")
+        if v not in (("ok", "bad") if iid is not None else ("note", "done")) \
+                or (iid is not None and (not isinstance(iid, str) or not PT_ITEM_ID.match(iid))):
+            raise ActionError("bad_args")
+        rs = g("reasons") if g("reasons") is not None else []
+        if not isinstance(rs, list) or len(rs) > len(PT_REASONS) or any(r not in PT_REASONS for r in rs) or (rs and v != "bad"):
+            raise ActionError("bad_args")
+        note = " ".join(_str(g("note"), PT_NOTE_MAX * 2, required=False).split())
+        if len(note) > PT_NOTE_MAX:
+            raise ActionError("bad_args")
+        out = {"blog": "issue", "pid": _int(g("pid"))}
+        if iid is not None:
+            out["item_id"] = iid
+        out["verdict"] = v
+        if rs:
+            out["reasons"] = list(dict.fromkeys(rs))
+        if note:
+            out["note"] = note
         return out
     if name == "post_feedback":  # 👍/👎 (주인 10/20 — 계약 action_post_feedback.json): vote none = 지우기, reason 한 줄
         if g("vote") not in ("up", "down", "none"):

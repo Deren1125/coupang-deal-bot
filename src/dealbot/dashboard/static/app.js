@@ -139,7 +139,7 @@ function route() {
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog' && !/^(pics|search)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search|ptrial)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -842,6 +842,17 @@ const edLoad = () => EDJ = EDJ || new Promise((ok, bad) => {
   s.onload = () => W.SBEdit ? ok(W.SBEdit) : bad(); s.onerror = () => { EDJ = null; s.remove(); bad(); };
   D.head.append(s);
 });
+// 제품 테스트 (10/21 — Pick 비슷한 아이템 후보 검수): product.js 는 처음 열 때만 (주소는 meta sb-product)
+let PTJ = null;
+function vPT() {
+  const b = el('div', {});
+  PTJ = PTJ || new Promise((ok, bad) => {
+    const m = D.querySelector('meta[name=sb-product]'), s = el('script', {src: m ? m.content : '/dashboard/static/product.js'});
+    s.onload = () => W.SBProduct ? ok(W.SBProduct) : bad(); s.onerror = () => { PTJ = null; s.remove(); bad(); }; D.head.append(s);
+  });
+  PTJ.then(P => b.replaceChildren(...P.view(S.ptrial, {el, btn, ext, exec, toast, render})), () => toast(MSG.net));
+  return [el('div', {class: 'top'}, el('h2', {}, '제품 테스트'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')), b];
+}
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {
   let E;
@@ -950,6 +961,7 @@ function vBlog() {
     return btn('', [l, n ? el('span', {class: 'cp hot', 'aria-label': `할 일 ${n}개`}, n) : null], () => { location.hash = '#/blog/' + k; }, {'aria-pressed': k === key ? 'true' : 'false'}); }))];
   if (key === 'pics') return out.concat(vPics());
   if (key === 'search') return out.concat(vSearch());
+  if (key === 'ptrial') return out.concat(vPT());
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -958,6 +970,7 @@ function vBlog() {
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
+  if (key === 'issue' && S.ptrial) out.push(el('a', {class: 'bn', href: '#/blog/ptrial'}, `제품 테스트 ${S.ptrial.posts.length}편 →`));
   const sr = S.search;
   if (sr && sr.days.length) out.push(el('a', {class: 'bn', href: '#/blog/search'}, sr.left ? `구글 검색 등록 ${sr.left}개 →` : '구글 검색 등록 →'));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
