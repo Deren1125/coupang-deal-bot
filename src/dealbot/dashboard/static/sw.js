@@ -1,6 +1,6 @@
 /* Sns-board 서비스 워커 (범위 /dashboard/): 앱 파일은 캐시, 화면·상태는 네트워크 먼저(3초) 그다음 마지막 캐시, 웹 푸시 알림. */
 'use strict';
-const V = 'sb-v28', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
+const V = 'sb-v29', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
 const PRE = ['/dashboard/static/icon-192.png', '/dashboard/static/badge-72.png'];
 const STATE = '/dashboard/api/state', HOME = '/dashboard/';
 
@@ -23,11 +23,12 @@ function timeout(p, ms) {
 // 네트워크 먼저 (3초) → 받은 200 은 저장 → 안 되면 마지막 저장본 (상태에는 x-sw-cache 표시)
 async function fresh(req, key, mark) {
   const c = await caches.open(PAGE);
+  // 늦게 온 응답도 저장 — 3초를 넘겨도 다음에 열 때는 새 화면 (10/21: 서버가 바쁘면 옛 껍데기에 고정되던 것)
+  const net = fetch(req).then(r => { if (r.status === 200 && !r.redirected && r.type === 'basic') c.put(key, r.clone()); return r; });
   try {
-    const r = await timeout(fetch(req), 3000);
-    if (r.status === 200 && !r.redirected && r.type === 'basic') c.put(key, r.clone());
-    return r;
+    return await timeout(net, 3000);
   } catch (x) {
+    net.catch(() => {});
     return cached(key, mark, x);
   }
 }
