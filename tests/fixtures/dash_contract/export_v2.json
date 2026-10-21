@@ -221,7 +221,8 @@
     ],
     "similar": {
      "n": 3,
-     "ably": 1
+     "ably": 1,
+     "coupang": 2
     }
    }
   ],
@@ -718,7 +719,8 @@
       "at": "2026-10-21",
       "img": "pt-41-1a2b3c4d-9f8e7d6c.jpg",
       "link": "https://smartstore.naver.com/main/products/1234567",
-      "query": "베이지 트렌치코트 아우터"
+      "query": "베이지 트렌치코트 아우터",
+      "source": "naver"
      },
      {
       "id": "pt-5e6f7a8b",
@@ -730,6 +732,7 @@
       "img": null,
       "link": "https://search.shopping.naver.com/catalog/87654321",
       "query": "블랙 로퍼 신발",
+      "source": "naver",
       "verdict": "bad"
      }
     ]
@@ -754,6 +757,18 @@
    "너무 흔함",
    "셀럽 느낌 아님",
    "기타"
+  ],
+  "sources": [
+   {
+    "name": "coupang",
+    "state": "ok",
+    "text": ""
+   },
+   {
+    "name": "naver_shop",
+    "state": "failed",
+    "text": "쇼핑 검색 API 실패 (404 — 종료된 API로 보여요) · 24시간 쉬는 중"
+   }
   ]
  }
 }
