@@ -975,7 +975,7 @@ function vBlog() {
   if (key === 'trial') return out.concat(vTrial());
   if (key === 'ptrial') return out.concat(vPT());
   if (key === 'sched') return out.concat(vSC());
-  if (key === 'threads') { const b = el('div', {}); thLoad().then(T => T.view(b, {el, btn, api, toast, S}), () => toast(MSG.net)); return out.concat(b); }
+  if (key === 'threads') { const b = el('div', {}); thLoad().then(T => T.view(b, {el, btn, api, toast, S, exec, uploadAll}), () => toast(MSG.net)); return out.concat(b); }
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));

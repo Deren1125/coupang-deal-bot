@@ -61,6 +61,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "edit.js": "text/javascript; charset=utf-8",  # edit.js: 사진 고치기·편집기 (10/19, 처음 쓸 때만)
              "product.js": "text/javascript; charset=utf-8",  # product.js: 제품 테스트 (10/21, 처음 열 때만)
              "sched.js": "text/javascript; charset=utf-8",  # sched.js: 일정 화면 (10/21, 처음 열 때만)
+             "thpost.js": "text/javascript; charset=utf-8",  # thpost.js: 스레드 글·예약·댓글·통계 칸 (10/21, threads.js 칸에 붙음)
              "threads.js": "text/javascript; charset=utf-8"}  # threads.js: 스레드 화면 (10/21, 처음 열 때만)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024

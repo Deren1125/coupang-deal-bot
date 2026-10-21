@@ -107,8 +107,9 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     csp = headers["Content-Security-Policy"]
     assert "script-src 'self'" in csp and "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, re.S)
-    assert len(scripts) == 2
-    (src_attrs, src_body), (boot_attrs, _boot) = scripts
+    assert len(scripts) == 3  # app.js · thpost.js (스레드 칸, 10/21 — threads.js 보다 먼저 떠 있어야 칸이 붙음) · boot
+    (src_attrs, src_body), (tp_attrs, tp_body), (boot_attrs, _boot) = scripts
+    assert re.fullmatch(r' defer src="/dashboard/static/thpost\.js\?v=[0-9a-f]{10}"', tp_attrs) and tp_body == ""
     assert re.fullmatch(r' src="/dashboard/static/app\.js\?v=[0-9a-f]{10}" defer', src_attrs) and src_body == ""
     assert boot_attrs == ' type="application/json" id="boot"'
     outside = re.sub(r'<script type="application/json" id="boot">.*?</script>', "", html, flags=re.S)
