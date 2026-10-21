@@ -655,7 +655,7 @@ def _sched(data: Any) -> dict[str, Any] | None:
         for x in b.get("items")[:60] if isinstance(b.get("items"), list) else []:
             if isinstance(x, dict) and (pid := _count(x.get("pid"), top=10**9)) and x.get("status") in SCHED_STATUSES:
                 items.append({"pid": pid, "scheduled_at": _one_line(x.get("scheduled_at"), 40), "status": x["status"],
-                              "reason": _one_line(x.get("reason"), 80) or ""})
+                              "reason": _one_line(x.get("reason"), 80) or "", "moved": x.get("moved") is True})  # moved: 주인이 시각을 직접 정함 (선택 칸)
         out["blogs"][blog] = {
             "spaced_only": b.get("spaced_only") is True,
             "gap_minutes": [int(g) for g in gm] if isinstance(gm, list) and len(gm) == 2 and all(isinstance(g, int) and 30 <= g <= 600 for g in gm)

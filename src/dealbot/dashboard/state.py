@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import rank
+from dealbot.dashboard import rank, schedview
 from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
@@ -1081,6 +1081,7 @@ class StateBuilder:
         elif router is not None and not any(d["this"] for d in connect["push"]["devices"]):
             banner = {"kind": "push_off", "text": "이 기기에서 알림을 켜면 할 일이 바로 와요"}
         pending = [self._status(r) for r in bot.actions_out.store.open_rows()][:20]
+        blogs = self.blogs(export, todo)
         body: dict[str, Any] = {
             "v": STATE_V, "at": time.time(),
             "me": {"csrf": csrf, "push_key": router.public_key if router is not None else None,
@@ -1089,7 +1090,8 @@ class StateBuilder:
             "counts": {"todo": len(todo), "done_today": today_count(bot, now=time.time())},  # 오늘 한 일 (목록은 /api/today)
             "todo": todo,
             "deal": self.deal(export),
-            "blogs": self.blogs(export, todo),
+            "blogs": blogs,
+            "sched": schedview.build(blogs, getattr(export, "v2", None) or {}, self.tz, time.time(), self._sctx["ok"]),  # 일정 화면 (10/21)
             "sns": self.sns(),
             "connect": connect,
             "pending": pending,

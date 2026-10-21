@@ -101,7 +101,7 @@ async def test_page_hidden_without_trial_posts_or_for_old_blogauto(bot: DealBot,
 def test_app_and_edit_js_have_the_page() -> None:
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
     ed = (webapp.STATIC_DIR / "product.js").read_text(encoding="utf-8")  # 사진 테스트 화면은 처음 열 때만 받는 product.js (10/21)
-    assert "/^(pics|search|trial|ptrial)$/" in js and "'사진 테스트 →'" in js and "function vTrial()" in js and "P.photo(" in js
+    assert "/^(pics|search|trial|ptrial|sched)$/" in js and "'사진 테스트 →'" in js and "function vTrial()" in js and "P.photo(" in js
     assert "S.photo_trial && key === 'issue'" in js and "E2.photo(h, s" in js  # 사진을 누르면 평소 편집기
     for word in ("'배운 원칙'", "'✅ 괜찮아'", "'❌ 별로'", "여백 남음", "UI 남음", "얼굴/몸 잘림", "너무 넓음", "너무 좁음", "다른 사람", "흐림",
                  "중복", "글자 많음", "방송 캡처", "비율 이상", "어두움", "기타", "사진 배치", "사진 분포", "사진 개수", "'보내기'",

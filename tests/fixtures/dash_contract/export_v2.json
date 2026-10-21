@@ -393,13 +393,15 @@
       "pid": 47,
       "scheduled_at": "2026-10-18T14:20:00+09:00",
       "status": "scheduled",
-      "reason": ""
+      "reason": "",
+      "moved": false
      },
      {
       "pid": 48,
       "scheduled_at": null,
       "status": "blocked",
-      "reason": "사진이 아직 없어요"
+      "reason": "사진이 아직 없어요",
+      "moved": false
      }
     ]
    },

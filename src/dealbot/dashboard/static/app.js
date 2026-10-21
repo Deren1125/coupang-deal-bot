@@ -139,7 +139,7 @@ function route() {
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -848,6 +848,11 @@ function vPT() {
   ptLoad().then(P => b.replaceChildren(...P.view(S.ptrial, {el, btn, ext, exec, toast, render})), () => toast(MSG.net));
   return [el('div', {class: 'top'}, el('h2', {}, '제품 테스트'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')), b];
 }
+// 일정 화면 (10/21): sched.js 는 처음 열 때만
+const scLoad = lazy('meta[name=sb-sched]', 'sched', 'SBSched');
+let SC;
+const vSC = () => SC ? SC.view(S.sched, {el, btn, render, act, open: openItem, pend: pendingOf})
+  : (scLoad().then(m => { SC = m; render(); }, () => toast(MSG.net)), [el('p', {class: 'boot'}, '불러오는 중…')]);
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {
   let E;
@@ -968,6 +973,7 @@ function vBlog() {
   if (key === 'search') return out.concat(vSearch());
   if (key === 'trial') return out.concat(vTrial());
   if (key === 'ptrial') return out.concat(vPT());
+  if (key === 'sched') return out.concat(vSC());
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -975,6 +981,7 @@ function vBlog() {
   const more = acts.filter(a => !idea.includes(a) && a !== write && a !== seed);
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
+  if (S.sched && S.sched.total) out.push(el('a', {class: 'bn', href: '#/blog/sched'}, `예약 일정 보기 · ${S.sched.total}편 →`));
   if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
   if (S.photo_trial && key === 'issue') out.push(el('a', {class: 'bn', href: '#/blog/trial'}, '사진 테스트 →'));
   if (key === 'issue' && S.ptrial) out.push(el('a', {class: 'bn', href: '#/blog/ptrial'}, `제품 테스트 ${S.ptrial.posts.length}편 →`));

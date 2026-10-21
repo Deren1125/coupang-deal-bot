@@ -116,7 +116,7 @@ def test_app_js_page_and_product_js_flow() -> None:
     pj = (webapp.STATIC_DIR / "product.js").read_text(encoding="utf-8")
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
     assert "const V = 'sb-v28'" in sw  # 10/21 merge post-edit (sb-v28)
-    assert "/^(pics|search|trial|ptrial)$/" in js and "key === 'ptrial'" in js and "meta[name=sb-product]" in js
+    assert "/^(pics|search|trial|ptrial|sched)$/" in js and "key === 'ptrial'" in js and "meta[name=sb-product]" in js
     assert "key === 'issue' && S.ptrial" in js and "제품 테스트 ${S.ptrial.posts.length}편" in js
     for word in ("배운 기준", "✅ 괜찮아", "❌ 별로", "열기", "테스트 끝", "한 줄 보내기", "별로 보내기", "W.SBProduct = {view, photo}",
                  "extra.reasons", "verdict: v", "'done'", "'note'"):
