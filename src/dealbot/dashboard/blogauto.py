@@ -523,9 +523,23 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         "schedule": _sched_post(v.get("schedule")), "pics": _pics(v.get("pics")), "ig_suggest": _ig_suggest(v.get("ig_suggest")),
         # 인기 검색어 상위 10 키워드 글 (주인 10/20 — Blog-Auto hotfirst, 선택 칸: 핫 글만) → 할 일 맨 위 · '🔥 인기 N위'
         **({"hot_rank": hr} if (hr := _count(v.get("hot_rank"), top=10)) else {}),
+        # 업로드 실패 이유 (주인 10/21 — Blog-Auto failwhy, 선택 칸: 실패한 글만) → 할 일 줄 '업로드 실패 · 이유'
+        **({"fail": fl} if (fl := _fail(v.get("fail"))) is not None else {}),
         # 비슷한 아이템 (주인 10/20 — Blog-Auto issue_similar, 선택 칸: Pick 패션 글만) → '비슷한 아이템 링크 넣기'
         **({"similar": sim} if (sim := _similar(v.get("similar"))) is not None else {}),
     }
+
+
+FAIL_KINDS = ("memory", "busy", "login", "editor", "ai", "other")
+FAIL_AUTO = ("pending", "done", "no")
+
+
+def _fail(v: Any) -> dict[str, str] | None:
+    """{why, kind, at, auto_retry} — 이유 글이 없으면 None (예전 Blog-Auto 는 이 칸이 없음)."""
+    if not isinstance(v, dict) or not (why := _one_line(safe_text(v.get("why"), 120), 80)):
+        return None
+    return {"why": why, "kind": v.get("kind") if v.get("kind") in FAIL_KINDS else "other", "at": _one_line(v.get("at"), 40) or "",
+            "auto_retry": v.get("auto_retry") if v.get("auto_retry") in FAIL_AUTO else "no"}
 
 
 def _similar(v: Any) -> dict[str, int] | None:

@@ -252,7 +252,33 @@
     "schedule": null
    }
   ],
-  "hotdeal": []
+  "hotdeal": [
+   {
+    "pid": 100,
+    "title": "쿠팡 핫딜 모음",
+    "status": "failed",
+    "stage": "업로드 실패",
+    "saved_at": null,
+    "score": 0,
+    "popular": false,
+    "owner_edited": false,
+    "needs": [
+     "retry"
+    ],
+    "schedule": null,
+    "photo_request": null,
+    "slots": [],
+    "questions": [],
+    "deadline": null,
+    "naver_url": null,
+    "fail": {
+     "why": "서버 메모리가 모자라 크롬이 제때 안 떠서 (잠시 뒤 다시 하면 대부분 돼요)",
+     "kind": "memory",
+     "at": "2026-10-18T09:00:00+09:00",
+     "auto_retry": "pending"
+    }
+   }
+  ]
  },
  "recent": {
   "issue": [

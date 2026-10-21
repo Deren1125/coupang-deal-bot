@@ -383,6 +383,8 @@ class StateBuilder:
             status = f"사진 {n}장 필요" if n else status
         if first == "answers" and post and post.get("questions"):
             status = f"질문 {len(post['questions'])}개"
+        if first == "retry" and post and post.get("fail"):  # 실패 이유 한 줄 (주인 10/21 — 서버 쪽에서 글자로, app.js 는 그대로)
+            status = self._fail_text(status, post["fail"])
         if first == "publish" and post and post.get("popular"):
             status = "발행 대기 · 인기 예상"
         # 끝나는 시간 (질문 마감·사진 부탁 마감) → 줄에 '· 18:00까지' + 정렬·경고색 (딜 줄과 같은 기준으로 앞에)
@@ -419,6 +421,17 @@ class StateBuilder:
                            "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
                 "links": list((pr or {}).get("links") or [])[:LINKS_MAX] if "photos" in needs else [],
                 "_hot": rank.post_hot(post), "_hot_rank": (post or {}).get("hot_rank")}
+
+    def _fail_text(self, status: str, fail: dict[str, Any]) -> str:
+        """'업로드 실패 · 이유 — 20분 뒤 한 번 자동으로 다시 해요' (memory·busy 만 자동으로 한 번 다시)."""
+        text = f"{status} · {fail['why']}"
+        if fail["auto_retry"] == "done":
+            return text + " — 자동으로 한 번 다시 해 봤어요"
+        if fail["auto_retry"] != "pending":
+            return text
+        at = _iso_ts(fail.get("at"), self.tz)
+        left = 20 - int((time.time() - at) // 60) if at else 20
+        return text + (f" — {left}분 뒤 한 번 자동으로 다시 해요" if left > 0 else " — 곧 한 번 자동으로 다시 해요")
 
     @staticmethod
     def _ig_view(blog: str, pid: int, post: dict[str, Any] | None) -> list[dict[str, Any]]:
