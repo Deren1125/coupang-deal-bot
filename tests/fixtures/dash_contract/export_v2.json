@@ -514,10 +514,52 @@
  "trends": {
   "at": "2026-10-18T15:21:00+09:00",
   "items": [
-   {"keyword": "제니 공항패션", "rank": 1, "sources": ["google", "pick", "news"], "change": 2, "new": false, "written": true, "tag": "fashion"},
-   {"keyword": "폭싹 속았수다", "rank": 2, "sources": ["google"], "change": null, "new": true, "written": false, "tag": "ent"},
-   {"keyword": "트렌치코트", "rank": 3, "sources": ["news"], "change": -1, "new": false, "written": false, "tag": "fashion"},
-   {"keyword": "육영수", "rank": 4, "sources": ["google"], "change": 0, "new": false, "written": false, "tag": null}
+   {
+    "keyword": "제니 공항패션",
+    "rank": 1,
+    "sources": [
+     "google",
+     "pick",
+     "news"
+    ],
+    "change": 2,
+    "new": false,
+    "written": true,
+    "tag": "fashion"
+   },
+   {
+    "keyword": "폭싹 속았수다",
+    "rank": 2,
+    "sources": [
+     "google"
+    ],
+    "change": null,
+    "new": true,
+    "written": false,
+    "tag": "ent"
+   },
+   {
+    "keyword": "트렌치코트",
+    "rank": 3,
+    "sources": [
+     "news"
+    ],
+    "change": -1,
+    "new": false,
+    "written": false,
+    "tag": "fashion"
+   },
+   {
+    "keyword": "육영수",
+    "rank": 4,
+    "sources": [
+     "google"
+    ],
+    "change": 0,
+    "new": false,
+    "written": false,
+    "tag": null
+   }
   ]
  },
  "learn": {
@@ -526,14 +568,130 @@
   "lessons_week": 9,
   "auto_apply_days": null,
   "proposals": [
-   {"id": "lp-1a2b3c4d", "blog": "issue", "area": "title", "rule_text": "제목 끝에 물음표를 붙이지 않는다. 궁금증은 본문 첫 문장에서 푼다.", "evidence": 3, "examples": ["…일까? → …정리"], "effect": "주인이 제목을 고치는 일이 줄어듦", "state": "open"},
-   {"id": "lp-5e6f7a8b", "blog": "finance", "area": "tags", "rule_text": "태그는 14개 이상 넣는다.", "evidence": 2, "examples": [], "effect": "검색 유입이 늘어남", "state": "rejected"}
+   {
+    "id": "lp-1a2b3c4d",
+    "blog": "issue",
+    "area": "title",
+    "rule_text": "제목 끝에 물음표를 붙이지 않는다. 궁금증은 본문 첫 문장에서 푼다.",
+    "evidence": 3,
+    "examples": [
+     "…일까? → …정리"
+    ],
+    "effect": "주인이 제목을 고치는 일이 줄어듦",
+    "state": "open"
+   },
+   {
+    "id": "lp-5e6f7a8b",
+    "blog": "finance",
+    "area": "tags",
+    "rule_text": "태그는 14개 이상 넣는다.",
+    "evidence": 2,
+    "examples": [],
+    "effect": "검색 유입이 늘어남",
+    "state": "rejected"
+   }
   ],
   "rules": [
-   {"id": "lr-9c0d1e2f", "blog": "issue", "area": "photo", "rule_text": "전신 사진을 첫 자리에 둔다.", "at": "2026-10-11T21:30:00", "by": "owner"},
-   {"id": "lr-3a4b5c6d", "blog": "finance", "area": "tags", "rule_text": "태그는 12개로 맞춘다.", "at": "2026-10-11T21:31:00", "by": "owner", "config": {"key": "tags.min", "value": 12}}
+   {
+    "id": "lr-9c0d1e2f",
+    "blog": "issue",
+    "area": "photo",
+    "rule_text": "전신 사진을 첫 자리에 둔다.",
+    "at": "2026-10-11T21:30:00",
+    "by": "owner"
+   },
+   {
+    "id": "lr-3a4b5c6d",
+    "blog": "finance",
+    "area": "tags",
+    "rule_text": "태그는 12개로 맞춘다.",
+    "at": "2026-10-11T21:31:00",
+    "by": "owner",
+    "config": {
+     "key": "tags.min",
+     "value": 12
+    }
+   }
   ],
-  "votes": {"40": "up", "46": "down"}
+  "votes": {
+   "40": "up",
+   "46": "down"
+  }
+ },
+ "photo_trial": {
+  "posts": [
+   {
+    "pid": 52,
+    "title": "원빈 근황 공개 스타일",
+    "at": "2026-10-21T20:10:00",
+    "slots": [
+     {
+      "slot": 1,
+      "final": "post-issue-52-1-5d6e7f80-u.jpg",
+      "full": "post-issue-52-1-5d6e7f80-f.jpg",
+      "credit": "news1.kr",
+      "desc": "정면 전신",
+      "qa": {
+       "ok": true,
+       "issues": []
+      }
+     },
+     {
+      "slot": 2,
+      "final": "post-issue-52-2-9a0b1c2d-u.jpg",
+      "full": "post-issue-52-2-9a0b1c2d-f.jpg",
+      "credit": "",
+      "desc": "그 장면이 없으면 원빈 다른 사진도 돼요",
+      "qa": {
+       "ok": false,
+       "issues": [
+        "border"
+       ]
+      }
+     },
+     {
+      "slot": 3,
+      "final": null,
+      "full": null,
+      "credit": "",
+      "desc": "마무리 컷",
+      "qa": {
+       "ok": false,
+       "issues": []
+      }
+     }
+    ],
+    "feedback_done": 2
+   }
+  ],
+  "rules": [
+   {
+    "id": "lr-7e8f9a0b",
+    "area": "photo",
+    "text": "TV·방송 화면 캡처(로고·자막 띠가 있는 화면)는 자르지 말고 빼고, 그 자리는 비워 둔다.",
+    "at": "2026-10-21T23:41:00"
+   }
+  ],
+  "reasons": [
+   "margin_left_over",
+   "ui_remnant",
+   "subject_cut",
+   "too_wide",
+   "too_tight",
+   "wrong_person",
+   "low_quality_blur",
+   "duplicate",
+   "text_overlay",
+   "bad_aspect",
+   "dark",
+   "broadcast_frame",
+   "screen_capture_graphics",
+   "other",
+   "placement",
+   "spread",
+   "count",
+   "fit"
+  ]
  },
  "product_trial": {
   "posts": [

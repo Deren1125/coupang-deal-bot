@@ -108,5 +108,5 @@ async def test_button_on_pick_fashion_posts_only(bot: DealBot, settings: Setting
 def test_sw_bumped_and_textarea_path_in_app_js() -> None:
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
-    assert "const V = 'sb-v26'" in sw  # 10/21 제품 테스트 (sb-v26)
+    assert "const V = 'sb-v27'" in sw  # 10/21 merge: 사진 테스트 + 제품 테스트 (sb-v27)
     assert "(a.placeholder || '').includes('\\n')" in js and "else extra.text = v" in js  # 글 칸 그대로 text 로 → 서버가 줄을 나눔

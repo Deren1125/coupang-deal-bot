@@ -31,7 +31,14 @@ from urllib.parse import urlparse
 
 from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
-from dealbot.dashboard.blogauto import PIC_ID, PIC_JOB_ID, PT_ITEM_ID, PT_REASONS, VISIT_ID
+from dealbot.dashboard.blogauto import (
+    PIC_ID,
+    PIC_JOB_ID,
+    PT_ITEM_ID,
+    PT_REASONS,
+    TRIAL_REASONS,
+    VISIT_ID,
+)
 from dealbot.dashboard.model import safe_text
 from dealbot.notify import iid as iidmod
 from dealbot.utils.text import truncate
@@ -68,7 +75,7 @@ DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.photos_batch", "blog.write", "blog.issue", "blog.pick", "blog.hotdeal_now", "blog.fixpic",
                          "blog.similar_links"})
 FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
-              "blog.fixpic": "finance", "blog.similar_links": "issue"}
+              "blog.fixpic": "finance", "blog.similar_links": "issue", "blog.photo_feedback": "issue"}
 HHMM = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")  # 예약 시간 바꾸기 (주인 10/19)
 LEARN_ID = re.compile(r"^l[pr]-[0-9a-f]{8}$")  # Blog-Auto learn.py 개선안(lp-)·규칙(lr-) id
 FEEDBACK_REASON_MAX = 80  # Blog-Auto learn.x_post_feedback 과 같은 한도
@@ -86,6 +93,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "post_feedback", "learn_decide",  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
                 "similar_links",  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
                 "topic_seed",  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
+                "photo_feedback",  # 사진 테스트 (주인 10/21 — 시험 글 사진마다 ✅/❌·이유 · 글 전체 · 테스트 끝)
                 "product_feedback")  # 제품 테스트 (주인 10/21 — Pick 비슷한 아이템 후보 ✅/❌·이유 · 글마다 한 줄·테스트 끝)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
@@ -212,6 +220,7 @@ def _uploads(v: Any, lo: int, hi: int) -> list[str]:
 ANSWER_Q_MAX, ANSWER_PHOTOS_MAX = 40, 20
 NOTES_MAX, NOTES_PHOTOS_MAX, PRODUCT_MAX = 2000, 10, 60  # Blog-Auto bridge.x_post_notes 와 같은 한도
 SEED_MAX = 300  # 소재 넣기 (주인 10/21) — Blog-Auto early_radar.SEED_MAX 와 같은 한도
+TRIAL_NOTE_MAX = 200  # 사진 테스트 메모 (주인 10/21) — Blog-Auto photo_trial.NOTE_MAX 와 같은 한도
 
 
 def _answer_photos(v: Any) -> list[dict[str, Any]] | None:
@@ -645,6 +654,21 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
             raise ActionError("bad_args")
         if reason:
             out["reason"] = reason
+        return out
+    if name == "photo_feedback":  # 사진 테스트 (주인 10/21 — 계약 action_photo_feedback.json): slot 없으면 글 전체 · done = 테스트 끝
+        verdict, reasons = g("verdict"), g("reasons") if g("reasons") is not None else []
+        if verdict not in ("ok", "bad", "done") or not isinstance(reasons, list) or len(reasons) > 12 \
+                or not all(isinstance(r, str) and r in TRIAL_REASONS for r in reasons):
+            raise ActionError("bad_args")
+        out = {"blog": "issue", "pid": _int(g("pid"))}
+        if g("slot") is not None:
+            out["slot"] = _int(g("slot"), 1, 40)
+        out.update(verdict=verdict, reasons=list(dict.fromkeys(reasons)) if verdict == "bad" else [])
+        note = " ".join(_str(g("note"), TRIAL_NOTE_MAX * 2, required=False).split())
+        if len(note) > TRIAL_NOTE_MAX or (verdict == "bad" and not out["reasons"] and not note):
+            raise ActionError("bad_args")
+        if note and verdict != "done":
+            out["note"] = note
         return out
     if name == "learn_decide":  # 이번 주 개선안 ✅ 적용·❌ 빼기 (lp-) · 적용 규칙 지우기 (lr-) — 계약 action_learn_decide.json
         lid, d = g("id"), g("decision")

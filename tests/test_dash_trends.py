@@ -105,7 +105,7 @@ def test_app_js_has_the_board_badges_and_photo_tap() -> None:
                  "pendingOf(i.iid)", "edPhoto(it, s)", "E.photo(h, s"):
         assert word in js, word
     for word in ("'원본', -1", "'1:1'", "'4:5'", "'16:9'", "'자유'", "90° 돌리기", "사람만 남기기", "{focus: true}", "{retouch: c.re}",
-                 "'저장'", "교체·비우기", "W.SBEdit = {batch, editor, photo}", "'blog.photos_batch'", "edited: true"):
+                 "'저장'", "교체·비우기", "W.SBEdit = {batch, editor, photo", "'blog.photos_batch'", "edited: true"):
         assert word in ed, word
-    assert "const V = 'sb-v26'" in sw  # 10/21 제품 테스트 (sb-v26)
+    assert "const V = 'sb-v27'" in sw  # 10/21 merge: 사진 테스트 + 제품 테스트 (sb-v27)
     assert json.dumps(fixture("action_photos_batch.json")["args"]["ops"][1]).count("retouch") == 1
