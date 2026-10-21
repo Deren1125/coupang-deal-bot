@@ -36,6 +36,8 @@ from dealbot.dashboard.blogauto import (
     PIC_JOB_ID,
     PT_ITEM_ID,
     PT_REASONS,
+    TH_ITEM_ID,
+    TH_MEDIA_ID,
     TRIAL_REASONS,
     VISIT_ID,
 )
@@ -70,6 +72,7 @@ CONFIRM = frozenset({
     "blog.publish", "blog.drop", "blog.fix", "blog.rewrite", "blog.restyle", "blog.share", "blog.channel", "blog.oedit_redo",
     "blog.mode", "blog.pause", "blog.drafts_cleanup", "blog.ledger", "push.unsubscribe", "blog.unschedule_all",
     "blog.post_edit",  # 발행 글 고치기 (주인 10/21) — 공개된 글을 바로 바꿈
+    "blog.threads_post", "blog.threads_reply",  # 스레드 글·답글 (주인 10/21) — 밖으로 나가는 글
 })
 DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 # 그 블로그가 자동 발행 모드면 바로 네이버에 공개되는 일 (Blog-Auto nl.CATALOG 의 may_publish 와 같게) — 그때만 ★
@@ -96,6 +99,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "topic_seed",  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
                 "photo_feedback",  # 사진 테스트 (주인 10/21 — 시험 글 사진마다 ✅/❌·이유 · 글 전체 · 테스트 끝)
                 "product_feedback",  # 제품 테스트 (주인 10/21 — Pick 비슷한 아이템 후보 ✅/❌·이유 · 글마다 한 줄·테스트 끝)
+                "threads_post", "threads_cancel", "threads_reply",  # 스레드 (주인 10/21 — 주인이 쓴 글 바로·예약 · 예약 취소 · 내 글 답글에 답)
                 "post_edit")  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
@@ -222,6 +226,7 @@ def _uploads(v: Any, lo: int, hi: int) -> list[str]:
 ANSWER_Q_MAX, ANSWER_PHOTOS_MAX = 40, 20
 NOTES_MAX, NOTES_PHOTOS_MAX, PRODUCT_MAX = 2000, 10, 60  # Blog-Auto bridge.x_post_notes 와 같은 한도
 SEED_MAX = 300  # 소재 넣기 (주인 10/21) — Blog-Auto early_radar.SEED_MAX 와 같은 한도
+TH_TEXT_MAX = 500  # 스레드 글·답글 (Blog-Auto threads_api.TEXT_MAX — 제휴 고지를 붙여 넘으면 Blog-Auto 가 거절하며 알려 줌)
 TRIAL_NOTE_MAX = 200  # 사진 테스트 메모 (주인 10/21) — Blog-Auto photo_trial.NOTE_MAX 와 같은 한도
 
 
@@ -725,6 +730,32 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
                 or (d == "remove") != lid.startswith("lr-"):
             raise ActionError("bad_args")
         return {"id": lid, "decision": d}
+    if name == "threads_post":  # 스레드 글 (주인 10/21 — 계약 action_threads_post.json): {text, image?(올린 사진 id), at?('HH:MM' + day | epoch 초)}
+        out = {"text": _str(g("text"), TH_TEXT_MAX)}
+        if g("image") not in (None, ""):
+            out["image"] = _uploads([g("image")], 1, 1)[0]
+        at = g("at")
+        if isinstance(at, str) and at:
+            if not HHMM.match(at) or g("day") not in ("today", "tomorrow"):
+                raise ActionError("bad_args")
+            out.update(at=at, day=g("day"))
+        elif isinstance(at, int | float) and not isinstance(at, bool):
+            if not 1e9 < at < 1e10:
+                raise ActionError("bad_args")
+            out["at"] = round(float(at), 1)
+        elif at not in (None, ""):
+            raise ActionError("bad_args")
+        return out
+    if name == "threads_cancel":  # 스레드 예약 취소 — {id: th-xxxxxxxx}
+        tid = g("id")
+        if not isinstance(tid, str) or not TH_ITEM_ID.match(tid):
+            raise ActionError("bad_args")
+        return {"id": tid}
+    if name == "threads_reply":  # 내 글에 달린 답글에 주인이 쓴 답 — {media_id, text} (AI 초안 없음)
+        mid = g("media_id")
+        if not isinstance(mid, str) or not TH_MEDIA_ID.match(mid):
+            raise ActionError("bad_args")
+        return {"media_id": mid, "text": _str(g("text"), TH_TEXT_MAX)}
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
@@ -772,6 +803,13 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return str(args.get("id") or "")
     if action == "blog.learn_decide":
         return "learn"
+    if action == "blog.threads_cancel":  # 스레드 글·통계 화면 (주인 10/21) — 줄마다 따로 (여러 줄을 잇달아 눌러도 '하는 중' 아님)
+        return f"thpost-{args.get('id')}"
+    if action == "blog.threads_reply":
+        return f"thpost-r{args.get('media_id')}"
+    if action == "blog.threads_post":  # 글마다 따로 (같은 글을 두 번 누르면 한 번 · 다른 글은 앞 글이 끝나기 전에도)
+        key = json.dumps([args.get("text"), args.get("at"), args.get("day")], ensure_ascii=False)
+        return "thpost-p" + hashlib.sha256(key.encode()).hexdigest()[:8]
     if action == "search.check":
         return "search"
     if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all",
@@ -823,6 +861,10 @@ def confirm_text(action: str, args: dict[str, Any], facts: dict[str, Any]) -> di
                           else f"{blog}{num} 글을 간격 두고 발행할까요?",
                           "2~3시간 간격으로 08~22시에 한 편씩 올라가요. 블로그 탭에서 언제든 취소할 수 있어요.", "예약하기"),
         "blog.unschedule_all": (f"{blog} 예약을 모두 취소할까요?", "예약된 글은 발행하지 않고 기다리는 글로 돌아가요.", "모두 취소"),
+        "blog.threads_post": (("스레드 예약할까요?", "정한 시각에 공개 글로 올라가요. 그 전에는 취소할 수 있어요.", "예약하기")
+                              if args.get("at") else
+                              ("스레드에 올릴까요?", "바로 공개 글로 올라가요. 올린 뒤에는 스레드 앱에서만 지울 수 있어요.", "올리기")),
+        "blog.threads_reply": ("이 답글에 답할까요?", "내 스레드 글 아래에 공개 답글로 바로 올라가요.", "답글 달기"),
         "blog.post_edit": (f"{blog}{num} 발행 글을 고칠까요?", "네이버에 공개된 글을 바로 고쳐요. 뺀 사진·문장은 되돌리기 어려워요."
                            " 카테고리·태그·공개 설정은 그대로예요.", "고치기"),
     }
@@ -1103,6 +1145,13 @@ class ActionDesk:
                 per.append({**x, "uploads": [str(p) for p in paths]})
                 ups = [*ups, *x["uploads"]]
             spool_args["answers"] = per
+        elif name == "threads_post" and args.get("image"):  # 붙인 사진 id → 경로 (Blog-Auto 는 id 를 모른다)
+            ups = [args["image"]]
+            p = self.uploads.path(args["image"], kind="photo")
+            if p is None:
+                self._audit(caller, action, target, args, "bad_upload")
+                return 400, self._err("bad_upload")
+            spool_args["image"] = str(p)
         elif name == "post_notes":  # 붙인 사진 id → 경로 (photos — Blog-Auto 는 id 를 모른다)
             ups = list(args.get("photos") or [])
             paths = [self.uploads.path(uid, kind="photo") for uid in ups]

@@ -52,7 +52,10 @@
   "topic_seed",
   "photo_feedback",
   "product_feedback",
-  "post_edit"
+  "post_edit",
+  "threads_post",
+  "threads_cancel",
+  "threads_reply"
  ],
  "kakao": {
   "state": "ok",

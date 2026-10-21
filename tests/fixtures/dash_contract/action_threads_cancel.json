@@ -1,0 +1,18 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9t02",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "threads_cancel",
+ "blog": null,
+ "args": {
+  "id": "th-1a2b3c4d"
+ },
+ "target": "thpost",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_th0002"
+ }
+}

@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import rank, schedview
+from dealbot.dashboard import rank, schedview, thpost
 from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
@@ -1101,8 +1101,15 @@ class StateBuilder:
             "photo_trial": self.photo_trial(export),
             "search": self.search_view(getattr(export, "v2", None) or {}),
             "ptrial": self.product_trial(export),  # 제품 테스트 (10/21)
+            "thpost": self.thpost(export),  # 스레드 글·통계 (10/21 — thpost.py · Blog-Auto threads 칸이 없으면 None)
         }
         return body
+
+    def thpost(self, export: Any) -> dict[str, Any] | None:
+        """스레드 글·통계 (주인 10/21): 주인이 쓴 글 바로·예약 · 예약 취소 · 계정의 최근 글 · 새 답글에 답 · 공식 인사이트."""
+        sup = self._supported(self._ba_status())
+        ok = sup is None or {"threads_post", "threads_cancel", "threads_reply"} <= sup
+        return thpost.build((getattr(export, "v2", None) or {}).get("threads"), ZoneInfo(self.tz), time.time(), act, bridge_ok=ok)
 
     @staticmethod
     def _status(row: dict[str, Any]) -> dict[str, Any]:

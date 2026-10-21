@@ -884,13 +884,76 @@ def _photo_trial(v: Any) -> dict[str, Any] | None:
     return {"posts": posts, "rules": rules}
 
 
+# 스레드 (주인 10/21 — Blog-Auto threads_api.export): 주인이 쓴 글 바로·예약 줄 · 계정의 최근 글 · 내 글의 새 답글 · 공식 인사이트
+TH_ITEM_ID = re.compile(r"^th-[0-9a-f]{8}$")
+TH_MEDIA_ID = re.compile(r"^[0-9]{1,30}$")
+TH_STATUSES = ("scheduled", "posting", "posted", "failed", "cancelled")
+TH_METRICS = ("views", "likes", "replies", "reposts", "quotes")
+TH_TEXT_MAX = 500
+TH_QUEUE_MAX, TH_POSTS_MAX, TH_REPLIES_MAX, TH_STATS_POSTS_MAX = 40, 15, 20, 15
+_CTRL = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
+
+
+def _th_text(v: Any, limit: int) -> str:
+    """여러 줄 그대로 (줄바꿈만 남기고 제어 문자는 뺌), limit 자까지."""
+    if not isinstance(v, str):
+        return ""
+    t = _CTRL.sub(" ", v.replace("\r\n", "\n")).strip()
+    return t[:limit]
+
+
+def _th_nums(v: Any) -> dict[str, int]:
+    v = v if isinstance(v, dict) else {}
+    return {m: _count(v.get(m), top=10**12) or 0 for m in TH_METRICS}
+
+
+def _threads(v: Any) -> dict[str, Any] | None:
+    """{connected, how, token_days, today, cap, queue, posts, replies: {new, items}, stats} (계약 export_v2.json threads).
+    칸이 없으면(예전 Blog-Auto) None. 줄마다 따로 걸러 이상한 줄만 빠진다. 주소는 https 만."""
+    if not isinstance(v, dict) or not isinstance(v.get("connected"), bool):
+        return None
+    queue = []
+    for x in v.get("queue")[:TH_QUEUE_MAX] if isinstance(v.get("queue"), list) else []:
+        if isinstance(x, dict) and TH_ITEM_ID.match(str(x.get("id") or "")) and x.get("status") in TH_STATUSES:
+            queue.append({"id": x["id"], "text": _th_text(x.get("text"), TH_TEXT_MAX), "at": _one_line(x.get("at"), 40),
+                          "status": x["status"], "image": x.get("image") is True, "permalink": https_url(x.get("permalink")) or "",
+                          "error": _one_line(safe_text(x.get("error") or "", 200), 120) or ""})
+    posts = []
+    for x in v.get("posts")[:TH_POSTS_MAX] if isinstance(v.get("posts"), list) else []:
+        if isinstance(x, dict) and TH_MEDIA_ID.match(str(x.get("id") or "")):
+            posts.append({"id": x["id"], "text": _one_line(x.get("text"), 140) or "", "permalink": https_url(x.get("permalink")) or "",
+                          "at": _one_line(x.get("at"), 40)})
+    rep = v.get("replies") if isinstance(v.get("replies"), dict) else {}
+    items = []
+    for x in rep.get("items")[:TH_REPLIES_MAX] if isinstance(rep.get("items"), list) else []:
+        if isinstance(x, dict) and TH_MEDIA_ID.match(str(x.get("id") or "")):
+            items.append({"id": x["id"], "post_id": str(x.get("post_id") or "") if TH_MEDIA_ID.match(str(x.get("post_id") or "")) else "",
+                          "post_text": _one_line(x.get("post_text"), 80) or "", "username": _one_line(x.get("username"), 40) or "",
+                          "text": _one_line(x.get("text"), 300) or "", "at": _one_line(x.get("at"), 40)})
+    stats = None
+    st = v.get("stats")
+    if isinstance(st, dict):
+        days = [{"day": d["day"], "views": _count(d.get("views"), top=10**12) or 0}
+                for d in (st.get("days") if isinstance(st.get("days"), list) else [])[:7]
+                if isinstance(d, dict) and isinstance(d.get("day"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d["day"])]
+        per = [{"id": p["id"], **_th_nums(p)} for p in (st.get("posts") if isinstance(st.get("posts"), list) else [])[:TH_STATS_POSTS_MAX]
+               if isinstance(p, dict) and TH_MEDIA_ID.match(str(p.get("id") or ""))]
+        stats = {"at": _one_line(st.get("at"), 40), "totals": _th_nums(st.get("totals")),
+                 "followers": _count(st.get("followers"), top=10**12), "days": days, "posts": per}
+    return {"connected": v["connected"], "how": _one_line(v.get("how"), 200) or "",
+            "token_days": _count(v.get("token_days"), top=10**4), "today": _count(v.get("today"), top=10**4) or 0,
+            "cap": _count(v.get("cap"), top=250) or 0, "queue": queue, "posts": posts,
+            "replies": {"new": len(items), "items": items}, "stats": stats}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
                            "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits")),
                            "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends")),
                            "learn": _learn(data.get("learn")), "photo_trial": _photo_trial(data.get("photo_trial")),
-                           "product_trial": _product_trial(data.get("product_trial"))}
+                           "product_trial": _product_trial(data.get("product_trial")),
+                           "threads": _threads(data.get("threads"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

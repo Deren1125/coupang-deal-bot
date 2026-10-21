@@ -818,5 +818,133 @@
     "text": "쇼핑 검색 API 실패 (404 — 종료된 API로 보여요) · 24시간 쉬는 중"
    }
   ]
+ },
+ "threads": {
+  "connected": true,
+  "how": "",
+  "token_days": 41,
+  "today": 2,
+  "cap": 5,
+  "queue": [
+   {
+    "id": "th-1a2b3c4d",
+    "text": "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.\n\n오늘 올린 핫딜 정리했어요\nhttps://blog.naver.com/demiyum/224000000001",
+    "at": "2026-10-18T21:30:00+09:00",
+    "status": "scheduled",
+    "image": true,
+    "permalink": "",
+    "error": ""
+   },
+   {
+    "id": "th-5e6f7a8b",
+    "text": "주말에 가볼 만한 전시 세 곳 골라 봤어요",
+    "at": "2026-10-18T09:02:11+09:00",
+    "status": "posted",
+    "image": false,
+    "permalink": "https://www.threads.com/@deren/post/DAbcdEfgh12",
+    "error": ""
+   },
+   {
+    "id": "th-9c0d1e2f",
+    "text": "사진 글 시험",
+    "at": "2026-10-18T08:40:00+09:00",
+    "status": "failed",
+    "image": true,
+    "permalink": "",
+    "error": "스레드가 글 상자를 처리하지 못했어요 (ERROR)"
+   }
+  ],
+  "posts": [
+   {
+    "id": "18012345678900001",
+    "text": "주말에 가볼 만한 전시 세 곳 골라 봤어요",
+    "permalink": "https://www.threads.com/@deren/post/DAbcdEfgh12",
+    "at": "2026-10-18T09:02:11+09:00"
+   },
+   {
+    "id": "18012345678900002",
+    "text": "오늘의 핫딜: 무선청소기 32% 내려갔어요",
+    "permalink": "https://www.threads.com/@deren/post/DAbcdEfgh13",
+    "at": "2026-10-17T20:15:00+09:00"
+   }
+  ],
+  "replies": {
+   "new": 1,
+   "items": [
+    {
+     "id": "18012345678901234",
+     "post_id": "18012345678900002",
+     "post_text": "오늘의 핫딜: 무선청소기 32% 내려갔어요",
+     "username": "yoona_home",
+     "text": "아직 이 가격인가요?",
+     "at": "2026-10-18T08:55:00+09:00",
+     "act": {
+      "action": "threads_reply",
+      "args": {
+       "media_id": "18012345678901234"
+      }
+     }
+    }
+   ]
+  },
+  "stats": {
+   "at": "2026-10-18T07:00:00+09:00",
+   "totals": {
+    "views": 1830,
+    "likes": 64,
+    "replies": 9,
+    "reposts": 3,
+    "quotes": 1
+   },
+   "followers": 212,
+   "days": [
+    {
+     "day": "2026-10-12",
+     "views": 180
+    },
+    {
+     "day": "2026-10-13",
+     "views": 240
+    },
+    {
+     "day": "2026-10-14",
+     "views": 205
+    },
+    {
+     "day": "2026-10-15",
+     "views": 310
+    },
+    {
+     "day": "2026-10-16",
+     "views": 288
+    },
+    {
+     "day": "2026-10-17",
+     "views": 402
+    },
+    {
+     "day": "2026-10-18",
+     "views": 205
+    }
+   ],
+   "posts": [
+    {
+     "id": "18012345678900001",
+     "views": 420,
+     "likes": 18,
+     "replies": 2,
+     "reposts": 1,
+     "quotes": 0
+    },
+    {
+     "id": "18012345678900002",
+     "views": 610,
+     "likes": 21,
+     "replies": 4,
+     "reposts": 2,
+     "quotes": 1
+    }
+   ]
+  }
  }
 }
