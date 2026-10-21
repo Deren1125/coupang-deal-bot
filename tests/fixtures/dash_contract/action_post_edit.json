@@ -1,0 +1,24 @@
+{
+ "v": 1,
+ "id": "a_01jc6q8s3u5w7y9a1c3e5g7j9m",
+ "ts": 1761040000.5,
+ "expires_at": 1761040600.5,
+ "action": "post_edit",
+ "blog": "issue",
+ "args": {
+  "blog": "issue",
+  "pid": 57,
+  "ops": [
+   {"op": "remove_photo", "index": 2},
+   {"op": "replace_photo", "index": 3, "file": "/home/ubuntu/dealbot-data/dash_uploads/files/0a1b2c3d4e5f60718293a4b5c6d7e8f9.jpg"},
+   {"op": "remove_text", "text": "방송 화면을 그대로 캡처한 장면이에요."}
+  ]
+ },
+ "target": "post-issue-57",
+ "confirmed": true,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_9f2c6d"
+ }
+}

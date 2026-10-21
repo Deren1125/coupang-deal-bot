@@ -62,6 +62,7 @@ CONFIRM = frozenset({
     "deal.skip", "deal.repost", "deal.post", "bot.pause", "sns.test", "sns.disconnect",
     "blog.publish", "blog.drop", "blog.fix", "blog.rewrite", "blog.restyle", "blog.share", "blog.channel", "blog.oedit_redo",
     "blog.mode", "blog.pause", "blog.drafts_cleanup", "blog.ledger", "push.unsubscribe", "blog.unschedule_all",
+    "blog.post_edit",  # 발행 글 고치기 (주인 10/21) — 공개된 글을 바로 바꿈
 })
 DANGER = frozenset({"blog.oedit_redo", "blog.drop", "deal.skip"})
 # 그 블로그가 자동 발행 모드면 바로 네이버에 공개되는 일 (Blog-Auto nl.CATALOG 의 may_publish 와 같게) — 그때만 ★
@@ -84,7 +85,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
                 "post_feedback", "learn_decide",  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
                 "similar_links",  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
-                "topic_seed")  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
+                "topic_seed",  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
+                "post_edit")  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "stats.refresh", "stats.input", "search.check")
@@ -342,6 +344,41 @@ def _photo_ops(v: Any) -> list[dict[str, Any]]:
     return out
 
 
+# 발행 글 고치기 (주인 10/21 — 계약 action_post_edit.json) — Blog-Auto post_edit.parse 와 같은 한도
+EDIT_OPS = ("remove_photo", "replace_photo", "remove_text", "replace_text", "rebuild")
+EDIT_OPS_MAX, EDIT_TEXT_MAX, EDIT_NEW_TEXT_MAX = 20, 500, 1000
+
+
+def _edit_line(v: Any, limit: int) -> str:
+    s = _str(v, limit)
+    if re.search(r"[\x00-\x1f\x7f]", s):
+        raise ActionError("bad_args")
+    return " ".join(s.split())
+
+
+def _edit_ops(v: Any) -> list[dict[str, Any]]:
+    """[{op: remove_photo|replace_photo, index, file?} | {op: remove_text|replace_text, text, new_text?} | {op: rebuild}] 1~20개.
+    index = 글 순서 N번째 사진 (최근 글 photos[].n) · file = 올린 사진 id (보낼 때 경로로 바꾼다)."""
+    if not isinstance(v, list) or not 1 <= len(v) <= EDIT_OPS_MAX:
+        raise ActionError("bad_args")
+    out: list[dict[str, Any]] = []
+    for x in v:
+        op = x.get("op") if isinstance(x, dict) else None
+        if op not in EDIT_OPS:
+            raise ActionError("bad_args")
+        o: dict[str, Any] = {"op": op}
+        if op in ("remove_photo", "replace_photo"):
+            o["index"] = _int(x.get("index"), 1, 40)
+            if op == "replace_photo":
+                o["file"] = _uploads([x.get("file")], 1, 1)[0]
+        elif op in ("remove_text", "replace_text"):
+            o["text"] = _edit_line(x.get("text"), EDIT_TEXT_MAX)
+            if op == "replace_text":
+                o["new_text"] = _edit_line(x.get("new_text"), EDIT_NEW_TEXT_MAX)
+        out.append(o)
+    return out
+
+
 def _pids(v: Any, *, allow_all: bool = False) -> list[int] | str:
     if allow_all and v == "all":
         return "all"
@@ -502,6 +539,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return out
     if name == "photos_batch":
         return {"blog": _photo_blog(g("blog")), "pid": _int(g("pid")), "ops": _photo_ops(g("ops"))}
+    if name == "post_edit":  # 발행 글 고치기 (주인 10/21): 우리 세 블로그 글 · 발행된 글인지는 Blog-Auto 가 본다
+        return {"blog": _blog(g("blog")), "pid": _int(g("pid")), "ops": _edit_ops(g("ops"))}
     if name == "post_notes":  # 내 후기 쓰기 (주인 10/20 — 계약 action_post_notes.json): 핫딜 글(pid) 또는 새 제품(product)
         if g("blog") not in (None, "hotdeal"):
             raise ActionError("bad_args")
@@ -728,6 +767,8 @@ def confirm_text(action: str, args: dict[str, Any], facts: dict[str, Any]) -> di
                           else f"{blog}{num} 글을 간격 두고 발행할까요?",
                           "2~3시간 간격으로 08~22시에 한 편씩 올라가요. 블로그 탭에서 언제든 취소할 수 있어요.", "예약하기"),
         "blog.unschedule_all": (f"{blog} 예약을 모두 취소할까요?", "예약된 글은 발행하지 않고 기다리는 글로 돌아가요.", "모두 취소"),
+        "blog.post_edit": (f"{blog}{num} 발행 글을 고칠까요?", "네이버에 공개된 글을 바로 고쳐요. 뺀 사진·문장은 되돌리기 어려워요."
+                           " 카테고리·태그·공개 설정은 그대로예요.", "고치기"),
     }
     pub = "자동 발행 모드라 바로 네이버에 공개돼요."
     ph = "사진" if args.get("uploads") or not args.get("links") else "인스타 게시물"
@@ -978,7 +1019,16 @@ class ActionDesk:
             return down
         spool_args = dict(args)
         ups = args.get("uploads") or []
-        if name == "photos_batch":  # 바꿀 사진마다 올린 사진 id → 경로 (Blog-Auto 는 id 를 모른다)
+        if name == "post_edit":  # 바꿀 사진 id → 받은 파일 경로 (Blog-Auto 는 id 를 모른다)
+            ops, ups = [], [o["file"] for o in args["ops"] if o.get("file")]
+            for o in args["ops"]:
+                p = self.uploads.path(o["file"], kind="photo") if o.get("file") else None
+                if o.get("file") and p is None:
+                    self._audit(caller, action, target, args, "bad_upload")
+                    return 400, self._err("bad_upload")
+                ops.append({**o, "file": str(p)} if p is not None else o)
+            spool_args["ops"] = ops
+        elif name == "photos_batch":  # 바꿀 사진마다 올린 사진 id → 경로 (Blog-Auto 는 id 를 모른다)
             ops, ups = [], [o["upload"] for o in args["ops"] if o.get("upload")]
             for o in args["ops"]:
                 p = self.uploads.path(o["upload"], kind="photo") if o.get("upload") else None

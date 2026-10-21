@@ -812,6 +812,11 @@ class StateBuilder:
             out[blog]["learn"] = self._learn(v2.get("learn"), blog, supported)  # 이번 주 개선안·적용 규칙 (10/20)
             for r in out[blog]["recent"]:
                 r.update(self._submit_links(r))
+                ph = r.pop("photos", None)
+                if ph is not None and r.get("pid") and (supported is None or "post_edit" in supported):
+                    # 발행 글 고치기 (주인 10/21): 사진마다 빼기·교체 · '이 문장 빼기' 칸 → blog.post_edit (★ 확인)
+                    r["edit"] = {"photos": [dict(p, thumb=f"/dashboard/thumb/{p['thumb']}" if p.get("thumb") else None) for p in ph],
+                                 "act": act("blog.post_edit", "고치기", {"blog": blog, "pid": r["pid"]})}
                 if out[blog]["learn"] is not None and r.get("pid") and (supported is None or "post_feedback" in supported):
                     r["fb"] = {"vote": (v2["learn"]["votes"]).get(str(r["pid"])),  # 👍/👎 (10/20) — 다시 누르면 지움
                                "act": act("blog.post_feedback", "평가", {"blog": blog, "pid": r["pid"]})}
@@ -1066,7 +1071,7 @@ ACTION_LABELS = {
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",
-    "blog.similar_links": "비슷한 아이템 링크 넣기", "blog.topic_seed": "소재 넣기",
+    "blog.similar_links": "비슷한 아이템 링크 넣기", "blog.topic_seed": "소재 넣기", "blog.post_edit": "발행 글 고치기",
     "blog.answer": "답하기", "blog.noanswer": "답 없이 진행", "blog.oedit_keep": "그대로 두기", "blog.oedit_redo": "봇 글로 덮어쓰기",
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",

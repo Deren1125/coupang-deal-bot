@@ -50,8 +50,9 @@ HANGUL = re.compile(r"[가-힣]")
 APP_JS_MAX = 86 * 1024
 APP_JS_GZIP_MAX = 28 * 1024
 # 10/20: 편집기 비율(원본·16:9) + 사람만 남기기 + 사진 한 장 바로 저장 + 지금 사진도 편집 → 12 → 14 KB / gzip 5 → 5.75 KB
-EDIT_JS_MAX = 14 * 1024
-EDIT_JS_GZIP_MAX = 5 * 1024 + 768
+# 10/21: 발행 글 고치기 시트(사진마다 빼기·교체 + '이 문장 빼기') — app.js 는 버튼 하나만, 시트는 edit.js 에 → 16.5 KB / gzip 6.25 KB
+EDIT_JS_MAX = 16 * 1024 + 512
+EDIT_JS_GZIP_MAX = 6 * 1024 + 256
 APP_CSS_MAX = 15 * 1024 + 512
 SW_MAX = 8 * 1024
 

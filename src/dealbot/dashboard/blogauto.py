@@ -780,6 +780,19 @@ def _learn(v: Any) -> dict[str, Any] | None:
             "proposals": props, "rules": rules, "votes": votes}
 
 
+def _recent_photos(v: Any) -> list[dict[str, Any]] | None:
+    """최근 글 '고치기' 사진 (Blog-Auto dashview.recent[].photos): [{n, label, thumb}] 40장까지 · 칸이 없으면 None (고치기 없음)."""
+    if not isinstance(v, list):
+        return None
+    out: list[dict[str, Any]] = []
+    for x in v[:40]:
+        if isinstance(x, dict) and (n := _count(x.get("n"), top=40)) and n not in {p["n"] for p in out}:
+            t = x.get("thumb")
+            out.append({"n": n, "label": _one_line(x.get("label"), 40) or f"사진 {n}",
+                        "thumb": t if isinstance(t, str) and THUMB_RE.match(t) else None})
+    return out
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -800,7 +813,9 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
              # 검색 등록 체크리스트 (주인 10/18): 발행 시각 · Blog-Auto 가 구글 등록을 마친 글 (자동 등록을 켠 경우) — 없으면 칸 없음
              **({"published_at": pa} if (pa := _one_line(x.get("published_at"), 40)) else {}),
              **({"google_done": True} if x.get("google_done") is True or x.get("google") == "done" else {}),
-             **({"deals": ds} if blog == "hotdeal" and (ds := _post_deals(x.get("deals"))) else {})}
+             **({"deals": ds} if blog == "hotdeal" and (ds := _post_deals(x.get("deals"))) else {}),
+             # 발행 글 고치기 (주인 10/21 — Blog-Auto post_edit 를 켠 블로그만): 글 순서 사진 [{n, label, thumb}] (사진 없으면 [])
+             **({"photos": ph} if (ph := _recent_photos(x.get("photos"))) is not None else {})}
             for x in rows[:10] if isinstance(x, dict) and _one_line(x.get("title"), 80)]
     scan = data.get("scan")
     if isinstance(scan, dict) and isinstance(scan.get("items"), list):

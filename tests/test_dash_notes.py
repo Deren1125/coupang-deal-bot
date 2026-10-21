@@ -137,4 +137,4 @@ def test_app_js_viewer_review_and_trend_tap() -> None:
     # 내 후기 쓰기: 글 칸 + 사진(답하기 사진과 같은 uploadAll) · 제품 고르기는 제품 이름 칸
     assert "a.product" in js and "extra.product" in js and "'제품 이름을 적어 주세요'" in js
     assert "blog\\.(write|post_notes)" in js
-    assert "const V = 'sb-v24'" in sw  # 10/21 소재 넣기·급상승 칩 (sb-v24)
+    assert "const V = 'sb-v27'" in sw  # 10/21 발행 글 고치기 (sb-v27)

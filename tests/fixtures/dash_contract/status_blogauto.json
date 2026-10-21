@@ -49,7 +49,8 @@
   "post_feedback",
   "learn_decide",
   "similar_links",
-  "topic_seed"
+  "topic_seed",
+  "post_edit"
  ],
  "kakao": {
   "state": "ok",

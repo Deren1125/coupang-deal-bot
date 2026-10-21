@@ -198,5 +198,32 @@ async function photo(h, s, other) {
     await h.exec({action: 'blog.photos_batch', args: h.args}, {ops: [Object.assign(op(s.slot, {f: out, edited: true, re: s.slot}), {upload: ids[0]})]}, {iid: h.iid});
   } catch (x) { h.toast(x.message || '하지 못했어요 — 잠시 뒤 다시'); }
 }
-W.SBEdit = {batch, editor, photo};
+// ------------------------------------------------------------ 발행 글 고치기 (10/21): 사진마다 빼기·교체 + '이 문장 빼기' → blog.post_edit (★ 확인)
+function fix(h, r) {
+  H = h; style();
+  const {el, btn} = h, ph = r.edit.photos.map(p => ({p, c: null})), urls = [], list = el('div');
+  const t = el('textarea', {class: 'fl', rows: 2, maxlength: 500, placeholder: '뺄 문장을 글에 있는 그대로 붙여 넣기'});
+  h.sheet('발행 글 고치기', el('div', {}, el('p', {class: 'note'}, '네이버에 공개된 글을 바로 고쳐요 · 카테고리·태그는 그대로'), list,
+    el('p', {class: 'h3'}, '이 문장 빼기'), t, el('div', {class: 'ef'}, btn('lnk mute', '취소', () => h.back()), btn('pb', '고치기', e => send(e.currentTarget)))),
+    () => urls.forEach(u => URL.revokeObjectURL(u)));
+  const draw = () => list.replaceChildren(...ph.map(x => el('div', {class: 'eb' + (x.c ? ' chg' : '')},
+    x.c && x.c.f ? el('img', {src: x.c.src, alt: ''}) : x.p.thumb ? el('img', {src: x.p.thumb, alt: x.p.label}) : el('span', {class: 'e0'}),
+    el('div', {class: 'et'}, el('p', {}, el('b', {}, x.p.label)), el('p', {class: 'note'}, !x.c ? '지금 사진' : x.c.f ? '새 사진으로 교체' : '뺄 사진'),
+      el('div', {class: 'ea'}, btn('sm', x.c && !x.c.f ? '되돌리기' : '빼기', () => { x.c = x.c && !x.c.f ? null : {}; draw(); }),
+        btn('sm', '교체', () => h.pick('image/*', false, fs => { if (fs.length) { const src = URL.createObjectURL(fs[0]); urls.push(src); x.c = {f: fs[0], src}; draw(); } })))))));
+  async function send(b) {
+    const ops = ph.filter(x => x.c).map(x => x.c.f ? {op: 'replace_photo', index: x.p.n, f: x.c.f} : {op: 'remove_photo', index: x.p.n});
+    if (t.value.trim()) ops.push({op: 'remove_text', text: t.value.trim()});
+    if (!ops.length) { h.toast('뺄 사진이나 문장을 골라 주세요'); return; }
+    b.disabled = true;
+    try {
+      const fs = ops.filter(o => o.f);
+      if (fs.length) (await h.uploadAll(fs.map(o => o.f), 'photo', () => {})).forEach((id, i) => { fs[i].file = id; delete fs[i].f; });
+      if (await h.exec(r.edit.act, {ops}, {iid: h.iid})) { h.back(); return; }
+    } catch (x) { h.toast(x.message || '하지 못했어요 — 잠시 뒤 다시'); }
+    b.disabled = false;
+  }
+  draw();
+}
+W.SBEdit = {batch, editor, photo, fix};
 })();

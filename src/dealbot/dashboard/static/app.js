@@ -852,6 +852,8 @@ async function edGo(it, fn) {
 const edBatch = it => edGo(it, (E, h) => E.batch(h));
 // 사진을 누르면 바로 편집기 (10/20): 자르기·비율·돌리기·사람만 남기기 → 저장 (교체·비우기는 편집기 아래 링크)
 const edPhoto = (it, s) => edGo(it, (E, h) => E.photo(h, s, () => slotSheet(it, s)));
+// 발행 글 고치기 (10/21): 최근 글 → 사진 빼기·교체 · 문장 빼기 (edit.js fix)
+const edFix = (k, r) => edGo({blog: k, iid: `post-${k}-${r.pid}`, detail: {}}, (E, h) => E.fix(h, r));
 async function digestSheet(id) {
   const r = await api('/dashboard/api/digest/' + encodeURIComponent(id));
   if (r.status !== 200) { toast('정리가 아직 없어요'); return; }
@@ -997,7 +999,8 @@ function vBlog() {
     const open = OPEN['recent-' + key];
     out.push(el('div', {class: 'box', style: 'margin-top:12px'}, btn('fold', `최근 글 ${b.recent.length}개`, () => { OPEN['recent-' + key] = !open; render(); }, {'aria-expanded': open ? 'true' : 'false'}),
       open ? b.recent.map(r => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.title), el('span', {class: 's'}, ago(r.at))),
-        ...fbBtns(r), r.url ? ext('sm', '네이버', r.url) : null, r.google || r.daum || r.share ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
+        ...fbBtns(r), r.url ? ext('sm', '네이버', r.url) : null, r.edit ? btn('sm', '고치기', () => edFix(key, r)) : null,
+        r.google || r.daum || r.share ? btn('lnk mute', '더보기', () => submitSheet(r)) : null)) : null));
   }
   const vs = vis(b.visits);
   if (b.neighbors || vs.length) {
