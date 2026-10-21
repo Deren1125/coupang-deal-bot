@@ -15,9 +15,10 @@ const CSS = '.tq{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px
   '.tl p{margin:0;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.tl p:last-child{border:0}.tl i{display:block;font-style:normal;color:var(--sub)}' +
   '.ts{max-width:100%;border-radius:10px;border:1px solid var(--line);margin-top:8px}';
 const MODE = [['off', '꺼짐'], ['dry', '시험'], ['live', '실제']];
-const LOGIN = {busy: '블로그 봇이 크롬을 쓰는 중이에요 — 1~2분 뒤 다시 눌러 주세요', ok: '로그인됐어요', code: '인증 코드를 넣어 주세요 (문자·메일·인증 앱)', no: '로그인 안 된 상태예요',
+const LOGIN = {wrong: '아이디나 비밀번호가 틀렸대요 — 인스타그램 비밀번호를 확인해 주세요', wait: '시도가 많아 인스타그램이 잠시 막았어요 — 30분쯤 뒤에 다시 해 주세요',
+  busy: '블로그 봇이 크롬을 쓰는 중이에요 — 1~2분 뒤 다시 눌러 주세요', ok: '로그인됐어요', code: '인증 코드를 넣어 주세요 (문자·메일·인증 앱)', no: '로그인 안 된 상태예요',
   check: '화면 확인이 필요해요 — 아래 사진을 보고, 인스타그램 앱에 “본인 맞나요?” 알림이 왔으면 승인한 뒤 ‘로그인 확인’을 눌러 주세요'};
-const slots = {};
+const slots = (W.SBThreads && W.SBThreads.slots) || {};  // thpost.js 가 먼저 왔으면 그 칸을 그대로 (개발 세션 10/21)
 let T = null, box = null, H = null, code = false;
 
 function css() {
