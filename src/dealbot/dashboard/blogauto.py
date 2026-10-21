@@ -839,7 +839,7 @@ TRIAL_POSTS_MAX, TRIAL_RULES_MAX = 30, 20
 
 
 def _photo_trial(v: Any) -> dict[str, Any] | None:
-    """{posts: [{pid, title, at, slots: [{slot, final, full, credit, desc, qa: {ok, issues}}], feedback_done}], rules: [{id, area, text, at}]}.
+    """{posts: [{pid, title, at, slots: [{slot, final, full, credit, desc, section?, ctx?, where?, why?, qa: {ok, issues}}], feedback_done}], rules: [{id, area, text, at}]}.
     칸이 없거나 시험 글이 없으면 None (화면이 '사진 테스트' 를 숨김). 사진 이름은 thumbs 규칙(THUMB_RE)만."""
     if not isinstance(v, dict) or not isinstance(v.get("posts"), list):
         return None
@@ -854,6 +854,8 @@ def _photo_trial(v: Any) -> dict[str, Any] | None:
             pic = {k: s[k] for k in ("final", "full") if isinstance(s.get(k), str) and THUMB_RE.match(s[k])}
             qa = s.get("qa") if isinstance(s.get("qa"), dict) else {}
             slots.append({"slot": n, **pic, "credit": _one_line(s.get("credit"), 40) or "", "desc": _one_line(s.get("desc"), 80) or "",
+                          # 어느 사진인지 읽히게 (선택 칸): 소제목 · 바로 앞 문장 · 위치 · 고른 이유
+                          **{k: _one_line(safe_text(s.get(k) or "", 200), m) or "" for k, m in (("section", 30), ("ctx", 80), ("where", 40), ("why", 80))},
                           "qa": {"ok": qa.get("ok") is True,
                                  "issues": [i for i in qa.get("issues") or [] if isinstance(i, str) and TRIAL_QA.match(i)][:6]}})
         posts.append({"pid": pid, "title": _one_line(x.get("title"), 80) or f"#{pid}", "at": _one_line(x.get("at"), 40),

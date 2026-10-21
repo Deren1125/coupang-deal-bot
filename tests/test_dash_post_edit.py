@@ -146,7 +146,7 @@ def test_sheet_lives_in_edit_js_and_app_js_only_opens_it() -> None:
     assert "post_edit" not in js and "remove_photo" not in js  # 시트·ops 는 edit.js 에만
     for word in ("function fix(h, r)", "'발행 글 고치기'", "'이 문장 빼기'", "'빼기'", "'교체'", "'되돌리기'", "'고치기'", "'취소'",
                  "op: 'replace_photo', index: x.p.n", "op: 'remove_photo', index: x.p.n", "op: 'remove_text'", "h.uploadAll(",
-                 "h.exec(r.edit.act, {ops}", "카테고리·태그는 그대로", "W.SBEdit = {batch, editor, photo, trial, fix}"):
+                 "h.exec(r.edit.act, {ops}", "카테고리·태그는 그대로", "W.SBEdit = {batch, editor, photo, fix}"):
         assert word in ed, word
     assert "const V = 'sb-v28'" in sw  # 10/21 merge post-edit (sb-v28)
     assert len(gzip.compress(ed.encode(), 9)) <= 7 * 1024 + 512  # 10/21 (merge post-edit): 사진 테스트 + 고치기 시트 → 7.5 KB (test_dash_shell 과 같게)

@@ -67,6 +67,10 @@ SW_MAX = 8 * 1024
 # 10/21: 제품 테스트 화면 (후보 카드 ✅/❌·이유 칩·한 줄·테스트 끝·배운 기준) — 처음 열 때만 받는 product.js
 PRODUCT_JS_MAX = 6 * 1024
 PRODUCT_JS_GZIP_MAX = 2 * 1024 + 512
+# 10/21: 사진 테스트 화면(글 제목·사진 줄·자리마다 위치·앞 문장·큰 사진·고른 이유)을 edit.js 에서 옮겨 와 읽기 쉽게 — edit.js 는 줄고(20 KB 한도 안)
+# 처음 열 때만 받는 product.js 가 늘어남 → 12 KB / gzip 4.5 KB
+PRODUCT_JS_MAX = 12 * 1024
+PRODUCT_JS_GZIP_MAX = 4 * 1024 + 512
 
 
 @pytest.fixture

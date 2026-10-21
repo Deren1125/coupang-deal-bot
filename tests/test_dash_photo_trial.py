@@ -40,7 +40,8 @@ def test_parse_keeps_the_contract_and_drops_bad_rows() -> None:
     bad = _photo_trial({"posts": [{"pid": "x"}, {"pid": 3, "slots": [{"slot": 1, "final": "../etc/passwd", "qa": {"issues": ["<b>"]}}]}],
                         "rules": [{"id": "nope", "area": "photo", "text": "x"}]})
     assert [q["pid"] for q in bad["posts"]] == [3] and bad["posts"][0]["slots"][0] == {
-        "slot": 1, "credit": "", "desc": "", "qa": {"ok": False, "issues": []}} and bad["rules"] == []
+        "slot": 1, "credit": "", "desc": "", "section": "", "ctx": "", "where": "", "why": "",
+        "qa": {"ok": False, "issues": []}} and bad["rules"] == []
     assert _photo_trial({"posts": []}) is None and _photo_trial(None) is None and parse_v2({})["photo_trial"] is None
 
 
@@ -69,6 +70,8 @@ async def test_page_view_buttons_queue_the_bridge_work(bot: DealBot, settings: S
     p = t["posts"][0]
     assert t["rules"][0]["text"].startswith("TV·방송 화면 캡처") and p["iid"] == "post-issue-52"
     assert p["slots"][0]["final"] == "/dashboard/thumb/post-issue-52-1-5d6e7f80-u.jpg"
+    s1 = p["slots"][1]  # 어느 사진인지 읽히는 칸 (계약 export_v2.json: section·ctx·where·why)
+    assert (s1["section"], s1["where"], s1["why"]) == ("AIRPORT", "AIRPORT 부분", "로퍼가 잘 보이는 전신 사진") and s1["ctx"].startswith("캐주얼한")
     assert p["edit"][0] == {"slot": 1, "label": "정면 전신", "thumb": "/dashboard/thumb/post-issue-52-1-5d6e7f80-u.jpg",
                             "full": "/dashboard/thumb/post-issue-52-1-5d6e7f80-f.jpg",
                             "final": "/dashboard/thumb/post-issue-52-1-5d6e7f80-u.jpg"}  # 평소 편집기 모양
@@ -97,12 +100,12 @@ async def test_page_hidden_without_trial_posts_or_for_old_blogauto(bot: DealBot,
 
 def test_app_and_edit_js_have_the_page() -> None:
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    ed = (webapp.STATIC_DIR / "edit.js").read_text(encoding="utf-8")
-    assert "/^(pics|search|trial|ptrial)$/" in js and "'사진 테스트 →'" in js and "function vTrial()" in js and "E.trial(" in js
+    ed = (webapp.STATIC_DIR / "product.js").read_text(encoding="utf-8")  # 사진 테스트 화면은 처음 열 때만 받는 product.js (10/21)
+    assert "/^(pics|search|trial|ptrial)$/" in js and "'사진 테스트 →'" in js and "function vTrial()" in js and "P.photo(" in js
     assert "S.photo_trial && key === 'issue'" in js and "E2.photo(h, s" in js  # 사진을 누르면 평소 편집기
     for word in ("'배운 원칙'", "'✅ 괜찮아'", "'❌ 별로'", "여백 남음", "UI 남음", "얼굴/몸 잘림", "너무 넓음", "너무 좁음", "다른 사람", "흐림",
                  "중복", "글자 많음", "방송 캡처", "비율 이상", "어두움", "기타", "사진 배치", "사진 분포", "사진 개수", "'보내기'",
-                 "W.SBEdit = {batch, editor, photo, trial, fix}", "class: 'ck'"):
+                 "W.SBProduct = {view, photo}", "class: 'ck'", "번째 사진", "고른 이유", "class: 'sv'"):
         assert word in ed, word
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
     assert "const V = 'sb-v28'" in sw  # 10/21 merge post-edit (sb-v28)

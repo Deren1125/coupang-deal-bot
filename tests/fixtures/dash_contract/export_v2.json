@@ -632,6 +632,10 @@
       "full": "post-issue-52-1-5d6e7f80-f.jpg",
       "credit": "news1.kr",
       "desc": "정면 전신",
+      "section": "",
+      "ctx": "공항에 나타난 원빈은 베이지 트렌치코트를 입었어요.",
+      "where": "도입 뒤",
+      "why": "본문에 나온 코트 착용 사진",
       "qa": {
        "ok": true,
        "issues": []
@@ -643,6 +647,10 @@
       "full": "post-issue-52-2-9a0b1c2d-f.jpg",
       "credit": "",
       "desc": "그 장면이 없으면 원빈 다른 사진도 돼요",
+      "section": "AIRPORT",
+      "ctx": "캐주얼한 무드를 더한 로퍼 룩이에요.",
+      "where": "AIRPORT 부분",
+      "why": "로퍼가 잘 보이는 전신 사진",
       "qa": {
        "ok": false,
        "issues": [
@@ -656,6 +664,10 @@
       "full": null,
       "credit": "",
       "desc": "마무리 컷",
+      "section": "EDITOR'S NOTE",
+      "ctx": "올가을 따라 입기 좋은 조합이에요.",
+      "where": "EDITOR'S NOTE 부분",
+      "why": "",
       "qa": {
        "ok": false,
        "issues": []

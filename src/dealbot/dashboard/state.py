@@ -498,7 +498,7 @@ class StateBuilder:
             posts.append({"pid": p["pid"], "iid": iidmod.post_iid("issue", p["pid"]), "title": p["title"], "at": p["at"],
                           "feedback_done": p["feedback_done"], "slots": slots,
                           # 편집기(edit.js)가 쓰는 자리 모양 {slot, label, thumb, full, final}
-                          "edit": [{"slot": s["slot"], "label": s["desc"] or f"자리 {s['slot']}", "thumb": s.get("final") or s.get("full"),
+                          "edit": [{"slot": s["slot"], "label": s["desc"] or s.get("where") or f"자리 {s['slot']}", "thumb": s.get("final") or s.get("full"),
                                     **{k: s[k] for k in ("full", "final") if s.get(k)}} for s in slots],
                           "fb": act("blog.photo_feedback", "사진 피드백", a),
                           "done": act("blog.photo_feedback", "테스트 끝", dict(a, verdict="done"))})

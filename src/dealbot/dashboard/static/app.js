@@ -856,12 +856,12 @@ async function edGo(it, fn) {
     args: {blog: it.blog, pid: Number(it.iid.split('-')[2])}});
 }
 const edBatch = it => edGo(it, (E, h) => E.batch(h));
-// 사진 테스트 (10/21 — 시험 글만 · 그리기는 edit.js): 사진을 누르면 평소 편집기
+// 사진 테스트 (10/21 — 시험 글만 · 그리기는 product.js): 사진을 누르면 평소 편집기
 function vTrial() {
   const box = el('div');
   if (!S.photo_trial) return [el('p', {class: 'note'}, '사진 테스트 글이 없어요')];
-  edLoad().then(E => E.trial({el, btn, exec, toast, render, box, S: S.photo_trial,
-    edPhoto: (p, s) => edGo({blog: 'issue', iid: p.iid, detail: {slots: p.edit}}, (E2, h) => E2.photo(h, s, () => {}))})).catch(() => toast(MSG.net));
+  ptLoad().then(P => box.replaceChildren(...P.photo(S.photo_trial, {el, btn, exec, toast, render,
+    edPhoto: (p, s) => edGo({blog: 'issue', iid: p.iid, detail: {slots: p.edit}}, (E2, h) => E2.photo(h, s, () => {}))})), () => toast(MSG.net));
   return [el('h2', {}, '사진 테스트'), box];
 }
 // 사진을 누르면 바로 편집기 (10/20): 자르기·비율·돌리기·사람만 남기기 → 저장 (교체·비우기는 편집기 아래 링크)

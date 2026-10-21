@@ -225,48 +225,5 @@ function fix(h, r) {
   }
   draw();
 }
-// ------------------------------------------------------------ 사진 테스트 (주인 10/21): 시험 글 사진마다 ✅/❌·이유 · 글 전체 · 테스트 끝
-// 피드백은 blog.photo_feedback (배운 것 ×2) · 사진을 누르면 평소 편집기 (편집도 배운 것) · 맨 위 '배운 원칙'
-const RK = {margin_left_over: '여백 남음', ui_remnant: 'UI 남음', subject_cut: '얼굴/몸 잘림', too_wide: '너무 넓음', too_tight: '너무 좁음',
-  wrong_person: '다른 사람', low_quality_blur: '흐림', duplicate: '중복', text_overlay: '글자 많음', broadcast_frame: '방송 캡처',
-  bad_aspect: '비율 이상', dark: '어두움', other: '기타'};
-const PK = {placement: '사진 배치', spread: '사진 분포', count: '사진 개수', fit: '글과 안 맞음', other: '기타'};
-const QK = Object.assign({border: '테두리', ui: '화면 띠', lowres: '해상도', text: '글자', broadcast: '방송 캡처', missing: '파일 없음'}, RK);
-const TS = {};  // 고른 이유·메모 (다시 그려도 남게) — 키 '<pid>-<slot|all>'
-function trial(h) {
-  H = h; style();
-  const {el, btn} = h, t = h.S, box = h.box;
-  const fb = (p, k, s) => {  // 이유 칩 + 메모 + 보내기
-    const st = TS[k] = TS[k] || {r: [], n: ''}, keys = s ? RK : PK;
-    const note = el('input', {class: 'fl', placeholder: '한 줄 메모 (선택)', value: st.n, oninput: e => { st.n = e.target.value; }});
-    return el('div', {class: 'box'}, el('div', {class: 'ea'}, Object.keys(keys).map(r => btn('cp' + (st.r.includes(r) ? ' hot' : ' info'), keys[r], () => {
-      st.r = st.r.includes(r) ? st.r.filter(x => x !== r) : st.r.concat(r); h.render(); }, {'aria-pressed': st.r.includes(r) ? 'true' : 'false'}))), note,
-    btn('pb', '보내기', e => go(p, s, 'bad', st, e.currentTarget, k)));
-  };
-  async function go(p, s, v, st, b, k) {
-    if (v === 'bad' && !st.r.length && !st.n.trim()) { h.toast('이유를 하나 골라 주세요'); return; }
-    const x = Object.assign({verdict: v, reasons: v === 'bad' ? st.r : []}, s ? {slot: s.slot} : {}, st.n.trim() && v === 'bad' ? {note: st.n.trim()} : {});
-    if (await h.exec(p.fb, x, {btn: b, iid: p.iid})) { delete TS[k]; h.render(); }
-  }
-  const out = [];
-  if (t.rules.length) out.push(el('p', {class: 'h3'}, '배운 원칙'), el('div', {class: 'box'}, t.rules.map(r => el('p', {class: 'note'}, '· ' + r.text))));
-  for (const p of t.posts) {
-    out.push(el('p', {class: 'h3'}, p.title), el('p', {class: 'note'}, `피드백 ${p.feedback_done}개 · 사진을 누르면 편집`));
-    p.slots.forEach((s, i) => {
-      const k = p.pid + '-' + s.slot, open = TS[k] && TS[k].o;
-      out.push(el('div', {class: 'box'}, el('p', {}, el('b', {}, `자리 ${s.slot}`), ' ' + s.desc + (s.credit ? ` · ${s.credit}` : '')),
-        s.final || s.full ? el('div', {class: 'ck', onclick: () => h.edPhoto(p, p.edit[i])}, el('img', {src: s.final || s.full, alt: s.desc})) : el('p', {class: 'note'}, '빈 자리'),
-        s.qa.issues.length ? el('div', {class: 'ea'}, s.qa.issues.map(q => el('span', {class: 'cp stop'}, QK[q] || q))) : null,
-        s.final || s.full ? el('div', {class: 'two'}, btn('pb soft', '✅ 괜찮아', e => go(p, s, 'ok', {r: [], n: ''}, e.currentTarget, k)),
-          btn('pb soft', '❌ 별로', () => { TS[k] = Object.assign(TS[k] || {r: [], n: ''}, {o: !open}); h.render(); })) : null,
-        open ? fb(p, k, s) : null));
-    });
-    const k = p.pid + '-all';
-    out.push(el('p', {class: 'h3'}, '글 전체 (배치·분포·개수)'), fb(p, k, null),
-      el('div', {class: 'two'}, btn('pb soft', '✅ 괜찮아', e => go(p, null, 'ok', {r: [], n: ''}, e.currentTarget, k)),
-        btn('pb soft', p.done.label, e => h.exec(p.done, {}, {btn: e.currentTarget, iid: p.iid}))));
-  }
-  box.replaceChildren(...out);
-}
-W.SBEdit = {batch, editor, photo, trial, fix};
+W.SBEdit = {batch, editor, photo, fix};
 })();
