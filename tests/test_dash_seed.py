@@ -79,4 +79,4 @@ def test_trend_early_source_and_badge_chip() -> None:
     assert "a.action === 'blog.topic_seed'" in js and "a !== seed" in js and "'소재 넣기'" in js
     assert "panel(s, seed, pk(s.iid, seed), {fixed: true})" in js
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
-    assert "const V = 'sb-v27'" in sw  # 10/21 발행 글 고치기 (sb-v27)
+    assert "const V = 'sb-v28'" in sw  # 10/21 merge post-edit: 발행 글 고치기 + 사진 테스트 + 제품 테스트 (sb-v28)

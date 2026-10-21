@@ -793,12 +793,88 @@ def _recent_photos(v: Any) -> list[dict[str, Any]] | None:
     return out
 
 
+# 제품 테스트 (주인 10/21 — Blog-Auto product_trial.py): Pick 패션 글 '비슷한 아이템' 후보를 주인이 검수
+PT_REASONS = ("스타일 다름", "색 다름", "아이템 종류 다름", "싸 보임/품질", "브랜드·판매처 별로", "가격 이상", "사진 별로", "너무 흔함",
+              "셀럽 느낌 아님", "기타")  # Blog-Auto product_trial.REASONS 와 같게
+PT_ITEM_ID = re.compile(r"^pt-[0-9a-f]{8}$")
+PT_POSTS_MAX, PT_ITEMS_MAX, PT_PIECES_MAX, PT_LEARNED_MAX = 12, 8, 6, 12
+
+
+def _product_trial(v: Any) -> dict[str, Any] | None:
+    """{posts: [{pid, title, pieces: [{part, desc}], items: [{id, piece, name, shop, price, at, img, link, query, verdict?}]}],
+    learned, ok, goal, reasons}. 칸이 없으면(예전 Blog-Auto) None. 후보가 없는 글·이름·주소가 이상한 후보는 빠진다."""
+    if not isinstance(v, dict):
+        return None
+    posts = []
+    for x in v.get("posts")[:PT_POSTS_MAX] if isinstance(v.get("posts"), list) else []:
+        if not isinstance(x, dict) or not (pid := _count(x.get("pid"), top=10**9)) or not (title := _one_line(x.get("title"), 80)):
+            continue
+        pieces = [{"part": _one_line(p.get("part"), 20) or "", "desc": _one_line(safe_text(p.get("desc") or "", 120), 60) or ""}
+                  for p in (x.get("pieces") if isinstance(x.get("pieces"), list) else [])[:PT_PIECES_MAX] if isinstance(p, dict)]
+        items = []
+        for it in (x.get("items") if isinstance(x.get("items"), list) else [])[:PT_ITEMS_MAX]:
+            if not isinstance(it, dict) or not PT_ITEM_ID.match(str(it.get("id") or "")) \
+                    or not (name := _one_line(safe_text(it.get("name") or "", 160), 80)) or not (link := https_url(it.get("link"))):
+                continue
+            n = _count(it.get("piece"), top=PT_PIECES_MAX)
+            img = it.get("img")
+            items.append({"id": it["id"], "piece": n if n is not None and n < len(pieces) else 0, "name": name,
+                          "shop": _one_line(it.get("shop"), 40) or "", "price": _count(it.get("price"), top=10**9) or 0,
+                          "at": _one_line(it.get("at"), 20) or "", "img": img if isinstance(img, str) and THUMB_RE.match(img) else None,
+                          "link": link, "query": _one_line(it.get("query"), 60) or "",
+                          **({"verdict": it["verdict"]} if it.get("verdict") in ("ok", "bad") else {})})
+        if items:
+            posts.append({"pid": pid, "title": title, "pieces": pieces, "items": items})
+    reasons = [r for r in PT_REASONS if isinstance(v.get("reasons"), list) and r in v["reasons"]]
+    return {"posts": posts, "learned": _str_list(v.get("learned"), PT_LEARNED_MAX, 120), "ok": _count(v.get("ok"), top=10**6) or 0,
+            "goal": _count(v.get("goal"), top=10**4) or 20, "reasons": reasons or list(PT_REASONS)}
+
+
+# 사진 테스트 (주인 10/21 — Blog-Auto photo_trial.export): 시험 글마다 자리 사진(올라가는 판·큰 사본)·설명·출처·숫자 검수·받은 피드백 수
+TRIAL_REASONS = ("margin_left_over", "ui_remnant", "subject_cut", "too_wide", "too_tight", "wrong_person", "low_quality_blur",
+                 "duplicate", "text_overlay", "bad_aspect", "dark", "broadcast_frame", "screen_capture_graphics", "other",
+                 "placement", "spread", "count", "fit")  # Blog-Auto photo_trial.REASONS
+TRIAL_QA = re.compile(r"^[a-z_]{2,32}$")
+TRIAL_POSTS_MAX, TRIAL_RULES_MAX = 30, 20
+
+
+def _photo_trial(v: Any) -> dict[str, Any] | None:
+    """{posts: [{pid, title, at, slots: [{slot, final, full, credit, desc, qa: {ok, issues}}], feedback_done}], rules: [{id, area, text, at}]}.
+    칸이 없거나 시험 글이 없으면 None (화면이 '사진 테스트' 를 숨김). 사진 이름은 thumbs 규칙(THUMB_RE)만."""
+    if not isinstance(v, dict) or not isinstance(v.get("posts"), list):
+        return None
+    posts = []
+    for x in v["posts"][:TRIAL_POSTS_MAX]:
+        if not isinstance(x, dict) or not (pid := _count(x.get("pid"), top=10**9)):
+            continue
+        slots = []
+        for s in x.get("slots")[:40] if isinstance(x.get("slots"), list) else []:
+            if not isinstance(s, dict) or not (n := _count(s.get("slot"), top=40)):
+                continue
+            pic = {k: s[k] for k in ("final", "full") if isinstance(s.get(k), str) and THUMB_RE.match(s[k])}
+            qa = s.get("qa") if isinstance(s.get("qa"), dict) else {}
+            slots.append({"slot": n, **pic, "credit": _one_line(s.get("credit"), 40) or "", "desc": _one_line(s.get("desc"), 80) or "",
+                          "qa": {"ok": qa.get("ok") is True,
+                                 "issues": [i for i in qa.get("issues") or [] if isinstance(i, str) and TRIAL_QA.match(i)][:6]}})
+        posts.append({"pid": pid, "title": _one_line(x.get("title"), 80) or f"#{pid}", "at": _one_line(x.get("at"), 40),
+                      "slots": slots, "feedback_done": _count(x.get("feedback_done"), top=10**6) or 0})
+    if not posts:
+        return None
+    rules = []
+    for r in v.get("rules")[:TRIAL_RULES_MAX] if isinstance(v.get("rules"), list) else []:
+        if isinstance(r, dict) and LEARN_RULE_ID.match(str(r.get("id") or "")) and r.get("area") in LEARN_AREAS \
+                and (t := _one_line(safe_text(r.get("text") or "", 400), 200)):
+            rules.append({"id": r["id"], "area": r["area"], "text": t, "at": _one_line(r.get("at"), 40)})
+    return {"posts": posts, "rules": rules}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
                            "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits")),
                            "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends")),
-                           "learn": _learn(data.get("learn"))}
+                           "learn": _learn(data.get("learn")), "photo_trial": _photo_trial(data.get("photo_trial")),
+                           "product_trial": _product_trial(data.get("product_trial"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

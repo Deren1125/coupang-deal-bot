@@ -1,0 +1,26 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9s4p",
+ "ts": 1761010000.12,
+ "expires_at": 1761010600.12,
+ "action": "product_feedback",
+ "blog": "issue",
+ "args": {
+  "blog": "issue",
+  "pid": 41,
+  "item_id": "pt-5e6f7a8b",
+  "verdict": "bad",
+  "reasons": [
+   "색 다름",
+   "싸 보임/품질"
+  ],
+  "note": "셀럽 로퍼보다 광이 너무 나요"
+ },
+ "target": "post-issue-41",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_4e8b2a"
+ }
+}
