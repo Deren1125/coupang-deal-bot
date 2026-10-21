@@ -139,7 +139,7 @@ function route() {
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog' && !/^(pics|search)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search|trial)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -850,6 +850,14 @@ async function edGo(it, fn) {
     args: {blog: it.blog, pid: Number(it.iid.split('-')[2])}});
 }
 const edBatch = it => edGo(it, (E, h) => E.batch(h));
+// 사진 테스트 (10/21 — 시험 글만 · 그리기는 edit.js): 사진을 누르면 평소 편집기
+function vTrial() {
+  const box = el('div');
+  if (!S.photo_trial) return [el('p', {class: 'note'}, '사진 테스트 글이 없어요')];
+  edLoad().then(E => E.trial({el, btn, exec, toast, render, box, S: S.photo_trial,
+    edPhoto: (p, s) => edGo({blog: 'issue', iid: p.iid, detail: {slots: p.edit}}, (E2, h) => E2.photo(h, s, () => {}))})).catch(() => toast(MSG.net));
+  return [el('h2', {}, '사진 테스트'), box];
+}
 // 사진을 누르면 바로 편집기 (10/20): 자르기·비율·돌리기·사람만 남기기 → 저장 (교체·비우기는 편집기 아래 링크)
 const edPhoto = (it, s) => edGo(it, (E, h) => E.photo(h, s, () => slotSheet(it, s)));
 async function digestSheet(id) {
@@ -950,6 +958,7 @@ function vBlog() {
     return btn('', [l, n ? el('span', {class: 'cp hot', 'aria-label': `할 일 ${n}개`}, n) : null], () => { location.hash = '#/blog/' + k; }, {'aria-pressed': k === key ? 'true' : 'false'}); }))];
   if (key === 'pics') return out.concat(vPics());
   if (key === 'search') return out.concat(vSearch());
+  if (key === 'trial') return out.concat(vTrial());
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -958,6 +967,7 @@ function vBlog() {
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
+  if (S.photo_trial && key === 'issue') out.push(el('a', {class: 'bn', href: '#/blog/trial'}, '사진 테스트 →'));
   const sr = S.search;
   if (sr && sr.days.length) out.push(el('a', {class: 'bn', href: '#/blog/search'}, sr.left ? `구글 검색 등록 ${sr.left}개 →` : '구글 검색 등록 →'));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));

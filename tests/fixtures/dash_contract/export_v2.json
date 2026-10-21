@@ -534,5 +534,80 @@
    {"id": "lr-3a4b5c6d", "blog": "finance", "area": "tags", "rule_text": "태그는 12개로 맞춘다.", "at": "2026-10-11T21:31:00", "by": "owner", "config": {"key": "tags.min", "value": 12}}
   ],
   "votes": {"40": "up", "46": "down"}
+ },
+ "photo_trial": {
+  "posts": [
+   {
+    "pid": 52,
+    "title": "원빈 근황 공개 스타일",
+    "at": "2026-10-21T20:10:00",
+    "slots": [
+     {
+      "slot": 1,
+      "final": "post-issue-52-1-5d6e7f80-u.jpg",
+      "full": "post-issue-52-1-5d6e7f80-f.jpg",
+      "credit": "news1.kr",
+      "desc": "정면 전신",
+      "qa": {
+       "ok": true,
+       "issues": []
+      }
+     },
+     {
+      "slot": 2,
+      "final": "post-issue-52-2-9a0b1c2d-u.jpg",
+      "full": "post-issue-52-2-9a0b1c2d-f.jpg",
+      "credit": "",
+      "desc": "그 장면이 없으면 원빈 다른 사진도 돼요",
+      "qa": {
+       "ok": false,
+       "issues": [
+        "border"
+       ]
+      }
+     },
+     {
+      "slot": 3,
+      "final": null,
+      "full": null,
+      "credit": "",
+      "desc": "마무리 컷",
+      "qa": {
+       "ok": false,
+       "issues": []
+      }
+     }
+    ],
+    "feedback_done": 2
+   }
+  ],
+  "rules": [
+   {
+    "id": "lr-7e8f9a0b",
+    "area": "photo",
+    "text": "TV·방송 화면 캡처(로고·자막 띠가 있는 화면)는 자르지 말고 빼고, 그 자리는 비워 둔다.",
+    "at": "2026-10-21T23:41:00"
+   }
+  ],
+  "reasons": [
+   "margin_left_over",
+   "ui_remnant",
+   "subject_cut",
+   "too_wide",
+   "too_tight",
+   "wrong_person",
+   "low_quality_blur",
+   "duplicate",
+   "text_overlay",
+   "bad_aspect",
+   "dark",
+   "broadcast_frame",
+   "screen_capture_graphics",
+   "other",
+   "placement",
+   "spread",
+   "count",
+   "fit"
+  ]
  }
 }
