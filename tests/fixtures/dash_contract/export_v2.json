@@ -773,6 +773,14 @@
       "source": "naver",
       "verdict": "bad"
      }
+    ],
+    "dropped": [
+     {
+      "piece": 0,
+      "name": "카멜 롱 트렌치코트",
+      "shop": "떨이코트",
+      "why": "평점 3.8 · 후기 42개 — 기준 미달"
+     }
     ]
    }
   ],

@@ -647,12 +647,19 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
     if name == "similar_links":  # 비슷한 아이템 링크 (주인 10/20 — 계약 action_similar_links.json): 글 칸(text) 또는 links·notes
         if g("blog") not in (None, "issue"):
             raise ActionError("bad_args")
+        extra: dict[str, dict] = {}
         if g("links") is not None:
             links, notes = g("links"), g("notes") if g("notes") is not None else []
             if not isinstance(links, list) or not isinstance(notes, list) or len(notes) > len(links):
                 raise ActionError("bad_args")
             pairs = [(_similar_url(u), _str(n, SIMILAR_NOTE_MAX, required=False) if n != "" else "")
                      for u, n in zip(links, notes + [""] * (len(links) - len(notes)), strict=True)]
+            for k, hi in (("ratings", 10), ("reviews", 10 ** 8)):  # 주인이 본 평점·후기 수 (선택 — 10/21 평점 기준, links 와 같은 순서)
+                v = g(k)
+                if v is not None and (not isinstance(v, list) or len(v) > len(links) or any(
+                        x is not None and (isinstance(x, bool) or not isinstance(x, (int, float)) or not 0 <= x <= hi) for x in v)):
+                    raise ActionError("bad_args")
+                extra[k] = {pairs[i][0]: x for i, x in reversed(list(enumerate(v or []))) if x is not None}
         else:
             pairs = similar_lines(_str(g("text"), SIMILAR_TEXT_MAX))
         seen: dict[str, str] = {}
@@ -663,6 +670,9 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         out = {"blog": "issue", "pid": _int(g("pid")), "links": list(seen)}
         if any(seen.values()):
             out["notes"] = list(seen.values())
+        for k, m in extra.items():
+            if m:
+                out[k] = [m.get(u) for u in seen]
         return out
     if name == "product_feedback":  # 제품 테스트 (주인 10/21 — 계약 action_product_feedback.json)
         iid, v = g("item_id"), g("verdict")

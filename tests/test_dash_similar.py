@@ -30,9 +30,13 @@ def test_clean_args_match_the_contract_fixture() -> None:
     assert want["action"] == "similar_links" and want["target"] == "post-issue-41" and want["confirmed"] is False
     assert "similar_links" in BLOG_ACTIONS and "similar_links" in fixture("status_blogauto.json")["actions"]
     a = want["args"]
+    base = {k: v for k, v in a.items() if k not in ("ratings", "reviews")}  # 평점·후기 수는 links 로 보낼 때만 (선택 — 10/21)
     out = clean_args("blog.similar_links", {"blog": "issue", "pid": a["pid"], "text": TEXT})  # 화면 글 칸
-    assert out == a and list(out) == list(a)
-    assert clean_args("blog.similar_links", dict(a)) == a  # links·notes 로 보내도 같은 모양
+    assert out == base and list(out) == list(base)
+    assert clean_args("blog.similar_links", dict(a)) == a  # links·notes·ratings·reviews 로 보내도 같은 모양
+    for bad in ({"ratings": [11, None]}, {"reviews": [-1]}, {"ratings": ["4.8"]}, {"ratings": [4, 4, 4]}, {"reviews": [True]}):
+        with pytest.raises(ActionError):
+            clean_args("blog.similar_links", dict(a, **bad))
     plain = clean_args("blog.similar_links", {"pid": 41, "text": "https://m.a-bly.com/goods/1\nhttps://m.a-bly.com/goods/1"})
     assert plain == {"blog": "issue", "pid": 41, "links": ["https://m.a-bly.com/goods/1"]}  # 이름이 없으면 notes 없음 · 같은 주소는 한 번
     assert similar_lines("크림 니트 https://m.a-bly.com/goods/2") == [("https://m.a-bly.com/goods/2", "크림 니트")]
@@ -57,7 +61,8 @@ async def test_links_reach_the_spool_like_the_contract_fixture(bot: DealBot, set
     assert set(f) == set(want)
     assert {k: f[k] for k in ("v", "action", "blog", "target", "confirmed")} == \
         {k: want[k] for k in ("v", "action", "blog", "target", "confirmed")}
-    assert f["args"] == want["args"] and list(f["args"]) == list(want["args"])
+    base = {k: v for k, v in want["args"].items() if k not in ("ratings", "reviews")}
+    assert f["args"] == base and list(f["args"]) == list(base)
 
 
 def test_similar_field_is_optional_and_checked() -> None:
