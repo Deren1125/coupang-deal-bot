@@ -954,7 +954,8 @@ function dealLinks(r) {
 // -- 탭: 블로그
 const IDEA = ['blog.scan', 'blog.issue', 'blog.hotdeal_now'];
 // 블로그 이름 옆 할 일 수 (10/20)
-const todoN = k => S.todo.reduce((n, i) => n + (i.kind === 'visits' ? +vis(i.detail.visits).some(x => x.blog === k) : +(i.blog === k && !pendingOf(i.iid))), 0);
+const mineT = (i, k) => i.kind === 'visits' ? vis(i.detail.visits).some(x => x.blog === k) : i.blog === k && !pendingOf(i.iid);
+const todoN = k => S.todo.filter(i => mineT(i, k)).length;
 // Pick 인기 검색어 (10/20)
 const TSRC = {advisor: '어드바이저', google: '구글', pick: 'Pick', news: '뉴스', early: '급상승'}, TTAG = {fashion: '패션', ent: '연예'};
 function trendBox(t) {
@@ -993,6 +994,8 @@ function vBlog() {
   if (key === 'issue' && S.ptrial) out.push(el('a', {class: 'bn', href: '#/blog/ptrial'}, `제품 테스트 ${S.ptrial.posts.length}편 →`));
   const sr = S.search;
   if (sr && sr.days.length) out.push(el('a', {class: 'bn', href: '#/blog/search'}, sr.left ? `구글 검색 등록 ${sr.left}개 →` : '구글 검색 등록 →'));
+  const mt = S.todo.filter(i => mineT(i, key));  // 탭 옆 숫자 = 이 블로그 할 일 (주인 10/23 — 숫자만 있고 안 보였음)
+  if (mt.length) out.push(el('p', {class: 'h3'}, `이 블로그 할 일 ${mt.length}`), ...mt.map(i => item(i)));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
   const sc = b.schedule, want = sc ? 'blog.schedule' : 'blog.publish';
   const pubs = b.waiting.filter(x => x.primary && x.primary.action === want && !x.primary.disabled && x.kind !== 'sched_blocked' && !pendingOf(x.iid));
