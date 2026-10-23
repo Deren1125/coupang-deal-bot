@@ -12,6 +12,8 @@ const CSS = '.tp{display:grid;gap:8px}.tp textarea{font:inherit;font-size:16px;p
   '.tl2 i{display:block;font-style:normal;color:var(--sub);font-size:12px}.tl2 a{color:var(--text)}.tl2 .pb{width:auto;min-height:40px;padding:0 14px;margin-top:6px}' +
   '.tp .tq,.tt{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px}.tt div{background:var(--grey);border-radius:10px;padding:8px 10px}' +
   '.tt b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.tt span{font-size:12px;color:var(--sub)}' +
+  '.tt .tb{background:var(--grey);border:0;border-radius:10px;padding:8px 10px;text-align:left;color:var(--text);font:inherit;min-height:44px;cursor:pointer}' +
+  '.tt .tb[aria-pressed=true]{outline:2px solid var(--text)}' +
   '.bar{display:grid;grid-template-columns:64px 1fr 44px;gap:8px;align-items:center;font-size:13px;padding:3px 0}.bar u{display:block;height:10px;border-radius:5px;background:var(--text);opacity:.55;text-decoration:none}' +
   '.bar b{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}';
 const css = () => { if (D.getElementById('tp-css')) return; const s = D.createElement('style'); s.id = 'tp-css'; s.textContent = CSS; D.head.append(s); };
@@ -75,8 +77,21 @@ function stats(t, h) {
   const {el} = h, s = t.stats;
   if (!s) return [note(h, '통계는 3시간마다 모아요 — 아직 없어요')];
   const mx = Math.max(1, ...s.days.map(d => d.views));
-  return [el('div', {class: 'tt'}, s.totals.map(x => el('div', {}, el('b', {}, nf(x.n)), el('span', {}, x.label))), s.followers != null ? el('div', {}, el('b', {}, nf(s.followers)), el('span', {}, '팔로워')) : null),
-    note(h, `${s.range}${s.when ? ' · ' + s.when + ' 기준' : ''}`),
+  // 숫자를 누르면 그 수치가 나온 글 (주인 10/23 — '좋아요나 댓글은 클릭하면 무슨 글인지') · 다시 누르면 닫힘
+  const list = el('div', {class: 'tl2'}), tiles = [];
+  const show = (x, b) => {
+    const on = S0.k !== x.key;
+    S0.k = on ? x.key : null;
+    tiles.forEach(t => t.setAttribute('aria-pressed', t === b && on ? 'true' : 'false'));
+    const ps = on ? (t.posts || []).filter(p => p.stats && p.stats[x.key] > 0).sort((a, c) => c.stats[x.key] - a.stats[x.key]) : [];
+    list.replaceChildren(...(!on ? [] : ps.length ? ps.map(p => el('p', {}, el('i', {}, `${x.label} ${nf(p.stats[x.key])} · ${p.when}`), p.text,
+      p.permalink ? el('a', {href: p.permalink, target: '_blank', rel: 'noopener'}, ' ↗ 열기') : null)) : [note(h, `최근 글 중 ${x.label} 있는 글이 없어요`)]));
+  };
+  s.totals.forEach(x => { const b = el('button', {type: 'button', class: 'tb', 'aria-pressed': 'false', 'aria-label': `${x.label} ${nf(x.n)} — 어느 글인지 보기`},
+    el('b', {}, nf(x.n)), el('span', {}, x.label)); b.onclick = () => show(x, b); tiles.push(b); });
+  if (S0.k) { const x = s.totals.find(y => y.key === S0.k); S0.k = null; if (x) show(x, tiles[s.totals.indexOf(x)]); }
+  return [el('div', {class: 'tt'}, tiles, s.followers != null ? el('div', {}, el('b', {}, nf(s.followers)), el('span', {}, '팔로워')) : null),
+    note(h, `${s.range}${s.when ? ' · ' + s.when + ' 기준' : ''} · 숫자를 누르면 어느 글인지 보여요`), list,
     el('div', {style: 'margin-top:6px'}, s.days.map(d => el('div', {class: 'bar'}, el('span', {}, d.label), el('span', {}, el('u', {style: `width:${Math.round(d.views / mx * 100)}%`})), el('b', {}, nf(d.views)))))];
 }
 
