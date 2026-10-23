@@ -66,6 +66,7 @@ async function api(path, opt = {}, again) {
 }
 
 // 자동 새로고침(quiet)은 'N분 전'처럼 시간만 바뀐 것으로는 다시 그리지 않는다 (주인 10/23 — 20초마다 화면이 깜빡임)
+const APPV = ((D.querySelector('script[src*="app.js"]') || {}).src || '').split('v=')[1];
 const sig = d => JSON.stringify(d, (k, v) => k === 'at' || k === 'etag' || k === 'since' ? 0 : typeof v === 'string' ? v.replace(/\d+\s*(초|분|시간)\s*(전|남음|째)?/g, '') : v);
 function load(quiet) {
   if (loading) return loading;
@@ -83,6 +84,9 @@ function load(quiet) {
     if (r.status === 304) { OLD = false; head(); after(); return; }
     const d = await r.json().catch(() => null);
     if (!d) return;
+    // 자동 새로고침: 휴대폰이 느려 저장본(x-sw-cache)이 오면 버림 (저장본↔새것이 번갈아 깜빡이던 것) · 앱이 새로 올라왔으면 한 번 새로 열기
+    if (quiet && r.headers.get('x-sw-cache') === '1') return;
+    if (quiet && d.app && APPV && d.app !== APPV && !D.querySelector('.bd')) { location.reload(); return; }
     OLD = r.headers.get('x-sw-cache') === '1';
     const same = S && S.etag && d.etag === S.etag || quiet && S && sig(S) === sig(d);
     S = d;

@@ -57,6 +57,12 @@ NEED_STATUS = {"owner_edit": "직접 고친 글 · 건드리지 않음", "answer
                "channel": "채널에 아직 안 올림"}
 
 
+def _app_ver() -> str:
+    from dealbot.dashboard.shell import APP_JS, asset_url
+
+    return asset_url(APP_JS).rsplit("v=", 1)[-1]
+
+
 def act(action: str, label: str, args: dict[str, Any] | None = None, *, input: str = "none", danger: bool | None = None,
         url: str | None = None, goto: str | None = None, **extra: Any) -> dict[str, Any]:
     """Action (spec §5.1): input = url|text|answers|photos|file|secret|choice|none|open|goto."""
@@ -1119,7 +1125,7 @@ class StateBuilder:
         pending = [self._status(r) for r in bot.actions_out.store.open_rows()][:20]
         blogs = self.blogs(export, todo)
         body: dict[str, Any] = {
-            "v": STATE_V, "at": time.time(),
+            "v": STATE_V, "at": time.time(), "app": _app_ver(),  # 화면이 옛 app.js 로 떠 있으면 스스로 새로 열게 (10/23)
             "me": {"csrf": csrf, "push_key": router.public_key if router is not None else None,
                    "public_url": bot.settings.dashboard.public_url, "logout_t": logout_t},
             "banner": banner,
