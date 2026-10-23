@@ -65,9 +65,11 @@ async function api(path, opt = {}, again) {
   return {status: r.status, data};
 }
 
-function load() {
+// 자동 새로고침(quiet)은 'N분 전'처럼 시간만 바뀐 것으로는 다시 그리지 않는다 (주인 10/23 — 20초마다 화면이 깜빡임)
+const sig = d => JSON.stringify(d, (k, v) => k === 'at' || k === 'etag' || k === 'since' ? 0 : typeof v === 'string' ? v.replace(/\d+\s*(초|분|시간)\s*(전|남음|째)?/g, '') : v);
+function load(quiet) {
   if (loading) return loading;
-  $('rf').classList.add('busy');
+  if (!quiet) $('rf').classList.add('busy');
   loading = (async () => {
     let r = null;
     try {
@@ -82,7 +84,7 @@ function load() {
     const d = await r.json().catch(() => null);
     if (!d) return;
     OLD = r.headers.get('x-sw-cache') === '1';
-    const same = S && S.etag && d.etag === S.etag;
+    const same = S && S.etag && d.etag === S.etag || quiet && S && sig(S) === sig(d);
     S = d;
     if (!same) render(); else head();
     after();
@@ -1289,7 +1291,7 @@ function start() {
     if (Date.now() - PICK > 120000) load();
   });
   // 화면이 보이는 동안 20초마다 바뀐 것만 받아 다시 그림 (주인 10/23 — 새로고침 없이). 시트가 열렸거나 글을 쓰는 중이면 건너뜀
-  setInterval(() => { const a = D.activeElement; if (D.visibilityState === 'visible' && !D.querySelector('.bd') && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) load(); }, 20000);
+  setInterval(() => { const a = D.activeElement; if (D.visibilityState === 'visible' && !D.querySelector('.bd') && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) load(1); }, 20000);
   ptr();
   route();
   if (!S) load(); else setTimeout(load, 400);
