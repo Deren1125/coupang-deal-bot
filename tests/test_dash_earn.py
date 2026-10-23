@@ -247,7 +247,7 @@ def test_build_totals_per_source_and_recent(db: Database) -> None:
     assert t["30일"]["commission"] == "4,504원" and t["30일"]["orders"] == "5건"
     assert t["7일"]["amount"] == "96,800원"  # 쿠팡 주문금액 71,800+9,900+15,000 - 취소 9,900 + 직접 10,000
     src = {s["key"]: s for s in e["sources"]}
-    assert [s["label"] for s in e["sources"]] == ["쿠팡 (자동)", "쇼핑커넥트", "토스·패션몰 (직접 넣은 것)"]
+    assert [s["label"] for s in e["sources"]] == ["쿠팡 (자동)", "쇼핑커넥트", "직접 넣은 것"]
     assert src["coupang"]["state"] == "ok" and "하루 늦게" in src["coupang"]["note"] or src["coupang"]["state"] == "wait"
     assert src["coupang"]["cells"][1]["commission"] == "2,604원"
     assert src["manual"]["cells"][2]["commission"] == "1,900원"
@@ -356,3 +356,34 @@ def test_earn_js_syntax() -> None:
 def test_schedule_loop_calls_earn_tick() -> None:
     src = (Path(__file__).parent.parent / "src" / "dealbot" / "scheduler.py").read_text(encoding="utf-8")
     assert "earn_coupang" in src and asyncio.iscoroutinefunction(earn.EarnCoupang.tick)
+
+
+# ---------------------------------------------------------------- 에이블리·지그재그·토스쇼핑 자동 (주인 10/23 — 쇼핑몰 크리에이터를 제휴 수익으로)
+def test_creator_malls_are_auto_rows_in_the_same_layout(db: Database) -> None:
+    from dealbot.dashboard.blogauto import _creator_mall
+
+    cm = _creator_mall(json.loads((Path(__file__).parent / "fixtures" / "dash_contract" / "export_v2.json").read_text(encoding="utf-8"))["creator_mall"])
+    store = earn.EarnStore(db)
+    for m in store.manual():
+        store.delete_manual(m["id"])
+    store.replace_coupang(earn.parse_coupang(REPORTS, TODAY), "2026-09-24", "2026-10-23", "t")
+    plain = earn.build(store, TZ, NOW, None, coupang_on=True, sub_id_set=True)
+    e = earn.build(store, TZ, NOW, None, coupang_on=True, sub_id_set=True, cm_field=cm)
+    labels = [s["label"] for s in e["sources"]]
+    assert labels == ["쿠팡 (자동)", "쇼핑커넥트", "에이블리 (자동)", "지그재그 (자동)", "토스쇼핑 (자동)", "직접 넣은 것"]
+    src = {s["key"]: s for s in e["sources"]}
+    toss = src["cm_toss"]
+    assert toss["state"] == "ok" and [c["label"] for c in toss["cells"]] == ["오늘", "7일", "30일"]
+    assert toss["cells"][1] == {"label": "7일", "orders": "2건", "amount": "33,790원", "commission": "2,703원"}
+    assert "방문 오늘 1 · 7일 4 · 30일 4" in toss["note"] and "연결됨" in toss["note"]
+    assert src["cm_ably"]["cells"][0]["amount"] == "-"  # 에이블리는 주문 금액을 주지 않는다 — 짐작하지 않음
+    zz = src["cm_zigzag"]
+    assert zz["state"] == "wait" and "로그인 필요" in zz["note"]  # 로그인이 풀린 몰은 숫자 대신 안내
+    # 합계에 더해짐 (로그인이 풀린 지그재그는 빼고) — 30일: 에이블리 600 + 토스 2,703
+    p = {t["label"]: t for t in plain["totals"]}
+    t = {t["label"]: t for t in e["totals"]}
+    def won(s: str) -> int:
+        return int(s.replace(",", "").replace("원", ""))
+    assert won(t["30일"]["commission"]) - won(p["30일"]["commission"]) == 600 + 2703
+    assert any(r["src"] == "토스쇼핑" and r["name"].startswith("교동 육개장") for r in e["recent"])  # 토스가 알려 준 산 상품
+    assert e["manual"]["shops"] == ["무신사", "29CM", "기타"]

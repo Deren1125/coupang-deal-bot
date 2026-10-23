@@ -984,6 +984,18 @@ def _cm_items(v: Any) -> list[dict[str, Any]] | None:
     return out
 
 
+CM_WINDOWS = ("오늘", "7일", "30일")
+
+
+def _cm_windows(v: Any) -> list[dict[str, Any]] | None:
+    """제휴 수익 양식 (주인 10/23): [{label 오늘|7일|30일, visits, orders, amount, commission}] — 숫자는 _count (모르면 None)."""
+    if not isinstance(v, list):
+        return None
+    got = {w.get("label"): w for w in v if isinstance(w, dict) and w.get("label") in CM_WINDOWS}
+    return [{"label": label, **{k: _count((got.get(label) or {}).get(k), top=CM_MAX) for k in ("visits", "orders", "amount", "commission")}}
+            for label in CM_WINDOWS]
+
+
 def _creator_mall(v: Any) -> dict[str, Any] | None:
     """{read_at, month, malls: [{key, name, state, text, conn, checked_at, conn_since, visits?, orders?, order_amount?, reward?,
     expected?, last_month?, items (토스: 구매 상품 목록 · 그 밖 None)}],
@@ -1002,6 +1014,7 @@ def _creator_mall(v: Any) -> dict[str, Any] | None:
         for k in CM_NUMS:
             row[k] = _count(m.get(k), top=CM_MAX)
         row["items"] = _cm_items(m.get("items"))
+        row["windows"] = _cm_windows(m.get("windows"))
         malls.append(row)
 
     def total(k: str) -> int | None:

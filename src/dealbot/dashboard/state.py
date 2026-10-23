@@ -1143,10 +1143,11 @@ class StateBuilder:
         store = getattr(self.bot, "earn_store", None)
         if store is None:
             return None
-        sc = ((getattr(export, "v2", None) or {}).get("earnings") or {}).get("shopconnect")
+        v2 = getattr(export, "v2", None) or {}
+        sc = (v2.get("earnings") or {}).get("shopconnect")
         try:
             return earn.build(store, self.tz, time.time(), sc, coupang_on=self.bot.coupang is not None,
-                              sub_id_set=bool(self.bot.settings.secrets.coupang_sub_id))
+                              sub_id_set=bool(self.bot.settings.secrets.coupang_sub_id), cm_field=v2.get("creator_mall"))
         except Exception as e:  # noqa: BLE001 — 수익 칸 하나가 상태 전체를 막지 않게
             log.warning("earnings state failed: %s", type(e).__name__)
             return None

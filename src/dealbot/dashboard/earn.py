@@ -5,7 +5,10 @@
    기존 호출 예산(ApiBudget 'report' 몫)·하루 호출 수 한도를 따르고, 실패하면 1시간 뒤 다시. 주문 리포트에 상품 이름이 있으면 최근 구매 목록에 쓴다.
 2. 네이버 쇼핑커넥트: 공개 API 가 없다. Blog-Auto 가 주인 계정의 성과 화면을 하루 한 번 읽어 기록 파일 earnings.shopconnect 로 준다.
    Blog-Auto 가 아직 확인(report_confirmed) 전이면 '확인 준비 중' 한 줄만.
-3. 토스쇼핑·에이블리·지그재그·무신사·29CM·기타: API 도 없고 앱이 봇을 막으므로 로그인·긁기 없이 주인이 직접 넣는다 (earn_manual 표).
+3. 에이블리·지그재그·토스쇼핑 (자동 — 주인 10/23 '쇼핑몰 크리에이터를 제휴 수익으로 옮기고 양식도 똑같이'): Blog-Auto 기록 파일
+   creator_mall (주인 크리에이터 화면을 하루 한 번 읽음 · 4시간마다 로그인 확인)의 쇼핑몰별 windows(오늘·7일·30일 방문·주문·금액·수익)를
+   쿠팡처럼 한 줄씩 · 방문 수와 연결 상태는 설명 줄 · 토스가 알려 준 산 상품은 최근 구매에.
+4. 무신사·29CM·기타: 주인이 직접 넣는다 (earn_manual 표).
 """
 
 from __future__ import annotations
@@ -26,7 +29,9 @@ from dealbot.storage.db import Database
 
 log = logging.getLogger(__name__)
 
-SHOPS = ("토스쇼핑", "에이블리", "지그재그", "무신사", "29CM", "기타")
+SHOPS = ("무신사", "29CM", "기타")  # 새로 넣을 때 고르는 곳 — 에이블리·지그재그·토스쇼핑은 자동 (creator_mall) · 직접 넣으면 두 번 센다
+OLD_SHOPS = ("토스쇼핑", "에이블리", "지그재그")  # 10/23 전에 직접 넣은 줄을 고칠 때만 받는다
+CM_CONN_TEXT = {"ok": "연결됨", "expired": "로그인 필요", "failed": "연결 확인 실패", "unknown": "연결 확인 전"}
 WINDOW_DAYS = 30
 INTERVAL_SEC = 3 * 3600  # 쿠팡 실적 읽는 간격
 RETRY_SEC = 3600  # 실패하면 1시간 뒤
@@ -36,7 +41,7 @@ RECENT_MAX = 15
 MANUAL_MAX = 60
 MONEY_MAX = 100_000_000
 K_LAST_OK, K_NEXT, K_ERR, K_CALLS = "earn:coupang:last_ok", "earn:coupang:next", "earn:coupang:err", "earn:coupang:calls:{day}"
-LABEL_COUPANG, LABEL_SC, LABEL_MANUAL = "쿠팡 (자동)", "쇼핑커넥트", "토스·패션몰 (직접 넣은 것)"
+LABEL_COUPANG, LABEL_SC, LABEL_MANUAL = "쿠팡 (자동)", "쇼핑커넥트", "직접 넣은 것"
 SC_WAIT = "쇼핑커넥트 실적: 확인 준비 중 (서버 점검 후 켜짐)"
 SC_NOFIELD = "쇼핑커넥트 실적: 블로그 프로그램에서 아직 못 받았어요"
 
@@ -154,7 +159,7 @@ class EarnStore:
     def clean_manual(args: dict[str, Any], today: date) -> dict[str, Any]:
         """주인이 넣은 값 → 저장할 행 (맞지 않으면 EarnError — 한국어 한 줄)."""
         shop = str(args.get("shop") or "").strip()
-        if shop not in SHOPS:
+        if shop not in SHOPS + OLD_SHOPS:
             raise EarnError("어디서 생긴 수익인지 골라 주세요")
         try:
             day = date.fromisoformat(str(args.get("day") or ""))
@@ -289,8 +294,42 @@ def _tot(orders: int, amount: int, commission: int) -> dict[str, str]:
     return {"orders": f"{orders:,}건", "amount": money(amount), "commission": money(commission)}
 
 
-def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None, *, coupang_on: bool, sub_id_set: bool) -> dict[str, Any]:
-    """통계 탭 '제휴 수익' 칸 값. sc_field = Blog-Auto 기록 파일의 earnings.shopconnect (걸러 둔 것, 없으면 None)."""
+def _cm_cells(m: dict[str, Any]) -> list[dict[str, str]]:
+    ws = {w["label"]: w for w in m.get("windows") or []}
+    out = []
+    for label in ("오늘", "7일", "30일"):
+        w = ws.get(label) or {}
+        out.append({"label": label, "orders": f"{w['orders']:,}건" if w.get("orders") is not None else "-",
+                    "amount": money(w["amount"]) if w.get("amount") is not None else "-",
+                    "commission": money(w["commission"]) if w.get("commission") is not None else "-"})
+    return out
+
+
+def _cm_source(m: dict[str, Any], read_at: str | None) -> dict[str, Any]:
+    """쇼핑몰 한 줄 (모듈 설명 3)."""
+    ws = {w["label"]: w for w in m.get("windows") or []}
+    visits = " · ".join(f"{k} {ws[k]['visits']:,}" for k in ("오늘", "7일", "30일") if ws.get(k) and ws[k].get("visits") is not None)
+    conn = CM_CONN_TEXT.get(m.get("conn") or "unknown", "연결 확인 전") + (f" ({m['checked_at'][5:].replace('-', '/')})" if m.get("checked_at") else "")
+    bits = [f"방문 {visits}" if visits else "", conn, f"{read_at[5:].replace('-', '/')} 에 읽음" if read_at else "아직 못 읽었어요"]
+    if m["state"] == "ok" and m.get("windows"):
+        state = "ok"
+    else:
+        state = "wait"
+        bits.append(m.get("text") or "")
+    return {"key": f"cm_{m['key']}", "label": f"{m['name']} (자동)", "state": state, "note": " · ".join(b for b in bits if b),
+            "cells": _cm_cells(m)}
+
+
+def _cm_nums(m: dict[str, Any], label: str) -> tuple[int, int, int]:
+    w = next((x for x in m.get("windows") or [] if x["label"] == label), {})
+    return int(w.get("orders") or 0), int(w.get("amount") or 0), int(w.get("commission") or 0)
+
+
+def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None, *, coupang_on: bool, sub_id_set: bool,
+          cm_field: dict[str, Any] | None = None) -> dict[str, Any]:
+    """통계 탭 '제휴 수익' 칸 값. sc_field = Blog-Auto 기록 파일의 earnings.shopconnect (걸러 둔 것, 없으면 None).
+    cm_field = 기록 파일의 creator_mall (에이블리·지그재그·토스쇼핑 자동 — 없으면 그 줄들 없이)."""
+    cm_malls = [m for m in ((cm_field or {}).get("malls") or []) if m.get("state") != "pending"]
     today = datetime.fromtimestamp(now, ZoneInfo(tz)).date()
     wins = _window(today)
     first = wins[-1][1]
@@ -314,9 +353,11 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
 
     totals, per = [], {"coupang": [], "shopconnect": [], "manual": []}
     for label, lo, hi in wins:
-        parts = {"coupang": csum(lo, hi), "shopconnect": ssum(lo, hi), "manual": msum(lo, hi)}
+        parts = {"coupang": csum(lo, hi), "shopconnect": ssum(lo, hi), "manual": msum(lo, hi),
+                 **{f"cm_{m['key']}": _cm_nums(m, label) for m in cm_malls if m["state"] == "ok"}}
         for k, v in parts.items():
-            per[k].append({"label": label, **_tot(*v)})
+            if k in per:
+                per[k].append({"label": label, **_tot(*v)})
         totals.append({"label": label, **_tot(*(sum(p[i] for p in parts.values()) for i in range(3)))})
 
     # ---- 쿠팡
@@ -367,6 +408,11 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
     for o in (sc["orders"] if sc else [])[:RECENT_MAX]:
         recent.append({"src": LABEL_SC, "day": o["day"], "name": o["name"], "amount": money(o["amount"]),
                        "commission": money(o["commission"]), "cancelled": False, "id": None})
+    read_day = str((cm_field or {}).get("read_at") or "")[:10]
+    for m in cm_malls:  # 토스가 알려 준 산 상품 (상품명·금액·수수료 — 구매자 정보 없음 · 날짜는 읽은 날)
+        for it in (m.get("items") or [])[:RECENT_MAX] if read_day else []:
+            recent.append({"src": m["name"], "day": read_day, "name": it.get("name") or "(상품 이름 없음)", "amount": money(it.get("amount") or 0),
+                           "commission": money(it.get("reward") or 0), "cancelled": bool(it.get("refunded")), "id": None})
     for m in manual[:RECENT_MAX]:
         recent.append({"src": m["shop"], "day": m["day"], "name": m["product"] or "(상품 이름 없음)", "amount": money(m["amount"]),
                        "commission": money(m["commission"]), "cancelled": False, "id": m["id"]})
@@ -378,13 +424,14 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
         "title": "제휴 수익", "today": today.isoformat(), "totals": totals,
         "sources": [{"key": "coupang", "label": LABEL_COUPANG, "state": cstate, "note": cnote, "cells": per["coupang"]},
                     {"key": "shopconnect", "label": LABEL_SC, "state": sstate, "note": snote, "cells": per["shopconnect"]},
-                    {"key": "manual", "label": LABEL_MANUAL, "state": "ok", "note": "주인이 직접 넣은 것만 더해요", "cells": per["manual"]}],
+                    *[_cm_source(m, (cm_field or {}).get("read_at")) for m in cm_malls],
+                    {"key": "manual", "label": LABEL_MANUAL, "state": "ok", "note": "주인이 직접 넣은 것만 더해요 (무신사·29CM·기타)",
+                     "cells": per["manual"]}],
         "coupang": {"rows": crow, "subs": sub_rows, "sub_note": sub_note},
         "recent": recent,
         "manual": {"shops": list(SHOPS), "rows": [{"id": m["id"], "shop": m["shop"], "day": m["day"], "product": m["product"], "amount": m["amount"],
                                                    "commission": m["commission"], "memo": m["memo"],
                                                    "text": f"{_md(m['day'])} · {m['shop']} · {m['product'] or '상품 이름 없음'} · {money(m['amount'])} (수익 {money(m['commission'])})"}
                                                   for m in rows]},
-        "note": "무신사·29CM 은 ‘수익 직접 넣기’로 넣어 주세요 — 에이블리·지그재그·토스쇼핑의 이번 달 방문·구매·예상 리워드(토스는 산 상품까지)는 "
-                "통계 탭 ‘쇼핑몰 크리에이터’ 카드에 하루 한 번 자동으로 보여요 (주인 10/23 — 직접 넣으면 두 번 세지 않게 주의)",
+        "note": "에이블리·지그재그·토스쇼핑은 자동이에요 (하루 한 번 읽고 4시간마다 로그인 확인) — 무신사·29CM·기타만 ‘수익 직접 넣기’로 넣어 주세요",
     }

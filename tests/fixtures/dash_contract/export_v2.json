@@ -984,7 +984,30 @@
     "reward": 600,
     "expected": 1200,
     "last_month": 10000,
-    "items": null
+    "items": null,
+    "windows": [
+     {
+      "label": "오늘",
+      "visits": 2,
+      "orders": 0,
+      "amount": null,
+      "commission": 0
+     },
+     {
+      "label": "7일",
+      "visits": 9,
+      "orders": 1,
+      "amount": null,
+      "commission": 600
+     },
+     {
+      "label": "30일",
+      "visits": 12,
+      "orders": 1,
+      "amount": null,
+      "commission": 600
+     }
+    ]
    },
    {
     "key": "zigzag",
@@ -1000,7 +1023,30 @@
     "reward": 0,
     "expected": 0,
     "last_month": 0,
-    "items": null
+    "items": null,
+    "windows": [
+     {
+      "label": "오늘",
+      "visits": 0,
+      "orders": 0,
+      "amount": 0,
+      "commission": 0
+     },
+     {
+      "label": "7일",
+      "visits": 5,
+      "orders": 0,
+      "amount": 0,
+      "commission": 0
+     },
+     {
+      "label": "30일",
+      "visits": 5,
+      "orders": 0,
+      "amount": 0,
+      "commission": 0
+     }
+    ]
    },
    {
     "key": "toss",
@@ -1032,6 +1078,29 @@
       "amount": 8990,
       "reward": 719,
       "via": "다른 상품"
+     }
+    ],
+    "windows": [
+     {
+      "label": "오늘",
+      "visits": 1,
+      "orders": 1,
+      "amount": 24800,
+      "commission": 1984
+     },
+     {
+      "label": "7일",
+      "visits": 4,
+      "orders": 2,
+      "amount": 33790,
+      "commission": 2703
+     },
+     {
+      "label": "30일",
+      "visits": 4,
+      "orders": 2,
+      "amount": 33790,
+      "commission": 2703
      }
     ]
    }
