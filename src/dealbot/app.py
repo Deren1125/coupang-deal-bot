@@ -12,6 +12,7 @@ import html
 import io
 import json
 import logging
+import math
 import os
 import re
 import secrets as pysecrets
@@ -128,7 +129,7 @@ from dealbot.publisher.threads import (
 )
 from dealbot.shops import ShopRegistry, deal_disclosure, disclosure_program
 from dealbot.soldout import looks_sold_out
-from dealbot.storage.db import MAYBE_POSTED, REPLACED, Database, QueueItem
+from dealbot.storage.db import LINK_WAITING, MAYBE_POSTED, REPLACED, Database, QueueItem
 from dealbot.store_browser import StoreBrowser, store_browser_check
 from dealbot.summarize import InfoSummarizer, Summary, estimate_discount
 from dealbot.utils.text import clean_name, truncate
@@ -844,6 +845,13 @@ class DealBot:
                         "price": f"{p.price:,}원" if p.has_price else "", "at": it.created_at.timestamp(), "url": None,
                         "photo": "owner" if p.extra.get("owner_photo") else "none", "score": it.score})
         return out
+
+    def toss_counts(self, since: datetime) -> dict[str, int]:
+        """딜 탭 한 줄 '토스 후보 N · 링크 대기 N · 오늘 올림 N' (주인 10/23): 후보 = 올릴 차례를 기다리는 토스 딜 + 링크 대기,
+        링크 대기 = 내 링크를 기다리는 토스 딜, 오늘 올림 = since(오늘 0시) 뒤 채널에 올린 토스 딜 (연습 모드 글은 뺌)."""
+        waiting = self.db.shop_queue_count(("toss",), LINK_WAITING)
+        return {"candidates": waiting + self.db.shop_queue_count(("toss",), ("pending",)), "waiting": waiting,
+                "today": self.db.count_posts_since(since, product_prefix="toss:")}
 
     def recent_view(self, limit: int = 10) -> list[dict[str, Any]]:
         """/recent 의 값: 최근에 올린 글."""
@@ -2518,17 +2526,35 @@ class DealBot:
         기다리는 글은 게시판에서 다시 볼 때마다 새 점수로 — refresh_waiting_score).
         주인이 손댄 글(링크를 붙임·넘김·상태가 바뀜)은 내리지 않는다: 조건부 UPDATE 로 링크를 기다리는 그대로일 때만 바꾸고,
         그사이 바뀌었으면 다음 후보를 본다. 내린 글은 넘긴 것이 아니다: 유효 시간 안에는 같은 상품을 다시 묻지 않고(_replaced_recently)
-        주인이 /link 하면 그대로 받으며(attach_link), 지나면 같은 상품이 다시 나올 때 다시 물을 수 있다. 자리가 생겼으면 True."""
-        gain = self.settings.publish.swap_min_score_gain
-        if gain is None:
+        주인이 /link 하면 그대로 받으며(attach_link), 지나면 같은 상품이 다시 나올 때 다시 물을 수 있다. 자리가 생겼으면 True.
+        주인 10/23: 토스 같은 우선 몰(publish.link_priority_shops)은 자리의 link_priority_share 까지는 점수와 상관없이 다른 몰 글을 밀어내고, 그 몫은 다른 몰 새 딜이 못 밀어낸다."""
+        pub = self.settings.publish
+        gain = pub.swap_min_score_gain
+        prio = tuple(k.lower() for k in pub.link_priority_shops)
+        reserve = math.ceil(pub.link_priority_share * cap - 1e-9) if prio else 0  # 우선 몰이 지켜 받는 자리 수 (주인 10/23: 토스)
+        mine = bool(prio) and reserve > 0 and item.deal.product.shop.lower() in prio
+        if gain is None and not mine:
             return False
         for _ in range(3):  # 고르는 사이 주인이 손댄 글이면 다음으로 낮은 글을 다시 고른다
             if self.db.queue_counts().get("awaiting_link", 0) < cap:
                 return True  # 그사이 자리가 남 (주인이 링크를 붙였거나 품절로 내림)
-            low = self.db.weakest_awaiting_link()
-            # 소수 점수의 뺄셈 오차로 정확히 기준만큼 높은 딜(5.2 → 10.2)이 빠지지 않게 반올림해서 견준다
-            if low is None or low.id == item.id or item.score <= low.score or round(item.score - low.score, 6) < gain:
+            n_prio = self.db.awaiting_shop_count(prio) if reserve else 0
+            by_priority = False
+            if mine and n_prio < reserve:
+                # 우선 몰(토스)의 새 딜: 몫이 안 찼으면 점수와 상관없이 다른 몰의 가장 낮은 글을 내린다 (다른 몰 글이 없으면 아래 보통 규칙)
+                low = self.db.weakest_awaiting_link(not_shops=prio)
+                by_priority = low is not None
+            else:
+                # 다른 몰의 새 딜은 우선 몰의 몫(reserve)까지는 밀어내지 못한다
+                low = self.db.weakest_awaiting_link(not_shops=prio if reserve and not mine and n_prio <= reserve else ())
+            if low is None:
                 return False
+            if not by_priority:
+                if gain is None or low.id == item.id or item.score <= low.score or round(item.score - low.score, 6) < gain:
+                    return False
+            elif low.id == item.id:
+                return False
+            # 소수 점수의 뺄셈 오차로 정확히 기준만큼 높은 딜(5.2 → 10.2)이 빠지지 않게 반올림해서 견준다
             if not self.db.replace_awaiting_link(low.id, f"{REPLACED} #{item.id} (score {low.score:g}→{item.score:g})"):
                 continue
             self.db.log_event("INFO", "queue", f"#{low.id} {low.product_id} replaced by #{item.id} {item.product_id} "

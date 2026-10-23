@@ -413,6 +413,11 @@ class PublishConfig(BaseModel):
     # 높으면 그 글을 내리고 새 딜을 묻는다 (점수 = 대기열 점수, 판정의 DealVerdict.score). null 이면 바꾸지 않고 예전처럼 건너뜀
     max_awaiting_links: int = 15
     swap_min_score_gain: float | None = 5
+    # 링크 요청 자리에서 이 몰의 딜을 먼저 (주인 10/23: 토스 쉐어링크가 잘 팔림 — 앱에서만 만들어져 주인이 직접 넣는 몰). 자리가 다 찼을 때
+    # 이 몰의 딜이 link_priority_share 비율(올림)까지는 점수와 상관없이 다른 몰의 가장 낮은 글을 밀어내고, 그 비율까지는 다른 몰의 새 딜이
+    # 이 몰의 글을 밀어내지 못한다. 이 몰의 딜이 없으면 자리는 그대로 다른 몰이 쓴다 (미리 비워 두지 않음). 품질 기준(할인율·후기·가격 비교)은 그대로
+    link_priority_shops: list[str] = Field(default_factory=lambda: ["toss"])
+    link_priority_share: float = Field(0.5, ge=0, le=1)  # 0 = 우선하지 않음
     # 정보 글·정품 확인(/ok)을 기다리는 글의 자리 (링크 요청 자리와 따로). 링크 자리를 15로 늘려도 확인 요청은 6개까지만
     # (관리자 챗 폭주 방지). 링크 자리와 합쳐 세면 교체로 링크 15칸이 늘 차 있어 확인 요청을 하나도 못 보냄. 0 = 제한 없음
     max_awaiting_reviews: int = 6

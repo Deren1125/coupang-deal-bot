@@ -170,6 +170,7 @@ DEFAULT_SHOPS: list[Shop] = [
     Shop(key="daiso", name="다이소몰", aliases=["다이소", "다이소몰"], domains=["daisomall.co.kr"], link_mode="raw", enabled=False),
 ]
 
+_TOSS_HINT_RE = re.compile(r"토스\s*쇼핑|토스\s*쉐어|쉐어\s*링크|(?<![a-z])toss(?![a-z])", re.IGNORECASE)
 _URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+")
 
 
@@ -219,6 +220,12 @@ class ShopRegistry:
                     if best is None or len(a_l) > best[0]:
                         best = (len(a_l), s)
         return best[1] if best else None
+
+    def by_title_hint(self, title: str) -> Shop | None:
+        """[쇼핑몰] 머리말이 없거나 모르는 말인 글 제목에서 토스쇼핑 단서('토스쇼핑'·'토스 쉐어링크'·'toss')를 찾는다 (주인 10/23: 토스 딜 늘리기).
+        머리말 별칭(by_alias)이 못 찾은 글만 보는 보조 — '토스트'·'토스터' 같은 낱말은 단서가 아니다. 켜진 토스 몰이 없으면 None."""
+        shop = self._shops.get("toss")
+        return shop if shop is not None and _TOSS_HINT_RE.search(title or "") else None
 
     def by_url(self, url: str) -> Shop | None:
         for s in self._shops.values():

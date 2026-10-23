@@ -151,6 +151,10 @@ class AlgumonCollector(BaseCollector):
         for item in items:
             tag = item.get("shop_tag")
             shop = registry.by_alias(tag) if tag else None
+            if shop is None:  # 몰 칸이 비었거나 모르는 말이어도 제목·주소에 토스 단서가 있으면 (판정 기준은 그대로)
+                toss = registry.get("toss")
+                shop = registry.by_title_hint(item["title"]) or (
+                    toss if toss is not None and (toss.matches_url(item["origin_url"]) or toss.matches_url(item["link"])) else None)
             if shop is None and unknown_policy != "raw":
                 continue
             if shop is not None and (not shop.enabled or shop.link_mode == "skip"):
