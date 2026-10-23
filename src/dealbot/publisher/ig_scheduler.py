@@ -285,7 +285,28 @@ class InstagramScheduler:
             done = await self._scheduled(kind, plan, now, local)
             if done:
                 return done
+        done = await self._pick_share(now, local, plan)
+        if done:
+            return done
         return await self._single(now, local, plan)
+
+    async def _pick_share(self, now: datetime, local: datetime, plan: dict[str, str]) -> str | None:
+        """데런픽 패션 아닌 글 → 인스타 (주인 10/23 — growth/blog_share). 딜 하나짜리 글과 같은 간격·묶음 글 앞 30분 비움."""
+        from dealbot.growth import blog_share
+
+        recs = blog_share.due(blog_share.share_dir(self.bot.settings.dashboard.blogauto_metrics_path), self.db, now)
+        if not recs:
+            return None
+        last = self.db.ig_last_post_at()
+        if last is not None and now - last < self.gap_after(last):
+            return None
+        guard = timedelta(minutes=self.cfg.slot_guard_minutes)
+        for kind, slot in plan.items():
+            if not self._done(kind, local) and _at(local, _minutes(slot)) - local < guard:
+                return None
+        status = await blog_share.post_one(self, recs[0], now)
+        log.info("instagram %s", status)
+        return status
 
     async def _scheduled(self, kind: str, plan: dict[str, str], now: datetime, local: datetime) -> str | None:
         slot = plan.get(kind)

@@ -163,6 +163,9 @@ def instagram(bot: Any, start: float, end: float, tz: ZoneInfo) -> list[dict[str
         if len(items) > 1:
             title = f"{title or '딜'} 외 {len(items) - 1}개"
         kind = {"single": "", "reels": "릴스 · ", "top5": "TOP5 · "}.get(str(r.get("kind")), "")
+        if r.get("kind") == "pick":  # 데런픽 글 가공 (growth/blog_share)
+            pick = next((i for i in r.get("items") or [] if isinstance(i, dict) and i.get("pick_pid")), {})
+            kind, title = "데런픽 · ", str(pick.get("title") or "")
         out.append(_row(ts, kind + (title or "인스타 글"), tz, https_url(r.get("permalink")), "인스타"))
     return sorted(out, key=lambda x: x["at"], reverse=True)
 

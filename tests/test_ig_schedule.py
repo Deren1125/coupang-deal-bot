@@ -27,6 +27,7 @@ from PIL import Image
 
 from dealbot.config import Settings
 from dealbot.enrich import PageMeta
+from dealbot.growth import blog_share
 from dealbot.media import reel
 from dealbot.media.card_slides import SlideSpec
 from dealbot.models import Deal, DealVerdict, Product, PublishResult
@@ -1056,3 +1057,78 @@ async def test_unit_post_records_page_numbers_as_deal_no(bot, clock) -> None:  #
                     product_id="coupang:1")]
     await bot.ig._finish("unit", PublishResult(ok=True, dry_run=True), rows, at(19))
     assert bot.db.ig_posts_since(at(0), kind="unit")[0]["items"] == [{"product_id": "coupang:1", "deal_no": 7}]
+
+
+# ---------------------------------------------------------------- 데런픽 글 → 인스타 (주인 10/23 — growth/blog_share)
+# Blog-Auto 가 쓴 var/sns_share/<글번호>.json 을 차례(post_after)가 되면 블로그 사진으로 캐러셀 · 취소된 글은 안 올림 · 같은 글은 한 번
+
+CAPTION = "첫 방송부터 반응이 뜨거워요\n\n전체 이야기는 네이버 블로그 '데런픽'에서 볼 수 있어요\n사진: 뉴스1\n\n#원빈 #데런픽"
+
+
+def _share(bot: Any, tmp: Path, pid: int = 7, *, photos: int = 2, after=None, cancelled: bool = False,
+           size: tuple[int, int] = (600, 1200)) -> Path:
+    var = tmp / "Blog-Auto" / "var"
+    (var / "metrics").mkdir(parents=True, exist_ok=True)
+    bot.settings.dashboard.blogauto_metrics_path = str(var / "metrics" / "blogauto.json")
+    d = var / "sns_share" / str(pid)
+    d.mkdir(parents=True, exist_ok=True)
+    files = []
+    for i in range(1, photos + 1):
+        p = d / f"{i:02d}.jpg"
+        Image.new("RGB", size, (200, 30 * i, 30)).save(p, "JPEG")
+        files.append(str(p))
+    rec = {"v": 1, "pid": pid, "title": "원빈 새 드라마 첫 방송", "url": "https://blog.naver.com/derenpick/1",
+           "post_after": (after or at(10)).isoformat(), "ig_caption": CAPTION, "photos": files, "cancelled": cancelled}
+    path = var / "sns_share" / f"{pid}.json"
+    path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+async def test_pick_share_posts_a_carousel_of_the_blog_photos_when_due(bot, clock, monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    seen = live(bot, _carousel_handler("9100"), monkeypatch)
+    _plan(bot, {})
+    _share(bot, tmp_path)
+    assert await tick(bot, clock, at(9, 30)) is None  # 아직 차례 전
+    assert await tick(bot, clock, at(10, 1)) == "pick #7: posted 9100"
+    creates = [r for r in seen if r.url.path == "/v25.0/UID/media"]
+    items, parent = creates[:-1], creates[-1]
+    assert len(items) == 2 and all(r.url.params["is_carousel_item"] == "true" for r in items)
+    assert all(r.url.params["image_url"].startswith("https://bot.example.com/media/pick_") for r in items)
+    assert parent.url.params["media_type"] == "CAROUSEL" and parent.url.params["caption"] == CAPTION
+    assert not list((bot.settings.data_dir / "media").glob("pick_*"))  # 올린 뒤 공개 사본은 지움
+    assert [p["kind"] for p in bot.db.ig_posts_since(at(0))] == ["pick"]
+    assert await tick(bot, clock, at(12)) is None  # 같은 글은 한 번
+
+
+async def test_cancelled_or_photo_less_share_is_not_posted(bot, clock, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    _plan(bot, {})
+    _share(bot, tmp_path, 7, cancelled=True)
+    _share(bot, tmp_path, 8, photos=0)
+    assert await tick(bot, clock, at(10, 5)) == "pick #8: skipped (no photo)"
+    assert await tick(bot, clock, at(11)) is None
+    assert bot.db.ig_posts_since(at(0)) == []
+
+
+async def test_pick_share_keeps_the_instagram_gap_and_one_photo_posts_as_a_single_image(bot, clock, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    _plan(bot, {})
+    bot.db.ig_record_post("single", media_id="1", items=[], now=at(9, 50))
+    _share(bot, tmp_path, photos=1)
+    assert await tick(bot, clock, at(10, 1)) is None  # 직전 인스타 글과 30분이 안 됨
+    assert await tick(bot, clock, at(10, 50)) == "pick #7: posted dry-run"
+
+
+async def test_stale_share_is_skipped(bot, clock, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    _plan(bot, {})
+    _share(bot, tmp_path, after=at(10) - timedelta(hours=31))
+    assert await tick(bot, clock, at(10)) == "pick #7: skipped (too late)"
+
+
+def test_photos_are_fitted_to_instagram_ratios(tmp_path) -> None:
+    tall, wide = tmp_path / "tall.jpg", tmp_path / "wide.jpg"
+    Image.new("RGB", (600, 1500), "white").save(tall, "JPEG")
+    Image.new("RGB", (2000, 500), "white").save(wide, "JPEG")
+    for p in (tall, wide):
+        out = tmp_path / f"out_{p.name}"
+        out.write_bytes(blog_share.fit_jpeg(p))
+        with Image.open(out) as im:
+            assert 0.8 - 0.01 <= im.width / im.height <= 1.91 + 0.01
