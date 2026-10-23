@@ -296,6 +296,7 @@ async def test_disabled_or_unverified_or_other_shops_keep_the_old_flow(bot: Deal
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
     bot.db.update_queue_item(qid, status="skipped")
     bot.settings.autolink.naver.enabled = True
+    bot.settings.autolink.naver.unverified = "manual"  # 운영 설정은 auto (주인 10/23) — manual 일 때의 예전 흐름을 본다
     qid = _enqueue(bot, _product(url="https://smartstore.naver.com/baleuljung/products/12133409758", auth="unknown"))
     assert await bot.process_queue_once()
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]  # 판매처 확인 안 됨 → 주인이 봄
@@ -520,3 +521,20 @@ async def test_name_without_search_words_goes_to_the_owner_at_once(bot: DealBot,
     assert await bot.process_queue_once()
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
     assert not [u for u in _inbox(settings) if "connect_link" in u]
+
+
+async def test_waiting_backlog_goes_to_autolink_once(bot: DealBot, settings: Settings) -> None:
+    """주인 10/23 '밀린 링크 자동으로 싹': 주인 링크를 기다리던 네이버 딜(판매처 모름 포함 — unverified: auto)을 자동 링크로 한 번 보낸다."""
+    bot.settings.autolink.naver.enabled = False
+    qid = _enqueue(bot, _product(auth="unknown"))
+    assert await bot.process_queue_once()
+    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
+    bot.settings.autolink.naver.enabled = True
+    bot.settings.autolink.naver.unverified = "auto"
+    assert bot._autolink_backlog() == 1
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
+    assert _job(settings)["id"] == qid
+    assert bot._autolink_backlog() == 0  # 이미 보낸 딜은 다시 안 봄
+    await bot._autolink_fallback(bot.db.get_queue_item(qid), "timeout")  # type: ignore[arg-type]
+    bot.db.update_queue_item(qid, status="awaiting_link")
+    assert bot._autolink_backlog() == 0  # 자동이 안 된 딜은 주인 요청으로 남고 또 보내지 않음
