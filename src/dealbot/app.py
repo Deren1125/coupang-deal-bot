@@ -23,6 +23,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from telegram import Bot, BotCommand, Update
@@ -2844,6 +2845,18 @@ class DealBot:
 
     BACKLOG_PER_TICK = 3
 
+    @staticmethod
+    def _naver_short(deal: Deal) -> bool:
+        """네이버 단축 주소(naver.me — 대개 글쓴이의 쇼핑커넥트 제휴 링크)로 들어온 딜. 열지 않고(남의 제휴 클릭이 됨) 건너뛴다 (주인 10/23)."""
+        host = urlparse(deal.product.url or "").netloc.lower()
+        return deal.product.shop == "naver" and (host == "naver.me" or host.endswith(".naver.me"))
+
+    def _skip_short(self, item: QueueItem) -> None:
+        self.db.update_queue_item(item.id, status="skipped", error="naver short link (owner 10/23: skip)")
+        self.notifier.resolve(f"link:{item.id}")
+        self.db.log_event("INFO", "autolink", f"#{item.id} 네이버 단축 주소 딜 → 건너뜀")
+        log.info("queue #%d skipped — naver short link", item.id)
+
     def _autolink_backlog(self) -> int:
         """주인 링크를 기다리는 딜 중 자동 링크(쇼핑커넥트·토스 쉐어링크)를 거칠 수 있는 것을 자동으로 보낸다 (주인 10/23 '밀린 링크
         자동으로 싹 처리'). 딜마다 한 번만 (kv autolink:tried:<번호>) — 자동이 안 되면 예전처럼 주인 링크 요청으로 돌아가고 또 보내지 않는다.
@@ -2858,6 +2871,9 @@ class DealBot:
             if self.db.kv_get(key):
                 continue
             deal = item.deal
+            if self._naver_short(deal):  # 밀려 있던 네이버 단축 주소 딜도 건너뜀 (주인 10/23)
+                self._skip_short(item)
+                continue
             shop = self.registry.get(deal.product.shop)
             cached = deal.product.extra.get("auth")
             auth = (AuthResult(str(cached.get("status") or "ok"), str(cached.get("reason") or ""), cached.get("seller"))
@@ -3081,6 +3097,9 @@ class DealBot:
                     self._post_raw_link(item, deal, "쇼핑커넥트에 없던 상품 (기억)")
                 else:
                     self._request_autolink(item, deal, product_no)
+                return True
+            if self._naver_short(deal):
+                self._skip_short(item)
                 return True
             return await self._request_manual_link(item, deal, shop, auth, err)
         if state == "skip":

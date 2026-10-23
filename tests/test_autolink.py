@@ -538,3 +538,16 @@ async def test_waiting_backlog_goes_to_autolink_once(bot: DealBot, settings: Set
     await bot._autolink_fallback(bot.db.get_queue_item(qid), "timeout")  # type: ignore[arg-type]
     bot.db.update_queue_item(qid, status="awaiting_link")
     assert bot._autolink_backlog() == 0  # 자동이 안 된 딜은 주인 요청으로 남고 또 보내지 않음
+
+
+async def test_naver_short_link_deals_are_skipped_not_asked(bot: DealBot, settings: Settings) -> None:
+    """주인 10/23: naver.me 단축 주소(대개 남의 제휴 링크)로 들어온 딜은 열지도 묻지도 않고 건너뛴다 — 밀려 있던 것도."""
+    qid = _enqueue(bot, _product(url="https://naver.me/GxAbCd", product_id="naver:short1"))
+    assert await bot.process_queue_once()
+    item = bot.db.get_queue_item(qid)
+    assert item.status == "skipped" and "short" in (item.last_error or "")  # type: ignore[union-attr]
+    assert bot.sent == []  # type: ignore[attr-defined]
+    q2 = _enqueue(bot, _product(url="https://naver.me/Zz99", product_id="naver:short2"))
+    bot.db.update_queue_item(q2, status="awaiting_link")
+    assert bot._autolink_backlog() == 0
+    assert bot.db.get_queue_item(q2).status == "skipped"  # type: ignore[union-attr]
