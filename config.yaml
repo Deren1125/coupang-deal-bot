@@ -44,7 +44,7 @@ autolink:
     enabled: true         # 주인 결정 10/20: 켬 ("자동화. 책임도 내가 질게"). 바로 끄기: Blog-Auto 에서 python -m blogauto shopconnect stop
     wait_minutes: 30      # Blog-Auto 답을 기다리는 시간. 넘으면 링크 요청
     not_found_days: 7     # 쇼핑커넥트에 없던 상품번호는 이 기간 다시 찾지 않고 원본 주소로
-    unverified: manual    # 판매처 확인이 안 된 딜: manual = 예전처럼 링크 요청 / auto = 그래도 자동
+    unverified: auto      # 판매처 확인이 안 된 딜: manual = 예전처럼 링크 요청 / auto = 그래도 자동 (주인 10/23 '자동으로 바꾸자')
     no_link_autopost: true  # 주인이 '쇼핑 커넥트에 없음'을 누른 판매처의 새 딜은 묻지 않고 링크 없이(고지 없이) 바로 올림 (자동 링크와 따로)
   toss:
     enabled: true         # 주인 10/23: 토스 딜 전부 자동 쉐어링크. 바로 끄기: Blog-Auto 에서 python -m blogauto tosslink stop

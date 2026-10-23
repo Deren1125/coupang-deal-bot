@@ -2840,7 +2840,43 @@ class DealBot:
                 log.warning("toss autolink result failed (%s): %s", row.get("id"), e)
         if rows or pos != int(self.db.kv_get(autolink.KV_TOSS_POS) or 0):
             self.toss_results.commit(pos)
-        return n + await self._autolink_timeouts()
+        return n + await self._autolink_timeouts() + self._autolink_backlog()
+
+    BACKLOG_PER_TICK = 3
+
+    def _autolink_backlog(self) -> int:
+        """주인 링크를 기다리는 딜 중 자동 링크(쇼핑커넥트·토스 쉐어링크)를 거칠 수 있는 것을 자동으로 보낸다 (주인 10/23 '밀린 링크
+        자동으로 싹 처리'). 딜마다 한 번만 (kv autolink:tried:<번호>) — 자동이 안 되면 예전처럼 주인 링크 요청으로 돌아가고 또 보내지 않는다.
+        한 번에 BACKLOG_PER_TICK 개씩 (Blog-Auto 하루 한도·간격은 그쪽이 지킨다)."""
+        if self.state.dry_run:
+            return 0
+        n = 0
+        for item in self.db.awaiting_items(50):
+            if n >= self.BACKLOG_PER_TICK:
+                break
+            key = f"{autolink.KV_TRIED}{item.id}"
+            if self.db.kv_get(key):
+                continue
+            deal = item.deal
+            shop = self.registry.get(deal.product.shop)
+            cached = deal.product.extra.get("auth")
+            auth = (AuthResult(str(cached.get("status") or "ok"), str(cached.get("reason") or ""), cached.get("seller"))
+                    if isinstance(cached, dict) else AuthResult("unknown", ""))
+            if self._toss_autolink_key(deal, shop):
+                self.db.kv_set(key, to_iso(utcnow()))
+                self.notifier.resolve(f"link:{item.id}")  # 자동으로 넘어감 — 안 되면 다시 열린다
+                self._request_toss_autolink(item, deal)
+                n += 1
+                continue
+            no = self._autolink_product_no(deal, shop, auth)
+            if no and not self._sc_known_missing(no):
+                self.db.kv_set(key, to_iso(utcnow()))
+                self.notifier.resolve(f"link:{item.id}")
+                self._request_autolink(item, deal, no)
+                n += 1
+        if n:
+            log.info("밀린 링크 대기 딜 %d개 → 자동 링크로 보냄", n)
+        return n
 
     async def _apply_autolink_result(self, row: dict[str, Any]) -> int:
         try:
@@ -2929,6 +2965,7 @@ class DealBot:
 
     async def _autolink_fallback(self, item: QueueItem, why: str) -> None:
         """자동 링크가 안 됨 (오류·시간 초과·로그인·한도…): 예전처럼 주인에게 링크 요청."""
+        self.db.kv_set(f"{autolink.KV_TRIED}{item.id}", to_iso(utcnow()))  # 밀린 링크 자동 보내기가 다시 보내지 않게
         self.db.log_event("INFO", "autolink", f"#{item.id} {why} → 링크 요청")
         cached = item.deal.product.extra.get("auth")
         auth = (AuthResult(str(cached.get("status") or "ok"), str(cached.get("reason") or ""), cached.get("seller"))

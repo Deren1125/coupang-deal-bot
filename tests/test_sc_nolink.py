@@ -187,6 +187,7 @@ async def test_remembered_store_still_goes_through_the_price_gate(bot: DealBot) 
 
 async def test_unverified_seller_is_still_asked(bot: DealBot, settings: Settings) -> None:
     sc_stores.remember(bot.db, _product(), via="post")
+    settings.autolink.naver.unverified = "manual"  # 운영 설정은 auto (주인 10/23) — manual 일 때의 흐름을 본다
     qid = _enqueue(bot, _product(2002, auth="unknown"))
     assert await bot.process_queue_once()
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]  # 판매처 확인 안 됨 → 주인이 봄
