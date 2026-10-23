@@ -946,6 +946,23 @@ def _threads(v: Any) -> dict[str, Any] | None:
             "replies": {"new": len(items), "items": items}, "stats": stats}
 
 
+DEVLOG_MAX = 15
+DEVLOG_REPOS = ("블로그", "딜봇")
+
+
+def _devlog(v: Any) -> dict[str, Any] | None:
+    """'오늘 바뀐 것' (주인 10/23 — Blog-Auto devlog.py): {day, items: [{at, repo, text, count?}], n}. 칸이 없으면 None.
+    줄마다 따로 걸러 이상한 줄만 빠진다 (시각은 HH:MM, 프로그램은 블로그|딜봇)."""
+    if not isinstance(v, dict) or not isinstance(v.get("items"), list):
+        return None
+    items = []
+    for x in v["items"][:DEVLOG_MAX]:
+        if (isinstance(x, dict) and x.get("repo") in DEVLOG_REPOS and isinstance(x.get("at"), str)
+                and re.fullmatch(r"\d{2}:\d{2}", x["at"]) and (t := _one_line(x.get("text"), 100))):
+            items.append({"at": x["at"], "repo": x["repo"], "text": t, "count": _count(x.get("count"), top=999) or 1})
+    return {"day": _one_line(v.get("day"), 10), "items": items, "n": max(_count(v.get("n"), top=9999) or 0, len(items))}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -953,7 +970,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                            "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends")),
                            "learn": _learn(data.get("learn")), "photo_trial": _photo_trial(data.get("photo_trial")),
                            "product_trial": _product_trial(data.get("product_trial")),
-                           "threads": _threads(data.get("threads"))}
+                           "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

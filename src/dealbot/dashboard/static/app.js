@@ -40,7 +40,7 @@ const IOS = /iP(hone|ad|od)/.test(N.userAgent) || (N.platform === 'MacIntel' && 
 const STANDALONE = N.standalone === true || matchMedia('(display-mode: standalone)').matches;
 const PUSH = 'serviceWorker' in N && 'PushManager' in W && 'Notification' in W;
 
-// ------------------------------------------------------------ 시간
+// -- 시간
 const now = () => Date.now() / 1000;
 function ago(t) {
   if (!t) return '';
@@ -49,7 +49,7 @@ function ago(t) {
 }
 const hhmm = t => t ? new Date(t * 1000).toLocaleTimeString('ko-KR', {hour: '2-digit', minute: '2-digit', hour12: false}) : '';
 
-// ------------------------------------------------------------ 서버
+// -- 서버
 async function api(path, opt = {}, again) {
   const h = Object.assign({}, opt.headers);
   if (opt.method === 'POST') { h['X-Dash-Token'] = S && S.me ? S.me.csrf : ''; h['Content-Type'] = 'application/json'; }
@@ -107,7 +107,7 @@ function after() {
   if (n && n.text) { toast(n.text); S.connect.notice = null; }
 }
 
-// ------------------------------------------------------------ 화면 틀
+// -- 화면 틀
 function head() {
   const t = R.tab === 'todo' && S ? (S.todo.length ? `할 일 ${S.todo.length}개` : '할 일') : TABS[R.tab];
   $('ttl').textContent = t;
@@ -152,7 +152,7 @@ function go(u) {
   if (h) location.hash = '#' + h;
 }
 
-// ------------------------------------------------------------ 시트 (모달 대신 아래에서 올라오는 판)
+// -- 시트 (모달 대신 아래에서 올라오는 판)
 const SH = [];
 function sheet(title, body, onclose) {
   const sh = el('div', {class: 'sh', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, tabindex: '-1'},
@@ -217,7 +217,7 @@ function planSheet(d, body) {
   });
 }
 
-// ------------------------------------------------------------ 알림 줄 (토스트)
+// -- 알림 줄 (토스트)
 let toastT = null;
 function toast(text, act, fn) {
   const t = $('toast');
@@ -227,7 +227,7 @@ function toast(text, act, fn) {
   toastT = setTimeout(() => { t.hidden = true; }, act ? 8000 : 3000);
 }
 
-// ------------------------------------------------------------ 로그인 시트 (하던 일은 그대로)
+// -- 로그인 시트 (하던 일은 그대로)
 let LOGIN = null;
 function login() {
   if (LOGIN) return LOGIN;
@@ -256,7 +256,7 @@ function login() {
   return LOGIN;
 }
 
-// ------------------------------------------------------------ 누르기 → 서버
+// -- 누르기 → 서버
 const pk = (iid, a) => `${iid}|${a.action}|${a.label}`;
 async function exec(a, extra, ctx = {}) {
   const body = {action: a.action, args: Object.assign({}, a.args, extra), cid: 'c_' + rnd(), ctoken: null};
@@ -339,7 +339,7 @@ function pendingOf(iid) {
 const fetching = iid => Object.values(POLL).some(p => p.iid === iid && /pics_fetch/.test(p.action)) ||
   (S.pending || []).some(p => (p.target || 'pics') === iid && /pics_fetch/.test(p.action) && /queued|running/.test(p.status));
 
-// ------------------------------------------------------------ 올리기 (사진 · 정리본)
+// -- 올리기 (사진 · 정리본)
 async function prep(f) {
   const ok = /^image\/(jpeg|png|webp)$/.test(f.type);
   if (ok && f.size <= 4e6) return f;
@@ -400,7 +400,7 @@ function pick(accept, multiple, done) {
   f.click();
 }
 
-// ------------------------------------------------------------ 줄 하나 (칩 · 제목 · 상태 한 줄 · 누를 것 하나)
+// -- 줄 하나 (칩 · 제목 · 상태 한 줄 · 누를 것 하나)
 function chip(it) {
   if (it.cue) return el('span', {class: 'cp ' + (it.cue === '급해요' ? 'stop' : 'hot')}, it.cue);
   const [mk, lab] = SEV[it.sev] || SEV.todo;
@@ -440,7 +440,7 @@ function primary(it, a) {
   }) : null, L.length > 1 && !SH.length ? btn('lnk', `링크 ${L.length}개 모두`, () => openItem(it.iid, it)) : null].filter(Boolean);
   return t.length ? el('div', {}, b, el('div', {class: 'tools sub'}, ...t)) : b;
 }
-// 인스타 링크 (Pick 사진 자리 — 주소 글자만 보고 Blog-Auto 가 링크 카드로): 빈 자리(설명 한 줄), 자리 정보가 없으면 1..N
+// 인스타 링크 (Pick 사진 자리): 빈 자리, 자리 정보가 없으면 1..N
 const IGRE = /^https?:\/\/(www\.|m\.)?instagram\.com\/([\w.]+\/)?(p|reels?)\/[\w-]{5,40}([/?#]|$)/i;
 function igSlots(it, a) {
   if (a.input !== 'photos' || !a.options || (a.args || {}).blog !== 'issue') return [];
@@ -510,7 +510,7 @@ function panel(it, a, key, ctx) {
       a.photo_optional ? btn('lnk', st.files.length ? '사진 바꾸기' : '사진 추가 (선택)', () => pick(a.accept || 'image/*', false, fs => { if (fs.length) { st.files = fs.slice(0, 1); redraw(); } })) : null);
     kids.push(tools, f);
   } else if (qs.length) {
-    // 답마다 사진 첨부 (10/18: 공식 페이지 캡처 같은 근거 — Blog-Auto 가 읽고 고친다, 글에 넣지는 않음). ✕ 는 기호 — 읽는 글자는 aria-label
+    // 답마다 사진 첨부 (10/18: 근거 캡처 — 글에는 안 넣음). ✕ 는 기호, 읽는 글자는 aria-label
     for (const q of qs) {
       const k = `${key}|${q.n}`, fs = qf[q.n] || [];
       keys.push(k);
@@ -621,7 +621,7 @@ function paste(f, key) {
   });
 }
 
-// ------------------------------------------------------------ 링크에서 사진 고르기 (10/18): AI 고른 것 미리 · 누르면 넣기·빼기 · 꾹 = 크게
+// -- 링크에서 사진 고르기 (10/18): AI 고른 것 미리 · 누르면 넣기·빼기 · 꾹 = 크게
 const PS = {};
 function sel(it) {
   const p = it.detail.pics, o = PS[it.iid];
@@ -694,7 +694,7 @@ function vPics() {
   return out;
 }
 
-// 구글 검색 등록 (주인 10/18 22:20 · 10/19 '그냥 복사하기 버튼으로'): 주소 복사만, 등록함은 확인 없이 (다시 누르면 되돌림)
+// 구글 검색 등록 (10/18): 주소 복사만, 등록함은 확인 없이 (다시 누르면 되돌림)
 const CHK = {}, isOn = x => x.auto || (x.url in CHK ? CHK[x.url] : x.done);
 async function mark(urls, on) {
   urls.forEach(u => { CHK[u] = on; }); render();
@@ -722,7 +722,7 @@ function vSearch() {
   return out;
 }
 
-// ------------------------------------------------------------ 시트들: 더보기 · 자세히 · 고르기 · 찾기 · 정리
+// -- 시트들: 더보기 · 자세히 · 고르기 · 찾기 · 정리
 function moreSheet(it, more) {
   const box = el('div');
   sheet(it.title || '더보기', box);
@@ -829,7 +829,7 @@ function slotActs(it, s, c, l1, l2) {
     s.thumb ? btn(c + ' red', l2, e => exec({action: 'blog.photo_clear', args: Object.assign({}, args, {slot: s.slot})}, {}, {btn: e.currentTarget, iid: it.iid})) : null];
 }
 function slotSheet(it, s) { sheet(slotT(s), el('div', {}, slotActs(it, s, 'mr', '이 자리 사진 바꾸기', '이 자리 비우기'))); }
-// 사진을 누르면 먼저 올릴 그대로 (10/20): final(올릴 파일, 없으면 full) · 체크무늬 위 원래 비율(흰 여백이 보이게) · 픽셀 크기
+// 사진을 누르면 올릴 그대로 (10/20): final(없으면 full) · 체크무늬 위 원래 비율 · 픽셀 크기
 function slotView(it, s) {
   const px = el('p', {class: 'note'}), im = el('img', {src: s.final || s.full || s.thumb, alt: slotT(s), onload: () => { px.textContent = `${im.naturalWidth} × ${im.naturalHeight}px`; }});
   sheet(slotT(s), el('div', {}, el('div', {class: 'ck'}, im), px,
@@ -887,7 +887,7 @@ async function copy(t, m = '복사했어요', a, f) {
   }
 }
 
-// ------------------------------------------------------------ 탭: 할 일
+// -- 탭: 할 일
 function banner() {
   const b = S.banner;
   if (b && b.kind === 'nowhere') return el('div', {class: 'bn bad'}, el('span', {}, b.text), el('a', {class: 'pb soft', href: '#/connect'}, '연결'));
@@ -919,10 +919,11 @@ function vTodo() {
   if (items.length > n) out.push(btn('pb ghost', `더 보기 (${items.length - n})`, () => { ALL = true; render(); }));
   if (items.length) out.push(doneRow());
   if (S.digest && S.digest.latest) out.push(el('p', {class: 'foot'}, btn('lnk', '오늘 정리 보기', () => digestSheet(S.digest.latest))));
+  out.push(devRow(S.devlog));
   return out;
 }
 
-// ------------------------------------------------------------ 탭: 딜
+// -- 탭: 딜
 function vDeal() {
   const d = S.deal, st = d.status, n = S.todo.filter(i => i.src === 'deal').length, seg = LS.g('dseg') || 'today';
   const pseudo = {iid: 'deal-tab', title: '딜'};
@@ -948,7 +949,7 @@ function dealLinks(r) {
   return a.length ? el('span', {class: 'dl'}, a) : null;
 }
 
-// ------------------------------------------------------------ 탭: 블로그
+// -- 탭: 블로그
 const IDEA = ['blog.scan', 'blog.issue', 'blog.hotdeal_now'];
 // 블로그 이름 옆 할 일 수 (10/20): '할 일' 탭과 같은 줄을 그 블로그만 — 하는 중·끝난 줄은 빼서 바로 줄어든다 (0 이면 숨김)
 const todoN = k => S.todo.reduce((n, i) => n + (i.kind === 'visits' ? +vis(i.detail.visits).some(x => x.blog === k) : +(i.blog === k && !pendingOf(i.iid))), 0);
@@ -1108,7 +1109,7 @@ async function pubAll(xs) {
   render(); poll();
 }
 
-// ------------------------------------------------------------ 탭: 통계 (서버가 그린 카드 조각 — 폼·스크립트 없음)
+// -- 탭: 통계 (서버가 그린 카드 조각 — 폼·스크립트 없음)
 function vStats() {
   const box = el('div', {class: 'stx', onclick: statsClick});
   if (STATS) box.innerHTML = STATS; else box.append(el('p', {class: 'boot'}, '불러오는 중…'));
@@ -1141,7 +1142,7 @@ function statsClick(e) {
     }));
 }
 
-// ------------------------------------------------------------ 탭: 연결 (가끔 쓰는 설정)
+// -- 탭: 연결 (가끔 쓰는 설정)
 function thisOn() { return !!(S && S.connect && S.connect.push.devices.some(d => d.this)); }
 function denyHint() {
   return IOS ? '알림이 막혀 있어요 — 설정 › 알림 › Sns-board 에서 허용해 주세요'
@@ -1187,7 +1188,10 @@ const fold = (label, fn) => btn('fold', label, fn);
 function listSheet(title, rows) { sheet(title, el('div', {}, rows.length ? rows : el('p', {class: 'empty'}, '없어요'))); }
 // 오늘 한 일 (주인 10/18): 링크·사진·발행… 칸마다 새것 먼저 · 결과 칩 · 글·채널·상품 링크 (서버가 정한 주소만)
 const RC = {ok: 'ok', run: 'info', bad: 'stop'};
-const doneRow = () => el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, fold(`오늘 한 일 ${(S.counts || {}).done_today || 0}개`, todaySheet));
+const foldBox = (t, f) => el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, fold(t, f));
+const doneRow = () => foldBox(`오늘 한 일 ${(S.counts || {}).done_today || 0}개`, todaySheet);
+// 오늘 바뀐 것 (10/23): 서버가 만든 {title, rows: [{at, repo, text}]} 를 그대로
+const devRow = d => d && foldBox(d.title, () => listSheet('오늘 바뀐 것', d.rows.map(r => row(r.text, r.at, el('span', {class: 'cp info'}, r.repo)))));
 function todaySheet() {
   const box = sheet('오늘 한 일', el('p', {class: 'empty'}, '불러오는 중…')), h = box.parentNode.querySelector('h2');
   const fill = async b => {
@@ -1242,7 +1246,7 @@ function vConnect() {
   return out;
 }
 
-// ------------------------------------------------------------ 시작
+// -- 시작
 async function sw() {
   if (!('serviceWorker' in N)) return;
   try {

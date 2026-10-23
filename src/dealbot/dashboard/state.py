@@ -1102,8 +1102,19 @@ class StateBuilder:
             "search": self.search_view(getattr(export, "v2", None) or {}),
             "ptrial": self.product_trial(export),  # 제품 테스트 (10/21)
             "thpost": self.thpost(export),  # 스레드 글·통계 (10/21 — thpost.py · Blog-Auto threads 칸이 없으면 None)
+            "devlog": self.devlog(export),  # 할 일 페이지 맨 아래 '오늘 바뀐 것' (10/23 — 화면이 title·rows 를 그대로 그림)
         }
         return body
+
+    @staticmethod
+    def devlog(export: Any) -> dict[str, Any] | None:
+        """할 일 페이지 맨 아래 접힌 '오늘 바뀐 것 · N개' 칸 (주인 10/23 — Blog-Auto devlog 칸). 화면(app.js)은 이 말을 그대로 그린다:
+        {title, rows: [{at, repo, text}]}. 칸이 없거나 비었으면 None (칸이 안 보임)."""
+        d = (getattr(export, "v2", None) or {}).get("devlog")
+        if not d or not d["items"]:
+            return None
+        rows = [{"at": x["at"], "repo": x["repo"], "text": x["text"] + (f" ({x['count']}번)" if x["count"] > 1 else "")} for x in d["items"]]
+        return {"title": f"오늘 바뀐 것 · {d['n']}개", "rows": rows}
 
     def thpost(self, export: Any) -> dict[str, Any] | None:
         """스레드 글·통계 (주인 10/21): 주인이 쓴 글 바로·예약 · 예약 취소 · 계정의 최근 글 · 새 답글에 답 · 공식 인사이트."""
