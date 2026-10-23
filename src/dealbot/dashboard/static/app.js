@@ -988,7 +988,7 @@ function vBlog() {
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   if (S.sched && S.sched.total) out.push(el('a', {class: 'bn', href: '#/blog/sched'}, `예약 일정 보기 · ${S.sched.total}편 →`));
   if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
-  out.push(el('a', {class: 'bn', href: '#/blog/threads'}, '스레드 →'));
+  out.push(el('a', {class: 'bn', href: '#/blog/threads'}, '스레드·인스타 →'));
   if (S.photo_trial && key === 'issue') out.push(el('a', {class: 'bn', href: '#/blog/trial'}, '사진 테스트 →'));
   if (key === 'issue' && S.ptrial) out.push(el('a', {class: 'bn', href: '#/blog/ptrial'}, `제품 테스트 ${S.ptrial.posts.length}편 →`));
   const sr = S.search;

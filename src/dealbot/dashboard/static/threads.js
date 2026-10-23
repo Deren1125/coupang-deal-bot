@@ -1,4 +1,5 @@
-/* Sns-board 스레드 화면 (주인 10/21 — "sns-board 에서 스레드 페이지를 아예 만들면 되겠네"). 블로그 탭 '스레드 →' 를 처음 열 때만 app.js 가 불러온다.
+/* Sns-board 스레드·인스타 화면 (주인 10/21 — "sns-board 에서 스레드 페이지를 아예 만들면 되겠네", 10/23 인스타도 같이 · 칸 나눔).
+   블로그 탭 '스레드·인스타 →' 를 처음 열 때만 app.js 가 불러온다.
    위: 스레드 자동화 서비스(Blog-Auto threads/ — 맞팔·좋아요·AI 댓글·답글·AI 글) 상태와 설정 — /dashboard/api/threads/* (threads_proxy.py).
    아래 세 칸은 개발 세션 자리 (주인이 직접 쓰는 글·예약 · 댓글 알림 · 통계 — sns-board state 의 thpost 칸):
    SBThreads.slots.compose / alerts / stats = (thpost, h) => 노드 배열 을 붙이면 그 칸에 그린다 (없으면 '준비 중').
@@ -40,10 +41,16 @@ async function act(op, args, why) {
 const card = (title, ...kids) => H.el('section', {class: 'itm'}, H.el('p', {class: 'h3', style: 'margin-top:0'}, title), ...kids);
 const inp = (id, label, v, x) => H.el('label', {}, label, H.el('input', Object.assign({id, value: v == null ? '' : v}, x)));
 const val = id => (D.getElementById(id) || {}).value || '';
+// 스레드 · 인스타 칸 나누기 (주인 10/23): 인스타 일·종류는 이름이 ig_ 로 시작 — 인스타 칸에서는 이름 앞 '인스타 ' 를 뗀다
+const IG = k => k.startsWith('ig_');
+const NAME = (n, k) => IG(k) ? String(n).replace(/^인스타\s*/, '') : n;
+const split = (o, f) => [['스레드', Object.entries(o).filter(([k]) => !IG(k))], ['인스타', Object.entries(o).filter(([k]) => IG(k))]]
+  .filter(([, xs]) => xs.length).map(([t, xs]) => [t, xs.map(f)]);
+const sub = t => H.el('p', {class: 'note', style: 'margin:8px 0 4px;font-weight:600;color:var(--text)'}, t);
 
 function head() {
   const {el, btn} = H, s = T.settings, K = T.kind_names || {};
-  const top = [el('div', {class: 'top'}, el('h2', {}, '스레드 @' + T.username), el('a', {class: 'lnk', href: '#/blog'}, '블로그로'))];
+  const top = [el('div', {class: 'top'}, el('h2', {}, '스레드·인스타 @' + T.username), el('a', {class: 'lnk', href: '#/blog'}, '블로그로'))];
   const warn = [];
   if (T.login_needed) warn.push('스레드 로그인이 풀렸어요 — 아래 ‘스레드 로그인’에서 다시 로그인해 주세요');
   if (T.paused_until) warn.push(`${T.paused_until}까지 쉬는 중이에요`);
@@ -51,7 +58,8 @@ function head() {
   if (s.mode === 'dry') warn.push('시험 모드 — 화면만 열어 보고 아무것도 누르거나 올리지 않아요');
   const last = T.last_cycle ? `마지막 ${T.last_cycle.at}` : '아직 돌지 않았어요';
   return top.concat(warn.map(w => el('p', {class: 'bn' + (/풀렸|쉬는/.test(w) ? ' bad' : '')}, el('span', {}, w))),
-    card('오늘', el('div', {class: 'tq'}, Object.entries(T.today).map(([k, v]) => el('div', {}, el('b', {}, `${v.done}/${v.cap}`), el('span', {}, K[k] || k)))),
+    card('오늘', ...split(T.today, ([k, v]) => el('div', {}, el('b', {}, `${v.done}/${v.cap}`), el('span', {}, NAME(K[k] || k, k))))
+      .map(([t, xs]) => [sub(t), el('div', {class: 'tq'}, xs)]).flat(),
       el('p', {class: 'note'}, `${T.busy ? '지금 하는 중 · ' : ''}${last}${T.next_run ? ' · 다음 ' + T.next_run : ''} · ${s.hours[0]}~${s.hours[1]}시`),
       el('div', {class: 'seg', role: 'group', 'aria-label': '모드', style: 'margin-top:10px'}, MODE.map(([m, l]) => btn('', l, () => {
         if (m === 'live' && !confirm('실제로 누르고 올리기 시작할까요?')) return;
@@ -62,13 +70,15 @@ function head() {
 }
 function jobs() {
   const {el} = H, s = T.settings;
-  return card('할 일 켜고 끄기', ...Object.entries(T.job_names).map(([k, n]) => el('label', {class: 'tg'}, el('span', {}, n),
-    el('input', {type: 'checkbox', checked: !!s.jobs[k], onchange: e => act('settings', {jobs: {[k]: e.target.checked}})}))));
+  return split(T.job_names, ([k, n]) => el('label', {class: 'tg'}, el('span', {}, NAME(n, k)),
+    el('input', {type: 'checkbox', checked: !!s.jobs[k], onchange: e => act('settings', {jobs: {[k]: e.target.checked}})})))
+    .map(([t, xs]) => card(t + ' 할 일 켜고 끄기', ...xs));
 }
 function settings() {
   const {el, btn} = H, s = T.settings, K = T.kind_names || {};
-  const caps = Object.keys(T.hard_caps).map(k => inp('thc-' + k, `${K[k] || k} (최대 ${T.hard_caps[k]})`, s.caps[k], {type: 'number', inputmode: 'numeric'}));
-  return card('하루 상한 · 키워드 · AI', el('div', {class: 'tf'}, el('div', {class: 'tc'}, ...caps),
+  const caps = split(T.hard_caps, ([k, mx]) => inp('thc-' + k, `${NAME(K[k] || k, k)} (최대 ${mx})`, s.caps[k], {type: 'number', inputmode: 'numeric'}))
+    .map(([t, xs]) => [sub(t + ' 하루 상한'), el('div', {class: 'tc'}, xs)]).flat();
+  return card('하루 상한 · 키워드 · AI', el('div', {class: 'tf'}, ...caps,
     inp('th-kw', '관심 키워드 (쉼표로)', s.keywords.join(', ')), inp('th-tone', 'AI 말투', s.tone), inp('th-top', 'AI 글 주제 (쉼표로)', s.topics.join(', ')),
     el('div', {class: 'tc'}, inp('th-h0', '활동 시작(시)', s.hours[0], {type: 'number'}), inp('th-h1', '활동 끝(시)', s.hours[1], {type: 'number'}),
       inp('th-p0', 'AI 글 시작(시)', s.post_hours[0], {type: 'number'}), inp('th-p1', 'AI 글 끝(시)', s.post_hours[1], {type: 'number'}),
@@ -116,7 +126,7 @@ function draw() {
   const {el} = H;
   if (T.off) { box.replaceChildren(el('p', {class: 'empty'}, T.off), H.btn('pb soft', '다시 불러오기', load)); return; }
   box.replaceChildren(...head(), slot('compose', '내가 쓰는 글 (바로 올리기·예약)'), slot('alerts', '댓글 알림'), slot('stats', '통계'),
-    jobs(), settings(), ...login(), ...logs());
+    ...jobs(), settings(), ...login(), ...logs());
 }
 function view(b, h) {
   css(); box = b; H = h;

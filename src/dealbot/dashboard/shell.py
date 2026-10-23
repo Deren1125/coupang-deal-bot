@@ -26,7 +26,7 @@ PRODUCT_JS = "product.js"  # 제품 테스트 (10/21) — 블로그 › Pick '�
 SCHED_JS = "sched.js"  # 일정 (10/21) — 블로그 탭 '예약 일정 보기'를 처음 열 때만 (주소는 meta sb-sched)
 EARN_JS = "earn.js"  # 제휴 수익 칸 (10/23) — 통계 탭을 처음 열 때만 (주소는 meta sb-earn)
 THPOST_JS = "thpost.js"  # 스레드 글·예약·댓글·통계 칸 (10/21) — threads.js 의 세 칸에 붙는 그리기. 어느 쪽이 먼저 떠도 붙도록 defer 로 먼저 받는다
-THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
+THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드·인스타 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
 
 
 @cache
