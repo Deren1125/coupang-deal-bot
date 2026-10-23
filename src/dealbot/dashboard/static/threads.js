@@ -124,11 +124,21 @@ function manual() {
   if (!T.follow_blocked_until && !xs.length) return null;
   const rows = xs.map(x => el('div', {class: 'tg'}, el('a', {href: 'https://www.threads.com/@' + x.user, target: '_blank', rel: 'noopener noreferrer'},
     '@' + x.user, el('i', {style: 'display:block;font-style:normal;font-size:12px;color:var(--sub)'}, x.from)),
-    btn('pb soft', '했어요', () => act('manual_done', {user: x.user}), {style: 'width:auto;min-height:40px;padding:0 14px'})));
+    el('div', {style: 'display:flex;gap:6px'}, btn('pb soft', '복사', () => copyId(x.user), {style: 'width:auto;min-height:40px;padding:0 14px'}),
+      btn('pb soft', '했어요', () => act('manual_done', {user: x.user}), {style: 'width:auto;min-height:40px;padding:0 14px'}))));
   return card(`직접 팔로우할 사람 ${xs.length}명`, el('p', {class: 'note', style: 'margin-top:0'},
     `스레드가 지금 자동 팔로우를 막고 있어요${T.follow_blocked_until ? ` — ${T.follow_blocked_until}에 다시 시험해 보고, 풀리면 이 목록은 사라지고 자동으로 해요` : ''}. ` +
-    '아이디를 누르면 스레드가 열려요. 팔로우한 뒤 했어요를 눌러 주세요 (안 눌러도 다음 회차에 확인해서 빼요). 하루 10~15명씩 나눠서 해 주세요.'),
+    '아이디를 누르면 스레드가 열려요 (복사를 누르면 아이디만 복사). 팔로우한 뒤 했어요를 눌러 주세요 (안 눌러도 다음 회차에 확인해서 빼요). 하루 10~15명씩 나눠서 해 주세요.'),
     ...(rows.length ? rows : [el('p', {class: 'note'}, '아직 없어요 — 다음 회차에 찾아서 올려요')]));
+}
+// 아이디 복사 (주인 10/23) — 스레드 앱 검색 칸에 붙여 넣기용
+async function copyId(u) {
+  const m = u + ' 복사했어요 — 스레드 검색에 붙여 넣으세요';
+  try { await navigator.clipboard.writeText(u); H.toast(m); } catch (e) {
+    const x = document.createElement('textarea'); x.value = u; x.style.cssText = 'position:fixed;opacity:0'; document.body.append(x); x.select();
+    try { document.execCommand('copy'); H.toast(m); } catch (y) { H.toast('길게 눌러 복사해 주세요'); }
+    x.remove();
+  }
 }
 // 개발 세션 자리 — thpost 칸이 오면 slots 에 붙인 그리기로
 function slot(key, title) {
