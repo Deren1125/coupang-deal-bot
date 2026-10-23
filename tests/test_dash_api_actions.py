@@ -324,3 +324,62 @@ async def test_dashboard_results_are_quiet_no_push(bot: DealBot) -> None:
     await act(bot, "deal.ok", {"qid": review.id})
     row = bot.router.store.get("dealbot", f"photo:{review.id}")  # type: ignore[union-attr]
     assert row is not None and row.quiet
+
+
+async def test_hide_any_todo_row_until_it_reopens(bot: DealBot) -> None:
+    """주인 10/23: 할 일 줄은 무엇이든 '알림 없애기'로 화면에서 뺄 수 있다 (일 자체는 그대로) · 같은 줄이 새로 열리면 다시 보인다."""
+    t0 = time.time()
+    bot.router.open({"src": "dealbot", "key": "collector:x", "kind": "collector_stuck", "iid": "sys-dealbot",  # type: ignore[union-attr]
+                     "title": "알구몬 수집 실패", "at": t0})
+    row = next(it for it in bot.dash_state.items() if it["iid"] == "sys-dealbot")
+    hide = next(a for a in row["more"] if a["action"] == "todo.hide")
+    assert hide["label"] == "알림 없애기" and not hide["confirm"]
+    _s, body = await act(bot, "todo.hide", hide["args"])
+    assert body["code"] == "done"
+    assert not [it for it in bot.dash_state.items() if it["iid"] == "sys-dealbot"]
+    assert bot.router.store.get("dealbot", "collector:x").resolved_at is None  # type: ignore[union-attr]  # 알림 자체는 그대로
+    bot.router.resolve("dealbot", ["collector:x"])  # type: ignore[union-attr]
+    rows = json.loads(bot.db.kv_get("dash:hidden") or "{}")
+    rows["sys-dealbot"]["since"] -= 600  # 10분 전에 없앤 것으로
+    bot.db.kv_set("dash:hidden", json.dumps(rows))
+    bot.router.open({"src": "dealbot", "key": "collector:y", "kind": "collector_stuck", "iid": "sys-dealbot",  # type: ignore[union-attr]
+                     "title": "뽐뿌 수집 실패", "at": t0 + 600})
+    assert [it for it in bot.dash_state.items() if it["iid"] == "sys-dealbot"]  # 새로 열린 줄은 다시 보임
+    for bad in ({"iid": "../x"}, {"iid": "sys-dealbot", "since": "x"}, {"iid": "sys-dealbot", "since": True}):
+        _s, body = await act(bot, "todo.hide", bad)
+        assert body["code"] == "bad_args"
+
+
+def test_hidden_rows_forget_old_entries() -> None:
+    from dealbot.dashboard.actions import HIDDEN_KEY, hidden_rows, is_hidden
+
+    class DB:
+        def __init__(self, v: str) -> None:
+            self.v = v
+
+        def kv_get(self, k: str) -> str:
+            assert k == HIDDEN_KEY
+            return self.v
+
+    now = 1_800_000_000.0
+    db = DB(json.dumps({"a": {"since": 5, "at": now - 86400}, "b": {"since": 5, "at": now - 15 * 86400},
+                        "c": {"since": None, "at": now - 4 * 86400}, "d": "x"}))
+    rows = hidden_rows(db, now)
+    assert set(rows) == {"a"}
+    assert is_hidden({"iid": "a", "since": 5}, rows) and not is_hidden({"iid": "a", "since": 99}, rows)
+    assert hidden_rows(DB("not json"), now) == {}
+
+
+def test_collector_success_closes_its_stuck_notice(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    """수집이 다시 되면 '확인 실패' 할 일을 닫는다 (실패가 이어지던 때만) — 주인 10/23."""
+    from datetime import UTC, datetime
+
+    got: list[tuple[str, ...]] = []
+    monkeypatch.setattr(bot.notifier, "resolve", lambda *keys: got.append(keys))
+    bot.notifier.error_cleared("collector:algumon")
+    assert got == []
+    bot.notifier._err_since["collector:algumon"] = datetime.now(UTC)
+    bot.notifier.error_cleared("collector:algumon")
+    bot.notifier._err_since["publisher"] = datetime.now(UTC)
+    bot.notifier.error_cleared("publisher")
+    assert got == [("collector:algumon",)]

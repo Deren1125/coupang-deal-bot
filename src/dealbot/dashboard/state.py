@@ -26,6 +26,8 @@ from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
     dismissible,
+    hidden_rows,
+    is_hidden,
     needs_confirm,
     publish_blog,
 )
@@ -681,7 +683,11 @@ class StateBuilder:
             out[vrow["iid"]] = vrow
         if (srow := self._search_item(self.search_view(v2))) is not None:
             out[srow["iid"]] = srow
-        items = list(out.values())
+        hidden = hidden_rows(self.bot.db, now)  # 주인이 '알림 없애기'로 뺀 줄 (주인 10/23)
+        items = [it for it in out.values() if not is_hidden(it, hidden)]
+        for it in items:
+            if not any(a and a["action"] == "todo.dismiss" for a in (it["primary"], *it["more"])):
+                it["more"] = [*it["more"], act("todo.hide", "알림 없애기", {"iid": it["iid"], "since": it.get("since")})]
         supported = self._supported(self._ba_status())
         modes = self._modes(v2)
         for it in items:

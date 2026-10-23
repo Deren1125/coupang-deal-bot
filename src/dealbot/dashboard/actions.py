@@ -108,7 +108,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "post_edit")  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
-                "todo.dismiss", "stats.refresh", "stats.input", "search.check",
+                "todo.dismiss", "todo.hide", "stats.refresh", "stats.input", "search.check",
                 "earn.save", "earn.delete")  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
 DISMISS_POST_HEADS = ("dup", "cards", "openchat")
@@ -116,6 +116,42 @@ REAL_WORK_HEADS = ("link", "review", "unsure", "photo", "ask", "draft", "oedit",
 # Blog-Auto 가 닫아 주는 키 머리 (blogauto/bridge.py DISMISS_HEADS 와 같게) — 이 밖의 Blog-Auto 줄은 '다 했어요'를 보이지 않는다
 BLOGAUTO_DISMISS_HEADS = ("dup", "cards", "openchat", "cq", "buddy", "stalled", "scan", "err", "loop", "neighbors", "restyle_once")
 REPLIES_KEY = "threads_replies:"
+# 알림 없애기 (todo.hide — 주인 10/23 "할일 알림 다 내가 임의로 없앨 수 있게"): 어떤 줄이든 할 일 화면에서만 뺀다 (일 자체는 그대로).
+# 같은 줄이 새로 열리면(시각 since 가 더 늦음) 다시 보인다. 기록은 봇 DB kv 에 (since 가 없는 줄은 사흘, 나머지는 2주 뒤 잊음)
+HIDDEN_KEY = "dash:hidden"
+HIDDEN_DAYS, HIDDEN_NOSINCE_DAYS, HIDDEN_MAX = 14, 3, 300
+
+
+def hidden_rows(db: Any, now: float) -> dict[str, dict[str, Any]]:
+    """{iid: {since, at}} — 지난 것은 뺀 채로."""
+    try:
+        raw = json.loads(db.kv_get(HIDDEN_KEY) or "{}")
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for iid, h in raw.items():
+        if not isinstance(h, dict) or not isinstance(h.get("at"), int | float):
+            continue
+        days = HIDDEN_DAYS if h.get("since") is not None else HIDDEN_NOSINCE_DAYS
+        if now - float(h["at"]) < days * 86400:
+            out[str(iid)] = h
+    return out
+
+
+def is_hidden(item: dict[str, Any], hidden: dict[str, dict[str, Any]]) -> bool:
+    """주인이 없앤 줄인가 — 없앤 뒤 같은 줄이 새로 열렸으면(since 가 더 늦음) 아님."""
+    h = hidden.get(item.get("iid") or "")
+    if h is None:
+        return False
+    since, hs = item.get("since"), h.get("since")
+    if since is None or hs is None:
+        return since is None
+    try:
+        return float(since) <= float(hs) + 1
+    except (TypeError, ValueError):
+        return False
 
 
 def dismissible(iid: str, key: str, *, dealbot_row: bool) -> bool:
@@ -483,6 +519,12 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         if not iidmod.ok(iid):
             raise ActionError("bad_args")
         return {"iid": iid, "key": _str(g("key"), 120)}
+    if action == "todo.hide":
+        iid = _str(g("iid"), 64)
+        since = g("since")
+        if not iidmod.ok(iid) or not (since is None or isinstance(since, int | float) and not isinstance(since, bool)):
+            raise ActionError("bad_args")
+        return {"iid": iid, "since": since}
     if action == "stats.refresh":
         return {"src": _str(g("src"), 40)}
     if action == "search.check":  # 구글 검색 등록 '등록함' (주인 10/18 22:20) — url 하나 또는 그날 urls 한 번에, done=False 는 되돌림
@@ -814,7 +856,7 @@ def target_of(action: str, args: dict[str, Any]) -> str:
     pids = args.get("pids")
     if isinstance(pids, list) and len(pids) == 1 and blog in BLOGS:
         return iidmod.post_iid(blog, pids[0])
-    if action == "todo.dismiss":
+    if action in ("todo.dismiss", "todo.hide"):
         return str(args.get("iid") or "")
     if action == "blog.visit_done":
         return str(args.get("id") or "")
@@ -1357,6 +1399,8 @@ class ActionDesk:
             return "failed", "알림을 보내지 못했어요 — 기기에서 알림을 다시 켜 주세요"
         if action == "todo.dismiss":
             return self._dismiss(args, caller)
+        if action == "todo.hide":
+            return self._hide(args)
         if action == "stats.refresh":
             dash = bot.dashboard
             got = await dash.refresh(args["src"])
@@ -1402,6 +1446,17 @@ class ActionDesk:
         except EarnError as e:
             return "bad_args", str(e)
         return "done", "넣었어요"
+
+    def _hide(self, args: dict[str, Any]) -> tuple[str, str]:
+        """알림 없애기: 할 일 화면에서만 뺀다 (딜·글·알림 자체는 건드리지 않음 — 같은 줄이 새로 열리면 다시 보임)."""
+        db = self.bot.db
+        now = self.clock()
+        rows = hidden_rows(db, now)
+        rows[args["iid"]] = {"since": args["since"], "at": now}
+        if len(rows) > HIDDEN_MAX:
+            rows = dict(sorted(rows.items(), key=lambda kv: kv[1]["at"])[-HIDDEN_MAX:])
+        db.kv_set(HIDDEN_KEY, json.dumps(rows, ensure_ascii=False))
+        return "done", "할 일에서 없앴어요"
 
     def _dismiss(self, args: dict[str, Any], caller: Caller) -> tuple[str, str]:
         """다 했어요: 밖에서 끝낸 일만 (두 번 발행·구매 링크 빠짐·서로이웃·멈춤·스레드 답글·시스템 참고)."""

@@ -582,6 +582,10 @@ class DealBot:
                 status.unavailable_reason = str(e)
                 log.warning("collector '%s' unavailable: %s", ccfg.name, e)
             self.collectors.append(collector)
+        # 꺼 둔 수집기의 '확인 실패' 할 일은 닫는다 (주인 10/23 — 알구몬을 끈 뒤에도 '2시간째 실패'가 남아 있었음)
+        for ccfg in settings.collectors:
+            if not ccfg.enabled:
+                self.notifier.resolve(f"collector:{ccfg.name}")
 
         if self.application is not None and settings.secrets.telegram_admin_chat_id:
             register_admin_handlers(

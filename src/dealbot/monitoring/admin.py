@@ -1027,8 +1027,9 @@ class AdminNotifier:
         return await self.edit(notice_message_id, text)
 
     def error_cleared(self, kind: str) -> None:
-        """그 종류의 작업이 다시 성공함 — '계속 실패' 셈을 처음부터."""
-        self._err_since.pop(kind, None)
+        """그 종류의 작업이 다시 성공함 — '계속 실패' 셈을 처음부터. 수집 실패 할 일이 열려 있었으면 닫는다 (주인 10/23)."""
+        if self._err_since.pop(kind, None) is not None and kind.startswith("collector:"):
+            self.resolve(kind)
         self._err_recent.pop(kind, None)
 
     async def _escalate(self, kind: str, message: str) -> None:
