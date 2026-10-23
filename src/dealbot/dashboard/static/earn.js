@@ -87,7 +87,7 @@ function view(e, h) {
   }
   out.push(el('h3', {class: 'h3'}, '최근 구매'));
   out.push(e.recent.length ? el('article', {class: 'itm'}, e.recent.map(r => el('div', {class: 'rc' + (r.cancelled ? ' cx' : '')},
-    el('div', {class: 'nm'}, r.name, el('small', {}, `${r.day} · ${r.src}${r.cancelled ? ' · 취소됨' : ''}`)),
+    el('div', {class: 'nm'}, r.name, el('small', {}, r.sub)),
     el('div', {class: 'am'}, r.amount, el('small', {}, `수익 ${r.commission}`)))))
     : el('p', {class: 'empty'}, '아직 구매 내역이 없어요'));
   if (e.manual.rows.length) {

@@ -13,9 +13,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import re
+import sqlite3
 import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
@@ -154,6 +156,31 @@ class EarnStore:
     def coupang_orders(self, start: str, limit: int) -> list[dict[str, Any]]:
         return [dict(r) for r in self.db._q("SELECT * FROM earn_coupang_orders WHERE day >= ? ORDER BY day DESC, okey LIMIT ?", (start, limit))]
 
+    def posted_where(self, name: str, tz: str) -> str:
+        """산 상품을 봇이 어디에 올렸는지 (주인 10/23 — "어떤 sns 타고 온 건지"): 이름이 같은 상품의 텔레그램 글 · 스레드 · 인스타.
+        쇼핑몰은 어느 SNS 에서 왔는지 알려 주지 않고 링크도 상품마다 하나라, 올린 곳 후보만 — 한 곳이면 거기서 온 것."""
+        key = _norm(name)
+        word = next((w for w in re.split(r"[\s,()\[\]/]+", name) if len(w) >= 2), "")
+        if len(key) < 4 or not word:
+            return ""
+        ids = [r["product_id"] for r in self.db._q("SELECT product_id, name FROM products WHERE name LIKE ? LIMIT 200", (f"%{word}%",))
+               if _norm(r["name"]) == key]
+        if not ids:
+            return ""
+        marks = ",".join("?" * len(ids))
+        got: dict[str, str] = {}
+        rows = [("텔레그램", r["posted_at"]) for r in self.db._q(f"SELECT posted_at FROM posts WHERE dry_run = 0 AND product_id IN ({marks})", ids)]
+        with contextlib.suppress(sqlite3.Error):  # sns_log 는 SNS 저장소가 만든다 — 아직 없으면 텔레그램만
+            rows += [(SNS_NAMES.get(r["channel"], r["channel"]), r["at"])
+                     for r in self.db._q(f"SELECT channel, at FROM sns_log WHERE outcome = 'posted' AND product_id IN ({marks})", ids)]
+        for where, at in sorted(rows, key=lambda x: x[1]):
+            try:
+                d = datetime.fromisoformat(at).astimezone(ZoneInfo(tz))
+            except ValueError:
+                continue
+            got.setdefault(where, f"{d.month}/{d.day}")
+        return " · ".join(f"{k} {v}" for k, v in got.items())
+
     # 직접 넣은 것
     @staticmethod
     def clean_manual(args: dict[str, Any], today: date) -> dict[str, Any]:
@@ -275,6 +302,14 @@ class EarnCoupang:
 # ---------------------------------------------------------------- 화면 값
 def _sum(rows: list[dict[str, Any]], key: str) -> int:
     return sum(int(r.get(key) or 0) for r in rows)
+
+
+SNS_NAMES = {"threads": "스레드", "instagram": "인스타"}
+TOSS_VIA = {"내 링크 상품": "링크 상품을 삼", "다른 상품": "링크로 들어와 다른 상품을 삼"}
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[\W_]+", "", name or "").lower()
 
 
 def _md(day: str) -> str:
@@ -448,12 +483,24 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
     for m in cm_malls:  # 토스가 알려 준 산 상품 (상품명·금액·수수료 — 구매자 정보 없음 · 날짜는 읽은 날)
         for it in (m.get("items") or [])[:RECENT_MAX] if read_day else []:
             recent.append({"src": m["name"], "day": read_day, "name": it.get("name") or "(상품 이름 없음)", "amount": money(it.get("amount") or 0),
-                           "commission": money(it.get("reward") or 0), "cancelled": bool(it.get("refunded")), "id": None})
+                           "commission": money(it.get("reward") or 0), "cancelled": bool(it.get("refunded")), "id": None,
+                           "via": TOSS_VIA.get(it.get("via") or "", "")})
     for m in manual[:RECENT_MAX]:
         recent.append({"src": m["shop"], "day": m["day"], "name": m["product"] or "(상품 이름 없음)", "amount": money(m["amount"]),
                        "commission": money(m["commission"]), "cancelled": False, "id": m["id"]})
     recent.sort(key=lambda r: r["day"], reverse=True)
     recent = [{**r, "day": _md(r["day"])} for r in recent[:RECENT_MAX]]
+    for r in recent:  # 작은 줄: 날짜 · 어디 · (토스) 링크 상품인지 · 봇이 올린 곳 (주인 10/23)
+        other = r.get("via") == TOSS_VIA["다른 상품"]  # 산 것이 링크 상품이 아니면 어느 링크였는지 토스가 알려 주지 않는다
+        where = store.posted_where(r["name"], tz) if r["id"] is None and not other else ""
+        if other:
+            place = "어느 링크였는지는 토스가 알려 주지 않아요"
+        elif where:
+            place = f"올린 곳 {where}"
+        else:
+            place = "올린 곳: 봇 기록에 없음 (블로그 글일 수 있음)" if r["id"] is None else ""
+        bits = [r["day"], r["src"], "취소됨" if r["cancelled"] else "", r.get("via") or "", place]
+        r["sub"] = " · ".join(b for b in bits if b)
 
     rows = store.manual(limit=MANUAL_MAX)
     return {

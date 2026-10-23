@@ -420,3 +420,20 @@ def test_creator_mall_parser_drops_bad_challenge_bits() -> None:
                        "history": ["x", {"round": 1, "ended": "2026-08-01"}]})
     assert c["visits"] is None and c["tiers"] == [{"visits": 30, "reward": 3000}] and c["next"] is None and c["content"] is False
     assert len(c["history"]) == 1 and _cm_challenge(None) is None
+
+
+def test_recent_purchase_shows_link_kind_and_where_it_was_posted(db: Database) -> None:
+    """최근 구매 작은 줄 (주인 10/23 — "뭘 파는 링크인지 … 어떤 sns 타고 온 건지"): 토스 링크 상품/다른 상품 · 봇이 올린 곳."""
+    from dealbot.dashboard.blogauto import _creator_mall
+
+    cm = _creator_mall(json.loads((Path(__file__).parent / "fixtures" / "dash_contract" / "export_v2.json").read_text(encoding="utf-8"))["creator_mall"])
+    db._conn.execute("INSERT INTO products (product_id, name, url, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
+          ("toss:1", "교동 육개장 500g 10개", "https://toss.shopping/t/1", "2026-10-18T00:00:00+00:00", "2026-10-18T00:00:00+00:00"))
+    db._conn.execute("INSERT INTO posts (product_id, source, price, channel_id, posted_at) VALUES (?, ?, ?, ?, ?)",
+          ("toss:1", "ppomppu", 1000, "@ch", "2026-10-18T08:06:52+00:00"))
+    db._conn.execute("INSERT INTO sns_log (at, channel, product_id, outcome) VALUES (?, ?, ?, ?)", ("2026-10-18T20:00:00+00:00", "threads", "toss:1", "posted"))
+    db._conn.execute("INSERT INTO sns_log (at, channel, product_id, outcome) VALUES (?, ?, ?, ?)", ("2026-10-19T01:00:00+00:00", "instagram", "toss:1", "failed"))
+    e = earn.build(earn.EarnStore(db), TZ, NOW, None, coupang_on=True, sub_id_set=True, cm_field=cm)
+    subs = {r["name"]: r["sub"] for r in e["recent"] if r["src"] == "토스쇼핑"}
+    assert subs["교동 육개장, 500g, 10개"].endswith("링크 상품을 삼 · 올린 곳 텔레그램 10/18 · 스레드 10/19")  # 이름은 띄어쓰기·쉼표 달라도 같음
+    assert subs["프로프룻 샤인머스켓, 특품, 2kg, 1박스"].endswith("링크로 들어와 다른 상품을 삼 · 어느 링크였는지는 토스가 알려 주지 않아요")
