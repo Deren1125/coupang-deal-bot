@@ -3646,6 +3646,7 @@ class DealBot:
             me = await self.instagram.client.me(token.access_token)
             username = str(me.get("username") or "")
             self.instagram.save_token(token, username)
+            self.notifier.resolve("sns:instaauth", "sns_fail:instaauth:")  # 다시 연결됨 — 끊김·실패 할 일은 닫는다
             expires = token.expires_at.date().isoformat() if token.expires_at else "-"
             self.db.log_event("INFO", "instagram", f"authorized as {username}")
             return f"✅ 인스타그램 연결 완료: @{username} (토큰 만료 {expires}, 자동 갱신됨)"
@@ -3666,6 +3667,7 @@ class DealBot:
             return f"❌ 연결하지 못했어요: {html.escape(str(e))}\n토큰을 다시 만들어 보내 주세요 (테스터로 수락한 프로페셔널 계정으로 만든 토큰이어야 해요)."
         username = str(me.get("username") or "")
         self.instagram.save_token(tok, username)
+        self.notifier.resolve("sns:instaauth", "sns_fail:instaauth:")  # 다시 연결됨 — 끊김·실패 할 일은 닫는다
         self.db.log_event("INFO", "instagram", f"authorized by user token as {username}")
         expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
         return f"✅ 인스타그램 연결 완료: @{html.escape(username)} (토큰 만료 {expires}, 자동 갱신됨). 이제 /instatest 로 시험해 보세요."
@@ -3820,6 +3822,7 @@ class DealBot:
         try:
             token = await self.threads.client.exchange_code(code, self.settings.secrets.threads_redirect_uri)
             self.threads.save_token(token)
+            self.notifier.resolve("sns:threadsauth", "sns_fail:threadsauth:")  # 다시 연결됨 — 끊김·실패 할 일은 닫는다
             me = await self.threads.client.me(token.access_token)
             self.db.kv_set(KV_USERNAME, str(me.get("username") or ""))
             expires = token.expires_at.date().isoformat() if token.expires_at else "-"
@@ -3841,6 +3844,7 @@ class DealBot:
         except ThreadsError as e:
             return f"❌ 연결하지 못했어요: {html.escape(str(e))}\n토큰을 다시 만들어 보내 주세요 (테스터로 수락한 계정으로 만든 토큰이어야 해요)."
         self.threads.save_token(tok)
+        self.notifier.resolve("sns:threadsauth", "sns_fail:threadsauth:")  # 다시 연결됨 — 끊김·실패 할 일은 닫는다
         self.db.kv_set(KV_USERNAME, str(me.get("username") or ""))
         self.db.log_event("INFO", "threads", f"authorized by user token as {me.get('username')}")
         expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
