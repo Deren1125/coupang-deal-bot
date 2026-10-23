@@ -396,8 +396,24 @@ def _cm_nums(m: dict[str, Any], label: str) -> tuple[int, int, int]:
     return int(w.get("orders") or 0), int(w.get("amount") or 0), int(w.get("commission") or 0)
 
 
+SUB_CHANNELS = {"threads": "스레드", "instagram": "인스타", "blog": "블로그"}  # links.coupang_sub_ids 의 키 → 표에 쓸 채널 이름
+
+
+def sub_label(sub: str, channel_subs: dict[str, str] | None, default_sub: str | None) -> str:
+    """서브아이디 → 표에 보일 이름 (주인 10/23 — 채널 이름으로). 기본 서브아이디 = 텔레그램 채널 글."""
+    if not sub:
+        return "(서브아이디 없음)"
+    for ch, sid in (channel_subs or {}).items():
+        if sid == sub:
+            return f"{SUB_CHANNELS.get(ch, ch)} ({sub})"
+    if default_sub and sub == default_sub:
+        return f"텔레그램 ({sub})"
+    return sub
+
+
 def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None, *, coupang_on: bool, sub_id_set: bool,
-          cm_field: dict[str, Any] | None = None) -> dict[str, Any]:
+          cm_field: dict[str, Any] | None = None, channel_subs: dict[str, str] | None = None,
+          default_sub: str | None = None) -> dict[str, Any]:
     """통계 탭 '제휴 수익' 칸 값. sc_field = Blog-Auto 기록 파일의 earnings.shopconnect (걸러 둔 것, 없으면 None).
     cm_field = 기록 파일의 creator_mall (에이블리·지그재그·토스쇼핑 자동 — 없으면 그 줄들 없이)."""
     cm_malls = [m for m in ((cm_field or {}).get("malls") or []) if m.get("state") != "pending"]
@@ -443,11 +459,13 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
         s = subs.setdefault(r["sub_id"] or "", {"clicks": 0, "orders": 0, "amount": 0, "commission": 0})
         for k in s:
             s[k] += int(r[k] or 0)
-    sub_rows = [{"sub": k or "(서브아이디 없음)", "clicks": f"{v['clicks']:,}회", "orders": f"{v['orders']:,}건", "commission": money(v["commission"])}
+    sub_rows = [{"sub": sub_label(k, channel_subs, default_sub), "clicks": f"{v['clicks']:,}회", "orders": f"{v['orders']:,}건", "commission": money(v["commission"])}
                 for k, v in sorted(subs.items(), key=lambda kv: -kv[1]["commission"])]
     named = [k for k in subs if k]
     if len(named) > 1:
         sub_note = ""
+    elif channel_subs:  # 채널마다 다른 서브아이디를 쓰기 시작함 (10/23) — 새 링크로 팔린 것부터 나뉨
+        sub_note = "10/23부터 채널(텔레그램·스레드·인스타·블로그)마다 다른 서브아이디를 써요 — 그 뒤에 팔린 것부터 채널별로 나뉘어 보여요"
     elif sub_id_set or named:
         sub_note = "모든 채널이 같은 서브아이디를 써서 어느 플랫폼(텔레그램·인스타·스레드 등)에서 팔렸는지는 나눌 수 없어요"
     else:

@@ -211,12 +211,13 @@ class CoupangClient:
             return list(data.get("productData") or [])
         return list(data or [])
 
-    async def deeplink(self, urls: list[str]) -> list[DeeplinkResult]:
+    async def deeplink(self, urls: list[str], *, sub_id: str | None = None) -> list[DeeplinkResult]:
+        """sub_id: 이 링크만 다른 채널 아이디로 (주인 10/23 — 채널마다 실적을 나눠 보려고). 없으면 기본(COUPANG_SUB_ID)."""
         if not urls:
             return []
         body: dict[str, Any] = {"coupangUrls": urls}
-        if self.sub_id:
-            body["subId"] = self.sub_id
+        if sub_id or self.sub_id:
+            body["subId"] = sub_id or self.sub_id
         data = await self._request("POST", PATH_DEEPLINK, json=body, kind="deeplink")
         results: list[DeeplinkResult] = []
         for item in data or []:

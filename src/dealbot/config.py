@@ -681,6 +681,9 @@ class CopyConfig(BaseModel):
 class LinksConfig(BaseModel):
     always_deeplink: bool = False
     resolve_short_links: bool = True
+    # 쿠팡 딜 링크를 채널마다 다른 채널 아이디(subId)로 (주인 10/23 — 쿠팡 실적을 채널별로). 키: threads·instagram·blog.
+    # 텔레그램 채널 글은 기본(COUPANG_SUB_ID) 그대로. 비우면 모든 채널이 같은 링크 (예전처럼)
+    coupang_sub_ids: dict[str, str] = Field(default_factory=dict)
     # 링크프라이스 링크 생성이 실패한 몰(대개 아직 승인 안 된 머천트)은 이 시간 동안 건너뛴다. 0 = 매번 시도
     provider_error_cooldown_hours: float = 6
 

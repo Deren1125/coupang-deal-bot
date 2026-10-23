@@ -534,6 +534,12 @@ links:
   always_deeplink: false
   resolve_short_links: true
   provider_error_cooldown_hours: 12  # 링크프라이스 링크 생성 실패한 몰(승인 전 머천트 등)은 이 시간 동안 건너뜀 (알림도 그때 1번). 0 = 매번 시도
+  # 쿠팡 실적을 채널별로 (주인 10/23): 채널마다 다른 채널 아이디(subId)로 딥링크. 텔레그램 채널 글은 기본 COUPANG_SUB_ID 그대로.
+  # 통계 탭 '쿠팡 자세히' 표에 이 이름으로 나뉘어 보임. 딥링크가 안 되면(채널 아이디 거절 등) 기본 링크로 올림
+  coupang_sub_ids:
+    threads: threads
+    instagram: insta
+    blog: blog
 
 # 정보 글: 상품 링크가 없는 게시판 글(이벤트·결제 할인 공지 등)을 본문·사진만 정리해 올림. 수익 링크는 없음
 info_posts:

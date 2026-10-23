@@ -586,3 +586,28 @@ async def test_waking_many_waiting_deals_is_spread_out(bot: DealBot, settings: S
     bot.db.kv_set(autolink.KV_STOP, "")
     await bot.autolink_tick()
     assert len([u for u in _inbox(settings) if "connect_link" in u]) == bot.WAKE_INFLIGHT_MAX
+
+
+async def test_coupang_channel_links_use_their_own_sub_id(bot: DealBot) -> None:
+    """주인 10/23: 쿠팡 딜은 스레드·인스타·블로그 링크를 그 채널 아이디(subId)로 따로 만든다 — 안 되면 기본 링크."""
+    calls = []
+
+    class Prov:
+        async def convert(self, url: str, *, sub_id: str | None = None) -> str:
+            calls.append(sub_id)
+            if sub_id == "bad":
+                raise RuntimeError("rejected")
+            return f"https://link.coupang.com/a/{sub_id}"
+
+    bot.links.providers["coupang"] = Prov()
+    bot.settings.links.coupang_sub_ids = {"threads": "threads", "instagram": "bad"}
+    p = Product(source="coupang_goldbox", product_id="coupang:1", shop="coupang", name="청소기", price=1000,
+                url="https://www.coupang.com/vp/products/1", extra={})
+    deal = Deal(p, DealVerdict(is_deal=True, score=5), affiliate_url="https://link.coupang.com/a/main")
+    t = await bot.channel_deal(deal, "threads")
+    assert t.affiliate_url == "https://link.coupang.com/a/threads" and deal.affiliate_url.endswith("/main")
+    assert (await bot.channel_deal(deal, "threads")).affiliate_url.endswith("/threads") and calls == ["threads"]  # 한 번만 만듦
+    assert (await bot.channel_deal(deal, "instagram")).affiliate_url.endswith("/main")  # 거절되면 기본
+    assert (await bot.channel_deal(deal, "blog")).affiliate_url.endswith("/main")  # 채널 아이디 없음
+    naver = Deal(_product(), DealVerdict(is_deal=True), affiliate_url="https://naver.me/x")
+    assert (await bot.channel_deal(naver, "threads")) is naver

@@ -1023,7 +1023,7 @@ class DealBot:
                           + (f" 채널 글 {message_id}" if message_id else ""))
         if info:
             return f"✅ #{queue_id} 번을 채널에 올라간 글로 기록했어요.{note}"
-        row = self.export_published(deal, photo)
+        row = self.export_published(await self.channel_deal(deal, "blog"), photo)
         # 사진 기다림 기록을 인스타 대기열에 넣기 전에 — 인스타 시간표가 그 사이에 사진 없는 딜 글을 바로 올리지 않게
         await self._ask_late_photo(queue_id, deal, photo, row)
         await self._publish_side_channels(deal, photo=photo, deal_no=queue_id)
@@ -3210,7 +3210,7 @@ class DealBot:
                 self.export_published(deal, photo, preview=True)  # 블로그 미리보기(/hotdeal)용 — 실제 블로그 발행엔 안 쓰임
             else:
                 await self.notifier.notify_published(deal, result)
-                row = self.export_published(deal, photo)
+                row = self.export_published(await self.channel_deal(deal, "blog"), photo)  # 블로그 글의 쿠팡 링크는 blog 채널 아이디로
                 # 사진 기다림 기록이 먼저 — 인스타 시간표(ig_scheduler)가 기다리는 동안 사진 없는 딜 글을 미룬다
                 await self._ask_late_photo(item.id, deal, photo, row)
                 await self._publish_side_channels(deal, photo=photo, deal_no=item.id)
@@ -3627,6 +3627,26 @@ class DealBot:
             return "확인된 상품 사진 없음"
         return None
 
+    async def channel_deal(self, deal: Deal, channel: str) -> Deal:
+        """그 채널에 올릴 딜 — 쿠팡 딜이면 채널 아이디(links.coupang_sub_ids[channel])로 만든 링크를 단 사본 (주인 10/23 — 쿠팡 실적을
+        채널별로). 쿠팡이 아니거나, 그 채널 아이디가 없거나, 딥링크가 안 되면 그대로 (기본 링크). 만든 링크는 상품 extra 에 기억."""
+        sub = (self.settings.links.coupang_sub_ids or {}).get(channel)
+        if not sub or deal.product.shop != "coupang" or not deal.affiliate_url or self.state.dry_run:
+            return deal
+        made = deal.product.extra.setdefault("sub_links", {}) if isinstance(deal.product.extra, dict) else {}
+        link = made.get(channel) if isinstance(made, dict) else None
+        if not link:
+            provider = self.links.providers.get("coupang")
+            if provider is None:
+                return deal
+            try:
+                link = await provider.convert(deal.product.url, sub_id=sub)
+            except Exception as e:  # noqa: BLE001 — 채널 링크가 안 돼도 기본 링크로 올린다
+                log.info("coupang %s link (%s) failed — default link: %s", channel, sub, e)
+                return deal
+            made[channel] = link
+        return replace(deal, affiliate_url=link)
+
     async def _publish_side_channels(self, deal: Deal, *, photo: bytes | None = None, deal_no: int | None = None) -> None:
         """텔레그램 채널 발행 후: 스레드 대기열 + 인스타 대기열에 넣기 + 복붙 문구를 관리자 챗으로.
         스레드와 인스타는 대기열·리듬이 따로다 (주인 결정 10/15):
@@ -3654,7 +3674,8 @@ class DealBot:
             # 스레드 대기열에 넣고 리듬(07~24시·45분 간격·하루 딜 10개)이 허락하면 바로 (주인 결정 10/15).
             # 사진: deal_photo 가 확인한 상품 사진, 없으면 봇이 만든 4:5 글자 카드 (글만 올리지 않음)
             try:
-                job = self.threads_flow.enqueue_deal(deal, queue_id=queue_id, has_photo=photo is not None)
+                job = self.threads_flow.enqueue_deal(await self.channel_deal(deal, "threads"), queue_id=queue_id,
+                                                     has_photo=photo is not None)
                 if job is not None and not self.settings.threads.rhythm.enabled:
                     await self.threads_flow.post_now(job)
                 elif job is not None:
@@ -3664,7 +3685,7 @@ class DealBot:
                 self.db.log_event("WARNING", "threads", f"{deal.product.product_id}: {type(e).__name__}: {e}")
         if want_ig:
             try:
-                self.ig.enqueue(deal, photo=photo, queue_id=queue_id)
+                self.ig.enqueue(await self.channel_deal(deal, "instagram"), photo=photo, queue_id=queue_id)
             except Exception as e:  # noqa: BLE001 — 대기열에 못 넣어도 채널 글·복붙 문구는 그대로
                 log.warning("instagram queue failed: %s", e)
                 self.db.log_event("WARNING", "instagram", f"{deal.product.product_id}: queue failed: {e}")

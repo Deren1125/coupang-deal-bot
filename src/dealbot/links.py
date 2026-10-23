@@ -71,11 +71,11 @@ class CoupangDeeplinkProvider:
                 return canonical_product_url(resolved)
         return None
 
-    async def convert(self, url: str) -> str:
+    async def convert(self, url: str, *, sub_id: str | None = None) -> str:
         canon = await self.canonical_url(url)
         if not canon:
             raise LinkConversionError(f"cannot canonicalize coupang url: {url}")
-        results = await self._client.deeplink([canon])
+        results = await self._client.deeplink([canon], sub_id=sub_id)
         if not results or not results[0].shorten_url:
             raise LinkConversionError(f"deeplink api returned no link for {canon}")
         return results[0].shorten_url

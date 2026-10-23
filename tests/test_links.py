@@ -100,3 +100,12 @@ async def test_coupang_without_api_asks_manual(http: httpx.AsyncClient) -> None:
         await r.to_affiliate(_product("coupang", "https://www.coupang.com/vp/products/1"))
     assert ei.value.shop.key == "coupang"
     assert r.describe(ShopRegistry().get("coupang")) == "내 링크 요청 (자동 변환기 없음)"  # type: ignore[arg-type]
+
+
+def test_coupang_sub_label_names_the_channel() -> None:
+    from dealbot.dashboard.earn import sub_label
+
+    subs = {"threads": "threads", "instagram": "insta", "blog": "blog"}
+    assert sub_label("insta", subs, "shoppingwithderen") == "인스타 (insta)"
+    assert sub_label("shoppingwithderen", subs, "shoppingwithderen") == "텔레그램 (shoppingwithderen)"
+    assert sub_label("", subs, None) == "(서브아이디 없음)" and sub_label("zz", subs, None) == "zz"
