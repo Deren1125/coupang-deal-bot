@@ -57,6 +57,7 @@ _STATUS_TEXT = {
     429: "Too Many Requests", 500: "Internal Server Error", 503: "Service Unavailable",
 }
 _MAX_HEADER_BYTES = 16 * 1024
+TUNNEL_MAX_S = 40 * 60  # 원격 화면 연결 하나의 최대 시간
 _READ_TIMEOUT = 10.0
 FORM_TYPE = "application/x-www-form-urlencoded"
 JSON_TYPE = "application/json"
@@ -174,6 +175,9 @@ class WebServer:
         self.json_routes: dict[str, tuple[JsonHandler, int]] = {}  # POST JSON 경로 → (핸들러, 본문 최대 바이트)
         # POST 로 큰 본문을 파일로 받는 경로 → (핸들러, 요청 헤더 → 받을 수 있는 최대 바이트(0 이면 안 받음), 임시 파일 경로 만들기)
         self.stream_routes: dict[str, tuple[StreamHandler, Callable[[dict[str, str]], int], Callable[[], Path]]] = {}
+        # 앞부분 → 그 아래를 그대로 넘길 이 서버 안쪽(127.0.0.1) 포트를 돌려주는 함수 (None 이면 닫힘). 지키는 앞부분(guard)의
+        # 로그인을 먼저 통과해야 함 — 주인 10/23 대시보드에서 원격 로그인 화면 (noVNC 정적 파일·웹소켓 → 127.0.0.1 의 websockify)
+        self.tunnels: dict[str, Callable[[], int | None]] = {}
         self.auth_realm = "dashboard"
         self._server: asyncio.AbstractServer | None = None
 
@@ -254,6 +258,38 @@ class WebServer:
             "WWW-Authenticate": f'Basic realm="{self.auth_realm}", charset="UTF-8"',
         }
 
+    def route_tunnel(self, prefix: str, port: Callable[[], int | None]) -> None:
+        """prefix 아래 GET(웹소켓 포함)을 127.0.0.1:port() 로 그대로 잇는다 (prefix 는 떼고). port() 가 None 이면 404.
+        인증은 지키는 앞부분 규칙 그대로 — prefix 는 guard_prefix 로 지키는 경로 아래여야 한다 (아니면 열지 않음)."""
+        self.tunnels[prefix.rstrip("/") + "/"] = port
+
+    async def _tunnel(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, port: int, head: bytes,
+                      prefix: str) -> None:
+        """요청 첫 줄의 경로에서 prefix 를 떼고, 받은 머리를 그대로 보낸 뒤 양쪽을 끝날 때까지 잇는다 (최대 TUNNEL_MAX_S)."""
+        first, _, rest = head.partition(b"\r\n")
+        method, target, version = first.decode("latin-1").split(" ", 2)
+        target = "/" + target[len(prefix):]
+        up_r, up_w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=5)
+        up_w.write(f"{method} {target} {version}\r\n".encode("latin-1") + rest)
+        await up_w.drain()
+
+        async def pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
+            with contextlib.suppress(Exception):
+                while chunk := await src.read(65536):
+                    dst.write(chunk)
+                    await dst.drain()
+            with contextlib.suppress(Exception):
+                dst.close()
+
+        try:
+            await asyncio.wait_for(asyncio.gather(pipe(reader, up_w), pipe(up_r, writer)), timeout=TUNNEL_MAX_S)
+        except TimeoutError:
+            pass
+        finally:
+            for w in (up_w, writer):
+                with contextlib.suppress(Exception):
+                    w.close()
+
     def serve_static(self, prefix: str, directory: Path) -> None:
         self.static[prefix.rstrip("/") + "/"] = Path(directory)
 
@@ -301,6 +337,20 @@ class WebServer:
             peer = writer.get_extra_info("peername")
             if isinstance(peer, tuple) and peer:
                 headers[PEER_HEADER] = str(peer[0])
+            tpath = urlsplit(target).path or "/"
+            tprefix = next((p for p in self.tunnels if tpath.startswith(p)), None)
+            if tprefix is not None and method == "GET":
+                guarded, guard, _gp = self._guard_for(tpath)
+                denied = self._precheck(method, tpath, headers) if guarded and guard is not None else \
+                    (404, page("없는 주소", "이 주소는 쓰지 않습니다."))
+                port = self.tunnels[tprefix]() if denied is None else None
+                if denied is None and port:
+                    await self._tunnel(reader, writer, port, head, tprefix)
+                    return
+                result = denied or (404, page("닫혀 있어요", "원격 화면이 열려 있지 않아요 — 대시보드에서 다시 열어 주세요."))
+                await self._respond(writer, result[0], result[1], result[2] if len(result) >= 3 else None,  # type: ignore[misc]
+                                    result[3] if len(result) >= 4 else None)  # type: ignore[misc]
+                return
             form_body: bytes | None = None
             body_path: Path | None = None
             early: Response | None = None

@@ -108,7 +108,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "post_edit")  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
-                "todo.dismiss", "todo.hide", "stats.refresh", "stats.input", "search.check",
+                "todo.dismiss", "todo.hide", "login.remote", "stats.refresh", "stats.input", "search.check",
                 "earn.save", "earn.delete")  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
 DISMISS_POST_HEADS = ("dup", "cards", "openchat")
@@ -519,6 +519,12 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         if not iidmod.ok(iid):
             raise ActionError("bad_args")
         return {"iid": iid, "key": _str(g("key"), 120)}
+    if action == "login.remote":
+        from dealbot.dashboard.remote_login import TARGETS
+
+        if g("target") not in TARGETS:
+            raise ActionError("bad_args")
+        return {"target": g("target")}
     if action == "todo.hide":
         iid = _str(g("iid"), 64)
         since = g("since")
@@ -1401,6 +1407,11 @@ class ActionDesk:
             return self._dismiss(args, caller)
         if action == "todo.hide":
             return self._hide(args)
+        if action == "login.remote":
+            from dealbot.dashboard import remote_login
+
+            remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"])
+            return "done", "서버에 로그인 화면을 띄우는 중이에요 — 30초쯤 뒤 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
         if action == "stats.refresh":
             dash = bot.dashboard
             got = await dash.refresh(args["src"])

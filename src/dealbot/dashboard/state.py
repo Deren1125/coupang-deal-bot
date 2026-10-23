@@ -563,6 +563,7 @@ class StateBuilder:
         elif iid.startswith("conn-naver-"):
             blog = iid.rsplit("-", 1)[-1]
             primary = act("blog.login_check", "로그인 확인", {"blog": blog})
+            more.append(act("login.remote", "원격 화면으로 다시 로그인", {"target": blog}))
         elif iid in ("conn-kakao", "sns-threads", "sns-instagram"):
             primary = goto("다시 연결", "#/connect")
         elif iid == "sns-replies":
@@ -577,6 +578,10 @@ class StateBuilder:
         else:
             primary = goto("자세히", f"#/i/{iid}")
             more.append(goto("연결 보기", "#/connect"))
+        relog = {"autolink:login": "finance", "autolink_toss:login": "toss"}  # 쇼핑커넥트(아카이브 프로필)·토스 로그인 풀림
+        for r in rows:
+            if r.key in relog and not any(a["action"] == "login.remote" for a in more):
+                more.insert(0, act("login.remote", "원격 화면으로 다시 로그인", {"target": relog[r.key]}))
         if not can_dismiss:
             more = [a for a in more if a["action"] != "todo.dismiss"]
         when = ago(datetime.fromtimestamp(first.opened_at, UTC), datetime.fromtimestamp(now, UTC))
@@ -682,6 +687,10 @@ class StateBuilder:
         # '오늘 들를 이웃 글'은 할 일에 넣지 않는다 (주인 10/23 — 알림 없이, 블로그 화면 '이웃' 칸에서만 본다)
         if (srow := self._search_item(self.search_view(v2))) is not None:
             out[srow["iid"]] = srow
+        from dealbot.dashboard import remote_login
+
+        if (vrow := remote_login.item(self.bot.db, open_link)) is not None:  # 원격 로그인 화면이 열려 있음 (주인 10/23)
+            out[vrow["iid"]] = vrow
         hidden = hidden_rows(self.bot.db, now)  # 주인이 '알림 없애기'로 뺀 줄 (주인 10/23)
         items = [it for it in out.values() if not is_hidden(it, hidden)]
         for it in items:

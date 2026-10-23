@@ -191,6 +191,10 @@ class DashApi:
         web.route(f"{API}/deal/find", self.deal_find)
         web.route(f"{API}/stats.html", self.stats_html)
         web.route_prefix("/dashboard/go/", self.go)
+        from dealbot.dashboard import remote_login
+
+        # 원격 로그인 화면 (주인 10/23): 대시보드 로그인 뒤, 세션이 살아 있을 때만 127.0.0.1:6080(websockify)로 잇는다
+        web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))
         web.route_prefix("/dashboard/connect/", self.connect, with_headers=True)
         web.route(SW_PATH, self.sw)
         for name in APP_FILES:
