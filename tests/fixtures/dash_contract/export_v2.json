@@ -983,7 +983,8 @@
     "order_amount": null,
     "reward": 600,
     "expected": 1200,
-    "last_month": 10000
+    "last_month": 10000,
+    "items": null
    },
    {
     "key": "zigzag",
@@ -998,13 +999,47 @@
     "order_amount": 0,
     "reward": 0,
     "expected": 0,
-    "last_month": 0
+    "last_month": 0,
+    "items": null
+   },
+   {
+    "key": "toss",
+    "name": "토스쇼핑",
+    "state": "ok",
+    "text": "",
+    "conn": "ok",
+    "checked_at": "2026-10-23 18:42",
+    "conn_since": "2026-10-23 16:20",
+    "visits": 4,
+    "orders": 2,
+    "order_amount": 33790,
+    "reward": 0,
+    "expected": 2703,
+    "last_month": null,
+    "items": [
+     {
+      "name": "교동 육개장, 500g, 10개",
+      "qty": 1,
+      "refunded": 0,
+      "amount": 24800,
+      "reward": 1984,
+      "via": "내 링크 상품"
+     },
+     {
+      "name": "프로프룻 샤인머스켓, 특품, 2kg, 1박스",
+      "qty": 1,
+      "refunded": 0,
+      "amount": 8990,
+      "reward": 719,
+      "via": "다른 상품"
+     }
+    ]
    }
   ],
   "total": {
-   "visits": 17,
-   "orders": 1,
-   "expected": 1200,
+   "visits": 21,
+   "orders": 3,
+   "expected": 3903,
    "last_month": 10000
   }
  },
