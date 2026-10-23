@@ -158,7 +158,7 @@ async def test_state_stays_small_with_30_items(bot: DealBot, tmp_path: Path) -> 
     for i in range(30):
         queued(bot, product_id=f"toss:{100 + i}", name=f"상품 이름이 조금 긴 테스트 상품 {i} " * 2)
     body = await state(bot)
-    assert len(body["todo"]) >= 30 and len(json.dumps(body, ensure_ascii=False).encode()) <= 80 * 1024
+    assert len(body["todo"]) >= 30 and len(json.dumps(body, ensure_ascii=False).encode()) <= 96 * 1024  # 10/23 오늘 바뀐 것·제휴 수익·토스 칸이 더해짐
 
 
 async def test_digest_endpoint(bot: DealBot) -> None:
