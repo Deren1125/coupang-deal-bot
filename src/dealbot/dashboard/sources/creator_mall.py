@@ -1,6 +1,7 @@
 """쇼핑몰 크리에이터 (주인 10/23 — "내 링크 타고 들어와서 구매한 내역 … 조회수 … 예상 리워드도 표시해주고 각 사이트별로,
-그리고 총합도"): Blog-Auto 기록 파일의 "creator_mall" 만 본다 (Blog-Auto creator_stats — 에이블리·지그재그 크리에이터 화면을
-하루 한 번 읽은 이번 달 숫자). 딜봇은 쇼핑몰에 접속하지 않는다.
+그리고 총합도"): Blog-Auto 기록 파일의 "creator_mall" 만 본다 (Blog-Auto creator_stats — 에이블리·지그재그 크리에이터 화면과
+토스 쉐어링크 실적 화면을 하루 한 번 읽은 이번 달 숫자). 딜봇은 쇼핑몰에 접속하지 않는다.
+토스는 구매 상품 목록(상품명·수량·금액·예상 수수료)도 온다 → '토스쇼핑 구매 상품' 묶음 (주인 10/23).
 
 위쪽 숫자: 이번 달 방문 · 구매 · 예상 리워드 (읽은 쇼핑몰 합계). 아래 목록: 쇼핑몰마다 한 줄 —
 '방문 N · 구매 N · 지난달 N원' + 오른쪽 알약 '예상 N원', 로그인이 풀린 쇼핑몰은 '다시 로그인' (Blog-Auto deploy/affiliate-login.sh),
@@ -12,7 +13,17 @@ from __future__ import annotations
 from typing import Any
 
 from dealbot.dashboard import icons
-from dealbot.dashboard.model import OK, PARTIAL, UNAVAILABLE, CardView, FetchResult, ListEntry, ListGroup, Stat, fmt_num
+from dealbot.dashboard.model import (
+    OK,
+    PARTIAL,
+    UNAVAILABLE,
+    CardView,
+    FetchResult,
+    ListEntry,
+    ListGroup,
+    Stat,
+    fmt_num,
+)
 from dealbot.dashboard.sources.base import CardData, Source, register
 
 UNKNOWN_TEXT = "판단 불가"
@@ -92,7 +103,18 @@ class CreatorMallSource(Source):
                  sub=f"지난달 {_won(tot.get('last_month'))}" if tot.get("last_month") is not None else "정산 전 금액 포함"),
         ]
         note = f"쇼핑몰 화면을 읽은 시각 {read} · 하루 한 번" if read else "쇼핑몰 화면을 아직 읽지 않았어요 (하루 한 번 무작위 시각)"
-        groups = [ListGroup("쇼핑몰별", "", entries), ListGroup("연결", "", conn_rows)]
+        groups = [ListGroup("쇼핑몰별", "", entries)]
+        for m in part["malls"]:  # 구매 상품 (토스 — 주인 10/23 "무슨 물건을 샀는지"): 상품명 · 수량·금액 · 예상 수수료
+            if m["state"] == "ok" and m.get("items"):
+                rows = []
+                for it in m["items"]:
+                    qty = f"{fmt_num(it['qty'])}개" if it.get("qty") is not None else "-"
+                    if it.get("refunded"):
+                        qty += f" (환불 {fmt_num(it['refunded'])})"
+                    sub = " · ".join(x for x in (qty, _won(it.get("amount")), it.get("via") or "") if x)
+                    rows.append(ListEntry(it["name"], pill=f"수수료 {_won(it.get('reward'))}", hot=bool(it.get("reward")), sub=sub))
+                groups.append(ListGroup(f"{m['name']} 구매 상품 · 이번 달", "", rows))
+        groups.append(ListGroup("연결", "", conn_rows))
         return self.view(data, stats=stats, groups=groups, note=note, hints=hints,
                          spark=data.series("cm_expected"), spark_label="예상 리워드",
                          read_at=live.read_at if live is not None else None, detail=part)

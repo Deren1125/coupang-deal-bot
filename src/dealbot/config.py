@@ -701,8 +701,18 @@ class NaverAutoLinkConfig(BaseModel):
     no_link_autopost: bool = True
 
 
+class TossAutoLinkConfig(BaseModel):
+    """토스쇼핑 쉐어링크 자동 만들기 (주인 10/23 — 팔이 안 좋아 링크를 직접 만들기 힘듦, 토스 딜 전부 자동). 브라우저 일은 Blog-Auto 가
+    주인 쇼핑몰 프로필로 하고 (blogauto/tosslink.py), 딜봇은 받은편지함 {"toss_link"} 로 묻고 toss_results.jsonl 의 답을 읽는다.
+    끄면(false) 예전처럼 주인에게 링크 요청."""
+
+    enabled: bool = False
+    wait_minutes: float = 30  # Blog-Auto 의 답을 이만큼 기다리고, 없으면 예전처럼 주인에게 링크 요청
+
+
 class AutoLinkConfig(BaseModel):
     naver: NaverAutoLinkConfig = Field(default_factory=NaverAutoLinkConfig)
+    toss: TossAutoLinkConfig = Field(default_factory=TossAutoLinkConfig)
 
 
 class InfoSummarizerConfig(BaseModel):

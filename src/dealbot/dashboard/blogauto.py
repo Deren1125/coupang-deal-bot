@@ -968,11 +968,25 @@ CM_STATES = ("ok", "login", "failed", "pending", "none")
 CM_CONN = ("ok", "expired", "failed", "unknown")
 CM_NUMS = ("visits", "orders", "order_amount", "reward", "expected", "last_month")
 CM_MALLS_MAX, CM_MAX = 8, 10**10
+CM_ITEMS_MAX = 20  # 구매 상품 목록 (토스 — 주인 10/23 "토스쇼핑도 무슨 물건을 샀는지")
+
+
+def _cm_items(v: Any) -> list[dict[str, Any]] | None:
+    """[{name, qty, refunded, amount, reward, via}] — 이름 없는 줄은 빠지고 숫자는 0 이상 정수만. 목록이 아니면 None (토스 말고는 없음)."""
+    if not isinstance(v, list):
+        return None
+    out = []
+    for it in v[:CM_ITEMS_MAX]:
+        if not isinstance(it, dict) or not (name := _one_line(it.get("name"), 80)):
+            continue
+        out.append({"name": name, **{k: _count(it.get(k), top=CM_MAX) for k in ("qty", "refunded", "amount", "reward")},
+                    "via": _one_line(it.get("via"), 20) or ""})
+    return out
 
 
 def _creator_mall(v: Any) -> dict[str, Any] | None:
     """{read_at, month, malls: [{key, name, state, text, conn, checked_at, conn_since, visits?, orders?, order_amount?, reward?,
-    expected?, last_month?}],
+    expected?, last_month?, items (토스: 구매 상품 목록 · 그 밖 None)}],
     total: {visits, orders, expected, last_month}}. 칸이 없으면(예전 Blog-Auto) None. 이름이 없거나 상태가 이상한 줄은 빠지고,
     숫자는 0 이상 CM_MAX 이하 정수만 (아니면 None — 짐작하지 않음). 합계는 남은 줄로 다시 셈."""
     if not isinstance(v, dict) or not isinstance(v.get("malls"), list):
@@ -987,6 +1001,7 @@ def _creator_mall(v: Any) -> dict[str, Any] | None:
                                "checked_at": _one_line(m.get("checked_at"), 20), "conn_since": _one_line(m.get("conn_since"), 20)}
         for k in CM_NUMS:
             row[k] = _count(m.get(k), top=CM_MAX)
+        row["items"] = _cm_items(m.get("items"))
         malls.append(row)
 
     def total(k: str) -> int | None:

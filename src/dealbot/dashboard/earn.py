@@ -385,6 +385,6 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
                                                    "commission": m["commission"], "memo": m["memo"],
                                                    "text": f"{_md(m['day'])} · {m['shop']} · {m['product'] or '상품 이름 없음'} · {money(m['amount'])} (수익 {money(m['commission'])})"}
                                                   for m in rows]},
-        "note": "토스·무신사·29CM 은 ‘수익 직접 넣기’로 넣어 주세요 — 에이블리·지그재그의 이번 달 방문·구매·예상 리워드는 "
+        "note": "무신사·29CM 은 ‘수익 직접 넣기’로 넣어 주세요 — 에이블리·지그재그·토스쇼핑의 이번 달 방문·구매·예상 리워드(토스는 산 상품까지)는 "
                 "통계 탭 ‘쇼핑몰 크리에이터’ 카드에 하루 한 번 자동으로 보여요 (주인 10/23 — 직접 넣으면 두 번 세지 않게 주의)",
     }
