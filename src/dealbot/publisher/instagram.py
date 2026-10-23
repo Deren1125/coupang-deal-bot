@@ -47,6 +47,7 @@ REEL_TIMEOUT = "timeout"
 KV_TOKEN = "instagram_access_token"
 KV_TOKEN_EXPIRES = "instagram_token_expires_at"
 KV_USER_ID = "instagram_user_id"
+KV_TOKEN_SAVED_AT = KV_TOKEN + "_saved_at"
 KV_USERNAME = "instagram_username"
 
 CONTAINER_WAIT_SECONDS = 120.0
@@ -415,6 +416,7 @@ class InstagramPublisher:
     def save_token(self, token: InstagramToken, username: str | None = None) -> None:
         self.db.kv_set(KV_TOKEN, token.access_token)
         self.db.kv_set(KV_USER_ID, token.user_id)
+        self.db.kv_set(KV_TOKEN_SAVED_AT, to_iso(utcnow()))  # 이 뒤의 실패만 '최근 실패'로 (다시 연결한 뒤 '다시 연결'이 남지 않게)
         if token.expires_at:
             self.db.kv_set(KV_TOKEN_EXPIRES, to_iso(token.expires_at))
         if username:

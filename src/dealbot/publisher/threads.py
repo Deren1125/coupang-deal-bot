@@ -47,6 +47,7 @@ TEXT_LIMIT = 500
 KV_TOKEN = "threads_access_token"
 KV_TOKEN_EXPIRES = "threads_token_expires_at"
 KV_USER_ID = "threads_user_id"
+KV_TOKEN_SAVED_AT = KV_TOKEN + "_saved_at"
 KV_USERNAME = "threads_username"
 # 최근 글에 쓴 첫 줄·마무리 (오래된 것부터, JSON 목록). 같은 문구를 최근 10건쯤 안에 다시 안 쓰려고 고를 때 뺀다
 KV_RECENT_LINES = "threads_recent_lines"
@@ -463,6 +464,7 @@ class ThreadsPublisher:
     def save_token(self, token: ThreadsToken) -> None:
         self.db.kv_set(KV_TOKEN, token.access_token)
         self.db.kv_set(KV_USER_ID, token.user_id)
+        self.db.kv_set(KV_TOKEN_SAVED_AT, to_iso(utcnow()))  # 이 뒤의 실패만 '최근 실패'로 (다시 연결한 뒤 '다시 연결'이 남지 않게)
         if token.expires_at:
             self.db.kv_set(KV_TOKEN_EXPIRES, to_iso(token.expires_at))
 

@@ -1192,11 +1192,14 @@ class StatusReporter:
         if not (self.db.kv_get(KV_TOKEN) and self.db.kv_get(KV_USER_ID)):
             return row | {"state": "unlinked"}
         expires = from_iso(self.db.kv_get(KV_TOKEN_EXPIRES))
+        saved = from_iso(str(self.db.kv_get(KV_TOKEN + "_saved_at") or ""))
         last_fail = None
         for ev in self.db.recent_events(limit=30, level="WARNING"):
             if ev.get("kind") != "threads":
                 continue
             ts = from_iso(str(ev.get("ts") or ""))
+            if ts is not None and saved is not None and ts < saved:
+                break  # 다시 연결하기 전의 실패 — 지금 연결과 상관없음
             if ts is None or now - ts <= timedelta(hours=24):
                 when = fmt_local(ts, tz, "%m-%d %H:%M") if ts else ""
                 last_fail = f"{when} {truncate(str(ev.get('message') or ''), 160)}".strip()
@@ -1220,11 +1223,14 @@ class StatusReporter:
             return row | {"state": "unlinked"}
         tz = self.settings.app.timezone
         expires = from_iso(self.db.kv_get(ig.KV_TOKEN_EXPIRES))
+        saved = from_iso(str(self.db.kv_get(ig.KV_TOKEN_SAVED_AT) or ""))
         last_fail = None
         for ev in self.db.recent_events(limit=30, level="WARNING"):
             if ev.get("kind") != "instagram":
                 continue
             ts = from_iso(str(ev.get("ts") or ""))
+            if ts is not None and saved is not None and ts < saved:
+                break  # 다시 연결하기 전의 실패 — 지금 연결과 상관없음
             if ts is None or now - ts <= timedelta(hours=24):
                 when = fmt_local(ts, tz, "%m-%d %H:%M") if ts else ""
                 last_fail = f"{when} {truncate(str(ev.get('message') or ''), 160)}".strip()
