@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import time
@@ -117,7 +118,28 @@ def _kv_names(name: str) -> dict[str, str]:
     return {"token": m.KV_TOKEN, "expires": m.KV_TOKEN_EXPIRES, "saved": m.KV_TOKEN_SAVED_AT, "user": m.KV_USERNAME}
 
 
-def sns_connection(bot: Any, name: str, label: str, now: Any = None) -> str:
+def live_probe(name: str, token: str) -> str | None:
+    """메타에 '나 누구?'(me?fields=username)를 한 번 물어 토큰이 진짜 살아 있는지 (읽기만). 살아 있으면 None, 아니면 짧은 이유.
+    토큰은 요청에만 쓰고 결과·로그에 남기지 않는다. 테스트 중에는 묻지 않는다."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    import httpx
+
+    base = "https://graph.threads.net/v1.0" if name == "threads" else "https://graph.instagram.com"
+    try:
+        r = httpx.get(f"{base}/me", params={"fields": "username", "access_token": token}, timeout=8)
+    except httpx.HTTPError as e:
+        return f"메타에 못 물어봄 ({type(e).__name__})"
+    if r.status_code == 200:
+        return None
+    try:
+        msg = str((r.json().get("error") or {}).get("message") or "")
+    except ValueError:
+        msg = ""
+    return safe_text(f"메타가 거절 ({r.status_code}) {msg.replace(token, '***')}", 160)
+
+
+def sns_connection(bot: Any, name: str, label: str, now: Any = None, probe: Callable[[str, str], str | None] | None = None) -> str:
     """토큰이 있나 · 계정 · 만료일(남은 날) · 다시 연결한 때. 토큰 값은 읽지도 화면에 쓰지도 않는다 (있는지만)."""
     now = now or utcnow()
     tz = bot.settings.app.timezone
@@ -144,6 +166,11 @@ def sns_connection(bot: Any, name: str, label: str, now: Any = None) -> str:
         elif days <= 10:
             mark, fix = WARN, "곧 만료 — 다시 연결"
     bits.append(f"연결한 때 {fmt_local(saved, tz)}" if saved else "연결한 때 기록 없음")
+    if probe is not None:  # 저장만 보지 않고 메타에 직접 물어봄 (비밀번호를 바꾸면 토큰이 남아 있어도 끊김 — 주인 10/23)
+        why = probe(name, str(bot.db.kv_get(k["token"])))
+        if why:
+            return line(BAD, title, " · ".join([*bits, why]), "다시 연결 (연결 탭) 또는 토큰 넣기")
+        bits.append("메타 확인 ✓")
     return line(mark, title, " · ".join(bits), fix)
 
 
@@ -226,12 +253,12 @@ def memory_line(info: dict[str, int] | None = None) -> str:
     return line(WARN if avail < 300 or (st and (st - sf) * 2 > st) else OK, "메모리", what)
 
 
-def local_lines(bot: Any, *, with_memory: bool = False) -> list[str]:
+def local_lines(bot: Any, *, with_memory: bool = False, probe: Callable[[str, str], str | None] | None = live_probe) -> list[str]:
     """딜봇 쪽 점검 전체 — 한 칸이 터져도 줄 하나만 ⚠️ 로 바꾸고 계속."""
     from dealbot.monitoring.admin import CODE_SHA
 
     now = utcnow()
-    parts: list[Callable[[], list[str]]] = [lambda n=n, lb=lb: [sns_connection(bot, n, lb, now)] for n, lb in SNS]
+    parts: list[Callable[[], list[str]]] = [lambda n=n, lb=lb: [sns_connection(bot, n, lb, now, probe)] for n, lb in SNS]
     parts += [lambda: sns_events(bot, now), lambda: [service_line()], lambda: [journal_line()],
               lambda: [version_line(running=CODE_SHA)]]
     if with_memory:

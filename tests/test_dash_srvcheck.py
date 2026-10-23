@@ -266,3 +266,15 @@ async def test_button_is_in_the_connect_tab(bot: DealBot, settings: Settings, tm
     assert conn["check"]["args"] == {} and conn["check"]["confirm"] is False
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
     assert "row('서버 점검'" in js and "exec(c.check" in js and "server_check" in js
+
+
+def test_live_probe_turns_a_saved_but_dead_token_red(bot: DealBot) -> None:  # noqa: F811
+    from dealbot.publisher import instagram as ig
+
+    bot.db.kv_set(ig.KV_TOKEN, "SECRET-TOKEN")
+    bot.db.kv_set(ig.KV_USER_ID, "1")
+    bot.db.kv_set(ig.KV_USERNAME, "oneul_hot_deal")
+    dead = srvcheck.sns_connection(bot, "instagram", "인스타그램", probe=lambda n, t: "메타가 거절 (400) Error validating access token")
+    assert dead.startswith("❌") and "메타가 거절" in dead and "SECRET-TOKEN" not in dead
+    ok = srvcheck.sns_connection(bot, "instagram", "인스타그램", probe=lambda n, t: None)
+    assert "메타 확인 ✓" in ok
