@@ -191,7 +191,8 @@ async def test_refuses_urls_robots_disallows(settings: Settings, db: Database) -
 
 def test_config_registers_clien_collector(settings: Settings) -> None:
     cfg = next(c for c in settings.collectors if c.name == "clien_jirum")
-    assert cfg.type == "clien" and cfg.enabled and cfg.interval_minutes == 15 and cfg.label == "클리앙 알뜰구매"
+    assert cfg.type == "clien" and not cfg.enabled and cfg.interval_minutes == 15 and cfg.label == "클리앙 알뜰구매"
+    # 꺼 둠: 클리앙이 서버 IP 를 막음 (주인 10/23) — 풀리면 enabled 와 함께 이 줄도 되돌린다
     assert cfg.options["shops"] == [] and cfg.options["request_delay_seconds"] == 3 and cfg.options["max_detail_fetch_per_run"] == 8
     rule = settings.deal.per_source["clien_jirum"]
     assert rule.community_min_recommend is None and rule.coupon_min_recommend is None and rule.discount_alone is None  # 전체 판정 기준 그대로

@@ -183,7 +183,9 @@ collectors:
   - name: clien_jirum
     label: 클리앙 알뜰구매
     type: clien
-    enabled: true
+    # 꺼 둠 (주인 10/23): 클리앙이 서버 IP(Lightsail 52.79.136.64)를 막아 /info/notConnection.html 로 302 — 한 번도 못 읽음.
+    # 우회(프록시 등)는 하지 않는다. 차단이 풀리면(admin@clien.net 문의) true 로.
+    enabled: false
     interval_minutes: 15
     options:
       shops: []                  # 비우면 등록된 모든 쇼핑몰
