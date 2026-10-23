@@ -39,6 +39,47 @@ ALERT_REASONS = {
 # 다시 켜는 법 (Blog-Auto 서버에서). 안 하면 다음 날 저절로 다시 시도
 RESUME_HINT = "확인 뒤 python -m blogauto shopconnect resume 하면 바로 다시 해요"
 
+# 토스쇼핑 쉐어링크 (주인 10/23): 같은 방식 — 딜봇 → {"toss_link": {...}} · Blog-Auto → toss_results.jsonl (blogauto/tosslink.py)
+TOSS_RESULTS_FILE = "toss_results.jsonl"
+KV_TOSS_POS = "autolink_toss_results_pos"
+KV_TOSS_STOP = "autolink_toss_stop_until"
+TOSS_SHORT = re.compile(r"^https://(?:toss\.shopping|toss\.im)/_m/[A-Za-z0-9_-]+$")
+_TOSS_PATH = re.compile(r"^/(t|i)/(\d+)/?$")
+TOSS_ALERT_REASONS = {
+    "login": "토스 쉐어링크 로그인이 풀렸어요 (Blog-Auto 서버에서 bash deploy/affiliate-login.sh 토스)",
+    "blocked": "토스가 쉐어링크 요청을 잠시 막아 오늘은 멈췄어요",
+}
+TOSS_RESUME_HINT = "로그인한 뒤 python -m blogauto tosslink resume 하면 바로 다시 해요"
+
+
+def toss_key(url: str | None) -> tuple[str, str] | None:
+    """토스 상품 주소 → ('t', tacaId) · ('i', tacaItemId). toss.shopping/t/·/i/ 주소만 (남의 쉐어링크 _m·앱 화면 주소는 None
+    — Blog-Auto 가 남의 링크를 열지 않으므로 예전처럼 주인에게)."""
+    u = urlparse(str(url or "").strip())
+    if u.scheme != "https" or (u.hostname or "").lower() not in ("toss.shopping", "www.toss.shopping"):
+        return None
+    m = _TOSS_PATH.match(u.path or "")
+    return (m.group(1), m.group(2)) if m else None
+
+
+def verify_toss_link(link: str, deal_url: str, row: dict[str, Any]) -> str | None:
+    """Blog-Auto 가 만든 쉐어링크가 붙여도 되는 모양인지. 맞으면 None, 아니면 이유 (링크는 열지 않는다 — 내 링크를 누르지 않게).
+    상품은 Blog-Auto 가 발급 응답의 originUrl(toss.shopping/t/{tacaId})로 이미 맞춰 봤고, 여기서는 그 tacaId 가 딜 주소와 같은지만."""
+    link = (link or "").strip()
+    if not TOSS_SHORT.match(link):
+        return "not_toss_short"
+    if link == (deal_url or "").strip():
+        return "same_as_deal_url"
+    key = toss_key(deal_url)
+    if key is None:
+        return "deal_url"
+    kind, n = key
+    if kind == "t" and str(row.get("taca_id") or "") != n:
+        return "mismatch"
+    if kind == "i" and str(row.get("item_id") or "") != n:
+        return "mismatch"
+    return None
+
 
 def job_queries(name: str) -> list[str]:
     """쇼핑커넥트 '상품 찾기' 검색어: 쇼핑몰 꼬리표·괄호(가격·배송)를 걷은 상품명을 낱말 단위로 40자 안에서, 그다음 앞 네 낱말."""
@@ -92,12 +133,13 @@ async def verify_link(http: httpx.AsyncClient, link: str, product_no: str, *, de
 class ResultReader:
     """Blog-Auto 가 쓰는 connect_results.jsonl 을 이어 읽는다. 읽은 자리는 반영한 뒤에 저장 (도중에 꺼져도 다시 읽어 반영)."""
 
-    def __init__(self, path: Path, db: Any) -> None:
+    def __init__(self, path: Path, db: Any, pos_key: str = KV_POS) -> None:
         self.path = path
         self.db = db
+        self.pos_key = pos_key
 
     def read(self, max_bytes: int = 256 * 1024) -> tuple[list[dict[str, Any]], int]:
-        pos = int(self.db.kv_get(KV_POS) or 0)
+        pos = int(self.db.kv_get(self.pos_key) or 0)
         try:
             size = self.path.stat().st_size
         except OSError:
@@ -123,4 +165,4 @@ class ResultReader:
         return rows, pos + end
 
     def commit(self, pos: int) -> None:
-        self.db.kv_set(KV_POS, str(pos))
+        self.db.kv_set(self.pos_key, str(pos))
