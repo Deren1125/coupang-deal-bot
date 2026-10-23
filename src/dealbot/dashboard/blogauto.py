@@ -996,9 +996,45 @@ def _cm_windows(v: Any) -> list[dict[str, Any]] | None:
             for label in CM_WINDOWS]
 
 
+CM_RULES_MAX = 8
+
+
+def _cm_rules(v: Any) -> list[str]:
+    """보상 기준 글 (주인 10/23 — "보상이 얼마인지, 기준이 어떻게 되는지"): 한 줄 글만, 최대 CM_RULES_MAX 줄."""
+    if not isinstance(v, list):
+        return []
+    return [t for t in (_one_line(x, 200) for x in v[:CM_RULES_MAX]) if t]
+
+
+def _cm_challenge(v: Any) -> dict[str, Any] | None:
+    """에이블리 방문 수 챌린지 {status, round, visits, started, ends, content, earned, next {visits, reward}, tiers [{visits, reward}],
+    paid, result, history [{round, visits, reward, ended, result}]} — 숫자는 _count, 이상한 단계·지난 판 줄은 빠짐. 없으면 None."""
+    if not isinstance(v, dict):
+        return None
+
+    def tier(t: Any) -> dict[str, int] | None:
+        if not isinstance(t, dict):
+            return None
+        a, b = _count(t.get("visits"), top=CM_MAX), _count(t.get("reward"), top=CM_MAX)
+        return {"visits": a, "reward": b} if a is not None and b is not None else None
+
+    hist = []
+    for h in (v.get("history") if isinstance(v.get("history"), list) else [])[:10]:
+        if isinstance(h, dict):
+            hist.append({"round": _count(h.get("round"), top=CM_MAX), "visits": _count(h.get("visits"), top=CM_MAX),
+                         "reward": _count(h.get("reward"), top=CM_MAX), "ended": _one_line(h.get("ended"), 10) or "",
+                         "result": _one_line(h.get("result"), 60) or ""})
+    return {"status": _one_line(v.get("status"), 30) or "", "round": _count(v.get("round"), top=CM_MAX),
+            "visits": _count(v.get("visits"), top=CM_MAX), "started": _one_line(v.get("started"), 10),
+            "ends": _one_line(v.get("ends"), 10), "content": v.get("content") is True,
+            "earned": _count(v.get("earned"), top=CM_MAX), "next": tier(v.get("next")),
+            "tiers": [t for t in map(tier, v.get("tiers") if isinstance(v.get("tiers"), list) else []) if t][:12],
+            "paid": _count(v.get("paid"), top=CM_MAX), "result": _one_line(v.get("result"), 60) or "", "history": hist}
+
+
 def _creator_mall(v: Any) -> dict[str, Any] | None:
     """{read_at, month, malls: [{key, name, state, text, conn, checked_at, conn_since, visits?, orders?, order_amount?, reward?,
-    expected?, last_month?, items (토스: 구매 상품 목록 · 그 밖 None)}],
+    expected?, last_month?, items (토스: 구매 상품 목록 · 그 밖 None), windows, rules (보상 기준 글), challenge (에이블리 방문 수 챌린지)}],
     total: {visits, orders, expected, last_month}}. 칸이 없으면(예전 Blog-Auto) None. 이름이 없거나 상태가 이상한 줄은 빠지고,
     숫자는 0 이상 CM_MAX 이하 정수만 (아니면 None — 짐작하지 않음). 합계는 남은 줄로 다시 셈."""
     if not isinstance(v, dict) or not isinstance(v.get("malls"), list):
@@ -1015,6 +1051,8 @@ def _creator_mall(v: Any) -> dict[str, Any] | None:
             row[k] = _count(m.get(k), top=CM_MAX)
         row["items"] = _cm_items(m.get("items"))
         row["windows"] = _cm_windows(m.get("windows"))
+        row["rules"] = _cm_rules(m.get("rules"))
+        row["challenge"] = _cm_challenge(m.get("challenge"))
         malls.append(row)
 
     def total(k: str) -> int | None:

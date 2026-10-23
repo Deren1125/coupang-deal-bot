@@ -317,7 +317,43 @@ def _cm_source(m: dict[str, Any], read_at: str | None) -> dict[str, Any]:
         state = "wait"
         bits.append(m.get("text") or "")
     return {"key": f"cm_{m['key']}", "label": f"{m['name']} (자동)", "state": state, "note": " · ".join(b for b in bits if b),
-            "cells": _cm_cells(m)}
+            "cells": _cm_cells(m), "challenge": _challenge(m.get("challenge"))}
+
+
+def _md_ok(day: str | None) -> str:
+    return _md(day) if day and len(day) == 10 else "?"
+
+
+def _challenge(c: dict[str, Any] | None) -> dict[str, Any] | None:
+    """에이블리 방문 수 챌린지 (주인 10/23 — 조회수 기준 보상): 줄 글 · 경고 · 단계표 · 지난 판."""
+    if not c:
+        return None
+    visits = c.get("visits")
+    running = c.get("status") == "IN_PROGRESS"
+    head = f"방문 수 챌린지{' ' + str(c['round']) + '회차' if c.get('round') else ''} · {visits if visits is not None else '?'}명"
+    if c.get("next"):
+        head += f" · {c['next']['visits']:,}명 되면 {money(c['next']['reward'])}"
+    elif c.get("tiers"):
+        head += " · 마지막 단계까지 닿았어요"
+    if running and c.get("ends"):
+        head += f" · {_md_ok(c.get('ends'))}까지"
+    elif not running:
+        head = "방문 수 챌린지 · 지금 진행 중인 판이 없어요"
+    warn = ""
+    if running and not c.get("content"):
+        warn = "콘텐츠 링크를 아직 안 냈어요 — 내지 않으면 몇 명이 와도 0원 (에이블리 크리에이터 > 방문 수 챌린지 > 콘텐츠 제출하기)"
+    earned = f"지금 닿은 단계 {money(c['earned'])} (콘텐츠 검수 뒤 확정)" if c.get("earned") else ""
+    tiers = [{"visits": f"{t['visits']:,}명", "reward": money(t["reward"]), "hit": visits is not None and visits >= t["visits"]}
+             for t in c.get("tiers") or []]
+    hist = [f"{h['round'] or '?'}회차 (~{_md_ok(h.get('ended'))}) · {h['visits'] if h.get('visits') is not None else '?'}명 · "
+            f"{money(h['reward'] or 0)}{' · ' + h['result'] if h.get('result') else ''}" for h in c.get("history") or []]
+    return {"text": head, "warn": warn, "earned": earned, "tiers": tiers, "history": hist}
+
+
+def _rewards(cm_malls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """'보상 기준' 시트 (주인 10/23 — "보상 확인할 수 있는 탭"): 쇼핑몰마다 기준 글 + 방문 수 챌린지."""
+    return [{"name": m["name"], "rules": m.get("rules") or [], "challenge": _challenge(m.get("challenge"))}
+            for m in cm_malls if m.get("rules") or m.get("challenge")]
 
 
 def _cm_nums(m: dict[str, Any], label: str) -> tuple[int, int, int]:
@@ -429,6 +465,8 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
                      "cells": per["manual"]}],
         "coupang": {"rows": crow, "subs": sub_rows, "sub_note": sub_note},
         "recent": recent,
+        "rewards": _rewards(cm_malls),
+        "rewards_note": "방문(조회) 수로 돈을 주는 곳은 에이블리 방문 수 챌린지 하나예요 — 나머지는 내 링크로 산 것에만 줘요",
         "manual": {"shops": list(SHOPS), "rows": [{"id": m["id"], "shop": m["shop"], "day": m["day"], "product": m["product"], "amount": m["amount"],
                                                    "commission": m["commission"], "memo": m["memo"],
                                                    "text": f"{_md(m['day'])} · {m['shop']} · {m['product'] or '상품 이름 없음'} · {money(m['amount'])} (수익 {money(m['commission'])})"}

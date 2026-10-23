@@ -15,7 +15,11 @@ const CSS = '.ew{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:
   '.rc .am small{display:block;color:var(--sub);font-size:12px}.rc.cx .nm{text-decoration:line-through;color:var(--muted)}' +
   '.er details{margin:6px 0 0}.er summary{cursor:pointer;color:var(--sub);font-size:13px}.er table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0}' +
   '.er th,.er td{text-align:right;padding:3px 0;font-weight:400}.er th:first-child,.er td:first-child{text-align:left}.er th{color:var(--muted)}' +
-  '.mr{display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}.mr span{flex:1;min-width:0}';
+  '.mr{display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}.mr span{flex:1;min-width:0}' +
+  '.ch{margin:6px 0 0;padding:8px 0 0;border-top:1px dashed var(--line);font-size:13px}.ch b{font-weight:600}.ch .wn{color:var(--red);display:block;margin-top:2px}' +
+  '.ch .ok{color:var(--gr);display:block}.rg h3{font-size:15px;margin:14px 0 4px}.rg ul{margin:0;padding-left:18px;font-size:14px}.rg li{margin:3px 0}' +
+  '.rg table{width:100%;border-collapse:collapse;font-size:14px;margin:6px 0}.rg td{padding:3px 0}.rg td:last-child{text-align:right}.rg tr.hit td{color:var(--gr);font-weight:600}' +
+  '.rg .hs{font-size:13px;color:var(--muted);margin:2px 0}';
 const css = () => {
   if (D.getElementById('er-css')) return;
   const s = D.createElement('style'); s.id = 'er-css'; s.textContent = CSS; D.head.append(s);
@@ -42,15 +46,35 @@ function form(e, h, m) {
   }));
 }
 
+const chal = (h, c) => c ? h.el('div', {class: 'ch'}, h.el('b', {}, c.text), c.earned ? h.el('span', {class: 'ok'}, c.earned) : null,
+  c.warn ? h.el('span', {class: 'wn'}, c.warn) : null) : null;
+
+/* 보상 기준 시트 (10/23) */
+function rewards(e, h) {
+  const {el} = h;
+  const box = h.sheet('쇼핑몰 보상 기준', el('div', {class: 'rg'}));
+  box.append(el('p', {class: 'note'}, e.rewards_note));
+  for (const r of e.rewards) {
+    box.append(el('h3', {}, r.name), el('ul', {}, r.rules.map(t => el('li', {}, t))));
+    const c = r.challenge;
+    if (!c) continue;
+    box.append(chal(h, c));
+    if (c.tiers.length) box.append(el('table', {}, el('tr', {}, el('td', {}, '7일 방문'), el('td', {}, '받는 돈')),
+      c.tiers.map(t => el('tr', {class: t.hit ? 'hit' : ''}, el('td', {}, t.visits), el('td', {}, t.reward)))));
+    if (c.history.length) box.append(el('p', {class: 'hs'}, '지난 판'), ...c.history.map(t => el('p', {class: 'hs'}, t)));
+  }
+}
+
 function view(e, h) {
   css();
   const {el, btn} = h;
-  const out = [el('div', {class: 'top'}, el('h2', {}, e.title), btn('lnk', '수익 직접 넣기', () => form(e, h, null)))];
+  const out = [el('div', {class: 'top'}, el('h2', {}, e.title), (e.rewards || []).length ? btn('lnk', '보상 기준', () => rewards(e, h)) : null,
+    btn('lnk', '수익 직접 넣기', () => form(e, h, null)))];
   out.push(el('div', {class: 'ew'}, e.totals.map(t => el('div', {class: 'ec'}, el('span', {class: 'el'}, t.label), el('b', {}, t.commission),
     el('span', {class: 'es'}, `주문 ${t.orders} · ${t.amount}`)))));
   for (const s of e.sources) {
     out.push(el('article', {class: 'itm es2'}, el('h3', {}, s.label), el('p', {class: 'note', style: 'margin:0 0 6px'}, s.note),
-      s.state === 'ok' ? s.cells.map(c => row(h, c.label, `수익 ${c.commission} · ${c.orders}`)) : null));
+      s.state === 'ok' ? s.cells.map(c => row(h, c.label, `수익 ${c.commission} · ${c.orders}`)) : null, chal(h, s.challenge)));
     if (s.key === 'coupang' && s.state === 'ok') {
       const c = e.coupang;
       out.push(el('details', {class: 'er'}, el('summary', {}, '쿠팡 자세히 (클릭 · 주문 · 주문금액 · 서브아이디)'),

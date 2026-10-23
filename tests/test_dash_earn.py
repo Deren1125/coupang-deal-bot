@@ -387,3 +387,36 @@ def test_creator_malls_are_auto_rows_in_the_same_layout(db: Database) -> None:
     assert won(t["30일"]["commission"]) - won(p["30일"]["commission"]) == 600 + 2703
     assert any(r["src"] == "토스쇼핑" and r["name"].startswith("교동 육개장") for r in e["recent"])  # 토스가 알려 준 산 상품
     assert e["manual"]["shops"] == ["무신사", "29CM", "기타"]
+
+
+def test_reward_rules_and_ably_visit_challenge(db: Database) -> None:
+    """보상 기준 시트 · 에이블리 방문 수 챌린지 (주인 10/23 — "조회수 기준으로 돈 주는 것 … 보상 확인할 수 있는 탭")."""
+    from dealbot.dashboard.blogauto import _creator_mall
+
+    cm = _creator_mall(json.loads((Path(__file__).parent / "fixtures" / "dash_contract" / "export_v2.json").read_text(encoding="utf-8"))["creator_mall"])
+    e = earn.build(earn.EarnStore(db), TZ, NOW, None, coupang_on=True, sub_id_set=True, cm_field=cm)
+    rw = {r["name"]: r for r in e["rewards"]}
+    assert list(rw) == ["에이블리", "지그재그", "토스쇼핑"]
+    assert any("8%" in t for t in rw["토스쇼핑"]["rules"]) and rw["토스쇼핑"]["challenge"] is None
+    c = rw["에이블리"]["challenge"]
+    assert c["text"] == "방문 수 챌린지 2회차 · 12명 · 30명 되면 3,000원 · 10/28까지"
+    assert "0원" in c["warn"] and c["earned"] == ""  # 콘텐츠 링크를 안 냈으면 경고
+    assert c["tiers"][0] == {"visits": "30명", "reward": "3,000원", "hit": False} and len(c["tiers"]) == 6
+    assert c["history"] == ["1회차 (~8/1) · 0명 · 0원 · 콘텐츠를 제출하지 않아 0원"]
+    src = {s["key"]: s for s in e["sources"]}
+    assert src["cm_ably"]["challenge"] == c and src["cm_toss"]["challenge"] is None
+    # 단계를 넘고 콘텐츠를 냈으면 경고 대신 닿은 금액
+    raw = json.loads(json.dumps(cm))
+    raw["malls"][0]["challenge"].update(visits=60, earned=10000, next={"visits": 100, "reward": 30000}, content=True)
+    c2 = earn._challenge(_creator_mall(raw)["malls"][0]["challenge"])
+    assert c2["warn"] == "" and c2["earned"].startswith("지금 닿은 단계 10,000원") and [t["hit"] for t in c2["tiers"][:3]] == [True, True, False]
+
+
+def test_creator_mall_parser_drops_bad_challenge_bits() -> None:
+    from dealbot.dashboard.blogauto import _cm_challenge, _cm_rules
+
+    assert _cm_rules("x") == [] and _cm_rules(["a", 3, "", "b"]) == ["a", "b"]
+    c = _cm_challenge({"visits": -1, "tiers": [{"visits": 30, "reward": 3000}, {"visits": "x"}], "next": {"visits": 30}, "content": "yes",
+                       "history": ["x", {"round": 1, "ended": "2026-08-01"}]})
+    assert c["visits"] is None and c["tiers"] == [{"visits": 30, "reward": 3000}] and c["next"] is None and c["content"] is False
+    assert len(c["history"]) == 1 and _cm_challenge(None) is None
