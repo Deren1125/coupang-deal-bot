@@ -31,11 +31,12 @@ def write(tmp_path: Path, part: Any, *, written_at: str = "2026-10-14T18:00:00+0
 def test_fixture_parses_and_bad_rows_are_dropped() -> None:
     e = parse_export(fixture(), "Asia/Seoul")
     cm = e.v2["creator_mall"]
-    assert [m["key"] for m in cm["malls"]] == ["ably", "zigzag", "musinsa", "29cm"]
+    assert [m["key"] for m in cm["malls"]] == ["ably", "zigzag"]
+    assert [(m["conn"], m["checked_at"]) for m in cm["malls"]] == [("ok", "2026-10-23 18:40"), ("expired", "2026-10-23 18:41")]
     assert cm["total"] == {"visits": 17, "orders": 1, "expected": 1200, "last_month": 10000}
     bad = _creator_mall({"malls": [{"name": "에이블리", "state": "ok", "visits": -3, "orders": 1.5, "expected": "999"},
                                    {"name": "", "state": "ok"}, {"name": "x", "state": "hacked"}, "junk"]})
-    assert bad is not None and len(bad["malls"]) == 1
+    assert bad is not None and len(bad["malls"]) == 1 and bad["malls"][0]["conn"] == "unknown"
     assert bad["malls"][0]["visits"] is None and bad["malls"][0]["orders"] is None and bad["malls"][0]["expected"] is None
     assert _creator_mall(None) is None and _creator_mall({"malls": "x"}) is None
 
@@ -46,8 +47,10 @@ def test_card_shows_totals_rows_and_login_hint(db: Database, tmp_path: Path) -> 
     v = next(x for x in dash.views() if x.key == "creator_mall")
     assert [(s.label, s.value) for s in v.stats] == [("방문 · 이번 달", 17), ("구매 · 이번 달", 1), ("예상 리워드 · 이번 달", 1200)]
     rows = v.groups[0].entries
-    assert [(r.title, r.pill) for r in rows] == [("에이블리", "예상 1,200원"), ("지그재그", "다시 로그인"),
-                                                ("무신사", "승인 대기"), ("29CM", "승인 대기")]
+    assert [(r.title, r.pill) for r in rows] == [("에이블리", "예상 1,200원"), ("지그재그", "다시 로그인")]
+    conn = v.groups[1].entries  # 쇼핑몰별 연결 (주인 10/23)
+    assert [(r.title, r.pill, r.hot) for r in conn] == [("에이블리", "연결됨", True), ("지그재그", "로그인 필요", False)]
+    assert conn[0].sub == "마지막 확인 2026-10-23 18:40" and conn[1].sub == "마지막 확인 2026-10-23 18:41 · 2026-10-23 14:05부터"
     assert "방문 12 · 구매 1 · 지난달 10,000원" == rows[0].sub
     assert "지난번 예상 0원" in rows[1].sub
     card = card_html(dash.page_html(), "creator_mall")

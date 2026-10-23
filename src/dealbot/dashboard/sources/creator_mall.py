@@ -4,7 +4,7 @@
 
 위쪽 숫자: 이번 달 방문 · 구매 · 예상 리워드 (읽은 쇼핑몰 합계). 아래 목록: 쇼핑몰마다 한 줄 —
 '방문 N · 구매 N · 지난달 N원' + 오른쪽 알약 '예상 N원', 로그인이 풀린 쇼핑몰은 '다시 로그인' (Blog-Auto deploy/affiliate-login.sh),
-무신사·29CM 은 '큐레이터 승인 대기'. 예상 리워드는 정산 금액이 아니다 (아직 확정 안 된 것까지).
+예상 리워드는 정산 금액이 아니다 (아직 확정 안 된 것까지).
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from dealbot.dashboard.model import OK, PARTIAL, UNAVAILABLE, CardView, FetchRes
 from dealbot.dashboard.sources.base import CardData, Source, register
 
 UNKNOWN_TEXT = "판단 불가"
+CONN_TEXT = {"ok": "연결됨", "expired": "로그인 필요", "failed": "확인 실패", "unknown": "확인 전"}
 STATE_TEXT = {"login": "다시 로그인", "failed": "읽기 실패", "pending": "승인 대기", "none": "아직 안 읽음"}
 NO_PART = "no_creator_mall"
 
@@ -59,6 +60,14 @@ class CreatorMallSource(Source):
                      Stat("예상 리워드 · 이번 달", None, money=True, missing=UNKNOWN_TEXT)]
             return self.view(data, stats=stats, note=note, read_at=live.read_at if live is not None else None)
         tot = part["total"]
+        conn_rows = []  # 쇼핑몰별 연결 (주인 10/23 — "실시간 쇼핑몰별 연결 내역"): 4시간쯤마다 확인한 로그인 상태
+        for m in part["malls"]:
+            if m["state"] == "pending":
+                continue
+            since = f" · {m['conn_since']}부터" if m.get("conn_since") and m.get("conn") != "ok" else ""
+            conn_rows.append(ListEntry(m["name"], pill=CONN_TEXT.get(m.get("conn") or "unknown", "확인 전"),
+                                       hot=m.get("conn") == "ok",
+                                       sub=(f"마지막 확인 {m['checked_at']}" if m.get("checked_at") else "아직 확인 전") + since))
         entries = []
         for m in part["malls"]:
             if m["state"] == "ok":
@@ -73,7 +82,7 @@ class CreatorMallSource(Source):
                 if m["state"] == "login" and m.get("expected") is not None:  # 로그인이 풀려도 지난번 숫자는 남아 있다
                     sub = (sub + f" · 지난번 예상 {_won(m['expected'])}").strip(" ·")
                 entries.append(ListEntry(m["name"], pill=STATE_TEXT.get(m["state"], m["state"]), sub=sub))
-        logins = [m["name"] for m in part["malls"] if m["state"] == "login"]
+        logins = [m["name"] for m in part["malls"] if m["state"] == "login" or m.get("conn") == "expired"]
         hints = [f"{', '.join(logins)} 로그인이 풀렸어요 — 원격 로그인 화면(Blog-Auto deploy/affiliate-login.sh)으로 다시 로그인해 주세요"] if logins else []
         read = part.get("read_at")
         stats = [
@@ -83,6 +92,7 @@ class CreatorMallSource(Source):
                  sub=f"지난달 {_won(tot.get('last_month'))}" if tot.get("last_month") is not None else "정산 전 금액 포함"),
         ]
         note = f"쇼핑몰 화면을 읽은 시각 {read} · 하루 한 번" if read else "쇼핑몰 화면을 아직 읽지 않았어요 (하루 한 번 무작위 시각)"
-        return self.view(data, stats=stats, groups=[ListGroup("쇼핑몰별", "", entries)], note=note, hints=hints,
+        groups = [ListGroup("쇼핑몰별", "", entries), ListGroup("연결", "", conn_rows)]
+        return self.view(data, stats=stats, groups=groups, note=note, hints=hints,
                          spark=data.series("cm_expected"), spark_label="예상 리워드",
                          read_at=live.read_at if live is not None else None, detail=part)

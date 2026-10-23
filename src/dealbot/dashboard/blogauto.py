@@ -965,12 +965,14 @@ def _devlog(v: Any) -> dict[str, Any] | None:
 
 # 쇼핑몰 크리에이터 통계 (주인 10/23 — Blog-Auto creator_stats.export): 쇼핑몰별 이번 달 방문·구매·예상 리워드와 합계
 CM_STATES = ("ok", "login", "failed", "pending", "none")
+CM_CONN = ("ok", "expired", "failed", "unknown")
 CM_NUMS = ("visits", "orders", "order_amount", "reward", "expected", "last_month")
 CM_MALLS_MAX, CM_MAX = 8, 10**10
 
 
 def _creator_mall(v: Any) -> dict[str, Any] | None:
-    """{read_at, month, malls: [{key, name, state, text, visits?, orders?, order_amount?, reward?, expected?, last_month?}],
+    """{read_at, month, malls: [{key, name, state, text, conn, checked_at, conn_since, visits?, orders?, order_amount?, reward?,
+    expected?, last_month?}],
     total: {visits, orders, expected, last_month}}. 칸이 없으면(예전 Blog-Auto) None. 이름이 없거나 상태가 이상한 줄은 빠지고,
     숫자는 0 이상 CM_MAX 이하 정수만 (아니면 None — 짐작하지 않음). 합계는 남은 줄로 다시 셈."""
     if not isinstance(v, dict) or not isinstance(v.get("malls"), list):
@@ -980,7 +982,9 @@ def _creator_mall(v: Any) -> dict[str, Any] | None:
         if not isinstance(m, dict) or not (name := _one_line(m.get("name"), 20)) or m.get("state") not in CM_STATES:
             continue
         row: dict[str, Any] = {"key": _one_line(m.get("key"), 20) or name, "name": name, "state": m["state"],
-                               "text": _one_line(m.get("text"), 80) or ""}
+                               "text": _one_line(m.get("text"), 80) or "",
+                               "conn": m.get("conn") if m.get("conn") in CM_CONN else "unknown",
+                               "checked_at": _one_line(m.get("checked_at"), 20), "conn_since": _one_line(m.get("conn_since"), 20)}
         for k in CM_NUMS:
             row[k] = _count(m.get(k), top=CM_MAX)
         malls.append(row)
