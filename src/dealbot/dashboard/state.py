@@ -940,6 +940,12 @@ class StateBuilder:
                 state, text = ("expiring" if state == "ok" else state), text + " · 최근 실패 있음"
             out[name] = {"state": state, "text": text, "fix": "connect" if state in ("broken", "expiring") else None,
                          "connect_url": f"/dashboard/connect/{name}"}
+            if state == "ok":  # 연결이 멀쩡하면 남아 있던 '연결 끊김'·'발행 실패' 할 일은 닫는다 (다시 연결한 뒤에도 남던 것)
+                cmd = "threadsauth" if name == "threads" else "instaauth"
+                try:
+                    bot.notifier.resolve(f"sns:{cmd}", f"sns_fail:{cmd}:")
+                except Exception:  # noqa: BLE001
+                    pass
         tg = None
         try:
             got = bot.db.metric_latest("telegram", "subscribers")
