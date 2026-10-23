@@ -852,7 +852,7 @@ const edLoad = lazy('meta[name=sb-edit]', 'edit', 'SBEdit');
 const ptLoad = lazy('meta[name=sb-product]', 'product', 'SBProduct');
 function vPT() {
   const b = el('div', {});
-  ptLoad().then(P => b.replaceChildren(...P.view(S.ptrial, {el, btn, ext, exec, toast, render})), () => toast(MSG.net));
+  ptLoad().then(P => b.replaceChildren(...P.view(S.ptrial, {el, btn, ext, exec, toast, render, sheet})), () => toast(MSG.net));
   return [el('div', {class: 'top'}, el('h2', {}, '제품 테스트'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')), b];
 }
 // 일정 화면 (10/21): sched.js 는 처음 열 때만
@@ -873,7 +873,7 @@ const edBatch = it => edGo(it, (E, h) => E.batch(h));
 function vTrial() {
   const box = el('div');
   if (!S.photo_trial) return [el('p', {class: 'note'}, '사진 테스트 글이 없어요')];
-  ptLoad().then(P => box.replaceChildren(...P.photo(S.photo_trial, {el, btn, exec, toast, render,
+  ptLoad().then(P => box.replaceChildren(...P.photo(S.photo_trial, {el, btn, exec, toast, render, sheet,
     edPhoto: (p, s) => edGo({blog: 'issue', iid: p.iid, detail: {slots: p.edit}}, (E2, h) => E2.photo(h, s, () => {}))})), () => toast(MSG.net));
   return [el('h2', {}, '사진 테스트'), box];
 }

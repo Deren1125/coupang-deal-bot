@@ -702,7 +702,11 @@
       }
      }
     ],
-    "feedback_done": 2
+    "feedback_done": 2,
+    "read": {
+     "url": "https://blog.naver.com/derenpick/224000000041",
+     "text": "원빈이 공항에 나타났어요.\n\n📷 사진 1\n\n베이지 트렌치코트를 입었어요."
+    }
    }
   ],
   "rules": [
@@ -783,7 +787,11 @@
       "shop": "떨이코트",
       "why": "평점 3.8 · 후기 42개 — 기준 미달"
      }
-    ]
+    ],
+    "read": {
+     "url": "https://blog.naver.com/derenpick/224000000041",
+     "text": "원빈이 공항에 나타났어요.\n\n📷 사진 1\n\n베이지 트렌치코트를 입었어요."
+    }
    }
   ],
   "learned": [

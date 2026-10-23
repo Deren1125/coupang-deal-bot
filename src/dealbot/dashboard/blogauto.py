@@ -814,6 +814,17 @@ PT_ITEM_ID = re.compile(r"^pt-[0-9a-f]{8}$")
 PT_POSTS_MAX, PT_ITEMS_MAX, PT_PIECES_MAX, PT_LEARNED_MAX = 12, 8, 6, 12
 
 
+READ_TEXT_MAX = 6000
+
+
+def _read(v: Any) -> dict[str, str] | None:
+    """테스트 글 '글 보기' (주인 10/23 — 어느 글인지 보게): {url: 발행 주소(https 만, 없으면 ''), text: 본문 여러 줄}. 둘 다 없으면 None."""
+    if not isinstance(v, dict):
+        return None
+    out = {"url": https_url(v.get("url")) or "", "text": _th_text(v.get("text"), READ_TEXT_MAX)}
+    return out if out["url"] or out["text"] else None
+
+
 def _product_trial(v: Any) -> dict[str, Any] | None:
     """{posts: [{pid, title, pieces: [{part, desc}], items: [{id, piece, name, shop, price, at, img, link, query, verdict?}]}],
     learned, ok, goal, reasons}. 칸이 없으면(예전 Blog-Auto) None. 후보가 없는 글·이름·주소가 이상한 후보는 빠진다."""
@@ -838,7 +849,7 @@ def _product_trial(v: Any) -> dict[str, Any] | None:
                           "link": link, "query": _one_line(it.get("query"), 60) or "",
                           **({"verdict": it["verdict"]} if it.get("verdict") in ("ok", "bad") else {})})
         if items:
-            posts.append({"pid": pid, "title": title, "pieces": pieces, "items": items})
+            posts.append({"pid": pid, "title": title, "pieces": pieces, "items": items, "read": _read(x.get("read"))})
     reasons = [r for r in PT_REASONS if isinstance(v.get("reasons"), list) and r in v["reasons"]]
     return {"posts": posts, "learned": _str_list(v.get("learned"), PT_LEARNED_MAX, 120), "ok": _count(v.get("ok"), top=10**6) or 0,
             "goal": _count(v.get("goal"), top=10**4) or 20, "reasons": reasons or list(PT_REASONS)}
@@ -873,7 +884,7 @@ def _photo_trial(v: Any) -> dict[str, Any] | None:
                           "qa": {"ok": qa.get("ok") is True,
                                  "issues": [i for i in qa.get("issues") or [] if isinstance(i, str) and TRIAL_QA.match(i)][:6]}})
         posts.append({"pid": pid, "title": _one_line(x.get("title"), 80) or f"#{pid}", "at": _one_line(x.get("at"), 40),
-                      "slots": slots, "feedback_done": _count(x.get("feedback_done"), top=10**6) or 0})
+                      "slots": slots, "feedback_done": _count(x.get("feedback_done"), top=10**6) or 0, "read": _read(x.get("read"))})
     if not posts:
         return None
     rules = []

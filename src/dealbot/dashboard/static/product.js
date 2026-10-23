@@ -53,6 +53,13 @@ function card(t, p, x) {
       btn('sm' + (v === 'bad' || OP[x.id] ? ' ac' : ''), '❌ 별로', () => { OP[x.id] = !OP[x.id]; H.render(); }, {'aria-expanded': OP[x.id] ? 'true' : 'false'})),
     OP[x.id] ? bad(t, x) : null);
 }
+// 어느 글인지 (주인 10/23 — 링크·사진 테스트하며): 본문(사진 자리 '📷 사진 N') + 발행됐으면 네이버 주소
+function rd(p) {
+  const {el, btn} = H, r = p.read;
+  return r ? btn('sm', '글 보기', () => H.sheet(p.title, el('div', {},
+    r.url ? el('a', {class: 'pb soft', href: r.url, target: '_blank', rel: 'noopener'}, '네이버에서 보기') : el('p', {class: 'note'}, '아직 발행 전 글이에요 (임시저장)'),
+    el('p', {style: 'white-space:pre-wrap;margin-top:12px'}, r.text)))) : null;
+}
 function view(t, h) {
   H = h; css();
   const {el, btn} = h;
@@ -60,7 +67,7 @@ function view(t, h) {
   const out = [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '배운 기준'), el('span', {class: 'note'}, `괜찮아 ${t.ok}/${t.goal}`)),
     el('div', {class: 'box'}, t.learned.length ? t.learned.map(s => el('p', {class: 'note', text: '· ' + s})) : el('p', {class: 'note'}, '아직 배운 기준이 없어요'))];
   for (const p of t.posts) {
-    out.push(el('p', {class: 'h3', style: 'margin-top:20px'}, p.title),
+    out.push(el('p', {class: 'h3', style: 'margin-top:20px'}, p.title), rd(p),
       el('p', {class: 'note'}, '글 속 옷: ' + p.pieces.map(c => `${c.part} ${c.desc}`).join(' · ')), ...p.items.map(x => card(t, p, x)));
     const f = line('p' + p.pid, '고르는 방식 한 줄 (예: 같은 브랜드 공식몰 우선)');
     out.push(el('div', {class: 'box', style: 'margin-top:8px'}, f, el('div', {class: 'two', style: 'margin-top:8px'},
@@ -93,7 +100,7 @@ function photo(t, h) {
   const out = [];
   if (t.rules.length) out.push(el('p', {class: 'h3'}, '배운 원칙'), el('div', {class: 'box'}, t.rules.map(r => el('p', {class: 'note'}, '· ' + r.text))));
   for (const p of t.posts) {
-    out.push(el('p', {class: 'h3', style: 'margin-top:20px;font-size:15px'}, p.title), el('p', {class: 'note'}, `사진 ${p.slots.filter(s => s.final || s.full).length}/${p.slots.length}장 · 피드백 ${p.feedback_done}개 · 사진을 누르면 편집`),
+    out.push(el('p', {class: 'h3', style: 'margin-top:20px;font-size:15px'}, p.title), rd(p), el('p', {class: 'note'}, `사진 ${p.slots.filter(s => s.final || s.full).length}/${p.slots.length}장 · 피드백 ${p.feedback_done}개 · 사진을 누르면 편집`),
       el('div', {class: 'sv', 'aria-label': '글 순서대로 사진'}, p.slots.map(s => s.final || s.full ? el('img', {src: s.final || s.full, alt: `${s.slot}번째 사진`}) : el('i', {title: `${s.slot}번째 빈 자리`}))));
     p.slots.forEach((s, i) => {
       const k = p.pid + '-' + s.slot, open = TS[k] && TS[k].o, pic = s.final || s.full;

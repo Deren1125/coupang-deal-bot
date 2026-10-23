@@ -79,6 +79,8 @@ PRODUCT_JS_GZIP_MAX = 2 * 1024 + 512
 # 처음 열 때만 받는 product.js 가 늘어남 → 12 KB / gzip 4.5 KB
 PRODUCT_JS_MAX = 12 * 1024
 PRODUCT_JS_GZIP_MAX = 4 * 1024 + 512
+# 10/23: 테스트 글마다 '글 보기' (본문 + 네이버 주소 시트 — 어느 글인지 보며 검수) → gzip 4.75 KB
+PRODUCT_JS_GZIP_MAX = 4 * 1024 + 768
 # 10/21: 일정 화면(세 블로그 예약을 시간순으로 · 날짜 칸 · 블로그 칩 · 시간 바꾸기/바로 발행/빼기) — 처음 열 때만 받는 sched.js (CSS 도 여기서 넣음)
 SCHED_JS_MAX = 10 * 1024
 SCHED_JS_GZIP_MAX = 4 * 1024

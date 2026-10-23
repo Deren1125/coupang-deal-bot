@@ -122,3 +122,13 @@ def test_app_js_page_and_product_js_flow() -> None:
                  "extra.reasons", "verdict: v", "'done'", "'note'"):
         assert word in pj, word
     assert "innerHTML" not in pj and "https://" not in pj and "eval(" not in pj
+
+
+def test_trial_post_read_view_keeps_text_and_only_https_links() -> None:
+    """'글 보기' (주인 10/23 — 어느 글인지 보며 검수): 본문 여러 줄 그대로 · https 주소만 · 둘 다 없으면 없음."""
+    from dealbot.dashboard.blogauto import _read
+
+    assert _read({"url": "https://blog.naver.com/derenpick/1", "text": "첫 줄\n\n📷 사진 1"}) == {
+        "url": "https://blog.naver.com/derenpick/1", "text": "첫 줄\n\n📷 사진 1"}
+    assert _read({"url": "javascript:alert(1)", "text": "본문"}) == {"url": "", "text": "본문"}
+    assert _read({"url": "", "text": ""}) is None and _read(None) is None

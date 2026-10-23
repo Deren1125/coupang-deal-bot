@@ -528,7 +528,7 @@ class StateBuilder:
             a = {"blog": "issue", "pid": p["pid"]}
             slots = [dict(s, **{k: f"/dashboard/thumb/{s[k]}" for k in ("final", "full") if s.get(k)}) for s in p["slots"]]
             posts.append({"pid": p["pid"], "iid": iidmod.post_iid("issue", p["pid"]), "title": p["title"], "at": p["at"],
-                          "feedback_done": p["feedback_done"], "slots": slots,
+                          "feedback_done": p["feedback_done"], "slots": slots, "read": p.get("read"),
                           # 편집기(edit.js)가 쓰는 자리 모양 {slot, label, thumb, full, final}
                           "edit": [{"slot": s["slot"], "label": s["desc"] or s.get("where") or f"자리 {s['slot']}", "thumb": s.get("final") or s.get("full"),
                                     **{k: s[k] for k in ("full", "final") if s.get(k)}} for s in slots],
@@ -547,7 +547,7 @@ class StateBuilder:
         posts = []
         for p in pt["posts"]:
             base = {"blog": "issue", "pid": p["pid"]}
-            posts.append({"pid": p["pid"], "title": p["title"], "pieces": p["pieces"],
+            posts.append({"pid": p["pid"], "title": p["title"], "pieces": p["pieces"], "read": p.get("read"),
                           "items": [dict(x, img=f"/dashboard/thumb/{x['img']}" if x.get("img") else None,
                                          act=act("blog.product_feedback", "판정", dict(base, item_id=x["id"]))) for x in p["items"]],
                           "act": act("blog.product_feedback", "테스트 끝", base)})
