@@ -671,6 +671,9 @@ dashboard:
       options:
         max_calls_per_day: 3                # 리포트 API 는 하루 이만큼만 (한 번 읽을 때 3회: 클릭·주문·수익, 재시도 없음, 어제까지)
         min_interval_hours: 20              # 하루 한 번만 (10/15: 쿠팡 시간당 몫을 딜 수집·발행에 양보 — 실적은 어제까지라 하루 한 번이면 충분)
+    - key: creator_mall                     # 에이블리·지그재그(·무신사·29CM) 내 링크 방문·구매·예상 리워드 (주인 10/23 — Blog-Auto creator_stats)
+      type: creator_mall
+      title: 쇼핑몰 크리에이터
     - key: dealbot
       type: dealbot
       title: 핫딜 봇 운영

@@ -963,6 +963,36 @@ def _devlog(v: Any) -> dict[str, Any] | None:
     return {"day": _one_line(v.get("day"), 10), "items": items, "n": max(_count(v.get("n"), top=9999) or 0, len(items))}
 
 
+# 쇼핑몰 크리에이터 통계 (주인 10/23 — Blog-Auto creator_stats.export): 쇼핑몰별 이번 달 방문·구매·예상 리워드와 합계
+CM_STATES = ("ok", "login", "failed", "pending", "none")
+CM_NUMS = ("visits", "orders", "order_amount", "reward", "expected", "last_month")
+CM_MALLS_MAX, CM_MAX = 8, 10**10
+
+
+def _creator_mall(v: Any) -> dict[str, Any] | None:
+    """{read_at, month, malls: [{key, name, state, text, visits?, orders?, order_amount?, reward?, expected?, last_month?}],
+    total: {visits, orders, expected, last_month}}. 칸이 없으면(예전 Blog-Auto) None. 이름이 없거나 상태가 이상한 줄은 빠지고,
+    숫자는 0 이상 CM_MAX 이하 정수만 (아니면 None — 짐작하지 않음). 합계는 남은 줄로 다시 셈."""
+    if not isinstance(v, dict) or not isinstance(v.get("malls"), list):
+        return None
+    malls = []
+    for m in v["malls"][:CM_MALLS_MAX]:
+        if not isinstance(m, dict) or not (name := _one_line(m.get("name"), 20)) or m.get("state") not in CM_STATES:
+            continue
+        row: dict[str, Any] = {"key": _one_line(m.get("key"), 20) or name, "name": name, "state": m["state"],
+                               "text": _one_line(m.get("text"), 80) or ""}
+        for k in CM_NUMS:
+            row[k] = _count(m.get(k), top=CM_MAX)
+        malls.append(row)
+
+    def total(k: str) -> int | None:
+        got = [r[k] for r in malls if r.get(k) is not None]
+        return sum(got) if got else None
+
+    return {"read_at": _one_line(v.get("read_at"), 20), "month": _one_line(v.get("month"), 10), "malls": malls,
+            "total": {k: total(k) for k in ("visits", "orders", "expected", "last_month")}}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -970,7 +1000,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                            "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends")),
                            "learn": _learn(data.get("learn")), "photo_trial": _photo_trial(data.get("photo_trial")),
                            "product_trial": _product_trial(data.get("product_trial")),
-                           "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog"))}
+                           "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog")),
+                           "creator_mall": _creator_mall(data.get("creator_mall"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

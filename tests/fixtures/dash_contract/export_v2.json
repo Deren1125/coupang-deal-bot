@@ -965,5 +965,53 @@
    }
   ],
   "n": 2
+ },
+ "creator_mall": {
+  "read_at": "2026-10-23 14:05",
+  "month": "2026-10",
+  "malls": [
+   {
+    "key": "ably",
+    "name": "에이블리",
+    "state": "ok",
+    "text": "",
+    "visits": 12,
+    "orders": 1,
+    "order_amount": null,
+    "reward": 600,
+    "expected": 1200,
+    "last_month": 10000
+   },
+   {
+    "key": "zigzag",
+    "name": "지그재그",
+    "state": "login",
+    "text": "지그재그 로그인이 풀렸어요 · 2026-10-22 13:10 숫자",
+    "visits": 5,
+    "orders": 0,
+    "order_amount": 0,
+    "reward": 0,
+    "expected": 0,
+    "last_month": 0
+   },
+   {
+    "key": "musinsa",
+    "name": "무신사",
+    "state": "pending",
+    "text": "큐레이터 승인 대기"
+   },
+   {
+    "key": "29cm",
+    "name": "29CM",
+    "state": "pending",
+    "text": "큐레이터 승인 대기"
+   }
+  ],
+  "total": {
+   "visits": 17,
+   "orders": 1,
+   "expected": 1200,
+   "last_month": 10000
+  }
  }
 }
