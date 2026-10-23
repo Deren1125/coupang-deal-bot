@@ -1285,7 +1285,8 @@ function start() {
     if (D.querySelector('[data-pm]')) toast('토스 링크를 복사했다면 "붙여넣기"를 눌러 주세요');
     if (Date.now() - PICK > 120000) load();
   });
-  setInterval(() => { if (D.visibilityState === 'visible' && (R.tab === 'todo' || Object.keys(POLL).length)) load(); }, 60000);
+  // 화면이 보이는 동안 20초마다 바뀐 것만 받아 다시 그림 (주인 10/23 — 새로고침 없이). 시트가 열렸거나 글을 쓰는 중이면 건너뜀
+  setInterval(() => { const a = D.activeElement; if (D.visibilityState === 'visible' && !D.querySelector('.bd') && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) load(); }, 20000);
   ptr();
   route();
   if (!S) load(); else setTimeout(load, 400);
