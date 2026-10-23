@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import time
+
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -143,3 +145,8 @@ async def test_today_api_carries_posts_next_to_actions(bot: DealBot) -> None:
     status, body, _ = await get_json(bot, "/dashboard/api/today", session_headers(bot))
     assert status == 200 and body["groups"] == [] and body["posts"]["count"] == 1
     assert body["posts"]["groups"][0]["rows"][0]["link"]["url"] == "https://t.me/hot_deal_and_info/5"
+    # 머리 '오늘 한 일 N개'·카드 줄은 올린 글까지 센다 (주인 10/23 — '한 일 1개인데 올린 글 18개')
+    assert body["count"] == 1 and body["actions"] == 0
+    from dealbot.dashboard.today import count
+
+    assert count(bot, now=time.time()) == 1

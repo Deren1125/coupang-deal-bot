@@ -1114,7 +1114,7 @@ class StateBuilder:
             "me": {"csrf": csrf, "push_key": router.public_key if router is not None else None,
                    "public_url": bot.settings.dashboard.public_url, "logout_t": logout_t},
             "banner": banner,
-            "counts": {"todo": len(todo), "done_today": today_count(bot, now=time.time())},  # 오늘 한 일 (목록은 /api/today)
+            "counts": {"todo": len(todo), "done_today": today_count(bot, now=time.time(), v2=getattr(export, "v2", None))},  # 오늘 한 일 (목록은 /api/today)
             "todo": todo,
             "deal": self.deal(export),
             "blogs": blogs,

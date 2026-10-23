@@ -115,9 +115,18 @@ def raw_rows(db: Any, start: float, end: float) -> list[dict[str, Any]]:
     return [r for r in out if group_of(r["action"], r["args"]) is not None]
 
 
-def count(bot: Any, *, now: float) -> int:
+def count(bot: Any, *, now: float, v2: dict[str, Any] | None = None) -> int:
+    """오늘 한 일 개수 = 주인이 한 일 + 오늘 올린 글 (주인 10/23 — '오늘 한 일 1개인데 올린 글은 18개'로 어긋나 보였음)."""
     tz = bot.settings.app.timezone
-    return len(raw_rows(bot.db, day_start(now, tz), now + 60))
+    start = day_start(now, tz)
+    n = len(raw_rows(bot.db, start, now + 60))
+    try:
+        from dealbot.dashboard.today_posts import build
+
+        n += int(build(bot, v2 or {}, start, now + 60, tz)["count"])
+    except Exception:  # noqa: BLE001 — 올린 글을 못 세도 한 일 개수는
+        pass
+    return n
 
 
 class TodayView:
@@ -238,5 +247,7 @@ class TodayView:
             posts = build(self.bot, v2, start, end, tz)
         except Exception:  # noqa: BLE001 — 올린 글 칸이 안 읽혀도 한 일 목록은 보여 줌
             posts = {"count": 0, "groups": []}
-        return {"day": f"{d.month}월 {d.day}일", "back": back, "count": len(rows), "posts": posts,
+        # count = 한 일 + 올린 글 (머리 '오늘 한 일 N개'와 카드 줄이 같은 수) · actions = 주인이 한 일만
+        return {"day": f"{d.month}월 {d.day}일", "back": back, "count": len(rows) + int(posts.get("count") or 0), "actions": len(rows),
+                "posts": posts,
                 "groups": [{"key": k, "label": label, "rows": groups[k]} for k, label in GROUPS if groups[k]]}
