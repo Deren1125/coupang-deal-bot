@@ -10,7 +10,7 @@ const CSS = '.pc{display:flex;gap:10px;align-items:flex-start}.pc img,.pc .p0{wi
   '.pc .p0{background:var(--grey)}.pc .pg{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.pr{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}' +
   '.pr .cp{min-height:36px;padding:0 10px;border:1px solid var(--line);border-radius:18px;background:none;font:inherit;font-size:13px}.pr .cp.on{background:var(--or-soft);border-color:currentColor}' +
   '.ea{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.sv{display:flex;gap:4px;overflow-x:auto;margin:8px 0}.sv img,.sv i{width:44px;height:44px;flex:none;border-radius:6px;object-fit:cover;background:var(--grey)}' +
-  '.sv i{border:1px dashed var(--fline);background:none}.cx{font-size:14px;margin:4px 0 8px}.ck img{max-height:50dvh}';
+  '.sv i{border:1px dashed var(--fline);background:none}.cx{font-size:14px;margin:4px 0 8px}.ck img{max-height:50dvh}.pv{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pv figure{margin:0}.pv img{width:100%;max-height:40dvh;object-fit:contain;background:var(--fline)}';
 const V = {}, RS = {}, NT = {}, OP = {};  // 이 화면에서 누른 판정 · 고른 이유 · 적던 한 줄 · 이유 칩 펼침
 let H = null;
 const won = n => n ? n.toLocaleString('ko-KR') + '원' : '';
@@ -99,7 +99,11 @@ function photo(t, h) {
       const k = p.pid + '-' + s.slot, open = TS[k] && TS[k].o, pic = s.final || s.full;
       out.push(el('div', {class: 'box', style: 'margin-top:8px'}, el('p', {}, el('b', {}, `${i + 1}번째 사진${s.where ? ' · ' + s.where : ''}`), s.section && !(s.where || '').includes(s.section) ? ' · ' + s.section : ''),
         s.ctx ? el('p', {class: 'cx note'}, `“${s.ctx}”`) : null,
-        pic ? el('div', {class: 'ck', onclick: () => h.edPhoto(p, p.edit[i])}, el('img', {src: pic, alt: s.desc})) : el('p', {class: 'note'}, '빈 자리'),
+        // 원본(받은 사진)과 편집본(네이버에 올라가는 판)을 나란히 (주인 10/23 — 둘 다 보고 검증). 편집본을 누르면 편집기
+        s.full && s.final && s.full !== s.final ? el('div', {class: 'pv'},
+          el('figure', {}, el('img', {src: s.full, alt: '원본 ' + s.desc}), el('figcaption', {class: 'note'}, '원본')),
+          el('figure', {class: 'ck', onclick: () => h.edPhoto(p, p.edit[i])}, el('img', {src: s.final, alt: '편집본 ' + s.desc}), el('figcaption', {class: 'note'}, '편집본 (올라가는 사진)')))
+          : pic ? el('div', {class: 'ck', onclick: () => h.edPhoto(p, p.edit[i])}, el('img', {src: pic, alt: s.desc})) : el('p', {class: 'note'}, '빈 자리 — 봇이 사진을 찾는 중이에요'),
         el('p', {class: 'note'}, [s.why ? '고른 이유: ' + s.why : '', s.desc ? '자리 설명: ' + s.desc : '', s.credit ? '출처 ' + s.credit : ''].filter(Boolean).join(' · ')),
         s.qa.issues.length ? el('div', {class: 'ea'}, s.qa.issues.map(q => el('span', {class: 'cp stop'}, QK[q] || q))) : null,
         pic ? el('div', {class: 'two'}, btn('pb soft', '✅ 괜찮아', e => go(p, s, 'ok', {r: [], n: ''}, e.currentTarget, k)),
