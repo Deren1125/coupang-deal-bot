@@ -14,7 +14,13 @@ const CSS = '.tq{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px
   '.tc{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}.tg{display:flex;justify-content:space-between;align-items:center;' +
   'min-height:44px;border-bottom:1px solid var(--line)}.tg:last-child{border:0}.tg input{width:24px;height:24px}' +
   '.tl p{margin:0;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.tl p:last-child{border:0}.tl i{display:block;font-style:normal;color:var(--sub)}' +
-  '.ts{max-width:100%;border-radius:10px;border:1px solid var(--line);margin-top:8px}';
+  '.ts{max-width:100%;border-radius:10px;border:1px solid var(--line);margin-top:8px}' +
+  // 직접 팔로우 줄 (주인 10/23 '더 깔끔하게'): 아이디 왼쪽, 작은 알약 단추 둘 오른쪽
+  '.tm{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.tm:last-child{border:0}' +
+  '.tm a{flex:1;min-width:0;color:var(--text);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+  '.tm a i{display:block;font-style:normal;font-weight:400;font-size:12px;color:var(--sub)}' +
+  '.tb{flex:none;height:34px;padding:0 14px;border:0;border-radius:999px;font:inherit;font-size:14px;font-weight:600;background:var(--grey);color:var(--text)}' +
+  '.tb.ok{background:var(--gr-soft);color:var(--gr)}.tb:active{opacity:.6}';
 const MODE = [['off', '꺼짐'], ['dry', '시험'], ['live', '실제']];
 const LOGIN = {wrong: '로그인이 거절됐어요 — 비밀번호를 확인해 주세요. 맞는데도 계속이면 인스타그램이 서버 로그인을 막는 거라 알려 주세요', wait: '시도가 많아 인스타그램이 잠시 막았어요 — 30분쯤 뒤에 다시 해 주세요',
   busy: '블로그 봇이 크롬을 쓰는 중이에요 — 1~2분 뒤 다시 눌러 주세요', ok: '로그인됐어요', code: '인증 코드를 넣어 주세요 (문자·메일·인증 앱)', no: '로그인 안 된 상태예요',
@@ -122,13 +128,11 @@ function logs() {
 function manual() {
   const {el, btn} = H, xs = T.manual_follow || [];
   if (!T.follow_blocked_until && !xs.length) return null;
-  const rows = xs.map(x => el('div', {class: 'tg'}, el('a', {href: 'https://www.threads.com/@' + x.user, target: '_blank', rel: 'noopener noreferrer'},
-    '@' + x.user, el('i', {style: 'display:block;font-style:normal;font-size:12px;color:var(--sub)'}, x.from)),
-    el('div', {style: 'display:flex;gap:6px'}, btn('pb soft', '복사', () => copyId(x.user), {style: 'width:auto;min-height:40px;padding:0 14px'}),
-      btn('pb soft', '했어요', () => act('manual_done', {user: x.user}), {style: 'width:auto;min-height:40px;padding:0 14px'}))));
+  const rows = xs.map(x => el('div', {class: 'tm'}, el('a', {href: 'https://www.threads.com/@' + x.user, target: '_blank', rel: 'noopener noreferrer'},
+    '@' + x.user, el('i', {}, x.from)),
+    btn('tb', '복사', () => copyId(x.user)), btn('tb ok', '했어요 ✓', () => act('manual_done', {user: x.user}))));
   return card(`직접 팔로우할 사람 ${xs.length}명`, el('p', {class: 'note', style: 'margin-top:0'},
-    `스레드가 지금 자동 팔로우를 막고 있어요${T.follow_blocked_until ? ` — ${T.follow_blocked_until}에 다시 시험해 보고, 풀리면 이 목록은 사라지고 자동으로 해요` : ''}. ` +
-    '아이디를 누르면 스레드가 열려요 (복사를 누르면 아이디만 복사). 팔로우한 뒤 했어요를 눌러 주세요 (안 눌러도 다음 회차에 확인해서 빼요). 하루 10~15명씩 나눠서 해 주세요.'),
+    `자동 팔로우가 막힌 동안만 보여요${T.follow_blocked_until ? ` (${T.follow_blocked_until}에 다시 시험)` : ''}. 아이디를 누르면 스레드가 열려요 — 팔로우하고 ‘했어요’. 하루 10~15명이면 충분해요.`),
     ...(rows.length ? rows : [el('p', {class: 'note'}, '아직 없어요 — 다음 회차에 찾아서 올려요')]));
 }
 // 아이디 복사 (주인 10/23) — 스레드 앱 검색 칸에 붙여 넣기용
