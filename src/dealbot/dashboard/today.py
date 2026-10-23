@@ -1,6 +1,7 @@
 """'오늘 한 일' (주인 10/18 — "오늘 내가 발행하도록 허가한 글 모음은 어디서 봐? 사진·링크 첨부한 거라거나").
 
 GET /dashboard/api/today[?day=yesterday] → {"day","count","groups":[{"key","label","rows":[Row]}]} — 시트를 열 때만 (state 는 개수만).
+  + "posts": {"count","groups":[{"key","label","rows":[{"title","when","link"?}]}]} — 오늘 올린 글 (today_posts.py: 블로그·텔레그램·인스타·스레드)
   Row = {"title","at","when","what","res": ok|run|bad,"chip","why"?,"note"?,"blog"?,"link"?: {"label","url"}}
 
 - 오늘(설정 시간대 0시부터) 대시보드에서 주인이 한 일: dash_actions (딜봇에서 바로 한 일 + Blog-Auto 에 맡긴 일) +
@@ -231,5 +232,11 @@ class TodayView:
         for r in rows:
             groups[group_of(r["action"], r["args"]) or "other"].append(self.row(r, v2, tz))
         d = datetime.fromtimestamp(start, ZoneInfo(tz))
-        return {"day": f"{d.month}월 {d.day}일", "back": back, "count": len(rows),
+        try:
+            from dealbot.dashboard.today_posts import build
+
+            posts = build(self.bot, v2, start, end, tz)
+        except Exception:  # noqa: BLE001 — 올린 글 칸이 안 읽혀도 한 일 목록은 보여 줌
+            posts = {"count": 0, "groups": []}
+        return {"day": f"{d.month}월 {d.day}일", "back": back, "count": len(rows), "posts": posts,
                 "groups": [{"key": k, "label": label, "rows": groups[k]} for k, label in GROUPS if groups[k]]}

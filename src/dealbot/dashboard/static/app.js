@@ -1186,20 +1186,22 @@ const sec = (title, moreActs, ...kids) => [el('div', {class: 'top', style: 'marg
 const row = (t, s, right, bad) => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, t), s ? el('span', {class: 's' + (bad ? ' bad' : '')}, s) : null), right);
 const fold = (label, fn) => btn('fold', label, fn);
 function listSheet(title, rows) { sheet(title, el('div', {}, rows.length ? rows : el('p', {class: 'empty'}, '없어요'))); }
-// 오늘 한 일 (주인 10/18): 링크·사진·발행… 칸마다 새것 먼저 · 결과 칩 · 글·채널·상품 링크 (서버가 정한 주소만)
+// 오늘 한 일: 올린 글(채널별) + 칸마다 서버가 정한 행·주소
 const RC = {ok: 'ok', run: 'info', bad: 'stop'};
 const foldBox = (t, f) => el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, fold(t, f));
 const doneRow = () => foldBox(`오늘 한 일 ${(S.counts || {}).done_today || 0}개`, todaySheet);
-// 오늘 바뀐 것 (10/23): 서버가 만든 {title, rows: [{at, repo, text}]} 를 그대로
+// 오늘 바뀐 것: 서버가 만든 rows 그대로
 const devRow = d => d && foldBox(d.title, () => listSheet('오늘 바뀐 것', d.rows.map(r => row(r.text, r.at, el('span', {class: 'cp info'}, r.repo)))));
 function todaySheet() {
   const box = sheet('오늘 한 일', el('p', {class: 'empty'}, '불러오는 중…')), h = box.parentNode.querySelector('h2');
   const fill = async b => {
     const r = await api('/dashboard/api/today' + (b ? '?day=yesterday' : '')), d = r.data || {}, w = b ? '어제' : '오늘';
     h.textContent = `${w} 한 일${d.count ? ' ' + d.count + '개' : ''}`;
-    box.replaceChildren(...[r.status !== 200 ? el('p', {class: 'empty'}, d.text || MSG.net) : d.groups.length ? d.groups.map(g => [el('p', {class: 'grp'}, g.label),
+    const P = d.posts || {count: 0, groups: []};
+    box.replaceChildren(...[r.status !== 200 ? el('p', {class: 'empty'}, d.text || MSG.net) : [P.count ? el('p', {class: 't'}, `${w} 올린 글 · ${P.count}개`) : null, P.groups.map(g => [el('p', {class: 'grp'}, `${g.label} ${g.rows.length}`),
+      el('div', {class: 'box'}, g.rows.map(x => row(x.title, x.when, x.link && ext('sm', x.link.label, x.link.url))))]), d.groups.length ? d.groups.map(g => [el('p', {class: 'grp'}, g.label),
       el('div', {class: 'box'}, g.rows.map(x => row(x.title, [el('span', {class: 'cp ' + RC[x.res]}, x.chip), ' ', [x.when, x.blog, x.title !== x.what && x.what, x.why || x.note].filter(Boolean).join(' · ')],
-        x.link && ext('sm', x.link.label, x.link.url), x.res === 'bad')))]) : el('p', {class: 'empty'}, `${w} 한 일이 아직 없어요`),
+        x.link && ext('sm', x.link.label, x.link.url), x.res === 'bad')))]) : P.count ? null : el('p', {class: 'empty'}, `${w} 한 일이 아직 없어요`)],
     el('p', {class: 'foot'}, btn('lnk mute', b ? '오늘 보기' : '어제 보기', () => fill(!b)), S.connect && S.connect.audit.length ? btn('lnk mute', '접속 기록', () => listSheet('접속 기록', S.connect.audit.map(x => el('p', {text: x.text})))) : null)].flat(9));
   };
   fill(0);
