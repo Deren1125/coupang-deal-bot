@@ -29,7 +29,8 @@ KEY_FILE = Path(os.environ.get("THREADS_KEY_FILE", str(Path.home() / "Blog-Auto"
 PREFIX = f"{API}/threads"
 # 화면이 할 수 있는 일 → 그 서비스 경로 (글 직접 올리기는 sns-board thpost 몫이라 넘기지 않는다)
 OPS = {"settings": "/api/settings", "run": "/api/run", "pause": "/api/pause", "resume": "/api/resume",
-       "tlogin": "/api/tlogin", "tcode": "/api/tcode", "tcheck": "/api/tcheck", "token": "/api/token"}
+       "tlogin": "/api/tlogin", "tcode": "/api/tcode", "tcheck": "/api/tcheck", "token": "/api/token",
+       "manual_done": "/api/manual_done"}  # 직접 팔로우할 사람 '했어요' (10/23)
 SLOW_OPS = {"tlogin", "tcode", "tcheck", "token"}  # 브라우저 로그인·토큰 확인은 오래 걸림
 BODY_MAX = 16 * 1024
 SHOT_MAX = 3_000_000

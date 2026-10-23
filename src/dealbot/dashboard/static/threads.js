@@ -117,6 +117,19 @@ function logs() {
   return [card('알림', el('div', {class: 'tl'}, ...(al.length ? al : [el('p', {class: 'note'}, '없어요')]))),
     card('최근 기록', el('div', {class: 'tl'}, ...(ac.length ? ac : [el('p', {class: 'note'}, '없어요')])))];
 }
+// 직접 팔로우할 사람 (주인 10/23): 스레드 팔로우가 막힌 동안 자동화가 찾은 사람 — 누르면 스레드 앱, 하고 나서 '했어요'.
+// 막힘이 풀리면 서버가 목록을 지우고 다시 자동으로 한다 (이 칸도 사라짐)
+function manual() {
+  const {el, btn} = H, xs = T.manual_follow || [];
+  if (!T.follow_blocked_until && !xs.length) return null;
+  const rows = xs.map(x => el('div', {class: 'tg'}, el('a', {href: 'https://www.threads.com/@' + x.user, target: '_blank', rel: 'noopener noreferrer'},
+    '@' + x.user, el('i', {style: 'display:block;font-style:normal;font-size:12px;color:var(--sub)'}, x.from)),
+    btn('pb soft', '했어요', () => act('manual_done', {user: x.user}), {style: 'width:auto;min-height:40px;padding:0 14px'})));
+  return card(`직접 팔로우할 사람 ${xs.length}명`, el('p', {class: 'note', style: 'margin-top:0'},
+    `스레드가 지금 자동 팔로우를 막고 있어요${T.follow_blocked_until ? ` — ${T.follow_blocked_until}에 다시 시험해 보고, 풀리면 이 목록은 사라지고 자동으로 해요` : ''}. ` +
+    '아이디를 누르면 스레드가 열려요. 팔로우한 뒤 했어요를 눌러 주세요 (안 눌러도 다음 회차에 확인해서 빼요). 하루 10~15명씩 나눠서 해 주세요.'),
+    ...(rows.length ? rows : [el('p', {class: 'note'}, '아직 없어요 — 다음 회차에 찾아서 올려요')]));
+}
 // 개발 세션 자리 — thpost 칸이 오면 slots 에 붙인 그리기로
 function slot(key, title) {
   const tp = H.S && H.S.thpost, f = slots[key];
@@ -126,7 +139,7 @@ function draw() {
   if (!box || !T) return;
   const {el} = H;
   if (T.off) { box.replaceChildren(el('p', {class: 'empty'}, T.off), H.btn('pb soft', '다시 불러오기', load)); return; }
-  box.replaceChildren(...head(), slot('compose', '내가 쓰는 글 (바로 올리기·예약)'), slot('alerts', '댓글 알림'), slot('stats', '통계'),
+  box.replaceChildren(...head(), ...[manual()].filter(Boolean), slot('compose', '내가 쓰는 글 (바로 올리기·예약)'), slot('alerts', '댓글 알림'), slot('stats', '통계'),
     ...jobs(), settings(), ...login(), ...logs());
 }
 function view(b, h) {
