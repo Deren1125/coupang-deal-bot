@@ -678,7 +678,8 @@ class StateBuilder:
                 continue
             sev = {"⛔[멈춤]": "stop", "🔥[핫]": "hot", "ℹ️": "info"}.get(t.marker, "todo")
             primary = open_link(t.link and ("네이버에서 보기" if "naver.com" in t.link else "열기") or "열기", t.link) if t.link \
-                else goto("블로그 보기", f"#/blog/{blog}") if blog else goto("자세히", "#/connect")
+                else goto("스레드·인스타 보기", "#/blog/threads") if t.kind == "threads_todo" \
+                else goto("블로그 보기", f"#/blog/{blog}") if blog else goto("자세히", "#/connect")  # threads_todo: 스레드 자동화가 남긴 할 일 (10/23)
             out[iid] = {"iid": iid, "src": "blog", "blog": blog, "kind": t.kind, "sev": sev, "urgent": t.urgent, "title": t.short,
                         "status": truncate(t.what, 60) if t.what and t.what != t.short else (ago(t.since, now_dt) if t.since else ""),
                         "since": _ts(t.since), "expires_at": None, "primary": primary,
