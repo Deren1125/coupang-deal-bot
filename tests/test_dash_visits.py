@@ -28,7 +28,6 @@ from dealbot.app import DealBot
 from dealbot.bridge import spool
 from dealbot.bridge.kakao_out import KakaoOut
 from dealbot.config import Settings
-from dealbot.dashboard import rank
 from dealbot.dashboard.blogauto import parse_v2
 from dealbot.dashboard.state import neighbors_line
 from dealbot.notify import iid as iidmod
@@ -121,7 +120,7 @@ async def state(bot: DealBot) -> dict:
     return body
 
 
-async def test_visits_row_is_info_ranked_low_and_opens_the_list(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+async def test_visits_stay_on_the_blog_tab_not_in_todo(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
     more = [dict(VISIT, id=f"visit-issue-{n}", title=f"이웃 글 {n}") for n in (13, 14)] + \
         [dict(VISIT, id="visit-finance-5", blog="finance", blog_name="절약 일기"), dict(VISIT, id="visit-issue-9", status="done")]
     write_export(tmp_path / "blogauto.json", visits=[VISIT, *more])
@@ -130,24 +129,12 @@ async def test_visits_row_is_info_ranked_low_and_opens_the_list(bot: DealBot, se
                      "title": "Pick #31 발행 대기", "at": time.time()})
     body = await state(bot)
     todo = body["todo"]
-    by = {it["iid"]: it for it in todo}
-    v = by["visits"]
-    assert v["title"] == "오늘 들를 이웃 글 4개" and v["sev"] == "info" and v["urgent"] is False and v["kind"] == "visits"
-    assert v["status"] == "아카이브 1 · Pick 3" and v["primary"] == dict(v["primary"], input="goto", goto="#/i/visits")
-    assert [x["id"] for x in v["detail"]["visits"]] == ["visit-issue-12", "visit-issue-13", "visit-issue-14", "visit-finance-5"]
-    x = v["detail"]["visits"][0]
-    assert x == {"id": "visit-issue-12", "blog": "issue", "name": "미니의 스타일 노트", "title": "가을 트렌치코트 코디 세 가지",
-                 "url": VISIT["url"], "comment": VISIT["comment"]}
-    assert rank.rank(dict(v), time.time()) == 50.0 and v["group"] == "여유 있을 때"
-    assert todo.index(v) > todo.index(by["post-issue-31"]) and todo.index(v) > todo.index(by["post-issue-46"])
-    # 블로그 탭: 그 블로그의 할 일만 · 서로이웃 한 줄
+    assert "visits" not in {it["iid"] for it in todo}  # 주인 10/23: 할 일 알림에는 넣지 않음 — 블로그 화면 '이웃' 칸에서만
+    # 블로그 탭: 그 블로그의 들를 글 · 서로이웃 한 줄
     issue, fin = body["blogs"]["issue"], body["blogs"]["finance"]
     assert [x["id"] for x in issue["visits"]] == ["visit-issue-12", "visit-issue-13", "visit-issue-14"]
     assert [x["id"] for x in fin["visits"]] == ["visit-finance-5"] and body["blogs"]["hotdeal"]["visits"] == []
     assert issue["neighbors"] == "이웃 신청 오늘 18건까지 · 받은 신청 수락 2건" and fin["neighbors"] is None
-    # 시트 (/api/item/visits)
-    status, item, _ = await get_json(bot, "/dashboard/api/item/visits", session_headers(bot))
-    assert status == 200 and len(item["detail"]["visits"]) == 4
 
 
 async def test_no_visits_key_or_nothing_left_shows_nothing(bot: DealBot, settings: Settings, tmp_path: Path) -> None:

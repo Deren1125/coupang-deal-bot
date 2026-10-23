@@ -679,8 +679,7 @@ class StateBuilder:
                         "since": _ts(t.since), "expires_at": None, "primary": primary,
                         "more": [act("todo.dismiss", "다 했어요", {"iid": iid, "key": t.key})]
                         if dismissible(iid, t.key, dealbot_row=False) else [], "detail": {"lines": []}}
-        if (vrow := self._visits_item(v2.get("visits"))) is not None:
-            out[vrow["iid"]] = vrow
+        # '오늘 들를 이웃 글'은 할 일에 넣지 않는다 (주인 10/23 — 알림 없이, 블로그 화면 '이웃' 칸에서만 본다)
         if (srow := self._search_item(self.search_view(v2))) is not None:
             out[srow["iid"]] = srow
         hidden = hidden_rows(self.bot.db, now)  # 주인이 '알림 없애기'로 뺀 줄 (주인 10/23)

@@ -2849,14 +2849,17 @@ class DealBot:
 
     @staticmethod
     def _naver_short(deal: Deal) -> bool:
-        """네이버 단축 주소(naver.me — 대개 글쓴이의 쇼핑커넥트 제휴 링크)로 들어온 딜. 열지 않고(남의 제휴 클릭이 됨) 건너뛴다 (주인 10/23)."""
+        """상품 번호가 없는 네이버 주소로 들어온 딜 — 건너뛴다 (주인 10/23). naver.me 단축 주소(대개 글쓴이의 쇼핑커넥트 제휴 링크 —
+        열지 않음), 쇼핑라이브 방송·쇼핑스토리 글·쇼핑윈도처럼 스마트스토어 상품 번호가 없는 주소 (자동 링크를 못 거쳐 주인 링크만 기다리다 버려졌음)."""
+        if deal.product.shop != "naver":
+            return False
         host = urlparse(deal.product.url or "").netloc.lower()
-        return deal.product.shop == "naver" and (host == "naver.me" or host.endswith(".naver.me"))
+        return host == "naver.me" or host.endswith(".naver.me") or not store_product_no(deal.product.url)
 
     def _skip_short(self, item: QueueItem) -> None:
-        self.db.update_queue_item(item.id, status="skipped", error="naver short link (owner 10/23: skip)")
+        self.db.update_queue_item(item.id, status="skipped", error="naver short link / no product number (owner 10/23: skip)")
         self.notifier.resolve(f"link:{item.id}")
-        self.db.log_event("INFO", "autolink", f"#{item.id} 네이버 단축 주소 딜 → 건너뜀")
+        self.db.log_event("INFO", "autolink", f"#{item.id} 상품 번호 없는 네이버 주소 딜 → 건너뜀")
         log.info("queue #%d skipped — naver short link", item.id)
 
     def _autolink_backlog(self) -> int:

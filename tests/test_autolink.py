@@ -328,11 +328,11 @@ async def test_disabled_or_unverified_or_other_shops_keep_the_old_flow(bot: Deal
     qid = _enqueue(bot, toss)
     assert await bot.process_queue_once()
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
-    # 상품번호가 없는 네이버 주소(쇼핑 창 등)도 예전처럼
+    # 상품번호가 없는 네이버 주소(쇼핑 창·쇼핑라이브 등)는 묻지 않고 건너뜀 (주인 10/23)
     bot.db.update_queue_item(qid, status="skipped")
     qid = _enqueue(bot, _product(url="https://shopping.naver.com/window-products/12345", product_id="naver:w12345"))
     assert await bot.process_queue_once()
-    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
+    assert bot.db.get_queue_item(qid).status == "skipped"  # type: ignore[union-attr]
     assert not [u for u in _inbox(settings) if "connect_link" in u]
 
 
