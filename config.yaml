@@ -172,6 +172,25 @@ collectors:
       #   row: "li.post-li"
       #   title: "a.product-link"
 
+  # 클리앙 알뜰구매 (주인 승인 10/23).
+  # robots.txt(www.clien.net/robots.txt): `Allow:/service/board/` 이지만 `Disallow: /*?*` — 그래서 목록은 쿼리 없는 맨 주소
+  # https://www.clien.net/service/board/jirum 첫 페이지만 읽고(페이지 넘기기·정렬 쿼리 없음), 글 본문은 쇼핑몰 링크를 찾을 때만
+  # /service/board/jirum/<번호> 경로로 열며 목록 링크에 붙은 ?od=… 쿼리는 뗀다. 3초 간격, 한 판에 본문 8개까지.
+  # 품절·종료 표시(제목 '품절'/'종료', 행의 sold_out 클래스)가 붙은 글은 건너뜀. 0건이면 /errors 에 DOM 요약이 남으니 options.selectors 를 맞춘다.
+  - name: clien_jirum
+    label: 클리앙 알뜰구매
+    type: clien
+    enabled: true
+    interval_minutes: 15
+    options:
+      shops: []                  # 비우면 등록된 모든 쇼핑몰
+      unknown_shop: skip
+      request_delay_seconds: 3
+      max_detail_fetch_per_run: 8
+      # selectors:
+      #   row: "div.list_item.jirum"
+      #   title: "span.list_subject a:not(.list_reply)"
+
   # 애드픽 쇼핑메이트 핫딜 API (ADPICK_AFFID 필요). 제휴 링크가 포함된 여러 쇼핑몰 핫딜 목록.
   - name: adpick
     label: 애드픽
@@ -202,6 +221,14 @@ deal:
     ruliweb_biz:
       community_min_recommend: 0     # 업체 게시판은 추천이 안 붙음 → 시중가 대조로만 판정
       coupon_min_recommend: 0
+    # 클리앙 알뜰구매: 공감(추천)이 작다 (10/23 목록 31건: 중앙값 약 5, 최대 41) — 그래서 community_min_recommend(10)·
+    # community_strong_recommend(30)·coupon_min_recommend(20) 같은 판정 기준은 건드리지 않고(전체 기준 그대로) 관심도 문턱만 둔다.
+    # 추천·댓글 문턱은 뽐뿌(전체 기본값)와 같게 1·3. 조회수는 클리앙이 훨씬 커서(목록 최소 647, 보통 수천) 전체 기본 500 이면
+    # 모든 글이 관심도 게이트를 통과하므로 3000 으로 올려 의미 있는 신호로 남김 — 느슨하게 하는 게 아니라 조이는 쪽.
+    clien_jirum:
+      interest_min_recommend: 1
+      interest_min_comments: 3
+      interest_min_views: 3000
   # 품절/종료된 딜 정리
   #  - 게시판을 다시 읽을 때 제목에 품절·종료·마감·매진 표시가 붙은 글 → 기다리는 글에서 내리고, 보냈던 링크 요청 메시지를
   #    "품절되어 취소했습니다" 로 고치고, 올린 지 mark_published_hours 안의 채널 글에는 맨 위에 "⛔ 품절" 표시

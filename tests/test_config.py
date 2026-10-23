@@ -18,7 +18,7 @@ def test_load_repo_config(repo_root: Path, monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setenv("DEALBOT_DRY_RUN", "true")
 
     s = load_settings(repo_root / "config.yaml", load_env=False)
-    assert [c.name for c in s.collectors] == ["goldbox", "category_best", "ppomppu", "ruliweb_biz", "ruliweb_user", "algumon", "adpick"]
+    assert [c.name for c in s.collectors] == ["goldbox", "category_best", "ppomppu", "ruliweb_biz", "ruliweb_user", "algumon", "clien_jirum", "adpick"]
     assert {sh.key for sh in s.shops} >= {"coupang", "toss", "naver"}
     assert s.deal.community_min_recommend == 10 and s.deal.recommend_needs_support and not s.deal.discount_alone
     assert s.deal.accept_coupons_and_events is False  # 이벤트/쿠폰(가격 없는 글)은 올리지 않기로 함
