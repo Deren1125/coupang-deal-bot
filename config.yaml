@@ -164,7 +164,9 @@ collectors:
   - name: algumon
     label: 알구몬
     type: algumon
-    enabled: true         # 주인 10/23 켬 — robots.txt 가 /n/deal 허용. 서버에서 막히면(403) 수집기 목록에 '오류'로 보임
+    # 꺼 둠 (주인 10/23): 알구몬이 서버 IP(Lightsail 52.79.136.64)를 막아 403 "접근이 차단되었어요 (E001)" — 한 번도 못 읽음.
+    # 우회(프록시 등)는 하지 않는다. 차단이 풀리면(team@algumon.com 문의) true 로.
+    enabled: false
     interval_minutes: 15
     options:
       url: https://www.algumon.com/n/deal
