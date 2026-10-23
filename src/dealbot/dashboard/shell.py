@@ -24,6 +24,7 @@ APP_CSS = "app.css"
 EDIT_JS = "edit.js"  # 사진 고치기·편집기 (10/19) — app.js 가 처음 쓸 때만 불러온다 (주소는 meta sb-edit)
 PRODUCT_JS = "product.js"  # 제품 테스트 (10/21) — 블로그 › Pick '제품 테스트'를 처음 열 때만 (주소는 meta sb-product)
 SCHED_JS = "sched.js"  # 일정 (10/21) — 블로그 탭 '예약 일정 보기'를 처음 열 때만 (주소는 meta sb-sched)
+EARN_JS = "earn.js"  # 제휴 수익 칸 (10/23) — 통계 탭을 처음 열 때만 (주소는 meta sb-earn)
 THPOST_JS = "thpost.js"  # 스레드 글·예약·댓글·통계 칸 (10/21) — threads.js 의 세 칸에 붙는 그리기. 어느 쪽이 먼저 떠도 붙도록 defer 로 먼저 받는다
 THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
 
@@ -59,6 +60,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<meta name="sb-edit" content="{asset_url(EDIT_JS)}">'
         f'<meta name="sb-product" content="{asset_url(PRODUCT_JS)}">'
         f'<meta name="sb-sched" content="{asset_url(SCHED_JS)}">'
+        f'<meta name="sb-earn" content="{asset_url(EARN_JS)}">'
         f'<meta name="sb-threads" content="{asset_url(THREADS_JS)}">'
         '</head><body>'
         '<header class="hd"><h1 id="ttl">할 일</h1><span class="old" id="old" hidden></span>'

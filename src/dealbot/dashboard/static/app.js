@@ -1112,10 +1112,13 @@ async function pubAll(xs) {
 }
 
 // -- 탭: 통계 (서버가 그린 카드 조각 — 폼·스크립트 없음)
+const erLoad = lazy('meta[name=sb-earn]', 'earn', 'SBEarn');  // 제휴 수익 칸 (10/23): earn.js 는 통계 탭을 처음 열 때만
+let ER;
 function vStats() {
   const box = el('div', {class: 'stx', onclick: statsClick});
   if (STATS) box.innerHTML = STATS; else box.append(el('p', {class: 'boot'}, '불러오는 중…'));
-  return [box];
+  if (!S || !S.earnings) return [box];
+  return [...(ER ? ER.view(S.earnings, {el, btn, sheet, back, exec, confirmSheet}) : (erLoad().then(m => { ER = m; render(); }, () => 0), [])), box];
 }
 async function loadStats() {
   let r = null;

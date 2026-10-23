@@ -497,6 +497,8 @@ class DealBot:
             self.notifier.router = self.router
             self.digests = Digests(self.db, self.router, tz=settings.app.timezone, export=self._blog_export,
                                    todo=self._todo_brief)
+        self.earn_store: Any = None  # dashboard.earn.EarnStore (대시보드를 만든 뒤)
+        self.earn_coupang: Any = None  # dashboard.earn.EarnCoupang — 쿠팡 실적을 3시간마다 읽음 (scheduler.dashboard_loop)
         self.dash_state: Any = None  # dashboard.state.StateBuilder (대시보드를 만든 뒤)
         # 말 명령 (주인 요청 10/11): 일반 말 → 기존 명령. AI 는 정보 글 요약기처럼 API 키가 있으면 API, 없으면 서버 claude CLI
         nc = settings.monitoring.nl_router
@@ -549,8 +551,11 @@ class DealBot:
         self.dashboard: Dashboard | None = None
         try:
             self.dashboard = self._build_dashboard()
+            from dealbot.dashboard.earn import EarnCoupang, EarnStore
             from dealbot.dashboard.state import StateBuilder
 
+            self.earn_store = EarnStore(self.db)  # 제휴 수익 (10/23 — dashboard/earn.py)
+            self.earn_coupang = EarnCoupang(self.earn_store, lambda: self.coupang, lambda: self.budget, settings.app.timezone)
             self.dash_state = StateBuilder(self)
             self.dashboard.attach_app(self)  # 대시보드 앱 API (/dashboard/api/…, dashboard/api.py)
             self.dashboard.register(self.web)

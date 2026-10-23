@@ -330,6 +330,14 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
                 log.info("dashboard collected: %s", ", ".join(ran))
         except Exception as e:  # noqa: BLE001
             log.warning("dashboard collect failed: %s", e)
+        earn = getattr(bot, "earn_coupang", None)
+        if earn is not None:  # 제휴 수익: 쿠팡 실적 3시간마다 (읽을 때가 아니면 바로 돌아옴 — dashboard/earn.py)
+            try:
+                got = await earn.tick()
+                if got:
+                    log.info("earnings coupang: %s", got)
+            except Exception as e:  # noqa: BLE001
+                log.warning("earnings coupang failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 

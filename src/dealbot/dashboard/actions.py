@@ -27,8 +27,10 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
@@ -43,6 +45,7 @@ from dealbot.dashboard.blogauto import (
     TRIAL_REASONS,
     VISIT_ID,
 )
+from dealbot.dashboard.earn import EarnError
 from dealbot.dashboard.model import safe_text
 from dealbot.notify import iid as iidmod
 from dealbot.utils.text import truncate
@@ -105,7 +108,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "post_edit")  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
-                "todo.dismiss", "stats.refresh", "stats.input", "search.check")
+                "todo.dismiss", "stats.refresh", "stats.input", "search.check",
+                "earn.save", "earn.delete")  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
 DISMISS_POST_HEADS = ("dup", "cards", "openchat")
 REAL_WORK_HEADS = ("link", "review", "unsure", "photo", "ask", "draft", "oedit", "fail", "chan", "share", "hot", "sched")
@@ -489,6 +493,15 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         if not all(_naver_post(u) for u in urls):
             raise ActionError("bad_args")
         return {"urls": list(dict.fromkeys(urls)), "done": g("done")}
+    if action == "earn.save":  # 값 확인(날짜·금액·가게)은 EarnStore.clean_manual 이 — 여기서는 모양과 길이만
+        amounts = {k: g(k) if isinstance(g(k), str | int) and not isinstance(g(k), bool) else "" for k in ("amount", "commission")}
+        out = {"shop": _str(g("shop"), 20), "day": _str(g("day"), 10), "product": _str(g("product"), 200, required=False),
+               "memo": _str(g("memo"), 400, required=False), **{k: str(v)[:20] for k, v in amounts.items()}}
+        if g("id") not in (None, ""):
+            out["id"] = _int(g("id"))
+        return out
+    if action == "earn.delete":
+        return {"id": _int(g("id"))}
     if action == "stats.input":
         values = g("values")
         if not isinstance(values, dict) or len(values) > 10 or not all(isinstance(k, str) and isinstance(v, str | int) for k, v in values.items()):
@@ -1358,6 +1371,8 @@ class ActionDesk:
                 return "not_found", TEXTS["not_found"]
             what = f"{n}개를 " if n > 1 else ""
             return "done", f"{what}등록함으로 표시했어요" if args["done"] else f"{what}등록 안 함으로 되돌렸어요"
+        if action in ("earn.save", "earn.delete"):
+            return self._earn(action, args)
         if action == "stats.input":
             dash = bot.dashboard
             query = dict(args["values"])
@@ -1366,6 +1381,27 @@ class ActionDesk:
             got = dash.save_manual(args["src"], query)
             return ("done" if got == "saved" else got), ("저장했어요" if got == "saved" else TEXTS.get(got, TEXTS["bad_args"]))
         raise ActionError("bad_args")
+
+    def _earn(self, action: str, args: dict[str, Any]) -> tuple[str, str]:
+        """제휴 수익 직접 넣기·고치기·지우기 (봇 DB earn_manual — 밖으로 나가는 것 없음)."""
+        store = getattr(self.bot, "earn_store", None)
+        if store is None:
+            raise ActionError("off")
+        if action == "earn.delete":
+            return ("done", "지웠어요") if store.delete_manual(args["id"]) else ("not_found", TEXTS["not_found"])
+        today = datetime.fromtimestamp(self.clock(), ZoneInfo(self.bot.settings.app.timezone)).date()
+        try:
+            row = store.clean_manual(args, today)
+        except EarnError as e:
+            return "bad_args", str(e)
+        now = datetime.fromtimestamp(self.clock(), UTC).isoformat(timespec="seconds")
+        if "id" in args:
+            return ("done", "고쳤어요") if store.update_manual(args["id"], row, now) else ("not_found", TEXTS["not_found"])
+        try:
+            store.add_manual(row, now)
+        except EarnError as e:
+            return "bad_args", str(e)
+        return "done", "넣었어요"
 
     def _dismiss(self, args: dict[str, Any], caller: Caller) -> tuple[str, str]:
         """다 했어요: 밖에서 끝낸 일만 (두 번 발행·구매 링크 빠짐·서로이웃·멈춤·스레드 답글·시스템 참고)."""

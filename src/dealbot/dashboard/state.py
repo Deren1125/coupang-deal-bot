@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import rank, schedview, thpost
+from dealbot.dashboard import earn, rank, schedview, thpost
 from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
@@ -1123,6 +1123,7 @@ class StateBuilder:
             "search": self.search_view(getattr(export, "v2", None) or {}),
             "ptrial": self.product_trial(export),  # 제품 테스트 (10/21)
             "thpost": self.thpost(export),  # 스레드 글·통계 (10/21 — thpost.py · Blog-Auto threads 칸이 없으면 None)
+            "earnings": self.earnings(export),  # 통계 탭 '제휴 수익' (10/23 — earn.py · 그리기는 처음 열 때만 받는 earn.js)
             "devlog": self.devlog(export),  # 할 일 페이지 맨 아래 '오늘 바뀐 것' (10/23 — 화면이 title·rows 를 그대로 그림)
         }
         return body
@@ -1136,6 +1137,19 @@ class StateBuilder:
             return None
         rows = [{"at": x["at"], "repo": x["repo"], "text": x["text"] + (f" ({x['count']}번)" if x["count"] > 1 else "")} for x in d["items"]]
         return {"title": f"오늘 바뀐 것 · {d['n']}개", "rows": rows}
+
+    def earnings(self, export: Any) -> dict[str, Any] | None:
+        """통계 탭 '제휴 수익' 칸: 쿠팡(자동 · DB) + 쇼핑커넥트(Blog-Auto 기록 파일) + 직접 넣은 것. DB 를 못 읽으면 None (칸이 안 보임)."""
+        store = getattr(self.bot, "earn_store", None)
+        if store is None:
+            return None
+        sc = ((getattr(export, "v2", None) or {}).get("earnings") or {}).get("shopconnect")
+        try:
+            return earn.build(store, self.tz, time.time(), sc, coupang_on=self.bot.coupang is not None,
+                              sub_id_set=bool(self.bot.settings.secrets.coupang_sub_id))
+        except Exception as e:  # noqa: BLE001 — 수익 칸 하나가 상태 전체를 막지 않게
+            log.warning("earnings state failed: %s", type(e).__name__)
+            return None
 
     def thpost(self, export: Any) -> dict[str, Any] | None:
         """스레드 글·통계 (주인 10/21): 주인이 쓴 글 바로·예약 · 예약 취소 · 계정의 최근 글 · 새 답글에 답 · 공식 인사이트."""
@@ -1162,7 +1176,7 @@ ACTION_LABELS = {
     "deal.repost": "다시 올리기", "deal.late_photo": "사진 올리기", "deal.post": "새 딜 올리기", "bot.pause": "딜봇 멈춤",
     "bot.resume": "딜봇 다시 시작", "bot.run": "지금 수집", "sns.token": "토큰 넣기", "sns.code": "코드 넣기", "sns.test": "테스트 글",
     "sns.invites": "초대 링크 만들기", "push.test": "테스트 알림", "push.subscribe": "알림 켜기", "push.unsubscribe": "알림 끄기",
-    "todo.dismiss": "다 했어요", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "upload": "사진 올림",
+    "todo.dismiss": "다 했어요", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기", "upload": "사진 올림",
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",

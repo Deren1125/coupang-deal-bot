@@ -993,6 +993,30 @@ def _creator_mall(v: Any) -> dict[str, Any] | None:
             "total": {k: total(k) for k in ("visits", "orders", "expected", "last_month")}}
 
 
+EARN_DAYS_MAX = 35
+EARN_ORDERS_MAX = 40
+
+
+def _earnings(v: Any) -> dict[str, Any] | None:
+    """제휴 수익 (주인 10/23 — Blog-Auto earnings.py): {shopconnect: {confirmed, read_at, days: [{day, clicks, orders, amount, commission}],
+    orders: [{day, name, amount, commission}]}}. 칸이 없으면(예전 Blog-Auto) None. confirmed 가 false 면 줄 없이 그것만. 금액은 원 정수."""
+    sc = v.get("shopconnect") if isinstance(v, dict) else None
+    if not isinstance(sc, dict) or not isinstance(sc.get("confirmed"), bool):
+        return None
+    top = 10**11
+    days, orders = [], []
+    if sc["confirmed"]:
+        for x in sc.get("days")[:EARN_DAYS_MAX] if isinstance(sc.get("days"), list) else []:
+            if isinstance(x, dict) and isinstance(x.get("day"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", x["day"]):
+                days.append({"day": x["day"], **{k: _count(x.get(k), top=top) or 0 for k in ("clicks", "orders", "amount", "commission")}})
+        for x in sc.get("orders")[:EARN_ORDERS_MAX] if isinstance(sc.get("orders"), list) else []:
+            if isinstance(x, dict) and isinstance(x.get("day"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", x["day"]):
+                orders.append({"day": x["day"], "name": _one_line(x.get("name"), 80) or "(상품 이름 없음)",
+                               "amount": _count(x.get("amount"), top=top) or 0, "commission": _count(x.get("commission"), top=top) or 0})
+    return {"shopconnect": {"confirmed": sc["confirmed"], "read_at": _one_line(sc.get("read_at"), 40) if sc["confirmed"] else None,
+                            "days": days, "orders": orders}}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -1001,7 +1025,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                            "learn": _learn(data.get("learn")), "photo_trial": _photo_trial(data.get("photo_trial")),
                            "product_trial": _product_trial(data.get("product_trial")),
                            "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog")),
-                           "creator_mall": _creator_mall(data.get("creator_mall"))}
+                           "creator_mall": _creator_mall(data.get("creator_mall")),
+                           "earnings": _earnings(data.get("earnings"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []
