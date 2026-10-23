@@ -142,28 +142,25 @@ async def test_not_on_sale_is_skipped_without_asking(bot: DealBot, settings: Set
     assert bot.sent == []  # type: ignore[attr-defined]
 
 
-async def test_login_stops_toss_alerts_once_and_falls_back(bot: DealBot, settings: Settings) -> None:
+async def test_login_stop_alerts_once_and_toss_deals_wait(bot: DealBot, settings: Settings) -> None:
+    """주인 10/23: 토스 로그인이 풀리면 기다렸다가 다시 로그인(resume)하면 자동으로 — 링크를 묻지 않음."""
     qid, job = await _ask(bot, settings)
     _reply(settings, {"id": qid, "job": job["job"], "url": URL, "ok": False, "reason": "login", "retry_at": time.time() + 3600})
     await bot.autolink_tick()
-    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
     notes = [u["owner_notice"] for u in _inbox(settings) if "owner_notice" in u and u["owner_notice"]["kind"] == "autolink_stop"]
     assert len(notes) == 1 and "토스" in notes[0]["text"] and "affiliate-login.sh 토스" in notes[0]["text"]
-    # 멈춘 동안 새 토스 딜은 묻지 않고 바로 예전처럼, 네이버 쇼핑커넥트 멈춤과는 따로
-    assert not bot.db.kv_get(autolink.KV_STOP)
+    assert not bot.db.kv_get(autolink.KV_STOP)  # 네이버 쇼핑커넥트 멈춤과는 따로
     asked = len([u for u in _inbox(settings) if "toss_link" in u])
-    bot.db.update_queue_item(qid, status="skipped")
     qid2 = _enqueue(bot, _product(url="https://toss.shopping/t/78829901"))
     assert await bot.process_queue_once()
-    assert bot.db.get_queue_item(qid2).status == "awaiting_link"  # type: ignore[union-attr]
+    assert bot.db.get_queue_item(qid2).status == autolink.STATUS  # type: ignore[union-attr]
     assert len([u for u in _inbox(settings) if "toss_link" in u]) == asked
     bot._note_toss_stop({"reason": "login"})  # 같은 날 또 와도 카톡은 한 번
     assert len([u for u in _inbox(settings) if "owner_notice" in u and u["owner_notice"]["kind"] == "autolink_stop"]) == 1
-    # Blog-Auto 에서 다시 로그인하고 resume → 다시 묻는다
-    _reply(settings, {"resume": True, "at": time.time()})
+    _reply(settings, {"resume": True, "at": time.time()})  # 다시 로그인하고 resume → 기다리던 두 딜을 다시 부탁
     await bot.autolink_tick()
-    bot.db.update_queue_item(qid2, status="skipped")
-    await _ask(bot, settings, _product(url="https://toss.shopping/t/114368443"))
+    assert sorted([u["toss_link"]["id"] for u in _inbox(settings) if "toss_link" in u][asked:]) == sorted([qid, qid2])
 
 
 async def test_no_reply_in_time_falls_back_and_cancels_with_toss_cancel(bot: DealBot, settings: Settings) -> None:

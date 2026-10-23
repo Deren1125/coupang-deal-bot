@@ -2638,7 +2638,7 @@ class DealBot:
             log.info("queue #%d: store %s joined Shopping Connect — removed from the no-link list", item.id, label)
 
     # ------------------------------------------------- 네이버 쇼핑커넥트 자동 링크 (Blog-Auto 가 브라우저 일)
-    def _autolink_product_no(self, deal: Deal, shop: Any, auth: AuthResult) -> str | None:
+    def _autolink_product_no(self, deal: Deal, shop: Any, auth: AuthResult, *, ignore_stop: bool = False) -> str | None:
         """자동 링크를 시도할 네이버 딜이면 스토어 상품번호, 아니면 None (→ 예전처럼 주인에게 링크 요청)."""
         cfg = self.settings.autolink.naver
         if not cfg.enabled or shop is None or shop.key != "naver" or self.state.dry_run:
@@ -2646,7 +2646,7 @@ class DealBot:
         if auth.status != "ok" and cfg.unverified != "auto":
             return None  # 판매처 확인이 안 된 딜은 주인이 보고 링크를 만든다 (예전 흐름)
         until = from_iso(self.db.kv_get(autolink.KV_STOP))
-        if until and until > utcnow():
+        if until and until > utcnow() and not ignore_stop:
             return None  # Blog-Auto 가 멈춘 동안(한도·시간 밖·로그인·제한)은 묻지 않고 예전 흐름으로
         if not autolink.job_queries(deal.product.name):
             return None  # 검색어가 안 남는 이름 — Blog-Auto 가 받지 않으니 30분 기다리지 않고 바로 주인에게
@@ -2710,13 +2710,13 @@ class DealBot:
             self.relay_to_blog({kind: {"id": queue_id, "job": marker.get("job"), "at": time.time()}})
 
     # ------------------------------------------------- 토스쇼핑 쉐어링크 자동 링크 (주인 10/23, Blog-Auto 가 브라우저 일)
-    def _toss_autolink_key(self, deal: Deal, shop: Any) -> tuple[str, str] | None:
+    def _toss_autolink_key(self, deal: Deal, shop: Any, *, ignore_stop: bool = False) -> tuple[str, str] | None:
         """자동 쉐어링크를 시도할 토스 딜이면 상품 주소의 (t|i, 번호), 아니면 None (→ 예전처럼 주인에게 링크 요청)."""
         cfg = self.settings.autolink.toss
         if not cfg.enabled or shop is None or shop.key != "toss" or self.state.dry_run:
             return None
         until = from_iso(self.db.kv_get(autolink.KV_TOSS_STOP))
-        if until and until > utcnow():
+        if until and until > utcnow() and not ignore_stop:
             return None  # Blog-Auto 가 멈춘 동안(로그인·한도·시간 밖)은 묻지 않고 예전 흐름으로
         return autolink.toss_key(deal.product.url)
 
@@ -2769,6 +2769,8 @@ class DealBot:
             self.db.update_queue_item(qid, status="skipped", error=f"toss: {reason} (auto link)")
             self.db.log_event("INFO", "autolink", f"#{qid} 토스 {reason} → 건너뜀")
             return 1
+        if self._defer_from_row(item, row, "toss"):
+            return 1  # 시간 밖·로그인·한도 — 주인에게 묻지 않고 다시 될 때까지
         await self._autolink_fallback(item, f"toss: {reason}")
         return 1
 
@@ -2788,7 +2790,7 @@ class DealBot:
                 self.db.kv_set(key, day)
                 self.db.log_event("WARNING", "autolink", f"toss stopped: {reason}")
                 log.warning("토스 쉐어링크 자동 링크 멈춤: %s", reason)
-                text = (f"토스 쉐어링크 자동 링크 멈춤: {autolink.TOSS_ALERT_REASONS[reason]}. 그동안 토스 딜은 예전처럼 링크를 요청할게요. "
+                text = (f"토스 쉐어링크 자동 링크 멈춤: {autolink.TOSS_ALERT_REASONS[reason]}. 그동안 들어온 토스 딜은 묻지 않고 기다렸다가 다시 되면 자동으로 링크를 만들어요. "
                         f"{autolink.TOSS_RESUME_HINT}")
                 if self.notifier.silent_policy:
                     if not self.notifier.owner_line({"kind": "autolink_stop", "key": f"autolink_toss:{reason}", "urgent": True,
@@ -2935,6 +2937,8 @@ class DealBot:
             self.db.kv_set(f"{autolink.KV_MISS}{no}", to_iso(utcnow()))
             self._post_raw_link(item, item.deal, "쇼핑커넥트에 없음")
             return 1
+        if self._defer_from_row(item, row, "naver", no):
+            return 1  # 시간 밖·로그인·한도 — 주인에게 묻지 않고 다시 될 때까지
         await self._autolink_fallback(item, reason)
         return 1
 
@@ -2954,7 +2958,7 @@ class DealBot:
                 self.db.kv_set(key, day)
                 self.db.log_event("WARNING", "autolink", f"stopped: {reason}")
                 log.warning("쇼핑커넥트 자동 링크 멈춤: %s", reason)
-                text = (f"쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 네이버 딜은 예전처럼 링크를 요청할게요. "
+                text = (f"쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 들어온 네이버 딜은 묻지 않고 기다렸다가 다시 되면 자동으로 링크를 만들어요. "
                         f"{autolink.RESUME_HINT}")
                 if self.notifier.silent_policy:  # 알림 정책(10/11): 카톡 할 일 한 통 (v2 키 — 다시 시작하면 해결)
                     if not self.notifier.owner_line({"kind": "autolink_stop", "key": f"autolink:{reason}", "urgent": True,
@@ -2964,12 +2968,63 @@ class DealBot:
                 else:
                     self.owner_notice("autolink_stop", f"⛔ {text}")
 
+    def _stop_until(self, shop: str) -> datetime | None:
+        """Blog-Auto 가 그 일(naver 쇼핑커넥트·toss 쉐어링크)을 멈춘 시각까지 — 멈추지 않았으면 None."""
+        until = from_iso(self.db.kv_get(autolink.KV_TOSS_STOP if shop == "toss" else autolink.KV_STOP))
+        return until if until and until > utcnow() else None
+
+    def _defer_autolink(self, item: QueueItem, deal: Deal, *, shop: str, until: datetime, no: str = "") -> None:
+        """Blog-Auto 가 지금 못 함 (시간 밖·로그인·한도·멈춤 — 주인 10/23 '묻지 말고 기다렸다가'): 주인에게 링크를 묻지 않고
+        다시 될 때(until, 또는 주인이 다시 로그인해 resume)까지 자동 링크 대기로 둔다. 깨우는 것은 _autolink_timeouts."""
+        marker = {"deferred": True, "shop": shop, "until": to_iso(until), "at": to_iso(utcnow()), "no": no, "url": deal.product.url}
+        self.db.kv_set(f"{autolink.KV_JOB}{item.id}", json.dumps(marker))
+        self.db.update_queue_item(item.id, status=autolink.STATUS, error="auto link waiting (Blog-Auto paused)", deal=deal)
+        self.notifier.resolve(f"link:{item.id}")
+        log.info("queue #%d → 자동 링크 기다림 (%s, %s 까지)", item.id, shop, to_iso(until))
+
+    def _defer_from_row(self, item: QueueItem, row: dict[str, Any], shop: str, no: str = "") -> bool:
+        """답이 '지금 못 함'(WAIT_REASONS)이면 기다리게 하고 True."""
+        if str(row.get("reason") or "") not in autolink.WAIT_REASONS:
+            return False
+        retry_at = row.get("retry_at")
+        until = (datetime.fromtimestamp(float(retry_at), tz=UTC) if isinstance(retry_at, (int, float)) and retry_at > time.time()
+                 else self._stop_until(shop) or utcnow() + timedelta(hours=1))
+        self._defer_autolink(item, item.deal, shop=shop, until=until, no=no)
+        return True
+
+    WAKE_INFLIGHT_MAX = 3  # 기다리던 글을 깨울 때 Blog-Auto 에 한꺼번에 맡겨 두는 수 (하나씩 1~2분 — 30분 안에 답이 오게)
+
     async def _autolink_timeouts(self) -> int:
         now = utcnow()
         n = 0
-        for item in self.db.awaiting_items(50, statuses=(autolink.STATUS,)):
+        items = self.db.awaiting_items(50, statuses=(autolink.STATUS,))
+        markers = {}
+        for item in items:
             raw = self.db.kv_get(f"{autolink.KV_JOB}{item.id}")
-            marker = json.loads(raw) if raw else {}
+            try:
+                markers[item.id] = json.loads(raw) if raw else {}
+            except ValueError:
+                markers[item.id] = {}
+        inflight = sum(1 for m in markers.values() if isinstance(m, dict) and m and not m.get("deferred"))
+        for item in items:
+            marker = markers.get(item.id) or {}
+            if isinstance(marker, dict) and marker.get("deferred"):  # Blog-Auto 가 다시 될 때까지 기다리는 글
+                shop = str(marker.get("shop") or "naver")
+                until = from_iso(marker.get("until"))
+                if until is not None and until > now and self._stop_until(shop) is not None:
+                    continue  # 아직 멈춤 (주인이 다시 로그인해 resume 하면 멈춤이 풀려 바로 깨움)
+                if self._stop_until(shop) is not None:  # 멈춤이 늘었음 — 그 시각까지 더 기다림
+                    self._defer_autolink(item, item.deal, shop=shop, until=self._stop_until(shop) or now, no=str(marker.get("no") or ""))
+                    continue
+                if inflight >= self.WAKE_INFLIGHT_MAX:
+                    continue  # 앞서 깨운 글의 답을 받은 뒤에 (한꺼번에 맡기면 30분 안에 다 못 함)
+                if shop == "toss":
+                    self._request_toss_autolink(item, item.deal)
+                else:
+                    self._request_autolink(item, item.deal, str(marker.get("no") or ""))
+                inflight += 1
+                n += 1
+                continue
             cfg = self.settings.autolink.toss if isinstance(marker, dict) and marker.get("shop") == "toss" else self.settings.autolink.naver
             at = from_iso(marker.get("at")) if isinstance(marker, dict) else None
             if at is not None and at > now - timedelta(minutes=cfg.wait_minutes):
@@ -3083,12 +3138,20 @@ class DealBot:
                     return True
                 self._post_raw_link(item, deal, "쇼핑 커넥트 없는 판매처 (주인 표시)", reason="sc_store")
                 return True
-            toss = self._toss_autolink_key(deal, shop)
+            toss = self._toss_autolink_key(deal, shop, ignore_stop=True)
             if toss:
                 # 토스: 주인에게 묻기 전에 Blog-Auto 가 쉐어링크를 자동으로 (주인 10/23). 안 되면 아래와 같은 링크 요청으로 돌아온다
+                if (until := self._stop_until("toss")) is not None:
+                    self._defer_autolink(item, deal, shop="toss", until=until)  # 시간 밖·로그인·한도 — 묻지 않고 기다림
+                    return True
                 self._request_toss_autolink(item, deal)
                 return True
-            product_no = self._autolink_product_no(deal, shop, auth)
+            product_no = self._autolink_product_no(deal, shop, auth, ignore_stop=True)
+            if product_no and (until := self._stop_until("naver")) is not None and not self._sc_known_missing(product_no):
+                if await self._held_before_autolink(item, deal):
+                    return True
+                self._defer_autolink(item, deal, shop="naver", until=until, no=product_no)
+                return True
             if product_no:
                 # 네이버: 주인에게 묻기 전에 쇼핑커넥트에서 자동으로 (주인 결정 10/11). 안 되면 아래와 같은 링크 요청으로 돌아온다
                 if await self._held_before_autolink(item, deal):

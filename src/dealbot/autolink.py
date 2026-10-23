@@ -28,6 +28,8 @@ RESULTS_FILE = "connect_results.jsonl"
 KV_JOB = "autolink:"  # autolink:{queue_id} → {"job", "no", "at"}
 KV_POS = "autolink_results_pos"
 KV_STOP = "autolink_stop_until"  # Blog-Auto 가 멈춘(한도·시간 밖·로그인·제한) 동안은 묻지 않고 바로 주인에게
+# Blog-Auto 가 지금 못 하는 이유 (시간 밖·로그인·한도·멈춤·제한) — 주인에게 묻지 않고 다시 될 때까지 기다린다 (주인 10/23)
+WAIT_REASONS = frozenset({"hours", "login", "cap", "issue_cap", "stopped", "blocked"})
 KV_TRIED = "autolink_tried:"  # autolink_tried:{queue_id} → 자동 링크를 이미 거친 시각 (밀린 링크 자동 보내기는 한 번만)
 KV_MISS = "sc_miss:"  # sc_miss:{상품번호} → 쇼핑커넥트에 없던 시각
 NAVER_ME = re.compile(r"^https://naver\.me/[A-Za-z0-9]+$")

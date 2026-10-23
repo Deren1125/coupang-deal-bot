@@ -230,31 +230,53 @@ async def test_owner_link_on_a_raw_item_brings_the_disclosure_back(bot: DealBot,
     assert "raw_link" not in deal.product.extra and NAVER_DISCLOSURE in bot.publisher.render(deal)
 
 
-async def test_login_stops_autolink_alerts_once_and_falls_back(bot: DealBot, settings: Settings) -> None:
+async def test_login_stop_alerts_once_and_deals_wait_instead_of_asking(bot: DealBot, settings: Settings) -> None:
+    """주인 10/23: 로그인이 풀리면 주인이 다시 로그인할 때까지 기다린다 (링크를 묻지 않음) · 멈춤 카톡은 하루 한 번."""
     qid, job = await _ask(bot, settings)
     _reply(settings, {"id": qid, "job": job["job"], "product_no": NO, "ok": False, "reason": "login", "retry_at": time.time() + 3600})
     await bot.autolink_tick()
-    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]  # 기다림 (주인에게 안 물음)
+    assert bot.sent == []  # type: ignore[attr-defined]
     notes = [u["owner_notice"] for u in _inbox(settings) if "owner_notice" in u and u["owner_notice"]["kind"] == "autolink_stop"]
-    assert len(notes) == 1 and "로그인" in notes[0]["text"] and len(notes[0]["text"]) <= 200
-    # 멈춘 동안 새 네이버 딜은 Blog-Auto 에 묻지 않고 바로 예전처럼
+    assert len(notes) == 1 and "로그인" in notes[0]["text"] and "기다렸다가" in notes[0]["text"] and len(notes[0]["text"]) <= 200
+    # 멈춘 동안 새 네이버 딜도 Blog-Auto 에 묻지 않고 기다린다
     asked = len([u for u in _inbox(settings) if "connect_link" in u])
-    bot.db.update_queue_item(qid, status="skipped")
     qid2 = _enqueue(bot, _product(url="https://smartstore.naver.com/baleuljung/products/12133409758"))
     assert await bot.process_queue_once()
-    assert bot.db.get_queue_item(qid2).status == "awaiting_link"  # type: ignore[union-attr]
+    assert bot.db.get_queue_item(qid2).status == autolink.STATUS  # type: ignore[union-attr]
     assert len([u for u in _inbox(settings) if "connect_link" in u]) == asked
-    # 같은 날 또 로그인 답이 와도 카톡은 한 번
-    bot._note_autolink_stop({"reason": "login"})
+    await bot.autolink_tick()  # 아직 멈춤 — 그대로
+    assert len([u for u in _inbox(settings) if "connect_link" in u]) == asked
+    bot._note_autolink_stop({"reason": "login"})  # 같은 날 또 와도 카톡은 한 번
     assert len([u for u in _inbox(settings) if "owner_notice" in u and u["owner_notice"]["kind"] == "autolink_stop"]) == 1
+    # 주인이 다시 로그인 → resume → 기다리던 두 딜을 다시 부탁
+    _reply(settings, {"resume": True, "at": time.time()})
+    await bot.autolink_tick()
+    jobs = [u["connect_link"]["id"] for u in _inbox(settings) if "connect_link" in u][asked:]
+    assert sorted(jobs) == sorted([qid, qid2])
 
 
-async def test_cap_reason_falls_back_quietly(bot: DealBot, settings: Settings) -> None:
+async def test_cap_and_hours_wait_until_retry_time_quietly(bot: DealBot, settings: Settings) -> None:
     qid, job = await _ask(bot, settings)
-    _reply(settings, {"id": qid, "job": job["job"], "ok": False, "reason": "cap", "retry_at": time.time() + 3600})
+    _reply(settings, {"id": qid, "job": job["job"], "ok": False, "reason": "hours", "retry_at": time.time() + 3600})
+    await bot.autolink_tick()
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
+    assert not [u for u in _inbox(settings) if "owner_notice" in u]
+    marker = json.loads(bot.db.kv_get(f"{autolink.KV_JOB}{qid}"))
+    assert marker["deferred"] and marker["shop"] == "naver" and marker["no"] == NO
+    # 시각이 지나면(멈춤이 풀림) 다시 부탁
+    bot.db.kv_set(autolink.KV_STOP, "")
+    bot.db.kv_set(f"{autolink.KV_JOB}{qid}", json.dumps({**marker, "until": "2000-01-01T00:00:00+00:00"}))
+    before = len([u for u in _inbox(settings) if "connect_link" in u])
+    await bot.autolink_tick()
+    assert len([u for u in _inbox(settings) if "connect_link" in u]) == before + 1
+
+
+async def test_item_specific_failures_still_fall_back(bot: DealBot, settings: Settings) -> None:
+    qid, job = await _ask(bot, settings)
+    _reply(settings, {"id": qid, "job": job["job"], "ok": False, "reason": "ambiguous"})
     await bot.autolink_tick()
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
-    assert not [u for u in _inbox(settings) if "owner_notice" in u and u["owner_notice"]["kind"] == "autolink_stop"]
 
 
 async def test_no_reply_in_time_falls_back_and_cancels(bot: DealBot, settings: Settings) -> None:
@@ -383,11 +405,10 @@ async def test_resume_from_blogauto_lets_the_bot_ask_again(bot: DealBot, setting
     bot._note_autolink_stop({"reason": "login", "retry_at": time.time() + 3600})
     qid = _enqueue(bot)
     assert await bot.process_queue_once()
-    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
-    bot.db.update_queue_item(qid, status="skipped")
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]  # 멈춘 동안은 기다림
     _reply(settings, {"resume": True, "at": time.time()})
     await bot.autolink_tick()
-    await _ask(bot, settings, _product(price=50000))
+    assert _job(settings)["id"] == qid  # 다시 시작하면 기다리던 딜을 바로 부탁
     # 알림 정책(10/11): 멈춤 카톡은 v2 할 일 한 통(⛔[멈춤], 키 autolink:login), 다시 시작하면 그 키를 해결
     notes = [u["owner_notice"] for u in _inbox(settings) if "owner_notice" in u]
     stop = [n for n in notes if n.get("kind") == "autolink_stop"]
@@ -551,3 +572,17 @@ async def test_naver_short_link_deals_are_skipped_not_asked(bot: DealBot, settin
     bot.db.update_queue_item(q2, status="awaiting_link")
     assert bot._autolink_backlog() == 0
     assert bot.db.get_queue_item(q2).status == "skipped"  # type: ignore[union-attr]
+
+
+async def test_waking_many_waiting_deals_is_spread_out(bot: DealBot, settings: Settings) -> None:
+    """아침에 기다리던 딜이 많으면 한꺼번에 맡기지 않는다 (Blog-Auto 는 하나씩 — 30분 안에 답이 오게)."""
+    bot._note_autolink_stop({"reason": "hours", "retry_at": time.time() + 3600})
+    qids = []
+    for i in range(5):
+        qids.append(_enqueue(bot, _product(url=f"https://smartstore.naver.com/s{i}/products/1000{i}", product_id=f"naver:1000{i}",
+                                           name=f"[네이버] 테스트 상품 {i} 무선 청소기")))
+        assert await bot.process_queue_once()
+    assert all(bot.db.get_queue_item(q).status == autolink.STATUS for q in qids)  # type: ignore[union-attr]
+    bot.db.kv_set(autolink.KV_STOP, "")
+    await bot.autolink_tick()
+    assert len([u for u in _inbox(settings) if "connect_link" in u]) == bot.WAKE_INFLIGHT_MAX
