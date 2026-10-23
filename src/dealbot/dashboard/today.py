@@ -52,7 +52,7 @@ LABELS = {
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.oedit_keep": "그대로 두기", "blog.oedit_redo": "봇 글로 덮어쓰기",
     "blog.drop": "버리기", "deal.skip": "안 올리기", "blog.noshare": "보내지 않기", "deal.nolink": "링크 없이",
     "deal.sc_forget": "판매처 빼기", "bot.pause": "딜봇 멈춤", "bot.resume": "딜봇 다시 시작", "bot.run": "지금 수집",
-    "sns.test": "테스트 글", "sns.invites": "초대 링크 만들기", "todo.dismiss": "다 했어요", "stats.input": "통계 직접 넣기",
+    "sns.test": "테스트 글", "sns.invites": "초대 링크 만들기", "todo.dismiss": "다 했어요", "stats.input": "통계 직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기",
     "blog.scan": "글감 찾기", "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기",
     "blog.hotdeal_now": "한 편 쓰기", "blog.mode": "모드 바꾸기", "blog.pause": "블로그 멈춤", "blog.resume": "블로그 다시 시작",
     "blog.drafts_cleanup": "임시저장 정리", "blog.ledger": "정리본 바꾸기", "blog.dismiss": "다 했어요", "blog.visit_done": "이웃 글 들름",

@@ -53,6 +53,8 @@ APP_JS_MAX = 86 * 1024 + 512
 # 10/21 (일정 화면): 화면은 처음 열 때만 받는 sched.js — app.js 에는 불러오기·길 하나·블로그 탭 입구 단추뿐 (+0.6 KB / gzip +0.1 KB)
 APP_JS_MAX = 87 * 1024
 APP_JS_GZIP_MAX = 28 * 1024 + 256
+# 10/23 (제휴 수익): 통계 탭 맨 위 칸은 처음 열 때만 받는 earn.js — app.js 에는 불러오기와 칸 붙이기 한 줄뿐 (+0.3 KB / gzip +0.1 KB)
+APP_JS_GZIP_MAX = 28 * 1024 + 512
 # 10/20: 편집기 비율(원본·16:9) + 사람만 남기기 + 사진 한 장 바로 저장 + 지금 사진도 편집 → 12 → 14 KB / gzip 5 → 5.75 KB
 # 10/21: 발행 글 고치기 시트(사진마다 빼기·교체 + '이 문장 빼기') — app.js 는 버튼 하나만, 시트는 edit.js 에 → 16.5 KB / gzip 6.25 KB
 EDIT_JS_MAX = 16 * 1024 + 512
@@ -164,7 +166,8 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
     assert res[0] == 200 and res[2].startswith("text/javascript")
     assert res[3]["Cache-Control"] == "no-cache" and res[3]["Service-Worker-Allowed"] == "/dashboard/"
     for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css"), ("badge-72.png", "image/png"),
-                        ("edit.js", "text/javascript"), ("product.js", "text/javascript"), ("sched.js", "text/javascript")):
+                        ("edit.js", "text/javascript"), ("product.js", "text/javascript"), ("sched.js", "text/javascript"),
+                        ("earn.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))

@@ -306,6 +306,45 @@ CREATE TABLE IF NOT EXISTS dash_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_dash_audit_ts ON dash_audit(ts);
 
+-- 제휴 수익 (주인 10/23 — dashboard/earn.py). 쿠팡 파트너스 리포트(3시간마다 최근 30일을 날짜×subId 로 다시 씀)와 주문 줄,
+-- 주인이 직접 넣은 토스쇼핑·에이블리·지그재그·무신사·29CM 등 (금액은 원 단위 정수)
+CREATE TABLE IF NOT EXISTS earn_coupang (
+    day            TEXT NOT NULL,
+    sub_id         TEXT NOT NULL DEFAULT '',
+    clicks         INTEGER NOT NULL DEFAULT 0,
+    orders         INTEGER NOT NULL DEFAULT 0,
+    amount         INTEGER NOT NULL DEFAULT 0,
+    cancel_amount  INTEGER NOT NULL DEFAULT 0,
+    commission     INTEGER NOT NULL DEFAULT 0,
+    read_at        TEXT NOT NULL,
+    PRIMARY KEY (day, sub_id)
+);
+CREATE TABLE IF NOT EXISTS earn_coupang_orders (
+    okey           TEXT PRIMARY KEY,
+    day            TEXT NOT NULL,
+    order_id       TEXT NOT NULL DEFAULT '',
+    product        TEXT NOT NULL DEFAULT '',
+    qty            INTEGER NOT NULL DEFAULT 1,
+    amount         INTEGER NOT NULL DEFAULT 0,
+    commission     INTEGER NOT NULL DEFAULT 0,
+    sub_id         TEXT NOT NULL DEFAULT '',
+    cancelled      INTEGER NOT NULL DEFAULT 0,
+    read_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_earn_coupang_orders_day ON earn_coupang_orders(day);
+CREATE TABLE IF NOT EXISTS earn_manual (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    shop           TEXT NOT NULL,
+    day            TEXT NOT NULL,
+    product        TEXT NOT NULL DEFAULT '',
+    amount         INTEGER NOT NULL DEFAULT 0,
+    commission     INTEGER NOT NULL DEFAULT 0,
+    memo           TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_earn_manual_day ON earn_manual(day);
+
 -- 스레드 답글 (관리자 챗 대신 대시보드 '스레드 답글' 에서 봄, 7일). 봇은 답글을 달지 않는다
 CREATE TABLE IF NOT EXISTS threads_replies (
     reply_id       TEXT PRIMARY KEY,

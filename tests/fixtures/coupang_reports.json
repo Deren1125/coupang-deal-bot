@@ -1,0 +1,22 @@
+{
+ "_note": "Shapes follow the Coupang Partners reports docs (rCode 0 + data rows). The real account has not been read yet: field names are the documented ones, the parser is tolerant.",
+ "clicks": [
+  {"date": "20261022", "trackingCode": "AF1", "subId": "dealbot", "click": 40},
+  {"date": "20261021", "trackingCode": "AF1", "subId": "dealbot", "click": 25},
+  {"date": "20261021", "trackingCode": "AF1", "subId": "", "click": 5}
+ ],
+ "orders": [
+  {"date": "20261022", "subId": "dealbot", "orderId": 9001, "productId": 111, "productName": "무선 청소기 헤드 세트", "quantity": 1, "gmv": 59800, "commission": 1794},
+  {"date": "20261022", "subId": "dealbot", "orderId": 9001, "productId": 112, "productName": "청소기 필터", "quantity": 2, "gmv": 12000, "commission": 360},
+  {"date": "20261021", "subId": "dealbot", "orderId": 9000, "productId": 110, "productName": "방수 양말 3족", "quantity": 1, "gmv": 9900, "commission": 297},
+  {"date": "20261021", "subId": "", "orderId": 8999, "productId": 109, "productName": "주방 저울", "quantity": 1, "gmv": 15000, "commission": 450}
+ ],
+ "cancels": [
+  {"date": "20261021", "subId": "dealbot", "orderId": 9000, "productId": 110, "productName": "방수 양말 3족", "quantity": 1, "gmv": 9900, "commission": 297}
+ ],
+ "commission": [
+  {"date": "20261022", "subId": "dealbot", "commission": 2154},
+  {"date": "20261021", "subId": "dealbot", "commission": 0},
+  {"date": "20261021", "subId": "", "commission": 450}
+ ]
+}

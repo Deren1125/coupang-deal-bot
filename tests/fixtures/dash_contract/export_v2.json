@@ -965,5 +965,47 @@
    }
   ],
   "n": 2
+ },
+ "earnings": {
+  "shopconnect": {
+   "confirmed": true,
+   "read_at": "2026-10-18T09:10:00+09:00",
+   "days": [
+    {
+     "day": "2026-10-17",
+     "clicks": 42,
+     "orders": 3,
+     "amount": 87600,
+     "commission": 2628
+    },
+    {
+     "day": "2026-10-16",
+     "clicks": 31,
+     "orders": 1,
+     "amount": 19900,
+     "commission": 597
+    }
+   ],
+   "orders": [
+    {
+     "day": "2026-10-17",
+     "name": "무선 청소기 헤드 세트",
+     "amount": 59800,
+     "commission": 1794
+    },
+    {
+     "day": "2026-10-17",
+     "name": "주물 오발 쿡플레이트",
+     "amount": 27800,
+     "commission": 834
+    },
+    {
+     "day": "2026-10-16",
+     "name": "방수 양말 3족",
+     "amount": 19900,
+     "commission": 597
+    }
+   ]
+  }
  }
 }
