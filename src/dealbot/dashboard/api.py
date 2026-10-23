@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from dealbot.dashboard import webapp
+from dealbot.dashboard import srvcheck, webapp
 from dealbot.dashboard.actions import TEXTS, ActionDesk, Caller, RateWindow
 from dealbot.dashboard.auth import client_key
 from dealbot.dashboard.blogauto import PIC_FILE_RE
@@ -248,7 +248,7 @@ class DashApi:
             self.bot.actions_out.ingest()  # 고를 때마다 결과를 먼저 읽는다
         except Exception as e:  # noqa: BLE001
             log.warning("dashboard actions ingest failed: %s", e)
-        from dealbot.bridge.actions_out import status_of
+        from dealbot.bridge.actions_out import TERMINAL, status_of
 
         out = []
         for aid in ids:
@@ -256,6 +256,8 @@ class DashApi:
             if row is None:
                 continue
             st = status_of(row)
+            if row["action"] == "blog.server_check" and (row["status"] in TERMINAL or row["status"] == "unknown"):
+                st = await asyncio.to_thread(srvcheck.finish, self.bot, st)  # 딜봇 쪽 점검을 합쳐 한 시트로
             if row["action"] == "blog.kakao_auth_url" and row["status"] == "ok":
                 url = self.bot.actions_out.take_url(aid)
                 if url:

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import hashlib
@@ -31,6 +32,7 @@ from urllib.parse import urlparse
 
 from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
+from dealbot.dashboard import srvcheck
 from dealbot.dashboard.blogauto import (
     PIC_ID,
     PIC_JOB_ID,
@@ -92,7 +94,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
                 "post_notes",  # 내 후기 쓰기 (주인 10/20 — 핫딜 글에 주인 메모·사진 → 1인칭 후기로 다시)
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
-                "pause", "resume", "drafts_cleanup", "ledger", "login_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
+                "pause", "resume", "drafts_cleanup", "ledger", "login_check", "server_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
                 "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
                 "post_feedback", "learn_decide",  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
                 "similar_links",  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
@@ -597,6 +599,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"blog": _blog(g("blog")), "mode": g("mode")}
     if name in ("pause", "resume", "drafts_cleanup", "login_check"):
         return {"blog": _blog(g("blog"))}
+    if name == "server_check":  # 서버 점검 (주인): 고를 값이 없다 — 정해진 점검만, 명령에 끼어들 자리 없음
+        return {}
     if name == "ledger":
         return {"uploads": _uploads(g("uploads") if g("uploads") is not None else [g("upload_id")], 1, 1)}
     if name == "info":
@@ -957,6 +961,7 @@ class ActionDesk:
         self.facts = facts or (lambda _iid: {})
         self.clock = clock
         self.rate = RateWindow(ACTION_RATE, 60.0)
+        self.srv_cool = srvcheck.Cooldown(clock)  # 서버 점검 2분에 한 번 (모든 기기 합쳐서)
         self.test_rate = test_rate  # 테스트 알림 한도 (POST /api/push/test 와 같은 셈 — 기기가 없으면 카톡 한 통이라)
 
     # 바깥에서 부르는 하나
@@ -981,6 +986,8 @@ class ActionDesk:
             return 429, self._err("rate")
         if not getattr(getattr(self.bot.settings, "dashboard", None), "actions_enabled", True):
             return 403, self._err("off")
+        if action == "blog.server_check":
+            return await self._server_check(action, args, target, caller, cid)
         if action.startswith("blog.") and (down := self._blog_down(action[5:], caller, target, args)) is not None:
             return down  # 확인 창을 띄우기 전에 (맡길 곳이 없는데 '발행할까요?'를 묻지 않게)
         this_device = True
@@ -1004,6 +1011,22 @@ class ActionDesk:
         if action.startswith("blog."):
             return self._queue(action, args, target, caller, cid, confirmed=need)
         return await self._deal(action, args, target, caller, cid)
+
+    async def _server_check(self, action: str, args: dict[str, Any], target: str, caller: Caller,
+                            cid: str | None) -> tuple[int, dict[str, Any]]:
+        """서버 점검: 2분에 한 번. 블로그 프로그램 몫은 맡기고(결과를 읽을 때 딜봇 몫과 합침), 맡길 수 없으면 딜봇 몫만 바로."""
+        if left := self.srv_cool.hit():
+            self._audit(caller, action, target, args, "cooldown")
+            return 429, self._err("cooldown", srvcheck.Cooldown.text(left))
+        down = self._blog_down("server_check", caller, target, args)
+        if down is None:
+            got = self._queue(action, args, target, caller, cid)
+            if got[0] != 202:
+                self.srv_cool.last = 0.0  # 맡기지 못했으니 바로 다시 눌러도 됨
+            return got
+        why = "아직 이 점검을 몰라요 — 블로그 프로그램 업데이트가 필요해요" if down[1].get("code") == "unsupported" else "응답이 없어요"
+        local = await asyncio.to_thread(srvcheck.local_lines, self.bot, with_memory=True)
+        return 200, {"status": "ok", "code": "done", "text": srvcheck.compose(srvcheck.down_part(why), local), "sheet": True}
 
     def _publish_mode(self, action: str, args: dict[str, Any]) -> bool:
         """MAY_PUBLISH 일의 블로그가 자동 발행 모드인가 (모르면 True — 확인 창 한 번이 더 안전).

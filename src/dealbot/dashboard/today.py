@@ -38,7 +38,7 @@ GROUP_OF = {
     "blog.drop": "drop", "deal.skip": "drop", "blog.noshare": "drop",
 }
 # 보기만 하거나 연결·시험인 일 — 한 일 목록에 넣지 않음
-SKIP = frozenset({"blog.info", "stats.refresh", "push.test", "push.subscribe", "push.unsubscribe", "blog.login_check",
+SKIP = frozenset({"blog.info", "stats.refresh", "push.test", "push.subscribe", "push.unsubscribe", "blog.login_check", "blog.server_check",
                   "blog.kakao_auth_url", "blog.kakao_connect", "blog.kakao_test", "sns.token", "sns.code", "upload", "login",
                   "logout", "state", "connect", "blog.dismiss"})  # blog.dismiss: todo.dismiss 가 맡긴 것 (두 번 세지 않게)
 LABELS = {

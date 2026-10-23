@@ -289,7 +289,7 @@ async function exec(a, extra, ctx = {}) {
       const nx = ls[at + 1] || ls.find(i => i.iid !== ctx.iid);
       if (nx) { OPEN[nx.iid] = pk(nx.iid, nx.primary); NEXT = nx.iid; }
     }
-    toast(d.text || MSG.done);
+    d.sheet ? infoSheet(d.text) : toast(d.text || MSG.done);
     if (ctx.close) back();
     load();
     return d;
@@ -319,7 +319,7 @@ async function poll() {
 function finish(s, p) {
   const ok = s.status === 'ok';
   if (s.action === 'blog.kakao_auth_url' && ok && s.url) { KURL = s.url; toast('카카오 화면을 열어 주세요'); return; }
-  if (s.action === 'blog.info' && ok) { infoSheet(s.text); return; }
+  if (/^blog\.(info|server_check)$/.test(s.action) && ok) { infoSheet(s.text); return; }
   if (s.action === 'blog.visit_done') { if (ok) return; GONE.delete(p.iid); }
   let text = ok ? (s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : (!/move/.test(s.action) && MSG[s.code]) || s.text || MSG.failed;
   if (s.status === 'unknown') text = MSG.unknown;
@@ -1235,6 +1235,7 @@ function vConnect() {
   const bd = c.bots.dealbot, ba = c.bots.blogauto, cols = bd.collectors || [];
   out.push(...sec('봇 상태', null, row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.updated ? ` · ${bd.updated} 업데이트` : ''}`, null, bd.paused),
     row('블로그 프로그램', ba.ok ? `정상 · ${ago(ba.seen_at)} 신호` : `응답 없음${ba.seen_at ? ' · ' + ago(ba.seen_at) : ''}`, null, !ba.ok),
+    row('서버 점검', '로그인·서비스·메모리·스레드를 한 번에', btn('sm', '점검', e => exec(c.check, {}, {btn: e.currentTarget}))),
     cols.length ? fold(`수집기 ${cols.length}개`, () => listSheet('수집기', cols.map(x => row(x.label, `${x.enabled ? (x.ok ? '정상' : '오류') : '꺼짐'} · ${x.text}`, null, !x.ok)))) : null));
   out.push(el('div', {class: 'box', style: 'margin-top:20px'},
     c.errors.length ? fold(`오류 ${c.errors.length}개`, () => listSheet('오류', c.errors.map(x => row(x.where || '오류', `${hhmm(x.at)} · ${x.text}`)))) : row('오류', '없어요'),

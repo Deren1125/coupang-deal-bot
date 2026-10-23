@@ -42,6 +42,7 @@ SECRET_KEYS = ("token", "code", "url", "redirect", "password", "secret")
 URL_TTL_S = 300
 TEXT_MAX = 120
 INFO_TEXT_MAX = 1500
+LONG_TEXT_ACTIONS = {"blog.info": INFO_TEXT_MAX, "blog.server_check": 3000}  # 줄마다 읽어 주는 긴 결과 (서버 점검: 줄 40개까지)
 RESULT_STATUSES = ("running", "ok", "error", "rejected")
 
 
@@ -186,9 +187,9 @@ class ActionsOut:
     def _clean_result(self, row: dict[str, Any], data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         status = data.get("status") if data.get("status") in RESULT_STATUSES else "error"
         code = data.get("code") if isinstance(data.get("code"), str) and len(data.get("code")) <= 40 else ""
-        limit = INFO_TEXT_MAX if row["action"] == "blog.info" else TEXT_MAX
+        limit = LONG_TEXT_ACTIONS.get(row["action"], TEXT_MAX)
         text = data.get("text") if isinstance(data.get("text"), str) else ""
-        text = "\n".join(safe_text(ln, limit) for ln in text.splitlines()[:40] if ln.strip())[:limit] if row["action"] == "blog.info" \
+        text = "\n".join(safe_text(ln, limit) for ln in text.splitlines()[:40] if ln.strip())[:limit] if row["action"] in LONG_TEXT_ACTIONS \
             else safe_text(text, limit)
         res: dict[str, Any] = {"code": code, "text": text}
         post = data.get("post")

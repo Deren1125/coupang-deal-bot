@@ -1002,6 +1002,7 @@ class StateBuilder:
                      "actions": [act("push.test", "테스트 알림")]},
             "kakao": {"state": k_state, "expires_in_days": exp_days, "actions": self._filter(kakao_actions, self._supported(st))},
             "naver": naver,
+            "check": act("blog.server_check", "서버 점검"),  # 읽기만 하는 정해진 점검 (srvcheck.py) — 결과는 한 시트로
             "bots": {"dealbot": {"ok": True, "paused": bot.state.paused, "version": self._version(), "updated": self._updated(),
                                  "collectors": self._collectors()},
                      "blogauto": {"ok": st.fresh(now), "seen_at": st.at, "bridge": st.bridge, "actions": st.actions,
@@ -1152,7 +1153,7 @@ ACTION_LABELS = {
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",
     "blog.mode": "모드 바꾸기", "blog.pause": "블로그 멈춤", "blog.resume": "블로그 다시 시작", "blog.drafts_cleanup": "임시저장 정리",
-    "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
+    "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.server_check": "서버 점검", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
     "blog.kakao_connect": "카톡 연결", "blog.kakao_test": "테스트 카톡", "blog.dismiss": "다 했어요",
     "blog.pics_fetch": "사진 찾기", "blog.pics_clear": "사진 후보 지우기", "search.check": "검색 등록 표시",
     "connect": "다시 연결 시작",

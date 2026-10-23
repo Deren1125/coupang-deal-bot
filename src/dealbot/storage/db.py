@@ -1145,6 +1145,15 @@ class Database(SnsStoreMixin):
             rows = self._q("SELECT * FROM events ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
         return [dict(r) for r in rows]
 
+    def recent_events_of(self, kinds: tuple[str, ...], limit: int = 10, levels: tuple[str, ...] = ("WARNING", "ERROR")) -> list[dict[str, Any]]:
+        """종류(kind)·등급이 맞는 최근 사건 (새것 먼저). 서버 점검 — 스레드·인스타 실패만 보려고."""
+        if not kinds or not levels:
+            return []
+        ks, ls = ",".join("?" * len(kinds)), ",".join("?" * len(levels))
+        rows = self._q(f"SELECT * FROM events WHERE kind IN ({ks}) AND level IN ({ls}) ORDER BY ts DESC, id DESC LIMIT ?",
+                       (*kinds, *(x.upper() for x in levels), limit))
+        return [dict(r) for r in rows]
+
     def last_error(self) -> dict[str, Any] | None:
         rows = self.recent_events(1, level="ERROR")
         return rows[0] if rows else None
