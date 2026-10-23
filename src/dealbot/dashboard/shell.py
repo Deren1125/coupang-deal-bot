@@ -26,6 +26,7 @@ PRODUCT_JS = "product.js"  # 제품 테스트 (10/21) — 블로그 › Pick '�
 SCHED_JS = "sched.js"  # 일정 (10/21) — 블로그 탭 '예약 일정 보기'를 처음 열 때만 (주소는 meta sb-sched)
 EARN_JS = "earn.js"  # 제휴 수익 칸 (10/23) — 통계 탭을 처음 열 때만 (주소는 meta sb-earn)
 THPOST_JS = "thpost.js"  # 스레드 글·예약·댓글·통계 칸 (10/21) — threads.js 의 세 칸에 붙는 그리기. 어느 쪽이 먼저 떠도 붙도록 defer 로 먼저 받는다
+THEME_JS = "theme.js"  # 화면 밝기 단추 (10/24) — 머리에서 먼저 돌아 첫 화면부터 고른 색 (자동·밝게·어둡게)
 THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드·인스타 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
 
 
@@ -55,6 +56,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         '<meta name="format-detection" content="telephone=no">'
         + webapp.head_tags()
         + f'<link rel="stylesheet" href="{asset_url(APP_CSS)}">'
+        f'<script blocking="render" src="{asset_url(THEME_JS)}"></script>'  # defer 없음 — 그리기 전에 data-theme 를 붙여 깜빡이지 않게 ("<script src=" 아님 — app.js 하나만 세는 시험과 구분)
         f'<script src="{asset_url(APP_JS)}" defer></script>'
         f'<script defer src="{asset_url(THPOST_JS)}"></script>'  # "<script src=" 아님 — app.js 하나만 세는 시험과 구분
         f'<meta name="sb-edit" content="{asset_url(EDIT_JS)}">'
