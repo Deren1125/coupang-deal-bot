@@ -82,11 +82,12 @@ function settings() {
     inp('th-kw', '관심 키워드 (쉼표로)', s.keywords.join(', ')), inp('th-tone', 'AI 말투', s.tone), inp('th-top', 'AI 글 주제 (쉼표로)', s.topics.join(', ')),
     el('div', {class: 'tc'}, inp('th-h0', '활동 시작(시)', s.hours[0], {type: 'number'}), inp('th-h1', '활동 끝(시)', s.hours[1], {type: 'number'}),
       inp('th-p0', 'AI 글 시작(시)', s.post_hours[0], {type: 'number'}), inp('th-p1', 'AI 글 끝(시)', s.post_hours[1], {type: 'number'}),
-      inp('th-mf', '팔로워 이보다 많으면 건너뜀', s.max_followers, {type: 'number'})),
+      inp('th-mf', '팔로워 이보다 많으면 건너뜀', s.max_followers, {type: 'number'}),
+      inp('th-d0', '누르기 사이 쉬는 시간 최소(초)', (s.delay_sec || [])[0], {type: 'number'}), inp('th-d1', '최대(초)', (s.delay_sec || [])[1], {type: 'number'})),
     btn('pb', '저장', () => {
       const c = {}; for (const k of Object.keys(T.hard_caps)) c[k] = +val('thc-' + k);
       act('settings', {caps: c, keywords: val('th-kw'), tone: val('th-tone'), topics: val('th-top'), hours: [+val('th-h0'), +val('th-h1')],
-        post_hours: [+val('th-p0'), +val('th-p1')], max_followers: +val('th-mf')}, '저장했어요');
+        post_hours: [+val('th-p0'), +val('th-p1')], max_followers: +val('th-mf'), delay_sec: [+val('th-d0'), +val('th-d1')]}, '저장했어요');
     })));
 }
 function login() {
