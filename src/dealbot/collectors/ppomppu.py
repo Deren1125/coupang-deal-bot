@@ -851,6 +851,8 @@ class PpomppuCollector(BaseCollector):
         for item in listed:
             tag = item.get("shop_tag")
             shop = registry.by_alias(tag) if tag else None
+            if shop is None:
+                shop = registry.by_title_hint(item["title"])  # 머리말을 못 읽어도 제목에 토스쇼핑 단서가 있으면 (같은 기준으로 판정)
             if shop is None and unknown_policy != "raw":
                 if not self.ctx.db.is_seen(self.name, item["external_id"]):
                     self.ctx.db.mark_seen(self.name, item["external_id"], None, title=item["title"], recommend=item.get("recommend"), views=item.get("views"), comments=item.get("comments"))

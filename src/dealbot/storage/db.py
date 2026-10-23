@@ -880,13 +880,43 @@ class Database(SnsStoreMixin):
         self.update_queue_item(item_id, status="pending", error=None, deal=item.deal, now=now, reset_created=True)
         return self.get_queue_item(item_id)
 
-    def weakest_awaiting_link(self) -> QueueItem | None:
-        """내 링크를 기다리는 글 중 점수가 가장 낮은 글 (같은 점수면 가장 오래된 글). 링크가 붙은 글은 뺀다."""
+    def weakest_awaiting_link(self, *, only_shops: tuple[str, ...] = (), not_shops: tuple[str, ...] = ()) -> QueueItem | None:
+        """내 링크를 기다리는 글 중 점수가 가장 낮은 글 (같은 점수면 가장 오래된 글). 링크가 붙은 글은 뺀다.
+        only_shops / not_shops: 그 몰(상품 키 머리말 'toss:')의 글만 / 빼고 (링크 요청 자리의 몰 우선 — 주인 10/23)."""
+        where, args = self._shop_filter(only_shops, not_shops)
         row = self._one(
-            "SELECT * FROM deal_queue WHERE status = 'awaiting_link' AND json_extract(payload, '$.affiliate_url') IS NULL "
-            "ORDER BY score ASC, created_at ASC, id ASC LIMIT 1"
+            "SELECT * FROM deal_queue WHERE status = 'awaiting_link' AND json_extract(payload, '$.affiliate_url') IS NULL"
+            f"{where} ORDER BY score ASC, created_at ASC, id ASC LIMIT 1", args
         )
         return self._row_to_queue_item(row) if row else None
+
+    @staticmethod
+    def _shop_filter(only_shops: tuple[str, ...], not_shops: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+        parts = [f"product_id LIKE '{k}:%'" for k in only_shops if k.isalnum()]
+        where = f" AND ({' OR '.join(parts)})" if parts else ""
+        for k in not_shops:
+            if k.isalnum():
+                where += f" AND product_id NOT LIKE '{k}:%'"
+        return where, ()
+
+    def shop_queue_count(self, shops: tuple[str, ...], statuses: tuple[str, ...]) -> int:
+        """그 몰(상품 키 머리말)의 대기열 글 수. 링크가 이미 붙은 글도 센다 (status 로만 고름)."""
+        where, args = self._shop_filter(shops, ())
+        if not where or not statuses:
+            return 0
+        marks = ",".join("?" * len(statuses))
+        row = self._one(f"SELECT COUNT(*) AS c FROM deal_queue WHERE status IN ({marks}){where}", (*statuses, *args))
+        return int(row["c"]) if row else 0
+
+    def awaiting_shop_count(self, shops: tuple[str, ...]) -> int:
+        """내 링크를 기다리는 글(링크 안 붙음) 중 그 몰의 글 수."""
+        where, args = self._shop_filter(shops, ())
+        if not where:
+            return 0
+        row = self._one(
+            "SELECT COUNT(*) AS c FROM deal_queue WHERE status = 'awaiting_link' "
+            f"AND json_extract(payload, '$.affiliate_url') IS NULL{where}", args)
+        return int(row["c"]) if row else 0
 
     def replace_awaiting_link(self, item_id: int, error: str, now: datetime | None = None) -> bool:
         """더 좋은 딜에 자리를 내준 글을 skipped 로. 아직 링크를 기다리는 그대로일 때만 (조건부 UPDATE 한 번 —

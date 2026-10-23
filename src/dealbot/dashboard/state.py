@@ -200,13 +200,14 @@ class StateBuilder:
 
             photo = wants_owner_photo(p.shop, p)
             prod = link_target(p.url)
+            toss = self._toss_open(p, prod)  # 토스: 앱에서만 쉐어링크를 만들 수 있어 '토스에서 열기' + 붙여넣기 때 토스 링크만 받음 (주인 10/23)
             primary = act("deal.link", "링크 넣기", {"qid": it.id}, input="url", url=prod, placeholder="만든 링크 붙여넣기",
-                          photo_optional=photo or None, accept="image/*" if photo else None)
+                          photo_optional=photo or None, accept="image/*" if photo else None, **toss)
             more = [act("deal.skip", "안 올리기", {"qid": it.id})]
             if (post := link_target(p.extra.get("post_url"))) is not None:
                 more.append(open_link("원문 글 보기", post))
             detail: dict[str, Any] = {"how": (shop.manual_hint if shop and shop.manual_hint else "그 몰 앱에서 내 링크를 만들어 넣어 주세요"),
-                                      "open": [{"label": "상품 열기", "url": prod}] if prod else []}
+                                      "open": [{"label": toss.get("ol") or "상품 열기", "url": prod}] if prod else []}
             if p.shop == "naver":
                 from dealbot.monitoring.admin import naver_queries
 
@@ -269,6 +270,16 @@ class StateBuilder:
                  expires=until)  # 상품 페이지는 사진 올리기 옆 버튼 (줄·시트 모두 — 같은 링크를 두 번 그리지 않음)
             items[iidmod.deal_iid(qid)]["links"] = links
         return items
+
+    TOSS_PASTE = r"https?://(?:toss\.im/_m/|toss\.shopping/)[^\s]+"  # app.js paste(): 복사한 글에서 이 모양의 주소만 뽑아 칸에 넣음
+
+    def _toss_open(self, p: Any, prod: str | None) -> dict[str, Any]:
+        """토스 딜의 링크 넣기 칸에 덧붙일 것: pm = 붙여넣기가 받는 주소 모양(토스 쉐어링크만), ol = 상품 열기 단추 글자 '토스에서 열기'
+        (글에서 찾은 toss.im/_m/·toss.shopping/t/ 주소는 모바일에서 토스 앱으로 열리는 앱 링크라 따로 딥링크를 만들지 않음). 토스 딜이 아니면 빈 값."""
+        shop = self._shop(p.shop)
+        if p.shop != "toss" or shop is None:
+            return {}
+        return {"pm": self.TOSS_PASTE, **({"ol": "토스에서 열기"} if prod and shop.matches_url(prod) else {})}
 
     def _channel_url(self) -> str | None:
         base = getattr(self.bot.notifier, "channel_post_base", None)
@@ -785,7 +796,10 @@ class StateBuilder:
         today = bot.db.published_items_between(start, now + timedelta(minutes=1), include_dry_run=bot.state.dry_run)
         recent = sorted(bot.db.published_items_between(now - timedelta(hours=24), now + timedelta(minutes=1),
                                                        include_dry_run=bot.state.dry_run), key=lambda x: x.id, reverse=True)[:10]
-        return {"status": {"paused": bot.state.paused, "ok": not bot.state.paused, "today": len(today), "dry_run": bot.state.dry_run},
+        tc = bot.toss_counts(start)  # 주인 10/23: 토스 쉐어링크 딜이 얼마나 모이고 올라가는지 한 줄 (서버가 글까지 만들어 앱은 그대로 그림)
+        toss = f"토스 후보 {tc['candidates']} · 링크 대기 {tc['waiting']} · 오늘 올림 {tc['today']}"
+        return {"status": {"paused": bot.state.paused, "ok": not bot.state.paused, "today": len(today), "dry_run": bot.state.dry_run,
+                           "toss": toss},
                 "today": [self._deal_row(it, hotdeal) for it in recent], "queue": bot.queue_view(10), "collectors": bot.collector_names(),
                 "actions": [act("deal.post", "새 딜 직접 올리기", input="text", placeholder="몰 주소\n상품명\n가격"),
                             act("bot.run", "지금 수집", input="choice",
