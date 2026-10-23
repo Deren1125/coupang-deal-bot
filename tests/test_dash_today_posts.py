@@ -54,7 +54,7 @@ def build(bot: DealBot, v2: dict | None = None) -> dict:
 
 
 def test_empty_day_hides_every_group(bot: DealBot) -> None:
-    assert build(bot) == {"count": 0, "groups": []}
+    assert build(bot) == {"count": 0, "groups": [], "summary": []}
 
 
 def test_blogs_today_only_kst_and_naver_links(bot: DealBot) -> None:
@@ -125,7 +125,7 @@ def test_threads_merge_dedupe_by_permalink_and_id(bot: DealBot) -> None:
 def test_threads_dry_run_jobs_are_skipped(bot: DealBot) -> None:
     jid = bot.db.threads_enqueue("info", "p1", {"text": "연습"}, now=at(9))
     bot.db.threads_update(jid, status="posted", post_id="1", dry_run=True, now=at(9))
-    assert build(bot) == {"count": 0, "groups": []}
+    assert build(bot) == {"count": 0, "groups": [], "summary": []}
 
 
 def test_group_order_and_count(bot: DealBot) -> None:
@@ -150,3 +150,21 @@ async def test_today_api_carries_posts_next_to_actions(bot: DealBot) -> None:
     from dealbot.dashboard.today import count
 
     assert count(bot, now=time.time()) == 1
+
+
+def test_summary_counts_deals_by_shop_and_link_kind(bot: DealBot) -> None:
+    """주인 10/23: 오늘 한 일 맨 위 요약 — 쿠팡·토스 딜 수, 링크 종류(쿠팡 파트너스·토스 쉐어링크·쇼핑커넥트·원본) 수."""
+    when = datetime(2026, 10, 23, 10, 30, tzinfo=KST)
+    for pid, name, url in (("coupang:1", "청소기", "https://link.coupang.com/a/x"), ("coupang:2", "마우스", "https://link.coupang.com/a/y"),
+                           ("toss:3", "사료", "https://toss.im/_m/abc"), ("naver:4", "텀블러", "https://naver.me/Gs"),
+                           ("naver:5", "양말", "https://smartstore.naver.com/s/products/5")):
+        product(bot, pid, name)
+        with bot.db._lock:
+            bot.db._conn.execute("INSERT INTO posts (product_id, source, price, channel_id, message_id, affiliate_url, dry_run, posted_at) "
+                                 "VALUES (?, 's', 1000, 'c', 1, ?, 0, ?)", (pid, url, to_iso(when)))
+    out = build(bot)
+    lines = out["summary"]
+    assert lines[0].startswith("딜 5개 — ") and "2" in lines[0]
+    assert lines[1] == "링크 — 쿠팡 파트너스 2 · 토스 쉐어링크 1 · 쇼핑커넥트 1 · 원본 주소(제휴 아님) 1"
+    tg_rows = next(g for g in out["groups"] if g["key"] == "telegram")["rows"]
+    assert any(r["title"].endswith("] 사료") and r["title"].startswith("[") for r in tg_rows)

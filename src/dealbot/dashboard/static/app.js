@@ -1203,7 +1203,7 @@ function todaySheet() {
     const r = await api('/dashboard/api/today' + (b ? '?day=yesterday' : '')), d = r.data || {}, w = b ? '어제' : '오늘';
     h.textContent = `${w} 한 일${d.count ? ' ' + d.count + '개' : ''}`;
     const P = d.posts || {count: 0, groups: []};
-    box.replaceChildren(...[r.status !== 200 ? el('p', {class: 'empty'}, d.text || MSG.net) : [P.count ? el('p', {class: 't'}, `${w} 올린 글 · ${P.count}개`) : null, P.groups.map(g => [el('p', {class: 'grp'}, `${g.label} ${g.rows.length}`),
+    box.replaceChildren(...[r.status !== 200 ? el('p', {class: 'empty'}, d.text || MSG.net) : [(P.summary || []).length ? el('div', {class: 'box'}, P.summary.map(t => el('p', {class: 'note'}, t))) : null, P.count ? el('p', {class: 't'}, `${w} 올린 글 · ${P.count}개`) : null, P.groups.map(g => [el('p', {class: 'grp'}, `${g.label} ${g.rows.length}`),
       el('div', {class: 'box'}, g.rows.map(x => row(x.title, x.when, x.link && ext('sm', x.link.label, x.link.url))))]), d.groups.length ? d.groups.map(g => [el('p', {class: 'grp'}, g.label),
       el('div', {class: 'box'}, g.rows.map(x => row(x.title, [el('span', {class: 'cp ' + RC[x.res]}, x.chip), ' ', [x.when, x.blog, x.title !== x.what && x.what, x.why || x.note].filter(Boolean).join(' · ')],
         x.link && ext('sm', x.link.label, x.link.url), x.res === 'bad')))]) : P.count ? null : el('p', {class: 'empty'}, `${w} 한 일이 아직 없어요`)],

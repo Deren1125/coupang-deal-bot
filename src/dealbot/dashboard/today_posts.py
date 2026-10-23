@@ -1,6 +1,7 @@
 """'오늘 올린 글' (주인 10/23 — "각 블로그 별로 어떤 글을, 어떤 채널에 어떤 글을 올렸는지 싹 취합"): 오늘 한 일 시트 맨 위 칸.
 
-build(bot, v2, start, end, tz) → {"count", "groups": [{"key","label","rows": [{"title","when","link"?: {"label","url"}}]}]}
+build(bot, v2, start, end, tz) → {"count", "groups": [{"key","label","rows": [{"title","when","link"?: {"label","url"}}]}], "summary": [str]}
+- summary: 맨 위 요약 — 딜 가게별 수 · 링크 종류별 수(쿠팡 파트너스·토스 쉐어링크·쇼핑커넥트·원본) · 블로그별 글 · 인스타·스레드
 - 블로그 셋: Blog-Auto 기록 파일 recent[] (title·url·at) · 텔레그램: posts(dry_run=0)+products · 인스타: ig_posts(permalink)
 - 스레드: 딜봇 threads_jobs(posted) + 계정 전체 글(기록 파일 threads.posts) 을 주소·글 id 로 겹치지 않게 합침
 - 글자는 이미 걸러진 글(safe_text)만, 주소는 https 만 (블로그는 네이버 글 주소만). 빈 칸은 숨김. 새로 받는 것 없음 (DB·기록 파일만)
@@ -11,6 +12,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from dealbot.dashboard.model import https_url, safe_text
@@ -77,15 +79,76 @@ def blogs(v2: dict[str, Any], start: float, end: float, tz: ZoneInfo) -> list[tu
     return out
 
 
-def telegram(bot: Any, start: float, end: float, tz: ZoneInfo) -> list[dict[str, Any]]:
+def shop_of(product_id: Any) -> str:
+    """'toss:123' → 'toss' (상품 키 앞머리 = 가게). 앞머리가 없으면 ''."""
+    head, sep, _ = str(product_id or "").partition(":")
+    return head if sep else ""
+
+
+def link_kind(url: Any) -> str:
+    """채널 글에 붙은 링크 종류: coupang(쿠팡 파트너스)·toss(토스 쉐어링크)·naver(쇼핑커넥트)·raw(제휴 아님 — 원본 주소)."""
+    host = urlparse(str(url or "")).netloc.lower()
+    if host.endswith(("link.coupang.com", "coupa.ng")):
+        return "coupang"
+    if host.endswith("toss.im"):
+        return "toss"
+    if host.endswith(("naver.me", "brandconnect.naver.com")):
+        return "naver"
+    return "raw"
+
+
+def _label(bot: Any, shop: str) -> str:
+    try:
+        return str(bot.notifier.shop_label(shop) or shop)
+    except Exception:  # noqa: BLE001
+        return shop
+
+
+def _deals(bot: Any, start: float, end: float, tz: ZoneInfo) -> list[Any]:
     s, e = to_iso(datetime.fromtimestamp(start, tz)), to_iso(datetime.fromtimestamp(end, tz))
+    return bot.db._q("SELECT p.product_id, p.message_id, p.posted_at, p.affiliate_url, pr.name FROM posts p "
+                     "LEFT JOIN products pr ON pr.product_id = p.product_id "
+                     "WHERE p.dry_run = 0 AND p.posted_at >= ? AND p.posted_at < ? ORDER BY p.posted_at DESC LIMIT ?", (s, e, LIMIT))
+
+
+def telegram(bot: Any, start: float, end: float, tz: ZoneInfo) -> list[dict[str, Any]]:
     base = getattr(bot.notifier, "channel_post_base", None)
-    rs = bot.db._q("SELECT p.product_id, p.message_id, p.posted_at, pr.name FROM posts p LEFT JOIN products pr ON pr.product_id = p.product_id "
-                   "WHERE p.dry_run = 0 AND p.posted_at >= ? AND p.posted_at < ? ORDER BY p.posted_at DESC LIMIT ?", (s, e, LIMIT))
     out = []
-    for r in rs:
+    for r in _deals(bot, start, end, tz):
         url = https_url(f"{base}/{r['message_id']}") if base and r["message_id"] else None
-        out.append(_row(from_iso(r["posted_at"]).timestamp(), _name(r["name"] or "") or "딜", tz, url, "채널 글"))
+        shop = shop_of(r["product_id"])
+        title = (f"[{_label(bot, shop)}] " if shop else "") + (_name(r["name"] or "") or "딜")  # 어느 가게 딜인지 (주인 10/23)
+        out.append(_row(from_iso(r["posted_at"]).timestamp(), title, tz, url, "채널 글"))
+    return out
+
+
+LINK_LABELS = (("coupang", "쿠팡 파트너스"), ("toss", "토스 쉐어링크"), ("naver", "쇼핑커넥트"), ("raw", "원본 주소(제휴 아님)"))
+
+
+def summary(bot: Any, groups: dict[str, list[dict[str, Any]]], start: float, end: float, tz: ZoneInfo) -> list[str]:
+    """오늘 한 일 시트 맨 위 요약 줄 (주인 10/23 — '쿠팡 링크 몇 개, 토스 링크 몇 개 … 요약해서 다 확인'). 0 인 칸은 뺀다."""
+    out: list[str] = []
+    try:
+        deals = _deals(bot, start, end, tz)
+    except Exception:  # noqa: BLE001
+        deals = []
+    if deals:
+        shops: dict[str, int] = {}
+        for r in deals:
+            k = shop_of(r["product_id"]) or "etc"
+            shops[k] = shops.get(k, 0) + 1
+        out.append(f"딜 {len(deals)}개 — " + " · ".join(f"{_label(bot, k) if k != 'etc' else '기타'} {n}"
+                                                       for k, n in sorted(shops.items(), key=lambda kv: -kv[1])))
+        kinds: dict[str, int] = {}
+        for r in deals:
+            kinds[link_kind(r["affiliate_url"])] = kinds.get(link_kind(r["affiliate_url"]), 0) + 1
+        out.append("링크 — " + " · ".join(f"{lb} {kinds[k]}" for k, lb in LINK_LABELS if kinds.get(k)))
+    blog = [f"{label.split(' (')[0]} {len(groups[k])}" for k, label in BLOG_LABELS if groups.get(k)]
+    if blog:
+        out.append("블로그 글 — " + " · ".join(blog))
+    sns = [f"{lb} {len(groups[k])}" for k, lb in (("instagram", "인스타"), ("threads", "스레드")) if groups.get(k)]
+    if sns:
+        out.append("SNS — " + " · ".join(sns))
     return out
 
 
@@ -154,4 +217,5 @@ def build(bot: Any, v2: dict[str, Any], start: float, end: float, tz: str) -> di
             groups.append((key, label, []))
     out = [{"key": k, "label": lb, "rows": [{a: b for a, b in r.items() if a != "at"} for r in sorted(rs, key=lambda x: x["at"], reverse=True)]}
            for k, lb, rs in groups if rs]
-    return {"count": sum(len(g["rows"]) for g in out), "groups": out}
+    return {"count": sum(len(g["rows"]) for g in out), "groups": out,
+            "summary": summary(bot, {k: rs for k, _, rs in groups}, start, end, z)}
