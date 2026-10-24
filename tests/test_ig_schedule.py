@@ -1132,3 +1132,22 @@ def test_photos_are_fitted_to_instagram_ratios(tmp_path) -> None:
         out.write_bytes(blog_share.fit_jpeg(p))
         with Image.open(out) as im:
             assert 0.8 - 0.01 <= im.width / im.height <= 1.91 + 0.01
+
+
+async def test_profile_page_lists_pick_posts_shared_to_instagram(bot, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """주인 10/25 '인스타에 잘 올렸는데 내 블로그 링크도 넣어 줘야지': 인스타 캡션 주소는 안 눌려서 프로필 링크 페이지('/') 맨 위에
+    인스타에 올린 데런픽 글 링크 (올린 글만)."""
+    import json as _json
+
+    from dealbot.growth import blog_share
+
+    folder = blog_share.share_dir(bot.settings.dashboard.blogauto_metrics_path)
+    folder.mkdir(parents=True, exist_ok=True)
+    for pid, posted in ((7, True), (8, False)):
+        (folder / f"{pid}.json").write_text(_json.dumps({"pid": pid, "title": f"글 {pid}", "url": f"https://blog.naver.com/derenpick/22400000000{pid}"}),
+                                            encoding="utf-8")
+        if posted:
+            bot.db.kv_set(f"{blog_share.KV_DONE}{pid}", "posted 123 2026-10-25T00:00:00")
+    assert bot._pick_links() == [{"title": "글 7", "url": "https://blog.naver.com/derenpick/224000000007"}]
+    status, html = await bot._deals_page({})
+    assert status == 200 and "데런픽 블로그 새 글" in html and "224000000007" in html and "224000000008" not in html

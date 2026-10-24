@@ -28,6 +28,9 @@
   .btn { display: block; text-align: center; background: #111; color: #fff; text-decoration: none; padding: 12px; border-radius: 10px; font-weight: 600; }
   .empty { color: #666; padding: 32px 0; text-align: center; }
   .ad { background: #fff4e5; color: #8a4b00; font-size: 12px; line-height: 1.5; padding: 8px 16px; margin: 0; }
+  .pick { margin: 12px 0 4px; padding: 10px 12px; border: 1px solid #e5e5e5; border-radius: 10px; }
+  .pick b { display: block; font-size: 13px; margin-bottom: 4px; }
+  .pick a { display: block; color: #222; text-decoration: none; font-size: 14px; padding: 4px 0; }
   .join { display: block; text-align: center; background: #229ed9; color: #fff; text-decoration: none; padding: 12px; border-radius: 10px; font-weight: 600; margin: 12px 0 4px; }
   .links { color: #666; font-size: 13px; margin: 6px 0 0; text-align: center; }
   .links a { color: #444; }
@@ -46,6 +49,7 @@
   <p class="sub">최근 {{ hours }}시간 안에 올라온 딜입니다. 핫딜은 금방 품절돼요.</p>
   {% endif %}
   {% if telegram_join is defined and telegram_join %}<a class="join" href="{{ telegram_join }}" rel="nofollow">텔레그램 채널에서 실시간으로 받기</a>{% endif %}
+  {% if picks is defined and picks %}<div class="pick"><b>📖 데런픽 블로그 새 글 (인스타에 올린 글 전체 보기)</b>{% for p in picks %}<a href="{{ p.url }}" rel="nofollow">{{ p.title }} →</a>{% endfor %}</div>{% endif %}
   {% if channels.instagram_url or channels.threads_url %}<p class="links">{% if channels.instagram_url %}<a href="{{ channels.instagram_url }}" rel="nofollow">인스타그램</a>{% endif %}{% if channels.instagram_url and channels.threads_url %} · {% endif %}{% if channels.threads_url %}<a href="{{ channels.threads_url }}" rel="nofollow">스레드</a>{% endif %}</p>{% endif %}
 </header>
 <main>

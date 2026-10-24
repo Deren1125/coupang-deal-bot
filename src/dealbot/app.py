@@ -4087,8 +4087,24 @@ class DealBot:
                     + ("·".join(programs) if programs else "판매처") + " 수수료를 받아요"),
             # 텔레그램 버튼: /invitelinks 로 만든 deals_page 초대 링크 (가입 경로를 셈), 없으면 채널 주소
             telegram_join=self.db.kv_get(f"{invites.KV_PREFIX}deals_page") or channels.get("telegram_url") or "",
+            picks=self._pick_links(),
         )
         return 200, html_text
+
+    def _pick_links(self, limit: int = 3) -> list[dict[str, str]]:
+        """인스타에 올린 데런픽 글 (주인 10/25 — '인스타에 내 블로그 링크도'): 인스타 캡션 주소는 안 눌려서 프로필 링크 페이지 맨 위에
+        최근 올린 글 limit 개 [{title, url}] (blog_share 가 올린 글만 — 네이버 블로그 주소만)."""
+        from dealbot.growth import blog_share
+
+        folder = blog_share.share_dir(self.settings.dashboard.blogauto_metrics_path)
+        rows = []
+        for p in folder.glob("*.json") if folder.is_dir() else []:
+            rec = blog_share.load(p)
+            done = str(self.db.kv_get(f"{blog_share.KV_DONE}{rec['pid']}") or "") if rec else ""
+            url = str((rec or {}).get("url") or "")
+            if rec and done.startswith("posted") and url.startswith(("https://blog.naver.com/", "https://m.blog.naver.com/")):
+                rows.append((p.stat().st_mtime, {"title": str(rec.get("title") or "데런픽 새 글")[:60], "url": url}))
+        return [r for _, r in sorted(rows, key=lambda x: -x[0])[:limit]]
 
     async def _deal_redirect(self, query: dict[str, str]) -> tuple[int, str]:
         raw = (query.get("path") or "").strip("/")
