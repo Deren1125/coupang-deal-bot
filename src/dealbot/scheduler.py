@@ -338,6 +338,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
                     log.info("earnings coupang: %s", got)
             except Exception as e:  # noqa: BLE001
                 log.warning("earnings coupang failed: %s", type(e).__name__)
+        try:  # 새 제휴 수익 → 앱 알림 (주인 10/24 — notify/earn_watch)
+            from dealbot.notify import earn_watch
+
+            await earn_watch.check(bot)
+        except Exception as e:  # noqa: BLE001
+            log.warning("earnings watch failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 

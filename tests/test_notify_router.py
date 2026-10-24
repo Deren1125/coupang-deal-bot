@@ -332,3 +332,31 @@ async def test_push_test_reports_devices_and_kakao_when_none(env: Env) -> None:
     got = await env.router.push_test()
     assert got["sent"] == 1 and env.pushes()[-1]["type"] == "test"
     assert json.loads(json.dumps(got))  # 응답에 주소·키는 없음
+
+
+# ---------------------------------------------------------------- 새 제휴 수익 알림 (주인 10/24 — notify/earn_watch)
+async def test_new_affiliate_sale_pushes_once_and_first_run_only_remembers(env: Env) -> None:
+    from types import SimpleNamespace
+
+    from dealbot.dashboard.earn import EarnStore
+    from dealbot.notify import earn_watch
+
+    store = EarnStore(env.db)
+    day = "2026-10-24"
+    export = SimpleNamespace(v2={"earnings": {"shopconnect": {"confirmed": True, "days": [{"day": day, "orders": 0, "commission": 0}]}},
+                                 "creator_mall": {"read_at": f"{day}T09:00:00", "malls": [
+                                     {"key": "ably", "name": "에이블리", "state": "ok", "windows": [{"label": "오늘", "orders": 1, "commission": 500}]}]}})
+    bot = SimpleNamespace(router=env.router, earn_store=store, dash_state=SimpleNamespace(_export=lambda: export), db=env.db,
+                          settings=SimpleNamespace(app=SimpleNamespace(timezone="Asia/Seoul")))
+    now = 1792800000.0  # 2026-10-24 KST
+    env.device()
+    assert await earn_watch.check(bot, now) is None and env.server.requests == []  # 처음: 기억만 (지난 주문으로 알리지 않음)
+    store.replace_coupang({"days": {(day, "threads"): {"clicks": 9, "orders": 1, "cancels": 0, "amount": 30000, "cancel_amount": 0,
+                                                        "commission": 900}}, "orders": []}, day, day, f"{day}T10:00:00")
+    export.v2["earnings"]["shopconnect"]["days"][0].update(orders=2, commission=1200)
+    got = await earn_watch.check(bot, now + 60)
+    assert got and "쿠팡 1건 · 수익 900원" in got and "쇼핑커넥트 2건 · 수익 1,200원" in got
+    p = env.pushes()[-1]
+    assert p["type"] == "event" and p["title"] == "🎉 제휴 수익이 생겼어요! (3건)" and p["url"] == "/dashboard/#/stats"
+    assert await earn_watch.check(bot, now + 120) is None and len(env.pushes()) == 1  # 같은 주문으로 다시 알리지 않음
+    assert env.router.store.open_rows(now) == []  # 할 일 줄은 만들지 않음

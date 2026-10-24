@@ -498,6 +498,18 @@ class NotifyRouter:
         self.store.log_push(type_="digest", tag="digest", sent=sent, failed=failed, now=now)
         return sent
 
+    async def push_event(self, title: str, body: str, *, url: str, tag: str) -> int:
+        """할 일이 아닌 좋은 소식 한 통 (주인 10/24 — 새 제휴 수익, notify/earn_watch). 할 일 줄·카톡 없음. 보낸 기기 수."""
+        devices = self.devices()
+        if not devices:
+            return 0
+        now = self.clock()
+        payload = {"v": 1, "type": "event", "title": title, "body": body[:120], "tag": tag, "url": url, "urgent": True,
+                   "badge": self.badge() if self.badge is not None else 0, "ts": int(now)}
+        sent, failed, _retry, _ra = await self._deliver(payload, urgent=True, ttl=DIGEST_TTL, tag=tag, devices=devices)
+        self.store.log_push(type_="event", tag=tag, sent=sent, failed=failed, now=now)
+        return sent
+
     async def push_test(self, devices: list[dict[str, Any]] | None = None) -> dict[str, int]:
         """연결 → 알림 → '테스트 알림'. 기기가 없으면 '테스트 카톡'."""
         devices = self.devices() if devices is None else devices
