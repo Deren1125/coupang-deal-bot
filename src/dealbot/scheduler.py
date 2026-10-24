@@ -344,6 +344,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
             await earn_watch.check(bot)
         except Exception as e:  # noqa: BLE001
             log.warning("earnings watch failed: %s", type(e).__name__)
+        try:  # 핫딜 새 글 → '오픈톡방에 보내기' 앱 알림 (주인 10/24 — notify/openchat_watch)
+            from dealbot.notify import openchat_watch
+
+            await openchat_watch.check(bot)
+        except Exception as e:  # noqa: BLE001
+            log.warning("open chat watch failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 

@@ -360,3 +360,26 @@ async def test_new_affiliate_sale_pushes_once_and_first_run_only_remembers(env: 
     assert p["type"] == "event" and p["title"] == "🎉 제휴 수익이 생겼어요! (3건)" and p["url"] == "/dashboard/#/stats"
     assert await earn_watch.check(bot, now + 120) is None and len(env.pushes()) == 1  # 같은 주문으로 다시 알리지 않음
     assert env.router.store.open_rows(now) == []  # 할 일 줄은 만들지 않음
+
+
+# ---------------------------------------------------------------- 핫딜 새 글 → 오픈톡방 알림 (주인 10/24 — notify/openchat_watch)
+async def test_new_hotdeal_post_pushes_open_chat_alert_once(env: Env) -> None:
+    from types import SimpleNamespace
+
+    from dealbot.dashboard import webapp
+    from dealbot.notify import openchat_watch
+
+    old = {"pid": 10, "title": "에어팟", "share": "🔥 에어팟\n129,000원"}
+    export = SimpleNamespace(v2={"recent": {"hotdeal": [old, {"pid": 9, "title": "문구 없음"}]}})
+    bot = SimpleNamespace(router=env.router, dash_state=SimpleNamespace(_export=lambda: export), db=env.db)
+    env.device()
+    assert await openchat_watch.check(bot) is None and env.server.requests == []  # 처음: 기억만
+    export.v2["recent"]["hotdeal"].insert(0, {"pid": 11, "title": "버즈", "share": "🔥 버즈\n99,000원"})
+    got = await openchat_watch.check(bot)
+    assert got and got.startswith("#11")
+    p = env.pushes()[-1]
+    assert p["type"] == "event" and p["url"] == "/dashboard/#/share/11" and p["tag"] == "openchat-11" and "버즈" in p["body"]
+    assert await openchat_watch.check(bot) is None and len(env.pushes()) == 1  # 같은 글로 다시 알리지 않음
+    assert env.router.store.open_rows(1792800000.0) == []  # 할 일 줄은 만들지 않음
+    js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    assert "p[0] === 'share'" in js and "submitSheet(r)" in js and "openchat" in js  # 알림을 누르면 그 글의 보내기 판

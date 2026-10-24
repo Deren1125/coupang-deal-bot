@@ -101,7 +101,7 @@ function after() {
   const open = new Set(S.todo.map(i => i.iid));
   if (REG && REG.getNotifications) {
     REG.getNotifications().then(ns => ns.forEach(n => {
-      if (n.tag === 'digest' || n.tag === 'test') return;
+      if (/^(digest|test|earn|openchat)/.test(n.tag)) return;
       if (n.tag === 'todo-batch' ? !S.todo.length : !open.has(n.tag)) n.close();
     })).catch(() => {});
   }
@@ -109,6 +109,7 @@ function after() {
   for (const p of S.pending || []) if (!POLL[p.id] && (p.status === 'queued' || p.status === 'running')) POLL[p.id] = {iid: p.target, action: p.action, t: Date.now()};
   if (Object.keys(POLL).length) poll();
   if (SUB && !thisOn() && !RESYNC && S.me.push_key) { RESYNC = true; sendSub().then(r => r.status === 200 && load()); }
+  shr();
   const n = S.connect && S.connect.notice;
   if (n && n.text) { toast(n.text); S.connect.notice = null; }
 }
@@ -143,6 +144,7 @@ D.addEventListener('focusout', () => setTimeout(() => DIRTY && render(), 50));
 
 function route() {
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
+  if (p[0] === 'share') { SHR = p[1]; location.hash = '#/blog/hotdeal'; return; }
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
   if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched|threads)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
@@ -150,7 +152,10 @@ function route() {
   render();
   scrollTo(0, 0);
   if (R.tab === 'stats') loadStats();
+  shr();
 }
+let SHR = '';
+const shr = () => { const r = SHR && S && (((S.blogs || {}).hotdeal || {}).recent || []).find(x => x.pid == SHR); if (r) { SHR = ''; submitSheet(r); } };
 function go(u) {
   const m = /\/go\/([a-z0-9-]+)/.exec(u || '');
   if (m) { if (m[1] === 'todo') location.hash = '#/todo'; else openItem(m[1]); return; }
