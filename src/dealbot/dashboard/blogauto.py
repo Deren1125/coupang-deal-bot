@@ -1098,6 +1098,28 @@ def _earnings(v: Any) -> dict[str, Any] | None:
                             "days": days, "orders": orders}}
 
 
+SC_STATES = ("off", "ok", "resting", "stopped", "unknown")
+SC_REASON_RE = re.compile(r"^[a-z_]{1,30}$")
+
+
+def _secs(v: Any) -> float | None:
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 10**11 else None
+
+
+def _shopconnect(v: Any) -> dict[str, Any] | None:
+    """쇼핑커넥트 자동 링크 상태 (주인 10/24 — 연결 탭에서 실시간으로, Blog-Auto shopconnect.snapshot). 없으면 None."""
+    if not isinstance(v, dict) or v.get("state") not in SC_STATES:
+        return None
+    t = v.get("today") if isinstance(v.get("today"), dict) else {}
+    lim = v.get("limits") if isinstance(v.get("limits"), dict) else {}
+    reason = v.get("reason") if isinstance(v.get("reason"), str) and SC_REASON_RE.match(v.get("reason")) else ""
+    return {"state": v["state"], "reason": reason, "until": _secs(v.get("until")), "hours": _one_line(v.get("hours"), 20) or "",
+            "queued": _count(v.get("queued"), top=1000) or 0,
+            "today": {k: _count(t.get(k), top=1000) or 0 for k in ("searches", "issues")},
+            "limits": {k: _count(lim.get(k), top=1000) or 0 for k in ("searches", "issues")},
+            "last_at": _secs(v.get("last_at")), "last_ok_at": _secs(v.get("last_ok_at"))}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -1151,6 +1173,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     k = st.get("kakao") if isinstance(st.get("kakao"), dict) else {}
     out["status"]["kakao"] = {"state": k.get("state") if k.get("state") in ("ok", "down", "expiring", "unknown") else "unknown",
                               "expires_at": _one_line(k.get("expires_at"), 40)}
+    out["status"]["shopconnect"] = _shopconnect(st.get("shopconnect"))
     dg = data.get("digest") if isinstance(data.get("digest"), dict) else {}
     out["digest"] = {"day": _one_line(dg.get("day"), 10), "generated_at": _one_line(dg.get("generated_at"), 40),
                      "blogs": {b: _str_list((dg.get("blogs") or {}).get(b) if isinstance(dg.get("blogs"), dict) else None, 8, 200)

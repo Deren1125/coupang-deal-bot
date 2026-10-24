@@ -1011,6 +1011,35 @@ class StateBuilder:
                  "demiyum": "핫딜 블로그 서명", "qr": "QR 코드"}
         return [{"name": n, "label": LABELS.get(n, n), "where": where.get(n, ""), "url": links[n]} for n in INVITE_NAMES if n in links]
 
+    SC_REASONS = {"login": "아카이브 계정 로그인 필요", "blocked": "네이버가 잠깐 막음", "owner": "직접 멈춤"}
+
+    def _sc_row(self, sc: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
+        """연결 탭 '쇼핑커넥트' 한 줄 (주인 10/24 — 실시간 연결 상태): {text, bad, action?}. 상태를 모르면 None (줄 숨김)."""
+        if not sc:
+            return None
+        st = sc["state"]
+        if st == "off":
+            return {"text": "꺼짐", "bad": False}
+        if st == "unknown":
+            return {"text": "확인 못 함", "bad": True}
+        tz = ZoneInfo(self.tz)
+        if st == "stopped":
+            why = self.SC_REASONS.get(sc["reason"], sc["reason"] or "멈춤")
+            until = sc.get("until")
+            head = f"멈춤 — {why}" + (f" · {datetime.fromtimestamp(until, tz):%H:%M}까지" if until and until - now < 86400 else "")
+        else:
+            head = "정상" if st == "ok" else f"쉬는 시간 (일하는 시간 {sc.get('hours') or '-'})"
+        t, lim = sc["today"], sc["limits"]
+        parts = [head, f"오늘 링크 {t['issues']}/{lim['issues']} · 검색 {t['searches']}/{lim['searches']}"]
+        if sc["queued"]:
+            parts.append(f"대기 {sc['queued']}")
+        if sc.get("last_ok_at"):
+            parts.append(f"마지막 성공 {datetime.fromtimestamp(sc['last_ok_at'], tz):%m/%d %H:%M}")
+        row: dict[str, Any] = {"text": " · ".join(parts), "bad": st == "stopped" and sc["reason"] != "owner"}
+        if st == "stopped" and sc["reason"] == "login":
+            row["action"] = act("login.remote", "원격 로그인", {"target": "finance"})
+        return row
+
     def connect(self, export: Any, session: str) -> dict[str, Any]:
         bot = self.bot
         now = time.time()
@@ -1043,6 +1072,7 @@ class StateBuilder:
                      "actions": [act("push.test", "테스트 알림")]},
             "kakao": {"state": k_state, "expires_in_days": exp_days, "actions": self._filter(kakao_actions, self._supported(st))},
             "naver": naver,
+            "sc": self._sc_row((v2.get("status") or {}).get("shopconnect"), now),
             "check": act("blog.server_check", "서버 점검"),  # 읽기만 하는 정해진 점검 (srvcheck.py) — 결과는 한 시트로
             "bots": {"dealbot": {"ok": True, "paused": bot.state.paused, "version": self._version(), "updated": self._updated(),
                                  "collectors": self._collectors()},

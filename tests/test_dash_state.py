@@ -167,3 +167,23 @@ async def test_digest_endpoint(bot: DealBot) -> None:
     status, d, _ = await get_json(bot, "/dashboard/api/digest/digest-20261018-pm", session_headers(bot))
     assert status == 200 and d["sections"][0]["label"] == "기다리는 일" and set(d) == {"id", "title", "at", "sections"}
     assert (await state(bot))["digest"]["latest"] == "digest-20261018-pm"
+
+
+def test_connect_tab_shopconnect_row(bot: DealBot) -> None:
+    """주인 10/24 '연결 탭에서 실시간으로 쇼핑커넥트 연결 상태': Blog-Auto 상태 → 한 줄 (멈춤 이유·오늘 수·마지막 성공), 로그인 멈춤이면 원격 로그인 단추."""
+    from dealbot.dashboard.blogauto import _shopconnect
+
+    now = 1792846800.0
+    raw = {"state": "stopped", "reason": "login", "until": now + 3600, "hours": "08:00-23:00", "queued": 2,
+           "today": {"searches": 3, "issues": 1}, "limits": {"searches": 16, "issues": 8}, "last_at": now - 60,
+           "last_ok_at": now - 7200, "link": "https://naver.me/secret"}
+    sc = _shopconnect(raw)
+    assert sc is not None and "link" not in sc and sc["queued"] == 2
+    row = bot.dash_state._sc_row(sc, now)
+    assert row["bad"] and row["text"].startswith("멈춤 — 아카이브 계정 로그인 필요 · ") and "오늘 링크 1/8 · 검색 3/16" in row["text"]
+    assert "대기 2" in row["text"] and "마지막 성공" in row["text"]
+    assert row["action"]["action"] == "login.remote" and row["action"]["args"] == {"target": "finance"}
+    ok = bot.dash_state._sc_row(_shopconnect(dict(raw, state="ok", reason="", until=None, queued=0)), now)
+    assert ok["text"].startswith("정상 · ") and not ok["bad"] and "action" not in ok
+    assert bot.dash_state._sc_row(_shopconnect({"state": "off"}), now) == {"text": "꺼짐", "bad": False}
+    assert _shopconnect({"state": "weird"}) is None and bot.dash_state._sc_row(None, now) is None

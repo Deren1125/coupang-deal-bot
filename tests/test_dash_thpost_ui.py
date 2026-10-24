@@ -36,4 +36,4 @@ def test_thpost_js_is_loaded_early_and_app_hands_over_exec_and_upload() -> None:
     assert page.count("<script src=") == 1
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "T.view(b, {el, btn, api, toast, S, exec, uploadAll})" in app
-    assert len((STATIC / "app.js").read_bytes()) <= 88 * 1024  # test_dash_shell.APP_JS_MAX 와 같게 (10/23)
+    assert len((STATIC / "app.js").read_bytes()) <= 88 * 1024 + 256  # test_dash_shell.APP_JS_MAX 와 같게 (10/24)
