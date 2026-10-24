@@ -84,10 +84,11 @@ function load(quiet) {
     if (r.status === 304) { OLD = false; head(); after(); return; }
     const d = await r.json().catch(() => null);
     if (!d) return;
-    // 자동 새로고침: 휴대폰이 느려 저장본(x-sw-cache)이 오면 버림 (저장본↔새것이 번갈아 깜빡이던 것) · 앱이 새로 올라왔으면 한 번 새로 열기
-    if (quiet && r.headers.get('x-sw-cache') === '1') return;
-    if (quiet && d.app && APPV && d.app !== APPV && !D.querySelector('.bd')) { location.reload(); return; }
-    OLD = r.headers.get('x-sw-cache') === '1';
+    // 자동 새로고침: 휴대폰이 느려 저장본(x-sw-cache)이 오면 버림 (저장본↔새것이 번갈아 깜빡이던 것) · 앱이 새로 올라왔으면 한 번 새로 열기 (새로고침 단추도 — 10/24)
+    const c = r.headers.get('x-sw-cache') === '1';
+    if (quiet && c) return;
+    if (!c && d.app && APPV && d.app !== APPV && !D.querySelector('.bd')) { location.reload(); return; }
+    OLD = c;
     const same = S && S.etag && d.etag === S.etag || quiet && S && sig(S) === sig(d);
     S = d;
     if (!same) render(); else head();
