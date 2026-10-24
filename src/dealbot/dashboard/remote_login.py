@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import socket
 import time
 from typing import Any
 from urllib.parse import urlencode
@@ -44,6 +45,31 @@ def start(db: Any, relay: Any, target: str, now: float | None = None) -> dict[st
     return s
 
 
+def listening(port: int = PORT) -> bool:
+    """서버 화면(websockify)이 127.0.0.1:port 에서 받고 있나."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def refresh(db: Any, now: float | None = None, probe=listening) -> dict[str, Any] | None:
+    """살아 있는 세션 — 화면이 한 번 열렸다가(seen) 닫혔으면 끝난 것으로 지운다 (주인 10/24 — '로그인했는데 할 일이 왜 남아 있어':
+    로그인이 끝나면 Blog-Auto 스크립트가 화면을 닫는데, 줄은 25분 동안 그대로였다). 아직 한 번도 안 열렸으면(서버가 띄우는 중) 그대로."""
+    s = session(db, now)
+    if not s:
+        return None
+    up = probe()
+    if up and not s.get("seen"):
+        s["seen"] = True
+        db.kv_set(KV, json.dumps(s))
+    elif not up and s.get("seen"):
+        db.kv_set(KV, json.dumps(None))
+        return None
+    return s
+
+
 def port(db: Any) -> int | None:
     return PORT if session(db) else None
 
@@ -54,8 +80,8 @@ def url(s: dict[str, Any]) -> str:
 
 
 def item(db: Any, act_open: Any) -> dict[str, Any] | None:
-    """할 일 맨 위 한 줄 (세션이 살아 있을 때만)."""
-    s = session(db)
+    """할 일 맨 위 한 줄 (세션이 살아 있고, 열렸던 화면이 아직 닫히지 않았을 때만)."""
+    s = refresh(db)
     if not s:
         return None
     left = max(1, int(SESSION_MIN - (time.time() - float(s["at"])) / 60))

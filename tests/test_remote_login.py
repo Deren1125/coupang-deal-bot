@@ -118,3 +118,14 @@ async def test_tunnel_serves_one_request_per_connection() -> None:
     finally:
         await web.stop()
         up.close()
+
+
+def test_row_closes_once_the_opened_screen_closes(bot: DealBot) -> None:
+    """주인 10/24 '원격 화면 열고 로그인했는데 이 할 일이 왜 남아 있어': 화면이 한 번 열렸다가 닫히면(로그인 끝 — 스크립트가 닫음)
+    세션을 지워 줄도 사라진다. 아직 한 번도 안 열렸으면(서버가 띄우는 중) 그대로 둔다."""
+    remote_login.start(bot.db, lambda msg: None, "finance")
+    assert remote_login.refresh(bot.db, probe=lambda: False)  # 띄우는 중 — 아직 안 열림
+    assert remote_login.refresh(bot.db, probe=lambda: True)["seen"] is True  # 열림
+    assert remote_login.refresh(bot.db, probe=lambda: True)  # 로그인하는 중
+    assert remote_login.refresh(bot.db, probe=lambda: False) is None  # 로그인 끝 → 화면 닫힘 → 줄 사라짐
+    assert remote_login.session(bot.db) is None and remote_login.port(bot.db) is None
