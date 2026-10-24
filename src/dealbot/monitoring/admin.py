@@ -346,10 +346,10 @@ def naver_search_help(name: str, url: str, shop_key: str) -> str:
 
 
 def photo_ask(p: Product) -> str:
-    """네이버 딜 링크 요청의 한 줄 (주인 결정 10/15): 휴대폰으로 가격·옵션을 본 김에 상품 사진도 같이 — 그 사진이 이 딜의 상품 사진.
+    """네이버 딜 링크 요청의 한 줄: 휴대폰으로 가격·옵션 확인 (10/15). 사진은 봇이 상품 페이지에서 가져온다 (주인 10/24) — 주인 사진은 선택.
     가격은 글 제목의 가격 (페이지 가격으로 바꿔 둔 뒤에도 제목 값, app._title_price 와 같음)."""
     price = f" — 제목 가격 {int(p.extra.get('title_price') or p.price):,}원" if p.has_price else ""
-    return f"📸 가격·옵션 확인 후 사진도 같이 보내 주세요{price}"
+    return f"📸 가격·옵션 확인해 주세요{price} · 사진은 봇이 넣어요"
 
 
 def wants_owner_photo(shop_key: str, p: Product) -> bool:
@@ -938,7 +938,7 @@ class AdminNotifier:
         note = {
             "ok": "📸 상품 사진도 받았어요 (채널·블로그·인스타에 씀)\n",
             "kept": "📸 전에 받은 상품 사진을 그대로 써요\n",
-            "none": "사진 없이 받았어요 — 채널엔 글만, 인스타는 상품명·가격 글자 카드로 올라가요\n",
+            "none": "사진은 상품 사진으로 넣을게요 (상품 페이지에서 — 못 찾으면 채널엔 글만, 인스타는 글자 카드)\n",
             "unused": "사진은 네이버 딜에만 써요 — 링크만 붙였어요\n",
         }.get(photo or "", "")
         head = f"✅ <b>상품 링크 완료 #{item.id}</b> [{html.escape(shop)}]\n{html.escape(truncate(p.name, 80))}{price}\n{note}"

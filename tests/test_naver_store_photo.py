@@ -392,7 +392,7 @@ async def test_small_photo_still_goes_through_the_size_check(bot) -> None:  # ty
     seen: list[str] = []
     bot._fetch_image = _images({small: _jpeg(300, 300)}, seen)
     d = Deal(_deal_product(image_url=small), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is None and d.product.image_url is None and seen == []
+    assert await bot.deal_photo(d) is None and d.product.image_url is None and small in seen  # 주인 10/24: 네이버 딜도 받아 보고 크기로 거름
     other = Deal(_deal_product(shop="toss", product_id="toss:1", url="https://toss.im/_m/abc", image_url=small), DealVerdict(is_deal=True))
     assert await bot.deal_photo(other) is None and other.product.image_url is None and small in seen
 
@@ -450,8 +450,8 @@ async def test_store_page_after_429_is_read_for_the_price_but_its_photo_is_not_u
     p = _deal_product()
     p.extra["page_price"] = {"status": "unverified", "title_price": p.price, "reason": "페이지를 못 읽음"}
     d = Deal(p, DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is None and d.product.image_url is None and got == []
-    assert len(seen) == 2 and sleeps == [3.0] and reqs == [] and browser == [STORE_URL]
+    assert await bot.deal_photo(d) is not None and d.product.image_url == OG_BIG and OG_BIG in got  # 주인 10/24: 페이지 상품 사진을 씀
+    assert len(seen) == 2 and sleeps == [3.0] and reqs == []
     assert naver_image_url(OG_SMALL) == OG_BIG  # 축소본 → 원본 주소 규칙은 그대로 (다른 몰 사진에 씀)
 
 

@@ -31,7 +31,7 @@ from dealbot.publisher.templates import TemplateRenderer
 STORE_URL = "https://brand.naver.com/daekket/products/13008954661"
 BOARD_THUMB = "https://cdn4.ppomppu.co.kr/zboard/data/_thumb/ppomppu/1/small_739081.jpg"
 LINK = "https://naver.me/xMINE"
-ASK = "📸 가격·옵션 확인 후 사진도 같이 보내 주세요 — 제목 가격 60,020원"
+ASK = "📸 가격·옵션 확인해 주세요 — 제목 가격 60,020원 · 사진은 봇이 넣어요"
 
 
 def _jpeg(w: int, h: int, color: tuple[int, int, int] = (40, 120, 200), *, exif: bool = False, fmt: str = "JPEG") -> bytes:
@@ -122,7 +122,7 @@ async def test_link_request_asks_for_the_photo_with_the_title_price(bot, setting
     # 가격 없는 딜: 가격 부분만 뺌
     q2 = _waiting(bot, product_id="naver:2", name="데켓 쿠폰 이벤트", price=0, url="https://brand.naver.com/daekket/products/2")
     await bot.notifier.notify_manual_link(bot.db.get_queue_item(q2), bot.registry.get("naver"))
-    assert "📸 가격·옵션 확인 후 사진도 같이 보내 주세요\n" in sent[-1] and "제목 가격" not in sent[-1]
+    assert "📸 가격·옵션 확인해 주세요 · 사진은 봇이 넣어요\n" in sent[-1] and "제목 가격" not in sent[-1]
 
 
 async def test_toss_link_request_is_unchanged(bot, settings: Settings) -> None:  # type: ignore[no-untyped-def]
@@ -223,9 +223,9 @@ async def test_photo_with_a_non_naver_link_is_not_used(bot, settings: Settings) 
     assert "사진" not in await bot.attach_link(q2, "https://toss.im/_m/MINE2")
 
 
-async def test_naver_link_without_photo_says_text_only(bot) -> None:  # type: ignore[no-untyped-def]
+async def test_naver_link_without_photo_says_the_product_photo_is_used(bot) -> None:  # type: ignore[no-untyped-def]
     reply = await bot.attach_link(_waiting(bot), LINK)
-    assert "사진 없이 받았어요 — 채널엔 글만, 인스타는 상품명·가격 글자 카드로 올라가요" in reply and "못 찾으면" not in reply
+    assert "사진은 상품 사진으로 넣을게요" in reply and "못 찾으면 채널엔 글만" in reply  # 주인 10/24
 
 
 # ---------------------------------------------------------------- 3. 확인된 상품 사진으로 쓰기
@@ -260,12 +260,12 @@ async def test_owner_photo_is_the_verified_photo_and_no_page_is_opened(bot, sett
     assert row["photo_kind"] == "owner" and row["photo_src"] == "owner" and Path(row["photo_file"]).exists()
     assert row["photo_wait_until"] is None and row["text_card_file"] == ""
     assert Path(row["photo_file"]).parent == settings.data_dir / "media" / "export"
-    # 사진 파일이 사라졌으면(정리됨) 사진 없는 네이버 딜과 같다 — 찾지 않는다: 스토어 페이지·크롬·뽐뿌 썸네일 모두 안 엶 (검토 지적)
+    # 사진 파일이 사라졌으면(정리됨) 사진 없는 네이버 딜과 같다 — 상품 페이지에서 찾아본다 (주인 10/24). 뽐뿌 썸네일은 여전히 안 씀
     for f in _owner_files(settings):
         f.unlink()
     opened.clear()
     deal.product.image_url = BOARD_THUMB
-    assert await bot.deal_photo(deal) is None and opened == [] and deal.product.image_url is None
+    assert await bot.deal_photo(deal) is None and BOARD_THUMB not in opened and deal.product.image_url is None
 
 
 async def test_owner_photo_deal_publishes_with_that_photo_everywhere(bot) -> None:  # type: ignore[no-untyped-def]
@@ -412,7 +412,9 @@ def test_maintenance_prunes_old_owner_photos(bot, settings: Settings) -> None:  
 
 
 # ---------------------------------------------------------------- 6. 검토 반영 (10/15 둘째 판)
-async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_for_a_photo(bot, ig_post_now) -> None:  # type: ignore[no-untyped-def]
+async def test_naver_deal_without_owner_photo_uses_the_store_product_photo(bot, ig_post_now) -> None:  # type: ignore[no-untyped-def]
+    """바뀜 (주인 10/24 — '상품 링크에 들어가면 사진이 무조건 잘 나와 있을 텐데, 직접 넣어'): 주인 사진 없이 링크만 보낸 네이버 딜도
+    딜의 큰 스토어 사진(상품 사진)을 받아 채널에 붙인다. 아래 옛 설명은 10/15 판."""
     """검토 지적 (②를 글자 그대로): 주인이 사진 없이 링크만 보낸 네이버 딜은 사진을 찾지 않는다 — 딜에 적힌 큰 스토어 사진,
     일반 요청으로 읽힌 스토어 페이지, 크롬(최대 45초) 모두 쓰지 않는다. 예전엔 크롬이 열리면 채널에 스토어 사진이 붙고 인스타도
     그 사진 카드였다. 이제 채널엔 글만(사진 바이트·주소 없음), 인스타는 글자 카드."""
@@ -439,7 +441,7 @@ async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_fo
     bot._fetch_image = fetch
     qid = _waiting(bot, image_url=big)
     reply = await bot.attach_link(qid, LINK)  # 사진 없이
-    assert "사진 없이 받았어요 — 채널엔 글만" in reply
+    assert "사진은 상품 사진으로 넣을게요" in reply
     got: dict[str, object] = {}
 
     async def fake_publish(deal: Deal, **kw: object) -> PublishResult:
@@ -452,14 +454,8 @@ async def test_naver_deal_without_owner_photo_posts_text_only_and_never_looks_fo
     bot.state.dry_run = False
     assert await bot.process_queue_once()
     assert bot.db.get_queue_item(qid).status == "published"
-    assert got == {"photo": None, "image": None} and opened == [] and fetched == []
-    # 바뀜 (IG-1): 사진 없이 올라간 딜은 주인 사진을 기다리는 동안(📷 사진 필요, 4시간) 인스타 딜 글을 미룬다
-    assert bot.late_photo_waiting(qid)
-    assert await ig_post_now(bot) is None and spy.saved == [] and spy.posted == []
-    info = json.loads(bot.db.kv_get(f"late_photo:{qid}"))
-    bot.db.kv_set(f"late_photo:{qid}", json.dumps({**info, "until": "2000-01-01T00:00:00+00:00"}))  # 사진 없이 기다림이 끝남
-    await ig_post_now(bot)
-    assert spy.saved == [None] and len(spy.posted) == 1  # 인스타: 글자 카드 (대기열 → 시간표)
+    assert got["photo"] is not None and "1032" in str(got["image"]) and fetched and opened == []  # 크롬은 안 엶
+    assert not bot.late_photo_waiting(qid)  # 사진이 있으니 주인 사진을 기다리지 않음
     # 텔레그램: 사진도 주소도 없으면 미리보기를 끈다 (스토어 og:image 가 미리보기로 붙지 않게)
     from dealbot.cli import sample_deal
 

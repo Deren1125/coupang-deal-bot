@@ -398,7 +398,7 @@ async def test_naver_deal_photo_address_is_not_used_without_the_owner_photo(bot)
     got: list[str] = []
     bot._fetch_image = _images({big: _jpeg(800, 800)}, got)
     d = Deal(_product(image_url=big), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is None and opened == [] and got == [] and d.product.image_url is None
+    assert await bot.deal_photo(d) is not None and opened == [] and got == [big] and d.product.image_url == big  # 주인 10/24
 
 
 async def test_browser_without_a_usable_photo_posts_without_photo(bot) -> None:  # type: ignore[no-untyped-def]
@@ -440,8 +440,9 @@ async def test_browser_is_not_opened_when_the_read_page_had_the_price(bot) -> No
     got: list[str] = []
     bot._fetch_image = _images({OG: _jpeg(1000, 1000)}, got)
     d = Deal(_unverified(_product(url=url, product_id="naver:11223344556")), DealVerdict(is_deal=True))
-    assert await bot.deal_photo(d) is None and d.product.image_url is None
-    assert opened == [] and got == []
+    await bot.deal_photo(d)
+    assert got and all("pstatic.net" in u for u in got)  # 주인 10/24: 읽은 페이지의 상품 사진을 받아 본다
+    assert opened == []
     assert d.product.extra["page_price"]["status"] != "unverified"  # 읽은 페이지로 대조함
 
 

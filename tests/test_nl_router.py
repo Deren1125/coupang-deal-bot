@@ -1147,7 +1147,7 @@ async def test_naver_link_and_photo_reply_end_to_end_with_the_real_bot(settings:
         q = add_item(bot.db, "데켓 주물팬", shop="naver", url="https://brand.naver.com/daekket/products/1")
         await bot.notifier.notify_manual_link(bot.db.get_queue_item(q), bot.registry.get("naver"))
         req = notices[-1]
-        assert "📸 가격·옵션 확인 후 사진도 같이 보내 주세요 — 제목 가격 14,890원" in (req.text or "")
+        assert "📸 가격·옵션 확인해 주세요 — 제목 가격 14,890원 · 사진은 봇이 넣어요" in (req.text or "")
         env.bot.files["F9501"] = jpeg(300, 300)
         await env.media(caption=NAVER_LINK, photo=True, reply_to=req, mid=9501)
         assert "링크도 아직 안 붙였어요" in env.texts[-1] and "사진이 너무 작아요 (300×300)" in env.texts[-1]

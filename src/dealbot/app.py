@@ -3520,9 +3520,9 @@ class DealBot:
     async def deal_photo(self, deal: Deal) -> bytes | None:
         """올릴 상품 사진: 디코딩되고 짧은 변 photo_min_side(600px) 이상인 JPEG (EXIF 방향 반영). 없으면 None → 사진 없이 올린다.
         - 주인이 링크와 같이 보낸 사진이 있으면 그것 (네이버 딜, 주인 결정 10/15 ① — 페이지·크롬을 열지 않음).
-        - 그 사진이 없는 네이버 딜은 사진을 찾지 않는다 (10/15 ②): 딜에 적힌 사진·스토어 페이지·크롬 사진 모두 안 씀 →
-          채널엔 글만, 인스타는 상품명·가격 글자 카드. 수집 때 가격을 확인 못 한 딜만 가격을 한 번 본다 (_read_unverified_price).
-        - 다른 몰: 딜의 상품 사진(쿠팡·네이버 CDN 은 큰 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만).
+        - 주인 사진이 없으면 모든 몰(네이버 포함 — 주인 10/24 '상품 링크에 들어가면 사진이 무조건 잘 나와 있을 텐데, 직접 넣어'):
+          딜의 상품 사진(쿠팡·네이버 CDN 은 큰 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만).
+          네이버 딜은 수집 때 가격을 확인 못 했으면 가격도 한 번 본다 (_read_unverified_price).
         사진을 찾으러 검색하지 않는다 (네이버 쇼핑 검색 API 는 2026-07-31 종료). 게시판 목록·글 사진(뽐뿌 등)·로고·기본 배너는
         상품 사진으로 쓰지 않는다. 글자 카드도 상품 사진이 아니라 여기서 만들지 않는다 (카드는 인스타만).
         쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고(주인 사진은 공개 사본 주소), 못 찾았으면 비운다."""
@@ -3536,11 +3536,6 @@ class DealBot:
         if owned is not None:
             p.image_url = self._public_owner_photo(owned)  # 공개 도메인이 없으면 None (텔레그램은 바이트로, 스레드는 글만)
             return owned
-        if p.shop == "naver":
-            if p.image_url:
-                log.info("naver deal without the owner's photo — posting text only: %s", p.product_id)
-            p.image_url = None
-            return None
         referer = p.url if p.url and p.url.startswith("http") else None
         tried: set[str] = set()
 

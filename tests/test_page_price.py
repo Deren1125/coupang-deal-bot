@@ -423,7 +423,7 @@ async def test_owner_linked_naver_deal_is_not_held_by_the_browser_page(bot: Deal
     await bot.run_collector(bot.collectors[0])
     item = bot.db.pending_items()[0]
     reply = await bot.attach_link(item.id, "https://naver.me/MINE")  # 주인이 링크를 만들어 줌 (사진 없이)
-    assert "사진 없이 받았어요" in reply
+    assert "사진은 상품 사진으로 넣을게요" in reply
     assert await bot.process_queue_once()
     assert opened == []
     assert bot.db.queue_counts() == {"published": 1} and len(bot.db.recent_posts()) == 1
