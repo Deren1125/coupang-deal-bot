@@ -153,6 +153,12 @@ def redirect_target_ok(target: str) -> bool:
     return target.startswith("/") and target[1:2] not in ("/", "\\") and "\\" not in target
 
 
+def _close_header(block: bytes) -> bytes:
+    """머리 덩어리(첫 줄 뒤 · 빈 줄로 끝남)에서 Connection·Keep-Alive 줄을 빼고 Connection: close 를 넣는다."""
+    lines = [ln for ln in block.split(b"\r\n") if ln and not ln.lower().startswith((b"connection:", b"keep-alive:"))]
+    return b"\r\n".join([*lines, b"Connection: close"]) + b"\r\n\r\n"
+
+
 class WebServer:
     """`routes` 는 경로 → 핸들러. 핸들러는 쿼리 딕셔너리를 받아 (status, html) 을 돌려준다."""
 
@@ -265,13 +271,35 @@ class WebServer:
 
     async def _tunnel(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, port: int, head: bytes,
                       prefix: str) -> None:
-        """요청 첫 줄의 경로에서 prefix 를 떼고, 받은 머리를 그대로 보낸 뒤 양쪽을 끝날 때까지 잇는다 (최대 TUNNEL_MAX_S)."""
+        """요청 첫 줄의 경로에서 prefix 를 떼고, 받은 머리를 그대로 보낸 뒤 양쪽을 끝날 때까지 잇는다 (최대 TUNNEL_MAX_S).
+        웹소켓이 아닌 요청은 연결 하나에 요청 하나 (주인 10/24 — 원격 화면이 꾸밈 없이 'noVNC encountered an error'):
+        앞단(Caddy·브라우저)이 같은 연결로 다음 요청을 보내면 그 요청은 prefix 를 떼지 못해 websockify 에서 404 였다.
+        그래서 양쪽 머리에 Connection: close 를 넣고, 응답이 끝나면 연결을 닫는다."""
         first, _, rest = head.partition(b"\r\n")
         method, target, version = first.decode("latin-1").split(" ", 2)
         target = "/" + target[len(prefix):]
+        upgrade = b"upgrade: websocket" in head.lower()
+        if not upgrade:
+            rest = _close_header(rest)
         up_r, up_w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=5)
         up_w.write(f"{method} {target} {version}\r\n".encode("latin-1") + rest)
         await up_w.drain()
+        if not upgrade:
+            try:
+                resp = await asyncio.wait_for(up_r.readuntil(b"\r\n\r\n"), timeout=30)
+                line, _, hdrs = resp.partition(b"\r\n")
+                writer.write(line + b"\r\n" + _close_header(hdrs))
+                while chunk := await asyncio.wait_for(up_r.read(65536), timeout=60):
+                    writer.write(chunk)
+                    await writer.drain()
+                await writer.drain()
+            except Exception:  # noqa: BLE001 — 끊기거나 늦으면 그냥 닫는다
+                pass
+            finally:
+                for w in (up_w, writer):
+                    with contextlib.suppress(Exception):
+                        w.close()
+            return
 
         async def pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
             with contextlib.suppress(Exception):

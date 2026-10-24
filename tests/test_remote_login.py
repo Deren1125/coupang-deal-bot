@@ -90,3 +90,31 @@ async def test_login_remote_action_relays_a_session_and_shows_the_open_row(bot: 
     status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote", "args": {"target": "rm -rf"}},
                                       session_headers(bot))
     assert body["code"] == "bad_args"
+
+
+async def test_tunnel_serves_one_request_per_connection() -> None:
+    """주인 10/24: 원격 화면이 꾸밈 없이 오류 — 같은 연결로 온 다음 요청(CSS·JS)이 prefix 를 떼지 못해 404 였다.
+    웹소켓이 아닌 요청은 양쪽에 Connection: close · 응답이 끝나면 닫음 (다음 요청은 새 연결로 와서 prefix 를 뗌)."""
+    seen: list[bytes] = []
+
+    async def handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        seen.append(await r.readuntil(b"\r\n\r\n"))
+        w.write(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: keep-alive\r\n\r\ncss")
+        await w.drain()  # 닫지 않음 (keep-alive 서버)
+        await asyncio.sleep(2)
+        w.close()
+
+    up = await asyncio.start_server(handle, "127.0.0.1", 0)
+    web = WebServer(0, host="127.0.0.1")
+    web.guard_prefix("/dashboard", lambda h: True)
+    web.route_tunnel("/dashboard/vnc/", lambda: up.sockets[0].getsockname()[1])
+    await web.start()
+    port = web._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+    try:
+        data = await _get(port, "/dashboard/vnc/app/styles/base.css", "Connection: keep-alive\r\n")
+        assert data.endswith(b"css") and b"Connection: close" in data and b"keep-alive" not in data
+        assert seen[0].startswith(b"GET /app/styles/base.css HTTP/1.1") and b"Connection: close" in seen[0]
+        assert b"keep-alive" not in seen[0].lower()
+    finally:
+        await web.stop()
+        up.close()
