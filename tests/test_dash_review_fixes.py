@@ -446,3 +446,14 @@ def test_stats_unknown_goal_is_said_once_in_haeyo() -> None:
     assert "판단 불가" not in html and "확인할 수 없어" not in html and "아직 읽은 값이 없어요" in html
     old = card_html(v, token="t", today=date(2026, 10, 18), tz="Asia/Seoul", spark_days=14)
     assert "판단 불가" in old  # 예전 한 장짜리 화면은 그대로
+
+
+async def test_photo_feedback_on_the_same_post_goes_through_while_the_last_one_is_pending(bot: DealBot, settings: Settings,
+                                                                                           tmp_path: Path) -> None:
+    """주인 10/24: '자꾸 앞의 작업 진행 중이라고 내 피드백이 바로바로 안 들어가' — 피드백은 기록만이라 같은 글이어도 바로 맡긴다."""
+    write_export(tmp_path / "blogauto.json", modes={"issue": "draft"})
+    blogauto_status(settings)
+    h = session_headers(bot)
+    s1, first = await act(bot, "blog.photo_feedback", {"blog": "issue", "pid": 46, "slot": 1, "verdict": "ok"}, h)
+    s2, second = await act(bot, "blog.photo_feedback", {"blog": "issue", "pid": 46, "slot": 2, "verdict": "ok"}, h)
+    assert (s1, s2) == (202, 202) and first["id"] != second["id"]

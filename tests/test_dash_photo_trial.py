@@ -84,7 +84,7 @@ async def test_page_view_buttons_queue_the_bridge_work(bot: DealBot, settings: S
     f = spool.read(spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new" / f"{res['id']}.json")
     assert (f["action"], f["args"], f["target"], f["confirmed"]) == (want["action"], want["args"], want["target"], False)
     status, res = await act(bot, p["done"]["action"], p["done"]["args"], session_headers(bot))
-    assert status == 409 and res["code"] == "busy"  # 같은 글의 앞 일이 끝나기 전에는 (두 번 막기)
+    assert status == 202  # 주인 10/24: 피드백은 같은 글의 앞 피드백이 처리 중이어도 바로 (예전엔 '앞의 작업' 으로 막힘)
     assert clean_args(p["done"]["action"], p["done"]["args"]) == {"blog": "issue", "pid": 52, "verdict": "done", "reasons": []}
 
 

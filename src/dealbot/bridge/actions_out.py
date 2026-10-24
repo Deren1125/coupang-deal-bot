@@ -139,6 +139,11 @@ def status_of(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# 가벼운 피드백 (기록만 — 글을 바꾸지 않음): 같은 글에 앞의 피드백이 아직 처리 중이어도 바로 맡긴다
+# (주인 10/24 '자꾸 앞의 작업 진행 중이라고 내 피드백이 바로바로 안 들어가')
+PARALLEL_OK = frozenset({"photo_feedback", "product_feedback"})
+
+
 class ActionsOut:
     def __init__(self, db: Any, data_dir: Path | str, *, status: Callable[[], BlogAutoStatus],
                  clock: Callable[[], float] = time.time) -> None:
@@ -158,7 +163,7 @@ class ActionsOut:
         표의 action 은 'blog.publish' 처럼."""
         full = f"blog.{action}"
         ahash = args_hash(full, args)
-        if target:
+        if target and action not in PARALLEL_OK:
             cur = self.store.open_for(full, target)
             if cur is not None:
                 if ahash is not None and cur.get("args_hash") == ahash:
