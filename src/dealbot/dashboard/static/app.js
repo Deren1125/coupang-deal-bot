@@ -1102,7 +1102,7 @@ function submitSheet(r) {
   sheet(r.title, box);
   box.append(r.google ? btn('mr', '주소 복사하기', () => {
     N.clipboard.writeText(r.google.copy).then(() => toast('글 주소를 복사했어요 — 붙여넣고 등록하세요'), () => toast('길게 눌러 복사해 주세요: ' + r.google.copy));
-  }) : null, r.daum ? ext('mr', '다음 확인', r.daum) : null, r.share ? btn('mr', '오픈채팅 문구 복사', () => copy(r.share, '복사했어요 — 오픈채팅에 붙여넣기 하세요')) : null,
+  }) : null, r.daum ? ext('mr', '다음 확인', r.daum) : null, r.share ? btn('mr', '오픈채팅에 보내기', () => N.share ? N.share({text: r.share}).catch(() => 0) : copy(r.share, '복사했어요 — 오픈채팅에 붙여넣기 하세요')) : null,
   r.daum ? el('p', {class: 'note'}, '다음은 블로그를 한 번 등록해 두면 새 글이 알아서 들어가요') : null);
 }
 

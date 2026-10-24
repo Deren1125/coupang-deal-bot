@@ -123,4 +123,4 @@ async def test_share_text_reaches_the_blog_tab(ebot: DealBot, settings: Settings
     body = await state(ebot)
     assert body["blogs"]["hotdeal"]["recent"][0]["share"] == "🔥 에어팟\n129,000원"
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    assert "오픈채팅 문구 복사" in js and "복사했어요 — 오픈채팅에 붙여넣기 하세요" in js
+    assert "오픈채팅에 보내기" in js and "N.share" in js and "복사했어요 — 오픈채팅에 붙여넣기 하세요" in js
