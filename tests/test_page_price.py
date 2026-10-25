@@ -374,7 +374,7 @@ def _browser_pages(bot: DealBot) -> list[str]:
 
 async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> None:
     """수집 때 스토어가 막혀(429) 확인 못 한 딜: 발행 직전 크롬 페이지로 가격을 보고, 안 맞으면 올리지 않는다. 크롬은 한 번만.
-    10/15 ②: 주인 사진이 없는 네이버 딜은 사진을 찾지 않으므로 이 크롬은 가격만 보려고 연다 (아래 테스트: 그 사진은 안 씀).
+    주인 10/25: 그 크롬 페이지의 상품 사진도 쓴다 — 가격 때문에 연 그 한 번을 사진에도 (다시 열지 않음).
     주인 결정 10/15 로 바뀐 점: 주인이 휴대폰으로 보고 링크를 붙인 네이버 딜은 이 대조로 보류하지 않는다 (아래 테스트) —
     보류는 예전에 만든 링크(mylink)를 다시 써서 이번엔 주인이 보지 않은 딜만."""
     _serve(bot, {})
@@ -384,7 +384,7 @@ async def test_naver_store_browser_page_holds_before_publish(bot: DealBot) -> No
     assert bot.db.queue_counts() == {"pending": 1}
     bot.db.kv_set("mylink:naver:11223344556", "https://naver.me/MINE")  # 전에 주인이 만든 같은 상품의 링크를 다시 씀
     assert await bot.process_queue_once()
-    assert opened == [NAVER_URL]  # 가격을 확인 못 한 딜이라 가격 때문에 여는 그 한 번
+    assert opened == [NAVER_URL]  # 가격을 확인 못 한 딜이라 가격 때문에 여는 그 한 번 (사진도 그 페이지로)
     assert bot.db.queue_counts() == {"held": 1} and bot.db.recent_posts() == []
     assert bot.sent[-1][2] == "price_hold"  # type: ignore[attr-defined]
 
@@ -416,7 +416,8 @@ async def test_reused_link_and_photo_still_get_the_price_check(bot: DealBot) -> 
 
 async def test_owner_linked_naver_deal_is_not_held_by_the_browser_page(bot: DealBot) -> None:
     """주인 결정 10/15: 주인이 휴대폰으로 가격·옵션을 보고 링크를 붙인 네이버 딜은 그 확인이 가격 확인 — 발행 직전 크롬 페이지
-    값이 제목 가격과 달라도 보류하지 않고 올린다. 사진도 찾지 않으니(②, 검토 지적) 크롬을 아예 열지 않는다 (예전엔 사진 때문에 한 번)."""
+    값이 제목 가격과 달라도 보류하지 않고 올린다. 가격 때문에는 크롬을 열지 않지만, 주인 사진이 없으니 상품 사진 때문에 한 번 연다
+    (10/15 ② 에 껐다가 주인 10/25 '응'으로 다시 — 주인에게 '사진은 상품 사진으로 넣을게요'라고 답한 그대로)."""
     _serve(bot, {})
     opened = _browser_pages(bot)
     FakePageCollector.products = [_naver_22()]
@@ -425,17 +426,17 @@ async def test_owner_linked_naver_deal_is_not_held_by_the_browser_page(bot: Deal
     reply = await bot.attach_link(item.id, "https://naver.me/MINE")  # 주인이 링크를 만들어 줌 (사진 없이)
     assert "사진은 상품 사진으로 넣을게요" in reply
     assert await bot.process_queue_once()
-    assert opened == []
+    assert opened == [NAVER_URL]  # 사진 때문에 한 번
     assert bot.db.queue_counts() == {"published": 1} and len(bot.db.recent_posts()) == 1
     published = bot.db.get_queue_item(item.id)
     assert published is not None and published.deal.product.extra["page_price"]["status"] == "unverified"  # 크롬 값으로 다시 판정 안 함
     assert not any(kind == "price_hold" for _t, _s, kind, _q in bot.sent)  # type: ignore[attr-defined]
 
 
-async def test_unchecked_naver_deal_reads_only_the_price_and_posts_text_only(bot: DealBot) -> None:
-    """주인 결정 10/15 ② (검토 지적): 주인 사진이 없는 네이버 딜은 발행 직전에도 사진을 찾지 않는다. 예전 링크를 다시 써서 주인이
-    이번엔 안 본 딜이 수집 때 가격을 확인 못 했으면 크롬으로 가격만 한 번 보고(맞으면 올림), 그 페이지의 사진(og:image ?type=o1000)은
-    받지도 않는다 — 채널엔 글만 (사진 바이트도 주소도 없음)."""
+async def test_unchecked_naver_deal_reads_price_and_photo_with_one_browser_visit(bot: DealBot) -> None:
+    """예전 10/15 ②: 크롬으로 가격만 보고 그 페이지 사진은 받지도 않았다. 주인 10/25 '응'(핫딜 #118): 예전 링크를 다시 써서 주인이
+    이번엔 안 본 딜이 수집 때 가격을 확인 못 했으면 크롬으로 한 번 열어 가격을 보고(맞으면 올림) 그 페이지의 상품 사진도 받아 본다.
+    여기선 사진을 못 받아(가짜 받기 → None) 채널엔 글만. 크롬은 한 번만."""
     from dealbot.models import PublishResult
 
     _serve(bot, {})
@@ -462,7 +463,7 @@ async def test_unchecked_naver_deal_reads_only_the_price_and_posts_text_only(bot
     assert bot.db.pending_items()[0].deal.product.extra["page_price"]["status"] == "unverified"
     bot.db.kv_set("mylink:naver:11223344556", "https://naver.me/MINE")
     assert await bot.process_queue_once()
-    assert opened == [NAVER_URL] and fetched == []
+    assert opened == [NAVER_URL] and fetched and all("pstatic.net" in u for u in fetched)  # 그 페이지 사진을 받아 봄
     assert got == {"photo": None, "image": None}
     assert bot.db.queue_counts() == {"published": 1}
     assert bot.db.get_queue_item(qid).deal.product.extra["page_price"]["status"] in ("ok", "option")  # type: ignore[union-attr]  # 크롬 값으로 확인
