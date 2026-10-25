@@ -1,7 +1,8 @@
 /* Sns-board X(트위터) 화면 (주인 10/25 — '대시보드 형식 보고 그에 맞게 X 화면').
    스레드·인스타 화면 위 'X →' 를 처음 누를 때만 threads.js 가 불러온다 (주소는 meta sb-x).
    데이터: 스레드 자동화 서비스(Blog-Auto threads/ xbot.py)의 /api/state 'x' 칸 — /dashboard/api/threads/state 를 같이 쓴다.
-   바꾸기: /dashboard/api/threads/act 의 x_* 일 (threads_proxy.py OPS). 라이브러리 없음, 글자는 모두 textContent 로. */
+   바꾸기: /dashboard/api/threads/act 의 x_* 일 (threads_proxy.py OPS). 라이브러리 없음, 글자는 모두 textContent 로.
+   계정 둘 (주인 10/25): state 'x' · 'x2'. 위 단추로 고른 계정만 그리고, 바꾸기에 acct 를 붙인다. */
 'use strict';
 (() => {
 const D = document, W = window, P = '/dashboard/api/threads';
@@ -13,7 +14,7 @@ const CSS = '.xi{padding:10px 0;border-bottom:1px solid var(--line)}.xi:last-chi
 const N = {like: '♥ 좋아요', repost: '↻ 리포스트', reply: '💬 댓글'};
 const A = {like: '♥ 좋아요', reply: '💬 댓글', quote: '❝ 인용'};  // 자동 숫자 칸 (리포스트는 2~3일에 1번이라 뺌)
 const R = {done: '완료', already: '이미 함', no_button: '단추 못 찾음', no_menu: '메뉴 안 뜸', no_box: '글 칸 못 찾음', no_send: '보내기 안 눌림', unconfirmed: '확인 안 됨'};
-let T = null, box = null, H = null, back = null;
+let T = null, box = null, H = null, back = null, cur = 'x';
 const E = {};  // 승인함 글마다 고친 댓글·고른 동작 (다시 그려도 남게)
 
 function css() {
@@ -26,7 +27,7 @@ async function load() {
   draw();
 }
 async function act(op, args, why) {
-  const r = await H.api(P + '/act', {method: 'POST', body: {op, args: args || {}}});
+  const r = await H.api(P + '/act', {method: 'POST', body: {op, args: Object.assign({acct: cur}, args)}});
   if (r.status !== 200) { H.toast((r.data && r.data.text) || '안 됐어요'); return null; }
   if (why) H.toast(why);
   await load();
@@ -42,7 +43,10 @@ const res = r => !r ? '' : r.error ? r.error : Object.entries(r).map(([k, v]) =>
 // 첫 화면은 간략하게 (주인 10/25 '대시보드는 무조건 간략해야 해'): 알림 한 줄 · 오늘 숫자 · 켜기/끄기. 기록·설정은 접어 둔다
 function head(X) {
   const {el, btn} = H, s = X.settings, d = X.did_today || {};
-  const top = el('div', {class: 'top'}, el('h2', {}, 'X' + (X.me ? ' @' + X.me : '')), btn('lnk', '스레드·인스타로', back));
+  const top = el('div', {class: 'top'}, el('h2', {}, T.x2 ? 'X' : 'X' + (X.me ? ' @' + X.me : '')), btn('lnk', '스레드·인스타로', back));
+  const pick = T.x2 ? el('div', {class: 'seg', role: 'group', 'aria-label': '계정', style: 'margin-bottom:10px'}, [['x', T.x], ['x2', T.x2]].map(([k, S], i) =>
+    btn('', (S.me ? '@' + S.me : `계정 ${i + 1}`) + (S.login_needed || S.paused_until ? ' ⚠' : ''), () => { cur = k; draw(); },
+      {'aria-pressed': cur === k ? 'true' : 'false'}))) : null;
   const w = X.login_needed ? ['X 로그인이 필요해요 — 채팅에서 ‘X 원격 로그인 열어 줘’라고 해 주세요', 1]
     : X.paused_until ? [`X 가 잠시 막아서 ${X.paused_until}까지 쉬어요`, 1]
     : !s.on ? ['꺼져 있어요'] : !s.keywords.length ? ['설정에 찾을 키워드를 넣어 주세요'] : null;
@@ -51,7 +55,7 @@ function head(X) {
     : [el('div', {}, el('b', {}, `${X.sent_today}/${s.daily_max}`), el('span', {}, '보낸 글'))];
   const v = X.visits_today || [0, 0];
   const info = s.auto ? `자동 · 접속 ${v[0]}/${v[1]}${X.next_visit ? ' · 다음 ' + X.next_visit : ''}` : '누른 글만 보내요';
-  return [top, w ? el('p', {class: 'bn' + (w[1] ? ' bad' : '')}, el('span', {}, w[0])) : null,
+  return [top, pick, w ? el('p', {class: 'bn' + (w[1] ? ' bad' : '')}, el('span', {}, w[0])) : null,
     card('오늘', el('div', {class: 'tq'}, tiles), el('p', {class: 'note'}, info),
       btn('pb soft', s.on ? '끄기' : '켜기', () => act('x_settings', {on: !s.on}, s.on ? '껐어요' : '켰어요'), {style: 'margin-top:10px'}))];
 }
@@ -104,7 +108,7 @@ function draw() {
   if (!box || !T) return;
   const {el} = H;
   if (T.off || !T.x) { box.replaceChildren(el('p', {class: 'empty'}, T.off || 'X 기능이 아직 서버에 없어요'), H.btn('pb soft', '다시 불러오기', load)); return; }
-  const X = T.x, typing = D.activeElement && box.contains(D.activeElement) && /^(TEXTAREA|INPUT)$/.test(D.activeElement.tagName);
+  const X = T[cur] || T.x, typing = D.activeElement && box.contains(D.activeElement) && /^(TEXTAREA|INPUT)$/.test(D.activeElement.tagName);
   if (typing) return;  // 댓글·설정을 고치는 중에는 다시 그리지 않음
   box.replaceChildren(...[...head(X), X.settings.auto ? null : inbox(X), log(X), settings(X)].filter(Boolean));
 }
