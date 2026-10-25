@@ -134,3 +134,36 @@ async def test_wrong_key_is_treated_as_off(bot: DealBot, threads_srv, tmp_path: 
     monkeypatch.setattr(threads_proxy, "KEY_FILE", bad)
     status, data, _ = await get_json(bot, "/dashboard/api/threads/state", session_headers(bot))
     assert status == 503 and data["code"] == "threads_off"
+
+
+# X 화면 (주인 10/25) — 스레드 화면 'X →' 를 처음 누를 때만 x.js, 데이터는 같은 state 의 'x' 칸, 바꾸기는 x_* 일만
+X_JS_MAX = 12 * 1024
+X_JS_GZIP_MAX = 5 * 1024
+
+
+def test_x_js_is_lazy_small_and_safe() -> None:
+    js = (STATIC / "x.js").read_bytes()
+    assert len(js) <= X_JS_MAX and len(gzip.compress(js, 9)) <= X_JS_GZIP_MAX
+    text = js.decode("utf-8")
+    assert "'use strict'" in text and "W.SBX = {view}" in text
+    assert "innerHTML" not in text and "eval(" not in text and "http://" not in text
+    assert "meta[name=sb-x]" in (STATIC / "threads.js").read_text(encoding="utf-8")
+    page = shell.page({})
+    assert f'<meta name="sb-x" content="{shell.asset_url("x.js")}">' in page
+
+
+async def test_x_js_is_served_like_other_app_files(bot: DealBot) -> None:
+    res = await bot.web.dispatch("GET", "/dashboard/static/x.js", {})
+    assert res[0] == 200 and res[2].startswith("text/javascript") and res[3]["X-Content-Type-Options"] == "nosniff"
+
+
+async def test_x_ops_go_to_the_x_paths_only(bot: DealBot, threads_srv) -> None:  # type: ignore[no-untyped-def]
+    for op, path in (("x_settings", "/api/x/settings"), ("x_approve", "/api/x/approve"), ("x_skip", "/api/x/skip"),
+                     ("x_approve_all", "/api/x/approve_all"), ("x_find", "/api/x/find")):
+        status, _, _ = await post_json(bot, "/dashboard/api/threads/act", {"op": op, "args": {"id": "1"}}, session_headers(bot))
+        assert status == 200 and FakeThreads.seen[-1] == (path, {"id": "1"})
+    n = len(FakeThreads.seen)
+    status, _, _ = await post_json(bot, "/dashboard/api/threads/act", {"op": "x_settings", "args": {"auto": True}}, session_headers(bot, csrf=False))
+    assert status == 403 and len(FakeThreads.seen) == n
+    status, _, _ = await post_json(bot, "/dashboard/api/threads/act", {"op": "x_post", "args": {}}, session_headers(bot))
+    assert status == 400 and len(FakeThreads.seen) == n

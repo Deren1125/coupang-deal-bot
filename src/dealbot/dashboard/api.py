@@ -64,6 +64,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "earn.js": "text/javascript; charset=utf-8",  # earn.js: 통계 탭 제휴 수익 칸 (10/23, 처음 열 때만)
              "thpost.js": "text/javascript; charset=utf-8",  # thpost.js: 스레드 글·예약·댓글·통계 칸 (10/21, threads.js 칸에 붙음)
              "threads.js": "text/javascript; charset=utf-8",  # threads.js: 스레드 화면 (10/21, 처음 열 때만)
+             "x.js": "text/javascript; charset=utf-8",  # x.js: X 화면 (10/25, threads.js 가 처음 누를 때만)
              "theme.js": "text/javascript; charset=utf-8"}  # theme.js: 화면 밝기 단추 (10/24, 머리에서 먼저)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
