@@ -376,7 +376,9 @@ def _challenge(c: dict[str, Any] | None) -> dict[str, Any] | None:
         head = "방문 수 챌린지 · 지금 진행 중인 판이 없어요"
     warn = ""
     if running and not c.get("content"):
-        warn = "콘텐츠 링크를 아직 안 냈어요 — 내지 않으면 몇 명이 와도 0원 (에이블리 크리에이터 > 방문 수 챌린지 > 콘텐츠 제출하기)"
+        # 주인 10/25 '이거는 왜 계속 떠 있는 거야': 봇이 자동으로 내는 조건(에이블리 상품 링크가 든 Pick 글 발행 뒤 24시간 안)을 같이 적는다
+        warn = ("콘텐츠 링크를 아직 안 냈어요 (내지 않으면 몇 명이 와도 0원) — 에이블리 상품 링크가 들어간 데런픽 글이 발행되면 봇이 24시간 안에 자동으로 내요. "
+                "그런 글이 아직 없어서 남아 있어요 (직접 내려면: 에이블리 크리에이터 > 방문 수 챌린지 > 콘텐츠 제출하기)")
     earned = f"지금 닿은 단계 {money(c['earned'])} (콘텐츠 검수 뒤 확정)" if c.get("earned") else ""
     tiers = [{"visits": f"{t['visits']:,}명", "reward": money(t["reward"]), "hit": visits is not None and visits >= t["visits"]}
              for t in c.get("tiers") or []]
