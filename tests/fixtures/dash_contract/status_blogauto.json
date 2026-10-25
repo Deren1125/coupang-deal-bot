@@ -59,7 +59,10 @@
   "threads_reply",
   "x_posted",
   "x_drop",
-  "x_redo"
+  "x_redo",
+  "lookbook_posted",
+  "lookbook_drop",
+  "lookbook_redo"
  ],
  "kakao": {
   "state": "ok",

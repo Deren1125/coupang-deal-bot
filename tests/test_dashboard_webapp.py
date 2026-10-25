@@ -229,8 +229,8 @@ async def test_page_and_login_have_app_head_tags_and_a_minimal_csp(db: Database,
     dash, srv = make(db, tmp_path, title="<b>채널</b> 대시보드")
     csp = SECURITY_HEADERS["Content-Security-Policy"]
     assert csp == ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-                   "connect-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; "
-                   "frame-ancestors 'none'")  # 10/18 앱: 스크립트는 이 서버 파일만 (페이지 안 스크립트 없음)
+                   "media-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; "
+                   "frame-ancestors 'none'")  # 10/18 앱: 스크립트는 이 서버 파일만 (페이지 안 스크립트 없음) · 10/25 영상(룩북 릴스)도 이 서버 것만
     assert "unsafe-eval" not in csp and "script-src 'self';" in csp
     page = await srv.dispatch("GET", "/dashboard/", frm(authorization=basic(USER, PASSWORD)))
     login = await srv.dispatch("GET", "/dashboard/login", frm())

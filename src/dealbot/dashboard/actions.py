@@ -36,6 +36,7 @@ from dealbot.bridge import spool
 from dealbot.bridge.actions_out import ActionsBusy, ActionsOut, ActionStore, redact, status_of
 from dealbot.dashboard import srvcheck
 from dealbot.dashboard.blogauto import (
+    LB_ID_RE,
     PIC_ID,
     PIC_JOB_ID,
     PT_ITEM_ID,
@@ -106,7 +107,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "product_feedback",  # 제품 테스트 (주인 10/21 — Pick 비슷한 아이템 후보 ✅/❌·이유 · 글마다 한 줄·테스트 끝)
                 "threads_post", "threads_cancel", "threads_reply",  # 스레드 (주인 10/21 — 주인이 쓴 글 바로·예약 · 예약 취소 · 내 글 답글에 답)
                 "post_edit",  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
-                "x_posted", "x_drop", "x_redo")  # X 초안 (주인 10/25 — 올렸어요 · 버리기 · 다시 쓰기 · X API 없음, 올리기는 주인이 X 앱에서)
+                "x_posted", "x_drop", "x_redo",  # X 초안 (주인 10/25 — 올렸어요 · 버리기 · 다시 쓰기 · X API 없음, 올리기는 주인이 X 앱에서)
+                "lookbook_posted", "lookbook_drop", "lookbook_redo")  # 룩북 릴스 (주인 10/25 — 올렸어요 {id, url} · 버리기 · 다시 만들기 · 올리기는 주인이 인스타 앱에서)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "todo.hide", "login.remote", "stats.refresh", "stats.input", "search.check",
@@ -127,6 +129,12 @@ X_STATS_KEY, X_STATS_KEEP = "dash_x_stats", 60
 X_STATS_MAX = {"followers": 10**9, "verified": 10**9, "impressions_90d": 10**12}
 X_HANDLES_KEY = "dash_x_handles"  # {pick: 데런픽 계정, revenue: 수익 계정} — 아직 안 정했으면 빈 값
 X_HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+# 룩북 릴스 '올렸어요' 주소 (주인 10/25): Blog-Auto bridge._reel_url 과 같은 규칙 — https · instagram.com · /p|reel|reels|tv/<코드>/ (앞에 /계정/ 가능).
+# 글자만 본다 (인스타그램에 접속하지 않음) · 물음표 뒤(igsh= 공유 꼬리)는 버리고 www.instagram.com 주소로
+LB_ACTIONS = ("blog.lookbook_posted", "blog.lookbook_drop", "blog.lookbook_redo")
+REEL_URL_MAX = 300
+REEL_HOSTS = ("instagram.com", "www.instagram.com", "m.instagram.com")
+REEL_PATH_RE = re.compile(r"^/(?:[A-Za-z0-9_.]{1,30}/)?(?:p|reels?|tv)/[A-Za-z0-9_-]{5,40}/?$")
 
 
 def hidden_rows(db: Any, now: float) -> dict[str, dict[str, Any]]:
@@ -327,6 +335,22 @@ def instagram_post(url: str) -> bool:
     parts = [x for x in p.path.split("/") if x]
     return any(len(parts) > i + 1 and parts[i] in ("p", "reel", "reels", "tv") and IG_CODE_RE.fullmatch(parts[i + 1])
                and parts[i + 1] != "audio" for i in (0, 1))
+
+
+def reel_url(v: Any) -> str:
+    """주인이 붙여 넣은 릴스 주소 → 'https://www.instagram.com/reel/<코드>/' (REEL_PATH_RE). 아니면 ActionError (쉬운 말)."""
+    bad = ActionError("bad_args", text="인스타 릴스 주소를 넣어 주세요 (instagram.com/reel/… 주소)")
+    if not isinstance(v, str) or not v.strip() or len(v.strip()) > REEL_URL_MAX or any(c.isspace() for c in v.strip()):
+        raise bad
+    try:
+        p = urlparse(v.strip())
+        ok = p.scheme == "https" and (p.hostname or "").lower() in REEL_HOSTS and "@" not in p.netloc and p.port is None \
+            and bool(REEL_PATH_RE.match(p.path))
+    except ValueError:
+        ok = False
+    if not ok:
+        raise bad
+    return "https://www.instagram.com" + (p.path if p.path.endswith("/") else p.path + "/")
 
 
 def _ig_links(v: Any) -> list[dict[str, Any]]:
@@ -863,6 +887,11 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"media_id": mid, "text": _str(g("text"), TH_TEXT_MAX)}
     if name in ("x_posted", "x_drop", "x_redo"):  # X 초안 (주인 10/25) — {pid} 하나 (블로그는 데런픽뿐이라 안 받음)
         return {"pid": _int(g("pid"))}
+    if name in ("lookbook_posted", "lookbook_drop", "lookbook_redo"):  # 룩북 릴스 (주인 10/25 — 계약 action_lookbook_posted.json)
+        jid = g("id")
+        if not isinstance(jid, str) or not LB_ID_RE.match(jid):
+            raise ActionError("bad_args", text="룩북 릴스 번호가 맞지 않아요")
+        return {"id": jid, "url": reel_url(g("url"))} if name == "lookbook_posted" else {"id": jid}
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
@@ -923,6 +952,8 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return f"xdraft-{args.get('pid')}"
     if action in ("x.stats", "x.handles"):
         return "x"
+    if action in LB_ACTIONS:  # 룩북 릴스마다 따로 (할 일 줄 lookbook-<id> 와 같은 이름 — 누른 뒤 그 줄이 '하는 중')
+        return f"lookbook-{args.get('id')}"
     if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all",
                   "blog.topic_seed") and blog in BLOGS:
         return f"blog-{blog}"

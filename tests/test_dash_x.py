@@ -202,7 +202,7 @@ def test_xpost_js_lazy_load_budget_and_safety() -> None:
         assert re.search(r"[가-힣]", label), label
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "lazy('meta[name=sb-xpost]', 'xpost', 'SBXP')" in app and "'#/blog/x'" in app and "'X(트위터) →'" in app
-    assert "/^(pics|search|trial|ptrial|sched|threads|x)$/" in app
+    assert "/^(pics|search|trial|ptrial|sched|threads|x|lookbook)$/" in app
     html = shell.page({"me": {}})
     assert re.search(r'<meta name="sb-xpost" content="/dashboard/static/xpost\.js\?v=[0-9a-f]{10}">', html)
     assert html.count("<script src=") == 1  # xpost.js 는 처음 열 때만

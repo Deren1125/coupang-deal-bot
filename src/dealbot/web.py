@@ -52,8 +52,8 @@ PEER_HEADER = ":peer"
 _STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".mp4": "video/mp4"}
 
 _STATUS_TEXT = {
-    200: "OK", 202: "Accepted", 301: "Moved Permanently", 302: "Found", 303: "See Other", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-    405: "Method Not Allowed", 408: "Request Timeout", 409: "Conflict", 411: "Length Required", 413: "Content Too Large", 415: "Unsupported Media Type",
+    200: "OK", 202: "Accepted", 206: "Partial Content", 301: "Moved Permanently", 302: "Found", 303: "See Other", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    405: "Method Not Allowed", 408: "Request Timeout", 409: "Conflict", 411: "Length Required", 413: "Content Too Large", 415: "Unsupported Media Type", 416: "Range Not Satisfiable",
     429: "Too Many Requests", 500: "Internal Server Error", 503: "Service Unavailable",
 }
 _MAX_HEADER_BYTES = 16 * 1024

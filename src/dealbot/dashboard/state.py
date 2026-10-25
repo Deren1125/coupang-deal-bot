@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import earn, rank, schedview, thpost, xview
+from dealbot.dashboard import earn, lbview, rank, schedview, thpost, xview
 from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
@@ -705,6 +705,11 @@ class StateBuilder:
             out[srow["iid"]] = srow
         if (xrow := xview.todo_item(x_stats_rows(self.bot.db), x_handles(self.bot.db), now, goto)) is not None:  # X 숫자 넣기 (주인 10/25 — 주 1회)
             out[xrow["iid"]] = xrow
+        try:  # 룩북 릴스 올리기 (주인 10/25 — 완성됐는데 아직 안 올린 편이 있을 때만 · 칸이 이상해도 할 일 전체는 그대로)
+            if (lrow := lbview.todo_item(v2.get("lookbook"), ZoneInfo(self.tz), goto)) is not None:
+                out[lrow["iid"]] = lrow
+        except Exception as e:  # noqa: BLE001
+            log.warning("lookbook todo failed: %s", type(e).__name__)
         from dealbot.dashboard import remote_login
 
         if (vrow := remote_login.item(self.bot.db, open_link)) is not None:  # 원격 로그인 화면이 열려 있음 (주인 10/23)
@@ -1190,6 +1195,7 @@ class StateBuilder:
             "devlog": self.devlog(export),  # 할 일 페이지 맨 아래 '오늘 바뀐 것' (10/23 — 화면이 title·rows 를 그대로 그림)
             "opscheck": self.opscheck(export),  # 그 아래 '직전 AI 점검' (10/25 — 같은 모양 title·rows)
             "x": self.xview(export),  # 블로그 탭 'X(트위터) →' (10/25 — xview.py · 그리기는 처음 열 때만 받는 xpost.js)
+            "lookbook": self.lookbook(export),  # 블로그 탭 '룩북 릴스 →' (10/25 — lbview.py · 그리기는 처음 열 때만 받는 lookbook.js)
         }
         return body
 
@@ -1248,6 +1254,16 @@ class StateBuilder:
             log.warning("x state failed: %s", type(e).__name__)
             return None
 
+    def lookbook(self, export: Any) -> dict[str, Any] | None:
+        """룩북 릴스 화면 (주인 10/25): Blog-Auto lookbook 칸 — 영상·표지·캡션·룩 목록·올리기 전 확인 · 올렸어요/버리기/다시 만들기."""
+        sup = self._supported(self._ba_status())
+        ok = sup is None or {"lookbook_posted", "lookbook_drop", "lookbook_redo"} <= sup
+        try:
+            return lbview.build((getattr(export, "v2", None) or {}).get("lookbook"), ZoneInfo(self.tz), time.time(), act, bridge_ok=ok)
+        except Exception as e:  # noqa: BLE001 — 룩북 칸 하나가 상태 전체를 막지 않게
+            log.warning("lookbook state failed: %s", type(e).__name__)
+            return None
+
     @staticmethod
     def _status(row: dict[str, Any]) -> dict[str, Any]:
         from dealbot.bridge.actions_out import status_of
@@ -1283,6 +1299,7 @@ ACTION_LABELS = {
     "blog.pics_fetch": "사진 찾기", "blog.pics_clear": "사진 후보 지우기", "search.check": "검색 등록 표시",
     "blog.x_posted": "X 올렸어요", "blog.x_drop": "X 초안 버리기", "blog.x_redo": "X 초안 다시 쓰기", "x.stats": "X 숫자 저장",
     "x.handles": "X 계정 이름 저장",
+    "blog.lookbook_posted": "릴스 올렸어요", "blog.lookbook_drop": "릴스 버리기", "blog.lookbook_redo": "릴스 다시 만들기",
     "connect": "다시 연결 시작",
 }
 RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "linked_twin": "완료", "approved": "완료", "skipped": "완료",

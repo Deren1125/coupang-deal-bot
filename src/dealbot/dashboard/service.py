@@ -105,10 +105,10 @@ CLASSIC = "classic"  # /dashboard/?view=classic — 예전 한 장 화면 (카�
 
 SECURITY_HEADERS = {
     # 대시보드 앱 (주인 10/18): 스크립트는 이 서버의 파일만 (app.js — 페이지 안 스크립트 없음, boot 는 application/json 이라 실행 안 됨),
-    # 요청은 이 서버로만, 서비스 워커·매니페스트·아이콘도 이 서버
+    # 요청은 이 서버로만, 서비스 워커·매니페스트·아이콘도 이 서버. 영상은 이 서버 것만 (10/25 룩북 릴스 미리보기 — /dashboard/lookbook/…)
     "Content-Security-Policy": (
-        "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; "
-        "manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; "
+        "connect-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     ),
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",

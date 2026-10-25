@@ -1163,6 +1163,91 @@ def _x(v: Any) -> dict[str, Any] | None:
             "url_len": _count(v.get("url_len"), top=100) or 23, "drafts": drafts, "ideas": ideas}
 
 
+# 룩북 릴스 (주인 10/25 — Blog-Auto lookbook_jobs.export): 지그재그 실제 상품 → 쇼츠 서버가 얼굴 없는 AI 모델 사진·영상(음악 없음) →
+# 주인이 새 인스타 계정에 유행 음악을 붙여 손으로 올림. 영상·표지는 Blog-Auto 가 blog_view 에 둔 사본(없으면 var/lookbook)을 대시보드가 내보냄
+LB_ID_RE = re.compile(r"^lb-[0-9]{8}-[0-9]{4}$")
+LB_STATUSES = ("new", "waiting_server", "submitted", "rendering", "ready", "failed", "failed_match", "posted", "dropped", "expired")
+LB_WARNS = ("video_has_dropped_look", "unscored")
+LB_ABLY = ("queued", "put", "start", "skip", "none", "login", "failed", "no_link")
+LB_MALLS = ("zigzag", "ably")
+LB_LINK_HOSTS = ("zigzag.kr", "a-bly.com")  # 상품 링크는 이 두 쇼핑몰 주소(하위 주소 포함 — s.zigzag.kr · applink.a-bly.com)만
+LB_REASON_RE = re.compile(r"^[a-z][a-z0-9_]{0,29}$")  # 이유 코드 (no_token · looks_left · http_503 …) — 화면이 쉬운 말로 바꿈
+LB_POSTED_RE = re.compile(r"^https://www\.instagram\.com/(?:[A-Za-z0-9_.]{1,30}/)?(?:p|reels?|tv)/[A-Za-z0-9_-]{5,40}/$")
+LB_HANDLE_RE = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+LB_ITEMS_MAX, LB_LOOKS_MAX, LB_CAPTION_MAX = 14, 10, 2200
+
+
+def _lb_link(v: Any) -> str:
+    u = https_url(v)
+    if u is None:
+        return ""
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(u).hostname or "").lower()
+    return u if any(host == h or host.endswith("." + h) for h in LB_LINK_HOSTS) else ""
+
+
+def _lb_reason(v: Any) -> str:
+    """이유 코드만 ('server: …' 처럼 서버가 준 글은 'server' 로 — 영어 오류문을 주인 화면에 그대로 두지 않음)."""
+    if not isinstance(v, str) or not v.strip():
+        return ""
+    v = v.strip()
+    if v.startswith("server"):
+        return "server"
+    return v if LB_REASON_RE.match(v) else ""
+
+
+def _lb_look(x: Any, jid: str) -> dict[str, Any] | None:
+    if not isinstance(x, dict) or not (n := _count(x.get("n"), top=LB_LOOKS_MAX)):
+        return None
+    thumb = x.get("thumb")
+    thumb = thumb if isinstance(thumb, str) and THUMB_RE.match(thumb) and thumb.startswith(jid + "-") else None
+    return {"n": n, "name": _one_line(x.get("name"), 60) or f"Look {n}", "link": _lb_link(x.get("link")),
+            "price": _count(x.get("price"), top=100_000_000) or 0, "mall": x.get("mall") if x.get("mall") in LB_MALLS else "",
+            "score": _count(x.get("score"), top=10), "dropped": x.get("dropped") is True, "thumb": thumb}
+
+
+def _lb_item(x: Any) -> dict[str, Any] | None:
+    if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not LB_ID_RE.match(x["id"]) or x.get("status") not in LB_STATUSES:
+        return None
+    jid = x["id"]
+    looks, seen = [], set()
+    for lk in (x.get("looks") if isinstance(x.get("looks"), list) else [])[:LB_LOOKS_MAX]:
+        if (row := _lb_look(lk, jid)) is not None and row["n"] not in seen:
+            seen.add(row["n"])
+            looks.append(row)
+    video = x.get("video") if x.get("video") == f"lookbook/{jid}/video.mp4" else None  # var 기준 (Blog-Auto 가 쓴 그대로만)
+    cover = x.get("cover") if x.get("cover") == f"lookbook/{jid}/cover.jpg" else None
+    view_video = x.get("view_video") if x.get("view_video") == f"{jid}.mp4" else None  # blog_view/reels 사본
+    view_cover = x.get("view_cover") if x.get("view_cover") == f"{jid}-c.jpg" else None  # blog_view/thumbs 사본
+    posted = x.get("posted_url") if isinstance(x.get("posted_url"), str) and LB_POSTED_RE.match(x["posted_url"]) else None
+    return {"id": jid, "theme": _one_line(x.get("theme"), 40) or "", "hook": _one_line(x.get("hook"), 80) or "",
+            "status": x["status"], "reason": _lb_reason(x.get("reason")), "warn": x.get("warn") if x.get("warn") in LB_WARNS else None,
+            "caption": _th_text(x.get("caption"), LB_CAPTION_MAX), "looks": looks,
+            "has_video": x.get("has_video") is True and bool(video or view_video),
+            "has_cover": x.get("has_cover") is True and bool(cover or view_cover),
+            "video": video, "cover": cover, "view_video": view_video, "view_cover": view_cover,
+            "created_at": _one_line(x.get("created_at"), 40), "posted_url": posted,
+            "ably": x.get("ably") if x.get("ably") in LB_ABLY else None}
+
+
+def _lookbook(v: Any) -> dict[str, Any] | None:
+    """{enabled, per_day, server, instagram, items: [{id, theme, hook, status, reason, warn, caption, looks, has_video, has_cover,
+    video, cover, view_video, view_cover, created_at, posted_url, ably}]} (새 것부터). 칸이 없으면(예전 Blog-Auto) None → 화면은
+    '업데이트를 기다리는 중'. 줄마다 따로 걸러 이상한 줄만 빠진다 (같은 번호는 처음 것만 · 링크는 지그재그·에이블리 https 만)."""
+    if not isinstance(v, dict) or not isinstance(v.get("items"), list):
+        return None
+    items, seen = [], set()
+    for x in v["items"][:LB_ITEMS_MAX]:
+        if (row := _lb_item(x)) is not None and row["id"] not in seen:
+            seen.add(row["id"])
+            items.append(row)
+    ig = v.get("instagram").lstrip("@") if isinstance(v.get("instagram"), str) else ""
+    return {"enabled": v.get("enabled") is True, "per_day": _count(v.get("per_day"), top=10) or 0,
+            "server": v.get("server") if v.get("server") in ("ok", "no_token") else "",
+            "instagram": ig if LB_HANDLE_RE.match(ig) else None, "items": items}
+
+
 POST_COUNT_NAMES = {"blogs": V2_BLOGS, "channels": ("threads", "threads_auto", "x")}
 POST_COUNT_DAYS_MAX = 62  # 30일 칸 — 넉넉히 이만큼까지만 읽음
 DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -1202,7 +1287,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                            "opscheck": _opscheck(data.get("opscheck")),
                            "creator_mall": _creator_mall(data.get("creator_mall")),
                            "earnings": _earnings(data.get("earnings")), "x": _x(data.get("x")),
-                           "post_counts": _post_counts(data.get("post_counts"))}
+                           "post_counts": _post_counts(data.get("post_counts")),
+                           "lookbook": _lookbook(data.get("lookbook"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

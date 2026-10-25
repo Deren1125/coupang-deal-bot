@@ -92,6 +92,10 @@ SCHED_JS_GZIP_MAX = 4 * 1024
 # 처음 열 때만 받는 xpost.js (CSS 도 여기서). app.js 에는 불러오기·길 하나·입구 단추뿐 (긴 주석 셋을 줄여 예산 안)
 XPOST_JS_MAX = 12 * 1024
 XPOST_JS_GZIP_MAX = 5 * 1024
+# 10/25: 룩북 릴스 화면(편마다 상태·영상 미리보기·표지·영상/표지 저장·캡션/링크 복사·룩 목록·올리기 전 확인·릴스 주소·올렸어요/버리기/다시 만들기) —
+# 처음 열 때만 받는 lookbook.js (CSS 도 여기서). app.js 에는 불러오기·길 하나·입구 단추뿐 (주석 셋을 줄여 예산 안)
+LOOKBOOK_JS_MAX = 12 * 1024
+LOOKBOOK_JS_GZIP_MAX = 5 * 1024
 
 
 @pytest.fixture
@@ -182,7 +186,7 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
     assert res[3]["Cache-Control"] == "no-cache" and res[3]["Service-Worker-Allowed"] == "/dashboard/"
     for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css"), ("badge-72.png", "image/png"),
                         ("edit.js", "text/javascript"), ("product.js", "text/javascript"), ("sched.js", "text/javascript"),
-                        ("earn.js", "text/javascript"), ("xpost.js", "text/javascript")):
+                        ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))
@@ -204,6 +208,8 @@ def test_asset_budgets() -> None:
     assert len(sj) <= SCHED_JS_MAX and len(gzip.compress(sj, 9)) <= SCHED_JS_GZIP_MAX
     xj = (STATIC / "xpost.js").read_bytes()
     assert len(xj) <= XPOST_JS_MAX and len(gzip.compress(xj, 9)) <= XPOST_JS_GZIP_MAX
+    lb = (STATIC / "lookbook.js").read_bytes()
+    assert len(lb) <= LOOKBOOK_JS_MAX and len(gzip.compress(lb, 9)) <= LOOKBOOK_JS_GZIP_MAX
     assert shell.asset_url("app.js") != shell.asset_url("app.css")
 
 
@@ -215,7 +221,8 @@ def test_app_js_is_korean_local_and_safe() -> None:
     pj = (STATIC / "product.js").read_text(encoding="utf-8")
     sj = (STATIC / "sched.js").read_text(encoding="utf-8")
     xj = (STATIC / "xpost.js").read_text(encoding="utf-8")  # X 글쓰기 화면 주소는 state.x.intent 로 받는다 (파일에는 바깥 주소 없음)
-    for text in (js, css, sw, ed, pj, sj, xj):
+    lb = (STATIC / "lookbook.js").read_text(encoding="utf-8")  # 룩북 영상·상품 링크는 state.lookbook 으로 (쇼츠 서버 주소는 화면에 없음)
+    for text in (js, css, sw, ed, pj, sj, xj, lb):
         assert "http://" not in text and "https://" not in text  # 바깥 주소·CDN 없음
         assert "eval(" not in text and "new Function" not in text and "document.write" not in text
     assert js.count("innerHTML") == 1  # 서버가 그린 통계 조각 하나뿐

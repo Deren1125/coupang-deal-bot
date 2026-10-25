@@ -10,6 +10,8 @@
   POST /dashboard/api/upload            본문 = 파일 하나 (X-Upload-Kind: photo|ledger) → {"upload_id","w","h","bytes","thumb"}
   GET  /dashboard/upload/<id>/thumb     받은 사진 썸네일 · GET /dashboard/thumb/<이름>  Blog-Auto 사진 자리 썸네일
   GET  /dashboard/pic/<이름>            링크에서 고른 후보 사진 원본 (blog_view/pics — 꾹 눌러 저장·복사)
+  GET  /dashboard/lookbook/<lb-id>/{video.mp4,cover.jpg}   룩북 릴스 영상·표지 (blog_view 사본, 없으면 Blog-Auto var/lookbook/<id>/ 만 ·
+                                        영상은 Range → 206 — 아이폰 사파리 <video> 가 조각으로 받음)
   POST /dashboard/api/push/subscribe    {"endpoint","keys":{"p256dh","auth"},"label"} → {"id"}
   POST /dashboard/api/push/unsubscribe  {"id"} 또는 {"endpoint"}   ·  POST /dashboard/api/push/test {} → {"sent","failed"}
   GET  /dashboard/api/push/key          {"key": VAPID 공개 키}
@@ -17,7 +19,7 @@
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram>   스레드·인스타 다시 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -38,7 +40,7 @@ from urllib.parse import quote
 from dealbot.dashboard import srvcheck, webapp
 from dealbot.dashboard.actions import TEXTS, ActionDesk, Caller, RateWindow
 from dealbot.dashboard.auth import client_key
-from dealbot.dashboard.blogauto import PIC_FILE_RE
+from dealbot.dashboard.blogauto import LB_ID_RE, PIC_FILE_RE
 from dealbot.dashboard.login import (
     SESSION_COOKIE,
     SessionCsrf,
@@ -57,6 +59,12 @@ JT = "application/json; charset=utf-8"
 API = "/dashboard/api"
 THUMB_RE = re.compile(r"^[a-z0-9-]{1,64}\.(jpg|webp)$")
 PIC_MAX_BYTES = 8_000_000
+# 룩북 릴스 (주인 10/25): /dashboard/lookbook/<id>/video.mp4 · cover.jpg — 이름은 번호에서 정해짐 (붙여 넣은 경로를 그대로 쓰지 않음)
+LB_FILE_RE = re.compile(r"^(lb-[0-9]{8}-[0-9]{4})/(video\.mp4|cover\.jpg)$")
+LB_FILES = {"video.mp4": ("reels", "{id}.mp4", "video/mp4"), "cover.jpg": ("thumbs", "{id}-c.jpg", "image/jpeg")}
+REEL_MAX_BYTES = 80 * 1024 * 1024  # Blog-Auto lookbook_api.VIDEO_MAX 와 같게 (그보다 큰 파일은 Blog-Auto 가 받지 않음)
+RANGE_RE = re.compile(r"^bytes=([0-9]{0,15})-([0-9]{0,15})$")
+RANGE_CHUNK = 8 * 1024 * 1024  # 끝을 안 정한 조각(bytes=a-)은 이만큼씩 (브라우저가 이어서 다시 부름 — 큰 영상을 한 번에 메모리에 올리지 않게)
 APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; charset=utf-8", "badge-72.png": "image/png",
              "edit.js": "text/javascript; charset=utf-8",  # edit.js: 사진 고치기·편집기 (10/19, 처음 쓸 때만)
              "product.js": "text/javascript; charset=utf-8",  # product.js: 제품 테스트 (10/21, 처음 열 때만)
@@ -66,7 +74,8 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "threads.js": "text/javascript; charset=utf-8",  # threads.js: 스레드 화면 (10/21, 처음 열 때만)
              "x.js": "text/javascript; charset=utf-8",  # x.js: X 화면 (10/25, threads.js 가 처음 누를 때만)
              "theme.js": "text/javascript; charset=utf-8",  # theme.js: 화면 밝기 단추 (10/24, 머리에서 먼저)
-             "xpost.js": "text/javascript; charset=utf-8"}  # xpost.js: X(트위터) 초안함·진행률·글감 카드 (10/25, 블로그 탭에서 처음 열 때만)
+             "xpost.js": "text/javascript; charset=utf-8",  # xpost.js: X(트위터) 초안함·진행률·글감 카드 (10/25, 블로그 탭에서 처음 열 때만)
+             "lookbook.js": "text/javascript; charset=utf-8"}  # lookbook.js: 룩북 릴스 (10/25, 블로그 탭에서 처음 열 때만)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096
@@ -185,6 +194,7 @@ class DashApi:
         web.route_prefix("/dashboard/upload/", self.upload_thumb)
         web.route_prefix("/dashboard/thumb/", self.blog_thumb)
         web.route_prefix("/dashboard/pic/", self.blog_pic)
+        web.route_prefix("/dashboard/lookbook/", self.blog_lookbook, with_headers=True)
         web.route_json(f"{API}/push/subscribe", self.push_subscribe, max_body=PUSH_BODY_MAX)
         web.route_json(f"{API}/push/unsubscribe", self.push_unsubscribe, max_body=PUSH_BODY_MAX)
         web.route_json(f"{API}/push/test", self.push_test, max_body=TEST_BODY_MAX)
@@ -350,6 +360,60 @@ class DashApi:
             p = None
         ext = name.rsplit(".", 1)[-1]
         return self._file(p, {"png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg"))
+
+    def _lookbook_file(self, jid: str, name: str) -> Path | None:
+        """룩북 릴스 파일 하나: Blog-Auto 가 대시보드용으로 둔 blog_view 사본 먼저, 없으면 Blog-Auto var/lookbook/<id>/<이름>
+        (활동 기록 파일 var/metrics/blogauto.json 옆 — 그 폴더 바로 아래의 진짜 파일만, 바로가기 안 됨). 크기 상한을 넘으면 None."""
+        sub, view, _ctype = LB_FILES[name]
+        p = self._blog_view(sub, view.format(id=jid))
+        if p is None:
+            try:
+                base = (Path(self.bot.settings.dashboard.blogauto_metrics_path).expanduser().parent.parent / "lookbook").resolve()
+                q = base / jid / name
+                p = q if q.is_file() and not q.is_symlink() and q.resolve() == q else None
+            except (OSError, ValueError):
+                p = None
+        try:
+            return p if p is not None and p.stat().st_size <= (REEL_MAX_BYTES if name == "video.mp4" else PIC_MAX_BYTES) else None
+        except OSError:
+            return None
+
+    @staticmethod
+    def _byte_range(raw: str | None, size: int) -> tuple[int, int] | str | None:
+        """Range 머리 하나 (bytes=a-b · a- · -n) → (처음, 끝 포함). 없거나 모르는 모양·여러 조각이면 None (전체 200),
+        파일 밖이면 'bad' (416)."""
+        m = RANGE_RE.match((raw or "").strip().lower())
+        if m is None or (not m.group(1) and not m.group(2)):
+            return None
+        if not m.group(1):  # 끝에서 n 바이트
+            n = int(m.group(2))
+            return (max(0, size - n), size - 1) if n > 0 and size > 0 else "bad"
+        start = int(m.group(1))
+        end = min(int(m.group(2)), size - 1) if m.group(2) else min(size - 1, start + RANGE_CHUNK - 1)
+        return (start, end) if start < size and start <= end else "bad"
+
+    async def blog_lookbook(self, query: dict[str, str], headers: dict[str, str]) -> Any:
+        """룩북 릴스 영상·표지 (로그인 아래 · 개인 캐시). 영상은 Range 를 받아 206 으로 조각만 읽어 보낸다 (아이폰 <video> 는 조각으로만 받음)."""
+        m = LB_FILE_RE.match(query.get("path", ""))
+        p = self._lookbook_file(m.group(1), m.group(2)) if m and LB_ID_RE.match(m.group(1)) else None
+        if p is None or m is None:
+            return self._file(None, "")
+        ctype = LB_FILES[m.group(2)][2]
+        size = p.stat().st_size
+        head = {"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff", "Accept-Ranges": "bytes"}
+        rng = self._byte_range(headers.get("range"), size)
+        if rng == "bad":
+            return 416, b"", "text/plain; charset=utf-8", {**head, "Content-Range": f"bytes */{size}"}
+
+        def read(start: int, n: int) -> bytes:
+            with p.open("rb") as f:
+                f.seek(start)
+                return f.read(n)
+
+        if rng is None:
+            return 200, await asyncio.to_thread(read, 0, size), ctype, head
+        start, end = rng  # type: ignore[misc]
+        return 206, await asyncio.to_thread(read, start, end - start + 1), ctype, {**head, "Content-Range": f"bytes {start}-{end}/{size}"}
 
     # ---------------------------------------------------------- 푸시
     async def push_key(self, query: dict[str, str]) -> Any:
