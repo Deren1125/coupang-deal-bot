@@ -12,9 +12,12 @@ from dealbot.dashboard.model import (
     UNAVAILABLE,
     CardView,
     FetchResult,
+    POST_DAYS,
     GoalRow,
+    PostCount,
     Stat,
     fmt_num,
+    post_count,
     safe_error,
 )
 from dealbot.dashboard.sources.base import CardData, Source, register
@@ -43,19 +46,20 @@ class TelegramSource(Source):
         return FetchResult(OK, values={"subscribers": float(count)})
 
     def live(self) -> FetchResult:
-        """채널에 올린 글 (오늘·최근 7일) — 봇 DB 만 본다."""
+        """채널에 올린 글 (오늘·최근 7일) — 봇 DB 만 본다. 30일까지 센 '올린 글' 줄(주인 10/25)은 detail 로 (metrics 표에 쌓지 않음)."""
         today = self.ctx.today()
-        since = self.ctx.day_start_utc(today - timedelta(days=6))
+        since = self.ctx.day_start_utc(today - timedelta(days=POST_DAYS - 1))
         times = self.ctx.db.channel_post_times(since, include_dry_run=self.ctx.include_dry_run())
         days = [self.ctx.local_day(t) for t in times]
-        values = {"posts_today": float(sum(1 for d in days if d == today)), "posts_7d": float(len(days))}
+        posted = post_count(days, today)
+        values = {"posts_today": float(posted.today), "posts_7d": float(posted.d7)}
         try:
             joins, _ = joins_summary(self.ctx.db, today)
         except Exception:  # noqa: BLE001 — 가입 경로 표가 없어도 카드는 그대로
             joins = 0
         if joins:
             values["joins_7d"] = float(joins)
-        return FetchResult(OK, values=values)
+        return FetchResult(OK, values=values, detail=posted)
 
     def card(self, data: CardData) -> CardView:
         subs = self.stat_with_delta(data, "subscribers", "구독자", "명")
@@ -72,5 +76,6 @@ class TelegramSource(Source):
             stats.append(Stat("새 구독 경로 · 7일", float(total), "명", sub=parts))
         return self.view(
             data, stats=stats, spark=data.series("subscribers"), spark_label="구독자", rows=rows,
+            posted=data.live.detail if data.live and isinstance(data.live.detail, PostCount) else PostCount(why="기록을 못 읽음"),
             summary={"audience_delta": d} if (d := data.today_delta("subscribers")) is not None else {},
         )

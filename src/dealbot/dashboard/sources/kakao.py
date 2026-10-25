@@ -5,8 +5,12 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from dealbot.dashboard import icons
-from dealbot.dashboard.model import CardView, GoalRow, ManualField, Stat
+from dealbot.dashboard.model import CardView, GoalRow, ManualField, PostCount, Stat
 from dealbot.dashboard.sources.base import CardData, Source, register
+
+
+# 올린 글 (주인 10/25): 오픈톡방 전송 API 가 없어 주인이 휴대폰 공유창으로 보낸다 (notify/openchat_watch) — 보낸 기록이 없음
+NO_RECORD = "기록 없음 · 카톡 공유창으로 직접 보내서 셀 수 없어요"
 
 
 @register
@@ -31,5 +35,6 @@ class KakaoOpenChatSource(Source):
         return self.view(
             data, stats=[members, Stat("참여자 · 7일 증감", week, "명")], spark=data.series("members"), spark_label="참여자",
             rows=rows, read_at=self.ctx.db.metric_last_read(self.key, origin="manual"), read_label="입력한 시각",
+            posted=PostCount(why=NO_RECORD),
             summary={"audience_delta": d} if (d := data.today_delta("members")) is not None else {},
         )

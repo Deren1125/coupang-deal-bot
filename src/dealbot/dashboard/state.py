@@ -1241,8 +1241,9 @@ class StateBuilder:
         ok = sup is None or {"x_posted", "x_drop", "x_redo"} <= sup
         try:
             db = self.bot.db
-            return xview.build((getattr(export, "v2", None) or {}).get("x"), x_stats_rows(db), x_handles(db), ZoneInfo(self.tz),
-                               time.time(), act, bridge_ok=ok)
+            v2 = getattr(export, "v2", None) or {}
+            return xview.build(v2.get("x"), x_stats_rows(db), x_handles(db), ZoneInfo(self.tz), time.time(), act, bridge_ok=ok,
+                               post_counts=v2.get("post_counts"))
         except Exception as e:  # noqa: BLE001 — X 칸 하나가 상태 전체를 막지 않게
             log.warning("x state failed: %s", type(e).__name__)
             return None

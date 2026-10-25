@@ -119,6 +119,7 @@ function draw() {
     progress(x),
     el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, `데런픽 초안함 ${live.length ? live.length + '개' : ''}`),
       el('p', {class: 'note'}, '고쳐서 복사하거나 ‘X에 올리기’로 X 앱을 연 뒤, 올렸으면 ‘올렸어요’를 눌러 주세요'),
+      x.posted_line ? el('p', {class: 'note'}, x.posted_line) : null,
       live.length ? live.map(d => draft(x, d)) : el('p', {class: 'note'}, x.empty),
       done.length ? [el('p', {class: 'h3'}, '올린 글'), done.map(d => el('div', {class: 'xpd'}, el('p', {}, `#${d.pid} · ${d.title}`), el('div', {class: 'xpg'}, d.text)))] : null),
     el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, '수익 계정 글감 카드'), el('p', {class: 'note'}, x.idea_note),

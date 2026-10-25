@@ -1163,6 +1163,34 @@ def _x(v: Any) -> dict[str, Any] | None:
             "url_len": _count(v.get("url_len"), top=100) or 23, "drafts": drafts, "ideas": ideas}
 
 
+POST_COUNT_NAMES = {"blogs": V2_BLOGS, "channels": ("threads", "threads_auto", "x")}
+POST_COUNT_DAYS_MAX = 62  # 30일 칸 — 넉넉히 이만큼까지만 읽음
+DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _day_counts(v: Any) -> dict[str, int] | None:
+    """{'YYYY-MM-DD': n} — 이상한 줄만 뺀다. 사전이 아니면 None (그 프로그램 기록을 못 읽음 → 카드에 '—')."""
+    if not isinstance(v, dict):
+        return None
+    out: dict[str, int] = {}
+    for d, n in list(v.items())[:POST_COUNT_DAYS_MAX]:
+        if isinstance(d, str) and DAY_RE.fullmatch(d) and isinstance(n, int) and not isinstance(n, bool) and 0 < n <= 10_000:
+            out[d] = n
+    return out
+
+
+def _post_counts(v: Any) -> dict[str, dict[str, dict[str, int] | None]] | None:
+    """올린 글 수 (주인 10/25 — Blog-Auto post_counts.py): {blogs: {finance|issue|hotdeal: {날짜: n}},
+    channels: {threads|threads_auto|x: {날짜: n} | None}}. 칸이 없으면(예전 Blog-Auto) None → 카드마다 '—'."""
+    if not isinstance(v, dict):
+        return None
+    out: dict[str, dict[str, dict[str, int] | None]] = {}
+    for group, names in POST_COUNT_NAMES.items():
+        g = v.get(group) if isinstance(v.get(group), dict) else {}
+        out[group] = {name: _day_counts(g.get(name)) for name in names}
+    return out
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -1173,7 +1201,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                            "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog")),
                            "opscheck": _opscheck(data.get("opscheck")),
                            "creator_mall": _creator_mall(data.get("creator_mall")),
-                           "earnings": _earnings(data.get("earnings")), "x": _x(data.get("x"))}
+                           "earnings": _earnings(data.get("earnings")), "x": _x(data.get("x")),
+                           "post_counts": _post_counts(data.get("post_counts"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

@@ -135,6 +135,43 @@ class GoalRow:
 
 
 @dataclass(slots=True)
+class PostCount:
+    """통계 탭 카드의 '올린 글' 한 줄 (주인 10/25 '통계탭에서, 각 블로그별 올린 글 수, 각 채널별 올린글수 도' ·
+    '그냥 각 sns 탭에 추가만 해줘'): 오늘 · 최근 7일 · 최근 30일 (app.timezone 날짜). why 가 있으면 숫자 대신 '— why'
+    (믿을 만한 기록이 없을 때 — 짐작해서 숫자를 만들지 않는다). sub 는 숫자 밑 작은 글 (어디서 셌는지 나눠 보기)."""
+
+    today: int = 0
+    d7: int = 0
+    d30: int = 0
+    why: str = ""
+    sub: str = ""
+
+
+POST_DAYS = 30
+
+
+def post_count(days: Any, today: date, *, sub: str = "") -> PostCount:
+    """날마다 센 수 {date|'YYYY-MM-DD': n} (또는 날짜 목록 — 하나에 1) → 오늘·7일·30일. 앞날·이상한 칸은 셈에서 뺀다."""
+    pairs: list[tuple[Any, Any]] = list(days.items()) if isinstance(days, dict) else [(d, 1) for d in days or ()]
+    out = PostCount(sub=sub)
+    for d, n in pairs:
+        try:
+            day = d if isinstance(d, date) else date.fromisoformat(str(d))
+        except ValueError:
+            continue
+        if isinstance(day, datetime):
+            day = day.date()
+        if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
+            continue
+        age = (today - day).days
+        if 0 <= age < POST_DAYS:
+            out.d30 += n
+            out.d7 += n if age < 7 else 0
+            out.today += n if age == 0 else 0
+    return out
+
+
+@dataclass(slots=True)
 class CardView:
     key: str
     title: str
@@ -163,6 +200,7 @@ class CardView:
     groups: list[ListGroup] = field(default_factory=list)  # 그래프 밑 목록 (발행 대기 글 · 링크 기다리는 딜)
     empty_text: str = ""  # 목록 카드인데 줄이 하나도 없을 때 한 줄
     detail: dict[str, Any] = field(default_factory=dict)  # data.json 에 그대로 나갈 목록 값 (폼 토큰은 넣지 않음)
+    posted: PostCount | None = None  # 통계 탭 '올린 글 오늘 · 7일 · 30일' 한 줄 (없으면 줄 없음 — 쿠팡처럼 글을 안 올리는 카드)
 
     @property
     def status(self) -> str:

@@ -20,8 +20,11 @@ from dealbot.dashboard.model import (
     UNAVAILABLE,
     CardView,
     FetchResult,
+    POST_DAYS,
     GoalRow,
+    PostCount,
     Stat,
+    post_count,
     safe_error,
 )
 from dealbot.dashboard.sources._meta import insight_value, is_permission, is_token_problem
@@ -79,6 +82,33 @@ class ThreadsSource(Source):
             return FetchResult(PARTIAL, note="스레드 인사이트 응답에 숫자가 없음")
         return FetchResult(OK if len(values) == 2 else PARTIAL, values)
 
+    def posted(self) -> PostCount:
+        """올린 글 (주인 10/25): 세 프로그램이 따로 올리고 따로 적는다 — 겹치지 않으니 더한다.
+        딜봇 threads_jobs(올림 · 연습 글·글 id 없는 것 빼고) + Blog-Auto 스레드 줄(주인이 쓴 글·데런픽 글) +
+        스레드 자동 프로그램(AI 글·예약 글 — Blog-Auto 가 그 기록을 읽어 보냄). 못 읽은 쪽은 작은 글에 '기록 없음'."""
+        today = self.ctx.today()
+        try:
+            jobs = self.ctx.db.threads_posted_since(self.ctx.day_start_utc(today - timedelta(days=POST_DAYS - 1)),
+                                                     real_only=not self.ctx.include_dry_run())
+            mine: dict[str, int] | None = {}
+            for j in jobs:
+                if j.posted_at is not None:
+                    d = self.ctx.local_day(j.posted_at).isoformat()
+                    mine[d] = mine.get(d, 0) + 1
+        except Exception:  # noqa: BLE001
+            mine = None
+        ch = (self.blogauto_post_counts() or {}).get("channels") or {}
+        parts = [("딜봇", mine), ("블로그", ch.get("threads")), ("스레드 자동", ch.get("threads_auto"))]
+        known = [(name, m) for name, m in parts if m is not None]
+        if not known:
+            return PostCount(why="기록을 못 읽음")
+        total: dict[str, int] = {}
+        for _, m in known:
+            for d, n in m.items():
+                total[d] = total.get(d, 0) + n
+        bits = [f"{name} {post_count(m, today).d30}" if m is not None else f"{name} 기록 없음" for name, m in parts]
+        return post_count(total, today, sub="30일 · " + " · ".join(bits))
+
     def card(self, data: CardData) -> CardView:
         missing = "권한 필요" if (data.note or "").startswith("권한 필요") else "-"
         followers = self.stat_with_delta(data, "followers", "팔로워", "명", missing=missing)
@@ -87,6 +117,6 @@ class ThreadsSource(Source):
         spark_metric = f"views_{INSIGHT_DAYS}d" if len(data.series(f"views_{INSIGHT_DAYS}d")) >= 2 else "followers"
         return self.view(
             data, stats=[followers, views], spark=data.series(spark_metric),
-            spark_label="프로필 조회" if spark_metric != "followers" else "팔로워", rows=rows,
+            spark_label="프로필 조회" if spark_metric != "followers" else "팔로워", rows=rows, posted=self.posted(),
             summary={"audience_delta": d} if (d := data.today_delta("followers")) is not None else {},
         )

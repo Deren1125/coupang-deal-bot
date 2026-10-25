@@ -15,12 +15,24 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from dealbot.dashboard.model import post_count
+
 VERIFIED_GOAL = 500
 IMPR_GOAL = 500_000
 INTENT = "https://x.com/intent/post?text="  # 글은 화면이 encodeURIComponent 로 붙인다 (xpost.js 에는 바깥 주소를 두지 않음)
 RULES = "두 계정에 같은 글 금지 · 자동 좋아요·답글 안 함 · 손으로 올리기"
 IDEA_NOTE = "직접 쓰는 글 — 숫자는 실제 값만"
 ETA_MAX_DAYS = 3 * 365
+POSTED_LABEL = "X에 올린 글 (올렸어요 누른 것)"  # 실제로 올라갔는지는 모름 (X API 를 안 씀) — 주인이 누른 수
+
+
+def posted_line(post_counts: dict[str, Any] | None, tz: ZoneInfo, now: float) -> str:
+    """'X에 올린 글 (올렸어요 누른 것) 오늘 N · 7일 N · 30일 N' (주인 10/25 — Blog-Auto post_counts.channels.x). 기록이 없으면 '— 기록 없음'."""
+    days = ((post_counts or {}).get("channels") or {}).get("x")
+    if days is None:
+        return f"{POSTED_LABEL} — 기록 없음 · 블로그 프로그램이 아직 안 보내요"
+    p = post_count(days, datetime.fromtimestamp(now, tz).date())
+    return f"{POSTED_LABEL} 오늘 {p.today} · 7일 {p.d7} · 30일 {p.d30}"
 
 
 def _md(ts: float, tz: ZoneInfo) -> str:
@@ -48,8 +60,9 @@ def eta(rows: list[dict[str, Any]], key: str, goal: int, tz: ZoneInfo) -> str:
 
 
 def build(xv: dict[str, Any] | None, rows: list[dict[str, Any]], handles: dict[str, str], tz: ZoneInfo, now: float,
-          act: Callable[..., dict[str, Any]], *, bridge_ok: bool = True) -> dict[str, Any]:
-    """화면 값. xv = blogauto._x 로 걸러 둔 기록 파일 x 칸 (예전 Blog-Auto 면 None → 초안 없음), rows = actions.x_stats_rows."""
+          act: Callable[..., dict[str, Any]], *, bridge_ok: bool = True, post_counts: dict[str, Any] | None = None) -> dict[str, Any]:
+    """화면 값. xv = blogauto._x 로 걸러 둔 기록 파일 x 칸 (예전 Blog-Auto 면 None → 초안 없음), rows = actions.x_stats_rows,
+    post_counts = blogauto._post_counts 로 걸러 둔 올린 글 수 칸 (posted_line — 초안함 밑 한 줄)."""
     cur = rows[-1] if rows else None
     progress = {
         "verified": cur["verified"] if cur else None, "verified_goal": VERIFIED_GOAL,
@@ -77,7 +90,7 @@ def build(xv: dict[str, Any] | None, rows: list[dict[str, Any]], handles: dict[s
         "progress": progress, "save": act("x.stats", "저장", {}), "handles": handles, "save_handles": act("x.handles", "저장", {}),
         "drafts": drafts, "posted": posted, "ideas": (xv or {}).get("ideas") or [], "idea_note": IDEA_NOTE,
         "limit": (xv or {}).get("limit") or 280, "url_len": (xv or {}).get("url_len") or 23, "intent": INTENT,
-        "rules": RULES, "ready": xv is not None, "bridge_ok": bridge_ok,
+        "rules": RULES, "ready": xv is not None, "bridge_ok": bridge_ok, "posted_line": posted_line(post_counts, tz, now),
         "empty": "블로그 프로그램이 아직 X 초안을 안 보내요 — 업데이트를 기다리는 중이에요" if xv is None
         else "새 초안이 없어요 — 데런픽 글이 발행되면 하루 3편까지 만들어요",
     }

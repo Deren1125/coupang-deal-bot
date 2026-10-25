@@ -17,8 +17,11 @@ from dealbot.dashboard.model import (
     UNAVAILABLE,
     CardView,
     FetchResult,
+    POST_DAYS,
     GoalRow,
+    PostCount,
     Stat,
+    post_count,
     safe_error,
 )
 from dealbot.dashboard.sources._meta import (
@@ -84,6 +87,19 @@ class InstagramSource(Source):
                 values[f"{name}_{INSIGHT_DAYS}d"] = v
         return FetchResult(OK, values)
 
+    def posted(self) -> PostCount:
+        """올린 글 (주인 10/25): 봇 DB ig_posts — 딜 하나 · TOP5 · 릴스 · 단가표 · 데런픽 글(blog_share, Blog-Auto sns_share 가 준 것도
+        딜봇이 올리고 여기에 남김). 올리다 끊겨 '올라갔을 수도' 로 남긴 줄(글 id 없음)과 연습 글은 뺀다. 기록은 30일만 남는다."""
+        today = self.ctx.today()
+        try:
+            rows = self.ctx.db.ig_posts_since(self.ctx.day_start_utc(today - timedelta(days=POST_DAYS - 1)))
+        except Exception:  # noqa: BLE001 — 기록을 못 읽어도 카드는 그대로
+            return PostCount(why="기록을 못 읽음")
+        dry_ok = self.ctx.include_dry_run()
+        days = [self.ctx.local_day(r["posted_at"]) for r in rows
+                if r.get("posted_at") is not None and r.get("media_id") and (dry_ok or (not r.get("dry_run") and r["media_id"] != "dry-run"))]
+        return post_count(days, today)
+
     def card(self, data: CardData) -> CardView:
         followers = self.stat_with_delta(data, "followers", "팔로워", "명")
         views = data.latest_value(f"views_{INSIGHT_DAYS}d")
@@ -99,6 +115,6 @@ class InstagramSource(Source):
         spark_metric = f"views_{INSIGHT_DAYS}d" if len(data.series(f"views_{INSIGHT_DAYS}d")) >= 2 else "followers"
         return self.view(
             data, stats=[followers, stat_views], spark=data.series(spark_metric),
-            spark_label="조회수" if spark_metric != "followers" else "팔로워", rows=rows,
+            spark_label="조회수" if spark_metric != "followers" else "팔로워", rows=rows, posted=self.posted(),
             summary={"audience_delta": d} if (d := data.today_delta("followers")) is not None else {},
         )

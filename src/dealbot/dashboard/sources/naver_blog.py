@@ -40,12 +40,14 @@ from dealbot.dashboard.model import (
     FetchResult,
     GoalRow,
     ManualField,
+    PostCount,
     Stat,
     fmt_num,
     fmt_short_day,
     fmt_signed,
     fmt_time,
     https_url,
+    post_count,
 )
 from dealbot.dashboard.sources.base import CardData, Source, register
 from dealbot.utils.timeutil import from_iso
@@ -276,6 +278,11 @@ class NaverBlogSource(Source):
         grown = max(0.0, auto_total - base) if base is not None else 0.0
         return max(value + grown, auto_total)
 
+    def posted(self, today: date) -> PostCount:
+        """올린 글 (주인 10/25): Blog-Auto publishes 표로 센 날마다 발행 수 (기록 파일 post_counts.blogs — 지금도 발행 상태인 글만)."""
+        days = ((self.blogauto_post_counts() or {}).get("blogs") or {}).get(str(self.options.get("blog") or self.key))
+        return post_count(days, today) if days is not None else PostCount(why="기록 없음 · 블로그 프로그램이 아직 안 보내요")
+
     def card(self, data: CardData) -> CardView:
         live = data.live
         info = live.detail if live is not None and isinstance(live.detail, BlogLive) else BlogLive()
@@ -335,5 +342,5 @@ class NaverBlogSource(Source):
             # 방문자는 날마다 오르내려 '7일 평균'(애드포스트 기준과 같은 셈)으로, 이웃 수는 쌓이는 수라 그대로
             spark=data.rolling("visitors", 7, how="avg") if use_visitors else data.series("neighbors"),
             spark_label="방문자 7일 평균" if use_visitors else "이웃 수", rows=rows, activity=activity,
-            read_at=read_at, summary=summary, detail=detail,
+            read_at=read_at, summary=summary, detail=detail, posted=self.posted(data.today),
         )

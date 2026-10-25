@@ -292,6 +292,16 @@ class Source:
             v.manual_days[f.metric] = last[0] if last else None
         return v
 
+    def blogauto_post_counts(self) -> dict[str, Any] | None:
+        """Blog-Auto 기록 파일의 '올린 글 수' 칸 (주인 10/25 — blogauto._post_counts). 리더·칸이 없으면 None (예전 Blog-Auto)."""
+        reader = self.ctx.blogauto
+        if reader is None:
+            return None
+        try:
+            return (reader.read().v2 or {}).get("post_counts")
+        except Exception:  # noqa: BLE001 — 기록 파일이 이상해도 카드는 그대로
+            return None
+
     @staticmethod
     def stat_with_delta(data: CardData, metric: str, label: str, unit: str = "", **kw: Any) -> Stat:
         d = data.delta(metric)

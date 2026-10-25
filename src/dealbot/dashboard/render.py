@@ -28,6 +28,7 @@ from dealbot.dashboard.model import (
     GoalRow,
     ListEntry,
     ListGroup,
+    PostCount,
     Stat,
     explain,
     fmt_num,
@@ -430,6 +431,18 @@ def _form(v: CardView, token: str, today: date, min_day: date | None = None, *, 
     )
 
 
+def _posted(p: PostCount | None) -> str:
+    """통계 탭 카드 안 '올린 글' 한 줄 (주인 10/25 '그냥 각 sns 탭에 추가만 해줘'): 오늘 · 7일 · 30일.
+    믿을 만한 기록이 없으면 숫자 대신 '— 이유' (짐작한 숫자를 보이지 않음). 글을 안 올리는 카드(쿠팡)는 줄 없음."""
+    if p is None:
+        return ""
+    if p.why:
+        return f'<p class="posted">올린 글 <span class="none">— {e(p.why)}</span></p>'
+    nums = " · ".join(f'{label} <b class="num">{fmt_num(n)}</b>' for label, n in (("오늘", p.today), ("7일", p.d7), ("30일", p.d30)))
+    sub = f'<span class="psub">{e(p.sub)}</span>' if p.sub else ""
+    return f'<p class="posted">올린 글 {nums}{sub}</p>'
+
+
 def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int, min_day: date | None = None,
               notice: tuple[str, str] | None = None, app: bool = False) -> str:
     """카드 하나. notice 가 있으면(이 카드에서 저장·다시 읽기를 누르고 돌아왔을 때) 머리 바로 밑에.
@@ -462,6 +475,7 @@ def card_html(v: CardView, *, token: str, today: date, tz: str, spark_days: int,
         f'<p class="read">{e(read)}</p>',
         # 숫자 칸은 두 칸씩 줄 (블로그 카드는 자기 통계가 있으면 네 칸)
         '<div class="stats">' + "".join(_stat(s) for s in v.stats[:4]) + "</div>",
+        _posted(v.posted) if app else "",
         _links(v.links, v.title),
         _stats_note(v),
         sparkline(v.spark, days=spark_days, today=today, label=v.spark_label),
@@ -548,6 +562,8 @@ border-radius:10px;background:var(--card);color:var(--text);padding:0 10px;font-
 .stx .manual-app{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:12px 0 0;border-top:1px solid var(--line);padding-top:8px}
 .stx .mbtn{min-height:44px;border:0;background:none;color:var(--ac-ink);font-size:15px;font-weight:700;padding:0}
 .stx .what{font-size:13px;color:var(--muted)}
+.stx .posted{font-size:14px;color:var(--sub);margin:10px 0 0;line-height:1.5}.stx .posted b{color:var(--text);font-weight:700}
+.stx .posted .none{color:var(--muted)}.stx .psub{display:block;font-size:12px;color:var(--muted)}
 """
 
 
