@@ -53,6 +53,7 @@ class BrowserSession:
         self._pw: Any = None
         self._context: Any = None
         self._lock = asyncio.Lock()
+        self.gate_acct = f"dealbot-{self.profile_dir.name}"  # 사이트·계정마다 접속 상한 (site_gate — 블로그 프로그램과 같은 기록)
 
     @property
     def started(self) -> bool:
@@ -88,6 +89,9 @@ class BrowserSession:
         except Exception as e:  # noqa: BLE001
             await self.close()
             raise BrowserUnavailable(f"cannot launch chromium: {str(e).splitlines()[0]}") from e
+        from dealbot import site_gate
+
+        await site_gate.watch(self._context, self.gate_acct)
         log.info("browser session started (profile=%s, headless=%s)", self.profile_dir, self.headless)
 
     async def close(self) -> None:

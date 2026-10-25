@@ -38,7 +38,10 @@ class NaverConnectProvider:
         return bool(cookies)
 
     async def start_qr_login(self) -> bytes:
-        """로그인 페이지를 열고 QR 탭을 눌러 스크린샷을 돌려준다."""
+        """로그인 페이지를 열고 QR 탭을 눌러 스크린샷을 돌려준다. 주인이 직접 하는 로그인 — 접속 상한(site_gate) 멈춤을 풀고 잠시 세지 않음."""
+        from dealbot import site_gate
+
+        site_gate.owner_window(self.session.gate_acct)
 
         async def _do(page: Any) -> bytes:
             await page.goto(self.cfg.login_url, wait_until="domcontentloaded", timeout=45000)

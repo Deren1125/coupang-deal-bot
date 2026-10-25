@@ -279,6 +279,11 @@ class DealBot:
         # ---- 브라우저 자동화 (네이버 쇼핑커넥트)
         self.browser: Any = None
         self.naver_connect: Any = None
+        from dealbot import site_gate
+
+        # 사이트·계정마다 접속 상한 (주인 10/26) — 블로그 프로그램과 같은 기록 파일(Blog-Auto var/site_gate.db). 없으면 딜봇 data 폴더
+        ba_var = Path(settings.dashboard.blogauto_metrics_path).parent.parent
+        site_gate.configure((ba_var if ba_var.is_dir() else settings.data_dir) / "site_gate.db")
         if settings.browser.enabled:
             try:
                 from dealbot.browser.naver_connect import NaverConnectProvider
