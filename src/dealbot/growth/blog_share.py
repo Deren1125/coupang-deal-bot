@@ -7,6 +7,7 @@ Blog-Auto(sns_share.py)가 글마다 var/sns_share/<글번호>.json 을 쓴다:
 사진은 4:5~1.91:1 안으로 맞춰(세로가 너무 길면 위쪽을 남기고 자름) 공개 폴더(media)에 두고 올린 뒤 지운다.
 스레드는 Blog-Auto 가 자기 스레드 예약 줄로 올린다 (여기서는 인스타만). 스레드 예약을 취소하면 cancelled 가 되어 인스타도 안 올림.
 올린 기록: kv blog_share:ig:<글번호> (posted · failed · skipped: 이유) — 같은 글은 한 번만 (실패해도 다시 올리지 않음).
+다시 쓴 글(rec.redo — 주인 10/25 '이상하다고 했던 글도 규정에 맞게 고쳐서')은 blog_share:ig:<글번호>:<redo> 로 따로 센다 (한 번 더 올림).
 """
 
 from __future__ import annotations
@@ -30,6 +31,12 @@ RATIO_MIN, RATIO_MAX = 0.8, 1.91  # 인스타 사진 가로:세로 허용 범위
 MAX_SIDE = 1440
 
 
+def done_key(rec: dict[str, Any]) -> str:
+    """올린 기록 열쇠 — 다시 쓴 글은 따로 (한 번 더 올릴 수 있게)."""
+    redo = str(rec.get("redo") or "")
+    return f"{KV_DONE}{rec['pid']}" + (f":{redo}" if redo else "")
+
+
 def share_dir(metrics_path: str) -> Path:
     """Blog-Auto var/sns_share (활동 기록 파일 var/metrics/blogauto.json 옆)."""
     return Path(metrics_path).parent.parent / "sns_share"
@@ -50,7 +57,7 @@ def due(folder: Path, db: Any, now: datetime) -> list[dict[str, Any]]:
     out = []
     for p in folder.glob("*.json"):
         rec = load(p)
-        if rec is None or rec.get("cancelled") or db.kv_get(f"{KV_DONE}{rec['pid']}"):
+        if rec is None or rec.get("cancelled") or db.kv_get(done_key(rec)):
             continue
         after = _when(rec.get("post_after"))
         if after is None or now < after:
@@ -113,7 +120,7 @@ async def publish(instagram: Any, urls: list[str], caption: str, alt: str) -> Pu
 async def post_one(sched: Any, rec: dict[str, Any], now: datetime) -> str:
     """글 하나를 인스타에 (sched: InstagramScheduler). 한 일을 짧게 돌려준다."""
     db, bot = sched.db, sched.bot
-    key = f"{KV_DONE}{rec['pid']}"
+    key = done_key(rec)
     if now - rec["_after"] > MAX_AGE:
         db.kv_set(key, "skipped: too late")
         return f"pick #{rec['pid']}: skipped (too late)"

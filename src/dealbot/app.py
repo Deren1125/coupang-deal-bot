@@ -4133,7 +4133,7 @@ class DealBot:
         rows = []
         for p in folder.glob("*.json") if folder.is_dir() else []:
             rec = blog_share.load(p)
-            done = str(self.db.kv_get(f"{blog_share.KV_DONE}{rec['pid']}") or "") if rec else ""
+            done = str(self.db.kv_get(blog_share.done_key(rec)) or "") if rec else ""
             url = str((rec or {}).get("url") or "")
             if rec and done.startswith("posted") and url.startswith(("https://blog.naver.com/", "https://m.blog.naver.com/")):
                 rows.append((p.stat().st_mtime, {"title": str(rec.get("title") or "데런픽 새 글")[:60], "url": url}))

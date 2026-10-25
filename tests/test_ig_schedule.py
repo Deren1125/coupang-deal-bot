@@ -1100,6 +1100,20 @@ async def test_pick_share_posts_a_carousel_of_the_blog_photos_when_due(bot, cloc
     assert await tick(bot, clock, at(12)) is None  # 같은 글은 한 번
 
 
+async def test_redone_share_posts_once_more_under_its_own_record(bot, clock, monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """주인 10/25: 이상하다고 한 글을 새 검수로 다시 쓰면 (redo) 같은 글번호라도 한 번 더 올린다 — 다시 쓴 글도 한 번만."""
+    live(bot, _carousel_handler("9100"), monkeypatch)
+    _plan(bot, {})
+    path = _share(bot, tmp_path)
+    assert await tick(bot, clock, at(10, 1)) == "pick #7: posted 9100"
+    rec = json.loads(path.read_text(encoding="utf-8"))
+    rec.update(redo="owner_1025", post_after=at(11).isoformat(), ig_caption="다시 쓴 캡션이에요")
+    path.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
+    assert await tick(bot, clock, at(11, 1)) == "pick #7: posted 9100"
+    assert bot.db.kv_get("blog_share:ig:7:owner_1025").startswith("posted")
+    assert await tick(bot, clock, at(13)) is None
+
+
 async def test_cancelled_or_photo_less_share_is_not_posted(bot, clock, tmp_path) -> None:  # type: ignore[no-untyped-def]
     _plan(bot, {})
     _share(bot, tmp_path, 7, cancelled=True)
