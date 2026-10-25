@@ -1254,6 +1254,11 @@ class StateBuilder:
             log.warning("x state failed: %s", type(e).__name__)
             return None
 
+    def xplan(self) -> dict[str, Any] | None:
+        """수익 계정 2주 계획 (주인 10/26 — X 화면을 열 때만 /dashboard/api/xplan). Blog-Auto x 칸의 plan (blogauto._x_plan 으로 걸러 둔 것)."""
+        x = (getattr(self._export(), "v2", None) or {}).get("x")
+        return x.get("plan") if isinstance(x, dict) else None
+
     def lookbook(self, export: Any) -> dict[str, Any] | None:
         """룩북 릴스 화면 (주인 10/25): Blog-Auto lookbook 칸 — 영상·표지·캡션·룩 목록·올리기 전 확인 · 올렸어요/버리기/다시 만들기."""
         sup = self._supported(self._ba_status())

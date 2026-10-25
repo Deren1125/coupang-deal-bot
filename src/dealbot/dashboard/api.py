@@ -16,6 +16,7 @@
   POST /dashboard/api/push/unsubscribe  {"id"} 또는 {"endpoint"}   ·  POST /dashboard/api/push/test {} → {"sent","failed"}
   GET  /dashboard/api/push/key          {"key": VAPID 공개 키}
   GET  /dashboard/api/digest/<id>       {"id","title","at","sections":[{"label","sentences"}]}
+  GET  /dashboard/api/xplan             수익 계정 X 2주 계획 (blogauto._x_plan — X 화면을 열 때만, 첫 상태 값 예산 밖) · 없으면 404
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram>   스레드·인스타 다시 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
@@ -200,6 +201,7 @@ class DashApi:
         web.route_json(f"{API}/push/test", self.push_test, max_body=TEST_BODY_MAX)
         web.route(f"{API}/push/key", self.push_key)
         web.route_prefix(f"{API}/digest/", self.digest)
+        web.route(f"{API}/xplan", self.xplan)
         web.route(f"{API}/deal/hot", self.deal_hot)
         web.route(f"{API}/deal/find", self.deal_find)
         web.route(f"{API}/stats.html", self.stats_html)
@@ -509,6 +511,10 @@ class DashApi:
         if d is None:
             return err(404, "not_found")
         return jresp(200, {"id": d["id"], "title": d["title"], "at": d["at"], "sections": d["sections"]})
+
+    async def xplan(self, query: dict[str, str]) -> Any:
+        plan = self.bot.dash_state.xplan()
+        return jresp(200, plan, {"Cache-Control": "no-store"}) if plan else err(404, "not_found", "2주 계획이 아직 없어요")
 
     async def deal_hot(self, query: dict[str, str]) -> Any:
         raw = (query.get("n") or "5").strip()

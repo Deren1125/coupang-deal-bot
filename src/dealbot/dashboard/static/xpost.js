@@ -1,5 +1,5 @@
 /* X(트위터) 화면 (주인 10/25 — 'X 는 유료 구독만, API 는 안 써'). 블로그 탭 'X(트위터) →' 를 처음 열 때만 app.js 가 불러온다 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와는 다른 파일). 값은 state.x (xview.py).
-   진행률(주인이 주마다 넣는 숫자 x.stats) · 데런픽 초안함(Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 올렸어요 · 버리기 · 다시 쓰기) · 수익 계정 글감 카드.
+   진행률(주인이 주마다 넣는 숫자 x.stats) · 수익 계정 2주 계획(/dashboard/api/xplan — 열 때만) · 데런픽 초안함(Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 올렸어요 · 버리기 · 다시 쓰기) · 수익 계정 글감 카드.
    'X에 올리기'는 X 글쓰기 화면을 여는 링크일 뿐 (주소는 state.x.intent) — 자동 게시·자동 좋아요·답글 없음. 라이브러리 없음. */
 'use strict';
 (() => {
@@ -15,9 +15,10 @@ const CSS = '.xpw{display:grid;gap:10px}.xpw .itm{padding:14px}.xpb{height:10px;
   '.xpd{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.xpd:first-of-type{border:0;margin:0;padding:0}' +
   '.xpd p{margin:0 0 6px;font-size:13px;color:var(--sub)}.xpd a.t{color:var(--text)}.xpg{opacity:.55;white-space:pre-wrap;font-size:14px;overflow-wrap:anywhere}' +
   '.xpi{background:var(--tile);border-radius:10px;padding:10px;margin-top:8px}.xpi b{display:block}.xpi span{display:block;font-size:14px;margin-top:4px}' +
-  '.xpi i{display:block;font-style:normal;font-size:13px;color:var(--sub);margin-top:6px}';
+  '.xpi i{display:block;font-style:normal;font-size:13px;color:var(--sub);margin-top:6px}' +
+  '.xpw details>summary{cursor:pointer;font-weight:600;padding:8px 0}.xpi.ok{opacity:.5}.xpi em{font-style:normal;font-size:12px;color:var(--sub)}';
 const ED = {}, LOC = {};  // 고치는 중인 글 (다시 그려도 남게) · 누른 뒤 서버가 알려 줄 때까지 보여 줄 상태 (3분)
-let H = null, B = null;
+let H = null, B = null, PLAN = null;  // PLAN: 수익 계정 2주 계획 (null 아직 · false 없음 — 열 때 한 번만 /dashboard/api/xplan)
 
 const css = () => { if (D.getElementById('xp-css')) return; const s = D.createElement('style'); s.id = 'xp-css'; s.textContent = CSS; D.head.append(s); };
 const nf = n => (n == null ? '–' : Number(n).toLocaleString('ko-KR'));
@@ -103,6 +104,40 @@ function draft(x, d) {
         {disabled: busy})));
 }
 
+// 수익 계정 2주 계획 (주인 10/26): 날마다 첫 줄 초안 — 복사 · X에 쓰기(글쓰기 화면만 열림) · 올렸어요 표시는 이 폰에만 (localStorage)
+const KEY = p => 'xplan:' + p;
+const done = k => { try { return localStorage.getItem(KEY(k)) === '1'; } catch (e) { return false; } };
+const mark = (k, on) => { try { on ? localStorage.setItem(KEY(k), '1') : localStorage.removeItem(KEY(k)); } catch (e) { /* 저장 안 됨 */ } };
+function plan(x) {
+  const {el, btn} = H;
+  if (!x.plan_n) return null;
+  if (PLAN === null) {
+    PLAN = false;
+    H.api('/dashboard/api/xplan').then(r => { PLAN = r.status === 200 ? r.data : false; draw(); });
+    return el('section', {class: 'itm'}, el('p', {class: 'note'}, '2주 계획을 불러오는 중이에요'));
+  }
+  if (!PLAN) return null;
+  const today = new Date().toLocaleDateString('sv-SE', {timeZone: 'Asia/Seoul'});
+  const post = (d, p) => {
+    const k = d.date + ' ' + p.time, box = el('div', {class: 'xpi' + (done(k) ? ' ok' : '')});
+    box.append(el('em', {}, p.time + (done(k) ? ' · 올렸어요' : '')), el('b', {}, p.head), el('span', {}, p.outline),
+      p.attach ? el('i', {}, '첨부: ' + p.attach) : '',
+      el('div', {class: 'xpr'}, btn('pb soft', '복사', () => copy(p.head)),
+        el('a', {href: x.intent + encodeURIComponent(p.head), target: '_blank', rel: 'noopener'}, 'X에 쓰기'),
+        btn('pb soft', done(k) ? '올렸어요 취소' : '올렸어요', () => { mark(k, !done(k)); draw(); })));
+    return box;
+  };
+  const days = PLAN.days.map((d, i) => el('details', {open: d.date === today || (today < PLAN.start && !i) || null},
+    el('summary', {}, `${d.label} · ${d.posts.length}개${d.date === today ? ' · 오늘' : d.date < today ? ' · 지난 날' : ''}`),
+    d.posts.map(p => post(d, p))));
+  return el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, `수익 계정 ${PLAN.title} (${x.plan_n}개)`),
+    PLAN.rules.map(r => el('p', {class: 'note', style: 'margin:2px 0'}, r)), days,
+    PLAN.replies.length ? el('details', {}, el('summary', {}, `비슷한 계정에 손으로 다는 댓글 틀 ${PLAN.replies.length}개`),
+      el('p', {class: 'note'}, PLAN.reply_rules),
+      PLAN.replies.map(r => el('div', {class: 'xpi'}, el('em', {}, r.for), el('span', {}, r.text),
+        el('div', {class: 'xpr'}, btn('pb soft', '복사', () => copy(r.text)))))) : null);
+}
+
 function draw() {
   if (!H || !B) return;
   css();
@@ -116,7 +151,7 @@ function draw() {
   B.replaceChildren(el('div', {class: 'xpw'},
     el('div', {class: 'top'}, el('h2', {}, 'X(트위터)'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')),
     el('p', {class: 'note', style: 'margin:0'}, x.rules, names.length ? ' · ' + names.join(' · ') : ''),
-    progress(x),
+    progress(x), plan(x),
     el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, `데런픽 초안함 ${live.length ? live.length + '개' : ''}`),
       el('p', {class: 'note'}, '고쳐서 복사하거나 ‘X에 올리기’로 X 앱을 연 뒤, 올렸으면 ‘올렸어요’를 눌러 주세요'),
       x.posted_line ? el('p', {class: 'note'}, x.posted_line) : null,

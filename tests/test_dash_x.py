@@ -188,7 +188,40 @@ def test_export_parsing_tolerates_missing_and_bad_rows() -> None:
     bad = got["drafts"][2]
     assert bad["url"] == "" and bad["shop"] is False and "\x00" not in bad["text"]  # 글 주소는 네이버 블로그만
     assert [c["title"] for c in got["ideas"]] == ["카드"] and got["ideas"][0]["facts"] == ["a"] and got["ideas"][0]["prompt"] == ""
-    assert _x({"drafts": []}) == {"per_day": 0, "limit": 280, "url_len": 23, "drafts": [], "ideas": []}
+    assert _x({"drafts": []}) == {"per_day": 0, "limit": 280, "url_len": 23, "drafts": [], "ideas": [], "plan": None}
+
+
+async def test_two_week_plan_is_fetched_only_when_the_screen_opens(bot: DealBot, settings: Settings, tmp_path: Path) -> None:  # noqa: F811
+    """주인 10/26 '2주 계획이 X 탭에서 안 보여' — 첫 상태 값엔 글 수만 (104 KB 예산), 계획은 GET /dashboard/api/xplan."""
+    from dash_helpers import get_json
+
+    write_export(tmp_path / "blogauto.json")
+    blogauto_status(settings)
+    x = (await state(bot))["x"]
+    fx = fixture("export_v2.json")["x"]["plan"]
+    assert x["plan_n"] == 3 and "plan" not in x
+    status, plan, _ = await get_json(bot, "/dashboard/api/xplan", session_headers(bot))
+    assert status == 200 and [d["date"] for d in plan["days"]] == ["2026-10-27", "2026-10-28"]
+    assert plan["days"][0]["posts"][0] == fx["days"][0]["posts"][0] and plan["replies"] == fx["replies"] and plan["rules"] == fx["rules"]
+    status, _p, _ = await get_json(bot, "/dashboard/api/xplan", {})
+    assert status in (401, 302, 303)  # 로그인 아래
+    write_export(tmp_path / "blogauto.json", x=dict(fixture("export_v2.json")["x"], plan=None))
+    assert (await state(bot))["x"]["plan_n"] == 0
+    status, _p, _ = await get_json(bot, "/dashboard/api/xplan", session_headers(bot))
+    assert status == 404
+
+
+def test_plan_parsing_drops_bad_days_posts_and_replies() -> None:
+    fx = copy.deepcopy(fixture("export_v2.json")["x"])
+    fx["plan"]["days"] += [{"date": "10/29", "posts": [{"time": "08:00", "head": "a"}]}, "junk",
+                           {"date": "2026-10-30", "posts": [{"time": "8시", "head": "a"}, {"time": "09:10", "head": ""}]},
+                           {"date": "2026-10-31", "posts": [{"time": "09:10", "head": "글\x00자", "outline": None}]}]
+    fx["plan"]["replies"] += ["junk", {"for": "x", "text": ""}]
+    got = _x(fx)["plan"]
+    assert [d["date"] for d in got["days"]] == ["2026-10-27", "2026-10-28", "2026-10-31"] and got["end"] == "2026-10-31"
+    assert got["days"][2]["posts"] == [{"time": "09:10", "head": "글자", "outline": "", "attach": ""}]  # 제어 문자 빠짐
+    assert len(got["replies"]) == 2
+    assert _x(dict(fx, plan={"days": []}))["plan"] is None and _x(dict(fx, plan="x"))["plan"] is None
 
 
 # ---------------------------------------------------------------- x.js
@@ -196,7 +229,8 @@ def test_xpost_js_lazy_load_budget_and_safety() -> None:
     js = (STATIC / "xpost.js").read_text(encoding="utf-8")
     assert "http://" not in js and "https://" not in js and "eval(" not in js and "new Function" not in js and "innerHTML" not in js
     for word in ("인증 팔로워", "90일 인증 노출", "전체 팔로워", "지금 속도면", "X에 올리기", "올렸어요", "버리기", "다시 쓰기", "복사",
-                 "x.idea_note", "x.intent + encodeURIComponent(", "rel: 'noopener'", "target: '_blank'"):
+                 "x.idea_note", "x.intent + encodeURIComponent(", "rel: 'noopener'", "target: '_blank'",
+                 "/dashboard/api/xplan", "X에 쓰기", "댓글 틀", "try { return localStorage"):
         assert word in js, word
     for label in re.findall(r"btn\('[^']*', '([^']*)'", js):
         assert re.search(r"[가-힣]", label), label

@@ -1137,10 +1137,14 @@ def _shopconnect(v: Any) -> dict[str, Any] | None:
 X_STATUSES = ("draft", "posted", "dropped")
 X_TEXT_MAX = 1000  # Blog-Auto 는 X 셈 280 안으로 보냄 — 한 번 더 (긴 글 구독이어도 화면 칸은 이만큼)
 X_DRAFTS_MAX, X_IDEAS_MAX, X_FACTS_MAX = 20, 5, 6
+X_PLAN_DAYS, X_PLAN_POSTS, X_PLAN_REPLIES = 31, 6, 40  # 수익 계정 2주 계획 (주인 10/26) — 첫 상태 값엔 안 넣고 /dashboard/api/xplan 으로
+X_DATE_RE = re.compile(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
+X_TIME_RE = re.compile(r"^[0-2][0-9]:[0-5][0-9]$")
 
 
 def _x(v: Any) -> dict[str, Any] | None:
-    """{per_day, limit, url_len, drafts: [{pid, title, url, text, status, created_at, posted_at, shop}], ideas: [{id, title, facts, prompt}]}.
+    """{per_day, limit, url_len, drafts: [{pid, title, url, text, status, created_at, posted_at, shop}], ideas: [{id, title, facts, prompt}],
+    plan: _x_plan | None}.
     칸이 없으면(예전 Blog-Auto) None → 초안 없음. 줄마다 따로 걸러 이상한 줄만 빠진다 (글 주소는 네이버 블로그만)."""
     if not isinstance(v, dict) or not isinstance(v.get("drafts"), list):
         return None
@@ -1160,7 +1164,34 @@ def _x(v: Any) -> dict[str, Any] | None:
             ideas.append({"id": _one_line(c.get("id"), 20) or "", "title": title, "prompt": _one_line(c.get("prompt"), 200) or "",
                           "facts": _str_list(c.get("facts"), X_FACTS_MAX, 120)})
     return {"per_day": _count(v.get("per_day"), top=50) or 0, "limit": _count(v.get("limit"), top=25_000) or 280,
-            "url_len": _count(v.get("url_len"), top=100) or 23, "drafts": drafts, "ideas": ideas}
+            "url_len": _count(v.get("url_len"), top=100) or 23, "drafts": drafts, "ideas": ideas, "plan": _x_plan(v.get("plan"))}
+
+
+def _plan_line(v: Any, limit: int) -> str | None:
+    """한 줄 글자 — 제어 문자를 빼고 (_one_line 은 공백만 정리)."""
+    return _one_line(re.sub(r"[\x00-\x1f\x7f]", "", v), limit) if isinstance(v, str) else None
+
+
+def _x_plan(v: Any) -> dict[str, Any] | None:
+    """수익 계정 2주 계획 {title, start, end, rules, reply_rules, days: [{date, label, posts: [{time, head, outline, attach}]}],
+    replies: [{for, text}]} — Blog-Auto config/x_plan.json. 주인이 고쳐서 손으로 올리는 초안 (주소 칸 없음 — 글자만). 글이 하나도 없으면 None."""
+    if not isinstance(v, dict) or not isinstance(v.get("days"), list):
+        return None
+    days = []
+    for d in v["days"][:X_PLAN_DAYS]:
+        if not isinstance(d, dict) or not X_DATE_RE.match(str(d.get("date") or "")) or not isinstance(d.get("posts"), list):
+            continue
+        posts = [{"time": p["time"], "head": head, "outline": _plan_line(p.get("outline"), 300) or "", "attach": _plan_line(p.get("attach"), 160) or ""}
+                 for p in d["posts"][:X_PLAN_POSTS]
+                 if isinstance(p, dict) and X_TIME_RE.match(str(p.get("time") or "")) and (head := _plan_line(p.get("head"), 200))]
+        if posts:
+            days.append({"date": d["date"], "label": _plan_line(d.get("label"), 20) or d["date"][5:], "posts": posts})
+    if not days:
+        return None
+    replies = [{"for": _plan_line(r.get("for"), 40) or "", "text": text} for r in (v.get("replies") if isinstance(v.get("replies"), list) else [])[:X_PLAN_REPLIES]
+               if isinstance(r, dict) and (text := _plan_line(r.get("text"), 200))]
+    return {"title": _plan_line(v.get("title"), 40) or "2주 계획", "start": days[0]["date"], "end": days[-1]["date"],
+            "rules": _str_list(v.get("rules"), 6, 160), "reply_rules": _plan_line(v.get("reply_rules"), 200) or "", "days": days, "replies": replies}
 
 
 # 룩북 릴스 (주인 10/25 — Blog-Auto lookbook_jobs.export): 지그재그 실제 상품 → 쇼츠 서버가 얼굴 없는 AI 모델 사진·영상(음악 없음) →

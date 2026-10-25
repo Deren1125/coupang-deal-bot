@@ -5,6 +5,7 @@ state['x'] = 블로그 탭 'X(트위터) →' 화면(static/xpost.js)이 그대�
   지금 속도면 예상 달성일 (마지막 두 기록으로 직선 — 두 번 넣기 전엔 없음). 수익 배분 조건은 docs/x_strategy.md 2장 (Blog-Auto).
 - 초안함: Blog-Auto x_drafts 가 만든 데런픽 초안 — 'X에 올리기'는 x.com/intent/post 링크(무료, X 앱이 열림)일 뿐이고
   올리는 건 주인 손. 누르는 것은 다리 일 blog.x_posted · blog.x_drop · blog.x_redo 셋 (확인 창 없음).
+- 수익 계정 2주 계획(주인 10/26): 글 수(plan_n)만 여기 · 계획은 GET /dashboard/api/xplan (화면을 열 때만 — 첫 상태 값 예산).
 - 하지 않는 것: X API · x.com 읽기 · 자동 게시 · 자동 좋아요·답글·리포스트·팔로우.
 """
 
@@ -88,12 +89,17 @@ def build(xv: dict[str, Any] | None, rows: list[dict[str, Any]], handles: dict[s
         drafts.append(row)
     return {
         "progress": progress, "save": act("x.stats", "저장", {}), "handles": handles, "save_handles": act("x.handles", "저장", {}),
-        "drafts": drafts, "posted": posted, "ideas": (xv or {}).get("ideas") or [], "idea_note": IDEA_NOTE,
+        "drafts": drafts, "posted": posted, "ideas": (xv or {}).get("ideas") or [], "idea_note": IDEA_NOTE, "plan_n": plan_n(xv),
         "limit": (xv or {}).get("limit") or 280, "url_len": (xv or {}).get("url_len") or 23, "intent": INTENT,
         "rules": RULES, "ready": xv is not None, "bridge_ok": bridge_ok, "posted_line": posted_line(post_counts, tz, now),
         "empty": "블로그 프로그램이 아직 X 초안을 안 보내요 — 업데이트를 기다리는 중이에요" if xv is None
         else "새 초안이 없어요 — 데런픽 글이 발행되면 하루 3편까지 만들어요",
     }
+
+
+def plan_n(xv: dict[str, Any] | None) -> int:
+    """수익 계정 2주 계획 글 수 — 계획 자체는 첫 상태 값에 넣지 않는다 (상태 104 KB 예산 · 화면이 열릴 때 /dashboard/api/xplan 으로 받음)."""
+    return sum(len(d["posts"]) for d in ((xv or {}).get("plan") or {}).get("days") or [])
 
 
 TODO_IID = "x-stats"
