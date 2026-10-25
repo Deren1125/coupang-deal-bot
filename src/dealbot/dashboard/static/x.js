@@ -11,7 +11,8 @@ const CSS = '.xi{padding:10px 0;border-bottom:1px solid var(--line)}.xi:last-chi
   '.tb.on{background:var(--gr-soft);color:var(--gr)}.x2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.x2 .pb+.pb{margin-top:0}' +
   '.tf label.tg{display:flex;gap:8px}.tf .tg input{width:24px;height:24px;flex:none;padding:0}';
 const N = {like: '♥ 좋아요', repost: '↻ 리포스트', reply: '💬 댓글'};
-const R = {done: '완료', already: '이미 함', no_button: '단추 못 찾음', no_menu: '메뉴 안 뜸', no_box: '댓글 칸 못 찾음', no_send: '보내기 안 눌림', unconfirmed: '확인 안 됨'};
+const A = {like: '♥ 좋아요', reply: '💬 댓글', quote: '❝ 인용'};  // 자동 숫자 칸 (리포스트는 2~3일에 1번이라 뺌)
+const R = {done: '완료', already: '이미 함', no_button: '단추 못 찾음', no_menu: '메뉴 안 뜸', no_box: '글 칸 못 찾음', no_send: '보내기 안 눌림', unconfirmed: '확인 안 됨'};
 let T = null, box = null, H = null, back = null;
 const E = {};  // 승인함 글마다 고친 댓글·고른 동작 (다시 그려도 남게)
 
@@ -36,7 +37,7 @@ const inp = (id, label, v, x) => H.el('label', {}, label, H.el('input', Object.a
 const num = (id, label, v) => inp(id, label, v, {type: 'number', inputmode: 'numeric'});
 const val = id => (D.getElementById(id) || {}).value || '';
 const list = (xs, empty) => H.el('div', {class: 'tl'}, ...(xs.length ? xs : [H.el('p', {class: 'note'}, empty)]));
-const res = r => !r ? '' : r.error ? r.error : Object.entries(r).map(([k, v]) => `${N[k] || k} ${R[v] || v}`).join(' · ');
+const res = r => !r ? '' : r.error ? r.error : Object.entries(r).map(([k, v]) => `${N[k] || A[k] || k} ${R[v] || v}`).join(' · ');
 
 // 첫 화면은 간략하게 (주인 10/25 '대시보드는 무조건 간략해야 해'): 알림 한 줄 · 오늘 숫자 · 켜기/끄기. 기록·설정은 접어 둔다
 function head(X) {
@@ -46,9 +47,10 @@ function head(X) {
     : X.paused_until ? [`X 가 잠시 막아서 ${X.paused_until}까지 쉬어요`, 1]
     : !s.on ? ['꺼져 있어요'] : !s.keywords.length ? ['설정에 찾을 키워드를 넣어 주세요'] : null;
   const c = X.caps_today || s.caps;
-  const tiles = s.auto ? Object.keys(N).map(k => el('div', {}, el('b', {}, `${d[k] || 0}/${c[k]}`), el('span', {}, N[k])))
+  const tiles = s.auto ? Object.keys(A).map(k => el('div', {}, el('b', {}, `${d[k] || 0}/${c[k]}`), el('span', {}, A[k])))
     : [el('div', {}, el('b', {}, `${X.sent_today}/${s.daily_max}`), el('span', {}, '보낸 글'))];
-  const info = (s.auto ? (X.next_send ? '자동 · 다음 ' + X.next_send.slice(6) : '자동') : '누른 글만 보내요') + (X.warmup_week ? ` · 적응 ${X.warmup_week}주차` : '');
+  const v = X.visits_today || [0, 0];
+  const info = s.auto ? `자동 · 접속 ${v[0]}/${v[1]}${X.next_visit ? ' · 다음 ' + X.next_visit : ''}` : '누른 글만 보내요';
   return [top, w ? el('p', {class: 'bn' + (w[1] ? ' bad' : '')}, el('span', {}, w[0])) : null,
     card('오늘', el('div', {class: 'tq'}, tiles), el('p', {class: 'note'}, info),
       btn('pb soft', s.on ? '끄기' : '켜기', () => act('x_settings', {on: !s.on}, s.on ? '껐어요' : '켰어요'), {style: 'margin-top:10px'}))];
@@ -88,13 +90,13 @@ function settings(X) {
   const {el, btn} = H, s = X.settings, hc = X.hard_caps || {};
   let auto = s.auto;
   return fold('set', '설정', el('div', {class: 'tf', style: 'margin-top:8px'},
-    el('div', {class: 'tc'}, Object.keys(N).map(k => num('xc-' + k, `${N[k]} 하루 목표 (최대 ${hc[k]})`, s.caps[k]))),
+    el('div', {class: 'tc'}, Object.keys(A).map(k => num('xc-' + k, `${A[k]} 하루 (최대 ${hc[k]})`, s.caps[k]))),
     inp('x-kw', '찾을 키워드 (쉼표로)', s.keywords.join(', ')),
     el('label', {class: 'tg'}, el('span', {}, '승인 없이 자동으로 보내기'), el('input', {type: 'checkbox', checked: !!s.auto, onchange: e => { auto = e.target.checked; }})),
-    el('p', {class: 'note', style: 'margin:0'}, '처음 6주는 낮게 시작해 목표까지 천천히 올라가요. 주말은 조금 적게. 0이면 그 일은 안 해요.'),
+    el('p', {class: 'note', style: 'margin:0'}, '하루 4~6번만 접속해 나눠서 해요. 주말은 20% 더, 리포스트는 2~3일에 1번. 0이면 그 일은 안 해요.'),
     btn('pb', '저장', () => {
       if (auto && !s.auto && !confirm('승인 없이 서버가 바로 보내요. X 약관상 계정 제한 위험이 있어요. 켤까요?')) return;
-      const caps = {}; for (const k of Object.keys(N)) caps[k] = +val('xc-' + k);
+      const caps = {}; for (const k of Object.keys(A)) caps[k] = +val('xc-' + k);
       act('x_settings', {caps, keywords: val('x-kw'), auto}, '저장했어요');
     })));
 }
