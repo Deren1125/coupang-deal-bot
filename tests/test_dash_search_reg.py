@@ -205,3 +205,18 @@ def test_digest_build_has_the_search_line(tmp_path: Path) -> None:
                                                                        "키자드에 등록할 글 2개가 있어요."]
     finally:
         env.db.close()
+
+
+def test_checklist_is_grouped_by_blog_hottest_first() -> None:
+    """주인 10/25 '키자드 등록 알림은 같은 블로그끼리 묶어줘' — 아카이브·Pick·핫딜 묶음, 안에서는 안 한 글 → 점수 높은 순."""
+    db = FakeDB()
+    reg = SearchReg(db, tz="Asia/Seoul", now=lambda: NOW)
+    view = reg.view({"recent": {"issue": [row(1, NOW - 60, score=10), row(2, NOW - 86400, score=90)],
+                                "hotdeal": [row(5, NOW - 120, "hotdeal")], "finance": [row(7, NOW - 30, "finance")]}})
+    assert [g["label"] for g in view["blogs"]] == ["아카이브", "Pick", "핫딜"]
+    pick = view["blogs"][1]
+    assert [x["title"] for x in pick["items"]] == ["글 2", "글 1"] and pick["left"] == 2
+    assert {x["day"] for x in pick["items"]} == {"오늘", "어제"}
+    reg.check(["https://blog.naver.com/derenpick/224000000002"], True)
+    pick = reg.view({})["blogs"][1]
+    assert [x["title"] for x in pick["items"]] == ["글 1", "글 2"] and pick["left"] == 1  # 한 글은 아래로

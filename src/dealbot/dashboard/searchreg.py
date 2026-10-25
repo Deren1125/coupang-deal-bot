@@ -130,7 +130,7 @@ class SearchReg:
         return n
 
     def view(self, v2: dict[str, Any] | None) -> dict[str, Any]:
-        """화면 값: 날짜마다 (새 날 먼저) 글 목록 (새 글 먼저) + 아직 등록 안 한 글 수. 블로그마다 오늘 남은 몫(PER_DAY − 오늘 등록함)만큼
+        """화면 값: 블로그마다 묶은 글 목록 blogs (화면은 이것) · 날짜마다 days (새 날 먼저, 새 글 먼저) + 아직 등록 안 한 글 수. 블로그마다 오늘 남은 몫(PER_DAY − 오늘 등록함)만큼
         최근 FRESH_DAYS 일 글 중 점수 높은 순으로 골라 보이고, 오늘 등록함 누른 글은 그대로 보인다 (되돌릴 수 있게)."""
         rows = self.sync(v2)
         tz = ZoneInfo(self.tz)
@@ -153,15 +153,22 @@ class SearchReg:
             if pick:
                 per_blog[CHIPS[blog]] = len(pick)
         days: dict[date, list[dict[str, Any]]] = {}
+        by_blog: dict[str, list[dict[str, Any]]] = {}
         for url, r in sorted(rows.items(), key=lambda kv: (-kv[1]["at"], kv[0])):
             if url not in shown:
                 continue
             d = datetime.fromtimestamp(r["at"], tz).date()
             auto = r.get("auto") is True
-            days.setdefault(d, []).append({"url": url, "blog": r.get("blog") or "", "chip": CHIPS.get(r.get("blog") or "", ""),
-                                           "title": r.get("title") or url, "at": r["at"], "done": auto or r.get("done") is True,
-                                           "auto": auto})
+            x = {"url": url, "blog": r.get("blog") or "", "chip": CHIPS.get(r.get("blog") or "", ""), "title": r.get("title") or url,
+                 "at": r["at"], "day": day_label(d, today), "score": r.get("score"), "done": auto or r.get("done") is True, "auto": auto}
+            days.setdefault(d, []).append(x)
+            by_blog.setdefault(x["blog"], []).append(x)
         groups = [{"day": d.isoformat(), "label": day_label(d, today), "items": xs,
                    "left": sum(not x["done"] for x in xs)} for d, xs in sorted(days.items(), reverse=True)]
-        return {"keyzard": KEYZARD, "left": sum(g["left"] for g in groups), "days": groups, "per_blog": per_blog,
-                "per_day": PER_DAY}
+        # 블로그마다 한 묶음 (주인 10/25 '같은 블로그끼리 묶어줘' — 키자드는 블로그 아이디마다 넣으니까): 아카이브·Pick·핫딜 순,
+        # 묶음 안은 안 한 글 먼저 → 점수 높은 순 → 새 글 순
+        blogs = [{"blog": b, "label": CHIPS[b], "left": sum(not x["done"] for x in xs),
+                  "items": sorted(xs, key=lambda x: (x["done"], -float(x.get("score") or 0), -x["at"]))}
+                 for b in CHIPS if (xs := by_blog.get(b))]
+        return {"keyzard": KEYZARD, "left": sum(g["left"] for g in groups), "days": groups, "blogs": blogs,
+                "per_blog": per_blog, "per_day": PER_DAY}

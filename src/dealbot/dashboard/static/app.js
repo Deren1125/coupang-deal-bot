@@ -719,15 +719,15 @@ async function mark(urls, on) {
 function vSearch() {
   const s = S.search, out = [el('div', {class: 'top'}, el('h2', {}, '구글 검색 등록'), el('a', {class: 'lnk', href: '#/blog/' + (LS.g('blog') || 'finance')}, '블로그로'))];
   if (!s || !s.days.length) return out.concat(el('p', {class: 'empty'}, '새로 발행한 글이 아직 없어요'));
-  out.push(el('p', {class: 'note'}, '주소를 키자드에 붙여넣고 등록함을 눌러 주세요 · 다음은 할 일 없어요'));
-  for (const g of s.days) {
+  out.push(el('p', {class: 'note'}, '블로그 아이디마다 키자드에 붙여넣고 등록함을 눌러 주세요'));
+  for (const g of s.blogs) {
     const left = g.items.filter(x => !isOn(x)).map(x => x.url);
     out.push(el('div', {class: 'top hs'}, el('p', {class: 'h3'}, `${g.label} · ${left.length ? left.length + '개 남음' : '다 했어요'}`),
       left.length ? btn('lnk', '전부 복사', () => copy(left.join('\n'), `${left.length}개 복사했어요 — 키자드에 붙여넣기 하세요`)) : null,
       left.length > 1 ? btn('lnk mute', '모두 등록함', () => mark(left, true)) : null),
     el('div', {class: 'box'}, g.items.map(x => {
       const on = isOn(x);
-      return el('div', {class: 'vi' + (on ? ' ok' : '')}, el('span', {class: 'vn'}, x.chip), el('span', {class: 'vt'}, x.title),
+      return el('div', {class: 'vi' + (on ? ' ok' : '')}, el('span', {class: 'vn'}, x.day), el('span', {class: 'vt'}, x.title),
         el('div', {class: 'va k'}, btn('sm' + (on ? '' : ' ac'), '복사하기', () => copy(x.url, '주소를 복사했어요 — 키자드에 붙여넣기 하세요')),
           x.auto ? el('span', {class: 'cp ok'}, '자동 등록됨') : btn('sm', on ? '등록함 ✓' : '등록함', () => mark([x.url], !on), {'aria-pressed': on ? 'true' : 'false'})));
     })));
