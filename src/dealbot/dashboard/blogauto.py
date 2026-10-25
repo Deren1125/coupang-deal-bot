@@ -1158,6 +1158,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
              # 검색 등록 체크리스트 (주인 10/18): 발행 시각 · Blog-Auto 가 구글 등록을 마친 글 (자동 등록을 켠 경우) — 없으면 칸 없음
              **({"published_at": pa} if (pa := _one_line(x.get("published_at"), 40)) else {}),
              **({"google_done": True} if x.get("google_done") is True or x.get("google") == "done" else {}),
+             # 인기 예상 점수 (주인 10/25 — 키자드 하루 5개를 높은 순으로 고를 때) — 없으면 칸 없음
+             **({"score": int(x["score"])} if isinstance(x.get("score"), int | float) and not isinstance(x.get("score"), bool) else {}),
              **({"deals": ds} if blog == "hotdeal" and (ds := _post_deals(x.get("deals"))) else {}),
              # 발행 글 고치기 (주인 10/21 — Blog-Auto post_edit 를 켠 블로그만): 글 순서 사진 [{n, label, thumb}] (사진 없으면 [])
              **({"photos": ph} if (ph := _recent_photos(x.get("photos"))) is not None else {})}

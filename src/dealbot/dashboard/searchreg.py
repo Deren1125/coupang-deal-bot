@@ -8,6 +8,9 @@
 - 키는 PC 주소 (https://blog.naver.com/…) — 키자드에 넣는 주소와 같게
 - Blog-Auto 가 그 글의 구글 등록을 마쳤다고 하면 (recent[].google_done — 자동 등록을 켠 경우) 저절로 '등록함'
 - 표시는 확인 창 없이 바로 (다시 누르면 되돌림)
+- 하루 5개 (주인 10/25 — "키자드는 블로그 아이디마다 하루 5개만 · 5개 넘게 올린 블로그는 가장 중요한·핫한 글 5개만 띄워 · 맨날 놓쳐"):
+  블로그마다 오늘 '등록함' 누른 수를 빼고 남은 몫만큼, 최근 FRESH_DAYS 일 안의 아직 안 한 글 중 점수(Blog-Auto recent[].score —
+  인기 예상) 높은 순 → 새 글 순으로 골라 보여 준다. 고르지 않은 글은 숨긴다 (센 수에서도 빠짐). 할 일 줄은 맨 위 쪽.
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ MAX_ROWS = 600  # 블로그 셋 × 하루 몇 편 × 14일 — 넘으면 오래�
 KEYZARD = "https://keyzard.cc/nb"
 CHIPS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
 WEEK = "월화수목금토일"
+PER_DAY = 5  # 키자드: 블로그 아이디마다 하루 등록 수
+FRESH_DAYS = 3  # 이 날 수 안에 발행한 글만 (오래된 글은 구글 등록 효과가 적다)
 
 
 def pc_url(url: str) -> str:
@@ -94,6 +99,8 @@ class SearchReg:
                     row["at"] = at
                 if r.get("google_done") is True:
                     row["auto"] = True
+                if isinstance(r.get("score"), int | float) and not isinstance(r.get("score"), bool):
+                    row["score"] = float(r["score"])
         start = self._start()
         rows = {k: v for k, v in rows.items() if isinstance(v.get("at"), int | float) and v["at"] >= start}
         if len(rows) > MAX_ROWS:
@@ -113,18 +120,42 @@ class SearchReg:
             row = rows.get(pc_url(u))
             if row is not None:
                 row["done"] = done
+                if done:
+                    row["done_at"] = self.now()
+                else:
+                    row.pop("done_at", None)
                 n += 1
         if n:
             self._save(rows)
         return n
 
     def view(self, v2: dict[str, Any] | None) -> dict[str, Any]:
-        """화면 값: 날짜마다 (새 날 먼저) 글 목록 (새 글 먼저) + 아직 등록 안 한 글 수."""
+        """화면 값: 날짜마다 (새 날 먼저) 글 목록 (새 글 먼저) + 아직 등록 안 한 글 수. 블로그마다 오늘 남은 몫(PER_DAY − 오늘 등록함)만큼
+        최근 FRESH_DAYS 일 글 중 점수 높은 순으로 골라 보이고, 오늘 등록함 누른 글은 그대로 보인다 (되돌릴 수 있게)."""
         rows = self.sync(v2)
         tz = ZoneInfo(self.tz)
-        today = datetime.fromtimestamp(self.now(), tz).date()
+        now = self.now()
+        today = datetime.fromtimestamp(now, tz).date()
+        t0 = datetime.combine(today, datetime.min.time(), tz).timestamp()
+        fresh = t0 - (FRESH_DAYS - 1) * 86400
+        shown: set[str] = set()
+        per_blog: dict[str, int] = {}
+        for blog in CHIPS:
+            mine = {u: r for u, r in rows.items() if r.get("blog") == blog}
+            done_today = [u for u, r in mine.items() if (r.get("done") is True and float(r.get("done_at") or 0) >= t0)
+                          or (r.get("auto") is True and float(r.get("at") or 0) >= t0)]  # 자동 등록(Blog-Auto)된 오늘 글도 몫에 셈
+            shown.update(done_today)
+            left = max(0, PER_DAY - len(done_today))
+            cands = sorted(((u, r) for u, r in mine.items() if not (r.get("done") is True or r.get("auto") is True)
+                            and float(r.get("at") or 0) >= fresh), key=lambda kv: (-float(kv[1].get("score") or 0), -kv[1]["at"]))
+            pick = [u for u, _ in cands[:left]]
+            shown.update(pick)
+            if pick:
+                per_blog[CHIPS[blog]] = len(pick)
         days: dict[date, list[dict[str, Any]]] = {}
         for url, r in sorted(rows.items(), key=lambda kv: (-kv[1]["at"], kv[0])):
+            if url not in shown:
+                continue
             d = datetime.fromtimestamp(r["at"], tz).date()
             auto = r.get("auto") is True
             days.setdefault(d, []).append({"url": url, "blog": r.get("blog") or "", "chip": CHIPS.get(r.get("blog") or "", ""),
@@ -132,4 +163,5 @@ class SearchReg:
                                            "auto": auto})
         groups = [{"day": d.isoformat(), "label": day_label(d, today), "items": xs,
                    "left": sum(not x["done"] for x in xs)} for d, xs in sorted(days.items(), reverse=True)]
-        return {"keyzard": KEYZARD, "left": sum(g["left"] for g in groups), "days": groups}
+        return {"keyzard": KEYZARD, "left": sum(g["left"] for g in groups), "days": groups, "per_blog": per_blog,
+                "per_day": PER_DAY}

@@ -50,33 +50,48 @@ class FakeDB:
 
 # ---------------------------------------------------------------- 기록 파일 recent
 def test_parse_reads_published_at_and_google_done_only_when_given() -> None:
-    got = parse_v2({"recent": {"issue": [row(1, NOW, google_done=True, published_at="2026-10-18T21:00:00+09:00"),
-                                         row(2, NOW, google="done"), row(3, NOW, google_done="yes")]}})["recent"]["issue"]
+    got = parse_v2({"recent": {"issue": [row(1, NOW, google_done=True, published_at="2026-10-18T21:00:00+09:00", score=72),
+                                         row(2, NOW, google="done"), row(3, NOW, google_done="yes", score=True)]}})["recent"]["issue"]
+    assert got[0]["score"] == 72 and "score" not in got[1] and "score" not in got[2]  # 점수 (주인 10/25 키자드 고르기)
     assert got[0]["google_done"] is True and got[0]["published_at"] == "2026-10-18T21:00:00+09:00"
     assert got[1]["google_done"] is True and "google_done" not in got[2] and "published_at" not in got[2]
 
 
-# ---------------------------------------------------------------- 모으기 · 날짜 묶음 · 14일
-def test_groups_by_day_newest_first_keeps_14_days_and_collects_beyond_recent() -> None:
+# ---------------------------------------------------------------- 모으기 · 날짜 묶음 · 하루 5개 (주인 10/25)
+def test_shows_fresh_posts_by_day_and_keeps_14_days_in_storage() -> None:
     db, clock = FakeDB(), [NOW]
     reg = SearchReg(db, tz="Asia/Seoul", now=lambda: clock[0])
     old = NOW - 14 * 86400  # 15일째 — 버림
     v2 = {"recent": {"issue": [row(3, NOW - 600), row(2, NOW - 86400)], "finance": [row(1, NOW - 3 * 86400, "finance")],
                      "hotdeal": [row(9, old, "hotdeal")]}}
     view = reg.view(v2)
-    assert [g["label"] for g in view["days"]] == ["오늘", "어제", "10/15 (목)"] and view["left"] == 3
-    assert view["keyzard"] == "https://keyzard.cc/nb"
+    assert [g["label"] for g in view["days"]] == ["오늘", "어제"] and view["left"] == 2  # 사흘 지난 글은 키자드 효과가 적어 안 보임
+    assert view["keyzard"] == "https://keyzard.cc/nb" and view["per_blog"] == {"Pick": 2} and view["per_day"] == 5
     x = view["days"][0]["items"][0]
     assert x["url"] == "https://blog.naver.com/derenpick/224000000003"  # 키자드에 넣는 PC 주소
     assert x["chip"] == "Pick" and x["title"] == "글 3" and x["done"] is False and x["auto"] is False
     # 다음 읽기 때 recent 에서 빠진 글(10편 넘게 발행)도 남아 있다
     view = reg.view({"recent": {"issue": [row(4, NOW - 60)]}})
-    assert [x["title"] for x in view["days"][0]["items"]] == ["글 4", "글 3"] and view["left"] == 4
-    # 10/15 글은 10/28 까지 (오늘 포함 14일), 10/29 에는 빠진다
-    clock[0] = NOW + 10 * 86400
-    assert "10/15 (목)" in [g["label"] for g in reg.view({})["days"]]
+    assert [x["title"] for x in view["days"][0]["items"]] == ["글 4", "글 3"] and view["left"] == 3
+    assert len(json.loads(db.kv[KV])) == 4  # 보이지 않아도 14일은 모아 둔다 (사흘 지난 아카이브 글 포함)
     clock[0] = NOW + 11 * 86400
-    assert all(g["label"] != "10/15 (목)" for g in reg.view({})["days"]) and reg.view({})["left"] == 3
+    assert len(json.loads(db.kv[KV])) == 4 and reg.view({})["left"] == 0 and len(json.loads(db.kv[KV])) == 3  # 10/15 글은 버림
+
+
+def test_only_five_per_blog_a_day_hottest_first_and_done_ones_count() -> None:
+    """키자드는 블로그 아이디마다 하루 5개 — 5개 넘게 올린 블로그는 가장 핫한 글 5개만 (주인 10/25)."""
+    db = FakeDB()
+    reg = SearchReg(db, tz="Asia/Seoul", now=lambda: NOW)
+    posts = [row(i, NOW - 600 * i, score=s) for i, s in enumerate([10, 90, 30, 80, 20, 70, 60], start=1)]
+    view = reg.view({"recent": {"issue": posts, "hotdeal": [row(20, NOW - 60, "hotdeal", score=5)]}})
+    titles = [x["title"] for g in view["days"] for x in g["items"] if x["chip"] == "Pick"]
+    assert sorted(titles) == sorted(["글 2", "글 4", "글 6", "글 7", "글 3"]) and view["left"] == 6  # Pick 5 + 핫딜 1
+    assert view["per_blog"] == {"Pick": 5, "핫딜": 1}
+    reg.check(["https://blog.naver.com/derenpick/224000000002", "https://blog.naver.com/derenpick/224000000004"], True)
+    view = reg.view({})
+    pick = [x for g in view["days"] for x in g["items"] if x["chip"] == "Pick"]
+    assert len(pick) == 5 and sum(x["done"] for x in pick) == 2 and view["per_blog"]["Pick"] == 3  # 오늘 남은 몫 3
+    assert "글 1" not in [x["title"] for x in pick] and "글 5" not in [x["title"] for x in pick]  # 점수 낮은 글은 숨김
 
 
 def test_day_labels() -> None:
@@ -89,7 +104,7 @@ def test_check_persists_and_undoes_and_auto_submit_shows_checked() -> None:
     db = FakeDB()
     reg = SearchReg(db, tz="Asia/Seoul", now=lambda: NOW)
     v2 = {"recent": {"issue": [row(1, NOW - 60), row(2, NOW - 120, google_done=True)]}}
-    assert reg.view(v2)["left"] == 1  # 자동 등록된 글은 처음부터 '등록함'
+    assert reg.view(v2)["left"] == 1  # 자동 등록된 글은 처음부터 '등록함' (오늘 몫에 셈)
     assert reg.check(["https://m.blog.naver.com/derenpick/224000000001"], True) == 1  # 모바일 주소로 와도 같은 글
     again = SearchReg(db, tz="Asia/Seoul", now=lambda: NOW)  # 다시 켜도 그대로 (딜봇 kv)
     items = {x["title"]: x for x in again.view(v2)["days"][0]["items"]}
@@ -136,9 +151,10 @@ async def test_todo_row_blog_view_check_and_undo(bot: DealBot, settings: Setting
     todo = body["todo"]
     by = {it["iid"]: it for it in todo}
     s = by["search"]
-    assert s["title"] == "구글 검색 등록 3개" and s["sev"] == "info" and s["kind"] == "search_reg" and s["urgent"] is False
+    assert s["title"] == "키자드 등록 3개" and s["sev"] == "todo" and s["kind"] == "search_reg" and s["urgent"] is False
+    assert "블로그마다 하루 5개" in s["status"] and "Pick 2" in s["status"] and "핫딜 1" in s["status"]
     assert s["primary"]["input"] == "goto" and s["primary"]["goto"] == "#/blog/search"
-    assert rank.rank(dict(s), time.time()) == 50.0 and todo.index(s) > todo.index(by["post-issue-31"])  # 주인을 막는 일보다 아래
+    assert rank.rank(dict(s), time.time()) == 950.0 and todo.index(s) < todo.index(by["post-issue-31"])  # 주인 10/25 '맨날 놓쳐' — 맨 위 쪽
     sr = body["search"]
     assert sr["left"] == 3 and [g["label"] for g in sr["days"]] == ["오늘", "어제"]
     assert [x["chip"] for x in sr["days"][0]["items"]] == ["핫딜", "Pick"]
@@ -149,7 +165,7 @@ async def test_todo_row_blog_view_check_and_undo(bot: DealBot, settings: Setting
     assert status == 200 and r["status"] == "ok" and "등록함" in r["text"]
     assert all(json.loads(bot.db.kv_get(KV) or "{}")[u]["done"] for u in urls)
     _, body, _ = await get_json(bot, "/dashboard/api/state", h)
-    assert {it["iid"]: it for it in body["todo"]}["search"]["title"] == "구글 검색 등록 1개" and body["search"]["days"][0]["left"] == 0
+    assert {it["iid"]: it for it in body["todo"]}["search"]["title"] == "키자드 등록 1개" and body["search"]["days"][0]["left"] == 0
     # 되돌리기
     status, r, _ = await post_json(bot, "/dashboard/api/action", {"action": "search.check", "args": {"url": urls[0], "done": False}}, h)
     assert status == 200 and r["status"] == "ok"
@@ -172,9 +188,9 @@ async def test_digest_gets_one_search_line(bot: DealBot, settings: Settings, tmp
     write_export(tmp_path / "blogauto.json", recent=recent_now())
     blogauto_status(settings)
     brief = bot._todo_brief()
-    assert {"kind": "search_reg", "title": "구글 검색 등록 3개", "iid": "search", "n": 3} in brief
+    assert {"kind": "search_reg", "title": "키자드 등록 3개", "iid": "search", "n": 3} in brief
     lines = waiting_sentences(brief)
-    assert lines[-1] == "구글 검색 등록할 글 3개가 있어요." and not any("그 밖의" in x and "구글" in x for x in lines)
+    assert lines[-1] == "키자드에 등록할 글 3개가 있어요." and not any("그 밖의" in x and "키자드" in x for x in lines)
     assert waiting_sentences([{"kind": "search_reg", "title": "구글 검색 등록 0개", "n": 0}]) == []
 
 
@@ -186,6 +202,6 @@ def test_digest_build_has_the_search_line(tmp_path: Path) -> None:
         d = dg.build(datetime(2026, 10, 18).date(), "pm", env.clock())
         wait = d["sections"][0]
         assert wait["label"] == "기다리는 일" and wait["sentences"] == ["링크를 기다리는 딜 1개(무선청소기)가 있어요.",
-                                                                       "구글 검색 등록할 글 2개가 있어요."]
+                                                                       "키자드에 등록할 글 2개가 있어요."]
     finally:
         env.db.close()

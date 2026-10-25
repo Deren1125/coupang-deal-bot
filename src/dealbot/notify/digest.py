@@ -79,7 +79,7 @@ def waiting_sentences(items: list[dict[str, Any]]) -> list[str]:
     if left:
         out.append(f"그 밖의 할 일 {len(left)}개({_names([str(it.get('title') or '') for it in left])})가 있어요.")
     if search > 0:
-        out.append(f"구글 검색 등록할 글 {search}개가 있어요.")
+        out.append(f"키자드에 등록할 글 {search}개가 있어요.")
     return out
 
 

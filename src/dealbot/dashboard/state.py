@@ -751,13 +751,14 @@ class StateBuilder:
 
     @staticmethod
     def _search_item(view: dict[str, Any] | None) -> dict[str, Any] | None:
-        """할 일 한 줄 '구글 검색 등록 N개' (참고 — 주인을 막는 일보다 아래) → 누르면 블로그 탭 체크리스트. 다 했으면 None."""
+        """할 일 한 줄 '키자드 등록 N개' (주인 10/25 '맨날 놓쳐' — 맨 위 쪽, searchreg 하루 5개) → 누르면 블로그 탭 체크리스트. 다 했으면 None."""
         n = (view or {}).get("left") or 0
         if not n:
             return None
         since = max((x["at"] for g in view["days"] for x in g["items"] if not x["done"]), default=None)  # type: ignore[index]
-        return {"iid": SEARCH_IID, "src": "blog", "blog": "", "kind": "search_reg", "sev": "info", "urgent": False, "n": n,
-                "title": f"구글 검색 등록 {n}개", "status": "주소 복사 → 키자드에 붙여넣기", "since": since, "expires_at": None,
+        return {"iid": SEARCH_IID, "src": "blog", "blog": "", "kind": "search_reg", "sev": "todo", "urgent": False, "n": n,
+                "title": f"키자드 등록 {n}개", "status": " · ".join(f"{k} {v}" for k, v in (view.get("per_blog") or {}).items())
+                + f" — 블로그마다 하루 {view.get('per_day') or 5}개 · 주소 복사 → 키자드에 붙여넣기", "since": since, "expires_at": None,
                 "primary": goto("보기", "#/blog/search"), "more": [], "detail": {"lines": []}}
 
     def item(self, iid: str) -> dict[str, Any] | None:

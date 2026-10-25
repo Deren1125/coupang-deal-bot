@@ -85,6 +85,8 @@ def rank(it: dict[str, Any], now: float) -> float:
         return 1000.0
     if sev == "info":
         return 50.0
+    if kind == "search_reg":
+        return 950.0  # 키자드 등록 (주인 10/25 '맨날 놓쳐') — 멈춤 바로 아래, 다른 할 일보다 위
     if str(it.get("iid", "")).startswith(BROKEN_IIDS):
         return 900.0  # 연결·시스템 줄 (네이버 로그인 필요 등) — ⛔ 표시가 없어도 고장 쪽
     if it.get("src") == "deal" and kind in DEAL_KINDS:
