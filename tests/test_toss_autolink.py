@@ -166,9 +166,10 @@ async def test_login_stop_alerts_once_and_toss_deals_wait(bot: DealBot, settings
 async def test_no_reply_in_time_falls_back_and_cancels_with_toss_cancel(bot: DealBot, settings: Settings) -> None:
     qid, job = await _ask(bot, settings)
     bot.settings.autolink.toss.wait_minutes = 0
-    await bot.autolink_tick()
+    await bot.autolink_tick()  # 첫 시간 초과 → 한 번 더 자동으로 (주인 10/25)
+    await bot.autolink_tick()  # 또 시간 초과 → 주인에게
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
-    assert [u["toss_cancel"]["job"] for u in _inbox(settings) if "toss_cancel" in u] == [job["job"]]
+    assert [u["toss_cancel"]["job"] for u in _inbox(settings) if "toss_cancel" in u][0] == job["job"]
     assert not [u for u in _inbox(settings) if "connect_cancel" in u]
     _reply(settings, _ok(qid, job))  # 늦게 온 답은 무시 (이미 주인에게 넘어감)
     assert await bot.autolink_tick() == 0

@@ -282,10 +282,13 @@ async def test_item_specific_failures_still_fall_back(bot: DealBot, settings: Se
 async def test_no_reply_in_time_falls_back_and_cancels(bot: DealBot, settings: Settings) -> None:
     qid, job = await _ask(bot, settings)
     bot.settings.autolink.naver.wait_minutes = 0
-    await bot.autolink_tick()
+    await bot.autolink_tick()  # 첫 시간 초과 → 주인에게 묻기 전에 한 번 더 자동으로 (주인 10/25 켈로그 #114)
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
+    await bot.autolink_tick()  # 두 번째도 시간 초과 → 주인에게
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
     cancels = [u["connect_cancel"] for u in _inbox(settings) if "connect_cancel" in u]
-    assert cancels == [{"id": qid, "job": job["job"], "at": cancels[0]["at"]}]
+    assert len(cancels) == 2 and cancels[0] == {"id": qid, "job": job["job"], "at": cancels[0]["at"]}
+    assert len([u for u in _inbox(settings) if "connect_link" in u]) == 2  # 처음 + 한 번 더 (밀린 링크 보내기가 또 보내지 않음)
     # 늦게 온 답은 무시 (이미 주인에게 넘어감)
     _reply(settings, {"id": qid, "job": job["job"], "product_no": NO, "ok": True, "link": LINK})
     assert await bot.autolink_tick() == 0
@@ -497,7 +500,8 @@ async def test_late_login_answer_still_stops_and_alerts(bot: DealBot, settings: 
     """딜봇이 이미 시간 초과로 주인에게 넘긴 글의 늦은 답이라도 로그인 멈춤은 따르고 카톡으로 알린다 (한 번)."""
     qid, job = await _ask(bot, settings)
     bot.settings.autolink.naver.wait_minutes = 0
-    await bot.autolink_tick()  # 시간 초과 → 주인 요청
+    await bot.autolink_tick()  # 시간 초과 → 한 번 더 자동으로
+    await bot.autolink_tick()  # 또 시간 초과 → 주인 요청
     assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
     row = {"id": qid, "job": job["job"], "product_no": NO, "ok": False, "reason": "login", "retry_at": time.time() + 3600,
            "at": time.time()}
@@ -556,6 +560,7 @@ async def test_waiting_backlog_goes_to_autolink_once(bot: DealBot, settings: Set
     assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
     assert _job(settings)["id"] == qid
     assert bot._autolink_backlog() == 0  # 이미 보낸 딜은 다시 안 봄
+    bot.db.kv_set(f"autolink:timeout_retry:{qid}", "x")  # 시간 초과는 이미 한 번 더 해 봄 (주인 10/25 — _autolink_timeouts)
     await bot._autolink_fallback(bot.db.get_queue_item(qid), "timeout")  # type: ignore[arg-type]
     bot.db.update_queue_item(qid, status="awaiting_link")
     assert bot._autolink_backlog() == 0  # 자동이 안 된 딜은 주인 요청으로 남고 또 보내지 않음
@@ -611,3 +616,19 @@ async def test_coupang_channel_links_use_their_own_sub_id(bot: DealBot) -> None:
     assert (await bot.channel_deal(deal, "blog")).affiliate_url.endswith("/main")  # 채널 아이디 없음
     naver = Deal(_product(), DealVerdict(is_deal=True), affiliate_url="https://naver.me/x")
     assert (await bot.channel_deal(naver, "threads")) is naver
+
+
+async def test_old_timeout_fallback_is_sent_to_autolink_once_more(bot: DealBot, settings: Settings) -> None:
+    """주인 10/25 '이런 거는 왜 아직 떠' (켈로그 #114): 예전 판에서 시간 초과 한 번에 주인에게 넘어간 딜도 한 번 더 자동으로."""
+    qid, job = await _ask(bot, settings)
+    bot._cancel_autolink(qid)
+    await bot._autolink_fallback(bot.db.get_queue_item(qid), "timeout")  # 예전 판: 바로 주인에게
+    assert bot.db.get_queue_item(qid).status == "awaiting_link"  # type: ignore[union-attr]
+    before = len([u for u in _inbox(settings) if "connect_link" in u])
+    bot._autolink_backlog()
+    assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
+    assert len([u for u in _inbox(settings) if "connect_link" in u]) == before + 1
+    bot.db.update_queue_item(qid, status="awaiting_link")
+    bot.db.kv_set(f"{autolink.KV_TRIED}{qid}", "x")
+    bot._autolink_backlog()  # 한 번만
+    assert len([u for u in _inbox(settings) if "connect_link" in u]) == before + 1

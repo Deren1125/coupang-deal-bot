@@ -2873,6 +2873,10 @@ class DealBot:
             if n >= self.BACKLOG_PER_TICK:
                 break
             key = f"{autolink.KV_TRIED}{item.id}"
+            if self.db.kv_get(key) and not self.db.kv_get(f"autolink:timeout_retry:{item.id}") and self._timed_out_once(item.id):
+                # 예전 판은 시간 초과 한 번에 바로 주인에게 물었다 (주인 10/25 '이런 거는 왜 아직 떠') — 그런 딜도 한 번 더 자동으로
+                self.db.kv_set(f"autolink:timeout_retry:{item.id}", to_iso(utcnow()))
+                self.db.kv_take(key)
             if self.db.kv_get(key):
                 continue
             deal = item.deal
@@ -3032,10 +3036,39 @@ class DealBot:
             at = from_iso(marker.get("at")) if isinstance(marker, dict) else None
             if at is not None and at > now - timedelta(minutes=cfg.wait_minutes):
                 continue
+            tries = int(marker.get("tries") or 0) if isinstance(marker, dict) else 0
             self._cancel_autolink(item.id)
+            if tries < self.AUTOLINK_TIMEOUT_RETRIES and isinstance(marker, dict):
+                # 시간 초과는 블로그 프로그램이 잠깐 바빴던 것일 수 있다 (주인 10/25 — 원격 로그인 중이라 켈로그 #114 를 바로 물어봄):
+                # 주인에게 묻기 전에 한 번 더 맡긴다
+                if marker.get("shop") == "toss":
+                    self._request_toss_autolink(item, item.deal)
+                else:
+                    self._request_autolink(item, item.deal, str(marker.get("no") or ""))
+                self._mark_autolink_tries(item.id, tries + 1)
+                self.db.kv_set(f"autolink:timeout_retry:{item.id}", to_iso(utcnow()))  # 밀린 링크 보내기가 또 다시 보내지 않게
+                self.db.log_event("INFO", "autolink", f"#{item.id} timeout → 한 번 더 자동으로")
+                n += 1
+                continue
             await self._autolink_fallback(item, "timeout")
             n += 1
         return n
+
+    AUTOLINK_TIMEOUT_RETRIES = 1
+
+    def _timed_out_once(self, queue_id: int) -> bool:
+        """이 딜의 자동 링크가 시간 초과로 주인 요청이 됐었나 (기록: '#번호 timeout → 링크 요청')."""
+        row = self.db._one("SELECT 1 FROM events WHERE kind='autolink' AND message = ? LIMIT 1", (f"#{queue_id} timeout → 링크 요청",))
+        return row is not None
+
+    def _mark_autolink_tries(self, queue_id: int, tries: int) -> None:
+        raw = self.db.kv_get(f"{autolink.KV_JOB}{queue_id}")
+        try:
+            marker = json.loads(raw) if raw else {}
+        except ValueError:
+            marker = {}
+        if isinstance(marker, dict) and marker:
+            self.db.kv_set(f"{autolink.KV_JOB}{queue_id}", json.dumps({**marker, "tries": tries}))
 
     async def _autolink_fallback(self, item: QueueItem, why: str) -> None:
         """자동 링크가 안 됨 (오류·시간 초과·로그인·한도…): 예전처럼 주인에게 링크 요청."""

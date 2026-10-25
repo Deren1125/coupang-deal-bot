@@ -228,7 +228,7 @@ class StateBuilder:
                                    if bot.settings.autolink.naver.no_link_autopost else None,
                                    choices=[{"value": "post", "label": "링크 없이 올리기", "primary": True},
                                             {"value": "skip", "label": "안 올리기"}]))
-                detail["how"] = "쇼핑 커넥트 '상품 찾기'에서 아래 검색어로 찾아 링크를 만들어 주세요 · 상품 사진도 같이 넣으면 채널·블로그에 써요"
+                detail["how"] = "쇼핑 커넥트 '상품 찾기'에서 아래 검색어로 찾아 링크를 만들어 주세요 · 사진은 봇이 상품 페이지에서 넣어요"
             if (hold := p.extra.get("price_hold_note")) and isinstance(hold, str):
                 detail["note"] = truncate(hold, 120)
             base(it, "link_request", f"[{shop_name}] {price} · {left(exp, now)}", primary, more, detail, expires=exp)
