@@ -31,6 +31,7 @@ from dealbot.dashboard.actions import (
     needs_confirm,
     publish_blog,
 )
+from dealbot.dashboard.remote_login import TARGETS as REMOTE_TARGETS
 from dealbot.dashboard.searchreg import SearchReg
 from dealbot.dashboard.today import count as today_count
 from dealbot.dashboard.todo import ago, left, link_target
@@ -571,6 +572,9 @@ class StateBuilder:
             blog = iid.rsplit("-", 1)[-1]
             primary = act("blog.login_check", "로그인 확인", {"blog": blog})
             more.append(act("login.remote", "원격 화면으로 다시 로그인", {"target": blog}))
+        elif iid.startswith("conn-mall-"):  # 쇼핑몰 로그인·사람 확인 — 원격 화면에서 주인이 한 번 (봇은 확인을 뚫지 않음)
+            mall = iid.removeprefix("conn-mall-")
+            primary = act("login.remote", "원격 화면으로 확인", {"target": mall}) if mall in REMOTE_TARGETS else goto("연결 보기", "#/connect")
         elif iid in ("conn-kakao", "sns-threads", "sns-instagram"):
             primary = goto("다시 연결", "#/connect")
         elif iid == "sns-replies":
@@ -684,7 +688,9 @@ class StateBuilder:
                                            long=long)
                 continue
             sev = {"⛔[멈춤]": "stop", "🔥[핫]": "hot", "ℹ️": "info"}.get(t.marker, "todo")
+            mall = iid.removeprefix("conn-mall-") if iid.startswith("conn-mall-") else ""
             primary = open_link(t.link and ("네이버에서 보기" if "naver.com" in t.link else "열기") or "열기", t.link) if t.link \
+                else act("login.remote", "원격 화면으로 확인", {"target": mall}) if mall in REMOTE_TARGETS \
                 else goto("스레드·인스타 보기", "#/blog/threads") if t.kind == "threads_todo" \
                 else goto("블로그 보기", f"#/blog/{blog}") if blog else goto("자세히", "#/connect")  # threads_todo: 스레드 자동화가 남긴 할 일 (10/23)
             out[iid] = {"iid": iid, "src": "blog", "blog": blog, "kind": t.kind, "sev": sev, "urgent": t.urgent, "title": t.short,

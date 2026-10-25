@@ -70,6 +70,8 @@ def iid_for(key: str, blog: str = "", pid: int | None = None, *, src: str = "dea
         return f"conn-naver-{parts[1]}"
     if head == "kakao":
         return "conn-kakao"
+    if head == "mall_login" and len(parts) == 2 and re.fullmatch(r"[a-z0-9]{1,20}", mall := parts[1].split("_", 1)[0]):
+        return f"conn-mall-{mall}"  # 쇼핑몰 로그인·사람 확인 (mall_login:ably_cf → 에이블리) — 몰마다 한 줄 (주인 10/25)
     if head == "scan":
         return "blog-finance-scan"
     if head == "cq" and len(parts) >= 2 and parts[1] in BLOGS:
