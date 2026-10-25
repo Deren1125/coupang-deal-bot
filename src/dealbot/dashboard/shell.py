@@ -29,6 +29,7 @@ THPOST_JS = "thpost.js"  # 스레드 글·예약·댓글·통계 칸 (10/21) —
 THEME_JS = "theme.js"  # 화면 밝기 단추 (10/24) — 머리에서 먼저 돌아 첫 화면부터 고른 색 (자동·밝게·어둡게)
 XPOST_JS = "xpost.js"  # X(트위터) 초안함·진행률 (10/25) — 블로그 탭 'X(트위터) →'를 처음 열 때만 (주소는 meta sb-xpost)
 THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드·인스타 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
+X_JS = "x.js"  # X (10/25) — 스레드 화면 'X →'를 처음 누를 때만 threads.js 가 불러온다 (주소는 meta sb-x)
 
 
 @cache
@@ -65,6 +66,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<meta name="sb-sched" content="{asset_url(SCHED_JS)}">'
         f'<meta name="sb-earn" content="{asset_url(EARN_JS)}">'
         f'<meta name="sb-threads" content="{asset_url(THREADS_JS)}">'
+        f'<meta name="sb-x" content="{asset_url(X_JS)}">'
         f'<meta name="sb-xpost" content="{asset_url(XPOST_JS)}">'
         '</head><body>'
         '<header class="hd"><h1 id="ttl">할 일</h1><span class="old" id="old" hidden></span>'

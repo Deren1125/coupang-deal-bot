@@ -47,7 +47,7 @@ from dealbot.dashboard.blogauto import BlogAutoReader
 from dealbot.dashboard.service import Dashboard
 from dealbot.dashboard.sources import SourceContext
 from dealbot.dedupe import find_duplicate
-from dealbot.enrich import PageEnricher, PageMeta, page_images
+from dealbot.enrich import PageEnricher, PageMeta, is_naver_store, page_images
 from dealbot.growth import alerts as growth_alerts
 from dealbot.growth import invites, weekly
 from dealbot.growth.late_photo import LatePhoto
@@ -2668,15 +2668,16 @@ class DealBot:
             return True
         return False
 
-    async def _read_unverified_price(self, p: Product) -> None:
+    async def _read_unverified_price(self, p: Product) -> PageMeta | None:
         """수집 때 페이지 가격을 확인 못 한(unverified) 딜의 가격만 한 번 더 본다: 품절 확인 때 읽은 페이지(캐시)·일반 요청으로,
         그래도 가격이 없으면 스토어 크롬으로 (크롬이 읽은 페이지는 잠시 기억 — 쇼핑커넥트 전에 읽었으면 발행 때 다시 안 엶).
-        페이지 사진은 쓰지 않는다. 못 읽으면 예전처럼 진행. 쇼핑커넥트에 묻기 전(_held_before_autolink)과
+        크롬으로 읽은 페이지를 돌려준다 (deal_photo 가 그 사진을 씀 — 크롬을 다시 열지 않게, 주인 10/25). 못 읽으면 예전처럼 진행. 쇼핑커넥트에 묻기 전(_held_before_autolink)과
         주인 사진이 없는 네이버 딜의 발행 직전(deal_photo)에 부른다. 주인이 휴대폰으로 확인하고 링크를 붙인 딜은 읽지 않는다."""
         state = p.extra.get("page_price")
         if not isinstance(state, dict) or state.get("status") != "unverified" or self._owner_checked(p):
-            return
+            return None
         meta: PageMeta | None = None
+        browser: PageMeta | None = None
         if self._can_check_page(p):
             try:
                 meta = await self.enricher.fetch(p.url)
@@ -2684,10 +2685,11 @@ class DealBot:
                 meta = None
         if (meta is None or meta.prices is None) and p.shop not in self.settings.deal.enrich.exclude_shops:
             try:
-                meta = await self.store_browser.page_meta(p.url)
+                meta = browser = await self.store_browser.page_meta(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
         self._recheck_page_price(p, meta)
+        return browser  # 크롬으로 읽은 페이지 — deal_photo 가 그 사진을 쓴다 (크롬을 다시 열지 않게)
 
     def _request_autolink(self, item: QueueItem, deal: Deal, product_no: str) -> None:
         """Blog-Auto 에 쇼핑커넥트 링크를 부탁한다. 글마다 한 번 (job 을 kv 에 먼저 남기고 받은편지함에 한 줄)."""
@@ -3562,9 +3564,11 @@ class DealBot:
         cc = self.settings.publish
         p = deal.product
         if p.shop == "naver":
-            # 가격만 (사진은 버림). 주인 사진보다 먼저 — 예전 링크·사진을 다시 쓰는 딜은 주인이 가격을 본 게 아니라서
+            # 가격 확인 (크롬으로 읽었으면 그 페이지를 아래 사진에도 — 주인 10/25). 주인 사진보다 먼저 — 예전 링크·사진을 다시 쓰는 딜은 주인이 가격을 본 게 아니라서
             # 발행 전 가격 확인이 이것뿐이다 (주인이 이번에 확인한 딜은 _read_unverified_price 가 아무것도 안 함)
-            await self._read_unverified_price(p)
+            browser_meta = await self._read_unverified_price(p)
+        else:
+            browser_meta = None
         owned = self._owner_photo(p)
         if owned is not None:
             p.image_url = self._public_owner_photo(owned)  # 공개 도메인이 없으면 None (텔레그램은 바이트로, 스레드는 글만)
@@ -3600,6 +3604,20 @@ class DealBot:
                 if photo is not None:
                     src = url
                     break
+            if photo is None and is_naver_store(p.url):
+                # 일반 요청이 막힌(429) 네이버 스토어 — 가격 확인에 쓰는 그 크롬(위장 없는 빈 창 · 여유 메모리·간격·막히면 쉼은 store_browser)으로
+                # 상품 사진도 (주인 10/24 '직접 넣어' → 10/25 #118 '사진 필요'가 주인에게 감 · 주인 10/25 '응'). 가격 때문에 읽은 페이지면 다시 안 엶
+                bmeta = browser_meta
+                if bmeta is None:
+                    try:
+                        bmeta = await self.store_browser.page_meta(p.url)
+                    except Exception:  # noqa: BLE001
+                        bmeta = None
+                for url in [u for page_url in (page_images(bmeta) if bmeta else []) for u in _sizes(page_url)]:
+                    photo = await _try(url)
+                    if photo is not None:
+                        src = url
+                        break
         if photo is None and p.image_url:
             log.info("no usable product photo — posting without photo: %s", p.image_url[:100])
         p.image_url = src

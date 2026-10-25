@@ -56,7 +56,7 @@ const sub = t => H.el('p', {class: 'note', style: 'margin:8px 0 4px;font-weight:
 
 function head() {
   const {el, btn} = H, s = T.settings, K = T.kind_names || {};
-  const top = [el('div', {class: 'top'}, el('h2', {}, '스레드·인스타 @' + T.username), el('a', {class: 'lnk', href: '#/blog'}, '블로그로'))];
+  const top = [el('div', {class: 'top'}, el('h2', {}, '스레드·인스타 @' + T.username), btn('lnk', 'X →', openX), el('a', {class: 'lnk', href: '#/blog'}, '블로그로'))];
   const warn = [];
   if (T.login_needed) warn.push('스레드 로그인이 풀렸어요 — 아래 ‘스레드 로그인’에서 다시 로그인해 주세요');
   if (T.paused_until) warn.push(`${T.paused_until}까지 쉬는 중이에요`);
@@ -156,6 +156,10 @@ function draw() {
   box.replaceChildren(...head(), ...[manual()].filter(Boolean), slot('compose', '내가 쓰는 글 (바로 올리기·예약)'), slot('alerts', '댓글 알림'), slot('stats', '통계'),
     ...jobs(), settings(), ...login(), ...logs());
 }
+// X 화면 (10/25, x.js)
+let xp;
+const openX = () => (xp = xp || new Promise((ok, bad) => { const s = D.createElement('script'); s.src = D.querySelector('meta[name=sb-x]').content;
+  s.onload = () => ok(W.SBX); s.onerror = () => { xp = null; bad(); }; D.head.append(s); })).then(X => X.view(box, H, () => view(box, H)), () => H.toast('안 됐어요'));
 function view(b, h) {
   css(); box = b; H = h;
   b.replaceChildren(h.el('p', {class: 'boot'}, '불러오는 중…'));
