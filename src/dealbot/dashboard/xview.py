@@ -81,3 +81,23 @@ def build(xv: dict[str, Any] | None, rows: list[dict[str, Any]], handles: dict[s
         "empty": "블로그 프로그램이 아직 X 초안을 안 보내요 — 업데이트를 기다리는 중이에요" if xv is None
         else "새 초안이 없어요 — 데런픽 글이 발행되면 하루 3편까지 만들어요",
     }
+
+
+TODO_IID = "x-stats"
+TODO_EVERY_D = 7  # 주인 10/25 '알림 띄워 주라' — 마지막으로 넣은 지 이만큼 지나면 할 일
+
+
+def todo_item(rows: list[dict[str, Any]], handles: dict[str, str], now: float,
+              goto: Callable[..., dict[str, Any]]) -> dict[str, Any] | None:
+    """할 일 한 줄 'X 숫자 넣기' — X 를 쓰기 시작했으면(계정 아이디를 넣었거나 숫자를 한 번이라도 넣음) 한 번도 안 넣었거나
+    마지막으로 넣은 지 TODO_EVERY_D 일 지났을 때. 넣으면 저절로 빠짐."""
+    if not rows and not any((handles or {}).values()):
+        return None
+    last = rows[-1]["at"] if rows else None
+    if last is not None and now - last < TODO_EVERY_D * 86400:
+        return None
+    return {"iid": TODO_IID, "src": "blog", "blog": "", "kind": "x_stats", "sev": "todo", "urgent": False,
+            "title": "X 숫자 넣기 (일주일에 한 번)",
+            "status": "주급 계정 X 앱에서 전체 팔로워 · 인증된 팔로워 · 크리에이터 스튜디오 90일 노출 → X(트위터) 화면에 넣기",
+            "since": (last + TODO_EVERY_D * 86400) if last is not None else None, "expires_at": None,
+            "primary": goto("넣기", "#/blog/x"), "more": [], "detail": {"lines": []}}

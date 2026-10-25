@@ -703,6 +703,8 @@ class StateBuilder:
         # '오늘 들를 이웃 글'은 할 일에 넣지 않는다 (주인 10/23 — 알림 없이, 블로그 화면 '이웃' 칸에서만 본다)
         if (srow := self._search_item(self.search_view(v2))) is not None:
             out[srow["iid"]] = srow
+        if (xrow := xview.todo_item(x_stats_rows(self.bot.db), x_handles(self.bot.db), now, goto)) is not None:  # X 숫자 넣기 (주인 10/25 — 주 1회)
+            out[xrow["iid"]] = xrow
         from dealbot.dashboard import remote_login
 
         if (vrow := remote_login.item(self.bot.db, open_link)) is not None:  # 원격 로그인 화면이 열려 있음 (주인 10/23)

@@ -14,6 +14,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -95,11 +96,23 @@ async def test_stats_are_saved_and_shown_with_an_eta(bot: DealBot, settings: Set
     write_export(tmp_path / "blogauto.json")
     blogauto_status(settings)
     h = session_headers(bot)
-    x = (await state(bot))["x"]
+    st = await state(bot)
+    x = st["x"]
     assert x["progress"]["verified"] is None and x["progress"]["eta_verified"] == "" and x["progress"]["note"]
+    # 할 일 'X 숫자 넣기' (주인 10/25 '알림 띄워 주라') — X 를 안 쓰면 없음 · 계정 아이디를 넣고 숫자를 안 넣었으면 뜨고,
+    # 넣으면 빠지고, 7일 지나면 다시
+    assert "x-stats" not in {it["iid"] for it in st["todo"]}
+    status, _ = await act(bot, "x.handles", {"pick": "deren_pick", "revenue": ""}, h)
+    assert status == 200
+    todo = {it["iid"]: it for it in (await state(bot))["todo"]}
+    assert todo["x-stats"]["primary"]["goto"] == "#/blog/x" and "크리에이터 스튜디오" in todo["x-stats"]["status"]
     status, body = await act(bot, "x.stats", {"followers": 1000, "verified": 100, "impressions_90d": 100000}, h)
     assert status == 200 and body["status"] == "ok", body
+    assert "x-stats" not in {it["iid"] for it in (await state(bot))["todo"]}
     rows = x_stats_rows(bot.db)
+    stale = [{**rows[-1], "at": time.time() - 8 * 86400}]  # 화면은 지금 시각으로 봄 — 8일 전에 넣었으면 다시 할 일
+    bot.db.kv_set(X_STATS_KEY, json.dumps(stale))
+    assert "x-stats" in {it["iid"] for it in (await state(bot))["todo"]}
     rows[-1]["at"] -= 7 * 86400  # 일주일 전에 넣은 것으로
     bot.db.kv_set(X_STATS_KEY, json.dumps(rows))
     status, body = await act(bot, "x.stats", {"followers": 1100, "verified": 150, "impressions_90d": 150000}, h)
