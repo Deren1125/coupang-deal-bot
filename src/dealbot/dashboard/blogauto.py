@@ -974,6 +974,19 @@ def _devlog(v: Any) -> dict[str, Any] | None:
     return {"day": _one_line(v.get("day"), 10), "items": items, "n": max(_count(v.get("n"), top=9999) or 0, len(items))}
 
 
+OPS_RESULTS = ("ok", "fixed", "blocked", "owner")
+OPS_LINES_MAX = 30
+
+
+def _opscheck(v: Any) -> dict[str, Any] | None:
+    """'직전 AI 점검' (주인 10/25 — Blog-Auto opscheck.py): {at 'MM/DD HH:MM', result, summary, lines}. 모양이 틀리면 None (칸이 안 보임)."""
+    if not isinstance(v, dict) or v.get("result") not in OPS_RESULTS or not isinstance(v.get("at"), str) \
+            or not re.fullmatch(r"\d{2}/\d{2} \d{2}:\d{2}", v["at"]) or not (summary := _one_line(v.get("summary"), 80)):
+        return None
+    lines = [t for x in (v.get("lines") if isinstance(v.get("lines"), list) else [])[:OPS_LINES_MAX] if (t := _one_line(x, 160))]
+    return {"at": v["at"], "result": v["result"], "summary": summary, "lines": lines}
+
+
 # 쇼핑몰 크리에이터 통계 (주인 10/23 — Blog-Auto creator_stats.export): 쇼핑몰별 이번 달 방문·구매·예상 리워드와 합계
 CM_STATES = ("ok", "login", "failed", "pending", "none")
 CM_CONN = ("ok", "expired", "failed", "unknown")
@@ -1128,6 +1141,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                            "learn": _learn(data.get("learn")), "photo_trial": _photo_trial(data.get("photo_trial")),
                            "product_trial": _product_trial(data.get("product_trial")),
                            "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog")),
+                           "opscheck": _opscheck(data.get("opscheck")),
                            "creator_mall": _creator_mall(data.get("creator_mall")),
                            "earnings": _earnings(data.get("earnings"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}

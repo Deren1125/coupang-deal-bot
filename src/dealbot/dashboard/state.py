@@ -46,6 +46,7 @@ VISITS_IID = "visits"  # 할 일 '오늘 들를 이웃 글' 한 줄
 SEARCH_IID = "search"  # 할 일 '구글 검색 등록 N개' 한 줄 (주인 10/18 22:20)
 SEV_ORDER = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
 UNSURE_DAYS = 7
+OPS_MARK = {"ok": "✅", "fixed": "🔧", "blocked": "⛔", "owner": "🙋"}  # 직전 AI 점검: 새 오류 없음 · 고침 · 막힘 · 주인 할 일
 LINKS_MAX = 3  # 사진 부탁 줄의 '사진 받을 곳' (카드 버튼은 첫 링크, 시트에 모두)
 NAME_MAX = 40
 # 알림 종류 → 글의 할 일 (기록 파일 posts[] 가 아직 없을 때)
@@ -1176,6 +1177,7 @@ class StateBuilder:
             "thpost": self.thpost(export),  # 스레드 글·통계 (10/21 — thpost.py · Blog-Auto threads 칸이 없으면 None)
             "earnings": self.earnings(export),  # 통계 탭 '제휴 수익' (10/23 — earn.py · 그리기는 처음 열 때만 받는 earn.js)
             "devlog": self.devlog(export),  # 할 일 페이지 맨 아래 '오늘 바뀐 것' (10/23 — 화면이 title·rows 를 그대로 그림)
+            "opscheck": self.opscheck(export),  # 그 아래 '직전 AI 점검' (10/25 — 같은 모양 title·rows)
         }
         return body
 
@@ -1188,6 +1190,17 @@ class StateBuilder:
             return None
         rows = [{"at": x["at"], "repo": x["repo"], "text": x["text"] + (f" ({x['count']}번)" if x["count"] > 1 else "")} for x in d["items"]]
         return {"title": f"오늘 바뀐 것 · {d['n']}개", "rows": rows}
+
+    @staticmethod
+    def opscheck(export: Any) -> dict[str, Any] | None:
+        """할 일 페이지 맨 아래 접힌 '직전 AI 점검' 칸 (주인 10/25 — 매시간 오류 점검 AI 의 바로 전 차례 기록만, Blog-Auto opscheck 칸).
+        화면(app.js)은 이 말을 그대로 그린다: {title, rows: [{text, bad?}]} — 첫 줄은 결과 한 줄. 칸이 없으면 None (칸이 안 보임)."""
+        d = (getattr(export, "v2", None) or {}).get("opscheck")
+        if not d:
+            return None
+        mark = OPS_MARK[d["result"]]
+        rows = [{"text": f"{mark} {d['summary']}", "bad": d["result"] in ("blocked", "owner")}] + [{"text": t} for t in d["lines"]]
+        return {"title": f"직전 AI 점검 · {d['at']} · {d['summary']}", "rows": rows}
 
     def earnings(self, export: Any) -> dict[str, Any] | None:
         """통계 탭 '제휴 수익' 칸: 쿠팡(자동 · DB) + 쇼핑커넥트(Blog-Auto 기록 파일) + 직접 넣은 것. DB 를 못 읽으면 None (칸이 안 보임)."""

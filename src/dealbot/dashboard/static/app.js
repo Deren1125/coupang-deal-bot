@@ -932,7 +932,7 @@ function vTodo() {
   if (items.length > n) out.push(btn('pb ghost', `더 보기 (${items.length - n})`, () => { ALL = true; render(); }));
   if (items.length) out.push(doneRow());
   if (S.digest && S.digest.latest) out.push(el('p', {class: 'foot'}, btn('lnk', '오늘 정리 보기', () => digestSheet(S.digest.latest))));
-  out.push(devRow(S.devlog));
+  out.push(devRow(S.devlog), devRow(S.opscheck, '직전 AI 점검'));
   return out;
 }
 
@@ -1210,8 +1210,8 @@ function listSheet(title, rows) { sheet(title, el('div', {}, rows.length ? rows 
 const RC = {ok: 'ok', run: 'info', bad: 'stop'};
 const foldBox = (t, f) => el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, fold(t, f));
 const doneRow = () => foldBox(`오늘 한 일 ${(S.counts || {}).done_today || 0}개`, todaySheet);
-// 오늘 바뀐 것: 서버가 만든 rows 그대로
-const devRow = d => d && foldBox(d.title, () => listSheet('오늘 바뀐 것', d.rows.map(r => row(r.text, r.at, el('span', {class: 'cp info'}, r.repo)))));
+// 오늘 바뀐 것·AI 점검: 서버 rows 그대로
+const devRow = (d, h = '오늘 바뀐 것') => d && foldBox(d.title, () => listSheet(h, d.rows.map(r => row(r.text, r.at, r.repo && el('span', {class: 'cp info'}, r.repo), r.bad))));
 function todaySheet() {
   const box = sheet('오늘 한 일', el('p', {class: 'empty'}, '불러오는 중…')), h = box.parentNode.querySelector('h2');
   const fill = async b => {

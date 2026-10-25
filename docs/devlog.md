@@ -22,3 +22,10 @@
 
 - `dashboard/blogauto.py` `_devlog` 가 기록 파일 칸을 걸러 읽고(시각 HH:MM · 프로그램 블로그|딜봇만), `state.py` `devlog()` 가 `{title: "오늘 바뀐 것 · N개", rows: [{at, repo, text}]}` 로 만든다 (비면 None).
 - 화면은 app.js `devRow` — 할 일 페이지 맨 아래, 기존 '오늘 한 일' 과 같은 접는 줄(`foldBox`) + 목록 시트. 새 화면 파일 없음.
+
+## 직전 AI 점검 칸 (주인 10/25)
+
+- 같은 할 일 페이지 맨 아래, '오늘 바뀐 것' 밑에 접힌 '직전 AI 점검 · 시각 · 결과' 칸. 눌러 열면 첫 줄 결과(✅ 새 오류 없음 · 🔧 고침 · ⛔ 막힘 · 🙋 주인 할 일)와 본 것 한 줄씩.
+- 매시간 오류 점검 AI 가 Blog-Auto 의 `ops-check` 가지에 `last.json` 하나만 덮어 올린다 (직전 차례만 남음 — `docs/ai_ops_playbook.md` 3장 8번).
+- Blog-Auto `blogauto/opscheck.py` 가 10분마다 그 가지를 받아 기록 파일 `opscheck` 칸에 넣고, 딜봇 `dashboard/state.py` 가 `state["opscheck"]` 로 만든다.
+- 모양: `opscheck = {at "MM/DD HH:MM", result ok|fixed|blocked|owner, summary, lines: [한 줄]}`. 가지가 없거나 git 이 안 되면 칸이 안 보인다.
