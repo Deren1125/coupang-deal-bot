@@ -6,5 +6,5 @@
 - 배포: `main` 에 push → 서버가 자동 업데이트.
 - 테스트: `PYTHONPATH=src .venv/bin/python -m pytest -q -p no:cacheprovider`.
   원래부터 실패하는 3개(test_deploy_lightsail selftest 템플릿, test_toss_more 두 개) 외 실패가 있으면 push 하지 않는다.
-- `threads/`, `threads.js`, `threads_proxy.py`, `affiliate.py`, `shop_search.py` 는 건드리지 않는다.
+- `threads.js`, `threads_proxy.py`, `affiliate.py`, `shop_search.py` 는 건드리지 않는다. Blog-Auto `threads/` 는 문구만 (playbook 4장).
 - 비밀(.env·토큰·쿠키)은 출력·커밋 금지. 고친 일은 `docs/devlog.md` 와 playbook '사건 기록'에 한 줄.
