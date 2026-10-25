@@ -65,7 +65,7 @@ async function api(path, opt = {}, again) {
   return {status: r.status, data};
 }
 
-// 자동 새로고침(quiet)은 'N분 전'처럼 시간만 바뀐 것으로는 다시 그리지 않는다 (주인 10/23 — 20초마다 화면이 깜빡임)
+// 자동 새로고침(quiet)은 'N분 전'처럼 시간만 바뀐 것으론 다시 그리지 않음 (주인 10/23 — 깜빡임)
 const APPV = ((D.querySelector('script[src*="app.js"]') || {}).src || '').split('v=')[1];
 const sig = d => JSON.stringify(d, (k, v) => k === 'at' || k === 'etag' || k === 'since' ? 0 : typeof v === 'string' ? v.replace(/\d+\s*(초|분|시간)\s*(전|남음|째)?/g, '') : v);
 function load(quiet) {
@@ -84,7 +84,7 @@ function load(quiet) {
     if (r.status === 304) { OLD = false; head(); after(); return; }
     const d = await r.json().catch(() => null);
     if (!d) return;
-    // 자동 새로고침: 휴대폰이 느려 저장본(x-sw-cache)이 오면 버림 (저장본↔새것이 번갈아 깜빡이던 것) · 앱이 새로 올라왔으면 한 번 새로 열기 (새로고침 단추도 — 10/24)
+    // 자동 새로고침: 저장본(x-sw-cache)은 버림 (깜빡임) · 앱이 새로 올라왔으면 한 번 새로 열기 (새로고침 단추도 — 10/24)
     const c = r.headers.get('x-sw-cache') === '1';
     if (quiet && c) return;
     if (!c && d.app && APPV && d.app !== APPV && !D.querySelector('.bd') && LS.g('rl') !== d.app) { LS.s('rl', d.app); location.reload(); return; }
@@ -148,7 +148,7 @@ function route() {
   if (p[0] === 'share') { SHR = p[1]; location.hash = '#/blog/hotdeal'; return; }
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched|threads)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched|threads|x)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -866,7 +866,7 @@ const scLoad = lazy('meta[name=sb-sched]', 'sched', 'SBSched');
 let SC;
 const vSC = () => SC ? SC.view(S.sched, {el, btn, render, act, open: openItem, pend: pendingOf})
   : (scLoad().then(m => { SC = m; render(); }, () => toast(MSG.net)), [el('p', {class: 'boot'}, '불러오는 중…')]);
-const thLoad = lazy('meta[name=sb-threads]', 'threads', 'SBThreads');
+const thLoad = lazy('meta[name=sb-threads]', 'threads', 'SBThreads'), xLoad = lazy('meta[name=sb-xpost]', 'xpost', 'SBXP');
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {
   let E;
@@ -991,7 +991,8 @@ function vBlog() {
   if (key === 'trial') return out.concat(vTrial());
   if (key === 'ptrial') return out.concat(vPT());
   if (key === 'sched') return out.concat(vSC());
-  if (key === 'threads') { const b = el('div', {}); thLoad().then(T => T.view(b, {el, btn, api, toast, S, exec, uploadAll}), () => toast(MSG.net)); return out.concat(b); }
+  const L = {threads: thLoad, x: xLoad}[key];
+  if (L) { const b = el('div', {}); L().then(T => T.view(b, {el, btn, api, toast, S, exec, uploadAll}), () => toast(MSG.net)); return out.concat(b); }
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -1001,7 +1002,7 @@ function vBlog() {
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   if (S.sched && S.sched.total) out.push(el('a', {class: 'bn', href: '#/blog/sched'}, `예약 일정 보기 · ${S.sched.total}편 →`));
   if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
-  out.push(el('a', {class: 'bn', href: '#/blog/threads'}, '스레드·인스타 →'));
+  out.push(el('a', {class: 'bn', href: '#/blog/threads'}, '스레드·인스타 →'), el('a', {class: 'bn', href: '#/blog/x'}, 'X(트위터) →'));
   if (S.photo_trial && key === 'issue') out.push(el('a', {class: 'bn', href: '#/blog/trial'}, '사진 테스트 →'));
   if (key === 'issue' && S.ptrial) out.push(el('a', {class: 'bn', href: '#/blog/ptrial'}, `제품 테스트 ${S.ptrial.posts.length}편 →`));
   const sr = S.search;
@@ -1301,7 +1302,7 @@ function start() {
     if (D.querySelector('[data-pm]')) toast('토스 링크를 복사했다면 "붙여넣기"를 눌러 주세요');
     if (Date.now() - PICK > 120000) load();
   });
-  // 화면이 보이는 동안 20초마다 바뀐 것만 받아 다시 그림 (주인 10/23 — 새로고침 없이). 시트가 열렸거나 글을 쓰는 중이면 건너뜀
+  // 화면이 보이는 동안 20초마다 바뀐 것만 다시 그림 (주인 10/23). 시트가 열렸거나 글을 쓰는 중이면 건너뜀
   setInterval(() => { const a = D.activeElement; if (D.visibilityState === 'visible' && !D.querySelector('.bd') && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) load(1); }, 20000);
   ptr();
   route();

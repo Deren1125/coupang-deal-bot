@@ -27,6 +27,7 @@ SCHED_JS = "sched.js"  # 일정 (10/21) — 블로그 탭 '예약 일정 보기'
 EARN_JS = "earn.js"  # 제휴 수익 칸 (10/23) — 통계 탭을 처음 열 때만 (주소는 meta sb-earn)
 THPOST_JS = "thpost.js"  # 스레드 글·예약·댓글·통계 칸 (10/21) — threads.js 의 세 칸에 붙는 그리기. 어느 쪽이 먼저 떠도 붙도록 defer 로 먼저 받는다
 THEME_JS = "theme.js"  # 화면 밝기 단추 (10/24) — 머리에서 먼저 돌아 첫 화면부터 고른 색 (자동·밝게·어둡게)
+XPOST_JS = "xpost.js"  # X(트위터) 초안함·진행률 (10/25) — 블로그 탭 'X(트위터) →'를 처음 열 때만 (주소는 meta sb-xpost)
 THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드·인스타 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
 
 
@@ -64,6 +65,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<meta name="sb-sched" content="{asset_url(SCHED_JS)}">'
         f'<meta name="sb-earn" content="{asset_url(EARN_JS)}">'
         f'<meta name="sb-threads" content="{asset_url(THREADS_JS)}">'
+        f'<meta name="sb-xpost" content="{asset_url(XPOST_JS)}">'
         '</head><body>'
         '<header class="hd"><h1 id="ttl">할 일</h1><span class="old" id="old" hidden></span>'
         '<button type="button" class="rf" id="rf">새로고침</button></header>'

@@ -56,7 +56,10 @@
   "post_edit",
   "threads_post",
   "threads_cancel",
-  "threads_reply"
+  "threads_reply",
+  "x_posted",
+  "x_drop",
+  "x_redo"
  ],
  "kakao": {
   "state": "ok",

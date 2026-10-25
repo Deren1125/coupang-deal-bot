@@ -105,11 +105,13 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "photo_feedback",  # 사진 테스트 (주인 10/21 — 시험 글 사진마다 ✅/❌·이유 · 글 전체 · 테스트 끝)
                 "product_feedback",  # 제품 테스트 (주인 10/21 — Pick 비슷한 아이템 후보 ✅/❌·이유 · 글마다 한 줄·테스트 끝)
                 "threads_post", "threads_cancel", "threads_reply",  # 스레드 (주인 10/21 — 주인이 쓴 글 바로·예약 · 예약 취소 · 내 글 답글에 답)
-                "post_edit")  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
+                "post_edit",  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
+                "x_posted", "x_drop", "x_redo")  # X 초안 (주인 10/25 — 올렸어요 · 버리기 · 다시 쓰기 · X API 없음, 올리기는 주인이 X 앱에서)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "todo.hide", "login.remote", "stats.refresh", "stats.input", "search.check",
-                "earn.save", "earn.delete")  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
+                "earn.save", "earn.delete",  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
+                "x.stats", "x.handles")  # X 진행률 숫자·계정 이름 직접 넣기 (주인 10/25 — X API 없음, 크리에이터 스튜디오 숫자를 주인이 주마다)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
 DISMISS_POST_HEADS = ("dup", "cards", "openchat")
 REAL_WORK_HEADS = ("link", "review", "unsure", "photo", "ask", "draft", "oedit", "fail", "chan", "share", "hot", "sched")
@@ -120,6 +122,11 @@ REPLIES_KEY = "threads_replies:"
 # 같은 줄이 새로 열리면(시각 since 가 더 늦음) 다시 보인다. 기록은 봇 DB kv 에 (since 가 없는 줄은 사흘, 나머지는 2주 뒤 잊음)
 HIDDEN_KEY = "dash:hidden"
 HIDDEN_DAYS, HIDDEN_NOSINCE_DAYS, HIDDEN_MAX = 14, 3, 300
+# X 진행률 (주인 10/25 — 유료 API 없이 주인이 주마다 직접 넣는 숫자): 봇 DB kv 에 [{at, followers, verified, impressions_90d}] 최근 60번
+X_STATS_KEY, X_STATS_KEEP = "dash_x_stats", 60
+X_STATS_MAX = {"followers": 10**9, "verified": 10**9, "impressions_90d": 10**12}
+X_HANDLES_KEY = "dash_x_handles"  # {pick: 데런픽 계정, revenue: 수익 계정} — 아직 안 정했으면 빈 값
+X_HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 
 
 def hidden_rows(db: Any, now: float) -> dict[str, dict[str, Any]]:
@@ -138,6 +145,26 @@ def hidden_rows(db: Any, now: float) -> dict[str, dict[str, Any]]:
         if now - float(h["at"]) < days * 86400:
             out[str(iid)] = h
     return out
+
+
+def x_stats_rows(db: Any) -> list[dict[str, Any]]:
+    """X 진행률 기록 [{at, followers, verified, impressions_90d}] (오래된 것부터). 모양이 틀린 줄은 뺀다."""
+    try:
+        raw = json.loads(db.kv_get(X_STATS_KEY) or "[]")
+    except (ValueError, TypeError):
+        return []
+    return [r for r in raw if isinstance(r, dict) and isinstance(r.get("at"), int | float)
+            and all(isinstance(r.get(k), int) and not isinstance(r.get(k), bool) and 0 <= r[k] <= hi for k, hi in X_STATS_MAX.items())] \
+        if isinstance(raw, list) else []
+
+
+def x_handles(db: Any) -> dict[str, str]:
+    try:
+        raw = json.loads(db.kv_get(X_HANDLES_KEY) or "{}")
+    except (ValueError, TypeError):
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    return {k: h if isinstance(h := raw.get(k), str) and X_HANDLE_RE.match(h) else "" for k in ("pick", "revenue")}
 
 
 def is_hidden(item: dict[str, Any], hidden: dict[str, dict[str, Any]]) -> bool:
@@ -550,6 +577,19 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         return out
     if action == "earn.delete":
         return {"id": _int(g("id"))}
+    if action == "x.stats":  # 0 이상 정수 셋 (인증 팔로워가 전체 팔로워보다 많으면 잘못 넣은 것)
+        out = {k: _int(g(k), 0, hi) for k, hi in X_STATS_MAX.items()}
+        if out["verified"] > out["followers"]:
+            raise ActionError("bad_args", text="인증 팔로워가 전체 팔로워보다 많아요 — 숫자를 확인해 주세요")
+        return out
+    if action == "x.handles":  # 계정 이름 둘 (@ 없이 영문·숫자·_ 15자, 빈 값 = 아직 안 정함)
+        out = {}
+        for k in ("pick", "revenue"):
+            h = _str(g(k), 16, required=False).lstrip("@")
+            if h and not X_HANDLE_RE.match(h):
+                raise ActionError("bad_args", text="계정 이름은 @ 뒤 영문·숫자·_ 15자까지예요")
+            out[k] = h
+        return out
     if action == "stats.input":
         values = g("values")
         if not isinstance(values, dict) or len(values) > 10 or not all(isinstance(k, str) and isinstance(v, str | int) for k, v in values.items()):
@@ -821,6 +861,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         if not isinstance(mid, str) or not TH_MEDIA_ID.match(mid):
             raise ActionError("bad_args")
         return {"media_id": mid, "text": _str(g("text"), TH_TEXT_MAX)}
+    if name in ("x_posted", "x_drop", "x_redo"):  # X 초안 (주인 10/25) — {pid} 하나 (블로그는 데런픽뿐이라 안 받음)
+        return {"pid": _int(g("pid"))}
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
@@ -877,6 +919,10 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return "thpost-p" + hashlib.sha256(key.encode()).hexdigest()[:8]
     if action == "search.check":
         return "search"
+    if action in ("blog.x_posted", "blog.x_drop", "blog.x_redo"):  # X 초안마다 따로 (글 줄과 겹치지 않게)
+        return f"xdraft-{args.get('pid')}"
+    if action in ("x.stats", "x.handles"):
+        return "x"
     if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all",
                   "blog.topic_seed") and blog in BLOGS:
         return f"blog-{blog}"
@@ -1428,6 +1474,8 @@ class ActionDesk:
             return "done", f"{what}등록함으로 표시했어요" if args["done"] else f"{what}등록 안 함으로 되돌렸어요"
         if action in ("earn.save", "earn.delete"):
             return self._earn(action, args)
+        if action in ("x.stats", "x.handles"):
+            return self._x(action, args)
         if action == "stats.input":
             dash = bot.dashboard
             query = dict(args["values"])
@@ -1457,6 +1505,17 @@ class ActionDesk:
         except EarnError as e:
             return "bad_args", str(e)
         return "done", "넣었어요"
+
+    def _x(self, action: str, args: dict[str, Any]) -> tuple[str, str]:
+        """X 진행률 숫자 저장 (최근 X_STATS_KEEP 번) · 계정 이름 저장 — 봇 DB 만 (밖으로 나가는 것 없음)."""
+        db = self.bot.db
+        if action == "x.handles":
+            db.kv_set(X_HANDLES_KEY, json.dumps(args, ensure_ascii=False))
+            return "done", "계정 이름을 저장했어요"
+        rows = x_stats_rows(db)
+        rows.append({"at": round(self.clock(), 1), **args})
+        db.kv_set(X_STATS_KEY, json.dumps(rows[-X_STATS_KEEP:], ensure_ascii=False))
+        return "done", "X 숫자를 저장했어요"
 
     def _hide(self, args: dict[str, Any]) -> tuple[str, str]:
         """알림 없애기: 할 일 화면에서만 뺀다 (딜·글·알림 자체는 건드리지 않음 — 같은 줄이 새로 열리면 다시 보임)."""

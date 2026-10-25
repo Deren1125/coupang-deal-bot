@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import earn, rank, schedview, thpost
+from dealbot.dashboard import earn, rank, schedview, thpost, xview
 from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
@@ -30,6 +30,8 @@ from dealbot.dashboard.actions import (
     is_hidden,
     needs_confirm,
     publish_blog,
+    x_handles,
+    x_stats_rows,
 )
 from dealbot.dashboard.remote_login import TARGETS as REMOTE_TARGETS
 from dealbot.dashboard.searchreg import SearchReg
@@ -1185,6 +1187,7 @@ class StateBuilder:
             "earnings": self.earnings(export),  # 통계 탭 '제휴 수익' (10/23 — earn.py · 그리기는 처음 열 때만 받는 earn.js)
             "devlog": self.devlog(export),  # 할 일 페이지 맨 아래 '오늘 바뀐 것' (10/23 — 화면이 title·rows 를 그대로 그림)
             "opscheck": self.opscheck(export),  # 그 아래 '직전 AI 점검' (10/25 — 같은 모양 title·rows)
+            "x": self.xview(export),  # 블로그 탭 'X(트위터) →' (10/25 — xview.py · 그리기는 처음 열 때만 받는 xpost.js)
         }
         return body
 
@@ -1230,6 +1233,18 @@ class StateBuilder:
         ok = sup is None or {"threads_post", "threads_cancel", "threads_reply"} <= sup
         return thpost.build((getattr(export, "v2", None) or {}).get("threads"), ZoneInfo(self.tz), time.time(), act, bridge_ok=ok)
 
+    def xview(self, export: Any) -> dict[str, Any] | None:
+        """X(트위터) 화면 (주인 10/25): 진행률(주인이 넣는 숫자) · 데런픽 초안함(Blog-Auto x 칸) · 수익 계정 글감 카드. X API 없음."""
+        sup = self._supported(self._ba_status())
+        ok = sup is None or {"x_posted", "x_drop", "x_redo"} <= sup
+        try:
+            db = self.bot.db
+            return xview.build((getattr(export, "v2", None) or {}).get("x"), x_stats_rows(db), x_handles(db), ZoneInfo(self.tz),
+                               time.time(), act, bridge_ok=ok)
+        except Exception as e:  # noqa: BLE001 — X 칸 하나가 상태 전체를 막지 않게
+            log.warning("x state failed: %s", type(e).__name__)
+            return None
+
     @staticmethod
     def _status(row: dict[str, Any]) -> dict[str, Any]:
         from dealbot.bridge.actions_out import status_of
@@ -1263,6 +1278,8 @@ ACTION_LABELS = {
     "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.server_check": "서버 점검", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
     "blog.kakao_connect": "카톡 연결", "blog.kakao_test": "테스트 카톡", "blog.dismiss": "다 했어요",
     "blog.pics_fetch": "사진 찾기", "blog.pics_clear": "사진 후보 지우기", "search.check": "검색 등록 표시",
+    "blog.x_posted": "X 올렸어요", "blog.x_drop": "X 초안 버리기", "blog.x_redo": "X 초안 다시 쓰기", "x.stats": "X 숫자 저장",
+    "x.handles": "X 계정 이름 저장",
     "connect": "다시 연결 시작",
 }
 RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "linked_twin": "완료", "approved": "완료", "skipped": "완료",

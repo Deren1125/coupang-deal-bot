@@ -1133,6 +1133,36 @@ def _shopconnect(v: Any) -> dict[str, Any] | None:
             "last_at": _secs(v.get("last_at")), "last_ok_at": _secs(v.get("last_ok_at"))}
 
 
+# X(트위터) 초안함 (주인 10/25 — Blog-Auto x_drafts.export: X API 없음 · 주인이 'X에 올리기'로 손으로 올림)
+X_STATUSES = ("draft", "posted", "dropped")
+X_TEXT_MAX = 1000  # Blog-Auto 는 X 셈 280 안으로 보냄 — 한 번 더 (긴 글 구독이어도 화면 칸은 이만큼)
+X_DRAFTS_MAX, X_IDEAS_MAX, X_FACTS_MAX = 20, 5, 6
+
+
+def _x(v: Any) -> dict[str, Any] | None:
+    """{per_day, limit, url_len, drafts: [{pid, title, url, text, status, created_at, posted_at, shop}], ideas: [{id, title, facts, prompt}]}.
+    칸이 없으면(예전 Blog-Auto) None → 초안 없음. 줄마다 따로 걸러 이상한 줄만 빠진다 (글 주소는 네이버 블로그만)."""
+    if not isinstance(v, dict) or not isinstance(v.get("drafts"), list):
+        return None
+    drafts = []
+    for x in v["drafts"][:X_DRAFTS_MAX]:
+        if not isinstance(x, dict) or x.get("status") not in X_STATUSES or not (pid := _count(x.get("pid"), top=10**9)):
+            continue
+        text = _th_text(x.get("text"), X_TEXT_MAX)
+        if not text:
+            continue
+        drafts.append({"pid": pid, "title": _one_line(x.get("title"), 80) or "", "url": _naver_url(x.get("url")) or "",
+                       "text": text, "status": x["status"], "created_at": _one_line(x.get("created_at"), 40),
+                       "posted_at": _one_line(x.get("posted_at"), 40), "shop": x.get("shop") is True})
+    ideas = []
+    for c in (v.get("ideas") if isinstance(v.get("ideas"), list) else [])[:X_IDEAS_MAX]:
+        if isinstance(c, dict) and (title := _one_line(c.get("title"), 60)):
+            ideas.append({"id": _one_line(c.get("id"), 20) or "", "title": title, "prompt": _one_line(c.get("prompt"), 200) or "",
+                          "facts": _str_list(c.get("facts"), X_FACTS_MAX, 120)})
+    return {"per_day": _count(v.get("per_day"), top=50) or 0, "limit": _count(v.get("limit"), top=25_000) or 280,
+            "url_len": _count(v.get("url_len"), top=100) or 23, "drafts": drafts, "ideas": ideas}
+
+
 def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -1143,7 +1173,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                            "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog")),
                            "opscheck": _opscheck(data.get("opscheck")),
                            "creator_mall": _creator_mall(data.get("creator_mall")),
-                           "earnings": _earnings(data.get("earnings"))}
+                           "earnings": _earnings(data.get("earnings")), "x": _x(data.get("x"))}
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

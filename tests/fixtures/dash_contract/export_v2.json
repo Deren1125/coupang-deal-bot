@@ -1232,5 +1232,6 @@
     }
    ]
   }
- }
+ },
+ "x": {"per_day": 3, "limit": 280, "url_len": 23, "drafts": [{"pid": 131, "title": "변우석 새 드라마 첫 촬영 현장 공개", "url": "https://blog.naver.com/derenpick/224000000131", "text": "변우석 첫 촬영 사진 3장, 분위기 완전 다름\n현장 사진은 소속사가 오늘 공개함\n로맨스 전작보다 훨씬 차분한 톤이라 기대됨\nhttps://blog.naver.com/derenpick/224000000131", "status": "draft", "created_at": "2026-10-18T09:05:00", "posted_at": null, "shop": false}, {"pid": 128, "title": "장원영 공항패션 니트 브랜드 정보", "url": "https://blog.naver.com/derenpick/224000000128", "text": "장원영 공항 니트, 브랜드 찾았음\n크림색 케이블 니트에 와이드 데님 조합\n가을 공항룩은 이 조합이 정답인 듯\n링크를 통해 수익의 일부를 지급받을 수 있어요\nhttps://blog.naver.com/derenpick/224000000128", "status": "posted", "created_at": "2026-10-17T21:10:00", "posted_at": "2026-10-17T22:02:11", "shop": true}], "ideas": [{"id": "week", "title": "블로그 세 개 자동화 — 이번 주 기록", "facts": ["아카이브 9편 · 데런픽 14편 · 핫딜 12편 (최근 일주일 발행)"], "prompt": "글이 몇 편 나왔는지(위 숫자 그대로)와, 자동화해도 여전히 손이 가는 일 하나(사진 검수·로그인 같은)를 내 말로."}, {"id": "visits", "title": "방문자 숫자 솔직 공개", "facts": [], "prompt": "방문자를 늘리려고 해 본 것 하나와 결과를 내 말로 (숫자는 통계 화면에서 확인한 것만)."}, {"id": "deals", "title": "핫딜 고르는 기준 리스트", "facts": ["핫딜 글 12편에 딜 31개 소개 (최근 일주일)"], "prompt": "딜을 고를 때 보는 기준을 짧은 리스트로 (가격 확인·후기·배송처럼 내가 실제로 보는 것만)."}]}
 }
