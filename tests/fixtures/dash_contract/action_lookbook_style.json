@@ -1,0 +1,18 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9l02",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "lookbook_style",
+ "blog": null,
+ "args": {
+  "style": "mirror"
+ },
+ "target": "lookbook-style",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_lb00002"
+ }
+}

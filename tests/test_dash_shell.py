@@ -97,6 +97,10 @@ XPOST_JS_GZIP_MAX = 6 * 1024
 # 처음 열 때만 받는 lookbook.js (CSS 도 여기서). app.js 에는 불러오기·길 하나·입구 단추뿐 (주석 셋을 줄여 예산 안)
 LOOKBOOK_JS_MAX = 12 * 1024
 LOOKBOOK_JS_GZIP_MAX = 5 * 1024
+# 10/26: + 사진 시험(룩마다 상품 사진 | 거울 셀카 | 예전 양식 · 점수 · 시험 새로 만들기 · 이 양식으로 정하기) — 사진 목록은
+# /dashboard/api/lbtrial 로 열 때만 받아 파일엔 그리는 코드만 (12 → 16 KB / gzip 5 → 6.25 KB)
+LOOKBOOK_JS_MAX = 16 * 1024
+LOOKBOOK_JS_GZIP_MAX = 6 * 1024 + 256
 
 
 @pytest.fixture

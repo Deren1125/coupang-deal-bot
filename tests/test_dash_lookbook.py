@@ -8,6 +8,9 @@
 4) 영상·표지 /dashboard/lookbook/<id>/video.mp4 · cover.jpg: 로그인 아래 · blog_view 사본 먼저, 없으면 Blog-Auto var/lookbook/<id>/ ·
    바로가기·밖으로 나가는 이름 안 됨 · Range → 206 (아이폰 사파리 <video>).
 5) lookbook.js: 처음 열 때만 (meta sb-lookbook) · 바깥 주소 없음 · 한국어 단추 · 블로그 탭 '룩북 릴스 →'.
+6) 사진 시험 (주인 10/26): 시험 줄은 릴스 목록·할 일에 안 들어가고 첫 상태 값엔 수(trial_n)·지금 양식만 ·
+   사진은 GET /dashboard/api/lbtrial (바탕 릴스마다 묶음) · 다리 일 blog.lookbook_trial {base?} · blog.lookbook_style {style}
+   (계약 action_lookbook_trial.json · action_lookbook_style.json).
 """
 
 from __future__ import annotations
@@ -134,13 +137,15 @@ def test_export_parsing_reads_the_contract_fixture() -> None:
     assert list(fx)[-2:] == ["post_counts", "lookbook"]  # Blog-Auto 가 post_counts 뒤에 붙임
     got = _lookbook(fx["lookbook"])
     assert got["enabled"] is True and got["per_day"] == 1 and got["server"] == "ok" and got["instagram"] == "derenpick.look"
-    a, b = got["items"]
+    assert got["style"] == "mirror" and [x["trial"] for x in got["items"]] == [True, True, False, False]  # 사진 시험 둘이 먼저 (새 것부터)
+    a, b = [x for x in got["items"] if not x["trial"]]
     assert (a["id"], a["status"], b["id"], b["status"]) == (JID, "ready", "lb-20261025-0648", "posted")
+    assert (a["trial_of"], a["style"], b["style"]) == (None, "mirror", "studio")
     assert a["video"] == f"lookbook/{JID}/video.mp4" and a["view_video"] == f"{JID}.mp4" and a["view_cover"] == f"{JID}-c.jpg"
     assert a["has_video"] and a["has_cover"] and a["caption"].startswith("#광고") and "AI 가상인물" in a["caption"].split("\n")[0]
     assert [lk["n"] for lk in a["looks"]] == [1, 2, 3, 4, 5] and a["looks"][0] == {
         "n": 1, "name": "브라운 타이 블라우스", "link": "https://s.zigzag.kr/AbC12dE", "price": 39800, "mall": "zigzag", "score": 9,
-        "dropped": False, "thumb": f"{JID}-1.jpg"}
+        "dropped": False, "thumb": f"{JID}-1.jpg", "product_thumb": None}
     assert b["posted_url"] == "https://www.instagram.com/reel/DAbCdEfGhIj/" and b["ably"] == "no_link"
     assert b["looks"][1]["dropped"] is True and b["looks"][1]["thumb"] is None
 
@@ -148,7 +153,7 @@ def test_export_parsing_reads_the_contract_fixture() -> None:
 def test_export_parsing_tolerates_missing_and_bad_rows() -> None:
     assert _lookbook(None) is None and _lookbook({}) is None and _lookbook({"items": "x"}) is None and _lookbook([]) is None
     fx = copy.deepcopy(fixture("export_v2.json")["lookbook"])
-    good = fx["items"][0]
+    good = next(x for x in fx["items"] if x["id"] == JID)  # 보통 릴스 줄 (사진 시험 줄은 아래 따로)
     evil = dict(copy.deepcopy(good), id="lb-20261024-0101", status="failed", reason="server: Traceback (most recent call last) …",
                 warn="weird", caption="첫 줄\x00\x07\n둘째 줄" + "가" * 3000, video="../../etc/passwd", cover="lookbook/lb-20261026-0712/cover.jpg",
                 view_video="lb-20261026-0712.mp4", view_cover="other-c.jpg", has_video=True, has_cover=True,
@@ -175,10 +180,10 @@ def test_export_parsing_tolerates_missing_and_bad_rows() -> None:
     assert sorted(lk) == [1, 2, 3, 4]
     assert lk[1]["link"] == "" and lk[1]["price"] == 0 and lk[1]["mall"] == "" and lk[1]["score"] is None and lk[1]["thumb"] is None
     assert lk[2] == {"n": 2, "name": "에이블리", "link": "https://applink.a-bly.com/abc", "price": 1000, "mall": "ably", "score": 7,
-                     "dropped": False, "thumb": "lb-20261024-0101-2.jpg"}
+                     "dropped": False, "thumb": "lb-20261024-0101-2.jpg", "product_thumb": None}
     assert lk[3]["link"] == "" and lk[4]["link"] == ""
-    assert _lookbook({"items": [], "instagram": "a b", "server": "weird", "per_day": "x"}) == {
-        "enabled": False, "per_day": 0, "server": "", "instagram": None, "items": []}
+    assert _lookbook({"items": [], "instagram": "a b", "server": "weird", "per_day": "x", "style": "weird"}) == {
+        "enabled": False, "per_day": 0, "server": "", "instagram": None, "style": None, "items": []}
 
 
 # ---------------------------------------------------------------- 화면 값 (state.lookbook)
@@ -221,7 +226,7 @@ async def test_state_has_cards_media_looks_checklist_and_actions(bot: DealBot, s
 def _job(status: str, **kw: object) -> dict:
     base = {"id": "lb-20261026-0712", "theme": "하객룩", "hook": "훅", "status": status, "reason": "", "warn": None, "caption": "#광고 캡션",
             "looks": [], "has_video": False, "has_cover": False, "video": None, "cover": None, "view_video": None, "view_cover": None,
-            "created_at": "2026-10-26T07:12:40", "posted_url": None, "ably": None}
+            "created_at": "2026-10-26T07:12:40", "posted_url": None, "ably": None, "trial": False, "trial_of": None, "style": "mirror"}
     return {**base, **kw}
 
 
@@ -256,11 +261,11 @@ async def test_todo_line_only_while_a_finished_reel_waits(bot: DealBot, settings
     assert row["title"] == "룩북 릴스 올리기" and row["primary"]["goto"] == "#/blog/lookbook" and "유행 음악" in row["status"]
     assert any(a["action"] == "todo.hide" for a in row["more"]) and row["since"]
     lb = fixture("export_v2.json")["lookbook"]
-    lb["items"][0]["status"] = "posted"
+    next(x for x in lb["items"] if x["id"] == JID)["status"] = "posted"
     write_export(export_path(tmp_path), lookbook=lb)
-    assert not any(it["iid"].startswith("lookbook-") for it in (await state(bot))["todo"])
+    assert not any(it["iid"].startswith("lookbook-") for it in (await state(bot))["todo"])  # 완성된 사진 시험은 할 일이 아님
     two = fixture("export_v2.json")["lookbook"]
-    two["items"][1]["status"] = "ready"
+    next(x for x in two["items"] if x["id"] == "lb-20261025-0648")["status"] = "ready"
     assert lbview.todo_item(_lookbook(two), TZ, state_goto)["title"] == "룩북 릴스 올리기 · 2편"
     assert lbview.todo_item(None, TZ, state_goto) is None
 
@@ -337,7 +342,11 @@ def test_lookbook_js_lazy_load_budget_and_safety() -> None:
     assert "http://" not in js and "https://" not in js and "eval(" not in js and "new Function" not in js and "innerHTML" not in js
     for word in ("영상 저장", "표지 저장", "캡션 복사", "링크 복사", "올렸어요", "버리기", "다시 만들기", "올리기 전 확인", "playsinline: true",
                  "controls: true", "rel: 'noopener noreferrer'", "navigator.share", "W.SBLB", "L.checklist", "it.posted_act", "{url: u}",
-                 "lk.link && !lk.dropped"):  # 링크 복사는 뺀 룩(상품과 다름)을 빼고
+                 "lk.link && !lk.dropped",  # 링크 복사는 뺀 룩(상품과 다름)을 빼고
+                 # 사진 시험 (10/26): 열 때만 받기 · 상품 사진 | 거울 셀카 | 예전 양식 · 점수 · 단추 둘 · 비용 안내
+                 "'/dashboard/api/lbtrial'", "if (!TOPEN", "'사진 시험'", "'상품 사진'", "거울 셀카", "예전 양식", "점수", "'시험 새로 만들기'",
+                 "'이 양식으로 정하기'", "'blog.lookbook_trial'", "'blog.lookbook_style'", "args: {style: st}", "사진값 약 1,000원 · 쇼핑몰 접속 없음",
+                 "지금 양식", "L.trial_ok"):
         assert word in js, word
     for label in re.findall(r"btn\('[^']*', '([^']*)'", js):
         assert re.search(r"[가-힣]", label), label
@@ -364,3 +373,127 @@ def test_lookbook_js_syntax_and_reel_check() -> None:
     out = subprocess.run([node, "-e", f"const R={rx};console.log(JSON.stringify(process.argv.slice(1).map(u=>R.test(u))))", *urls],
                          capture_output=True, text=True)
     assert json.loads(out.stdout) == [True, True, False, False, False]
+
+
+# ---------------------------------------------------------------- 사진 시험 (주인 10/26)
+TRIAL_M, TRIAL_S = "lb-20261026-0911", "lb-20261026-0910"
+
+
+def test_trial_actions_match_the_contract_fixtures() -> None:
+    for name, args, target in (("lookbook_trial", {}, "lookbook-trial"), ("lookbook_style", {"style": "mirror"}, "lookbook-style")):
+        want = fixture(f"action_{name}.json")
+        assert (want["action"], want["args"], want["target"], want["confirmed"], want["blog"]) == (name, args, target, False, None)
+        assert name in BLOG_ACTIONS and name in fixture("status_blogauto.json")["actions"]
+        out = clean_args(f"blog.{name}", {**want["args"], "blog": "issue", "extra": 1})
+        assert out == want["args"] and not needs_confirm(f"blog.{name}", out) and target_of(f"blog.{name}", out) == target
+    assert clean_args("blog.lookbook_trial", {"base": JID}) == {"base": JID} and clean_args("blog.lookbook_trial", {"base": ""}) == {}
+    assert clean_args("blog.lookbook_style", {"style": "studio"}) == {"style": "studio"}
+    for bad in ({"base": "lb-1"}, {"base": 3}, {"base": JID + "\n"}, {"base": "../" + JID}, {"base": [JID]}):
+        with pytest.raises(ActionError):
+            clean_args("blog.lookbook_trial", bad)
+    for bad in ({}, {"style": "weird"}, {"style": ["mirror"]}, {"style": "Mirror"}):
+        with pytest.raises(ActionError) as e:
+            clean_args("blog.lookbook_style", bad)
+        assert "양식" in e.value.text
+
+
+async def test_trial_and_style_reach_the_spool_like_the_contract(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    write_export(export_path(tmp_path))
+    blogauto_status(settings)
+    for name, args in (("lookbook_style", {"style": "mirror"}), ("lookbook_trial", {})):
+        want = fixture(f"action_{name}.json")
+        status, body = await act(bot, f"blog.{name}", args, session_headers(bot))
+        assert status == 202, body  # 확인 창 없음 (사진값 안내는 화면에)
+        f = spool.read(spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new" / f"{body['id']}.json")
+        assert set(f) == set(want)
+        assert {k: f[k] for k in ("v", "action", "blog", "target", "confirmed", "args")} == \
+            {k: want[k] for k in ("v", "action", "blog", "target", "confirmed", "args")}
+    blogauto_status(settings, actions=old_actions())  # 예전 Blog-Auto (사진 시험을 모름) → 맡기지 않음
+    status, body = await act(bot, "blog.lookbook_style", {"style": "studio"})
+    assert status == 503 and body["code"] == "unsupported"
+
+
+def test_trial_rows_are_parsed_strictly() -> None:
+    fx = copy.deepcopy(fixture("export_v2.json")["lookbook"])
+    got = _lookbook(fx)
+    m, s = got["items"][:2]
+    assert (m["id"], m["trial"], m["trial_of"], m["style"], m["status"]) == (TRIAL_M, True, JID, "mirror", "ready")
+    assert (s["id"], s["trial_of"], s["style"]) == (TRIAL_S, JID, "studio") and m["caption"] == "" and m["has_video"] is False
+    assert m["looks"][0] == {"n": 1, "name": "브라운 타이 블라우스", "link": "https://s.zigzag.kr/AbC12dE", "price": 39800, "mall": "zigzag",
+                             "score": 9, "dropped": False, "thumb": f"{TRIAL_M}-1.jpg", "product_thumb": f"{TRIAL_M}-p1.jpg"}
+    assert s["looks"][4]["product_thumb"] is None and s["looks"][1]["score"] == 3  # 낮은 점수도 그대로 (다시 만들기·빼기 없음)
+    one = fx["items"][0]
+    evil = [dict(copy.deepcopy(one), id="lb-20261020-0101", trial_of=None),  # 바탕 번호 없음 → 버림 (보통 릴스로 보이면 안 됨)
+            dict(copy.deepcopy(one), id="lb-20261020-0102", trial_of="lb-20261020-0102"),  # 자기 자신
+            dict(copy.deepcopy(one), id="lb-20261020-0103", trial_of="../" + JID),
+            dict(copy.deepcopy(one), id="lb-20261020-0104", trial="yes", trial_of=JID, style="weird",  # 참·거짓만 → 보통 줄
+                 looks=[{"n": 1, "name": "A", "product_thumb": "lb-20261026-0911-p1.jpg"},  # 다른 번호의 사본
+                        {"n": 2, "name": "B", "product_thumb": "lb-20261020-0104-p3.jpg"},  # 다른 룩 번호
+                        {"n": 3, "name": "C", "product_thumb": "../lb-20261020-0104-p3.jpg"},
+                        {"n": 4, "name": "D", "product_thumb": "lb-20261020-0104-p4.jpg"}])]
+    got = _lookbook({**fx, "items": evil, "style": ["mirror"]})
+    assert [x["id"] for x in got["items"]] == ["lb-20261020-0104"] and got["style"] is None
+    plain = got["items"][0]
+    assert plain["trial"] is False and plain["trial_of"] is None and plain["style"] is None
+    assert [lk["product_thumb"] for lk in plain["looks"]] == [None, None, None, "lb-20261020-0104-p4.jpg"]
+
+
+async def test_trial_sets_stay_out_of_the_reel_list_and_first_state(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    write_export(export_path(tmp_path))
+    blogauto_status(settings)
+    body = await state(bot)
+    lb = body["lookbook"]
+    assert [it["id"] for it in lb["items"]] == [JID] and [it["id"] for it in lb["posted"]] == ["lb-20261025-0648"]
+    assert (lb["trial_n"], lb["trial_ready"], lb["style"], lb["style_word"], lb["trial_ok"]) == (2, 2, "mirror", "거울 셀카", True)
+    assert lb["entry"] == "룩북 릴스 · 완성 1편 →"  # 완성된 사진 시험은 '올릴 릴스'로 세지 않음
+    text = json.dumps(body, ensure_ascii=False)
+    assert TRIAL_M not in text and TRIAL_S not in text  # 시험 사진 목록은 첫 상태 값에 없음 (104 KB 예산 — 열 때만 받음)
+    assert [it["iid"] for it in body["todo"] if it["iid"].startswith("lookbook-")] == [f"lookbook-{JID}"]
+    blogauto_status(settings, actions=old_actions())
+    assert (await state(bot))["lookbook"]["trial_ok"] is False  # 예전 Blog-Auto 면 단추를 꺼 둠
+    write_export(export_path(tmp_path), lookbook=None)
+    lb = (await state(bot))["lookbook"]
+    assert (lb["trial_n"], lb["style"], lb["trial_ok"]) == (0, "", False)
+
+
+async def test_trial_endpoint_groups_sets_by_base_behind_login(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    from dash_helpers import get_json
+
+    write_export(export_path(tmp_path))
+    blogauto_status(settings)
+    status, _p, _ = await get_json(bot, "/dashboard/api/lbtrial", {})
+    assert status in (401, 302, 303)  # 로그인 아래
+    status, data, headers = await get_json(bot, "/dashboard/api/lbtrial", session_headers(bot))
+    assert status == 200 and headers.get("Cache-Control") == "no-store"
+    [g] = data
+    assert (g["base_id"], g["theme"], g["created_at"], g["created"]) == (JID, "하객룩", "2026-10-26T09:12:05", "10/26 09:12")
+    assert [(st["id"], st["style"], st["status"], st["word"]) for st in g["sets"]] == [(TRIAL_M, "mirror", "ready", "완성"),
+                                                                                       (TRIAL_S, "studio", "ready", "완성")]
+    assert g["sets"][0]["looks"][0] == {"n": 1, "name": "브라운 타이 블라우스", "score": 9, "thumb": f"/dashboard/thumb/{TRIAL_M}-1.jpg",
+                                        "product_thumb": f"/dashboard/thumb/{TRIAL_M}-p1.jpg"}
+    assert g["sets"][1]["looks"][4]["product_thumb"] == "" and "link" not in g["sets"][0]["looks"][0]
+    lb = fixture("export_v2.json")["lookbook"]
+    lb["items"] = [x for x in lb["items"] if not x["trial"]]
+    write_export(export_path(tmp_path), lookbook=lb)
+    status, data, _ = await get_json(bot, "/dashboard/api/lbtrial", session_headers(bot))
+    assert status == 200 and data == []
+    write_export(export_path(tmp_path), lookbook=None)
+    assert (await get_json(bot, "/dashboard/api/lbtrial", session_headers(bot)))[1] == []
+
+
+def test_trials_put_mirror_first_and_tolerate_one_set() -> None:
+    lv = {"enabled": True, "per_day": 1, "server": "ok", "instagram": None, "style": "studio",
+          "items": [_job("rendering", id="lb-20261027-0101", trial=True, trial_of=JID, style="studio",
+                         looks=[{"n": 1, "name": "A", "score": None, "thumb": None, "product_thumb": None, "link": "", "price": 0, "mall": "",
+                                 "dropped": False}]),
+                    _job("ready", id="lb-20261027-0100", trial=True, trial_of=JID, style="mirror", looks=[]),
+                    _job("ready", id="lb-20261026-0900", trial=True, trial_of="lb-20261025-0648", style="studio", looks=[]),
+                    _job("ready")]}
+    out = lbview.trials(lv, TZ)
+    assert [g["base_id"] for g in out] == [JID, "lb-20261025-0648"]
+    assert [st["style"] for st in out[0]["sets"]] == ["mirror", "studio"] and out[0]["sets"][1]["word"] == "사진 만드는 중"
+    assert out[0]["sets"][1]["looks"] == [{"n": 1, "name": "A", "score": None, "thumb": "", "product_thumb": ""}]
+    view = lbview.build(lv, TZ, 0.0, state_act)
+    assert [it["id"] for it in view["items"]] == [JID] and view["trial_n"] == 3 and view["trial_ready"] == 2
+    assert view["style_word"] == "예전 양식" and lbview.todo_item(lv, TZ, state_goto)["iid"] == f"lookbook-{JID}"
+    assert lbview.trials(None, TZ) == []

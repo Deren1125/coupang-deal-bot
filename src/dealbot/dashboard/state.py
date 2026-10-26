@@ -1259,12 +1259,18 @@ class StateBuilder:
         x = (getattr(self._export(), "v2", None) or {}).get("x")
         return x.get("plan") if isinstance(x, dict) else None
 
+    def lbtrial(self) -> list[dict[str, Any]]:
+        """룩북 사진 시험 (주인 10/26 — '사진 시험'을 열 때만 /dashboard/api/lbtrial). Blog-Auto lookbook 칸의 시험 줄을 바탕 릴스마다 묶음."""
+        return lbview.trials((getattr(self._export(), "v2", None) or {}).get("lookbook"), ZoneInfo(self.tz))
+
     def lookbook(self, export: Any) -> dict[str, Any] | None:
         """룩북 릴스 화면 (주인 10/25): Blog-Auto lookbook 칸 — 영상·표지·캡션·룩 목록·올리기 전 확인 · 올렸어요/버리기/다시 만들기."""
         sup = self._supported(self._ba_status())
         ok = sup is None or {"lookbook_posted", "lookbook_drop", "lookbook_redo"} <= sup
+        trial_ok = sup is None or lbview.TRIAL_ACTIONS <= sup  # 사진 시험 (10/26 — 예전 Blog-Auto 면 단추를 꺼 둠)
         try:
-            return lbview.build((getattr(export, "v2", None) or {}).get("lookbook"), ZoneInfo(self.tz), time.time(), act, bridge_ok=ok)
+            return lbview.build((getattr(export, "v2", None) or {}).get("lookbook"), ZoneInfo(self.tz), time.time(), act, bridge_ok=ok,
+                                trial_ok=trial_ok)
         except Exception as e:  # noqa: BLE001 — 룩북 칸 하나가 상태 전체를 막지 않게
             log.warning("lookbook state failed: %s", type(e).__name__)
             return None
@@ -1305,6 +1311,7 @@ ACTION_LABELS = {
     "blog.x_posted": "X 올렸어요", "blog.x_drop": "X 초안 버리기", "blog.x_redo": "X 초안 다시 쓰기", "x.stats": "X 숫자 저장",
     "x.handles": "X 계정 이름 저장",
     "blog.lookbook_posted": "릴스 올렸어요", "blog.lookbook_drop": "릴스 버리기", "blog.lookbook_redo": "릴스 다시 만들기",
+    "blog.lookbook_trial": "사진 시험 만들기", "blog.lookbook_style": "사진 양식 정하기",
     "connect": "다시 연결 시작",
 }
 RESULT_LABELS = {"queued": "요청함", "done": "완료", "linked": "완료", "linked_twin": "완료", "approved": "완료", "skipped": "완료",
