@@ -1,5 +1,5 @@
 """채널 성장 (주인 결정 10/15): 텔레그램 둘째 줄 광고 표시, 가격 기록 라벨, 스레드 리듬·태그·카드·품절 업데이트·답글 초안·투표,
-일요일 TOP5, 통계 권한, 핫딜 페이지 지난 딜, 채널 안내, 초대 링크 가입 경로, SNS 0개 알림, 늦게 받는 딜 사진, 내 도메인 DNS.
+일요일 TOP5, 통계 권한, 링크 페이지 지난 딜, 채널 안내, 초대 링크 가입 경로, SNS 0개 알림, 늦게 받는 딜 사진, 내 도메인 DNS.
 
 네트워크 없음: 스레드·텔레그램은 가짜 (httpx.MockTransport · 가짜 봇)."""
 
@@ -486,7 +486,7 @@ async def test_sns_tick_runs_reply_collection_twice_a_day(bot) -> None:  # type:
     assert ran == ["0", "1"]
 
 
-# ================================================================ 7. 핫딜 페이지 · 채널 안내 · 초대 링크
+# ================================================================ 7. 링크 페이지 · 채널 안내 · 초대 링크
 def _publish(bot, pid: str, when: datetime, name: str = "상품") -> int:  # type: ignore[no-untyped-def]
     d = _deal(pid, name=name)
     assert bot.db.enqueue(d, score=10, now=when)
@@ -748,7 +748,7 @@ def test_domain_aliases_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     s = load_settings(Path(__file__).resolve().parent.parent / "config.yaml", load_env=False)
     assert s.secrets.public_domain_aliases == ["3-35-1-2.sslip.io", "old.example.org"]
     assert s.secrets.threads_callback_served  # 예전 sslip.io 주소로 등록한 리디렉션도 봇이 직접 받음
-    assert s.secrets.public_base_url == "https://deals.example.com"  # 카드·핫딜 페이지 주소는 내 도메인
+    assert s.secrets.public_base_url == "https://deals.example.com"  # 카드·링크 페이지 주소는 내 도메인
     assert s.secrets.instagram_redirect_uri == "https://deals.example.com/instagram/callback"
     monkeypatch.setenv("PUBLIC_DOMAIN_ALIASES", "")
     assert not load_settings(Path(__file__).resolve().parent.parent / "config.yaml", load_env=False).secrets.threads_callback_served
@@ -826,12 +826,12 @@ async def test_blog_export_and_threads_cards_use_a_channel_neutral_footer(bot, m
     assert bot.fake.posts()[-1]["media_type"] == "IMAGE"
     th = specs[-1]
     assert th.footer == NEUTRAL_CTA and not any("프로필" in t for t in th.texts()) and th.ad.startswith("광고 · ")
-    # 스레드 글자 카드 위 띠엔 고지만 — 핫딜 페이지 번호 '#5' 는 안 그림 (스레드 독자는 본문의 링크로 감)
+    # 스레드 글자 카드 위 띠엔 고지만 — 링크 페이지 번호 '#5' 는 안 그림 (스레드 독자는 본문의 링크로 감)
     assert th.tag == "" and not any(t.startswith("#") for t in th.texts())
     await bot.make_card(_deal("coupang:th2"), None, deal_no=6, text_card=True, cta=NEUTRAL_CTA)  # 번호를 넘겨도 채널 중립 카드엔 없음
     assert specs[-1].tag == "" and specs[-1].ad.startswith("광고 · ")
     await bot.make_card(_deal("coupang:ig"), None, deal_no=7)  # 인스타 카드
-    assert specs[-1].footer == "구매 링크: 프로필 링크 → 핫딜 페이지 #7" and specs[-1].tag == "#7"
+    assert specs[-1].footer == "구매 링크: 프로필 링크 → 링크 페이지 #7" and specs[-1].tag == "#7"
     paths = {p.name for p in (bot.settings.data_dir / "media").glob("*.jpg")}
     assert len(paths) == 3  # 스레드·인스타 카드는 파일도 따로 (같은 상품이어도 덮어쓰지 않음)
 

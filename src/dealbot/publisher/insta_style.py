@@ -208,9 +208,9 @@ def caption_context(deal: Deal, info: CardInfo, *, shop: Shop | None, style: str
         notes.append(f"{unit} 가격도 카드에 적어 두었어요" if style == "P" else f"{unit} 가격은 카드 표 둘째 줄에 있어요")
     notes.append(AS_OF_LINE)
     if info.deal_no:
-        cta = f"구매 링크: 프로필 링크 → 핫딜 페이지 #{info.deal_no}"
+        cta = f"구매 링크: 프로필 링크 → 링크 페이지 #{info.deal_no}"
     else:
-        cta = "구매 링크: 프로필 링크 → 핫딜 페이지"
+        cta = "구매 링크: 프로필 링크 → 링크 페이지"
     return {
         "first_line": "" if info.ad_free else (info.ad or ad_line([deal_disclosure(shop, p.extra)])),
         "hook": hook,
@@ -230,7 +230,7 @@ def caption_context(deal: Deal, info: CardInfo, *, shop: Shop | None, style: str
 # ---------------------------------------------------------------- 여러 딜을 묶은 글
 @dataclass(slots=True)
 class Pick:
-    """캐러셀·릴스에 넣을 딜 하나: 딜, 카드 사실, 핫딜 페이지 번호, 확인된 상품 사진."""
+    """캐러셀·릴스에 넣을 딜 하나: 딜, 카드 사실, 링크 페이지 번호, 확인된 상품 사진."""
 
     deal: Deal
     info: CardInfo
@@ -241,7 +241,7 @@ class Pick:
 
     @property
     def label(self) -> str:
-        """'#12 휴지 30롤' (핫딜 페이지 번호 + 짧은 이름)."""
+        """'#12 휴지 30롤' (링크 페이지 번호 + 짧은 이름)."""
         head = f"#{self.deal_no} " if self.deal_no else ""
         return f"{head}{self.info.short or self.info.name}"
 
@@ -265,7 +265,7 @@ def bundle_caption(picks: Sequence[Pick], registry: Any, *, title: str, intro: s
         lines.append(intro)
     lines.append("")
     lines += [pk.line for pk in picks]
-    lines += ["", AS_OF_LINE, "구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로 찾아 주세요", TELEGRAM_LINE]
+    lines += ["", AS_OF_LINE, "구매 링크: 프로필 링크 → 링크 페이지에서 번호로 찾아 주세요", TELEGRAM_LINE]
     disclosures = full_disclosures(deals, registry)
     if disclosures:
         lines += ["", *disclosures]
@@ -376,8 +376,8 @@ def unit_list_name(kind: str, label: str) -> str:
     return f"{kind} {label}"
 
 
-UNIT_FIND = "구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로"
-UNIT_FIND_OLD = "구매 링크: #번호 딜은 프로필 링크 → 핫딜 페이지에서 (지난 딜은 내려감)"
+UNIT_FIND = "구매 링크: 프로필 링크 → 링크 페이지에서 번호로"
+UNIT_FIND_OLD = "구매 링크: #번호 딜은 프로필 링크 → 링크 페이지에서 (지난 딜은 내려감)"
 
 
 def unit_caption(rows_by_title: dict[str, list[UnitRow]], baselines: list[tuple[str, str, int, int]], deals: Sequence[Deal],
@@ -401,8 +401,8 @@ def unit_caption(rows_by_title: dict[str, list[UnitRow]], baselines: list[tuple[
             lines.append(f"사도 되는 기준선: {title} {value:,}원 (최근 우리가 올린 딜 {n}건의 가운데 값)")
         lines.append("")
     old = any(r.deal_no is None for rows in rows_by_title.values() for r in rows)
-    find = ("구매 링크: 프로필 링크 → 핫딜 페이지에서 #번호로 찾아 주세요 (번호 없는 지난 딜은 핫딜 페이지에서 내려갔어요)" if old
-            else "구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로 찾아 주세요")
+    find = ("구매 링크: 프로필 링크 → 링크 페이지에서 #번호로 찾아 주세요 (번호 없는 지난 딜은 링크 페이지에서 내려갔어요)" if old
+            else "구매 링크: 프로필 링크 → 링크 페이지에서 번호로 찾아 주세요")
     lines += [AS_OF_LINE, find, TELEGRAM_LINE]
     disclosures = full_disclosures(deals, registry)
     if disclosures:

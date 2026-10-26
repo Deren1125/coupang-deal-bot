@@ -441,7 +441,7 @@ class InstagramScheduler:
         bot = self.bot
         deal: Deal = item["deal"]
         pid = deal.product.product_id
-        deal_no = bot._page_deal_no(item["queue_id"])  # 카드·본문의 '#번호' 는 핫딜 페이지에 있는 글만
+        deal_no = bot._page_deal_no(item["queue_id"])  # 카드·본문의 '#번호' 는 링크 페이지에 있는 글만
         photo = _read(item.get("photo_file"))
         # 본문과 카드에 그리는 글을 같이 검사 (TOP5·릴스·단가표처럼) — 카드 첫 부분(위 띠)에 고지가 있어야 함
         slide = self.single_slide(deal, photo, deal_no=deal_no)
@@ -640,7 +640,7 @@ class InstagramScheduler:
         cover = SlideSpec(
             kind="cover", ad=GENERIC_AD, head=insta_style.date_kr(local), tag=f"1/{n}", title=title,
             big_note="우리가 기록한 가격·비교 근거가 있는 딜만 골랐어요", items=rows,
-            note="가격·재고는 올린 시점 기준이에요", footer="구매 링크: 프로필 링크 → 핫딜 페이지에서 번호로",
+            note="가격·재고는 올린 시점 기준이에요", footer="구매 링크: 프로필 링크 → 링크 페이지에서 번호로",
             alt=f"{title} 표지 — " + ", ".join(f"{a} {b}" for a, b, _ in rows),
         )
         cover = paper_fit(self.bot.card, cover, lambda got: f"{title} 표지 — " + ", ".join(f"{a} {b}" for a, b, _ in got))
@@ -653,7 +653,7 @@ class InstagramScheduler:
             ]
         end = SlideSpec(
             kind="end", ad=GENERIC_AD, tag=f"{n}/{n}", title="실시간 전체 딜은\n텔레그램에 먼저", big="프로필 링크",
-            note="가격·재고는 올린 시점 기준이에요. 구매 링크도 프로필 링크의 핫딜 페이지에 있어요.", footer=card_slides.BRAND,
+            note="가격·재고는 올린 시점 기준이에요. 구매 링크도 프로필 링크의 링크 페이지에 있어요.", footer=card_slides.BRAND,
             alt="실시간 전체 딜은 텔레그램에 먼저 올라와요. 프로필 링크에서 볼 수 있어요.",
         )
         return [cover, *deals, end]
@@ -699,7 +699,7 @@ class InstagramScheduler:
         frames = [hook]
         for i, pk in enumerate(picks, 1):
             rows = [r for r in deal_rows(pk.info) if r[0] not in ("가격", "배송", "평점", "판매")]
-            rows.append(("구매", f"프로필 링크 → 핫딜 페이지 #{pk.deal_no}" if pk.deal_no else "프로필 링크 → 핫딜 페이지"))
+            rows.append(("구매", f"프로필 링크 → 링크 페이지 #{pk.deal_no}" if pk.deal_no else "프로필 링크 → 링크 페이지"))
             frames.append(SlideSpec(
                 kind="reel_deal", ad=ad_of(pk.info), head=head, tag=f"{i}/{k}", title=pk.info.name,
                 big=f"{pk.info.price:,}원" if pk.info.price else "", rows=rows, photo=pk.photo,
@@ -795,7 +795,7 @@ class InstagramScheduler:
         need = self.bot.renderer.low_min_samples
         base = {insta_style.unit_list_name(kind, label): (value, cnt) for kind, label, value, cnt in baselines}
         period = f"{since:%m/%d}~{local:%m/%d}"
-        # 핫딜 페이지(최근 page_hours)에서 내려간 지난 딜은 번호가 없다 — '번호로 찾아 주세요' 라고만 하면 못 찾는 딜이 섞임
+        # 링크 페이지(최근 page_hours)에서 내려간 지난 딜은 번호가 없다 — '번호로 찾아 주세요' 라고만 하면 못 찾는 딜이 섞임
         old = any(r.deal_no is None for rows in week.values() for r in rows)
         footer = insta_style.UNIT_FIND_OLD if old else insta_style.UNIT_FIND
         cover = SlideSpec(

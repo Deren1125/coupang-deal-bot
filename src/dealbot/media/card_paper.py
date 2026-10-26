@@ -6,7 +6,7 @@
 - 그리는 글은 모두 SlideSpec 에서 (insta_style.validate 가 spec.texts() 로 고지·근거 없는 말을 본다). 사실 줄·메모는
   card_slides 의 데이터 함수(deal_rows · unit_parts · ad_of)와 CardInfo 의 비교·기록 값으로만 만든다 (deal_spec).
 - 맨 위 첫 줄은 언제나 고지 '광고 · …' — 검은 '광고' 칩 + 나머지 글 (spec.ad 를 그대로 나눠 그림).
-- '#번호' 와 '프로필 링크 → 핫딜 페이지' 는 포스트잇 한 곳에만, 카드마다 한 번. 번호가 없는 인스타 카드는 포스트잇 없이 바닥
+- '#번호' 와 '프로필 링크 → 링크 페이지' 는 포스트잇 한 곳에만, 카드마다 한 번. 번호가 없는 인스타 카드는 포스트잇 없이 바닥
   오른쪽에 '구매 링크는 프로필 링크에서' 한 번, 인스타 밖(스레드·블로그) 카드는 바닥 오른쪽에 spec.footer (NEUTRAL_CTA) 만.
 - 사진이 없으면(네이버 글자 카드·스레드·블로그) 사진 자리에 같은 종이의 이름 카드 — 꾸민 그림·가짜 사진은 없다.
 - 같은 딜이면 늘 같은 그림: 무늬·기울기는 spec 에서 만든 씨앗의 random.Random 으로만 (Image.effect_noise 는 안 씀).
@@ -39,9 +39,9 @@ W, H = 1080, 1350
 SS = 2  # 2배로 그리고 마지막에 줄임
 M = 60  # 바깥 여백 (프로필 격자 3:4 잘림 34px 보다 넉넉히)
 BRAND = "데미얌의 쇼핑일기"
-GUIDE = "프로필 링크 → 핫딜 페이지"  # 포스트잇의 구매 안내 (번호와 함께 한 번)
+GUIDE = "프로필 링크 → 링크 페이지"  # 포스트잇의 구매 안내 (번호와 함께 한 번)
 GUIDE_NO_NUMBER = "구매 링크는 프로필 링크에서"  # 번호 없는 인스타 카드의 바닥 안내 (B 카드·card_slides.deal_spec 과 같은 말)
-STICKY_LABEL = "핫딜 번호"
+STICKY_LABEL = "번호"
 MIN_TEXT = 30  # 가장 작은 글 (1080 기준 — 360px 화면에서 10px)
 
 BRAND_RED = (220, 35, 40)
@@ -413,7 +413,7 @@ def tape_clear_cy(want: float, length: float, angle: float, floor: float) -> flo
 
 
 def make_sticky(num: str, guide: list[str], P: dict, size: tuple[int, int]) -> Image.Image:
-    """포스트잇: '핫딜 번호 / #71 / 프로필 링크 → / 핫딜 페이지' — 카드에서 '#번호' 가 나오는 유일한 곳. RGBA 2배 (그림자 포함)."""
+    """포스트잇: '번호 / #71 / 프로필 링크 → / 링크 페이지' — 카드에서 '#번호' 가 나오는 유일한 곳. RGBA 2배 (그림자 포함)."""
     sw, sh = size
     w, h = S(sw), S(sh)
     col = P["sticky"]
@@ -447,7 +447,7 @@ def make_sticky(num: str, guide: list[str], P: dict, size: tuple[int, int]) -> I
 
 
 def guide_lines(footer: str) -> list[str]:
-    """'프로필 링크 → 핫딜 페이지' → ['프로필 링크 →', '핫딜 페이지'] (포스트잇 두 줄)."""
+    """'프로필 링크 → 링크 페이지' → ['프로필 링크 →', '링크 페이지'] (포스트잇 두 줄)."""
     head, sep, tail = footer.partition("→")
     if sep and tail.strip():
         return [f"{head.strip()} →", tail.strip()]
@@ -743,7 +743,7 @@ def facts_of(info: CardInfo, note_kind: str) -> list[tuple[str, str, str]]:
 
 def deal_spec(info: CardInfo, photo: bytes | None, *, page: str = "") -> SlideSpec:
     """종이 카드 한 장 (딜 하나짜리 글·TOP5 딜 장·사진 없는 글자 카드·스레드·블로그 카드).
-    tag = '#번호' (포스트잇, 인스타 카드에 번호가 있을 때만), footer = 포스트잇의 구매 안내 '프로필 링크 → 핫딜 페이지' —
+    tag = '#번호' (포스트잇, 인스타 카드에 번호가 있을 때만), footer = 포스트잇의 구매 안내 '프로필 링크 → 링크 페이지' —
     번호 없는 인스타 카드는 포스트잇 없이 바닥에 '구매 링크는 프로필 링크에서', 인스타 밖 카드(info.cta)는 바닥에 cta.
     items = 그리는 사실 줄, rows = 그 바탕 데이터(대체 텍스트·본문과 같은 표)."""
     from dealbot.media.card_slides import SlideSpec, ad_of, alt_text, deal_rows

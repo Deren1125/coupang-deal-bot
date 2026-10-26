@@ -194,7 +194,7 @@ def test_b_caption_has_plain_info_lines_instead_of_save_and_share_prompts(r: Tem
     assert lines[1] == "도브 인텐스 리페어 샴푸 680ml 2개 15,900원 · 쿠팡 최저가 22,900원"
     assert "✔ 1개당  7,950원 · 100mL당 1,169원" in lines  # 카드 표 둘째 줄과 같은 줄
     for line in ("1개당 가격은 카드 표 둘째 줄에 있어요", "가격·재고는 올린 시점 기준이에요",
-                 "실시간 전체 딜은 텔레그램에 먼저 올라와요 (프로필 링크)", "구매 링크: 프로필 링크 → 핫딜 페이지 #3"):
+                 "실시간 전체 딜은 텔레그램에 먼저 올라와요 (프로필 링크)", "구매 링크: 프로필 링크 → 링크 페이지 #3"):
         assert line in lines
     assert "✔ 기록  우리가 본 최근 30일 중 가장 낮음 (10/15 14시 기준)" in lines
     assert "최저가 갱신" not in text and "역대" not in text
@@ -228,7 +228,7 @@ async def test_deals_page_shows_numbers_only_for_variant_styles(settings) -> Non
 
 
 async def test_numbered_page_lists_every_deal_and_caption_numbers_only_page_deals(settings, ig_post_now) -> None:  # type: ignore[no-untyped-def]
-    """번호 양식이면 핫딜 페이지가 기간 안의 딜을 점수로 자르지 않고 모두 번호 순(최근 먼저)으로 보여 준다 —
+    """번호 양식이면 링크 페이지가 기간 안의 딜을 점수로 자르지 않고 모두 번호 순(최근 먼저)으로 보여 준다 —
     인스타 글의 '#번호' 를 페이지에서 찾을 수 있게. 페이지에 없는 글(기간이 지난 글)엔 카드·본문에 번호를 적지 않는다."""
     from datetime import timedelta
 
@@ -280,6 +280,6 @@ async def test_numbered_page_lists_every_deal_and_caption_numbers_only_page_deal
         await ig_post_now(bot)
         await ig_post_now(bot)
         assert got == [5, None]  # 페이지에 없는 글엔 '#번호' 를 적지 않음 (번호는 올리는 때 다시 봄)
-        assert "핫딜 페이지 #7" not in bot.instagram.render(old, deal_no=bot._page_deal_no(7))
+        assert "링크 페이지 #7" not in bot.instagram.render(old, deal_no=bot._page_deal_no(7))
     finally:
         await bot.close()

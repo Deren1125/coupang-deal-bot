@@ -157,12 +157,12 @@ def deal_spec(info: CardInfo, photo: bytes | None, *, tag: str | None = None, he
     if footer is None and info.cta is not None:
         footer = info.cta  # 인스타 밖(블로그·스레드) 카드: 채널 중립 안내
     if footer is None:
-        footer = f"구매 링크: 프로필 링크 → 핫딜 페이지 #{info.deal_no}" if info.deal_no else "구매 링크는 프로필 링크에서"
+        footer = f"구매 링크: 프로필 링크 → 링크 페이지 #{info.deal_no}" if info.deal_no else "구매 링크는 프로필 링크에서"
     return SlideSpec(
         kind="deal",
         ad=ad_of(info),
         head=head if head is not None else BRAND + (f" · {info.category}" if info.category else ""),
-        # 핫딜 페이지 번호는 인스타 카드에만 (스레드·블로그 카드는 글 안에 구매 링크가 있어 '#번호' 가 필요 없다)
+        # 링크 페이지 번호는 인스타 카드에만 (스레드·블로그 카드는 글 안에 구매 링크가 있어 '#번호' 가 필요 없다)
         tag=tag if tag is not None else (f"#{info.deal_no}" if info.deal_no and info.cta is None else ""),
         title=info.name,
         rows=rows,

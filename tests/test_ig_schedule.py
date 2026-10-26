@@ -53,7 +53,7 @@ def _jpeg(color: tuple[int, int, int] = (90, 140, 200)) -> bytes:
 
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, datetime]:
-    """봇의 '지금' (핫딜 페이지 번호·대기열 넣은 시각)을 정해 둔다 — 테스트가 도는 실제 시각과 상관없이."""
+    """봇의 '지금' (링크 페이지 번호·대기열 넣은 시각)을 정해 둔다 — 테스트가 도는 실제 시각과 상관없이."""
     state = {"now": at(9)}
 
     def now() -> datetime:
@@ -1009,7 +1009,7 @@ async def test_cut_off_single_counts_toward_the_gap_and_the_daily_cap(bot, clock
 
 
 def test_unit_carousel_marks_past_deals_without_a_page_number(bot) -> None:  # type: ignore[no-untyped-def]
-    """IG-6: 단가표는 지난 7일 딜이라 핫딜 페이지(48시간)에서 내려간 딜도 있다 — 번호 없는 줄은 '지난 딜' 로, 찾는 안내도 그에 맞게."""
+    """IG-6: 단가표는 지난 7일 딜이라 링크 페이지(48시간)에서 내려간 딜도 있다 — 번호 없는 줄은 '지난 딜' 로, 찾는 안내도 그에 맞게."""
     from dealbot.publisher.insta_style import UnitRow
 
     def row(no: int | None, pid: str) -> UnitRow:
@@ -1024,7 +1024,7 @@ def test_unit_carousel_marks_past_deals_without_a_page_number(bot) -> None:  # t
     assert items == ["#12 상품 coupang:1", "상품 coupang:2 (지난 딜)"]
     assert specs[0].footer == specs[1].footer == insta_style.UNIT_FIND_OLD
     caption = insta_style.unit_caption(week, [], [], bot.registry, since=since, until=local)
-    assert "(지난 딜)" in caption and "번호 없는 지난 딜은 핫딜 페이지에서 내려갔어요" in caption
+    assert "(지난 딜)" in caption and "번호 없는 지난 딜은 링크 페이지에서 내려갔어요" in caption
     only_new = {"휴지·물티슈": [row(12, "coupang:1")]}
     assert bot.ig.unit_specs(only_new, [], [], local, since)[0].footer == insta_style.UNIT_FIND
     assert "지난 딜" not in insta_style.unit_caption(only_new, [], [], bot.registry, since=since, until=local)

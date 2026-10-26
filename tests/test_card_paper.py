@@ -2,7 +2,7 @@
 
 - 크기 1080×1350, 사진 있음·없음·깨짐·아주 작음·아주 넓음·흰 바탕·투명 PNG·한 색뿐인 그림
 - 맨 처음 그리는 글 = 고지 ('광고' 칩 + 몰 고지 그대로), spec.texts() 첫 글도 '광고 · …'
-- '#번호' 와 '프로필 링크 → 핫딜 페이지' 는 카드에 한 번 (포스트잇). 번호 없는 인스타 카드는 바닥에 '구매 링크는 프로필 링크에서' 한 번, 스레드·블로그 카드는 둘 다 없음
+- '#번호' 와 '프로필 링크 → 링크 페이지' 는 카드에 한 번 (포스트잇). 번호 없는 인스타 카드는 바닥에 '구매 링크는 프로필 링크에서' 한 번, 스레드·블로그 카드는 둘 다 없음
 - 긴 이름·빠진 줄에도 글이 카드 밖으로 나가지 않음, 가장 작은 글 30px (360px 화면에서 읽힘)
 - 같은 딜이면 같은 그림 (난수는 딜에서 만든 씨앗으로만)
 - 비교 가격엔 취소선이 없고, 말은 데이터로만 (평소/최저가 메모는 CardInfo 의 비교 근거에서)
@@ -163,12 +163,12 @@ def test_disclosure_is_the_first_thing_drawn(r: TemplateRenderer, tmp_path: Path
 @pytest.mark.parametrize("kind", ["photo", "white_cutout", "none"])
 def test_number_and_profile_guide_appear_once(r: TemplateRenderer, kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
     spec = card_paper.deal_spec(_info(r, deal_no=1532), PHOTOS[kind])
-    assert spec.tag == "#1532" and spec.footer == "프로필 링크 → 핫딜 페이지"
+    assert spec.tag == "#1532" and spec.footer == "프로필 링크 → 링크 페이지"
     drawn = Drawn(monkeypatch)
     card_paper.render(spec)
     assert drawn.count("#1532") == 1 and sum(t.startswith("#") for t in drawn.texts) == 1
-    assert drawn.count("프로필 링크") == 1 and drawn.count("핫딜 페이지") == 1  # 포스트잇 두 줄 '프로필 링크 →' / '핫딜 페이지'
-    assert "핫딜 번호" in drawn.texts
+    assert drawn.count("프로필 링크") == 1 and drawn.count("링크 페이지") == 1  # 포스트잇 두 줄 '프로필 링크 →' / '링크 페이지'
+    assert card_paper.STICKY_LABEL in drawn.texts
 
 
 def test_threads_and_blog_cards_have_no_number_or_profile_guide(r: TemplateRenderer, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,13 +186,13 @@ def test_threads_and_blog_cards_have_no_number_or_profile_guide(r: TemplateRende
 def test_instagram_card_without_a_number_still_says_where_to_buy_once(r: TemplateRenderer, kind: str,
                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
     """번호 없는 인스타 카드(_page_deal_no 가 None·번호 없는 TOP5 딜): 포스트잇·'#' 없이 바닥에 B 카드와 같은 '구매 링크는 프로필 링크에서' 한 번
-    (캡션의 '구매 링크: 프로필 링크 → 핫딜 페이지' 와 같은 길 — 카드만 구매 안내가 빠지지 않게)."""
+    (캡션의 '구매 링크: 프로필 링크 → 링크 페이지' 와 같은 길 — 카드만 구매 안내가 빠지지 않게)."""
     spec = card_paper.deal_spec(_info(r, deal_no=None), PHOTOS[kind])
     assert spec.tag == "" and spec.footer == card_paper.GUIDE_NO_NUMBER == "구매 링크는 프로필 링크에서"
     drawn = Drawn(monkeypatch)
     card_paper.render(spec)
     assert drawn.texts.count(card_paper.GUIDE_NO_NUMBER) == 1 and drawn.count("프로필") == 1
-    assert not any(t.startswith("#") for t in drawn.texts) and "핫딜 번호" not in drawn.texts
+    assert not any(t.startswith("#") for t in drawn.texts) and card_paper.STICKY_LABEL not in drawn.texts
     assert NEUTRAL_CTA not in drawn.texts
     # B 카드도 같은 말 (되돌리기 해도 안내가 같음)
     assert card_slides.deal_spec(_info(r, deal_no=None), None).footer == card_paper.GUIDE_NO_NUMBER
@@ -412,7 +412,7 @@ def test_style_switch_routes_p_to_the_paper_card_and_keeps_b(r: TemplateRenderer
     first = card_slides.drawn_first_part("P", info, None)
     assert first.texts()[0].startswith("광고 · ") and getattr(first, "tag", "") == "#71"
     old = card_slides.drawn_first_part("B", info, None)
-    assert getattr(old, "footer", "") == "구매 링크: 프로필 링크 → 핫딜 페이지 #71"  # 되돌리기용 B 는 그대로
+    assert getattr(old, "footer", "") == "구매 링크: 프로필 링크 → 링크 페이지 #71"  # 되돌리기용 B 는 그대로
     called: list[str] = []
     real = card_paper.render
     monkeypatch.setattr(card_paper, "render", lambda spec: called.append(spec.kind) or real(spec))
@@ -423,12 +423,12 @@ def test_style_switch_routes_p_to_the_paper_card_and_keeps_b(r: TemplateRenderer
     called.clear()
     drawn = Drawn(monkeypatch)
     DealCard(tmp_path, layout="B").render(_deal(), None, info=info, layout="P")
-    assert called == ["deal"] and drawn.texts.count("#71") == 1 and "핫딜 번호" in drawn.texts
+    assert called == ["deal"] and drawn.texts.count("#71") == 1 and card_paper.STICKY_LABEL in drawn.texts
     called.clear()
     drawn.items.clear()
     DealCard(tmp_path, layout="P").render(_deal(), None, info=info, layout="B")
-    assert called == [] and "핫딜 번호" not in drawn.texts and "핫딜 페이지 #71" not in drawn.texts  # B 그림 (포스트잇 없음)
-    assert "구매 링크: 프로필 링크 → 핫딜 페이지 #71" in drawn.texts
+    assert called == [] and card_paper.STICKY_LABEL not in drawn.texts and "링크 페이지 #71" not in drawn.texts  # B 그림 (포스트잇 없음)
+    assert "구매 링크: 프로필 링크 → 링크 페이지 #71" in drawn.texts
 
 
 def test_caption_card_hint_matches_the_style(r: TemplateRenderer) -> None:
