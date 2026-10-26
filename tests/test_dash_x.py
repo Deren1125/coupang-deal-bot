@@ -4,7 +4,7 @@
    90일 인증 노출 n/500,000 · 지금 속도면 예상 달성일 (마지막 두 기록 직선). 계정 이름 x.handles (비어도 됨).
 2) 초안함: Blog-Auto 기록 파일 x 칸 (계약 export_v2.json — Blog-Auto 와 같은 파일) · 칸이 없으면 초안 없음 ·
    올렸어요·버리기·다시 쓰기 = 다리 일 blog.x_posted · x_drop · x_redo {pid} (계약 action_x_posted.json · 확인 창 없음).
-3) xpost.js: 처음 열 때만 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와 다른 파일) · 크기 예산 · 바깥 주소 없음 (X 글쓰기 주소는 state.x.intent) · 블로그 탭 'X(트위터) →'.
+3) xpost.js: 처음 열 때만 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와 다른 파일) · 크기 예산 · 바깥 주소 없음 (X 글쓰기 주소는 state.x.intent) · SNS 탭 'X(트위터)' 칸 (10/26 — 예전 '#/blog/x' 는 새 자리로).
 4) 링크 답글 (주인 10/26 새 기준 — 블로그 주소는 본문 말고 첫 답글): 초안마다 reply (엄격히 거름 · 끝 줄 = 글 주소) · 주인이 넣은 X 글 주소의
    번호로 답글 쓰기 화면 (state.x.reply_intent — 자동 게시 없음) · 스레드 첫 댓글이 두 번 실패한 할 일은 그 글을 여는 단추.
 """
@@ -272,8 +272,9 @@ def test_xpost_js_lazy_load_budget_and_safety() -> None:
     for label in re.findall(r"btn\('[^']*', '([^']*)'", js):
         assert re.search(r"[가-힣]", label), label
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "lazy('meta[name=sb-xpost]', 'xpost', 'SBXP')" in app and "'#/blog/x'" in app and "'X(트위터) →'" in app
-    assert "/^(pics|search|trial|ptrial|sched|threads|x|lookbook)$/" in app
+    assert "lazy('meta[name=sb-xpost]', 'xpost', 'SBXP')" in app and "'#/blog/x': '#/sns/x'" in app and "['x', 'X(트위터)']" in app
+    assert "/^(pics|search|trial|ptrial|sched)$/" in app and "SUBS = {sns: ['threads', 'x', 'lookbook']}" in app
+    assert "x: [xbLoad, xLoad]" in app  # X 칸 = x.js 자동 반응 + xpost.js 직접 올리는 글
     html = shell.page({"me": {}})
     assert re.search(r'<meta name="sb-xpost" content="/dashboard/static/xpost\.js\?v=[0-9a-f]{10}">', html)
     assert html.count("<script src=") == 1  # xpost.js 는 처음 열 때만

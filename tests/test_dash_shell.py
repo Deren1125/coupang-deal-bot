@@ -161,9 +161,9 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     assert '<link rel="stylesheet" href="/dashboard/static/app.css?v=' in html
     assert re.search(r'<meta name="sb-edit" content="/dashboard/static/edit\.js\?v=[0-9a-f]{10}">', html)  # 편집기는 처음 쓸 때만
     assert '<link rel="manifest" href="/dashboard/manifest.webmanifest"' in html and "viewport-fit=cover" in html
-    # 아래 탭 5개 (할 일 · 딜 · 블로그 · 통계 · 연결) — 이 순서, 글자가 있는 단추
-    assert re.findall(r'data-tab="([a-z]+)"', html) == ["todo", "deal", "blog", "stats", "connect"]
-    assert [lab for _k, lab, _s in icons.TABS] == ["할 일", "딜", "블로그", "통계", "연결"]
+    # 아래 탭 6개 (할 일 · 딜 · 블로그 · SNS · 통계 · 연결 — SNS 는 10/26) — 이 순서, 글자가 있는 단추
+    assert re.findall(r'data-tab="([a-z]+)"', html) == ["todo", "deal", "blog", "sns", "stats", "connect"]
+    assert [lab for _k, lab, _s in icons.TABS] == ["할 일", "딜", "블로그", "SNS", "통계", "연결"]
     for _k, lab, _s in icons.TABS:
         assert f"<span>{lab}</span>" in html
 

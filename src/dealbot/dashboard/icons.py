@@ -76,8 +76,12 @@ TAB_TODO = _tab('<rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8 
 TAB_DEAL = _tab('<path d="M3.5 12.6V5a1.5 1.5 0 0 1 1.5-1.5h7.6l8 8a1.5 1.5 0 0 1 0 2.1l-6.4 6.4a1.5 1.5 0 0 1-2.1 0z"/>'
                 '<circle cx="8.3" cy="8.3" r="1.4"/>')
 TAB_BLOG = _tab('<path d="M14.5 4.5l5 5L9 20H4v-5z"/><path d="M12.5 6.5l5 5"/>')
+# SNS (10/26): 말풍선 안 하트 — 스레드·인스타 · X · 룩북 릴스
+TAB_SNS = _tab('<path d="M12 4c4.6 0 8.2 3.1 8.2 7s-3.6 7-8.2 7c-1 0-2-.15-2.9-.45L4.6 19.6l1.2-3.6C4.6 14.7 3.8 13 3.8 11c0-3.9 3.6-7 8.2-7z"/>'
+               '<path d="M12 14.1l-2.4-2.3a1.45 1.45 0 0 1 2.05-2.05l.35.35.35-.35a1.45 1.45 0 0 1 2.05 2.05z"/>')
 TAB_STATS = _tab('<path d="M4 20h16"/><rect x="5.5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="6" width="3" height="11" rx="1"/>'
                  '<rect x="15.5" y="9" width="3" height="8" rx="1"/>')
 TAB_CONNECT = _tab('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>')
-TABS = (("todo", "할 일", TAB_TODO), ("deal", "딜", TAB_DEAL), ("blog", "블로그", TAB_BLOG), ("stats", "통계", TAB_STATS),
-        ("connect", "연결", TAB_CONNECT))
+# 아래 탭 6개 (주인 10/26 '밑에 배너의 탭을 늘리거나') — 390px 에서 한 칸 65px, 글자 한 줄
+TABS = (("todo", "할 일", TAB_TODO), ("deal", "딜", TAB_DEAL), ("blog", "블로그", TAB_BLOG), ("sns", "SNS", TAB_SNS),
+        ("stats", "통계", TAB_STATS), ("connect", "연결", TAB_CONNECT))

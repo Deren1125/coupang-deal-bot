@@ -3,11 +3,13 @@
 - sns.js: 처음 열 때만 받는 상자 파일 (meta sb-sns) · 바깥 주소·innerHTML 없음 · 문법 (node --check)
 - 상자는 칸마다 하나를 두고 다시 쓴다: 서버에서 스스로 읽는 화면(threads·x)은 탭을 열 때 · 새로고침 · (스레드는) 글 칸 값이 바뀔 때만
   다시 붙이고 (20초 새로고침에 X 승인함에서 고치던 댓글이 사라지지 않게), S 로 그리는 화면(xpost·lookbook)은 매번 다시 그린다
+- app.js: 아래 탭 SNS (마지막에 본 칸 기억) · 예전 '#/blog/threads|x|lookbook' 주소는 '#/sns/…' 로 · 블로그 탭엔 블로그 셋과 '도구' 한 칸
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 
@@ -95,3 +97,37 @@ def test_sns_boxes_remount_only_when_needed() -> None:
     assert got["th"] == ["th:snb"] and got["thSame"] == [] and got["thNew"] == ["th:snb"]
     assert got["lb"] == ["lb:snl", "lb:snl"]
     assert got["away"] == [] and got["css"] is True
+
+
+def _fn(js: str, head: str) -> str:
+    """app.js 에서 'function 이름(' 부터 맨 앞 칸의 '}' 까지."""
+    start = js.index(head)
+    return js[start:js.index("\n}\n", start)]
+
+
+def test_sns_tab_routes_and_old_addresses_move() -> None:
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "sns: 'SNS'" in js and "SUBS = {sns: ['threads', 'x', 'lookbook']}" in js and "sns: vSns" in js
+    # 예전 주소(Blog-Auto 알림 '/dashboard/#/blog/threads' · 할 일 goto · 홈 화면)는 새 자리로 — 주소를 바꿔 쓰고(뒤로 가기에 안 남게) 다시 그림
+    mv = re.search(r"const MV = \{([^}]*)\};", js)
+    assert mv
+    pairs = dict(re.findall(r"'(#/[a-z/]+)': '(#/[a-z/]+)'", mv.group(1)))
+    assert pairs == {"#/blog/threads": "#/sns/threads", "#/blog/x": "#/sns/x", "#/blog/lookbook": "#/sns/lookbook"}
+    route = _fn(js, "function route()")
+    assert route.index("if (MV[location.hash]) history.replaceState(null, '', MV[location.hash]);") < route.index("NAV++")
+    assert "LS.s(R.tab, R.sub)" in route  # 마지막에 본 칸을 기억
+    # 블로그 탭에는 블로그 셋만 — SNS 화면으로 가는 입구·불러오기가 없음
+    blog = _fn(js, "function vBlog()")
+    for gone in ("#/blog/threads", "#/blog/x", "#/blog/lookbook", "thLoad", "xLoad", "lbLoad", "스레드·인스타", "X(트위터)", "룩북"):
+        assert gone not in blog, gone
+    assert "sched|threads|x|lookbook)$/" not in js and "/^(pics|search|trial|ptrial|sched)$/" in route
+    # 도구 한 칸 (예약 일정 · 사진 뽑기 · 사진/제품 테스트 · 검색 등록) 은 예약된 글 아래 · 기다리는 글과 같은 할 일은 한 번만
+    assert blog.index("'기다리는 글'") < blog.index("'도구'") and blog.index("예약된 글") < blog.index("'도구'")
+    assert "!b.waiting.some(w => w.iid === i.iid)" in blog
+    # SNS 칸 옆 숫자 = 그 칸으로 가는 할 일 (예전 '#/blog/…' goto 도 같은 칸으로 셈)
+    sns = _fn(js, "function vSns()")
+    assert ".replace('#/blog/', '#/sns/')" in sns and "S.todo.filter(i => go(i) === '#/sns/' + k)" in sns
+    assert "['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스']" in sns
+    # 스레드·X 화면 파일은 그대로 (불러오기 이름·예전 주소 글자도 — X 봇·스레드 세션 시험이 본다)
+    assert "lazy('meta[name=sb-threads]', 'threads', 'SBThreads')" in js and "lazy('meta[name=sb-x]', 'x', 'SBX')" in js
+    assert "T.view(b, {el, btn, api, toast, S, exec, uploadAll})" in js

@@ -1,7 +1,7 @@
 """대시보드 앱(Sns-board) 첫 화면 — 껍데기 HTML + 첫 화면 값(boot JSON) (spec §1·§5.5, 주인 10/18).
 
 "휴대폰으로 일 처리를 많이 하다보니 휴대폰에서도 대시보드 (엡) 사용이 용이햇으면 좋겟어" ·
-"대시보드 구성은 반드시 깔끔해야해" — 휴대폰(360~412px)이 먼저, 아래 탭 5개(할 일 · 딜 · 블로그 · 통계 · 연결).
+"대시보드 구성은 반드시 깔끔해야해" — 휴대폰(360~412px)이 먼저, 아래 탭 6개(할 일 · 딜 · 블로그 · SNS · 통계 · 연결 — SNS 는 10/26).
 
 - 스크립트는 /dashboard/static/app.js 하나 (CSP script-src 'self' — 페이지 안 스크립트 없음). 사진 편집기 edit.js 는 처음 쓸 때만.
   첫 화면 값은 <script type="application/json" id="boot"> (실행되지 않는 글, api.boot_json 이 '</' 등을 막음)
@@ -27,10 +27,10 @@ SCHED_JS = "sched.js"  # 일정 (10/21) — 블로그 탭 '예약 일정 보기'
 EARN_JS = "earn.js"  # 제휴 수익 칸 (10/23) — 통계 탭을 처음 열 때만 (주소는 meta sb-earn)
 THPOST_JS = "thpost.js"  # 스레드 글·예약·댓글·통계 칸 (10/21) — threads.js 의 세 칸에 붙는 그리기. 어느 쪽이 먼저 떠도 붙도록 defer 로 먼저 받는다
 THEME_JS = "theme.js"  # 화면 밝기 단추 (10/24) — 머리에서 먼저 돌아 첫 화면부터 고른 색 (자동·밝게·어둡게)
-XPOST_JS = "xpost.js"  # X(트위터) 초안함·진행률 (10/25) — 블로그 탭 'X(트위터) →'를 처음 열 때만 (주소는 meta sb-xpost)
-LOOKBOOK_JS = "lookbook.js"  # 룩북 릴스 (10/25) — 블로그 탭 '룩북 릴스 →'를 처음 열 때만 (주소는 meta sb-lookbook)
-THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드·인스타 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
-X_JS = "x.js"  # X (10/25) — 스레드 화면 'X →'를 처음 누를 때만 threads.js 가 불러온다 (주소는 meta sb-x)
+XPOST_JS = "xpost.js"  # X(트위터) 초안함·진행률 (10/25) — SNS 탭 'X(트위터)' 칸을 처음 열 때만 (주소는 meta sb-xpost)
+LOOKBOOK_JS = "lookbook.js"  # 룩북 릴스 (10/25) — SNS 탭 '룩북 릴스' 칸을 처음 열 때만 (주소는 meta sb-lookbook)
+THREADS_JS = "threads.js"  # 스레드 (10/21) — SNS 탭 '스레드·인스타' 칸을 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
+X_JS = "x.js"  # X (10/25) — SNS 탭 'X(트위터)' 칸을 처음 열 때만 (주소는 meta sb-x — threads.js 'X →' 도 같은 주소)
 SNS_JS = "sns.js"  # SNS 탭 (10/26) — 스레드·인스타 · X · 룩북 릴스 화면을 담는 상자. SNS 탭을 처음 열 때만 (주소는 meta sb-sns)
 LOGINS_JS = "logins.js"  # 로그인 관리 (10/26) — 연결 탭 맨 위 칸. app.js 가 예산 끝이라 셸이 defer 로 받고, 칸은 스스로 연결 탭에 붙는다
 

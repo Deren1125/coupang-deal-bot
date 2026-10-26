@@ -1,4 +1,4 @@
-/* Sns-board 앱 (주인 10/18): 할 일 · 딜 · 블로그 · 통계 · 연결. 라이브러리 없음, 첫 화면은 boot JSON. */
+/* Sns-board 앱: 할 일 · 딜 · 블로그 · SNS · 통계 · 연결. 라이브러리 없음, 첫 화면은 boot JSON. */
 'use strict';
 (() => {
 const D = document, W = window, N = navigator;
@@ -20,8 +20,10 @@ const btn = (cls, label, on, x) => el('button', Object.assign({class: cls, type:
 const ext = (cls, label, url) => el('a', {class: cls, href: url, target: '_blank', rel: 'noopener noreferrer'}, label, ' ↗');
 const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
 
-const TABS = {todo: '할 일', deal: '딜', blog: '블로그', stats: '통계', connect: '연결'};
+const TABS = {todo: '할 일', deal: '딜', blog: '블로그', sns: 'SNS', stats: '통계', connect: '연결'}, SUBS = {sns: ['threads', 'x', 'lookbook']};
 const BLOGS = [['finance', '아카이브'], ['issue', 'Pick'], ['hotdeal', '핫딜']];
+const seg = (xs, base) => el('div', {class: 'seg', role: 'group'}, xs.map(([k, l, n]) => btn('', [l, n ? el('span', {class: 'cp hot', 'aria-label': `할 일 ${n}개`}, n) : null],
+  () => { location.hash = base + k; }, {'aria-pressed': k === R.sub ? 'true' : 'false'})));
 const SEV = {stop: ['⛔', '멈춤'], hot: ['🔥', '핫'], info: ['ℹ️', '참고'], todo: ['', '할 일']};
 const MSG = {published: '발행했어요', saved: '저장했어요', done: '했어요', not_found: '이미 없는 항목이에요',
   wrong_state: '지금 상태에서는 할 수 없어요', owner_edited: '직접 고친 글이라 멈췄어요 — 할 일에서 정해 주세요',
@@ -133,7 +135,7 @@ function render() {
   const a = D.activeElement, m = $('main');
   if (a && m.contains(a) && a.matches('input,textarea') && !SH.length) { DIRTY = true; head(); return; }
   DIRTY = false;
-  const v = {todo: vTodo, deal: vDeal, blog: vBlog, stats: vStats, connect: vConnect}[R.tab]();
+  const v = {todo: vTodo, deal: vDeal, blog: vBlog, sns: vSns, stats: vStats, connect: vConnect}[R.tab]();
   m.replaceChildren(...v);
   head();
   if (NEXT) {
@@ -143,12 +145,18 @@ function render() {
 }
 D.addEventListener('focusout', () => setTimeout(() => DIRTY && render(), 50));
 
+// 옮긴 주소: 예전 알림·할 일 링크도 새 자리로
+const MV = {'#/blog/threads': '#/sns/threads', '#/blog/x': '#/sns/x', '#/blog/lookbook': '#/sns/lookbook'};
+let NAV = 0;
 function route() {
+  if (MV[location.hash]) history.replaceState(null, '', MV[location.hash]);
+  NAV++;
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'share') { SHR = p[1]; location.hash = '#/blog/hotdeal'; return; }
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
-  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched|threads|x|lookbook)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  const L = SUBS[R.tab]; if (L) { if (!L.includes(R.sub)) R.sub = L.includes(LS.g(R.tab)) ? LS.g(R.tab) : L[0]; LS.s(R.tab, R.sub); }
   while (SH.length) closeTop();
   render();
   scrollTo(0, 0);
@@ -867,6 +875,15 @@ let SC;
 const vSC = () => SC ? SC.view(S.sched, {el, btn, render, act, open: openItem, pend: pendingOf})
   : (scLoad().then(m => { SC = m; render(); }, () => toast(MSG.net)), [el('p', {class: 'boot'}, '불러오는 중…')]);
 const thLoad = lazy('meta[name=sb-threads]', 'threads', 'SBThreads'), xLoad = lazy('meta[name=sb-xpost]', 'xpost', 'SBXP'), lbLoad = lazy('meta[name=sb-lookbook]', 'lookbook', 'SBLB');
+// SNS 탭 (주인 10/26): 상자는 sns.js, 화면 파일은 그대로
+const xbLoad = lazy('meta[name=sb-x]', 'x', 'SBX'), snLoad = lazy('meta[name=sb-sns]', 'sns', 'SBSns');
+const mount = (L, b) => L().then(T => T.view(b, {el, btn, api, toast, S, exec, uploadAll}), () => toast(MSG.net));
+function vSns() {
+  const b = el('div', {});
+  snLoad().then(N => N.view(b, R.sub, {el, mount, NAV, S, L: {threads: thLoad, x: [xbLoad, xLoad], lookbook: lbLoad}}), () => toast(MSG.net));
+  const go = i => ((i.primary || {}).goto || '').replace('#/blog/', '#/sns/');
+  return [seg([['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스']].map(([k, l]) => [k, l, S.todo.filter(i => go(i) === '#/sns/' + k).length]), '#/sns/'), b];
+}
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {
   let E;
@@ -984,15 +1001,12 @@ async function trendGo(t, x, e) {
 }
 function vBlog() {
   const key = R.sub, b = S.blogs[key];
-  const out = [el('div', {class: 'seg', role: 'group'}, BLOGS.map(([k, l]) => { const n = todoN(k);
-    return btn('', [l, n ? el('span', {class: 'cp hot', 'aria-label': `할 일 ${n}개`}, n) : null], () => { location.hash = '#/blog/' + k; }, {'aria-pressed': k === key ? 'true' : 'false'}); }))];
+  const out = [seg(BLOGS.map(([k, l]) => [k, l, todoN(k)]), '#/blog/')];
   if (key === 'pics') return out.concat(vPics());
   if (key === 'search') return out.concat(vSearch());
   if (key === 'trial') return out.concat(vTrial());
   if (key === 'ptrial') return out.concat(vPT());
   if (key === 'sched') return out.concat(vSC());
-  const L = {threads: thLoad, x: xLoad, lookbook: lbLoad}[key];
-  if (L) { const b = el('div', {}); L().then(T => T.view(b, {el, btn, api, toast, S, exec, uploadAll}), () => toast(MSG.net)); return out.concat(b); }
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
@@ -1000,14 +1014,11 @@ function vBlog() {
   const more = acts.filter(a => !idea.includes(a) && a !== write && a !== seed);
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
-  if (S.sched && S.sched.total) out.push(el('a', {class: 'bn', href: '#/blog/sched'}, `예약 일정 보기 · ${S.sched.total}편 →`));
-  if (S.pics) out.push(el('a', {class: 'bn', href: '#/blog/pics'}, '링크에서 사진 뽑기 →'));
-  out.push(el('a', {class: 'bn', href: '#/blog/threads'}, '스레드·인스타 →'), el('a', {class: 'bn', href: '#/blog/x'}, 'X(트위터) →'), el('a', {class: 'bn', href: '#/blog/lookbook'}, (S.lookbook || {}).entry || '룩북 릴스 →'));
-  if (S.photo_trial && key === 'issue') out.push(el('a', {class: 'bn', href: '#/blog/trial'}, '사진 테스트 →'));
-  if (key === 'issue' && S.ptrial) out.push(el('a', {class: 'bn', href: '#/blog/ptrial'}, `제품 테스트 ${S.ptrial.posts.length}편 →`));
-  const sr = S.search;
-  if (sr && sr.days.length) out.push(el('a', {class: 'bn', href: '#/blog/search'}, sr.left ? `구글 검색 등록 ${sr.left}개 →` : '구글 검색 등록 →'));
-  const mt = S.todo.filter(i => mineT(i, key));  // 탭 옆 숫자 = 이 블로그 할 일 (주인 10/23 — 숫자만 있고 안 보였음)
+  // 도구는 한 칸에 모아 글 아래로
+  const sr = S.search, tools = [S.sched && S.sched.total && {href: '#/blog/sched', t: `예약 일정 보기 · ${S.sched.total}편`}, S.pics && {href: '#/blog/pics', t: '링크에서 사진 뽑기'},
+    S.photo_trial && key === 'issue' && {href: '#/blog/trial', t: '사진 테스트'}, key === 'issue' && S.ptrial && {href: '#/blog/ptrial', t: `제품 테스트 ${S.ptrial.posts.length}편`},
+    sr && sr.days.length && {href: '#/blog/search', t: sr.left ? `구글 검색 등록 · ${sr.left}개` : '구글 검색 등록'}].filter(Boolean);
+  const mt = S.todo.filter(i => mineT(i, key) && !b.waiting.some(w => w.iid === i.iid));  // 기다리는 글과 같은 카드는 한 번만
   if (mt.length) out.push(el('p', {class: 'h3'}, `이 블로그 할 일 ${mt.length}`), ...mt.map(i => item(i)));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
   const sc = b.schedule, want = sc ? 'blog.schedule' : 'blog.publish';
@@ -1022,6 +1033,7 @@ function vBlog() {
       sc.cancel_all ? btn('lnk mute', sc.cancel_all.label, e => exec(sc.cancel_all, {}, {btn: e.currentTarget})) : null));
     out.push(...sc.items.map(x => item(x, true)));
   }
+  if (tools.length) out.push(el('p', {class: 'h3'}, '도구'), el('div', {class: 'box', style: 'padding:0 14px'}, tools.map(x => el('a', {class: 'mr', href: x.href}, x.t))));
   if (b.trends && b.trends.items.length) out.push(...trendBox(b.trends));
   if (b.learn) out.push(...learnBox(b.learn));
   if (idea.length || (b.scan && b.scan.items.length)) {
