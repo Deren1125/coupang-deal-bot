@@ -724,6 +724,13 @@ class StateBuilder:
                 out[lrow["iid"]] = lrow
         except Exception as e:  # noqa: BLE001
             log.warning("lookbook todo failed: %s", type(e).__name__)
+        try:  # 데런픽 룩 인스타 연결 필요 (주인 10/26 — 연결 전 한 줄, 알림 없이 · 연결하면 저절로 빠짐)
+            from dealbot.growth import look_share
+
+            if (krow := look_share.todo_item(self.bot, now, goto, waiting=look_share.waiting_count(self.bot))) is not None:
+                out[krow["iid"]] = krow
+        except Exception as e:  # noqa: BLE001
+            log.warning("look todo failed: %s", type(e).__name__)
         from dealbot.dashboard import remote_login
 
         if (vrow := remote_login.item(self.bot.db, open_link)) is not None:  # 원격 로그인 화면이 열려 있음 (주인 10/23)
@@ -1000,17 +1007,26 @@ class StateBuilder:
     def sns(self) -> dict[str, Any]:
         bot = self.bot
         now = self._now()
-        rows = {"threads": bot.reporter._threads_row(now), "instagram": bot.reporter._instagram_row(now)}
+        rows = {"threads": bot.reporter._threads_row(now), "instagram": bot.reporter._instagram_row(now),
+                "instagram_look": bot.reporter._instagram_row(now, "look")}  # 데런픽 룩 @derenpick.look (주인 10/26)
         out: dict[str, Any] = {}
         for name, r in rows.items():
             state = {"ok": "ok", "unlinked": "broken", "noapp": "off", "off": "off"}.get(r.get("state"), "off")
             text = {"ok": "연결됨", "broken": "연결 끊김", "off": "꺼짐"}[state]
+            first = name == "instagram_look" and r.get("state") == "unlinked" and not r.get("username")
+            if first:  # 한 번도 연결한 적 없음 — '끊김'이 아니라 처음 연결할 차례
+                text = "아직 연결 안 됨 — 같은 메타 앱에 인스타 테스터로 넣은 뒤 눌러 주세요"
+            if state == "ok" and r.get("username") and name == "instagram_look":
+                text += f" · @{r['username']}"
             if state == "ok" and r.get("expires"):
                 text += f" · {r['expires']} 까지"
             if r.get("last_fail"):
                 state, text = ("expiring" if state == "ok" else state), text + " · 최근 실패 있음"
             out[name] = {"state": state, "text": text, "fix": "connect" if state in ("broken", "expiring") else None,
-                         "connect_url": f"/dashboard/connect/{name}"}
+                         "connect_url": f"/dashboard/connect/{name}",
+                         "fix_label": "데런픽 룩 연결" if first else "다시 연결"}
+            if name == "instagram_look":
+                continue  # 할 일은 '데런픽 룩 인스타 연결 필요' 한 줄 (look_todo) — 딜 계정 알림 줄은 건드리지 않음
             if state == "ok":  # 연결이 멀쩡하면 남아 있던 '연결 끊김'·'발행 실패' 할 일은 닫는다 (다시 연결한 뒤에도 남던 것)
                 cmd = "threadsauth" if name == "threads" else "instaauth"
                 try:
@@ -1030,7 +1046,7 @@ class StateBuilder:
         out["replies"] = [self._reply(r) for r in replies]
         # 토큰·코드 직접 넣기는 '다시 연결'(승인 화면)이 안 될 때의 예비 — 끊겼거나 곧 끝나는 쪽만, 이름을 붙여서
         acts: list[dict[str, Any]] = []
-        for name, label in (("threads", "스레드"), ("instagram", "인스타")):
+        for name, label in (("threads", "스레드"), ("instagram", "인스타"), ("instagram_look", "데런픽 룩")):
             if out[name]["state"] in ("broken", "expiring"):
                 acts += [act("sns.token", f"{label} 토큰 넣기", {"sns": name}, input="secret", placeholder=f"{label} 토큰 붙여넣기"),
                          act("sns.code", f"{label} 코드 넣기", {"sns": name}, input="secret", placeholder=f"{label} 승인 코드 붙여넣기")]
@@ -1408,4 +1424,4 @@ def _target_label(target: str) -> str:
         return f"{CHIPS[p[0]]} #{p[1]}"
     if target.startswith("blog-"):
         return BLOG_NAMES.get(target.split("-")[1], "")
-    return {"threads": "스레드", "instagram": "인스타"}.get(target, "")
+    return {"threads": "스레드", "instagram": "인스타", "instagram_look": "데런픽 룩 인스타"}.get(target, "")

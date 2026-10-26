@@ -559,7 +559,7 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         return {"name": None if name in (None, "", "all") else _str(name, 40)}
     if action in ("sns.token", "sns.code"):
         sns = g("sns")
-        if sns not in ("threads", "instagram"):
+        if sns not in ("threads", "instagram", "instagram_look"):
             raise ActionError("bad_args")
         return {"sns": sns, ("token" if action == "sns.token" else "code"): _str(g("token" if action == "sns.token" else "code"),
                                                                               SECRET_MAX)}
@@ -1472,13 +1472,15 @@ class ActionDesk:
                 return "bad_args", TEXTS["bad_args"]
             bot.request_run(name)
             return "run", TEXTS["run"]
-        if action == "sns.token":
-            fn = bot.threads_submit_token if args["sns"] == "threads" else bot.instagram_submit_token
-            reply = plain(await fn(args["token"]))
-            return ("connected" if reply.startswith("✅") else "failed"), reply
-        if action == "sns.code":
-            fn = bot.threads_submit_code if args["sns"] == "threads" else bot.instagram_submit_code
-            reply = plain(await fn(args["code"]))
+        if action in ("sns.token", "sns.code"):
+            field = "token" if action == "sns.token" else "code"
+            if args["sns"] == "threads":
+                fn = bot.threads_submit_token if field == "token" else bot.threads_submit_code
+                reply = plain(await fn(args[field]))
+            else:  # 인스타: instagram = 데미얌의 쇼핑일기 · instagram_look = 데런픽 룩 (주인 10/26)
+                fn = bot.instagram_submit_token if field == "token" else bot.instagram_submit_code
+                acct = "look" if args["sns"] == "instagram_look" else "main"
+                reply = plain(await (fn(args[field], account=acct) if acct != "main" else fn(args[field])))
             return ("connected" if reply.startswith("✅") else "failed"), reply
         if action == "sns.test":
             fn = bot.threads_test if args["sns"] == "threads" else bot.instagram_test

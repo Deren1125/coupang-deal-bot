@@ -507,6 +507,11 @@ instagram:
     days: [tue, fri]
     window: "19:00-20:00"                 # TOP5 캐러셀과 1시간 넘게 띄워서 고름
     min_slides: 2
+  look:                                   # 두 번째 인스타 '데런픽 룩' @derenpick.look (주인 10/26) — 데런픽 패션 글 캐러셀 (룩북 릴스는 손으로)
+    enabled: true                         # 연결은 대시보드 연결 탭 '데런픽 룩 연결' (같은 메타 앱에 인스타 테스터로 넣은 뒤). 연결 전엔 기다리기만
+    username: derenpick.look
+    per_day: 2                            # 하루 2편까지, 3시간 넘게 띄워서 (instagram.hours 안)
+    min_gap_hours: 3
 
 # 딜 카드 이미지 (1080×1350). 인스타그램만 (사진은 텔레그램 글과 같은 확인된 상품 사진만)
 card:

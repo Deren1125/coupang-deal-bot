@@ -1259,8 +1259,8 @@ function vConnect() {
     kAuth ? (KURL ? el('a', {class: 'sm ac', href: KURL, target: '_blank', rel: 'noopener noreferrer', onclick: () => { KSTEP = true; setTimeout(render, 300); }}, '카카오 열기 ↗')
       : btn('sm ac', kAuth.label, e => { KSTEP = true; exec(kAuth, {}, {btn: e.currentTarget, iid: 'conn-kakao'}); })) : null, k.state === 'down'),
   kConn && KSTEP ? panel(kKid, kConn, pk(kKid.iid, kConn), {fixed: true}) : null));
-  const sns = S.sns, conn = (name, x) => row(name, x.text, x.fix ? el('a', {class: 'sm ac', href: x.connect_url}, '다시 연결') : null, x.state === 'broken');
-  out.push(...sec('인스타 · 스레드', sns.actions, conn('인스타그램', sns.instagram), conn('스레드', sns.threads),
+  const sns = S.sns, conn = (name, x, opt) => x && !(opt && x.state === 'off') ? row(name, x.text, x.fix ? el('a', {class: 'sm ac', href: x.connect_url}, x.fix_label || '다시 연결') : null, x.state === 'broken') : null;
+  out.push(...sec('인스타 · 스레드', sns.actions, conn('인스타그램', sns.instagram), conn('데런픽 룩 인스타', sns.instagram_look, 1), conn('스레드', sns.threads),
     sns.invites.length ? fold(`초대 링크 ${sns.invites.length}개`, () => listSheet('초대 링크', sns.invites.map(v => el('div', {class: 'box'},
       el('p', {class: 'q'}, v.label), v.where ? el('p', {class: 'note'}, v.where) : null, el('div', {class: 'kv'}, el('code', {text: v.url}), btn('sm', '복사', () => copy(v.url))))))) : null));
   // 네이버 로그인 상태·원격 로그인은 '로그인 관리' — 블로그별 로그인 확인은 봇 상태 더보기

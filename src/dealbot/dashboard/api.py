@@ -23,7 +23,7 @@
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
-  GET  /dashboard/connect/<threads|instagram>   스레드·인스타 다시 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
+  GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
   GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
@@ -580,9 +580,15 @@ class DashApi:
     async def connect(self, query: dict[str, str], headers: dict[str, str]) -> Any:
         """스레드·인스타 다시 연결: 같은 사이트에서 연 것만 (다른 사이트 링크로 주인 브라우저에서 OAuth 를 시작하지 못하게)."""
         platform = query.get("path", "")
-        if (headers.get("sec-fetch-site") or "").strip().lower() not in ("", "same-origin") or platform not in ("threads", "instagram"):
+        if (headers.get("sec-fetch-site") or "").strip().lower() not in ("", "same-origin") \
+                or platform not in ("threads", "instagram", "instagram_look"):
             return 403, "다른 곳에서 연 링크는 받지 않아요", "text/plain; charset=utf-8", {}
-        url = await (self.bot.threads_auth_link() if platform == "threads" else self.bot.instagram_auth_link())
+        if platform == "threads":
+            url = await self.bot.threads_auth_link()
+        elif platform == "instagram_look":  # '데런픽 룩 연결' (주인 10/26) — 같은 승인 화면, state 에 계정 표시
+            url = await self.bot.instagram_auth_link("look")
+        else:
+            url = await self.bot.instagram_auth_link()
         caller = self.caller(headers)[0]
         self.audit(session8=caller.session, client8=caller.client8, action="connect", target=platform, args={},
                    code="redirect" if url else "failed", action_id=None)  # 주소(state 포함)는 남기지 않는다

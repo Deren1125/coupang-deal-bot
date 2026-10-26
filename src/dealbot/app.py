@@ -461,6 +461,8 @@ class DealBot:
             refresh_before_days=settings.instagram.refresh_before_days,
             style=settings.instagram.style,
         )
+        # 두 번째 인스타 '데런픽 룩' @derenpick.look (주인 10/26) — 같은 앱·같은 콜백, 토큰만 따로 (연결 전엔 None 토큰 → 대기열이 기다림)
+        self.instagram_look = self.instagram.sibling("look", enabled=settings.instagram.enabled and settings.instagram.look.enabled)
         self.card: DealCard | None = None
         if settings.card.enabled:
             try:
@@ -3880,7 +3882,7 @@ class DealBot:
         # 주인 10/18: 연결 결과는 대시보드 '연결' 에 (다음에 화면을 열 때 한 번 '스레드 연결됐어요'). 글자는 남기지 않고 결과만
         plain = re.sub(r"<[^>]+>", "", text or "")
         ok = plain.lstrip().startswith("✅")
-        who = "인스타" if "인스타" in plain else "스레드" if "스레드" in plain else "SNS"
+        who = "데런픽 룩 인스타" if "데런픽 룩" in plain else "인스타" if "인스타" in plain else "스레드" if "스레드" in plain else "SNS"
         self.db.kv_set("dash:oauth_note", json.dumps({"at": time.time(), "ok": ok,
                                                      "text": f"{who} 연결됐어요" if ok else f"{who} 연결이 안 됐어요 — 다시 연결해 주세요"},
                                                     ensure_ascii=False))
@@ -3901,16 +3903,29 @@ class DealBot:
         self.db.kv_set(KV_OAUTH_STATE_AT, to_iso(utcnow()))
         return authorize_url(sec.threads_app_id or "", sec.threads_redirect_uri, state=state)
 
-    async def instagram_auth_link(self) -> str | None:
-        """대시보드 '다시 연결' (인스타): 승인 화면 주소 하나. 앱 설정이 없으면 None."""
+    def ig_publisher(self, account: str = "main") -> InstagramPublisher:
+        """인스타 계정별 게시기 (main = 데미얌의 쇼핑일기 · look = 데런픽 룩)."""
+        return self.instagram_look if account == "look" else self.instagram
+
+    def _ig_new_state(self, account: str = "main") -> str:
+        """승인 화면 state 를 새로 만들어 그 계정 칸에 둔다 (main 은 예전 kv 이름 그대로)."""
+        from dealbot.publisher.instagram import state_for
+
+        state = state_for(account, pysecrets.token_urlsafe(12))
+        suffix = "" if account == "main" else f"_{account}"
+        self.db.kv_set(KV_IG_OAUTH_STATE + suffix, state)
+        self.db.kv_set(KV_IG_OAUTH_STATE_AT + suffix, to_iso(utcnow()))
+        return state
+
+    async def instagram_auth_link(self, account: str = "main") -> str | None:
+        """대시보드 '다시 연결' (인스타) · '데런픽 룩 연결' (account='look'): 승인 화면 주소 하나. 앱 설정이 없으면 None.
+        승인 화면은 force_authentication — 지금 브라우저에 로그인된 인스타 계정이 아니라 연결할 계정으로 로그인하게."""
         from dealbot.publisher.instagram import authorize_url as ig_authorize_url
 
         sec = self.settings.secrets
         if not sec.has_instagram_app:
             return None
-        state = pysecrets.token_urlsafe(12)
-        self.db.kv_set(KV_IG_OAUTH_STATE, state)
-        self.db.kv_set(KV_IG_OAUTH_STATE_AT, to_iso(utcnow()))
+        state = self._ig_new_state(account)
         return ig_authorize_url(sec.instagram_app_id or "", sec.instagram_redirect_uri, state=state)
 
     async def instagram_auth_url(self) -> str:
@@ -3935,9 +3950,7 @@ class DealBot:
 
         app_id = sec.instagram_app_id or ""
         redirect = sec.instagram_redirect_uri
-        state = pysecrets.token_urlsafe(12)
-        self.db.kv_set(KV_IG_OAUTH_STATE, state)
-        self.db.kv_set(KV_IG_OAUTH_STATE_AT, to_iso(utcnow()))
+        state = self._ig_new_state("main")
         url = ig_authorize_url(app_id, redirect, state=state)
         basic_url = ig_authorize_url(app_id, redirect, state=state, scopes=IG_BASIC_SCOPES)
         register = (
@@ -3972,69 +3985,104 @@ class DealBot:
             + check
         )
 
-    def _ig_oauth_state_valid(self, state: str | None) -> bool:
-        expected = self.db.kv_get(KV_IG_OAUTH_STATE)
+    def _ig_oauth_state_valid(self, state: str | None, account: str = "main") -> bool:
+        suffix = "" if account == "main" else f"_{account}"
+        expected = self.db.kv_get(KV_IG_OAUTH_STATE + suffix)
         if not state or not expected or state != expected:
             return False
-        issued = from_iso(self.db.kv_get(KV_IG_OAUTH_STATE_AT))
+        issued = from_iso(self.db.kv_get(KV_IG_OAUTH_STATE_AT + suffix))
         return issued is not None and utcnow() - issued <= timedelta(hours=1)
 
     async def _instagram_callback(self, query: dict[str, str]) -> tuple[int, str]:
+        from dealbot.publisher.instagram import account_of_state
+
+        account = account_of_state(query.get("state"))
+        look = account == "look"
+        name = "데런픽 룩 인스타" if look else "인스타그램"
+        again = "대시보드 연결 탭의 '데런픽 룩 연결'을 다시 눌러" if look else "텔레그램에서 /instaauth 로 새 링크를 받아"
         err = query.get("error") or query.get("error_reason")
         if err:
             desc = query.get("error_description") or err
-            await self._notify_quiet(f"❌ 인스타그램 승인이 거부되었습니다: {html.escape(desc)}")
-            return 400, page("인스타그램 연결 실패", html.escape(desc))
+            await self._notify_quiet(f"❌ {name} 승인이 거부되었습니다: {html.escape(desc)}")
+            return 400, page(f"{name} 연결 실패", html.escape(desc))
         code = query.get("code")
         if not code:
-            return 400, page("인스타그램 연결", "code 가 없습니다. 텔레그램에서 /instaauth 링크를 다시 열어 주세요.")
-        if not self._ig_oauth_state_valid(query.get("state")):
+            return 400, page(f"{name} 연결", f"code 가 없습니다. {again} 다시 시도해 주세요.")
+        if not self._ig_oauth_state_valid(query.get("state"), account):
             return 400, page(
-                "인스타그램 연결 실패",
-                "요청 확인값(state)이 맞지 않거나 오래되었습니다. 텔레그램에서 /instaauth 로 새 링크를 받아 다시 시도해 주세요.",
+                f"{name} 연결 실패",
+                f"요청 확인값(state)이 맞지 않거나 오래되었습니다. {again} 다시 시도해 주세요.",
             )
-        self.db.kv_set(KV_IG_OAUTH_STATE, "")
-        msg = await self.instagram_submit_code(code)
+        self.db.kv_set(KV_IG_OAUTH_STATE + ("" if account == "main" else f"_{account}"), "")
+        msg = await self.instagram_submit_code(code, account=account)
         await self._notify_quiet(msg)
         ok = msg.startswith("✅")
         return 200 if ok else 400, page(
-            "인스타그램 연결 완료" if ok else "인스타그램 연결 실패",
-            html.escape(msg) + "<br>이 창을 닫고 텔레그램 관리자 챗을 확인하세요.",
+            f"{name} 연결 완료" if ok else f"{name} 연결 실패",
+            html.escape(msg) + ("<br>이 창을 닫고 대시보드로 돌아가세요." if look else "<br>이 창을 닫고 텔레그램 관리자 챗을 확인하세요."),
         )
 
-    async def instagram_submit_code(self, code: str) -> str:
+    def _ig_wrong_account(self, account: str, user_id: str, username: str) -> str | None:
+        """승인한 인스타 계정이 다른 칸(딜 계정 ↔ 데런픽 룩)에 이미 연결된 계정이면 받지 않는다 — 브라우저에 로그인돼 있던 계정으로
+        잘못 승인해서 패션 글이 딜 계정에 (또는 딜이 룩 계정에) 올라가는 일을 막는다. 문제면 안내 글."""
+        other = self.ig_publisher("main" if account == "look" else "look")
+        tok = other.stored_token()
+        if tok is not None and user_id and tok.user_id == user_id:
+            here = "데런픽 룩" if account == "look" else "데미얌의 쇼핑일기"
+            return (f"❌ @{username or '?'} 는 이미 '{other.label}' 계정으로 연결돼 있어요. '{here}' 칸에는 연결하지 않았어요 — "
+                    f"인스타그램에서 로그아웃한 뒤 {'@' + self.settings.instagram.look.username if account == 'look' else '@oneul_hot_deal'} "
+                    "로 로그인해서 다시 눌러 주세요.")
+        return None
+
+    def _ig_connected(self, account: str, token: Any, username: str, *, esc: bool = False) -> str:
+        """토큰 저장 + 끊김 할 일 닫기 + 기록. 완료 글 (esc: 글 속 아이디를 HTML 로 감쌈)."""
+        pub = self.ig_publisher(account)
+        pub.save_token(token, username)
+        shown = html.escape(username) if esc else username
+        if account == "main":
+            self.notifier.resolve("sns:instaauth", "sns_fail:instaauth:")  # 다시 연결됨 — 끊김·실패 할 일은 닫는다
+        self.db.log_event("INFO", pub.keys.platform, f"authorized as {username}")
+        expires = token.expires_at.date().isoformat() if token.expires_at else "-"
+        if account == "look":
+            want = self.settings.instagram.look.username.lstrip("@").lower()
+            note = "" if not want or username.lower() == want else f" — 설정의 아이디는 @{want} 예요, 맞는 계정인지 봐 주세요"
+            return f"✅ 데런픽 룩 인스타 연결 완료: @{shown} (토큰 만료 {expires}, 자동 갱신됨){note}"
+        return f"✅ 인스타그램 연결 완료: @{shown} (토큰 만료 {expires}, 자동 갱신됨)"
+
+    async def instagram_submit_code(self, code: str, account: str = "main") -> str:
         if not self.settings.secrets.has_instagram_app:
             return "INSTAGRAM_APP_ID / INSTAGRAM_APP_SECRET 이 필요합니다."
+        pub = self.ig_publisher(account)
         try:
-            token = await self.instagram.client.exchange_code(code, self.settings.secrets.instagram_redirect_uri)
-            me = await self.instagram.client.me(token.access_token)
+            token = await pub.client.exchange_code(code, self.settings.secrets.instagram_redirect_uri)
+            me = await pub.client.me(token.access_token)
             username = str(me.get("username") or "")
-            self.instagram.save_token(token, username)
-            self.notifier.resolve("sns:instaauth", "sns_fail:instaauth:")  # 다시 연결됨 — 끊김·실패 할 일은 닫는다
-            expires = token.expires_at.date().isoformat() if token.expires_at else "-"
-            self.db.log_event("INFO", "instagram", f"authorized as {username}")
-            return f"✅ 인스타그램 연결 완료: @{username} (토큰 만료 {expires}, 자동 갱신됨)"
+            if wrong := self._ig_wrong_account(account, token.user_id, username):
+                self.db.log_event("WARNING", pub.keys.platform, f"authorize refused: @{username} is the other account")
+                return wrong
+            return self._ig_connected(account, token, username)
         except InstagramError as e:
-            self.db.log_event("WARNING", "instagram", f"authorize failed: {e}")
-            log.warning("instagram authorize failed: %s", e)
-            msg = f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 /instaauth 로 다시 받아 주세요."
+            self.db.log_event("WARNING", pub.keys.platform, f"authorize failed: {e}")
+            log.warning("instagram (%s) authorize failed: %s", account, e)
+            again = "대시보드 '데런픽 룩 연결'을 다시 눌러 주세요" if account == "look" else "/instaauth 로 다시 받아 주세요"
+            msg = f"❌ 실패: {e}\n code 는 한 번만 쓸 수 있으니 {again}."
             if _auth_blocked(e):
                 msg += _AUTH_BLOCKED_HINT.format(cmd="/instatoken", where="인스타그램 → API 설정 → 2. 액세스 토큰 생성")
             return msg
 
-    async def instagram_submit_token(self, token: str) -> str:
-        """/instatoken: 메타 개발자 화면에서 만든 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""
+    async def instagram_submit_token(self, token: str, account: str = "main") -> str:
+        """/instatoken · 대시보드 '토큰 넣기': 메타 개발자 화면에서 만든 토큰으로 연결 (승인 링크 로그인이 돌기만 할 때)."""
+        pub = self.ig_publisher(account)
         try:
-            tok = await self.instagram.client.from_user_token(token)
-            me = await self.instagram.client.me(tok.access_token)
+            tok = await pub.client.from_user_token(token)
+            me = await pub.client.me(tok.access_token)
         except InstagramError as e:
             return f"❌ 연결하지 못했어요: {html.escape(str(e))}\n토큰을 다시 만들어 보내 주세요 (테스터로 수락한 프로페셔널 계정으로 만든 토큰이어야 해요)."
         username = str(me.get("username") or "")
-        self.instagram.save_token(tok, username)
-        self.notifier.resolve("sns:instaauth", "sns_fail:instaauth:")  # 다시 연결됨 — 끊김·실패 할 일은 닫는다
-        self.db.log_event("INFO", "instagram", f"authorized by user token as {username}")
-        expires = tok.expires_at.date().isoformat() if tok.expires_at else "-"
-        return f"✅ 인스타그램 연결 완료: @{html.escape(username)} (토큰 만료 {expires}, 자동 갱신됨). 이제 /instatest 로 시험해 보세요."
+        if wrong := self._ig_wrong_account(account, tok.user_id, username):
+            return wrong
+        msg = self._ig_connected(account, tok, username, esc=True)
+        return msg + (". 이제 /instatest 로 시험해 보세요." if account == "main" else "")
 
     async def instagram_test(self, queue_id: int | None = None) -> str:
         """인스타그램에 실제로 올려 본다. 번호 없으면 샘플 딜, 있으면 채널에 올렸던 그 글."""
