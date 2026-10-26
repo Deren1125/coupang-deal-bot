@@ -14,3 +14,11 @@ GamjaFlower-Regular-KSX1001.ttf
     card_paper 가 Pretendard 로 그린다. LICENSE-GamjaFlower.txt
 
 파생본(Bodoni Moda 고정본, Gamja Flower 부분 글꼴)도 OFL 1.1 을 그대로 따른다 (예약 글꼴 이름 없음).
+
+DMSerifDisplay-400.ttf
+    DM Serif Display (c) Adobe / Google LLC — 데런픽 룩 카드 A 화보형의 'Get the Look' 머리글·가격 숫자 (media/look_styles). 원본 그대로.
+    LICENSE-DMSerifDisplay.txt
+
+Jost-500.ttf
+    Jost (c) The Jost Project Authors — 데런픽 룩 카드의 브랜드 'DEREN'S PICK'·B 코디 보드형 번호표 (media/look_styles). 원본 그대로.
+    LICENSE-Jost.txt
