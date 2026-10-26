@@ -460,6 +460,8 @@ class Database(SnsStoreMixin):
             ("owner_notices", (("links", "TEXT"),)),
             # 올린 인스타·스레드 글 주소 (주인 10/18 — 대시보드 딜 줄의 '인스타 ↗'·'스레드 ↗')
             ("ig_posts", (("permalink", "TEXT"),)),
+            # 글마다 인사이트 {reach, saved, shares, views, likes, comments, ...} (JSON) · 읽은 시각 (주인 10/26 — 2주 시험 숫자)
+            ("ig_posts", (("insights", "TEXT"), ("insights_at", "TEXT"))),
             ("threads_jobs", (("permalink", "TEXT"),)),
         )
         for table, columns in adds:
@@ -1360,6 +1362,33 @@ class Database(SnsStoreMixin):
     def ig_set_permalink(self, post_id: int, permalink: str) -> None:
         with self._lock:
             self._conn.execute("UPDATE ig_posts SET permalink = ? WHERE id = ?", (permalink[:500], post_id))
+
+    def ig_insight_targets(self, since: datetime, until: datetime) -> list[dict[str, Any]]:
+        """인사이트를 읽을 글: since~until 에 올린 진짜 글 (연습 글·글 id 없는 줄 뺌), 마지막으로 읽은 시각 오래된 것 먼저."""
+        rows = self._q("SELECT id, kind, media_id, posted_at, insights_at FROM ig_posts WHERE posted_at >= ? AND posted_at < ? "
+                       "AND dry_run = 0 AND media_id IS NOT NULL AND media_id != '' AND media_id != 'dry-run' "
+                       "ORDER BY COALESCE(insights_at, '') ASC, posted_at ASC", (to_iso(since), to_iso(until)))
+        return [{**dict(r), "posted_at": from_iso(r["posted_at"]), "insights_at": from_iso(r["insights_at"])} for r in rows]
+
+    def ig_set_insights(self, post_id: int, values: dict[str, Any], now: datetime | None = None) -> None:
+        with self._lock:
+            self._conn.execute("UPDATE ig_posts SET insights = ?, insights_at = ? WHERE id = ?",
+                               (json.dumps(values, ensure_ascii=False), to_iso(now or utcnow()), post_id))
+
+    def ig_recent_insights(self, since: datetime, *, look: bool | None = None) -> list[dict[str, Any]]:
+        """숫자를 읽은 글 (새 것 먼저). look: True = 데런픽 룩 글만 · False = 그 밖 (딜 계정) · None = 모두."""
+        rows = self._q("SELECT id, kind, posted_at, permalink, insights, insights_at FROM ig_posts WHERE posted_at >= ? "
+                       "AND insights IS NOT NULL ORDER BY posted_at DESC", (to_iso(since),))
+        out = []
+        for r in rows:
+            if look is not None and (r["kind"] == "look") != look:
+                continue
+            try:
+                vals = json.loads(r["insights"] or "{}")
+            except ValueError:
+                continue
+            out.append({**dict(r), "posted_at": from_iso(r["posted_at"]), "insights": vals if isinstance(vals, dict) else {}})
+        return out
 
     def ig_permalink_for(self, queue_id: int, since: datetime) -> str | None:
         """이 대기열 번호의 딜이 들어간 인스타 글 주소 (딜 하나짜리 글 먼저, 없으면 TOP5·릴스 묶음 글). 연습 글·주소 없는 글은 뺌."""

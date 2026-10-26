@@ -1104,3 +1104,24 @@ def test_page_design_details(db: Database, tmp_path: Path) -> None:
     assert _row(GoalRow("링크 기다리는 딜", 5, 3, "개", lower_is_better=True)).endswith(
         '<div class="bar over"><i style="width:100.0%"></i></div></div>')
     assert ".bar.over i{background:var(--orange)}" in CSS
+
+
+async def test_instagram_card_lists_per_post_numbers_for_the_two_week_test(db: Database, tmp_path: Path) -> None:
+    """주인 10/26 — 2주 시험: 통계 탭 인스타 카드에 글마다 도달·저장·공유 (데런픽 룩 글은 딜 계정 카드에 안 섞임)."""
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/me"):
+            return httpx.Response(200, json={"followers_count": 12, "media_count": 3})
+        return httpx.Response(200, json={"data": [{"name": "views", "total_value": {"value": 1}}]})
+
+    reel = db.ig_record_post("reel", media_id="R1", items=[], now=NOW - timedelta(days=2))
+    db.ig_set_permalink(reel, "https://www.instagram.com/reel/abc/")
+    db.ig_set_insights(reel, {"reach": 1234, "saved": 9, "shares": 2, "likes": 40, "comments": 1, "ig_reels_avg_watch_time": 6200}, NOW)
+    look = db.ig_record_post("look", media_id="L1", items=[], now=NOW - timedelta(days=1))
+    db.ig_set_insights(look, {"reach": 50}, NOW)
+    dash = make_dash(db, tmp_path, card_list=cards({"key": "instagram", "type": "instagram"}), instagram=_ig(db, handler))
+    assert await dash.refresh("instagram") == "refreshed"
+    groups = card_of(dash, "instagram").groups
+    assert len(groups) == 1 and [e.pill for e in groups[0].entries] == ["도달 1,234"]
+    e = groups[0].entries[0]
+    assert e.title.startswith("릴스 · ") and "저장 9 · 공유 2" in e.sub and "평균 시청 6.2초" in e.sub
+    assert e.url == "https://www.instagram.com/reel/abc/"

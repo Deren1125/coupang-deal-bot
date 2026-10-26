@@ -289,6 +289,13 @@ class InstagramClient:
             step="insights",
         )
 
+    async def media_insights(self, token: InstagramToken, media_id: str, metrics: str) -> dict[str, Any]:
+        """글 하나의 인사이트 (reach·saved·shares·views·likes·comments 등). 글 종류마다 되는 지표가 달라 부르는 쪽이 고른다."""
+        return await self._request(
+            "GET", f"{GRAPH_BASE}/{API_VERSION}/{media_id}/insights",
+            params={"metric": metrics, "access_token": token.access_token}, step="insights",
+        )
+
     async def permalink(self, token: InstagramToken, media_id: str) -> str | None:
         body = await self._request(
             "GET", f"{GRAPH_BASE}/{API_VERSION}/{media_id}", params={"fields": "permalink", "access_token": token.access_token}, step="permalink"

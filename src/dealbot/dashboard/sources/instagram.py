@@ -19,6 +19,8 @@ from dealbot.dashboard.model import (
     FetchResult,
     POST_DAYS,
     GoalRow,
+    ListEntry,
+    ListGroup,
     PostCount,
     Stat,
     post_count,
@@ -112,6 +114,33 @@ class InstagramSource(Source):
                 and (dry_ok or (not r.get("dry_run") and r["media_id"] != "dry-run"))]
         return post_count(days, today)
 
+    KIND_LABEL = {"single": "딜 하나", "top5": "TOP5", "reel": "릴스", "unit": "단가표", "blog": "데런픽 글", "look": "패션 글"}
+
+    def recent(self) -> list[ListGroup]:
+        """최근 2주 글마다 숫자 (주인 10/26 — 2주 시험, growth/ig_insights 가 하루 한 번 읽어 둔 것). 숫자가 없으면 목록 없음."""
+        try:
+            rows = [r for r in self.ctx.db.ig_recent_insights(self.ctx.day_start_utc(self.ctx.today() - timedelta(days=13)))
+                    if self.counts(r)][:10]
+        except Exception:  # noqa: BLE001 — 기록을 못 읽어도 카드는 그대로
+            return []
+        entries = []
+        for r in rows:
+            v = r["insights"]
+
+            def n(key: str, v: dict = v) -> str:
+                x = finite_number(v.get(key))
+                return f"{int(x):,}" if x is not None else "-"
+
+            sub = f"저장 {n('saved')} · 공유 {n('shares')} · 좋아요 {n('likes')} · 댓글 {n('comments')}"
+            if (w := finite_number(v.get("ig_reels_avg_watch_time"))) is not None:
+                sub += f" · 평균 시청 {w / 1000:.1f}초"
+            when = self.ctx.local_day(r["posted_at"]) if r.get("posted_at") else None
+            label = self.KIND_LABEL.get(str(r.get("kind")), str(r.get("kind") or "글"))
+            url = r.get("permalink") if str(r.get("permalink") or "").startswith("https://") else None
+            entries.append(ListEntry(f"{label} · {when:%m/%d}" if when else label, pill=f"도달 {n('reach')}", sub=sub,
+                                     url=url, url_label="글 열기 ↗" if url else ""))
+        return [ListGroup("글마다 숫자 · 최근 2주", f"{len(entries)}개 (하루 지난 글부터)", entries)] if entries else []
+
     def card(self, data: CardData) -> CardView:
         followers = self.stat_with_delta(data, "followers", "팔로워", "명")
         views = data.latest_value(f"views_{INSIGHT_DAYS}d")
@@ -127,7 +156,7 @@ class InstagramSource(Source):
         spark_metric = f"views_{INSIGHT_DAYS}d" if len(data.series(f"views_{INSIGHT_DAYS}d")) >= 2 else "followers"
         return self.view(
             data, stats=[followers, stat_views], spark=data.series(spark_metric),
-            spark_label="조회수" if spark_metric != "followers" else "팔로워", rows=rows, posted=self.posted(),
+            spark_label="조회수" if spark_metric != "followers" else "팔로워", rows=rows, posted=self.posted(), groups=self.recent(),
             summary={"audience_delta": d} if (d := data.today_delta("followers")) is not None else {},
         )
 

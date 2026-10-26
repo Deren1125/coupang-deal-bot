@@ -4371,6 +4371,10 @@ class DealBot:
         await run("weekly_top", lambda: weekly.weekly_top(self, now))
         if self._hourly("sns_zero", now):
             await run("sns_zero", lambda: growth_alerts.sns_zero_check(self, now))
+        if self.settings.instagram.enabled and self._hourly("ig_insights", now):  # 글마다 숫자 (주인 10/26 — 2주 시험)
+            from dealbot.growth import ig_insights
+
+            await run("ig_insights", lambda: ig_insights.collect(self, now))
         if slot_due(self.db, "sns_scope", "10:00-10:59", now, tz):
             mark_slot(self.db, "sns_scope", now, tz)
             await run("sns_scope", lambda: growth_alerts.scope_todo(self, now))
