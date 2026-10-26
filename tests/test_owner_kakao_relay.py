@@ -370,3 +370,34 @@ def test_channel_post_base_only_for_public_channels() -> None:
     assert channel_post_base("-1001234567890", "https://t.me/oneul_hotdeal") == "https://t.me/oneul_hotdeal"
     assert channel_post_base("-1001234567890", "https://t.me/+AbCdEf") is None
     assert channel_post_base(None) is None
+
+
+async def test_selfcheck_item_that_recovers_is_closed(bot: DealBot, settings: Settings, sent, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """10/26: 켤 때 '텔레그램: httpx.ReadError' 가 한 번 뜬 뒤 9시간 넘게 할 일에 남음 — 다시 점검해 괜찮으면 닫는다."""
+    from dealbot import scheduler
+
+    _healthy(settings)
+    closed: list[str] = []
+    monkeypatch.setattr(bot.notifier, "resolve", lambda *keys: closed.extend(keys))
+    await scheduler.selfcheck_alerts(bot, ["❌ 텔레그램: httpx.ReadError", "✅ 쿠팡 파트너스: 정상"])
+    assert "selfcheck:텔레그램" not in closed
+    await scheduler.selfcheck_alerts(bot, ["✅ 텔레그램: 연결됨", "✅ 쿠팡 파트너스: 정상"])
+    assert "selfcheck:텔레그램" in closed
+
+
+async def test_selfcheck_runs_once_more_after_a_failure(bot: DealBot, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """켤 때 ❌ 가 있으면 10분 뒤 한 번만 다시 점검한다 (잠깐의 네트워크 오류가 다음 재시작까지 남지 않게)."""
+    from dealbot import scheduler
+
+    seen: list[list[str]] = []
+
+    async def fake_check():
+        return [(True, "텔레그램: 연결됨")]
+
+    async def fake_alerts(_bot, lines):
+        seen.append(lines)
+
+    monkeypatch.setattr(bot, "self_check", fake_check)
+    monkeypatch.setattr(scheduler, "selfcheck_alerts", fake_alerts)
+    await scheduler._selfcheck_again(bot, delay=0)
+    assert seen == [["✅ 텔레그램: 연결됨"]]

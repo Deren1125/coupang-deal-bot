@@ -85,6 +85,11 @@ async def selfcheck_alerts(bot: DealBot, lines: list[str]) -> None:
     except ValueError:
         before = set()
     bot.db.kv_set(SELFCHECK_BAD_KV, json.dumps(bad, ensure_ascii=False))
+    now_bad = {item.split(":", 1)[0][:30] for item in bad}
+    checked = {line[2:].strip().split(":", 1)[0][:30] for line in lines if line[:1] in ("✅", "⚠")}
+    healed = ({item.split(":", 1)[0][:30] for item in before} | checked) - now_bad  # 지난번 ❌ 였거나 이번에 괜찮은 항목 (이미 닫힌 건 그대로)
+    if healed:  # 다시 점검해 보니 괜찮아진 항목은 할 일·알림을 닫는다 (10/26 '텔레그램: httpx.ReadError' 가 9시간 넘게 열려 있었음)
+        bot.notifier.resolve(*(f"selfcheck:{name}" for name in sorted(healed)))
     for item in bad:
         if item in before:
             continue
@@ -94,6 +99,19 @@ async def selfcheck_alerts(bot: DealBot, lines: list[str]) -> None:
             kakao_fit(f"⛔[멈춤] 딜봇 자기 점검 실패: {item[:80]}", "→ 텔레그램 핫딜봇 /status"),
             key=f"selfcheck:{name}", short=f"딜봇 점검 실패 {name}"[:48],
         )
+
+
+SELFCHECK_AGAIN_S = 600
+
+
+async def _selfcheck_again(bot: DealBot, delay: float = SELFCHECK_AGAIN_S) -> None:
+    """켤 때 ❌ 가 있었으면 10분 뒤 한 번만 다시 점검 — 잠깐의 네트워크 오류(ReadError 등)가 다음 재시작까지 남지 않게 (10/26)."""
+    await asyncio.sleep(delay)
+    try:
+        checks = await bot.self_check()
+        await selfcheck_alerts(bot, [("✅ " if ok else "⚠️ " if ok is None else "❌ ") + text for ok, text in checks])
+    except Exception as e:  # noqa: BLE001 — 다시 점검이 실패해도 봇은 그대로
+        log.warning("자기 점검 다시 하기 실패: %s", e)
 
 
 def write_running_version() -> None:
@@ -463,6 +481,8 @@ async def run_forever(bot: DealBot) -> None:
         for line in lines:
             log.info("self-check: %s", line)
         await selfcheck_alerts(bot, lines)
+        if any(line.startswith("❌") for line in lines):
+            asyncio.get_running_loop().create_task(_selfcheck_again(bot))
         domain_todo = getattr(bot, "domain_todo", None)
         if domain_todo is not None:
             await domain_todo()  # 내 도메인 DNS 가 이 서버를 안 가리키면 주인 할 일 (https.sh --domain 뒤)
