@@ -7,7 +7,9 @@
  "blog": null,
  "args": {
   "id": "lb-20261026-0712",
-  "url": "https://www.instagram.com/reel/DAbCdEfGhIj/"
+  "url": "https://www.instagram.com/reel/DAbCdEfGhIj/",
+  "music": true,
+  "ai_label": true
  },
  "target": "lookbook-lb-20261026-0712",
  "confirmed": false,

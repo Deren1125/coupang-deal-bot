@@ -1,8 +1,5 @@
-/* 룩북 릴스 화면 (주인 10/25 — 실제 지그재그 상품 → 얼굴 없는 AI 모델 영상 → 주인이 새 인스타 계정에 유행 음악을 붙여 올림).
-   SNS 탭 '룩북 릴스' 칸을 처음 열 때만 app.js 가 불러온다 (meta sb-lookbook). 값은 state.lookbook (lbview.py).
-   편마다: 주제·훅 · 쉬운 말 상태 · 영상 미리보기(서버가 Range 206 — 아이폰도 재생) · 표지 · 영상·표지 저장 · 캡션·링크 복사 · 룩 목록 ·
-   올리기 전 확인 · 올린 릴스 주소 → 올렸어요 · 버리기 · 다시 만들기. 인스타그램을 열거나 자동으로 올리지 않음. 라이브러리 없음.
-   사진 시험(10/26): 목록은 열 때만 /dashboard/api/lbtrial. */
+/* 룩북 릴스 화면 (주인 10/25). SNS 탭에서 처음 열 때만 불러옴. 값은 state.lookbook (lbview.py — 설명은 거기).
+   인스타그램을 열거나 자동으로 올리지 않음. 사진 시험 목록은 열 때만 /dashboard/api/lbtrial. */
 'use strict';
 (() => {
 const D = document, W = window;
@@ -80,20 +77,23 @@ function looks(it) {
     lk.link && !lk.dropped ? el('a', {href: lk.link, target: '_blank', rel: 'noopener noreferrer'}, (lk.mall || '상품') + ' ↗') : null));
 }
 
+// 올림 완료 체크 (10/26): need 칸을 안 누르면 저장 안 됨 (서버도 막음) · 누른 칸의 k 는 true 로 같이 보냄
 function checks(it, L) {
-  const {el} = H, c = CHK[it.id] || (CHK[it.id] = ls('lbchk:' + it.id) || {});
-  return [el('p', {class: 'h3'}, '올리기 전 확인'), L.checklist.map((t, i) => el('label', {class: 'lbc'},
-    el('input', {type: 'checkbox', checked: !!c[i], onchange: e => { c[i] = e.target.checked; ls('lbchk:' + it.id, c); }}), t))];
+  const {el} = H, c = CHK[it.id] || (CHK[it.id] = ls('lbck:' + it.id) || {});
+  return [el('p', {class: 'h3'}, '올리기 전 확인'), L.checklist.map((x, i) => el('label', {class: 'lbc'},
+    el('input', {type: 'checkbox', checked: !!c[i], onchange: e => { c[i] = e.target.checked; ls('lbck:' + it.id, c); }}), x.need ? x.t + ' · 필수' : x.t))];
 }
 
-function posted(it) {
+function posted(it, L) {
   const {el, btn} = H;
   const inp = el('input', {type: 'url', inputmode: 'url', autocomplete: 'off', placeholder: '올린 릴스 주소 붙여넣기 (instagram.com/reel/…)',
     'aria-label': '올린 릴스 주소', value: TYPED[it.id] || '', oninput: e => { TYPED[it.id] = e.target.value; }});
   const go = e => {
-    const u = (inp.value || '').trim();
+    const u = (inp.value || '').trim(), c = CHK[it.id] || {}, x = {url: u};
     if (!REEL.test(u)) return H.toast('인스타 릴스 주소를 넣어 주세요 (instagram.com/reel/…)');
-    send(it.posted_act, e.currentTarget, 'posted', '올렸어요로 표시했어요', {url: u});
+    const miss = L.checklist.filter((k, i) => { if (c[i] && k.k) x[k.k] = true; return k.need && !c[i]; });
+    if (miss.length) return H.toast('먼저 체크해 주세요: ' + miss.map(k => k.t.split(' (')[0]).join(' · '));
+    send(it.posted_act, e.currentTarget, 'posted', '올렸어요로 표시했어요', x);
   };
   return [el('p', {class: 'h3'}, '올린 뒤'), el('p', {class: 'note'}, '인스타 앱에서 릴스 → ⋯ → 링크 복사 → 여기 붙여넣기'), inp,
     el('div', {class: 'lbr'}, btn('pb', '올렸어요', go, {disabled: !it.posted_act || it.posted_act.disabled || null}))];
@@ -122,7 +122,7 @@ function card(it, L) {
       links ? btn('pb soft', '링크 복사', () => copy(links, '룩 링크를')) : null),
     el('details', {}, el('summary', {}, '캡션 보기'), el('div', {class: 'lbp'}, it.caption))] : null,
     it.looks.length ? [el('p', {class: 'h3'}, `룩 ${it.looks.filter(x => !x.dropped).length}벌`), looks(it)] : null,
-    ready ? [checks(it, L), posted(it)] : null,
+    ready ? [checks(it, L), posted(it, L)] : null,
     drop || redo ? el('div', {class: 'lbr'}, redo, drop) : null);
 }
 
