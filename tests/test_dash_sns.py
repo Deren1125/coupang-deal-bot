@@ -131,3 +131,13 @@ def test_sns_tab_routes_and_old_addresses_move() -> None:
     # 스레드·X 화면 파일은 그대로 (불러오기 이름·예전 주소 글자도 — X 봇·스레드 세션 시험이 본다)
     assert "lazy('meta[name=sb-threads]', 'threads', 'SBThreads')" in js and "lazy('meta[name=sb-x]', 'x', 'SBX')" in js
     assert "T.view(b, {el, btn, api, toast, S, exec, uploadAll})" in js
+
+
+def test_x_and_lookbook_screens_fit_the_sns_tab() -> None:
+    """SNS 탭 안에서는 머리 줄 '… · 블로그로' 가 없고, X 는 데런픽 초안함이 진행률·계획보다 위 (주인이 매일 쓰는 칸이 먼저)."""
+    xp = (STATIC / "xpost.js").read_text(encoding="utf-8")
+    lb = (STATIC / "lookbook.js").read_text(encoding="utf-8")
+    for text in (xp, lb):
+        assert "'블로그로'" not in text and "#/blog/issue" not in text
+    draw = xp[xp.index("B.replaceChildren(el('div', {class: 'xpw'}"):]
+    assert draw.index("card(`데런픽 초안함") < draw.index("progress(x), plan(x)") < draw.index("card('수익 계정 글감 카드'")

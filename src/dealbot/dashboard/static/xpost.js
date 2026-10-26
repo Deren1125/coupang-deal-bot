@@ -1,5 +1,5 @@
-/* X(트위터) 화면 (주인 10/25 — 'X 는 유료 구독만, API 는 안 써'). 블로그 탭 'X(트위터) →' 를 처음 열 때만 app.js 가 불러온다 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와는 다른 파일). 값은 state.x (xview.py).
-   진행률(주인이 주마다 넣는 숫자 x.stats) · 수익 계정 2주 계획(/dashboard/api/xplan — 열 때만) · 데런픽 초안함(Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 링크 답글 · 올렸어요 · 버리기 · 다시 쓰기) · 수익 계정 글감 카드.
+/* X(트위터) 화면 (주인 10/25 — 'X 는 유료 구독만, API 는 안 써'). SNS 탭 'X(트위터)' 칸을 처음 열 때만 app.js 가 불러와 '직접 올리는 글' 아래에 그린다 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와는 다른 파일). 값은 state.x (xview.py).
+   데런픽 초안함 맨 위(10/26 · Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 링크 답글 · 올렸어요 · 버리기 · 다시 쓰기) · 진행률(주인이 주마다 넣는 숫자 x.stats) · 수익 계정 2주 계획(/dashboard/api/xplan — 열 때만) · 수익 계정 글감 카드.
    'X에 올리기'는 X 글쓰기 화면을 여는 링크일 뿐 (주소는 state.x.intent) — 자동 게시·자동 좋아요·답글 없음. 라이브러리 없음. */
 'use strict';
 (() => {
@@ -168,15 +168,14 @@ function draw() {
   const hp = el('input', {value: hd.pick || '', placeholder: '데런픽 계정 (@ 없이)', 'aria-label': '데런픽 계정'});
   const hr = el('input', {value: hd.revenue || '', placeholder: '수익 계정 (@ 없이)', 'aria-label': '수익 계정'});
   B.replaceChildren(el('div', {class: 'xpw'},
-    el('div', {class: 'top'}, el('h2', {}, 'X(트위터)'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')),
     el('p', {class: 'note', style: 'margin:0'}, x.rules, names.length ? ' · ' + names.join(' · ') : ''),
-    progress(x), plan(x),
     card(`데런픽 초안함 ${live.length ? live.length + '개' : ''}`,
       note('고쳐서 복사하거나 ‘X에 올리기’로 X 앱을 연 뒤, 올렸으면 ‘올렸어요’를 눌러 주세요'),
       x.posted_line ? note(x.posted_line) : null,
       live.length ? live.map(d => draft(x, d)) : note(x.empty),
       done.length ? [el('p', {class: 'h3'}, '올린 글'), done.map(d => el('div', {class: 'xpd'}, el('p', {}, `#${d.pid} · ${d.title}`), el('div', {class: 'xpg'}, d.text),
         d.reply ? el('details', {}, el('summary', {}, '링크 답글'), reply(x, d)) : null))] : null),
+    progress(x), plan(x),
     card('수익 계정 글감 카드', note(x.idea_note),
       x.ideas.length ? x.ideas.map(c => el('div', {class: 'xpi'}, el('b', {}, c.title), c.facts.map(f => el('span', {}, f)), el('i', {}, c.prompt)))
         : note('이번 주 카드가 아직 없어요')),

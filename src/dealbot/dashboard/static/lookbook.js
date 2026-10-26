@@ -1,5 +1,5 @@
 /* 룩북 릴스 화면 (주인 10/25 — 실제 지그재그 상품 → 얼굴 없는 AI 모델 영상 → 주인이 새 인스타 계정에 유행 음악을 붙여 올림).
-   블로그 탭 '룩북 릴스 →' 를 처음 열 때만 app.js 가 불러온다 (meta sb-lookbook). 값은 state.lookbook (lbview.py).
+   SNS 탭 '룩북 릴스' 칸을 처음 열 때만 app.js 가 불러온다 (meta sb-lookbook). 값은 state.lookbook (lbview.py).
    편마다: 주제·훅 · 쉬운 말 상태 · 영상 미리보기(서버가 Range 206 — 아이폰도 재생) · 표지 · 영상·표지 저장 · 캡션·링크 복사 · 룩 목록 ·
    올리기 전 확인 · 올린 릴스 주소 → 올렸어요 · 버리기 · 다시 만들기. 인스타그램을 열거나 자동으로 올리지 않음. 라이브러리 없음.
    사진 시험(10/26): 목록은 열 때만 /dashboard/api/lbtrial. */
@@ -180,7 +180,6 @@ function draw() {
   const live = L.items.filter(it => { const l = loc(it.id); return !l || l.s === 'redo'; });
   const done = L.posted.concat(L.items.filter(it => (loc(it.id) || {}).s === 'posted'));
   B.replaceChildren(el('div', {class: 'lbw'},
-    el('div', {class: 'top'}, el('h2', {}, '룩북 릴스'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')),
     el('p', {class: 'note', style: 'margin:0'}, L.rules, L.instagram ? ` · 계정 ${L.instagram}` : ''),
     L.server ? el('p', {class: 'note', style: 'margin:0;color:var(--red)'}, L.server) : null,
     L.ready ? trial(L) : null,
