@@ -583,8 +583,10 @@ class StateBuilder:
             primary = goto("답글 보기", "#/i/sns-replies")
             more.append(dismiss)
         elif iid == "sns-status":
-            # 스레드 블로그 링크 댓글 실패 (주인 10/26 — Blog-Auto threads_api 가 두 번 실패): 그 글을 열어 본문의 답글 글자를 손으로 댓글
-            link = first.links[0]["url"] if first.kind == "threads_reply_fail" and first.links else None
+            # 스레드 블로그 링크 댓글 실패 (주인 10/26 — Blog-Auto threads_api 가 두 번 실패): 그 글을 열어 본문의 답글 글자를 손으로 댓글.
+            # 같은 칸의 딜봇 SNS 줄(sns_zero·sns_scope — sev todo 라 먼저 옴)이 함께 열려 있어도 그 줄의 주소로
+            rf = next((n for n in rows if n.kind == "threads_reply_fail" and n.links), None)
+            link = rf.links[0]["url"] if rf else None
             primary = open_link("스레드 글 열기", link) if link else goto("자세히", "#/connect")
             more.append(dismiss)
         elif iid.startswith("blog-"):

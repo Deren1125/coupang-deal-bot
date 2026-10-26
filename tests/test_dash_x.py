@@ -314,3 +314,24 @@ async def test_threads_reply_fail_todo_opens_the_threads_post(bot: DealBot, sett
     assert (it["kind"], it["primary"]["input"], it["primary"]["url"], it["primary"]["label"]) == ("threads_reply_fail", "open", link, "스레드 글 열기")
     assert "blog.naver.com/derenpick/224000000131" in it["detail"]["lines"][0] and not it["urgent"]
     assert [a["action"] for a in it["more"]] == ["todo.hide"]
+
+
+async def test_threads_reply_fail_link_survives_a_dealbot_sns_row_in_the_same_card(bot: DealBot, settings: Settings, tmp_path: Path) -> None:  # noqa: F811
+    """같은 sns-status 칸에 딜봇 줄(sns_zero — sev todo, 먼저 열림)이 남아 있어도 첫 단추는 '스레드 글 열기'.
+    Blog-Auto 는 threads_reply_fail 을 sev 'info'(DIGEST)로 보내서 정렬하면 딜봇 줄이 앞에 온다."""
+    from dealbot.notify import ingest
+
+    write_export(tmp_path / "blogauto.json")
+    blogauto_status(settings)
+    bot.router.open({"src": "dealbot", "key": "sns_zero", "kind": "sns_zero", "iid": "sns-status", "sev": "todo",  # type: ignore[union-attr]
+                     "title": "SNS 0개", "body": "오늘 SNS 글이 0개예요", "at": time.time() - 3600})
+    link = "https://www.threads.net/@derenpick/post/DAbc123xyz"
+    n = ingest.clean_open(dict(fixture("notice_open_links.json"), key="sns:threads_reply:131", kind="threads_reply_fail", iid="sns-status",
+                               urgent=False, sev="info", title="스레드 Pick #131 블로그 링크 댓글 실패", short="스레드 Pick #131 댓글 실패",
+                               body="댓글로 달아 주세요: 🔗 변우석 새 드라마 첫 촬영 현장 공개 / blog.naver.com/derenpick/224000000131",
+                               links=[{"label": "스레드 글", "url": link}]))
+    assert n is not None and n["sev"] == "info"
+    bot.router.open(dict(n, at=time.time()))  # type: ignore[union-attr]
+    it = {i["iid"]: i for i in (await state(bot))["todo"]}["sns-status"]
+    assert (it["primary"]["input"], it["primary"]["url"], it["primary"]["label"]) == ("open", link, "스레드 글 열기")
+    assert any("blog.naver.com/derenpick/224000000131" in ln for ln in it["detail"]["lines"])  # 붙여 넣을 글자도 같은 칸에
