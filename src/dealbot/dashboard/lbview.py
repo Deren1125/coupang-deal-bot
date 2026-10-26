@@ -4,7 +4,8 @@ state['lookbook'] = 블로그 탭 '룩북 릴스 →' 화면(static/lookbook.js)
 (blogauto._lookbook 로 걸러 둔 것).
 - 편마다: 주제·훅 · 쉬운 말 상태(서버 준비 중 / 사진 만드는 중 / 완성 / 상품과 달라 다시 / 실패 / 올렸어요) · 영상 미리보기와 표지
   (대시보드가 /dashboard/lookbook/<id>/video.mp4 · cover.jpg 로 내보냄 — api.py) · 캡션 복사 · 룩 목록(Look N · 상품 · 가격 · 링크) ·
-  올리기 전 확인(인스타 'AI 정보' 켜기 · 유행 음악 고르기 · 캡션 붙여넣기) · 올린 릴스 주소 → 다리 일 blog.lookbook_posted {id, url} ·
+  올리기 전 확인(필수: 앱에서 음악 붙임 · 'AI 정보' 켬 — 체크 없이는 저장 안 됨 / 캡션 붙여넣기 · 고정 댓글은 선택) ·
+  올린 릴스 주소 → 다리 일 blog.lookbook_posted {id, url, music, ai_label, (pin)} ·
   버리기(blog.lookbook_drop) · 다시 만들기(blog.lookbook_redo). 확인 창 없음 (서버에서 밖으로 나가는 것이 없음 — 올리기는 주인 손).
 - 사진 시험 (주인 10/26 '거울 셀카 양식 같은 걸 확인하려고 하는데, 예전처럼 대시보드에 사진 테스트 페이지'): Blog-Auto 가 최근 릴스의 같은 상품으로
   양식마다(거울 셀카 · 예전 양식) 만든 시험 사진. 첫 상태 값엔 세트 수(trial_n)·지금 양식만 (상태 104 KB 예산) — 사진 목록은
@@ -44,7 +45,14 @@ ABLY = {"queued": "에이블리 챌린지에 낼 차례예요", "put": "에이�
         "login": "에이블리 로그인이 필요해요 — 앱에서 직접 내 주세요", "failed": "에이블리 제출이 안 됐어요 — 앱에서 직접 내 주세요",
         "no_link": "에이블리 링크가 없어 챌린지엔 안 내요"}
 MALLS = {"zigzag": "지그재그", "ably": "에이블리"}
-CHECKLIST = ("인스타 'AI 정보' 켜기 (고급 설정 → AI 레이블)", "유행 음악 고르기", "캡션 붙여넣기")
+# 올리기 전 확인 = '올림 완료' 체크리스트 (주인 10/26 — 쇼츠 총괄 제작 기준 v1 M3·B7 · 결정 D3·D5). need: 체크해야 '올렸어요'가 저장됨
+# (actions.py 도 같은 키로 막음 — 무음 게시·AI 레이블 빠짐 방지). k: 체크하면 다리 일 args 에 true 로 실림 (Blog-Auto 가 올린 기록에 남김).
+CHECKLIST = (
+    {"t": "앱에서 음악 붙임 (인스타 앱 라이브러리 곡 — 음소거 알림이 오면 그 편만 바꾸기)", "k": "music", "need": True},
+    {"t": "인스타 'AI 정보' 켬 (고급 설정 → AI 레이블)", "k": "ai_label", "need": True},
+    {"t": "캡션 붙여넣기", "k": "", "need": False},
+    {"t": "고정 댓글 달기 (선택 · 올린 직후 권장)", "k": "pin", "need": False},
+)
 RULES = "AI 가상인물 영상이에요 — 올릴 때 인스타 'AI 정보'를 꼭 켜 주세요 · 캡션 첫 줄 #광고 는 지우지 마세요"
 DROPPABLE = ("new", "waiting_server", "submitted", "rendering", "ready", "failed", "failed_match", "expired")
 REDOABLE = ("ready", "failed", "failed_match")  # Blog-Auto lookbook_jobs.redo_all 이 받는 것 중 주인이 누를 만한 것
@@ -137,7 +145,7 @@ def build(lv: dict[str, Any] | None, tz: ZoneInfo, now: float, act: Callable[...
         "ready": lv is not None, "bridge_ok": bridge_ok, "enabled": bool(lv and lv["enabled"]), "server": server,
         "instagram": f"@{ig}" if ig else "", "items": items, "posted": posted, "ready_n": ready,
         "entry": f"룩북 릴스 · 완성 {ready}편 →" if ready else "룩북 릴스 →",
-        "checklist": list(CHECKLIST), "rules": RULES, "empty": empty,
+        "checklist": [dict(c) for c in CHECKLIST], "rules": RULES, "empty": empty,
         "trial_n": len(tr), "trial_ready": sum(x["status"] == "ready" for x in tr), "style": (lv or {}).get("style") or "",
         "trial_busy": sum(x["status"] in TRIAL_BUSY for x in tr), "trial_sig": sig, "trial_base": base_ok,
         "style_word": STYLE_WORDS.get((lv or {}).get("style") or "", ""), "trial_ok": bool(trial_ok and lv is not None),

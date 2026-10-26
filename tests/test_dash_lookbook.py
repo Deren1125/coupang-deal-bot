@@ -91,6 +91,23 @@ def test_actions_match_the_contract_fixture() -> None:
     assert "릴스 주소" in e.value.text
 
 
+def test_posted_needs_the_music_and_ai_label_checks() -> None:
+    """'올림 완료' 필수 체크 (주인 10/26 — 쇼츠 총괄 제작 기준 v1 P0-8 · M3·B7): 앱에서 음악 붙임 · AI 레이블 켬 — 체크 없이는 저장 안 됨.
+    고정 댓글(pin, D3)은 선택 — 체크하면 같이 실림. 화면 체크리스트도 같은 키 (need 둘 · 선택 칸)."""
+    url = fixture("action_lookbook_posted.json")["args"]["url"]
+    for args in ({}, {"music": True}, {"ai_label": True}, {"music": "true", "ai_label": 1}, {"music": True, "ai_label": False}):
+        with pytest.raises(ActionError) as e:
+            clean_args("blog.lookbook_posted", {"id": JID, "url": url, **args})
+        assert "음악" in e.value.text and "AI 정보" in e.value.text
+    ok = clean_args("blog.lookbook_posted", {"id": JID, "url": url, "music": True, "ai_label": True, "pin": True})
+    assert ok == {"id": JID, "url": url, "music": True, "ai_label": True, "pin": True}
+    assert "pin" not in clean_args("blog.lookbook_posted", {"id": JID, "url": url, "music": True, "ai_label": True, "pin": "yes"})
+    from dealbot.dashboard import lbview
+
+    need = [c["k"] for c in lbview.CHECKLIST if c["need"]]
+    assert need == ["music", "ai_label"] and any(c["k"] == "pin" and not c["need"] for c in lbview.CHECKLIST)
+
+
 def test_reel_url_is_checked_by_its_letters_only_and_normalized() -> None:
     good = {
         "https://www.instagram.com/reel/DAbCdEfGhIj/": "https://www.instagram.com/reel/DAbCdEfGhIj/",
@@ -117,7 +134,11 @@ async def test_posted_reaches_the_spool_like_the_contract_fixture(bot: DealBot, 
     write_export(export_path(tmp_path))
     blogauto_status(settings)
     want = fixture("action_lookbook_posted.json")
-    status, body = await act(bot, "blog.lookbook_posted", {"id": JID, "url": want["args"]["url"] + "?igsh=abc"}, session_headers(bot))
+    status, body = await act(bot, "blog.lookbook_posted", {"id": JID, "url": want["args"]["url"] + "?igsh=abc", "music": True},
+                             session_headers(bot))
+    assert status == 400 and "AI 정보" in body["text"]  # 필수 체크 하나라도 없으면 저장 안 됨
+    status, body = await act(bot, "blog.lookbook_posted", {"id": JID, "url": want["args"]["url"] + "?igsh=abc", "music": True,
+                                                           "ai_label": True}, session_headers(bot))
     assert status == 202, body  # 확인 창 없음 (서버에서 밖으로 나가는 것 없음 — 올리기는 주인 손)
     f = spool.read(spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new" / f"{body['id']}.json")
     assert set(f) == set(want)
@@ -193,7 +214,8 @@ async def test_state_has_cards_media_looks_checklist_and_actions(bot: DealBot, s
     lb = (await state(bot))["lookbook"]
     assert lb["ready"] and lb["bridge_ok"] and lb["enabled"] and lb["server"] == "" and lb["instagram"] == "@derenpick.look"
     assert lb["entry"] == "룩북 릴스 · 완성 1편 →" and lb["ready_n"] == 1
-    assert lb["checklist"] == ["인스타 'AI 정보' 켜기 (고급 설정 → AI 레이블)", "유행 음악 고르기", "캡션 붙여넣기"]
+    assert [(c["k"], c["need"]) for c in lb["checklist"]] == [("music", True), ("ai_label", True), ("", False), ("pin", False)]
+    assert "음악" in lb["checklist"][0]["t"] and "AI 정보" in lb["checklist"][1]["t"] and "선택" in lb["checklist"][3]["t"]
     assert "AI 정보" in lb["rules"] and "#광고" in lb["rules"]
     [it] = lb["items"]
     assert (it["id"], it["status"], it["word"], it["tone"]) == (JID, "ready", "완성", "ok")
@@ -341,7 +363,7 @@ def test_lookbook_js_lazy_load_budget_and_safety() -> None:
     js = (STATIC / "lookbook.js").read_text(encoding="utf-8")
     assert "http://" not in js and "https://" not in js and "eval(" not in js and "new Function" not in js and "innerHTML" not in js
     for word in ("영상 저장", "표지 저장", "캡션 복사", "링크 복사", "올렸어요", "버리기", "다시 만들기", "올리기 전 확인", "playsinline: true",
-                 "controls: true", "rel: 'noopener noreferrer'", "navigator.share", "W.SBLB", "L.checklist", "it.posted_act", "{url: u}",
+                 "controls: true", "rel: 'noopener noreferrer'", "navigator.share", "W.SBLB", "L.checklist", "it.posted_act", "{url: u}", "k.need && !c[i]", "x[k.k] = true", "' · 필수'",
                  "lk.link && !lk.dropped",  # 링크 복사는 뺀 룩(상품과 다름)을 빼고
                  # 사진 시험 (10/26): 열 때만 받기 · 상품 사진 | 거울 셀카 | 예전 양식 · 점수 · 단추 둘 · 비용 안내
                  "'/dashboard/api/lbtrial'", "if (!TOPEN", "'사진 시험'", "'상품 사진'", "거울 셀카", "예전 양식", "점수", "'시험 새로 만들기'",
