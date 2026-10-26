@@ -23,7 +23,7 @@ STATIC = webapp.STATIC_DIR
 
 def test_sns_js_is_lazy_local_and_safe() -> None:
     js = (STATIC / "sns.js").read_text(encoding="utf-8")
-    assert "'use strict'" in js and "W.SBSns = {view}" in js
+    assert "'use strict'" in js and "W.SBSns = {view, again}" in js
     assert "innerHTML" not in js and "eval(" not in js and "http://" not in js and "https://" not in js
     for word in ("자동 반응 · 승인함", "직접 올리는 글", ".snb>.top:first-child", ".snx>.top:first-child", ".snb label.tg", ".snb .tc>.pb"):
         assert word in js, word
@@ -39,46 +39,57 @@ def test_sns_js_is_lazy_local_and_safe() -> None:
 # 작은 가짜 DOM: 상자를 언제 다시 붙이는지만 본다
 SHIM = r"""
 class E {
-  constructor(t, a) { this.tag = t; this.a = a || {}; this.kids = []; this.ls = {}; }
+  constructor(t, a) { this.tag = t; this.a = a || {}; this.kids = []; }
   replaceChildren(...k) { this.kids = k; }
-  addEventListener(n, f) { (this.ls[n] = this.ls[n] || []).push(f); }
   append(...k) { this.kids.push(...k); }
 }
-const ids = {rf: new E('button')};
-global.location = {hash: '#/sns/x'};
+const ids = {};
 global.document = {getElementById: id => ids[id] || null, createElement: t => new E(t), head: {append: s => { ids[s.id] = s; }}};
 global.window = {};
 require(process.argv[1]);
-const N = window.SBSns, log = [];
-const mount = (L, b) => log.push(L + ':' + b.a.class);
-const h = (nav, S) => ({el: (t, a, ...k) => { const e = new E(t, a); e.kids = k; return e; }, mount, NAV: nav, S,
+const N = window.SBSns, log = [], FAIL = new Set();
+// 불러오기 실패 흉내: app.js mount 처럼 false 를 돌려줌 (그 화면 파일을 못 받았을 때)
+const mount = (L, b) => { log.push(L + ':' + b.a.class); if (FAIL.has(L)) { FAIL.delete(L); return Promise.resolve(false); } return Promise.resolve(); };
+const h = (nav, S, j) => ({el: (t, a, ...k) => { const e = new E(t, a); e.kids = k; return e; }, mount, NAV: nav, S, j,
   L: {threads: 'th', x: ['xb', 'xp'], lookbook: 'lb'}});
-const out = {};
-const b = new E('div');
-N.view(b, 'x', h(1, {}));                       // X 칸 처음: x.js + xpost.js
-out.first = log.splice(0);
-out.kids = b.kids.map(k => k.tag === 'p' ? k.kids[0] : k.a.class);
-N.view(b, 'x', h(1, {}));                       // 20초 새로고침: x.js 는 그대로 · xpost.js 만
-out.poll = log.splice(0);
-N.view(b, 'x', h(2, {}));                       // 칸을 다시 열면 (NAV) 둘 다
-out.nav = log.splice(0);
-ids.rf.ls.click.forEach(f => f());              // 위 '새로고침' 단추
-out.rf = log.splice(0);
-location.hash = '#/sns/threads';
-N.view(b, 'threads', h(3, {thpost: {a: 1}}));
-out.th = log.splice(0);
-N.view(b, 'threads', h(3, {thpost: {a: 1}}));   // 글 칸 값이 같으면 그대로
-out.thSame = log.splice(0);
-N.view(b, 'threads', h(3, {thpost: {a: 2}}));   // 올린 글·답글로 값이 바뀌면 다시
-out.thNew = log.splice(0);
-N.view(b, 'lookbook', h(4, {}));
-N.view(b, 'lookbook', h(4, {}));
-out.lb = log.splice(0);
-location.hash = '#/blog/issue';
-ids.rf.ls.click.forEach(f => f());              // 다른 탭의 새로고침은 상관없음
-out.away = log.splice(0);
-out.css = !!ids['sn-css'];
-console.log(JSON.stringify(out));
+const tick = () => new Promise(r => setTimeout(r, 0));
+const names = b => b.kids.map(k => k.tag === 'p' ? k.kids[0] + (/sng/.test(k.a.class) ? '^' : '') : k.a.class);
+(async () => {
+  const out = {};
+  const b = new E('div');
+  N.view(b, 'x', h(1, {}));                       // X 칸 처음: x.js + xpost.js
+  out.first = log.splice(0);
+  out.kids = names(b);
+  N.view(b, 'x', h(1, {}));                       // 20초 새로고침: x.js 는 그대로 · xpost.js 만
+  out.poll = log.splice(0);
+  N.view(b, 'x', h(2, {}));                       // 칸을 다시 열면 (NAV) 둘 다
+  out.nav = log.splice(0);
+  N.again();                                      // 새로고침 (위 단추 · 끌어서 · 돌아올 때 — app.js refresh)
+  out.rf = log.splice(0);
+  N.view(b, 'x', h(2, {}));                       // 그 뒤 새 상태로 그릴 때는 다시 안 붙임
+  out.rfAfter = log.splice(0);
+  N.view(b, 'threads', h(3, {thpost: {a: 1}}));
+  out.th = log.splice(0);
+  N.view(b, 'threads', h(3, {thpost: {a: 1}}));   // 글 칸 값이 같으면 그대로
+  out.thSame = log.splice(0);
+  N.view(b, 'threads', h(3, {thpost: {a: 2}}));   // 올린 글·답글로 값이 바뀌면 다시
+  out.thNew = log.splice(0);
+  N.again();                                      // 스레드 칸의 새로고침
+  out.thRf = log.splice(0);
+  N.view(b, 'lookbook', h(4, {}));
+  N.view(b, 'lookbook', h(4, {}));
+  out.lb = log.splice(0);
+  FAIL.add('xb');                                 // 약한 인터넷: x.js 를 한 번 못 받음
+  N.view(b, 'x', h(5, {})); await tick();
+  N.view(b, 'x', h(5, {})); await tick();         // 다음 그릴 때 다시 받음
+  N.view(b, 'x', h(5, {})); await tick();         // 받은 뒤엔 그대로
+  out.fail = log.splice(0);
+  N.view(b, 'x', h(6, {}, true));                 // 할 일 'X 숫자 넣기'(#/blog/x)로 옴
+  out.jumpKids = names(b);
+  log.splice(0);
+  out.css = !!ids['sn-css'] && /\.snx \.tq\{/.test(ids['sn-css'].textContent) && /\.snx \.tb\{/.test(ids['sn-css'].textContent);
+  console.log(JSON.stringify(out));
+})();
 """
 
 
@@ -90,13 +101,35 @@ def test_sns_boxes_remount_only_when_needed() -> None:
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
     assert got["first"] == ["xb:snx", "xp:snp"]
-    assert got["kids"] == ["자동 반응 · 승인함", "snx", "직접 올리는 글", "snp"]  # 자동 반응 먼저, 직접 올리는 글 아래
+    assert got["kids"] == ["자동 반응 · 승인함^", "snx", "직접 올리는 글", "snp"]  # 자동 반응 먼저, 직접 올리는 글 아래
     assert got["poll"] == ["xp:snp"]  # 고치던 X 댓글이 남게
     assert got["nav"] == ["xb:snx", "xp:snp"]
-    assert got["rf"] == ["xb:snx", "xp:snp"]
-    assert got["th"] == ["th:snb"] and got["thSame"] == [] and got["thNew"] == ["th:snb"]
+    assert got["rf"] == ["xb:snx", "xp:snp"] and got["rfAfter"] == ["xp:snp"]
+    assert got["th"] == ["th:snb"] and got["thSame"] == [] and got["thNew"] == ["th:snb"] and got["thRf"] == ["th:snb"]
     assert got["lb"] == ["lb:snl", "lb:snl"]
-    assert got["away"] == [] and got["css"] is True
+    # 못 받은 x.js 는 다음 그릴 때 다시 (예전엔 칸이 빈 채로 남음) · 받은 뒤엔 20초 새로고침에 그대로
+    assert got["fail"] == ["xb:snx", "xp:snp", "xb:snx", "xp:snp", "xp:snp"]
+    assert got["jumpKids"] == ["직접 올리는 글^", "snp", "자동 반응 · 승인함", "snx"]  # 숫자 넣는 칸이 위
+    assert got["css"] is True  # X 를 먼저 열어도 숫자 칸·알약 단추 모양 (threads.js 없이)
+
+
+def test_refresh_paths_all_reload_the_sns_box() -> None:
+    """위 '새로고침' 단추 · 끌어서 새로고침 · 앱으로 돌아올 때 모두 같은 길 (SBSns.again) — sns.js 가 단추에 따로 붙지 않는다."""
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    sn = (STATIC / "sns.js").read_text(encoding="utf-8")
+    assert "getElementById('rf')" not in sn and "addEventListener" not in sn
+    assert "const snAgain = () => R.tab === 'sns' && W.SBSns && W.SBSns.again();" in js
+    assert "function refresh() { if (R.tab === 'stats') loadStats(); snAgain(); return load(); }" in js
+    assert "$('rf').addEventListener('click', refresh)" in js and "refresh().then(" in _fn(js, "function ptr()")
+    assert "if (Date.now() - PICK > 120000) { snAgain(); load(); }" in js
+    # 화면 파일을 못 받으면 mount 가 false → sns.js 가 다음에 다시
+    assert "() => (toast(MSG.net), false));" in js
+    # 할 일 'X 숫자 넣기'(#/blog/x) 표시 · 칸 고르기 숫자는 모서리 동그라미 (#snt)
+    route = _fn(js, "function route()")
+    assert "const j = location.hash === '#/blog/x';" in route and "sub: p[1] || '', j}" in route
+    sns = _fn(js, "function vSns()")
+    assert "j: R.j" in sns and "{id: 'snt'}" in sns
+    assert "#snt button{position:relative;white-space:nowrap" in sn and "#snt .cp{position:absolute" in sn
 
 
 def _fn(js: str, head: str) -> str:
@@ -141,3 +174,6 @@ def test_x_and_lookbook_screens_fit_the_sns_tab() -> None:
         assert "'블로그로'" not in text and "#/blog/issue" not in text
     draw = xp[xp.index("B.replaceChildren(el('div', {class: 'xpw'}"):]
     assert draw.index("card(`데런픽 초안함") < draw.index("progress(x), plan(x)") < draw.index("card('수익 계정 글감 카드'")
+    # 할 일 'X 숫자 넣기'가 있는 동안은 숫자 넣는 진행률 칸이 맨 위 (넣으면 할 일이 빠지고 제자리)
+    assert "const st = (H.S.todo || []).some(i => i.iid === 'x-stats');" in xp
+    assert draw.index("st ? progress(x) : null") < draw.index("card(`데런픽 초안함") and "st ? null : progress(x), plan(x)" in draw

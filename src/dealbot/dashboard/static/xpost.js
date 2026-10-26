@@ -167,15 +167,16 @@ function draw() {
   const hd = x.handles || {}, names = [hd.pick ? `데런픽 @${hd.pick}` : '', hd.revenue ? `수익 @${hd.revenue}` : ''].filter(Boolean);
   const hp = el('input', {value: hd.pick || '', placeholder: '데런픽 계정 (@ 없이)', 'aria-label': '데런픽 계정'});
   const hr = el('input', {value: hd.revenue || '', placeholder: '수익 계정 (@ 없이)', 'aria-label': '수익 계정'});
+  const st = (H.S.todo || []).some(i => i.iid === 'x-stats');  // 할 일 'X 숫자 넣기'가 있으면 숫자 칸이 맨 위
   B.replaceChildren(el('div', {class: 'xpw'},
-    el('p', {class: 'note', style: 'margin:0'}, x.rules, names.length ? ' · ' + names.join(' · ') : ''),
+    el('p', {class: 'note', style: 'margin:0'}, x.rules, names.length ? ' · ' + names.join(' · ') : ''), st ? progress(x) : null,
     card(`데런픽 초안함 ${live.length ? live.length + '개' : ''}`,
       note('고쳐서 복사하거나 ‘X에 올리기’로 X 앱을 연 뒤, 올렸으면 ‘올렸어요’를 눌러 주세요'),
       x.posted_line ? note(x.posted_line) : null,
       live.length ? live.map(d => draft(x, d)) : note(x.empty),
       done.length ? [el('p', {class: 'h3'}, '올린 글'), done.map(d => el('div', {class: 'xpd'}, el('p', {}, `#${d.pid} · ${d.title}`), el('div', {class: 'xpg'}, d.text),
         d.reply ? el('details', {}, el('summary', {}, '링크 답글'), reply(x, d)) : null))] : null),
-    progress(x), plan(x),
+    st ? null : progress(x), plan(x),
     card('수익 계정 글감 카드', note(x.idea_note),
       x.ideas.length ? x.ideas.map(c => el('div', {class: 'xpi'}, el('b', {}, c.title), c.facts.map(f => el('span', {}, f)), el('i', {}, c.prompt)))
         : note('이번 주 카드가 아직 없어요')),

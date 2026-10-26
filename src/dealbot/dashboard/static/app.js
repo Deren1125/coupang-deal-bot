@@ -149,12 +149,13 @@ D.addEventListener('focusout', () => setTimeout(() => DIRTY && render(), 50));
 const MV = {'#/blog/threads': '#/sns/threads', '#/blog/x': '#/sns/x', '#/blog/lookbook': '#/sns/lookbook'};
 let NAV = 0;
 function route() {
+  const j = location.hash === '#/blog/x';  // 할 일 'X 숫자 넣기'
   if (MV[location.hash]) history.replaceState(null, '', MV[location.hash]);
   NAV++;
   const p = (location.hash || '#/todo').replace(/^#\/?/, '').split('/');
   if (p[0] === 'share') { SHR = p[1]; location.hash = '#/blog/hotdeal'; return; }
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
-  R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || ''};
+  R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || '', j};
   if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
   const L = SUBS[R.tab]; if (L) { if (!L.includes(R.sub)) R.sub = L.includes(LS.g(R.tab)) ? LS.g(R.tab) : L[0]; LS.s(R.tab, R.sub); }
   while (SH.length) closeTop();
@@ -877,12 +878,12 @@ const vSC = () => SC ? SC.view(S.sched, {el, btn, render, act, open: openItem, p
 const thLoad = lazy('meta[name=sb-threads]', 'threads', 'SBThreads'), xLoad = lazy('meta[name=sb-xpost]', 'xpost', 'SBXP'), lbLoad = lazy('meta[name=sb-lookbook]', 'lookbook', 'SBLB');
 // SNS 탭 (주인 10/26): 상자는 sns.js, 화면 파일은 그대로
 const xbLoad = lazy('meta[name=sb-x]', 'x', 'SBX'), snLoad = lazy('meta[name=sb-sns]', 'sns', 'SBSns');
-const mount = (L, b) => L().then(T => T.view(b, {el, btn, api, toast, S, exec, uploadAll}), () => toast(MSG.net));
+const mount = (L, b) => L().then(T => T.view(b, {el, btn, api, toast, S, exec, uploadAll}), () => (toast(MSG.net), false));
 function vSns() {
   const b = el('div', {});
-  snLoad().then(N => N.view(b, R.sub, {el, mount, NAV, S, L: {threads: thLoad, x: [xbLoad, xLoad], lookbook: lbLoad}}), () => toast(MSG.net));
+  snLoad().then(N => N.view(b, R.sub, {el, mount, NAV, S, j: R.j, L: {threads: thLoad, x: [xbLoad, xLoad], lookbook: lbLoad}}), () => toast(MSG.net));
   const go = i => ((i.primary || {}).goto || '').replace('#/blog/', '#/sns/');
-  return [seg([['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스']].map(([k, l]) => [k, l, S.todo.filter(i => go(i) === '#/sns/' + k).length]), '#/sns/'), b];
+  return [Object.assign(seg([['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스']].map(([k, l]) => [k, l, S.todo.filter(i => go(i) === '#/sns/' + k).length]), '#/sns/'), {id: 'snt'}), b];
 }
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {
@@ -1016,7 +1017,7 @@ function vBlog() {
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   // 도구는 한 칸에 모아 글 아래로
   const sr = S.search, tools = [S.sched && S.sched.total && {href: '#/blog/sched', t: `예약 일정 보기 · ${S.sched.total}편`}, S.pics && {href: '#/blog/pics', t: '링크에서 사진 뽑기'},
-    S.photo_trial && key === 'issue' && {href: '#/blog/trial', t: '사진 테스트'}, key === 'issue' && S.ptrial && {href: '#/blog/ptrial', t: `제품 테스트 ${S.ptrial.posts.length}편`},
+    S.photo_trial && key === 'issue' && {href: '#/blog/trial', t: '사진 테스트'}, key === 'issue' && S.ptrial && {href: '#/blog/ptrial', t: `제품 테스트 · ${S.ptrial.posts.length}편`},
     sr && sr.days.length && {href: '#/blog/search', t: sr.left ? `구글 검색 등록 · ${sr.left}개` : '구글 검색 등록'}].filter(Boolean);
   const mt = S.todo.filter(i => mineT(i, key) && !b.waiting.some(w => w.iid === i.iid));  // 기다리는 글과 같은 카드는 한 번만
   if (mt.length) out.push(el('p', {class: 'h3'}, `이 블로그 할 일 ${mt.length}`), ...mt.map(i => item(i)));
@@ -1300,7 +1301,9 @@ function ptr() {
     y0 = null;
   });
 }
-function refresh() { if (R.tab === 'stats') loadStats(); return load(); }
+// SNS 칸(스레드·X)은 스스로 서버에서 읽어 새 상태만으로는 안 바뀜 — 새로고침·돌아올 때 다시 받게
+const snAgain = () => R.tab === 'sns' && W.SBSns && W.SBSns.again();
+function refresh() { if (R.tab === 'stats') loadStats(); snAgain(); return load(); }
 function start() {
   try { S = JSON.parse($('boot').textContent); } catch (e) { S = null; }
   $('rf').addEventListener('click', refresh);
@@ -1308,7 +1311,7 @@ function start() {
   D.addEventListener('visibilitychange', () => {
     if (D.visibilityState !== 'visible') return;
     if (D.querySelector('[data-pm]')) toast('토스 링크를 복사했다면 "붙여넣기"를 눌러 주세요');
-    if (Date.now() - PICK > 120000) load();
+    if (Date.now() - PICK > 120000) { snAgain(); load(); }
   });
   // 20초마다 바뀐 것만 다시 그림
   setInterval(() => { const a = D.activeElement; if (D.visibilityState === 'visible' && !D.querySelector('.bd') && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) load(1); }, 20000);
