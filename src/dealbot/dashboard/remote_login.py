@@ -21,6 +21,7 @@ from urllib.parse import urlencode
 KV = "vnc_session"
 PORT = 6080
 SESSION_MIN = 25
+GRACE_S = 180  # 누른 뒤 화면이 뜰 때까지 (login.sh 는 서비스를 멈추고 띄워 1~2분) — 이 안에 한 번도 안 뜨면 못 뜬 것
 PREFIX = "/dashboard/vnc/"
 # Blog-Auto blogauto/remote_login.TARGETS 와 같은 이름·순서 (instagram = ig_lookup 인스타 검색 전용 계정 — deploy/ig-login.sh, 주인 10/26)
 TARGETS = {"finance": "아카이브 블로그(쇼핑커넥트도)", "issue": "Pick 블로그", "hotdeal": "핫딜 블로그", "toss": "토스 쉐어링크",
@@ -87,6 +88,13 @@ def refresh(db: Any, now: float | None = None, probe=listening) -> dict[str, Any
     return s
 
 
+def live(s: dict[str, Any] | None, now: float | None = None) -> bool:
+    """화면이 떠 있거나(seen) 아직 띄우는 중(GRACE_S 안) — 이때만 새 부탁을 막고 다른 단추를 흐린다.
+    한 번도 안 뜬 채 GRACE_S 가 지나면 못 뜬 것 (받은편지함을 늦게 읽음 · 6080 이 바쁨 · 스크립트 실패) — 다시 누를 수 있게.
+    (세션은 그대로 둬 늦게라도 뜨면 refresh 가 seen 으로 바꾸고 터널도 이어 줌)"""
+    return bool(s) and (bool(s.get("seen")) or (now or time.time()) - float(s["at"]) < GRACE_S)
+
+
 def port(db: Any) -> int | None:
     return PORT if session(db) else None
 
@@ -97,9 +105,9 @@ def url(s: dict[str, Any]) -> str:
 
 
 def item(db: Any, act_open: Any) -> dict[str, Any] | None:
-    """할 일 맨 위 한 줄 (세션이 살아 있고, 열렸던 화면이 아직 닫히지 않았을 때만)."""
+    """할 일 맨 위 한 줄 (세션이 살아 있고, 화면이 떠 있거나 아직 띄우는 중일 때만 — 못 뜬 화면에 죽은 링크를 25분 두지 않음)."""
     s = refresh(db)
-    if not s:
+    if not s or not live(s):
         return None
     left = max(1, int(SESSION_MIN - (time.time() - float(s["at"])) / 60))
     return {"iid": "sys-vnc", "src": "dealbot", "blog": "", "kind": "remote_login", "sev": "todo", "urgent": True,

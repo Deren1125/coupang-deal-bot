@@ -1507,8 +1507,12 @@ class ActionDesk:
             from dealbot.dashboard import remote_login
 
             s = remote_login.refresh(self.bot.db)
-            if s and s.get("target") == args["target"]:  # 같은 화면이 이미 열려 있음 — 로그인 화면을 거듭 띄우지 않는다 (주인 10/26)
-                return "done", "이미 원격 화면이 열려 있어요 — 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
+            if s and remote_login.live(s):  # 화면이 떠 있거나 띄우는 중 — 로그인 화면을 거듭 띄우지 않는다 (주인 10/26)
+                if s.get("target") == args["target"]:
+                    return "done", "이미 원격 화면이 열려 있어요 — 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
+                # 서버 화면은 한 번에 하나 (127.0.0.1:6080) — 다른 대상을 띄우면 열린 화면의 비밀번호가 바뀌어 들어갈 수 없게 됨
+                name = remote_login.TARGETS.get(s.get("target"), s.get("target"))
+                return "busy", f"지금 {name} 원격 화면이 열려 있어요 — 그 화면이 닫힌 뒤(로그인하면 저절로 닫혀요) 다시 눌러 주세요"
             remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"])
             return "done", "서버에 로그인 화면을 띄우는 중이에요 — 30초쯤 뒤 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
         if action == "login.qr":

@@ -349,6 +349,29 @@ async def test_qr_page_stays_open_until_the_login_wait_ends(tmp_path: Path) -> N
         site_gate.configure(None)
 
 
+async def test_an_older_qr_wait_does_not_close_a_newer_qr_page(tmp_path: Path) -> None:
+    """텔레그램 /naverlogin 을 연 뒤 대시보드 QR 로그인을 누르면 새 화면이 옛 화면을 닫고 이어받는다 — 옛 기다림이 끝나면서
+    새 화면까지 닫으면 주인이 찍은 QR 을 받을 화면이 없다."""
+    from dealbot import site_gate
+    from dealbot.browser.naver_connect import NaverConnectProvider
+    from dealbot.config import NaverConnectConfig
+
+    site_gate.configure(tmp_path / "site_gate.db")
+    try:
+        sess = _Session()
+        prov = NaverConnectProvider(sess, NaverConnectConfig())  # type: ignore[arg-type]
+        await prov.start_qr_login()
+        first = asyncio.create_task(prov.wait_login(timeout_seconds=0.2, poll_seconds=0.01))
+        await asyncio.sleep(0.05)
+        await prov.start_qr_login()  # 다른 쪽에서 새 QR
+        assert sess.pages[0].closed and not sess.pages[1].closed
+        assert not await first
+        assert not sess.pages[1].closed  # 옛 기다림은 새 화면을 두고 끝남
+        assert not await prov.wait_login(timeout_seconds=0, poll_seconds=0.01)
+        assert sess.pages[1].closed
+    finally:
+        site_gate.configure(None)
+
 # ---------------------------------------------------------------- 4) 칸 · 화면 파일
 async def test_logins_view_lists_every_login_with_buttons_only_for_remote_rows(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
     write_export(tmp_path / "blogauto.json")
@@ -385,6 +408,25 @@ def test_logins_view_without_the_new_field_still_shows_every_remote_target(bot: 
     assert "threads_api" not in r
 
 
+def test_stale_blog_auto_record_shows_logins_as_unknown_but_keeps_the_buttons(bot: DealBot, tmp_path: Path) -> None:
+    """Blog-Auto 가 멈춰 기록 파일이 오래되면 그때의 '로그인됨' 을 지금 상태처럼 보이지 않는다 — '모름 · N시간 전 것' (단추는 그대로)."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    write_export(tmp_path / "blogauto.json")
+    data = json.loads((tmp_path / "blogauto.json").read_text(encoding="utf-8"))
+    data["written_at"] = (datetime.now(ZoneInfo("Asia/Seoul")) - timedelta(hours=9)).isoformat(timespec="seconds")
+    (tmp_path / "blogauto.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    export = bot.dash_state._export()
+    assert export is not None and export.status != "ok" and export.v2.get("status", {}).get("logins")
+    r = rows_of(logins.view(bot))
+    for t in remote_login.TARGETS:
+        assert r[t]["state"] == "unknown" and "9시간 전 것" in r[t]["text"] and not r[t]["bad"], t
+        assert r[t]["button"]["action"] == "login.remote", t
+    assert "(그때 로그인 필요)" in r["issue"]["text"] and r["threads_api"]["state"] == "unknown"
+    write_export(tmp_path / "blogauto.json")  # 새 기록이면 그대로
+    assert rows_of(logins.view(bot))["issue"]["state"] == "needed"
+
 def test_open_remote_screen_turns_its_row_into_an_open_link(bot: DealBot, tmp_path: Path) -> None:
     write_export(tmp_path / "blogauto.json")
     s = remote_login.start(bot.db, lambda msg: None, "zigzag")
@@ -394,6 +436,39 @@ def test_open_remote_screen_turns_its_row_into_an_open_link(bot: DealBot, tmp_pa
     assert r["issue"]["button"]["disabled"] is True  # 서버 화면은 한 번에 하나
     assert v["vnc"]["target"] == "zigzag" and v["vnc"]["label"] == "지그재그" and v["vnc"]["url"].startswith("/dashboard/vnc/vnc.html?")
 
+
+async def test_a_screen_that_never_came_up_does_not_lock_the_remote_login(bot: DealBot, settings: Settings, tmp_path: Path,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    """서버가 화면을 못 띄웠으면 (받은편지함을 늦게 읽음 · 6080 이 바쁨 · 스크립트 실패) GRACE_S 뒤엔 다시 누를 수 있다 —
+    25분 동안 '이미 열려 있어요'·죽은 링크·흐린 단추로 막지 않는다. 다른 대상은 화면이 떠 있거나 띄우는 중이면 막는다 (비밀번호가 바뀌지 않게)."""
+    write_export(tmp_path / "blogauto.json")
+    blogauto_status(settings)
+    assert not remote_login.listening()  # 이 시험 환경엔 서버 화면이 없음 (= 못 뜬 화면)
+    assert (await act(bot, "login.remote", {"target": "ably"}))["code"] == "done"
+    other = await act(bot, "login.remote", {"target": "finance"})  # 띄우는 중 — 다른 대상은 기다림
+    assert other["code"] == "busy" and "에이블리" in other["text"]
+    assert remote_login.live(remote_login.session(bot.db))
+    assert any(i["iid"] == "sys-vnc" for i in bot.dash_state.items())
+    s = json.loads(bot.db.kv_get(remote_login.KV))
+    s["at"] -= remote_login.GRACE_S + 1  # 한 번도 안 뜬 채 시간이 지남
+    bot.db.kv_set(remote_login.KV, json.dumps(s))
+    assert not remote_login.live(remote_login.session(bot.db))
+    assert not any(i["iid"] == "sys-vnc" for i in bot.dash_state.items())  # 죽은 링크 줄을 두지 않음
+    v = logins.view(bot)
+    r = rows_of(v)
+    assert v["vnc"] is None and r["ably"]["button"]["action"] == "login.remote" and "disabled" not in r["issue"]["button"]
+    again = await act(bot, "login.remote", {"target": "ably"})
+    assert again["code"] == "done" and "이미" not in again["text"]
+    inbox = [json.loads(x) for x in (settings.data_dir / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [u["login_remote"]["target"] for u in inbox if "login_remote" in u] == ["ably", "ably"]  # finance 는 안 보냄
+    # 화면이 뜬 뒤(seen)엔 시간이 지나도 계속 막음
+    monkeypatch.setattr(remote_login.refresh, "__defaults__", (None, lambda: True))  # 서버 화면이 떠 있음
+    assert remote_login.refresh(bot.db)["seen"] is True
+    s = json.loads(bot.db.kv_get(remote_login.KV))
+    s["at"] -= remote_login.GRACE_S + 1
+    bot.db.kv_set(remote_login.KV, json.dumps(s))
+    assert (await act(bot, "login.remote", {"target": "instagram"}))["code"] == "busy"
+    assert rows_of(logins.view(bot))["issue"]["button"]["disabled"] is True
 
 def test_logins_js_is_local_safe_and_korean() -> None:
     js = (STATIC / "logins.js").read_text(encoding="utf-8")

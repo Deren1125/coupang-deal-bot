@@ -78,6 +78,7 @@ class NaverConnectProvider:
     async def wait_login(self, timeout_seconds: int = 120, poll_seconds: float = 3.0) -> bool:
         import asyncio
 
+        page = self._qr_page  # 이 기다림의 QR 화면 — 그사이 다른 쪽(텔레그램 /naverlogin · 대시보드)이 새 QR 을 열었으면 그건 닫지 않음
         try:
             waited = 0.0
             while waited < timeout_seconds:
@@ -87,7 +88,8 @@ class NaverConnectProvider:
                 waited += poll_seconds
             return await self.is_logged_in()
         finally:
-            await self.close_qr()
+            if self._qr_page is page:
+                await self.close_qr()
 
     # ------------------------------------------------------------ convert
     async def convert(self, url: str) -> str:

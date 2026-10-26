@@ -31,7 +31,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dealbot.dashboard import remote_login
-from dealbot.dashboard.model import safe_text
+from dealbot.dashboard.model import OK, safe_text
 
 log = logging.getLogger(__name__)
 
@@ -187,7 +187,8 @@ def _row(rid: str, label: str, state: str | None, text: str, *, where: str = "",
     return {"id": rid, "label": label, "state": state, "text": text, "where": where, "bad": state == "needed", "button": button}
 
 
-def _remote_button(target: str, vnc: dict[str, Any] | None) -> dict[str, Any]:
+def _remote_button(target: str, vnc: dict[str, Any] | None, now: float | None = None) -> dict[str, Any]:
+    vnc = vnc if remote_login.live(vnc, now) else None  # 못 뜬 화면(띄운 지 GRACE_S 지나도록 안 열림)은 없는 것으로 — 다시 누를 수 있게
     if vnc and vnc.get("target") == target:
         return {"url": remote_login.url(vnc), "label": "원격 화면 열기"}
     b: dict[str, Any] = {"action": "login.remote", "args": {"target": target}, "label": REMOTE_LABEL}
@@ -243,6 +244,18 @@ def _kakao_row(bot: Any, now: float) -> dict[str, Any]:
     return _row("kakao", label, state, text, where=where)
 
 
+def _stale(export: Any, now: float) -> str:
+    """기록 파일이 오래됐으면(STALE · 못 읽음) 그 안내 한 줄 — 새것이면 ''."""
+    if getattr(export, "status", OK) == OK:
+        return ""
+    wa = getattr(export, "written_at", None)
+    try:
+        h = max(1, int((now - wa.timestamp()) // 3600)) if wa is not None else None
+    except (AttributeError, TypeError, ValueError, OverflowError, OSError):
+        h = None
+    return f"블로그 프로그램 기록이 {h}시간 전 것" if h else "블로그 프로그램 기록이 오래됐어요"
+
+
 def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[str, Any]]:
     now = now or time.time()
     tz = ZoneInfo(bot.settings.app.timezone)
@@ -250,21 +263,27 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
         export = bot.dash_state._export() if getattr(bot, "dash_state", None) is not None else None
     got = (((getattr(export, "v2", None) or {}).get("status") or {}).get("logins")) or []
     by_id = {r["id"]: r for r in got}
+    stale = _stale(export, now) if got else ""
     vnc = remote_login.refresh(bot.db, now)
     out: list[dict[str, Any]] = []
+
+    def text_of(r: dict[str, Any]) -> tuple[str, str]:
+        """(상태, 한 줄) — 기록이 오래됐으면 '모름' (그때 상태만 덧붙임 · Blog-Auto 가 멈췄을 수 있어 지금 상태로 보이지 않게)."""
+        if stale:
+            return "unknown", f"모름 · {stale} (그때 {STATE_TEXT.get(r['state'], '모름')})"
+        return r["state"], _text(r["state"], r["note"], tz, now, checked=r["checked_at"], until=r["until"])
+
     for target, label in remote_login.TARGETS.items():  # 원격 로그인 대상은 기록이 없어도 늘 한 줄 (예전 Blog-Auto · 아직 안 씀)
         r = by_id.get(target)
         if r is None:
-            out.append(_row(target, label, "unknown", "모름 · 블로그 프로그램이 아직 상태를 안 보냈어요", button=_remote_button(target, vnc)))
+            out.append(_row(target, label, "unknown", "모름 · 블로그 프로그램이 아직 상태를 안 보냈어요", button=_remote_button(target, vnc, now)))
             continue
-        btn = _remote_button(r["target"], vnc) if r["target"] and r["state"] != "off" else None
-        out.append(_row(target, r["label"], r["state"], _text(r["state"], r["note"], tz, now, checked=r["checked_at"], until=r["until"]),
-                        where=r["where"], button=btn))
+        btn = _remote_button(r["target"], vnc, now) if r["target"] and r["state"] != "off" else None
+        out.append(_row(target, r["label"], *text_of(r), where=r["where"], button=btn))
     out.append(naver_row(bot, tz, now))
     for r in got:  # 블로그 프로그램의 읽기만 하는 줄 (스레드 API 토큰 …) — 단추 없음
         if r["id"] not in remote_login.TARGETS:
-            out.append(_row(r["id"], r["label"], r["state"], _text(r["state"], r["note"], tz, now, checked=r["checked_at"], until=r["until"]),
-                            where=r["where"]))
+            out.append(_row(r["id"], r["label"], *text_of(r), where=r["where"]))
     out.append(_row("threads_auto", "스레드·인스타·X 자동 활동 계정", None, "여기서는 상태를 안 봐요", where=THREADS_AUTO_WHERE))
     out.append(_sns_row(bot, tz, now))
     out.append(_kakao_row(bot, now))
@@ -285,6 +304,7 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
               for t, label in remote_login.TARGETS.items()]
     q = qr_open(bot.db, now)
     s = remote_login.session(bot.db, now)
+    s = s if remote_login.live(s, now) else None
     vnc = {"target": s["target"], "label": remote_login.TARGETS.get(s["target"], s["target"]), "url": remote_login.url(s),
            "left_min": max(1, int(remote_login.SESSION_MIN - (now - float(s["at"])) / 60))} if s else None
     return {"rows": rs, "need": sum(1 for r in rs if r["bad"]), "at": round(now, 1), "vnc": vnc,
