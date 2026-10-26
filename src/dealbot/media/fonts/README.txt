@@ -1,7 +1,7 @@
 인스타그램 '종이' 카드(media/card_paper.py, instagram.style: P)에 쓰는 글꼴. 모두 SIL Open Font License 1.1 —
 이미지에 넣어 쓰는 것·저장소에 함께 두는 것 모두 허용. 라이선스 원문은 같은 폴더의 LICENSE-*.txt.
 
-Pretendard-SemiBold.otf, Pretendard-Medium.otf
+Pretendard-SemiBold.otf, Pretendard-Medium.otf, Pretendard-ExtraBold.otf (ExtraBold 는 데런픽 룩 카드 제목 — media/card_look.py)
     Pretendard 1.3.9 (c) Kil Hyung-jin, Reserved Font Name 'Pretendard' — 원본 그대로 (고치지 않음). LICENSE-Pretendard.txt
 
 BodoniModa-Medium-opsz11.ttf
