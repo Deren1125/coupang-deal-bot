@@ -230,7 +230,7 @@ def _sns_row(bot: Any, tz: ZoneInfo, now: float) -> dict[str, Any]:
 
 
 def _kakao_row(bot: Any, now: float) -> dict[str, Any]:
-    label, where = "카톡 알림 토큰", "연결 탭 › 카톡 (예비) › 다시 연결"
+    label, where = "카톡 알림 토큰", "연결 탭 › 알림 › 카톡 (예비)"
     try:
         st = bot.dash_state._ba_status()
         k = st.kakao_state if st.fresh(now) else "unknown"

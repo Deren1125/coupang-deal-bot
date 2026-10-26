@@ -1247,13 +1247,14 @@ function vConnect() {
   else if (!PUSH) s = '이 브라우저는 알림을 받을 수 없어요';
   else if (!me && Notification.permission === 'denied') s = denyHint();
   else right = me ? btn('sm', '끄기', () => pushOff(me)) : btn('sm ac', '알림 켜기', pushOn);
-  out.push(...sec('알림', null, row('이 기기', s, right),
-    push.devices.length ? row('테스트 알림', '알림이 오는지 확인해요', btn('sm', '보내기', e => exec({action: 'push.test', args: {}}, {}, {btn: e.currentTarget}))) : null,
-    others.map(d => row(d.label, d.last_ok ? `마지막 성공 ${ago(d.last_ok)}` : '아직 받은 적 없어요', btn('sm', '끄기', () => devOff(d)), !d.ok))));
   const k = c.kakao, KS = {ok: '연결됨', down: '끊김', expiring: `곧 만료${k.expires_in_days != null ? ` (D-${k.expires_in_days})` : ''}`, unknown: '확인 중'};
   const kAuth = (k.actions || []).find(a => a.action === 'blog.kakao_auth_url'), kConn = (k.actions || []).find(a => a.action === 'blog.kakao_connect');
   const kKid = {iid: 'conn-kakao', title: '카톡'};
-  out.push(...sec('카톡 (예비)', (k.actions || []).filter(a => a !== kAuth && a !== kConn), row('카톡', KS[k.state] || KS.unknown,
+  // 맨 위 '로그인 관리'는 logins.js · 카톡(예비)은 알림 칸 안에
+  out.push(...sec('알림', (k.actions || []).filter(a => a !== kAuth && a !== kConn), row('이 기기', s, right),
+    push.devices.length ? row('테스트 알림', '알림이 오는지 확인해요', btn('sm', '보내기', e => exec({action: 'push.test', args: {}}, {}, {btn: e.currentTarget}))) : null,
+    others.map(d => row(d.label, d.last_ok ? `마지막 성공 ${ago(d.last_ok)}` : '아직 받은 적 없어요', btn('sm', '끄기', () => devOff(d)), !d.ok)),
+    row('카톡 (예비)', KS[k.state] || KS.unknown,
     kAuth ? (KURL ? el('a', {class: 'sm ac', href: KURL, target: '_blank', rel: 'noopener noreferrer', onclick: () => { KSTEP = true; setTimeout(render, 300); }}, '카카오 열기 ↗')
       : btn('sm ac', kAuth.label, e => { KSTEP = true; exec(kAuth, {}, {btn: e.currentTarget, iid: 'conn-kakao'}); })) : null, k.state === 'down'),
   kConn && KSTEP ? panel(kKid, kConn, pk(kKid.iid, kConn), {fixed: true}) : null));
@@ -1261,16 +1262,11 @@ function vConnect() {
   out.push(...sec('인스타 · 스레드', sns.actions, conn('인스타그램', sns.instagram), conn('스레드', sns.threads),
     sns.invites.length ? fold(`초대 링크 ${sns.invites.length}개`, () => listSheet('초대 링크', sns.invites.map(v => el('div', {class: 'box'},
       el('p', {class: 'q'}, v.label), v.where ? el('p', {class: 'note'}, v.where) : null, el('div', {class: 'kv'}, el('code', {text: v.url}), btn('sm', '복사', () => copy(v.url))))))) : null));
-  const nv = c.naver, need = BLOGS.some(([b]) => nv[b] && nv[b].login === 'needed');
-  out.push(...sec('네이버 로그인', null, BLOGS.map(([b, l]) => {
-    const x = nv[b] || {};
-    const t = {ok: '정상', needed: '필요', unknown: '모름'}[x.login] || '모름';
-    return row(l, `${t}${x.checked_at ? ` · 확인 ${hhmm(x.checked_at)}` : ''}`, x.action ? btn('sm', '지금 확인', e => exec(x.action, {}, {btn: e.currentTarget, iid: 'conn-naver-' + b})) : null, x.login === 'needed');
-  }), (x => x && row('쇼핑커넥트', x.text, x.action && btn('sm', x.action.label, e => exec(x.action, {}, {btn: e.currentTarget})), x.bad))(c.sc),
-  need ? el('p', {class: 'note'}, '위 로그인 관리에서 원격 로그인해 주세요') : null));
-  const bd = c.bots.dealbot, ba = c.bots.blogauto, cols = bd.collectors || [];
-  out.push(...sec('봇 상태', null, row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.updated ? ` · ${bd.updated} 업데이트` : ''}`, null, bd.paused),
+  // 네이버 로그인 상태·원격 로그인은 '로그인 관리' — 블로그별 로그인 확인은 봇 상태 더보기
+  const nv = c.naver, bd = c.bots.dealbot, ba = c.bots.blogauto, cols = bd.collectors || [];
+  out.push(...sec('봇 상태', BLOGS.map(([b, l]) => nv[b] && nv[b].action && Object.assign({}, nv[b].action, {label: l + ' 로그인 확인'})).filter(Boolean), row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.updated ? ` · ${bd.updated} 업데이트` : ''}`, null, bd.paused),
     row('블로그 프로그램', ba.ok ? `정상 · ${ago(ba.seen_at)} 신호` : `응답 없음${ba.seen_at ? ' · ' + ago(ba.seen_at) : ''}`, null, !ba.ok),
+    (x => x && row('쇼핑커넥트', x.text, x.action && btn('sm', x.action.label, e => exec(x.action, {}, {btn: e.currentTarget})), x.bad))(c.sc),
     row('서버 점검', '로그인·서비스·메모리·스레드를 한 번에', btn('sm', '점검', e => exec(c.check, {}, {btn: e.currentTarget}))),
     cols.length ? fold(`수집기 ${cols.length}개`, () => listSheet('수집기', cols.map(x => row(x.label, `${x.enabled ? (x.ok ? '정상' : '오류') : '꺼짐'} · ${x.text}`, null, !x.ok)))) : null));
   out.push(el('div', {class: 'box', style: 'margin-top:20px'},
