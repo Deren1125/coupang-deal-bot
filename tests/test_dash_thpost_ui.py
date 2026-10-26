@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import re
 
 from dealbot.dashboard import api, shell, webapp
 
@@ -37,3 +38,13 @@ def test_thpost_js_is_loaded_early_and_app_hands_over_exec_and_upload() -> None:
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "T.view(b, {el, btn, api, toast, S, exec, uploadAll})" in app
     assert len((STATIC / "app.js").read_bytes()) <= 88 * 1024 + 256  # test_dash_shell.APP_JS_MAX 와 같게 (10/24)
+
+
+def test_stat_tiles_grow_with_their_label_even_with_the_threads_button_style() -> None:
+    """주인 10/26 스크린샷: 통계 숫자 칸의 '조회·좋아요·답글' 글자가 아래 칸에 가려짐 — threads.js 의 .tb{height:34px} 가 같은 이름의
+    숫자 칸 단추에도 걸렸다. 숫자 칸은 높이를 내용대로 (.tt .tb 가 더 구체적이라 이김) · 글자는 숫자 아래 한 줄."""
+    text = (STATIC / "thpost.js").read_text(encoding="utf-8")
+    tile = re.search(r"\.tt \.tb\{([^}]*)\}", text)
+    assert tile and "height:auto" in tile.group(1) and "min-height:44px" in tile.group(1)
+    assert ".tt span{display:block}" in text
+    assert ".tb{flex:none;height:34px" in (STATIC / "threads.js").read_text(encoding="utf-8")  # 부딪히는 쪽이 아직 그대로인지

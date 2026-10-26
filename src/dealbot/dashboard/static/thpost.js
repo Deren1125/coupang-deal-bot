@@ -12,7 +12,9 @@ const CSS = '.tp{display:grid;gap:8px}.tp textarea{font:inherit;font-size:16px;p
   '.tl2 i{display:block;font-style:normal;color:var(--sub);font-size:12px}.tl2 a{color:var(--text)}.tl2 .pb{width:auto;min-height:40px;padding:0 14px;margin-top:6px}' +
   '.tp .tq,.tt{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px}.tt div{background:var(--grey);border-radius:10px;padding:8px 10px}' +
   '.tt b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.tt span{font-size:12px;color:var(--sub)}' +
-  '.tt .tb{background:var(--grey);border:0;border-radius:10px;padding:8px 10px;text-align:left;color:var(--text);font:inherit;min-height:44px;cursor:pointer}' +
+  // .tb 는 threads.js 의 둥근 단추(height:34px)와 이름이 같다 — 숫자 칸은 높이를 내용대로 (주인 10/26 '조회·좋아요 글자가 가려짐')
+  '.tt .tb{background:var(--grey);border:0;border-radius:10px;padding:8px 10px;text-align:left;color:var(--text);font:inherit;height:auto;min-height:44px;cursor:pointer}' +
+  '.tt span{display:block}' +
   '.tt .tb[aria-pressed=true]{outline:2px solid var(--text)}' +
   '.bar{display:grid;grid-template-columns:64px 1fr 44px;gap:8px;align-items:center;font-size:13px;padding:3px 0}.bar u{display:block;height:10px;border-radius:5px;background:var(--text);opacity:.55;text-decoration:none}' +
   '.bar b{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}';
