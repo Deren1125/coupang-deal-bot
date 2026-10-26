@@ -181,8 +181,8 @@ async def tick(sched: Any, now: datetime) -> str | None:
     pub = getattr(bot, "instagram_look", None)
     if pub is None or not look_wanted(bot) or not pub.enabled:
         return None
-    if pub.stored_token() is None and not pub.dry_run:
-        return None  # 연결 전 — 기다리기만 (할 일 줄은 대시보드)
+    if pub.stored_token() is None:
+        return None  # 연결 전 — 기다리기만 (연습 모드여도 글을 '올림'으로 써 버리지 않게 · 할 일 줄은 대시보드)
     cfg = _cfg(bot)
     local = now.astimezone(sched.tz)
     if not in_time_window(local, cfg.hours or sched.cfg.hours):
