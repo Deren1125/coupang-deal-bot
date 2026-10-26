@@ -33,7 +33,8 @@ OPS = {"settings": "/api/settings", "run": "/api/run", "pause": "/api/pause", "r
        "manual_done": "/api/manual_done",  # 직접 팔로우할 사람 '했어요' (10/23)
        # X 화면 (주인 10/25, static/x.js) — 설정·승인함 보내기/건너뛰기·지금 찾기
        "x_settings": "/api/x/settings", "x_approve": "/api/x/approve", "x_approve_all": "/api/x/approve_all",
-       "x_skip": "/api/x/skip", "x_find": "/api/x/find"}
+       "x_skip": "/api/x/skip", "x_find": "/api/x/find",
+       "x_done": "/api/x/done"}  # 폰 방식 카드 '했어요' (주인 10/26 — 서버는 X 에 접속 안 함)
 SLOW_OPS = {"tlogin", "tcode", "tcheck", "token"}  # 브라우저 로그인·토큰 확인은 오래 걸림
 BODY_MAX = 16 * 1024
 SHOT_MAX = 3_000_000
