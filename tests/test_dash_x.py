@@ -5,6 +5,8 @@
 2) 초안함: Blog-Auto 기록 파일 x 칸 (계약 export_v2.json — Blog-Auto 와 같은 파일) · 칸이 없으면 초안 없음 ·
    올렸어요·버리기·다시 쓰기 = 다리 일 blog.x_posted · x_drop · x_redo {pid} (계약 action_x_posted.json · 확인 창 없음).
 3) xpost.js: 처음 열 때만 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와 다른 파일) · 크기 예산 · 바깥 주소 없음 (X 글쓰기 주소는 state.x.intent) · 블로그 탭 'X(트위터) →'.
+4) 링크 답글 (주인 10/26 새 기준 — 블로그 주소는 본문 말고 첫 답글): 초안마다 reply (엄격히 거름 · 끝 줄 = 글 주소) · 주인이 넣은 X 글 주소의
+   번호로 답글 쓰기 화면 (state.x.reply_intent — 자동 게시 없음) · 스레드 첫 댓글이 두 번 실패한 할 일은 그 글을 여는 단추.
 """
 
 from __future__ import annotations
@@ -154,9 +156,13 @@ async def test_state_has_drafts_posted_ideas_and_the_intent_link(bot: DealBot, s
     fx = fixture("export_v2.json")["x"]
     assert x["ready"] and x["bridge_ok"] and x["limit"] == 280 and x["url_len"] == 23
     assert x["intent"] == "https://x.com/intent/post?text="  # 무료 글쓰기 화면 링크 (API 아님)
+    assert x["reply_intent"] == "https://x.com/intent/tweet?in_reply_to="  # 링크 답글 쓰기 화면 (주인이 넣은 X 글 번호 + &text= 는 화면이)
     assert [d["pid"] for d in x["drafts"]] == [131] and [d["pid"] for d in x["posted"]] == [128]
     d = x["drafts"][0]
     assert d["text"] == fx["drafts"][0]["text"] and d["text"].endswith(d["url"])
+    assert d["reply"] == fx["drafts"][0]["reply"] and d["reply"].split("\n")[-1] == d["url"]
+    p = x["posted"][0]  # 제휴 글: 답글 첫 줄 고지 · 끝 줄 주소 (올린 글에도 — '올렸어요'를 먼저 눌러도 답글은 달 수 있게)
+    assert p["reply"] == fx["drafts"][1]["reply"] and p["reply"].split("\n")[0] == "링크를 통해 수익의 일부를 지급받을 수 있어요"
     assert [d[k]["action"] for k in ("posted_act", "drop", "redo")] == ["blog.x_posted", "blog.x_drop", "blog.x_redo"]
     assert all(d[k]["args"] == {"pid": 131} and not d[k]["confirm"] for k in ("posted_act", "drop", "redo"))
     assert x["posted"][0]["shop"] is True and "posted_act" not in x["posted"][0]
@@ -189,6 +195,24 @@ def test_export_parsing_tolerates_missing_and_bad_rows() -> None:
     assert bad["url"] == "" and bad["shop"] is False and "\x00" not in bad["text"]  # 글 주소는 네이버 블로그만
     assert [c["title"] for c in got["ideas"]] == ["카드"] and got["ideas"][0]["facts"] == ["a"] and got["ideas"][0]["prompt"] == ""
     assert _x({"drafts": []}) == {"per_day": 0, "limit": 280, "url_len": 23, "drafts": [], "ideas": [], "plan": None}
+
+
+def test_reply_is_parsed_strictly() -> None:
+    """첫 답글 글자: 글자만 · 줄은 그대로 (줄마다 제어 문자를 빼고 공백 정리 · 빈 줄은 뺌) · 끝 줄은 이 초안의 블로그 주소 · 8줄·500자 안.
+    아니면 '' — 새 기준 전 초안(칸 없음)도 '' (화면은 답글 칸을 숨김)."""
+    base = fixture("export_v2.json")["x"]["drafts"][0]
+    url = base["url"]
+
+    def one(reply: object, **kw: object) -> str:
+        return _x({"drafts": [dict(base, reply=reply, **kw)]})["drafts"][0]["reply"]
+
+    assert one(f"🔗 제목\r\n\n  {url}  ") == f"🔗 제목\n{url}"
+    assert one(f"블로그\x00 정리글\x1b\n제목   둘\n{url}") == f"블로그 정리글\n제목 둘\n{url}"
+    for bad in (None, 3, ["a"], {"t": url}, "", "제목만", f"{url}\n제목", f"제목\n{url}x", "제목\nhttps://blog.naver.com/other/1",
+                "\n".join(["줄"] * 8 + [url]), "가" * 480 + "\n" + url, "가" * 1100 + "\n" + url):
+        assert one(bad) == "", bad
+    assert one(f"제목\n{url}", url="https://evil.example/x") == ""  # 글 주소가 네이버 블로그가 아니면 답글도 없음
+    assert _x({"drafts": [{k: v for k, v in base.items() if k != "reply"}]})["drafts"][0]["reply"] == ""
 
 
 async def test_two_week_plan_is_fetched_only_when_the_screen_opens(bot: DealBot, settings: Settings, tmp_path: Path) -> None:  # noqa: F811
@@ -230,7 +254,8 @@ def test_xpost_js_lazy_load_budget_and_safety() -> None:
     assert "http://" not in js and "https://" not in js and "eval(" not in js and "new Function" not in js and "innerHTML" not in js
     for word in ("인증 팔로워", "90일 인증 노출", "전체 팔로워", "지금 속도면", "X에 올리기", "올렸어요", "버리기", "다시 쓰기", "복사",
                  "x.idea_note", "x.intent + encodeURIComponent(", "rel: 'noopener'", "target: '_blank'",
-                 "/dashboard/api/xplan", "X에 쓰기", "댓글 틀", "try { return localStorage"):
+                 "/dashboard/api/xplan", "X에 쓰기", "댓글 틀", "try { return localStorage",
+                 "링크 답글 달기", "답글 복사", "x.reply_intent + i + '&text=' + encodeURIComponent(d.reply)", "d.reply ? reply(x, d) : null"):
         assert word in js, word
     for label in re.findall(r"btn\('[^']*', '([^']*)'", js):
         assert re.search(r"[가-힣]", label), label
@@ -252,3 +277,40 @@ def test_xpost_js_syntax_and_x_length_count() -> None:
             "console.log(JSON.stringify([f('abc',23),f('가나',23),f('가 https://blog.naver.com/a/1?x=1',23)]))")
     out = subprocess.run([node, "-e", code, str(STATIC / "xpost.js")], capture_output=True, text=True)
     assert json.loads(out.stdout) == [3, 4, 26]  # Blog-Auto x_drafts.x_len 과 같은 셈 (한글 2 · 링크 23)
+    # 링크 답글: 주인이 넣은 X 글 주소 → 글 번호 (x.com·twitter.com/아이디/status/숫자만 — 아니면 '' 이고 '링크 답글 달기'는 주소 없이 흐림)
+    urls = ["https://x.com/deren_pick/status/1850123456789012345?s=46&t=ab", " twitter.com/a/status/12/ ", "https://mobile.twitter.com/a_b/status/9#m",
+            "https://X.com/i/web/status/77", "https://x.com/deren/status/abc", "https://evil.com/x.com/a/status/1", "https://x.com.evil.com/a/status/1",
+            "x.com/a/status/", "https://x.com/thisnameistoolong1/status/1", "https://x.com/a/status/1x", "https://x.com/a/likes/1", "", None]
+    code = ("global.document={};global.window={};require(process.argv[1]);"
+            "console.log(JSON.stringify(JSON.parse(process.argv[2]).map(window.SBXP.sid)))")
+    out = subprocess.run([node, "-e", code, str(STATIC / "xpost.js"), json.dumps(urls)], capture_output=True, text=True)
+    assert json.loads(out.stdout) == ["1850123456789012345", "12", "9", "77"] + [""] * 9
+
+
+# ---------------------------------------------------------------- 스레드 첫 댓글(블로그 링크) 실패 할 일 (Blog-Auto threads_api)
+async def test_threads_reply_fail_todo_opens_the_threads_post(bot: DealBot, settings: Settings, tmp_path: Path) -> None:  # noqa: F811
+    """두 번 실패하면 Blog-Auto 가 notify.queue (키 sns:threads_reply:<pid> · 종류 threads_reply_fail · iid sns-status · links [스레드 글]).
+    할 일 줄의 첫 단추 = '스레드 글 열기' (그 글 주소) · 본문에 댓글로 달 글자 · 급하지 않음 (정리에만) · 닫기는 Blog-Auto (주인 댓글이 보이면)
+    라 '다 했어요' 없이 '알림 없애기'만."""
+    from dealbot.notify import ingest
+    from dealbot.notify.router import urgency
+
+    write_export(tmp_path / "blogauto.json")
+    blogauto_status(settings)
+    h = session_headers(bot)
+    bot.router.open({"src": "dealbot", "key": "sns_zero", "kind": "sns_zero", "iid": "sns-status", "title": "SNS 0개", "at": time.time()})  # type: ignore[union-attr]
+    it = {i["iid"]: i for i in (await state(bot))["todo"]}["sns-status"]
+    assert it["primary"]["action"] == "goto" and it["primary"]["goto"] == "#/connect"  # 링크 없는 SNS 줄은 예전 그대로
+    await act(bot, "todo.dismiss", {"iid": "sns-status", "key": "sns_zero"}, h)
+    link = "https://www.threads.net/@derenpick/post/DAbc123xyz"
+    n = ingest.clean_open(dict(fixture("notice_open_links.json"), key="sns:threads_reply:131", kind="threads_reply_fail", iid="sns-status",
+                               urgent=False, title="스레드 Pick #131 블로그 링크 댓글 실패", short="스레드 Pick #131 댓글 실패",
+                               body="댓글로 달아 주세요: 🔗 변우석 새 드라마 첫 촬영 현장 공개 / blog.naver.com/derenpick/224000000131",
+                               links=[{"label": "스레드 글", "url": link}]))
+    assert n is not None and n["iid"] == "sns-status" and n["links"] == [{"label": "스레드 글", "url": link}]
+    assert urgency("threads_reply_fail") == "DIGEST"
+    bot.router.open(dict(n, at=time.time()))  # type: ignore[union-attr]
+    it = {i["iid"]: i for i in (await state(bot))["todo"]}["sns-status"]
+    assert (it["kind"], it["primary"]["input"], it["primary"]["url"], it["primary"]["label"]) == ("threads_reply_fail", "open", link, "스레드 글 열기")
+    assert "blog.naver.com/derenpick/224000000131" in it["detail"]["lines"][0] and not it["urgent"]
+    assert [a["action"] for a in it["more"]] == ["todo.hide"]

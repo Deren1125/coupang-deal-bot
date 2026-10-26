@@ -1137,13 +1137,14 @@ def _shopconnect(v: Any) -> dict[str, Any] | None:
 X_STATUSES = ("draft", "posted", "dropped")
 X_TEXT_MAX = 1000  # Blog-Auto 는 X 셈 280 안으로 보냄 — 한 번 더 (긴 글 구독이어도 화면 칸은 이만큼)
 X_DRAFTS_MAX, X_IDEAS_MAX, X_FACTS_MAX = 20, 5, 6
+X_REPLY_MAX, X_REPLY_LINES = 500, 8  # 첫 답글 (주인 10/26 새 기준 — 블로그 주소는 본문 말고 주인이 손으로 다는 첫 답글 · Blog-Auto 는 X 셈 280 안)
 X_PLAN_DAYS, X_PLAN_POSTS, X_PLAN_REPLIES = 31, 6, 40  # 수익 계정 2주 계획 (주인 10/26) — 첫 상태 값엔 안 넣고 /dashboard/api/xplan 으로
 X_DATE_RE = re.compile(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
 X_TIME_RE = re.compile(r"^[0-2][0-9]:[0-5][0-9]$")
 
 
 def _x(v: Any) -> dict[str, Any] | None:
-    """{per_day, limit, url_len, drafts: [{pid, title, url, text, status, created_at, posted_at, shop}], ideas: [{id, title, facts, prompt}],
+    """{per_day, limit, url_len, drafts: [{pid, title, url, text, status, created_at, posted_at, shop, reply}], ideas: [{id, title, facts, prompt}],
     plan: _x_plan | None}.
     칸이 없으면(예전 Blog-Auto) None → 초안 없음. 줄마다 따로 걸러 이상한 줄만 빠진다 (글 주소는 네이버 블로그만)."""
     if not isinstance(v, dict) or not isinstance(v.get("drafts"), list):
@@ -1155,9 +1156,10 @@ def _x(v: Any) -> dict[str, Any] | None:
         text = _th_text(x.get("text"), X_TEXT_MAX)
         if not text:
             continue
-        drafts.append({"pid": pid, "title": _one_line(x.get("title"), 80) or "", "url": _naver_url(x.get("url")) or "",
+        url = _naver_url(x.get("url")) or ""
+        drafts.append({"pid": pid, "title": _one_line(x.get("title"), 80) or "", "url": url,
                        "text": text, "status": x["status"], "created_at": _one_line(x.get("created_at"), 40),
-                       "posted_at": _one_line(x.get("posted_at"), 40), "shop": x.get("shop") is True})
+                       "posted_at": _one_line(x.get("posted_at"), 40), "shop": x.get("shop") is True, "reply": _x_reply(x.get("reply"), url)})
     ideas = []
     for c in (v.get("ideas") if isinstance(v.get("ideas"), list) else [])[:X_IDEAS_MAX]:
         if isinstance(c, dict) and (title := _one_line(c.get("title"), 60)):
@@ -1170,6 +1172,16 @@ def _x(v: Any) -> dict[str, Any] | None:
 def _plan_line(v: Any, limit: int) -> str | None:
     """한 줄 글자 — 제어 문자를 빼고 (_one_line 은 공백만 정리)."""
     return _one_line(re.sub(r"[\x00-\x1f\x7f]", "", v), limit) if isinstance(v, str) else None
+
+
+def _x_reply(v: Any, url: str) -> str:
+    """첫 답글 글자 (제휴 글이면 첫 줄 고지 · 끝 줄은 블로그 주소) — 줄은 그대로, 줄마다 제어 문자를 빼고 공백 정리 (_plan_line), 빈 줄은 뺌.
+    글자가 아니거나 X_REPLY_LINES 줄·X_REPLY_MAX 자를 넘거나 끝 줄이 이 초안의 블로그 주소가 아니면 '' (새 기준 전 초안도 '' — 화면은 답글 칸을 숨김)."""
+    if not isinstance(v, str) or not url or len(v) > X_REPLY_MAX * 2:
+        return ""
+    lines = [ln for ln in (_plan_line(x, X_REPLY_MAX) for x in v.replace("\r\n", "\n").split("\n")) if ln]
+    text = "\n".join(lines)
+    return text if 0 < len(lines) <= X_REPLY_LINES and len(text) <= X_REPLY_MAX and lines[-1] == url else ""
 
 
 def _x_plan(v: Any) -> dict[str, Any] | None:

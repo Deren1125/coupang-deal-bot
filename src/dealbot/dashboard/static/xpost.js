@@ -1,5 +1,5 @@
 /* X(트위터) 화면 (주인 10/25 — 'X 는 유료 구독만, API 는 안 써'). 블로그 탭 'X(트위터) →' 를 처음 열 때만 app.js 가 불러온다 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와는 다른 파일). 값은 state.x (xview.py).
-   진행률(주인이 주마다 넣는 숫자 x.stats) · 수익 계정 2주 계획(/dashboard/api/xplan — 열 때만) · 데런픽 초안함(Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 올렸어요 · 버리기 · 다시 쓰기) · 수익 계정 글감 카드.
+   진행률(주인이 주마다 넣는 숫자 x.stats) · 수익 계정 2주 계획(/dashboard/api/xplan — 열 때만) · 데런픽 초안함(Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 링크 답글 · 올렸어요 · 버리기 · 다시 쓰기) · 수익 계정 글감 카드.
    'X에 올리기'는 X 글쓰기 화면을 여는 링크일 뿐 (주소는 state.x.intent) — 자동 게시·자동 좋아요·답글 없음. 라이브러리 없음. */
 'use strict';
 (() => {
@@ -14,14 +14,17 @@ const CSS = '.xpw{display:grid;gap:10px}.xpw .itm{padding:14px}.xpb{height:10px;
   '.xpn{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums;margin-left:auto}.xpn.x{color:var(--red);font-weight:600}' +
   '.xpd{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.xpd:first-of-type{border:0;margin:0;padding:0}' +
   '.xpd p{margin:0 0 6px;font-size:13px;color:var(--sub)}.xpd a.t{color:var(--text)}.xpg{opacity:.55;white-space:pre-wrap;font-size:14px;overflow-wrap:anywhere}' +
-  '.xpi{background:var(--tile);border-radius:10px;padding:10px;margin-top:8px}.xpi b{display:block}.xpi span{display:block;font-size:14px;margin-top:4px}' +
+  '.xpi{background:var(--tile);border-radius:10px;padding:10px;margin-top:8px}.xpi b{display:block}.xpi span{display:block;font-size:14px;margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}' +
+  '.xpi input{margin-top:8px}.xpr a:not([href]){opacity:.5}' +
   '.xpi i{display:block;font-style:normal;font-size:13px;color:var(--sub);margin-top:6px}' +
   '.xpw details>summary{cursor:pointer;font-weight:600;padding:8px 0}.xpi.ok{opacity:.5}.xpi em{font-style:normal;font-size:12px;color:var(--sub)}';
-const ED = {}, LOC = {};  // 고치는 중인 글 (다시 그려도 남게) · 누른 뒤 서버가 알려 줄 때까지 보여 줄 상태 (3분)
+const ED = {}, LOC = {}, RU = {};  // 고치는 중인 글 (다시 그려도 남게) · 누른 뒤 서버가 알려 줄 때까지 보여 줄 상태 (3분) · 링크 답글에 넣은 X 글 주소
 let H = null, B = null, PLAN = null;  // PLAN: 수익 계정 2주 계획 (null 아직 · false 없음 — 열 때 한 번만 /dashboard/api/xplan)
 
 const css = () => { if (D.getElementById('xp-css')) return; const s = D.createElement('style'); s.id = 'xp-css'; s.textContent = CSS; D.head.append(s); };
 const nf = n => (n == null ? '–' : Number(n).toLocaleString('ko-KR'));
+const row = (...k) => H.el('div', {class: 'xpr'}, ...k), note = (...k) => H.el('p', {class: 'note'}, ...k), NW = {target: '_blank', rel: 'noopener'};  // NW: 새 창 링크
+const card = (t, ...k) => H.el('section', {class: 'itm'}, H.el('p', {class: 'h3', style: 'margin-top:0'}, t), ...k);
 // X 글자 수 (twitter-text: 한글·이모지 2 · 라틴·숫자·기호 1 · 링크는 길이와 상관없이 url_len)
 const ONE = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
 function xlen(t, u) {
@@ -70,19 +73,34 @@ function progress(x) {
     if (v.verified > v.followers) return H.toast('인증 팔로워가 전체 팔로워보다 많아요');
     H.exec(x.save, v, {btn: e.currentTarget});
   };
-  return el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, '수익 배분 진행률'),
+  return card('수익 배분 진행률',
     bar('인증 팔로워', p.verified, p.verified_goal, p.eta_verified), bar('90일 인증 노출', p.impr, p.impr_goal, p.eta_impr),
     el('div', {class: 'xpk'}, el('span', {}, '전체 팔로워'), el('b', {}, nf(p.followers))),
-    el('p', {class: 'note'}, p.at ? `${p.at}에 넣은 숫자 · 크리에이터 스튜디오에서 보고 주마다 넣어 주세요` : '크리에이터 스튜디오 숫자를 주마다 넣어 주세요', p.note ? ' · ' + p.note : ''),
+    note(p.at ? `${p.at}에 넣은 숫자 · 크리에이터 스튜디오에서 보고 주마다 넣어 주세요` : '크리에이터 스튜디오 숫자를 주마다 넣어 주세요', p.note ? ' · ' + p.note : ''),
     el('div', {class: 'xpf'}, inp('followers', '전체 팔로워', p.followers), inp('verified', '인증 팔로워', p.verified), inp('impressions_90d', '90일 인증 노출', p.impr)),
     btn('pb', '저장', save, {style: 'margin-top:8px'}));
+}
+
+// 링크 답글 (주인 10/26 — 블로그 주소는 본문 말고 첫 답글): 복사 · 올린 X 글 주소를 넣으면 답글 쓰기 화면 (state.x.reply_intent)
+const sid = u => (/^(?:https?:\/\/)?(?:www\.|mobile\.)?(?:x|twitter)\.com\/(?:i\/web|\w{1,15})\/status\/(\d{1,20})(?:[/?#]|$)/i.exec(String(u || '').trim()) || [])[1] || '';
+function reply(x, d) {
+  const {el, btn} = H, go = el('a', NW, '링크 답글 달기');
+  const u = el('input', {type: 'url', value: RU[d.pid] || '', placeholder: '방금 올린 X 글 주소 붙여넣기', 'aria-label': `#${d.pid} X 글 주소`});
+  const up = () => {
+    const i = sid(RU[d.pid] = u.value);
+    if (i) go.href = x.reply_intent + i + '&text=' + encodeURIComponent(d.reply); else go.removeAttribute('href');  // 주소 없으면 흐리게 (CSS)
+  };
+  u.oninput = up; up();
+  go.onclick = e => { if (!go.href) { e.preventDefault(); H.toast('x.com/아이디/status/숫자 주소를 넣어 주세요'); } };
+  return el('div', {class: 'xpi'}, el('em', {}, '첫 답글 (블로그 링크)'), el('span', {}, d.reply), u,
+    row(btn('pb soft', '답글 복사', () => copy(d.reply)), go));
 }
 
 function draft(x, d) {
   const {el, btn} = H, l = loc(d.pid);
   if (l && l.s === 'redo' && l.text !== d.text) { delete LOC[d.pid]; delete ED[d.pid]; }
   const busy = loc(d.pid) && loc(d.pid).s === 'redo';
-  const ta = el('textarea', {'aria-label': `#${d.pid} X 글`, rows: 6}), n = el('span', {class: 'xpn'}), go = el('a', {target: '_blank', rel: 'noopener'}, 'X에 올리기');
+  const ta = el('textarea', {'aria-label': `#${d.pid} X 글`, rows: 6}), n = el('span', {class: 'xpn'}), go = el('a', NW, 'X에 올리기');
   ta.value = ED[d.pid] != null ? ED[d.pid] : d.text;
   const up = () => {
     const c = xlen(ta.value, x.url_len);
@@ -93,13 +111,14 @@ function draft(x, d) {
   up();
   if (busy) ta.disabled = true;
   return el('div', {class: 'xpd'},
-    el('p', {}, `#${d.pid} · `, d.url ? el('a', {class: 't', href: d.url, target: '_blank', rel: 'noopener'}, d.title || '블로그 글') : d.title,
+    el('p', {}, `#${d.pid} · `, d.url ? el('a', {class: 't', href: d.url, ...NW}, d.title || '블로그 글') : d.title,
       d.shop ? ' · 제휴 고지 줄은 지우지 마세요' : ''),
-    ta, el('div', {class: 'xpr'}, n),
-    busy ? el('p', {class: 'note'}, '다시 쓰는 중이에요 — 1분쯤 뒤 새 초안이 떠요') : null,
-    el('div', {class: 'xpr'}, btn('pb soft', '복사', () => copy(ta.value.trim())), go,
+    ta, row(n),
+    busy ? note('다시 쓰는 중이에요 — 1분쯤 뒤 새 초안이 떠요') : null,
+    row(btn('pb soft', '복사', () => copy(ta.value.trim())), go,
       btn('pb', '올렸어요', e => send(d.posted_act, e.currentTarget, 'posted', '올렸어요로 표시했어요'))),
-    el('div', {class: 'xpr'}, btn('pb soft', '버리기', e => send(d.drop, e.currentTarget, 'dropped', '버렸어요')),
+    d.reply ? reply(x, d) : null,
+    row(btn('pb soft', '버리기', e => send(d.drop, e.currentTarget, 'dropped', '버렸어요')),
       btn('pb soft', '다시 쓰기', e => send(d.redo, e.currentTarget, 'redo', '다시 쓰는 중이에요 — 1분쯤 걸려요', d.text),
         {disabled: busy})));
 }
@@ -114,7 +133,7 @@ function plan(x) {
   if (PLAN === null) {
     PLAN = false;
     H.api('/dashboard/api/xplan').then(r => { PLAN = r.status === 200 ? r.data : false; draw(); });
-    return el('section', {class: 'itm'}, el('p', {class: 'note'}, '2주 계획을 불러오는 중이에요'));
+    return el('section', {class: 'itm'}, note('2주 계획을 불러오는 중이에요'));
   }
   if (!PLAN) return null;
   const today = new Date().toLocaleDateString('sv-SE', {timeZone: 'Asia/Seoul'});
@@ -122,27 +141,27 @@ function plan(x) {
     const k = d.date + ' ' + p.time, box = el('div', {class: 'xpi' + (done(k) ? ' ok' : '')});
     box.append(el('em', {}, p.time + (done(k) ? ' · 올렸어요' : '')), el('b', {}, p.head), el('span', {}, p.outline),
       p.attach ? el('i', {}, '첨부: ' + p.attach) : '',
-      el('div', {class: 'xpr'}, btn('pb soft', '복사', () => copy(p.head)),
-        el('a', {href: x.intent + encodeURIComponent(p.head), target: '_blank', rel: 'noopener'}, 'X에 쓰기'),
+      row(btn('pb soft', '복사', () => copy(p.head)),
+        el('a', {href: x.intent + encodeURIComponent(p.head), ...NW}, 'X에 쓰기'),
         btn('pb soft', done(k) ? '올렸어요 취소' : '올렸어요', () => { mark(k, !done(k)); draw(); })));
     return box;
   };
   const days = PLAN.days.map((d, i) => el('details', {open: d.date === today || (today < PLAN.start && !i) || null},
     el('summary', {}, `${d.label} · ${d.posts.length}개${d.date === today ? ' · 오늘' : d.date < today ? ' · 지난 날' : ''}`),
     d.posts.map(p => post(d, p))));
-  return el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, `수익 계정 ${PLAN.title} (${x.plan_n}개)`),
+  return card(`수익 계정 ${PLAN.title} (${x.plan_n}개)`,
     PLAN.rules.map(r => el('p', {class: 'note', style: 'margin:2px 0'}, r)), days,
     PLAN.replies.length ? el('details', {}, el('summary', {}, `비슷한 계정에 손으로 다는 댓글 틀 ${PLAN.replies.length}개`),
-      el('p', {class: 'note'}, PLAN.reply_rules),
+      note(PLAN.reply_rules),
       PLAN.replies.map(r => el('div', {class: 'xpi'}, el('em', {}, r.for), el('span', {}, r.text),
-        el('div', {class: 'xpr'}, btn('pb soft', '복사', () => copy(r.text)))))) : null);
+        row(btn('pb soft', '복사', () => copy(r.text)))))) : null);
 }
 
 function draw() {
   if (!H || !B) return;
   css();
   const {el, btn} = H, x = H.S.x;
-  if (!x) { B.replaceChildren(el('p', {class: 'note'}, 'X 화면을 불러오지 못했어요 — 새로고침해 주세요')); return; }
+  if (!x) { B.replaceChildren(note('X 화면을 불러오지 못했어요 — 새로고침해 주세요')); return; }
   const live = x.drafts.filter(d => { const l = loc(d.pid); return !l || l.s === 'redo'; });
   const done = x.posted.concat(x.drafts.filter(d => (loc(d.pid) || {}).s === 'posted'));
   const hd = x.handles || {}, names = [hd.pick ? `데런픽 @${hd.pick}` : '', hd.revenue ? `수익 @${hd.revenue}` : ''].filter(Boolean);
@@ -152,17 +171,18 @@ function draw() {
     el('div', {class: 'top'}, el('h2', {}, 'X(트위터)'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')),
     el('p', {class: 'note', style: 'margin:0'}, x.rules, names.length ? ' · ' + names.join(' · ') : ''),
     progress(x), plan(x),
-    el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, `데런픽 초안함 ${live.length ? live.length + '개' : ''}`),
-      el('p', {class: 'note'}, '고쳐서 복사하거나 ‘X에 올리기’로 X 앱을 연 뒤, 올렸으면 ‘올렸어요’를 눌러 주세요'),
-      x.posted_line ? el('p', {class: 'note'}, x.posted_line) : null,
-      live.length ? live.map(d => draft(x, d)) : el('p', {class: 'note'}, x.empty),
-      done.length ? [el('p', {class: 'h3'}, '올린 글'), done.map(d => el('div', {class: 'xpd'}, el('p', {}, `#${d.pid} · ${d.title}`), el('div', {class: 'xpg'}, d.text)))] : null),
-    el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, '수익 계정 글감 카드'), el('p', {class: 'note'}, x.idea_note),
+    card(`데런픽 초안함 ${live.length ? live.length + '개' : ''}`,
+      note('고쳐서 복사하거나 ‘X에 올리기’로 X 앱을 연 뒤, 올렸으면 ‘올렸어요’를 눌러 주세요'),
+      x.posted_line ? note(x.posted_line) : null,
+      live.length ? live.map(d => draft(x, d)) : note(x.empty),
+      done.length ? [el('p', {class: 'h3'}, '올린 글'), done.map(d => el('div', {class: 'xpd'}, el('p', {}, `#${d.pid} · ${d.title}`), el('div', {class: 'xpg'}, d.text),
+        d.reply ? el('details', {}, el('summary', {}, '링크 답글'), reply(x, d)) : null))] : null),
+    card('수익 계정 글감 카드', note(x.idea_note),
       x.ideas.length ? x.ideas.map(c => el('div', {class: 'xpi'}, el('b', {}, c.title), c.facts.map(f => el('span', {}, f)), el('i', {}, c.prompt)))
-        : el('p', {class: 'note'}, '이번 주 카드가 아직 없어요')),
+        : note('이번 주 카드가 아직 없어요')),
     el('details', {class: 'itm'}, el('summary', {}, '계정 이름 넣기'), el('div', {class: 'xpf'}, hp, hr),
       btn('pb soft', '저장', e => H.exec(x.save_handles, {pick: hp.value.trim(), revenue: hr.value.trim()}, {btn: e.currentTarget}), {style: 'margin-top:8px'}))));
 }
 
-W.SBXP = {view(b, h) { B = b; H = h; draw(); }, xlen};
+W.SBXP = {view(b, h) { B = b; H = h; draw(); }, xlen, sid};
 })();
