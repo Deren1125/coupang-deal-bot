@@ -159,7 +159,7 @@ async def test_x_js_is_served_like_other_app_files(bot: DealBot) -> None:
 
 async def test_x_ops_go_to_the_x_paths_only(bot: DealBot, threads_srv) -> None:  # type: ignore[no-untyped-def]
     for op, path in (("x_settings", "/api/x/settings"), ("x_approve", "/api/x/approve"), ("x_skip", "/api/x/skip"),
-                     ("x_approve_all", "/api/x/approve_all"), ("x_find", "/api/x/find")):
+                     ("x_approve_all", "/api/x/approve_all"), ("x_find", "/api/x/find"), ("x_done", "/api/x/done")):
         status, _, _ = await post_json(bot, "/dashboard/api/threads/act", {"op": op, "args": {"id": "1"}}, session_headers(bot))
         assert status == 200 and FakeThreads.seen[-1] == (path, {"id": "1"})
     n = len(FakeThreads.seen)

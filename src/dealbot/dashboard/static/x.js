@@ -10,7 +10,8 @@ const CSS = '.xi{padding:10px 0;border-bottom:1px solid var(--line)}.xi:last-chi
   '.xi q{display:block;quotes:none;font-size:14px;color:var(--sub);white-space:pre-wrap;margin:4px 0 6px;overflow-wrap:anywhere}' +
   '.xc{display:flex;gap:6px;margin:6px 0}.xc .tb{flex:1}' +
   '.tb.on{background:var(--gr-soft);color:var(--gr)}.x2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.x2 .pb+.pb{margin-top:0}' +
-  '.tf label.tg{display:flex;gap:8px}.tf .tg input{width:24px;height:24px;flex:none;padding:0}';
+  '.tf label.tg{display:flex;gap:8px}.tf .tg input{width:24px;height:24px;flex:none;padding:0}' +
+  '.xi .say{font-size:15px;margin:0 0 6px;overflow-wrap:anywhere}a.tb{display:flex;align-items:center;justify-content:center;text-decoration:none}';
 const N = {like: '♥ 좋아요', repost: '↻ 리포스트', reply: '💬 댓글'};
 const A = {like: '♥ 좋아요', reply: '💬 댓글', quote: '❝ 인용'};  // 자동 숫자 칸 (리포스트는 2~3일에 1번이라 뺌)
 const R = {done: '완료', already: '이미 함', no_button: '단추 못 찾음', no_menu: '메뉴 안 뜸', no_box: '글 칸 못 찾음', no_send: '보내기 안 눌림', unconfirmed: '확인 안 됨'};
@@ -45,16 +46,19 @@ function head(X) {
   const {el, btn} = H, s = X.settings, d = X.did_today || {};
   const top = el('div', {class: 'top'}, el('h2', {}, T.x2 ? 'X' : 'X' + (X.me ? ' @' + X.me : '')), btn('lnk', '스레드·인스타로', back));
   const pick = T.x2 ? el('div', {class: 'seg', role: 'group', 'aria-label': '계정', style: 'margin-bottom:10px'}, [['x', T.x], ['x2', T.x2]].map(([k, S], i) =>
-    btn('', (S.me ? '@' + S.me : `계정 ${i + 1}`) + (S.login_needed || S.paused_until ? ' ⚠' : ''), () => { cur = k; draw(); },
+    btn('', (S.me || S.settings.handle ? '@' + (S.me || S.settings.handle) : `계정 ${i + 1}`) + ((!S.settings.phone && S.login_needed) || S.paused_until ? ' ⚠' : ''), () => { cur = k; draw(); },
       {'aria-pressed': cur === k ? 'true' : 'false'}))) : null;
-  const w = X.login_needed ? ['X 로그인이 필요해요 — 채팅에서 ‘X 원격 로그인 열어 줘’라고 해 주세요', 1]
+  const ph = !!s.phone;
+  const w = !ph && X.login_needed ? ['X 로그인이 필요해요 — 채팅에서 ‘X 원격 로그인 열어 줘’라고 해 주세요', 1]
     : X.paused_until ? [`X 가 잠시 막아서 ${X.paused_until}까지 쉬어요`, 1]
-    : !s.on ? ['꺼져 있어요'] : !s.keywords.length ? ['설정에 찾을 키워드를 넣어 주세요'] : null;
+    : !s.on ? ['꺼져 있어요'] : ph && !(s.sources || []).length ? ['설정에 글을 읽어 올 계정을 넣어 주세요']
+    : !ph && !s.keywords.length ? ['설정에 찾을 키워드를 넣어 주세요'] : null;
   const c = X.caps_today || s.caps;
-  const tiles = s.auto ? Object.keys(A).map(k => el('div', {}, el('b', {}, `${d[k] || 0}/${c[k]}`), el('span', {}, A[k])))
+  const tiles = (s.auto || ph) ? Object.keys(A).map(k => el('div', {}, el('b', {}, `${d[k] || 0}/${c[k]}`), el('span', {}, A[k])))
     : [el('div', {}, el('b', {}, `${X.sent_today}/${s.daily_max}`), el('span', {}, '보낸 글'))];
   const v = X.visits_today || [0, 0];
-  const info = s.auto ? `자동 · 접속 ${v[0]}/${v[1]}${X.next_visit ? ' · 다음 ' + X.next_visit : ''}` : '누른 글만 보내요';
+  const info = ph ? `폰에서 누르기 · 카드 ${(X.waiting || []).length}장${X.next_visit ? ' · 다음 준비 ' + X.next_visit : ''}`
+    : s.auto ? `자동 · 접속 ${v[0]}/${v[1]}${X.next_visit ? ' · 다음 ' + X.next_visit : ''}` : '누른 글만 보내요';
   return [top, pick, w ? el('p', {class: 'bn' + (w[1] ? ' bad' : '')}, el('span', {}, w[0])) : null,
     card('오늘', el('div', {class: 'tq'}, tiles), el('p', {class: 'note'}, info),
       btn('pb soft', s.on ? '끄기' : '켜기', () => act('x_settings', {on: !s.on}, s.on ? '껐어요' : '켰어요'), {style: 'margin-top:10px'}))];
@@ -80,6 +84,22 @@ function inbox(X) {
       for (const x of ws) { const e = E[x.id]; if (Object.values(e.actions).some(Boolean)) await act('x_approve', {id: x.id, draft: e.draft, actions: e.actions}); }
     }) : null);
 }
+// 폰에서 누르기 (주인 10/26): 서버는 X 에 안 들어감 — 버튼이 폰 X 앱을 연다 (댓글·인용은 초안이 들어간 글쓰기 창, 글자는 복사도 해 둠)
+function phoneCards(X) {
+  const {el, btn} = H, ws = X.waiting || [];
+  const lnk = (label, href, copy) => el('a', {class: 'tb', href, target: '_blank', rel: 'noopener noreferrer',
+    onclick: () => { if (copy && navigator.clipboard) navigator.clipboard.writeText(copy).catch(() => {}); }}, label);
+  const rows = ws.map(x => {
+    const L = x.links || {open: x.url};
+    return el('div', {class: 'xi'}, el('a', {href: L.open, target: '_blank', rel: 'noopener noreferrer'}, '@' + x.author),
+      el('span', {class: 'note'}, ` ♥ ${x.likes}`), el('q', {}, x.text.slice(0, 120)),
+      x.draft ? el('p', {class: 'say'}, '💬 ' + x.draft) : null, x.quote ? el('p', {class: 'say'}, '❝ ' + x.quote) : null,
+      el('div', {class: 'xc'}, lnk('♥ 글 열기', L.open), L.reply ? lnk('💬 댓글', L.reply, x.draft) : null, L.quote ? lnk('❝ 인용', L.quote, x.quote) : null),
+      el('div', {class: 'x2'}, btn('pb', '✓ 했어요', () => act('x_done', {id: x.id})), btn('pb soft', '건너뛰기', () => act('x_skip', {id: x.id}))));
+  });
+  return card(`오늘 할 것 ${ws.length}`, el('p', {class: 'note', style: 'margin-top:0'}, '버튼을 누르면 X 앱에서 열려요. 앱에서 누른 뒤 ‘했어요’.'),
+    ...(rows.length ? rows : [el('p', {class: 'note'}, '지금은 없어요. 하루 3~4번 새로 골라 둬요')]));
+}
 const OPEN = {};  // 접은 칸을 열어 둔 채로 다시 그리기
 const fold = (key, title, ...kids) => H.el('details', {class: 'itm', open: !!OPEN[key], ontoggle: e => { OPEN[key] = e.target.open; }},
   H.el('summary', {class: 'h3', style: 'margin:0'}, title), ...kids);
@@ -95,13 +115,14 @@ function settings(X) {
   let auto = s.auto;
   return fold('set', '설정', el('div', {class: 'tf', style: 'margin-top:8px'},
     el('div', {class: 'tc'}, Object.keys(A).map(k => num('xc-' + k, `${A[k]} 하루 (최대 ${hc[k]})`, s.caps[k]))),
-    inp('x-kw', '찾을 키워드 (쉼표로)', s.keywords.join(', ')),
-    el('label', {class: 'tg'}, el('span', {}, '승인 없이 자동으로 보내기'), el('input', {type: 'checkbox', checked: !!s.auto, onchange: e => { auto = e.target.checked; }})),
-    el('p', {class: 'note', style: 'margin:0'}, '하루 4~6번만 접속해 나눠서 해요. 주말은 20% 더, 리포스트는 2~3일에 1번. 0이면 그 일은 안 해요.'),
+    s.phone ? inp('x-src', '글을 읽어 올 계정 (쉼표로, @ 없이)', (s.sources || []).join(', ')) : inp('x-kw', '찾을 키워드 (쉼표로)', s.keywords.join(', ')),
+    s.phone ? null : el('label', {class: 'tg'}, el('span', {}, '승인 없이 자동으로 보내기'), el('input', {type: 'checkbox', checked: !!s.auto, onchange: e => { auto = e.target.checked; }})),
+    el('p', {class: 'note', style: 'margin:0'}, s.phone ? '서버는 X 에 들어가지 않아요. 하루 3~4번 공개 글을 읽어 카드로 둬요. 0이면 그 카드는 안 만들어요.'
+      : '하루 3~4번만 접속해 나눠서 해요. 주말은 20% 더, 리포스트는 2~3일에 1번. 0이면 그 일은 안 해요.'),
     btn('pb', '저장', () => {
       if (auto && !s.auto && !confirm('승인 없이 서버가 바로 보내요. X 약관상 계정 제한 위험이 있어요. 켤까요?')) return;
       const caps = {}; for (const k of Object.keys(A)) caps[k] = +val('xc-' + k);
-      act('x_settings', {caps, keywords: val('x-kw'), auto}, '저장했어요');
+      act('x_settings', s.phone ? {caps, sources: val('x-src')} : {caps, keywords: val('x-kw'), auto}, '저장했어요');
     })));
 }
 function draw() {
@@ -110,7 +131,7 @@ function draw() {
   if (T.off || !T.x) { box.replaceChildren(el('p', {class: 'empty'}, T.off || 'X 기능이 아직 서버에 없어요'), H.btn('pb soft', '다시 불러오기', load)); return; }
   const X = T[cur] || T.x, typing = D.activeElement && box.contains(D.activeElement) && /^(TEXTAREA|INPUT)$/.test(D.activeElement.tagName);
   if (typing) return;  // 댓글·설정을 고치는 중에는 다시 그리지 않음
-  box.replaceChildren(...[...head(X), X.settings.auto ? null : inbox(X), log(X), settings(X)].filter(Boolean));
+  box.replaceChildren(...[...head(X), X.settings.phone ? phoneCards(X) : X.settings.auto ? null : inbox(X), log(X), settings(X)].filter(Boolean));
 }
 function view(b, h, goBack) {
   css(); box = b; H = h; back = goBack;
