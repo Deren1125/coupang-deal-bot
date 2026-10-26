@@ -65,7 +65,7 @@ async function api(path, opt = {}, again) {
   return {status: r.status, data};
 }
 
-// quiet: 시간 글자만 바뀐 것은 다시 그리지 않음 (10/23)
+// quiet: 시간 글자만 바뀌면 안 그림
 const APPV = ((D.querySelector('script[src*="app.js"]') || {}).src || '').split('v=')[1];
 const sig = d => JSON.stringify(d, (k, v) => k === 'at' || k === 'etag' || k === 'since' ? 0 : typeof v === 'string' ? v.replace(/\d+\s*(초|분|시간)\s*(전|남음|째)?/g, '') : v);
 function load(quiet) {
@@ -84,7 +84,7 @@ function load(quiet) {
     if (r.status === 304) { OLD = false; head(); after(); return; }
     const d = await r.json().catch(() => null);
     if (!d) return;
-    // 저장본(x-sw-cache)은 버림 · 새 판이면 한 번 새로 열기 (10/24)
+    // 저장본은 버림 · 새 판이면 한 번 새로 열기
     const c = r.headers.get('x-sw-cache') === '1';
     if (quiet && c) return;
     if (!c && d.app && APPV && d.app !== APPV && !D.querySelector('.bd') && LS.g('rl') !== d.app) { LS.s('rl', d.app); location.reload(); return; }
@@ -164,7 +164,7 @@ function go(u) {
   if (h) location.hash = '#' + h;
 }
 
-// -- 시트 (모달 대신 아래에서 올라오는 판)
+// -- 시트 (아래에서 올라오는 판)
 const SH = [];
 function sheet(title, body, onclose) {
   const sh = el('div', {class: 'sh', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, tabindex: '-1'},
@@ -296,7 +296,7 @@ async function exec(a, extra, ctx = {}) {
   if (r.status === 200 && d.status === 'ok') {
     if (ctx.key) { delete P[ctx.key]; delete OPEN[ctx.iid]; }
     if (ctx.keys) ctx.keys.forEach(k => delete VAL[k]);
-    if (a.action === 'deal.link') {  // 여러 개 한 번에: 다음 링크 줄을 열어 둔다
+    if (a.action === 'deal.link') {  // 다음 링크 줄을 열어 둠
       const ls = S.todo.filter(i => i.primary && i.primary.action === 'deal.link'), at = ls.findIndex(i => i.iid === ctx.iid);
       const nx = ls[at + 1] || ls.find(i => i.iid !== ctx.iid);
       if (nx) { OPEN[nx.iid] = pk(nx.iid, nx.primary); NEXT = nx.iid; }
@@ -398,7 +398,7 @@ async function uploadAll(files, kind, onp) {
   }
   return ids;
 }
-const prog = figs => (i, x, done) => {  // 올리는 칸 아래 막대 · 끝나면 초록 / 실패 빨강
+const prog = figs => (i, x, done) => {  // 올리기 막대
   const fg = figs[i]; if (!fg) return;
   fg.querySelector('i').style.width = Math.round(x * 100) + '%';
   if (done === true) fg.classList.add('ok'); else if (done === false) fg.classList.add('bad');
@@ -412,7 +412,7 @@ function pick(accept, multiple, done) {
   f.click();
 }
 
-// -- 줄 하나 (칩 · 제목 · 상태 한 줄 · 누를 것 하나)
+// -- 줄 하나
 function chip(it) {
   if (it.cue) return el('span', {class: 'cp ' + (it.cue === '급해요' ? 'stop' : 'hot')}, it.cue);
   const [mk, lab] = SEV[it.sev] || SEV.todo;
@@ -452,7 +452,7 @@ function primary(it, a) {
   }) : null, L.length > 1 && !SH.length ? btn('lnk', `링크 ${L.length}개 모두`, () => openItem(it.iid, it)) : null].filter(Boolean);
   return t.length ? el('div', {}, b, el('div', {class: 'tools sub'}, ...t)) : b;
 }
-// 인스타 링크 (Pick 사진 자리): 빈 자리, 자리 정보가 없으면 1..N
+// 인스타 링크 (Pick 사진 자리)
 const IGRE = /^https?:\/\/(www\.|m\.)?instagram\.com\/([\w.]+\/)?(p|reels?)\/[\w-]{5,40}([/?#]|$)/i;
 function igSlots(it, a) {
   if (a.input !== 'photos' || !a.options || (a.args || {}).blog !== 'issue') return [];
@@ -464,7 +464,7 @@ function igAdd(st, sl) {
   rows.push({slot: (sl.find(x => !u.includes(x.slot)) || sl[0]).slot, url: ''});
 }
 
-// 누를 것: 입력이 없으면 바로, 있으면 그 자리에(inline) 또는 시트로
+// 누를 것: 바로 · 그 자리 · 시트
 function act(it, a, b, inline) {
   if (a.input === 'open') { W.open(a.url, '_blank', 'noopener'); return; }
   if (a.input === 'goto') { go('#' + a.goto.replace(/^#/, '')); return; }
@@ -522,7 +522,7 @@ function panel(it, a, key, ctx) {
       a.photo_optional ? btn('lnk', st.files.length ? '사진 바꾸기' : '사진 추가 (선택)', () => pick(a.accept || 'image/*', false, fs => { if (fs.length) { st.files = fs.slice(0, 1); redraw(); } })) : null);
     kids.push(tools, f);
   } else if (qs.length) {
-    // 답마다 사진 첨부 (10/18: 근거 캡처 — 글에는 안 넣음). ✕ 는 기호, 읽는 글자는 aria-label
+    // 답마다 사진 첨부 (근거 캡처 — 글에는 안 넣음)
     for (const q of qs) {
       const k = `${key}|${q.n}`, fs = qf[q.n] || [];
       keys.push(k);
@@ -634,7 +634,7 @@ function paste(f, key, a) {
   }, a.pm ? {'data-pm': 1} : null);
 }
 
-// -- 링크에서 사진 고르기 (10/18): AI 고른 것 미리 · 누르면 넣기·빼기 · 꾹 = 크게
+// -- 링크에서 사진 고르기 (꾹 = 크게)
 const PS = {};
 function sel(it) {
   const p = it.detail.pics, o = PS[it.iid];
@@ -685,7 +685,7 @@ function picsBox(it) {
   out.push(n ? el('div', {class: 'tools'}, x(p.fetch, 'lnk'), x(p.clear, 'lnk mute')) : x(p.fetch, 'pb ghost'));
   return out;
 }
-// 블로그 탭 '링크에서 사진 뽑기' (웹은 한 번에 저장 불가 → 크게 열어 꾹)
+// '링크에서 사진 뽑기' (크게 열어 꾹)
 function vPics() {
   const t = S.pics, out = [el('div', {class: 'top'}, el('h2', {}, '링크에서 사진 뽑기'), el('a', {class: 'lnk', href: '#/blog/' + (LS.g('blog') || 'finance')}, '블로그로'))];
   if (!t) return out.concat(el('p', {class: 'empty'}, MSG.unsupported));
@@ -707,12 +707,12 @@ function vPics() {
   return out;
 }
 
-// 구글 검색 등록 (10/18): 주소 복사만, 등록함은 확인 없이 (다시 누르면 되돌림)
+// 구글 검색 등록: 주소 복사만
 const CHK = {}, isOn = x => x.auto || (x.url in CHK ? CHK[x.url] : x.done);
 async function mark(urls, on) {
   urls.forEach(u => { CHK[u] = on; }); render();
   const ok = await exec({action: 'search.check', args: {urls, done: on}});
-  await loading;  // 서버 값이 오면 화면 표시는 지운다 (다른 기기에서 바꾼 것도 보이게)
+  await loading;  // 서버 값이 오면 화면 표시는 지움
   urls.forEach(u => delete CHK[u]); render();
   if (ok) toast(on ? '등록함으로 표시했어요' : '되돌렸어요', '되돌리기', () => mark(urls, !on));
 }
@@ -735,7 +735,7 @@ function vSearch() {
   return out;
 }
 
-// -- 시트들: 더보기 · 자세히 · 고르기 · 찾기 · 정리
+// -- 시트들
 function moreSheet(it, more) {
   const box = el('div');
   sheet(it.title || '더보기', box);
@@ -747,7 +747,7 @@ function choiceSheet(a) {
   sheet(a.title || a.label, box);
   box.append(a.note ? el('p', {class: 'note'}, a.note) : '', ...(a.choices || []).map(c => btn(c.primary ? 'pb' : 'mr', c.label, () => { back(); exec(a, {name: c.value}); })));
 }
-function whenSheet(a) {  // 10/19: 예약 시간 바꾸기 — 시각 + 오늘/내일
+function whenSheet(a) {  // 예약 시간 바꾸기
   const f = el('input', {class: 'fl', type: 'time', value: a.value}), K = ['today', 'tomorrow'];
   let day = a.day;
   const tg = K.map((k, i) => btn('tg', i ? '내일' : '오늘', () => { day = k; tg.forEach((b, j) => b.setAttribute('aria-pressed', '' + (j === i))); }, {'aria-pressed': '' + (day === k)}));
@@ -807,7 +807,7 @@ function detail(it) {
   if (pr && (pr.must || []).length) out.push(el('p', {class: 'h3'}, '필요한 사진'), el('ul', {class: 'ls'}, pr.must.map(t => el('li', {text: t}))));
   if (pr && (pr.links || []).length) out.push(el('div', {class: 'tools'}, pr.links.map(l => ext('lnk', l.label, l.url))));
   out.push(...picsBox(it));
-  // 기사에서 찾은 인스타 게시물 · 넣기 = 인스타 링크 칸과 같은 blog.photos links
+  // 기사에서 찾은 인스타 게시물
   if ((d.ig || []).length) out.push(el('p', {class: 'h3'}, '넣으면 좋을 인스타 게시물'), ...d.ig.map(g => el('div', {class: 'box'}, el('p', {text: g.text}),
     el('div', {class: 'tools'}, g.open && ext('lnk', '인스타 열기', g.open), g.src && ext('lnk mute', '기사', g.src), g.put && btn('lnk', g.put.label, e => exec(g.put, {}, {btn: e.currentTarget, iid: it.iid}))))));
   if ((d.slots || []).length) {
@@ -842,26 +842,26 @@ function slotActs(it, s, c, l1, l2) {
     s.thumb ? btn(c + ' red', l2, e => exec({action: 'blog.photo_clear', args: Object.assign({}, args, {slot: s.slot})}, {}, {btn: e.currentTarget, iid: it.iid})) : null];
 }
 function slotSheet(it, s) { sheet(slotT(s), el('div', {}, slotActs(it, s, 'mr', '이 자리 사진 바꾸기', '이 자리 비우기'))); }
-// 사진을 누르면 올릴 그대로 (10/20): final(없으면 full) · 체크무늬 위 원래 비율 · 픽셀 크기
+// 사진을 누르면 올릴 그대로
 function slotView(it, s) {
   const px = el('p', {class: 'note'}), im = el('img', {src: s.final || s.full || s.thumb, alt: slotT(s), onload: () => { px.textContent = `${im.naturalWidth} × ${im.naturalHeight}px`; }});
   sheet(slotT(s), el('div', {}, el('div', {class: 'ck'}, im), px,
     el('div', {class: 'two'}, ED(it) ? btn('pb soft', '편집', () => edPhoto(it, s)) : null, slotActs(it, s, 'pb soft', '교체', '비우기'))));
 }
-// 사진 한 번에 고치기·편집기
+// 편집기
 const lazy = (q, f, g) => { let p = null; return () => p = p || new Promise((ok, bad) => {
   const m = D.querySelector(q), s = el('script', {src: m ? m.content : `/dashboard/static/${f}.js`});
   s.onload = () => W[g] ? ok(W[g]) : bad(); s.onerror = () => { p = null; s.remove(); bad(); }; D.head.append(s);
 }); };
 const edLoad = lazy('meta[name=sb-edit]', 'edit', 'SBEdit');
-// 제품 테스트 (10/21)
+// 제품 테스트
 const ptLoad = lazy('meta[name=sb-product]', 'product', 'SBProduct');
 function vPT() {
   const b = el('div', {});
   ptLoad().then(P => b.replaceChildren(...P.view(S.ptrial, {el, btn, ext, exec, toast, render, sheet})), () => toast(MSG.net));
   return [el('div', {class: 'top'}, el('h2', {}, '제품 테스트'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')), b];
 }
-// 일정 화면 (10/21): sched.js 는 처음 열 때만
+// 일정 화면 (sched.js)
 const scLoad = lazy('meta[name=sb-sched]', 'sched', 'SBSched');
 let SC;
 const vSC = () => SC ? SC.view(S.sched, {el, btn, render, act, open: openItem, pend: pendingOf})
@@ -875,7 +875,7 @@ async function edGo(it, fn) {
     args: {blog: it.blog, pid: Number(it.iid.split('-')[2])}});
 }
 const edBatch = it => edGo(it, (E, h) => E.batch(h));
-// 사진 테스트 (10/21 — 시험 글만 · 그리기는 product.js): 사진을 누르면 평소 편집기
+// 사진 테스트 (product.js)
 function vTrial() {
   const box = el('div');
   if (!S.photo_trial) return [el('p', {class: 'note'}, '사진 테스트 글이 없어요')];
@@ -883,9 +883,9 @@ function vTrial() {
     edPhoto: (p, s) => edGo({blog: 'issue', iid: p.iid, detail: {slots: p.edit}}, (E2, h) => E2.photo(h, s, () => {}))})), () => toast(MSG.net));
   return [el('h2', {}, '사진 테스트'), box];
 }
-// 사진을 누르면 바로 편집기 (10/20)
+// 사진을 누르면 편집기
 const edPhoto = (it, s) => edGo(it, (E, h) => E.photo(h, s, () => slotSheet(it, s)));
-// 발행 글 고치기 (10/21): 최근 글 → 사진 빼기·교체 · 문장 빼기 (edit.js fix)
+// 발행 글 고치기 (edit.js)
 const edFix = (k, r) => edGo({blog: k, iid: `post-${k}-${r.pid}`, detail: {}}, (E, h) => E.fix(h, r));
 async function digestSheet(id) {
   const r = await api('/dashboard/api/digest/' + encodeURIComponent(id));
@@ -956,7 +956,7 @@ function vDeal() {
   return out;
 }
 
-// 같은 딜이 간 곳 (채널·핫딜 블로그·인스타·스레드)
+// 같은 딜이 간 곳
 const DEAL_LINKS = [['url', '채널'], ['blog_url', '블로그'], ['ig_url', '인스타'], ['th_url', '스레드']];
 function dealLinks(r) {
   const a = DEAL_LINKS.filter(([k]) => r[k]).map(([k, l]) => ext('sm', l, r[k]));
@@ -965,10 +965,10 @@ function dealLinks(r) {
 
 // -- 탭: 블로그
 const IDEA = ['blog.scan', 'blog.issue', 'blog.hotdeal_now'];
-// 블로그 이름 옆 할 일 수 (10/20)
+// 블로그 옆 할 일 수
 const mineT = (i, k) => i.kind === 'visits' ? vis(i.detail.visits).some(x => x.blog === k) : i.blog === k && !pendingOf(i.iid);
 const todoN = k => S.todo.filter(i => mineT(i, k)).length;
-// Pick 인기 검색어 (10/20)
+// Pick 인기 검색어
 const TSRC = {advisor: '어드바이저', google: '구글', pick: 'Pick', news: '뉴스', early: '급상승'}, TTAG = {fashion: '패션', ent: '연예'};
 function trendBox(t) {
   const all = OPEN.trends, mv = x => x.new ? el('i', {class: 'up'}, 'NEW') : x.change ? el('i', {class: x.change > 0 ? 'up' : 'dn'}, (x.change > 0 ? '▲' : '▼') + Math.abs(x.change)) : el('i', {}, '–');
@@ -978,7 +978,7 @@ function trendBox(t) {
         e => trendGo(t, x, e), {disabled: !t.write || Object.values(POLL).some(p => p.args.keyword === x.keyword && p.action === t.write.action) || null}), x.badge ? el('span', {class: 'cp hot'}, x.badge) : null, x.written ? el('span', {class: 'cp ok'}, '이미 쓴 글 있음') : null)),
     t.items.length > 10 ? btn('fold', all ? '10위까지만' : `20위까지 보기`, () => { OPEN.trends = !all; render(); }) : null)];
 }
-// 누르면 바로 쓰기 (10/20)
+// 누르면 바로 쓰기
 async function trendGo(t, x, e) {
   if (await exec(t.write, {keyword: x.keyword}, {btn: e.currentTarget})) toast(`「${x.keyword}」 글 쓰기 시작했어요`);
 }
@@ -1040,7 +1040,7 @@ function vBlog() {
     const w = {iid: 'blog-' + key + '-write', title: write.label};
     out.push(el('div', {class: 'box', style: 'margin-top:12px'}, OPEN[w.iid] ? panel(w, write, pk(w.iid, write), {}) : btn('pb soft', write.label, () => { OPEN[w.iid] = pk(w.iid, write); render(); })));
   }
-  // 소재 넣기 (10/21): 카페 인기글 주제·아이디어 → 다음 글감의 첫 후보 (글 칸 + 보내기)
+  // 소재 넣기 → 다음 글감 첫 후보
   if (seed) { const s = {iid: 'blog-' + key + '-seed', title: seed.label}; out.push(el('p', {class: 'h3'}, '소재 넣기'), el('div', {class: 'box'}, panel(s, seed, pk(s.iid, seed), {fixed: true}))); }
   if (b.recent.length) {
     const open = OPEN['recent-' + key];
@@ -1058,7 +1058,7 @@ function vBlog() {
   return out;
 }
 
-// 배운 것으로 나아지기 (10/20)
+// 배운 것으로 나아지기
 const LA = {style: '문체', title: '제목', photo: '사진', tags: '태그', topic: '글감', schedule: '발행 시간'};
 const lgo = a => e => exec(a, {}, {btn: e.currentTarget});
 function learnBox(l) {
@@ -1083,7 +1083,7 @@ function fbSheet(r, v) {
   f.focus();
 }
 
-// 오늘 들를 이웃 글: 남의 블로그는 누를 때만 열고, 댓글은 주인이 직접 (했어요 → visit_done)
+// 오늘 들를 이웃 글 (댓글은 주인이 직접)
 const GONE = new Set(), vis = xs => (xs || []).filter(x => !GONE.has(x.id) && !pendingOf(x.id));
 function visitRow(x, all) {
   const r = el('div', {class: 'vi'}, el('span', {class: 'vn'}, all ? `${x.name} · ${(BLOGS.find(b => b[0] === x.blog) || [])[1]}` : x.name),
@@ -1103,7 +1103,7 @@ function visitSheet(xs, all) {
   sheet(`오늘 들를 이웃 글 ${xs.length}개`, el('div', {}, xs.map(x => visitRow(x, all)), el('p', {class: 'note'}, '글을 읽고 초안을 고쳐서 직접 달아 주세요')));
 }
 
-// 검색 등록: 구글은 주소 복사만 (주인 10/19)
+// 검색 등록
 function submitSheet(r) {
   const box = el('div');
   sheet(r.title, box);
@@ -1113,7 +1113,7 @@ function submitSheet(r) {
   r.daum ? el('p', {class: 'note'}, '다음은 블로그를 한 번 등록해 두면 새 글이 알아서 들어가요') : null);
 }
 
-// 한 번에 발행: 확인 창은 제목 목록으로 한 번, 그다음 글마다 발행 요청
+// 한 번에 발행: 확인 창 한 번, 그다음 글마다
 async function pubAll(xs) {
   if (!await confirmSheet({title: `${xs.length}편을 발행할까요?`, ok: '모두 발행',
     body: xs.map(x => '· ' + title(x)).join('\n') + '\n네이버 블로그에 바로 올라가요.'})) return;
@@ -1127,8 +1127,8 @@ async function pubAll(xs) {
   render(); poll();
 }
 
-// -- 탭: 통계 (서버가 그린 카드 조각 — 폼·스크립트 없음)
-const erLoad = lazy('meta[name=sb-earn]', 'earn', 'SBEarn');  // 제휴 수익 칸 (10/23): earn.js 는 통계 탭을 처음 열 때만
+// -- 탭: 통계 (서버가 그린 조각)
+const erLoad = lazy('meta[name=sb-earn]', 'earn', 'SBEarn');  // 제휴 수익 칸 (earn.js)
 let ER;
 function vStats() {
   const box = el('div', {class: 'stx', onclick: statsClick});
@@ -1211,7 +1211,7 @@ function listSheet(title, rows) { sheet(title, el('div', {}, rows.length ? rows 
 const RC = {ok: 'ok', run: 'info', bad: 'stop'};
 const foldBox = (t, f) => el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, fold(t, f));
 const doneRow = () => foldBox(`오늘 한 일 ${(S.counts || {}).done_today || 0}개`, todaySheet);
-// 오늘 바뀐 것·AI 점검: 서버 rows 그대로
+// 오늘 바뀐 것·AI 점검
 const devRow = (d, h = '오늘 바뀐 것') => d && foldBox(d.title, () => listSheet(h, d.rows.map(r => row(r.text, r.at, r.repo && el('span', {class: 'cp info'}, r.repo), r.bad))));
 function todaySheet() {
   const box = sheet('오늘 한 일', el('p', {class: 'empty'}, '불러오는 중…')), h = box.parentNode.querySelector('h2');
@@ -1302,7 +1302,7 @@ function start() {
     if (D.querySelector('[data-pm]')) toast('토스 링크를 복사했다면 "붙여넣기"를 눌러 주세요');
     if (Date.now() - PICK > 120000) load();
   });
-  // 20초마다 바뀐 것만 다시 그림 (10/23). 시트·글 쓰는 중엔 건너뜀
+  // 20초마다 바뀐 것만 다시 그림
   setInterval(() => { const a = D.activeElement; if (D.visibilityState === 'visible' && !D.querySelector('.bd') && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) load(1); }, 20000);
   ptr();
   route();
