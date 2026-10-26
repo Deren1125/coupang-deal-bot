@@ -1,8 +1,9 @@
 """네이버 쇼핑커넥트 링크 생성 (브라우저 자동화).
 
 흐름
-  1) /naverlogin : 네이버 로그인 페이지의 QR 탭을 열어 스크린샷을 관리자에게 보냄 → 네이버 앱으로 스캔 → 로그인 쿠키가
-     프로필에 저장됨 (이후 재로그인 불필요, 만료되면 다시 /naverlogin)
+  1) /naverlogin · 대시보드 '로그인 관리' › QR 로그인 (주인 10/26): 네이버 로그인 페이지의 QR 탭을 열어 스크린샷을 주인에게 보냄 →
+     네이버 앱으로 스캔 → 로그인 쿠키가 프로필에 저장됨 (이후 재로그인 불필요, 만료되면 다시). QR 화면은 wait_login 이 끝날 때까지
+     열어 둔다 — 닫으면 네이버가 앱에서 승인한 로그인을 이 브라우저에 넘기지 못한다. 주인이 누를 때만 (다시 시도·정해진 때 열기 없음)
   2) 발행 시 convert(url): 쇼핑커넥트 링크 생성 페이지에서 상품 URL 입력 → 발급 → 결과 링크 추출
   실제 화면 구조는 이 환경에서 확인하지 못했으므로 셀렉터(config.browser.naver_connect.selectors)는
   /shot <url> 스크린샷을 보고 맞춰야 한다. 실패하면 라우터가 수동(관리자 링크)으로 넘긴다.
@@ -10,8 +11,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 from dealbot.browser.session import BrowserSession
@@ -31,17 +34,26 @@ class NaverConnectProvider:
     def __init__(self, session: BrowserSession, cfg: NaverConnectConfig) -> None:
         self.session = session
         self.cfg = cfg
+        self.on_state: Callable[[bool], None] | None = None  # 로그인 쿠키를 볼 때마다 (대시보드 '로그인 관리' 칸 — app 이 붙임)
+        self._qr_page: Any = None  # 주인이 QR 을 찍는 동안 열어 둔 로그인 화면 (wait_login · close_qr 가 닫음)
 
     # ------------------------------------------------------------ login
     async def is_logged_in(self) -> bool:
         cookies = await self.session.cookies(name=self.cfg.login_cookie, domain_contains="naver.com")
+        if self.on_state is not None:
+            try:
+                self.on_state(bool(cookies))
+            except Exception as e:  # noqa: BLE001 — 상태 기록이 안 돼도 로그인 판단은 그대로
+                log.debug("naver login state note failed: %s", type(e).__name__)
         return bool(cookies)
 
     async def start_qr_login(self) -> bytes:
-        """로그인 페이지를 열고 QR 탭을 눌러 스크린샷을 돌려준다. 주인이 직접 하는 로그인 — 접속 상한(site_gate) 멈춤을 풀고 잠시 세지 않음."""
+        """로그인 페이지를 열고 QR 탭을 눌러 스크린샷을 돌려준다. 주인이 직접 하는 로그인 — 접속 상한(site_gate) 멈춤을 풀고 잠시 세지 않음.
+        화면은 닫지 않고 둔다 (wait_login 이 끝나면 닫힘 — 앱에서 승인한 로그인을 이 화면이 받아 쿠키로 남김)."""
         from dealbot import site_gate
 
         site_gate.owner_window(self.session.gate_acct)
+        await self.close_qr()
 
         async def _do(page: Any) -> bytes:
             await page.goto(self.cfg.login_url, wait_until="domcontentloaded", timeout=45000)
@@ -54,18 +66,30 @@ class NaverConnectProvider:
             await page.wait_for_timeout(2500)
             return await page.screenshot(type="png")
 
-        return await self.session.run(_do)
+        png, self._qr_page = await self.session.run_keep(_do)
+        return png
+
+    async def close_qr(self) -> None:
+        page, self._qr_page = self._qr_page, None
+        if page is not None:
+            with contextlib.suppress(Exception):
+                await page.close()
 
     async def wait_login(self, timeout_seconds: int = 120, poll_seconds: float = 3.0) -> bool:
         import asyncio
 
-        waited = 0.0
-        while waited < timeout_seconds:
-            if await self.is_logged_in():
-                return True
-            await asyncio.sleep(poll_seconds)
-            waited += poll_seconds
-        return await self.is_logged_in()
+        page = self._qr_page  # 이 기다림의 QR 화면 — 그사이 다른 쪽(텔레그램 /naverlogin · 대시보드)이 새 QR 을 열었으면 그건 닫지 않음
+        try:
+            waited = 0.0
+            while waited < timeout_seconds:
+                if await self.is_logged_in():
+                    return True
+                await asyncio.sleep(poll_seconds)
+                waited += poll_seconds
+            return await self.is_logged_in()
+        finally:
+            if self._qr_page is page:
+                await self.close_qr()
 
     # ------------------------------------------------------------ convert
     async def convert(self, url: str) -> str:

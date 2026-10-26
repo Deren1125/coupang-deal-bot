@@ -295,6 +295,10 @@ class DealBot:
                     executable_path=settings.browser.executable_path,
                 )
                 self.naver_connect = NaverConnectProvider(self.browser, settings.browser.naver_connect)
+                from dealbot.dashboard import logins as dash_logins
+
+                # 대시보드 '로그인 관리' 칸 (주인 10/26): 쿠키를 볼 때마다 상태만 적음 — 이 때문에 사이트를 더 열지 않는다
+                self.naver_connect.on_state = lambda ok: dash_logins.note_naver(self.db, ok)
                 providers["naver_connect"] = self.naver_connect
             except Exception as e:  # noqa: BLE001
                 log.warning("browser automation unavailable: %s", e)
@@ -1285,7 +1289,7 @@ class DealBot:
         if ok:
             self.db.log_event("INFO", "naver", "logged in via QR")
             return "✅ 네이버 로그인 완료. 이제 네이버 딜은 자동으로 링크를 만듭니다 (실패하면 수동 요청)."
-        return "⏰ 2분 안에 로그인이 확인되지 않았습니다. /naverlogin 을 다시 보내세요."
+        return "⏰ 2분 안에 로그인이 확인되지 않았습니다. /naverlogin (또는 대시보드 연결 탭 '로그인 관리' › QR 로그인) 을 다시 해 주세요."
 
     async def screenshot(self, url: str) -> tuple[bytes | None, str]:
         if self.browser is None:
@@ -1429,7 +1433,7 @@ class DealBot:
             else:
                 try:
                     logged = await self.naver_connect.is_logged_in()
-                    out.append((True, "네이버 브라우저 로그인 유지 중") if logged else (None, "네이버 브라우저: 로그인 필요 (/naverlogin)"))
+                    out.append((True, "네이버 브라우저 로그인 유지 중") if logged else (None, "네이버 브라우저: 로그인 필요 (대시보드 연결 탭 '로그인 관리' › QR 로그인 · /naverlogin)"))
                 except Exception as e:  # noqa: BLE001
                     out.append((False, f"브라우저: {e}"))
         if self.settings.secrets.has_linkprice:
@@ -2816,7 +2820,7 @@ class DealBot:
                 self.db.log_event("WARNING", "autolink", f"toss stopped: {reason}")
                 log.warning("토스 쉐어링크 자동 링크 멈춤: %s", reason)
                 text = (f"토스 쉐어링크 자동 링크 멈춤: {autolink.TOSS_ALERT_REASONS[reason]}. 그동안 들어온 토스 딜은 묻지 않고 기다렸다가 다시 되면 자동으로 링크를 만들어요. "
-                        f"{autolink.TOSS_RESUME_HINT}")
+                        f"{autolink.LOGIN_RESUME_HINT if reason == 'login' else autolink.TOSS_RESUME_HINT}")
                 if self.notifier.silent_policy:
                     if not self.notifier.owner_line({"kind": "autolink_stop", "key": f"autolink_toss:{reason}", "urgent": True,
                                                      "text": kakao_fit(f"⛔[멈춤] {text}"), "short": "토스 자동 링크 멈춤",
@@ -2991,7 +2995,7 @@ class DealBot:
                 self.db.log_event("WARNING", "autolink", f"stopped: {reason}")
                 log.warning("쇼핑커넥트 자동 링크 멈춤: %s", reason)
                 text = (f"쇼핑커넥트 자동 링크 멈춤: {autolink.ALERT_REASONS[reason]}. 그동안 들어온 네이버 딜은 묻지 않고 기다렸다가 다시 되면 자동으로 링크를 만들어요. "
-                        f"{autolink.RESUME_HINT}")
+                        f"{autolink.LOGIN_RESUME_HINT if reason == 'login' else autolink.RESUME_HINT}")
                 if self.notifier.silent_policy:  # 알림 정책(10/11): 카톡 할 일 한 통 (v2 키 — 다시 시작하면 해결)
                     if not self.notifier.owner_line({"kind": "autolink_stop", "key": f"autolink:{reason}", "urgent": True,
                                                      "text": kakao_fit(f"⛔[멈춤] {text}"), "short": "쇼핑커넥트 자동 링크 멈춤",

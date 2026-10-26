@@ -33,6 +33,10 @@ popular = 그중 score(0~100 인기 예상) 가 threshold 이상인 글 수, top
         {"key": "draft_ready:issue:31", "marker": "🔔[할 일]", "blog": "issue", "kind": "draft_ready", "short": "≤30자 요약",
          "text": "첫 줄 무엇\n→ 어떻게 (두 줄 이하)", "since": "…", "urgent": false, "link": "https://…" | "", "group": "", "count": 1}]}
 글은 카톡 메모와 같은 주인용 문구. 항목마다 따로 걸러서 이상한 항목만 버린다 (링크는 https 만, 토큰 모양 글자는 가림).
+로그인 할 일 줄에만 "login": 원격 로그인 대상 (remote_login.TARGETS 의 이름 — 주인 10/26, 딜봇이 그 줄에 '원격 로그인' 단추).
+
+v2 status.logins (주인 10/26 — Blog-Auto remote_login.states): 프로그램이 쓰는 로그인마다 지금 상태 (사이트를 열지 않고 읽은 것) —
+    [{"id", "label", "state": ok|needed|resting|off|unknown, "note", "checked_at", "since", "until", "target", "where"}] → logins.py '로그인 관리' 칸.
 """
 
 from __future__ import annotations
@@ -48,6 +52,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from dealbot.dashboard.model import OK, STALE, UNAVAILABLE, https_url, safe_text
+from dealbot.dashboard.remote_login import TARGETS as REMOTE_TARGETS
 
 MAX_BYTES = 4_000_000  # v2 (글·사진 자리·질문까지) — 4MB 까지
 
@@ -160,6 +165,7 @@ class TodoItem:
     link: str | None = None  # https 만 (아니면 None)
     group: str = ""
     count: int = 1
+    login: str | None = None  # 로그인 할 일 줄의 원격 로그인 대상 (REMOTE_TARGETS 의 이름만 — 주인 10/26)
 
 
 @dataclass(slots=True)
@@ -444,6 +450,7 @@ def _todo_item(v: Any, tz: str) -> TodoItem | None:
         urgent=v.get("urgent") is True, blog=(_one_line(v.get("blog"), 20) or "").lower(),
         kind=_one_line(v.get("kind"), 40) or "", link=link, group=_one_line(v.get("group"), 40) or "",
         count=max(1, _count(v.get("count"), top=TODO_COUNT_MAX) or 1),
+        login=v["login"] if isinstance(v.get("login"), str) and v["login"] in REMOTE_TARGETS else None,
     )
 
 
@@ -1119,6 +1126,44 @@ def _secs(v: Any) -> float | None:
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 10**11 else None
 
 
+# 로그인 관리 (주인 10/26 — Blog-Auto remote_login.states → status.logins). 줄마다 따로 걸러 이상한 줄만 빠진다
+LOGIN_STATES = ("ok", "needed", "resting", "off", "unknown")
+LOGIN_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
+LOGINS_MAX, LOGIN_LABEL_MAX, LOGIN_NOTE_MAX, LOGIN_WHERE_MAX = 12, 40, 80, 80
+_ISO_TZ_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,6})?)?(?:[+-][0-9]{2}:[0-9]{2}|Z)$")
+
+
+def _iso_tz(v: Any) -> str | None:
+    """시간대가 붙은 ISO 시각 글자만 그대로 (없거나 시간대가 없거나 날짜가 틀리면 None)."""
+    if not isinstance(v, str) or not _ISO_TZ_RE.match(v):
+        return None
+    try:
+        return v if datetime.fromisoformat(v.replace("Z", "+00:00")).tzinfo is not None else None
+    except ValueError:
+        return None
+
+
+def _logins(v: Any) -> list[dict[str, Any]] | None:
+    """[{id, label, state, note, checked_at, since, until, target, where}] — 칸이 없으면(예전 Blog-Auto) None.
+    target 은 딜봇 remote_login.TARGETS 에 있는 이름만 (모르는 이름·null 은 None → 단추 없이 읽기만). 같은 id 는 첫 줄만."""
+    if not isinstance(v, list):
+        return None
+    out: list[dict[str, Any]] = []
+    for x in v[:LOGINS_MAX]:
+        if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not LOGIN_ID_RE.match(x["id"]):
+            continue
+        label = _one_line(safe_text(x.get("label"), LOGIN_LABEL_MAX * 2), LOGIN_LABEL_MAX) if isinstance(x.get("label"), str) else None
+        if not label or any(r["id"] == x["id"] for r in out):
+            continue
+        text = {k: _one_line(safe_text(x.get(k), n * 2), n) or "" if isinstance(x.get(k), str) else ""
+                for k, n in (("note", LOGIN_NOTE_MAX), ("where", LOGIN_WHERE_MAX))}
+        out.append({"id": x["id"], "label": label, "state": x.get("state") if x.get("state") in LOGIN_STATES else "unknown",
+                    "note": text["note"], **{k: _iso_tz(x.get(k)) for k in ("checked_at", "since", "until")},
+                    "target": x["target"] if isinstance(x.get("target"), str) and x["target"] in REMOTE_TARGETS else None,
+                    "where": text["where"]})
+    return out
+
+
 def _shopconnect(v: Any) -> dict[str, Any] | None:
     """쇼핑커넥트 자동 링크 상태 (주인 10/24 — 연결 탭에서 실시간으로, Blog-Auto shopconnect.snapshot). 없으면 None."""
     if not isinstance(v, dict) or v.get("state") not in SC_STATES:
@@ -1388,6 +1433,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     out["status"]["kakao"] = {"state": k.get("state") if k.get("state") in ("ok", "down", "expiring", "unknown") else "unknown",
                               "expires_at": _one_line(k.get("expires_at"), 40)}
     out["status"]["shopconnect"] = _shopconnect(st.get("shopconnect"))
+    out["status"]["logins"] = _logins(st.get("logins"))  # 로그인 관리 칸 (주인 10/26 — 없으면 None: 예전 Blog-Auto)
     dg = data.get("digest") if isinstance(data.get("digest"), dict) else {}
     out["digest"] = {"day": _one_line(dg.get("day"), 10), "generated_at": _one_line(dg.get("generated_at"), 40),
                      "blogs": {b: _str_list((dg.get("blogs") or {}).get(b) if isinstance(dg.get("blogs"), dict) else None, 8, 200)

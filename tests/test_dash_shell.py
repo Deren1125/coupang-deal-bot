@@ -104,6 +104,10 @@ LOOKBOOK_JS_GZIP_MAX = 5 * 1024
 # /dashboard/api/lbtrial 로 열 때만 받아 파일엔 그리는 코드만 (12 → 16 KB / gzip 5 → 6.25 KB)
 LOOKBOOK_JS_MAX = 16 * 1024
 LOOKBOOK_JS_GZIP_MAX = 6 * 1024 + 256
+# 10/26: 로그인 관리 칸(연결 탭 맨 위 — 줄마다 상태·원격 로그인/QR 로그인 단추 · 열린 원격 화면 · QR 화면) — app.js 가 예산 끝이라
+# 셸이 defer 로 받는 logins.js (CSS 도 여기서). 줄 값은 /dashboard/api/logins 로 열 때만
+LOGINS_JS_MAX = 8 * 1024
+LOGINS_JS_GZIP_MAX = 3 * 1024 + 512
 
 
 @pytest.fixture
@@ -135,10 +139,13 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     csp = headers["Content-Security-Policy"]
     assert "script-src 'self'" in csp and "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, re.S)
-    assert len(scripts) == 4  # theme.js (화면 밝기, 10/24) · app.js · thpost.js (스레드 칸, 10/21 — threads.js 보다 먼저 떠 있어야 칸이 붙음) · boot
-    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (boot_attrs, _boot) = scripts
+    # theme.js (화면 밝기, 10/24) · app.js · thpost.js (스레드 칸, 10/21 — threads.js 보다 먼저 떠 있어야 칸이 붙음) ·
+    # logins.js (연결 탭 '로그인 관리' 칸, 10/26 — app.js 예산 끝이라 셸이 받음) · boot
+    assert len(scripts) == 5
+    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (boot_attrs, _boot) = scripts
     assert re.fullmatch(r' blocking="render" src="/dashboard/static/theme\.js\?v=[0-9a-f]{10}"', th_attrs) and th_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/thpost\.js\?v=[0-9a-f]{10}"', tp_attrs) and tp_body == ""
+    assert re.fullmatch(r' defer src="/dashboard/static/logins\.js\?v=[0-9a-f]{10}"', lg_attrs) and lg_body == ""
     assert re.fullmatch(r' src="/dashboard/static/app\.js\?v=[0-9a-f]{10}" defer', src_attrs) and src_body == ""
     assert boot_attrs == ' type="application/json" id="boot"'
     outside = re.sub(r'<script type="application/json" id="boot">.*?</script>', "", html, flags=re.S)
@@ -194,7 +201,8 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
     assert res[3]["Cache-Control"] == "no-cache" and res[3]["Service-Worker-Allowed"] == "/dashboard/"
     for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css"), ("badge-72.png", "image/png"),
                         ("edit.js", "text/javascript"), ("product.js", "text/javascript"), ("sched.js", "text/javascript"),
-                        ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript")):
+                        ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript"),
+                        ("logins.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))
@@ -218,6 +226,8 @@ def test_asset_budgets() -> None:
     assert len(xj) <= XPOST_JS_MAX and len(gzip.compress(xj, 9)) <= XPOST_JS_GZIP_MAX
     lb = (STATIC / "lookbook.js").read_bytes()
     assert len(lb) <= LOOKBOOK_JS_MAX and len(gzip.compress(lb, 9)) <= LOOKBOOK_JS_GZIP_MAX
+    lg = (STATIC / "logins.js").read_bytes()
+    assert len(lg) <= LOGINS_JS_MAX and len(gzip.compress(lg, 9)) <= LOGINS_JS_GZIP_MAX
     assert shell.asset_url("app.js") != shell.asset_url("app.css")
 
 
@@ -230,7 +240,8 @@ def test_app_js_is_korean_local_and_safe() -> None:
     sj = (STATIC / "sched.js").read_text(encoding="utf-8")
     xj = (STATIC / "xpost.js").read_text(encoding="utf-8")  # X 글쓰기 화면 주소는 state.x.intent 로 받는다 (파일에는 바깥 주소 없음)
     lb = (STATIC / "lookbook.js").read_text(encoding="utf-8")  # 룩북 영상·상품 링크는 state.lookbook 으로 (쇼츠 서버 주소는 화면에 없음)
-    for text in (js, css, sw, ed, pj, sj, xj, lb):
+    lg = (STATIC / "logins.js").read_text(encoding="utf-8")  # 로그인 관리 칸 — 원격 화면·QR 주소는 /dashboard/api/logins 로 (이 서버 주소만)
+    for text in (js, css, sw, ed, pj, sj, xj, lb, lg):
         assert "http://" not in text and "https://" not in text  # 바깥 주소·CDN 없음
         assert "eval(" not in text and "new Function" not in text and "document.write" not in text
     assert js.count("innerHTML") == 1  # 서버가 그린 통계 조각 하나뿐

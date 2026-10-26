@@ -31,6 +31,7 @@ XPOST_JS = "xpost.js"  # X(트위터) 초안함·진행률 (10/25) — 블로그
 LOOKBOOK_JS = "lookbook.js"  # 룩북 릴스 (10/25) — 블로그 탭 '룩북 릴스 →'를 처음 열 때만 (주소는 meta sb-lookbook)
 THREADS_JS = "threads.js"  # 스레드 (10/21) — 블로그 탭 '스레드·인스타 →'를 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
 X_JS = "x.js"  # X (10/25) — 스레드 화면 'X →'를 처음 누를 때만 threads.js 가 불러온다 (주소는 meta sb-x)
+LOGINS_JS = "logins.js"  # 로그인 관리 (10/26) — 연결 탭 맨 위 칸. app.js 가 예산 끝이라 셸이 defer 로 받고, 칸은 스스로 연결 탭에 붙는다
 
 
 @cache
@@ -62,6 +63,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<script blocking="render" src="{asset_url(THEME_JS)}"></script>'  # defer 없음 — 그리기 전에 data-theme 를 붙여 깜빡이지 않게 ("<script src=" 아님 — app.js 하나만 세는 시험과 구분)
         f'<script src="{asset_url(APP_JS)}" defer></script>'
         f'<script defer src="{asset_url(THPOST_JS)}"></script>'  # "<script src=" 아님 — app.js 하나만 세는 시험과 구분
+        f'<script defer src="{asset_url(LOGINS_JS)}"></script>'  # 로그인 관리 칸 (10/26) — 같은 이유로 "<script defer src="
         f'<meta name="sb-edit" content="{asset_url(EDIT_JS)}">'
         f'<meta name="sb-product" content="{asset_url(PRODUCT_JS)}">'
         f'<meta name="sb-sched" content="{asset_url(SCHED_JS)}">'

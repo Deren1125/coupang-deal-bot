@@ -11,7 +11,8 @@ tests/fixtures/dash_contract/iid_map.json 이 두 저장소에서 같아야 한�
     글 draft:B:N·fail:B:N·photo:B:N·sched:B:N     → post-B-N
        ask:N·chan:N·share:N·oedit:N:…·dup:N·cards:N·openchat:N → post-<그 글의 블로그>-N (블로그는 알림을 낸 쪽이 줌)
     hot:…                                          → post-issue-N (글 번호를 알 때), 아니면 blog-issue
-    login:B·kz:B·ownstats:B:…·login_down:B·own_stats_block:B → conn-naver-B
+    login:B·login_keep:B·kz:B·ownstats:B:…·login_down:B·own_stats_block:B → conn-naver-B
+    mall_login:<몰>[_…]                            → conn-mall-<몰> (ably_cf → ably · instagram = 인스타 검색 계정)
     kakao:…                                        → conn-kakao
     scan:…                                         → blog-finance-scan
     cq:B:…                                         → blog-B-comments
@@ -66,8 +67,8 @@ def iid_for(key: str, blog: str = "", pid: int | None = None, *, src: str = "dea
         return f"post-{blog}-{int(parts[1])}" if blog in BLOGS else "sys-blogauto"
     if head == "hot":
         return f"post-issue-{int(pid)}" if pid else "blog-issue"
-    if head in ("login", "kz", "ownstats", "login_down", "own_stats_block") and len(parts) >= 2 and parts[1] in BLOGS:
-        return f"conn-naver-{parts[1]}"
+    if head in ("login", "login_keep", "kz", "ownstats", "login_down", "own_stats_block") and len(parts) >= 2 and parts[1] in BLOGS:
+        return f"conn-naver-{parts[1]}"  # login_keep: '로그인 상태 유지' 없이 로그인함 — 같은 네이버 연결 줄 (Blog-Auto iid 와 같게, 10/26)
     if head == "kakao":
         return "conn-kakao"
     if head == "mall_login" and len(parts) == 2 and re.fullmatch(r"[a-z0-9]{1,20}", mall := parts[1].split("_", 1)[0]):

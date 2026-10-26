@@ -336,7 +336,97 @@
   "kakao": {
    "state": "ok",
    "expires_at": "2026-12-09T09:00:00"
-  }
+  },
+  "logins": [
+   {
+    "id": "finance",
+    "label": "아카이브 블로그(쇼핑커넥트도)",
+    "state": "ok",
+    "note": "",
+    "checked_at": "2026-10-18T09:00:00+09:00",
+    "since": null,
+    "until": null,
+    "target": "finance",
+    "where": ""
+   },
+   {
+    "id": "issue",
+    "label": "Pick 블로그",
+    "state": "needed",
+    "note": "로그인 풀림 — 다시 로그인할 때까지 자동 작업이 네이버를 열지 않아요",
+    "checked_at": "2026-10-18T08:40:00+09:00",
+    "since": "2026-10-18T08:12:00+09:00",
+    "until": null,
+    "target": "issue",
+    "where": ""
+   },
+   {
+    "id": "hotdeal",
+    "label": "핫딜 블로그",
+    "state": "unknown",
+    "note": "아직 확인 전",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": "hotdeal",
+    "where": ""
+   },
+   {
+    "id": "toss",
+    "label": "토스 쉐어링크",
+    "state": "ok",
+    "note": "",
+    "checked_at": "2026-10-18T08:02:00+09:00",
+    "since": "2026-10-15T08:00:00+09:00",
+    "until": null,
+    "target": "toss",
+    "where": ""
+   },
+   {
+    "id": "ably",
+    "label": "에이블리",
+    "state": "resting",
+    "note": "'사람인지 확인' 화면 — 하루 쉬었다가 한 번 다시 확인해요",
+    "checked_at": "2026-10-18T08:00:00+09:00",
+    "since": "2026-10-18T07:30:00+09:00",
+    "until": "2026-10-19T07:30:00+09:00",
+    "target": "ably",
+    "where": ""
+   },
+   {
+    "id": "zigzag",
+    "label": "지그재그",
+    "state": "needed",
+    "note": "로그인 풀림",
+    "checked_at": "2026-10-18T08:01:00+09:00",
+    "since": "2026-10-18T08:01:00+09:00",
+    "until": null,
+    "target": "zigzag",
+    "where": ""
+   },
+   {
+    "id": "instagram",
+    "label": "인스타 검색 계정",
+    "state": "needed",
+    "note": "로그인 안 됨 — 그동안 기사 속 게시물만 찾아요",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": "instagram",
+    "where": ""
+   },
+   {
+    "id": "threads_api",
+    "label": "스레드 API 토큰 (블로그 공유 글)",
+    "state": "ok",
+    "note": "토큰 41일 남음 (쓰는 동안 저절로 갱신)",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": null,
+    "where": "토큰 — 서버 .env 는 주인이 넣음 · 대시보드 연결 탭"
+   }
+  ]
  },
  "digest": {
   "day": "2026-10-18",

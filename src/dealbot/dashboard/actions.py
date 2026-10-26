@@ -113,6 +113,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "todo.hide", "login.remote", "stats.refresh", "stats.input", "search.check",
+                "login.qr",  # 딜봇 네이버 QR 로그인 (주인 10/26 — 대시보드 '로그인 관리' · 텔레그램 /naverlogin 과 같은 길)
                 "earn.save", "earn.delete",  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
                 "x.stats", "x.handles")  # X 진행률 숫자·계정 이름 직접 넣기 (주인 10/25 — X API 없음, 크리에이터 스튜디오 숫자를 주인이 주마다)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
@@ -578,6 +579,8 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         if g("target") not in TARGETS:
             raise ActionError("bad_args")
         return {"target": g("target")}
+    if action == "login.qr":
+        return {}
     if action == "todo.hide":
         iid = _str(g("iid"), 64)
         since = g("since")
@@ -1503,8 +1506,19 @@ class ActionDesk:
         if action == "login.remote":
             from dealbot.dashboard import remote_login
 
+            s = remote_login.refresh(self.bot.db)
+            if s and remote_login.live(s):  # 화면이 떠 있거나 띄우는 중 — 로그인 화면을 거듭 띄우지 않는다 (주인 10/26)
+                if s.get("target") == args["target"]:
+                    return "done", "이미 원격 화면이 열려 있어요 — 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
+                # 서버 화면은 한 번에 하나 (127.0.0.1:6080) — 다른 대상을 띄우면 열린 화면의 비밀번호가 바뀌어 들어갈 수 없게 됨
+                name = remote_login.TARGETS.get(s.get("target"), s.get("target"))
+                return "busy", f"지금 {name} 원격 화면이 열려 있어요 — 그 화면이 닫힌 뒤(로그인하면 저절로 닫혀요) 다시 눌러 주세요"
             remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"])
             return "done", "서버에 로그인 화면을 띄우는 중이에요 — 30초쯤 뒤 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
+        if action == "login.qr":
+            from dealbot.dashboard import logins
+
+            return await logins.start_qr(self.bot)
         if action == "stats.refresh":
             dash = bot.dashboard
             got = await dash.refresh(args["src"])

@@ -1255,7 +1255,7 @@ function vConnect() {
     const t = {ok: '정상', needed: '필요', unknown: '모름'}[x.login] || '모름';
     return row(l, `${t}${x.checked_at ? ` · 확인 ${hhmm(x.checked_at)}` : ''}`, x.action ? btn('sm', '지금 확인', e => exec(x.action, {}, {btn: e.currentTarget, iid: 'conn-naver-' + b})) : null, x.login === 'needed');
   }), (x => x && row('쇼핑커넥트', x.text, x.action && btn('sm', x.action.label, e => exec(x.action, {}, {btn: e.currentTarget})), x.bad))(c.sc),
-  need ? el('p', {class: 'note'}, 'PC에서 다시 로그인해야 해요 — 끝나면 지금 확인') : null));
+  need ? el('p', {class: 'note'}, '위 로그인 관리에서 원격 로그인해 주세요') : null));
   const bd = c.bots.dealbot, ba = c.bots.blogauto, cols = bd.collectors || [];
   out.push(...sec('봇 상태', null, row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.updated ? ` · ${bd.updated} 업데이트` : ''}`, null, bd.paused),
     row('블로그 프로그램', ba.ok ? `정상 · ${ago(ba.seen_at)} 신호` : `응답 없음${ba.seen_at ? ' · ' + ago(ba.seen_at) : ''}`, null, !ba.ok),

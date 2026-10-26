@@ -140,3 +140,14 @@ class BrowserSession:
                 return await fn(page, *args, **kwargs)
             finally:
                 await page.close()
+
+    async def run_keep(self, fn: Any, *args: Any, **kwargs: Any) -> tuple[Any, Any]:
+        """run 과 같지만 성공하면 페이지를 닫지 않고 (결과, 페이지) 를 돌려준다 — 닫는 것은 부른 쪽 (주인 QR 로그인 화면, 10/26).
+        fn 이 실패하면 닫는다."""
+        async with self._lock:
+            page = await self.new_page()
+            try:
+                return await fn(page, *args, **kwargs), page
+            except BaseException:
+                await page.close()
+                raise
