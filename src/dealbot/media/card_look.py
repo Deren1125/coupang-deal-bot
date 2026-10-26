@@ -30,6 +30,7 @@ CORNER = (210, 110)  # 오른쪽 위 비움 (가로·세로)
 AD = "광고"
 BRAND = "DEREN'S PICK"
 NEXT = "넘겨 보기 →"
+CARD_STYLES = ("current", "A", "B", "C")  # config instagram.look.card_style — A 화보형 · B 코디 보드형 · C 무드보드형 (media/look_styles)
 
 PAPER = (246, 245, 242)
 TOP = (234, 232, 227)
@@ -73,11 +74,15 @@ class LookDeck:
     end_kicker: str = "한눈에 정리"
     fonts: dict[str, str] = field(default_factory=dict)  # 글꼴 바꿔 쓰기 {xb|sb|md: 파일} (시험·샘플)
 
-    def texts(self) -> list[str]:
-        """카드에 그리는 글 전부 (검사용)."""
+    def texts(self, style: str = "current") -> list[str]:
+        """카드에 그리는 글 전부 (검사용). style A/B/C 는 그 갈래가 더 그리는 고정 글(머리글·사진 출처·기준 날짜)까지."""
         out = [AD, BRAND, self.kicker, *self.title, self.sub, self.end_kicker, self.end_line, self.price_note]
         for i, it in enumerate(self.items, 1):
             out += [item_label(i, it), piece_line(it), it.name, won(it.price), it.mall, not_worn(self.person, it)]
+        if style in CARD_STYLES[1:]:
+            from dealbot.media.look_styles import style_texts
+
+            out += style_texts(self, style)
         return [t for t in out if t]
 
 
@@ -374,15 +379,35 @@ def end(deck: LookDeck) -> Image.Image:
     return im
 
 
-def render(deck: LookDeck) -> list[tuple[bytes, str]]:
-    """덱 → [(JPEG, 대체 텍스트)] — 표지 · 상품 카드 N장 · 끝 카드."""
+def check_photos(deck: LookDeck, photo_root: str | Path | None) -> None:
+    """사진은 그 글 폴더(photo_root)의 판매처 상품 사진 사본만 — 셀럽 사진이 끼어들 길을 막음. 밖이면 ValueError."""
+    if photo_root is None:
+        return
+    root = Path(photo_root).resolve()
+    for it in deck.items:
+        if it.image and Path(it.image).resolve().parent != root:
+            raise ValueError("look card photo outside the post folder")
+
+
+def render(deck: LookDeck, style: str = "current", photo_root: str | Path | None = None) -> list[tuple[bytes, str]]:
+    """덱 → [(JPEG, 대체 텍스트)] — 표지 · 상품 카드 N장 · 끝 카드. style: current(처음 카드) | A | B | C (media/look_styles).
+    photo_root 를 주면 그 폴더 밖 사진이 있는 덱은 그리지 않는다 (ValueError)."""
     if not deck.items:
         raise ValueError("look deck needs items")
+    check_photos(deck, photo_root)
+    if style in CARD_STYLES[1:]:
+        from dealbot.media.look_styles import arrange
+
+        deck = arrange(deck, style)  # B 는 한 벌 순서로 번호 — 대체 텍스트도 같은 순서
     who = deck.person or "셀럽"
     kinds = "같은 제품" if all(it.same for it in deck.items) else "비슷한 상품" if not any(it.same for it in deck.items) else "같은·비슷한 상품"
-    out = [(_jpeg(cover(deck)), f"{who} 패션 {kinds} {len(deck.items)}가지 표지 (판매처 상품 사진)")]
-    for i, it in enumerate(deck.items, 1):
-        kind = "같은 제품" if it.same else "비슷한 상품"
-        out.append((_jpeg(product(deck, i, it)), f"{kind} {i}: {it.name} {won(it.price)} {it.mall} 상품 사진".strip()))
-    out.append((_jpeg(end(deck)), f"{who} 패션 비슷한 상품 가격 정리 카드"))
-    return out
+    alts = [f"{who} 패션 {kinds} {len(deck.items)}가지 표지 (판매처 상품 사진)"]
+    alts += [f"{'같은 제품' if it.same else '비슷한 상품'} {i}: {it.name} {won(it.price)} {it.mall} 상품 사진".strip()
+             for i, it in enumerate(deck.items, 1)]
+    alts.append(f"{who} 패션 비슷한 상품 가격 정리 카드")
+    if style in CARD_STYLES[1:]:
+        from dealbot.media import look_styles
+
+        return [(look_styles.to_jpeg(im), alt) for im, alt in zip(look_styles.render(deck, style), alts, strict=True)]
+    images = [cover(deck), *(product(deck, i, it) for i, it in enumerate(deck.items, 1)), end(deck)]
+    return [(_jpeg(im), alt) for im, alt in zip(images, alts, strict=True)]

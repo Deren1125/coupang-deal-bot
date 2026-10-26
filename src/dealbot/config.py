@@ -609,6 +609,9 @@ class InstagramLookConfig(BaseModel):
     min_gap_hours: float = Field(3.0, ge=0)  # 글 사이 간격 (주인 10/26 — 3시간 이상)
     hours: str | None = None  # 올리는 시간 — 비우면 instagram.hours (딜 계정과 같은 시간대)
     expire_hours: float = Field(48, gt=0)  # 이보다 오래 기다린 글은 안 올림 (가격·재고가 바뀌었을 가능성)
+    # 카드 디자인 (주인 10/26 '카드가 건성건성' → 새 시안 셋, media/look_styles). current = 처음 카드(media/card_look) 그대로.
+    # A 화보형(잡지 지면 · 세리프 머리글) · B 코디 보드형(한 벌 세우기 · 번호표) · C 무드보드형(인화 사진 · 테이프 · 가격표). 주인이 고르면 바꿈
+    card_style: Literal["current", "A", "B", "C"] = "current"
 
     @field_validator("hours")
     @classmethod

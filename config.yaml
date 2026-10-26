@@ -512,6 +512,7 @@ instagram:
     username: derenpick.look
     per_day: 2                            # 하루 2편까지, 3시간 넘게 띄워서 (instagram.hours 안)
     min_gap_hours: 3
+    card_style: current                   # 카드 디자인: current(처음 카드) · A 화보형 · B 코디 보드형 · C 무드보드형 (주인이 고르면 바꿈)
 
 # 딜 카드 이미지 (1080×1350). 인스타그램만 (사진은 텔레그램 글과 같은 확인된 상품 사진만)
 card:

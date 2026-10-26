@@ -8,7 +8,8 @@
    post_after, cancelled}. 셀럽 사진은 들어 있지 않다 (상품 사진만).
 - 올리기 (ig_scheduler.tick 이 1분마다 — 딜 계정 글과 따로): 연결돼 있을 때만, 인스타 시간대(instagram.look.hours — 비우면
   instagram.hours) 안에서 하루 per_day(2)편까지, 데런픽 룩 글 사이 min_gap_hours(3)시간 넘게. post_after 가 지난 것부터.
-  expire_hours(48) 넘게 기다린 글은 안 올림. 카드는 media/card_look (모든 장 '광고' 칩), 올리기 전 검사(check) — 캡션 첫 줄 고지 ·
+  expire_hours(48) 넘게 기다린 글은 안 올림. 카드는 media/card_look (모든 장 '광고' 칩 · 디자인은 instagram.look.card_style —
+  current·A·B·C, media/look_styles), 올리기 전 검사(check) — 캡션 첫 줄 고지 ·
   주소 글자 없음 · 해시태그 5개까지 #광고 먼저 · 'N가지' = 상품 카드 수 · 사진은 그 글 폴더의 상품 사진만.
 - 기록: kv look_share:ig:<글번호> (posting · posted · failed · skipped: 이유) — 같은 글은 한 번만. 올린 글은 ig_posts(kind 'look') —
   딜 계정 간격·하루 수·통계에는 세지 않는다. 실패하면 데런픽 룩만 30분 쉼 (딜 계정은 그대로) · 기록 kind 'instagram_look'
@@ -224,7 +225,7 @@ async def post_one(sched: Any, rec: dict[str, Any], now: datetime) -> str:
         db.log_event("INFO", EVENT, f"{what} skipped: {' · '.join(probs)}"[:500])
         return f"{what}: skipped ({' · '.join(probs)})"
     try:
-        slides = render(deck)
+        slides = render(deck, _cfg(bot).card_style, photo_root=rec.get("_dir") or None)
     except (FontMissing, ValueError, OSError) as e:
         db.kv_set(key, f"skipped: cards {type(e).__name__}")
         return f"{what}: skipped (cards {type(e).__name__})"
