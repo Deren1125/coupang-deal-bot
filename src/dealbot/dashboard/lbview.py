@@ -6,6 +6,10 @@ state['lookbook'] = 블로그 탭 '룩북 릴스 →' 화면(static/lookbook.js)
   (대시보드가 /dashboard/lookbook/<id>/video.mp4 · cover.jpg 로 내보냄 — api.py) · 캡션 복사 · 룩 목록(Look N · 상품 · 가격 · 링크) ·
   올리기 전 확인(인스타 'AI 정보' 켜기 · 유행 음악 고르기 · 캡션 붙여넣기) · 올린 릴스 주소 → 다리 일 blog.lookbook_posted {id, url} ·
   버리기(blog.lookbook_drop) · 다시 만들기(blog.lookbook_redo). 확인 창 없음 (서버에서 밖으로 나가는 것이 없음 — 올리기는 주인 손).
+- 사진 시험 (주인 10/26 '거울 셀카 양식 같은 걸 확인하려고 하는데, 예전처럼 대시보드에 사진 테스트 페이지'): Blog-Auto 가 최근 릴스의 같은 상품으로
+  양식마다(거울 셀카 · 예전 양식) 만든 시험 사진. 첫 상태 값엔 세트 수(trial_n)·지금 양식만 (상태 104 KB 예산) — 사진 목록은
+  GET /dashboard/api/lbtrial (trials — 화면에서 '사진 시험'을 열 때만). 단추: 시험 새로 만들기(blog.lookbook_trial) ·
+  이 양식으로 정하기(blog.lookbook_style {style}). 시험 줄은 릴스 목록·할 일에 넣지 않는다 (올리는 것이 아님).
 - 하지 않는 것: 인스타그램 열기·읽기 · 자동 게시 · 자동 좋아요·댓글·팔로우. 쇼츠 서버 주소·토큰은 화면에 오지 않는다.
 """
 
@@ -45,6 +49,8 @@ DROPPABLE = ("new", "waiting_server", "submitted", "rendering", "ready", "failed
 REDOABLE = ("ready", "failed", "failed_match")  # Blog-Auto lookbook_jobs.redo_all 이 받는 것 중 주인이 누를 만한 것
 MEDIA = "/dashboard/lookbook/"  # api.py blog_lookbook — blog_view 사본, 없으면 Blog-Auto var/lookbook/<id>/ 만
 THUMB = "/dashboard/thumb/"
+STYLE_WORDS = {"mirror": "거울 셀카", "studio": "예전 양식"}
+TRIAL_ACTIONS = {"lookbook_trial", "lookbook_style"}
 
 
 def _reason(code: str) -> str:
@@ -97,18 +103,20 @@ def _row(x: dict[str, Any], tz: ZoneInfo, act: Callable[..., dict[str, Any]], br
 
 
 def build(lv: dict[str, Any] | None, tz: ZoneInfo, now: float, act: Callable[..., dict[str, Any]], *,
-          bridge_ok: bool = True) -> dict[str, Any]:
+          bridge_ok: bool = True, trial_ok: bool = True) -> dict[str, Any]:
     """화면 값. lv = blogauto._lookbook 로 걸러 둔 기록 파일 lookbook 칸 (예전 Blog-Auto 면 None → 일감 없음).
-    items = 올리기 전 편 (새 것부터 · 버린 편은 뺌), posted = 올린 편. entry = 블로그 탭 입구 단추 글."""
+    items = 올리기 전 편 (새 것부터 · 버린 편은 뺌 · 사진 시험은 뺌), posted = 올린 편. entry = 블로그 탭 입구 단추 글.
+    trial_n·trial_ready = 사진 시험 세트 수·그중 완성 수 · style = 지금 양식 (사진은 trials 로 따로) · trial_ok = Blog-Auto 가 사진 시험 다리 일을 앎."""
     items, posted = [], []
     for x in (lv or {}).get("items") or []:
-        if x["status"] == "dropped":
+        if x["status"] == "dropped" or x["trial"]:
             continue
         if x["status"] == "posted":
             posted.append(_posted_row(x, tz))
         else:
             items.append(_row(x, tz, act, bridge_ok))
     ready = sum(it["status"] == "ready" for it in items)
+    tr = [x for x in (lv or {}).get("items") or [] if x["trial"]]  # 사진 시험 — 수만 (사진은 GET /dashboard/api/lbtrial)
     if lv is None:
         empty = "블로그 프로그램이 아직 룩북 릴스를 안 보내요 — 업데이트를 기다리는 중이에요"
     elif not lv["enabled"]:
@@ -124,7 +132,28 @@ def build(lv: dict[str, Any] | None, tz: ZoneInfo, now: float, act: Callable[...
         "instagram": f"@{ig}" if ig else "", "items": items, "posted": posted, "ready_n": ready,
         "entry": f"룩북 릴스 · 완성 {ready}편 →" if ready else "룩북 릴스 →",
         "checklist": list(CHECKLIST), "rules": RULES, "empty": empty,
+        "trial_n": len(tr), "trial_ready": sum(x["status"] == "ready" for x in tr), "style": (lv or {}).get("style") or "",
+        "style_word": STYLE_WORDS.get((lv or {}).get("style") or "", ""), "trial_ok": bool(trial_ok and lv is not None),
     }
+
+
+def trials(lv: dict[str, Any] | None, tz: ZoneInfo) -> list[dict[str, Any]]:
+    """GET /dashboard/api/lbtrial — 사진 시험을 바탕 릴스마다 묶음 (새 것부터):
+    [{base_id, theme, created_at, created, sets: [{id, style, status, word, looks: [{n, name, score, thumb, product_thumb}]}]}].
+    thumb·product_thumb = /dashboard/thumb/<이름> (없으면 ''). 세트는 거울 셀카 먼저."""
+    groups: dict[str, dict[str, Any]] = {}
+    for x in (lv or {}).get("items") or []:
+        if not x["trial"] or not x["trial_of"]:
+            continue
+        g = groups.setdefault(x["trial_of"], {"base_id": x["trial_of"], "theme": x["theme"], "created_at": x["created_at"],
+                                              "created": _when(x["created_at"], tz), "sets": []})
+        g["sets"].append({"id": x["id"], "style": x["style"] or "", "status": x["status"], "word": WORDS.get(x["status"], x["status"]),
+                          "looks": [{"n": lk["n"], "name": lk["name"], "score": lk["score"],
+                                     "thumb": THUMB + lk["thumb"] if lk["thumb"] else "",
+                                     "product_thumb": THUMB + lk["product_thumb"] if lk["product_thumb"] else ""} for lk in x["looks"]]})
+    for g in groups.values():
+        g["sets"].sort(key=lambda st: (st["style"] != "mirror", st["id"]))
+    return list(groups.values())
 
 
 TODO_PREFIX = "lookbook-"
@@ -133,7 +162,7 @@ TODO_PREFIX = "lookbook-"
 def todo_item(lv: dict[str, Any] | None, tz: ZoneInfo, goto: Callable[..., dict[str, Any]]) -> dict[str, Any] | None:
     """할 일 한 줄 '룩북 릴스 올리기' — 완성(ready)됐는데 아직 안 올린 편이 있을 때 (가장 새 편 이름으로 — 숨겨도 다음 편이 완성되면 다시 뜸).
     올렸어요·버리기를 누르면(또는 다른 상태가 되면) 저절로 빠짐."""
-    ready = [x for x in (lv or {}).get("items") or [] if x["status"] == "ready"]
+    ready = [x for x in (lv or {}).get("items") or [] if x["status"] == "ready" and not x["trial"]]  # 사진 시험은 올리는 것이 아님
     if not ready:
         return None
     x = ready[0]  # 새 것부터 (Blog-Auto 순서)

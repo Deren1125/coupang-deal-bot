@@ -62,7 +62,9 @@
   "x_redo",
   "lookbook_posted",
   "lookbook_drop",
-  "lookbook_redo"
+  "lookbook_redo",
+  "lookbook_trial",
+  "lookbook_style"
  ],
  "kakao": {
   "state": "ok",

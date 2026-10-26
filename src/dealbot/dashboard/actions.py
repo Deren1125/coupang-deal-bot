@@ -108,7 +108,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "threads_post", "threads_cancel", "threads_reply",  # 스레드 (주인 10/21 — 주인이 쓴 글 바로·예약 · 예약 취소 · 내 글 답글에 답)
                 "post_edit",  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
                 "x_posted", "x_drop", "x_redo",  # X 초안 (주인 10/25 — 올렸어요 · 버리기 · 다시 쓰기 · X API 없음, 올리기는 주인이 X 앱에서)
-                "lookbook_posted", "lookbook_drop", "lookbook_redo")  # 룩북 릴스 (주인 10/25 — 올렸어요 {id, url} · 버리기 · 다시 만들기 · 올리기는 주인이 인스타 앱에서)
+                "lookbook_posted", "lookbook_drop", "lookbook_redo",  # 룩북 릴스 (주인 10/25 — 올렸어요 {id, url} · 버리기 · 다시 만들기 · 올리기는 주인이 인스타 앱에서)
+                "lookbook_trial", "lookbook_style")  # 사진 시험 (주인 10/26 — 시험 새로 만들기 {base?} · 이 양식으로 정하기 {style})
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "todo.hide", "login.remote", "stats.refresh", "stats.input", "search.check",
@@ -132,6 +133,7 @@ X_HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 # 룩북 릴스 '올렸어요' 주소 (주인 10/25): Blog-Auto bridge._reel_url 과 같은 규칙 — https · instagram.com · /p|reel|reels|tv/<코드>/ (앞에 /계정/ 가능).
 # 글자만 본다 (인스타그램에 접속하지 않음) · 물음표 뒤(igsh= 공유 꼬리)는 버리고 www.instagram.com 주소로
 LB_ACTIONS = ("blog.lookbook_posted", "blog.lookbook_drop", "blog.lookbook_redo")
+LB_STYLES = ("mirror", "studio")  # 사진 시험 양식 (Blog-Auto lookbook.STYLES — 거울 셀카 · 예전 양식)
 REEL_URL_MAX = 300
 REEL_HOSTS = ("instagram.com", "www.instagram.com", "m.instagram.com")
 REEL_PATH_RE = re.compile(r"^/(?:[A-Za-z0-9_.]{1,30}/)?(?:p|reels?|tv)/[A-Za-z0-9_-]{5,40}/?$")
@@ -892,6 +894,18 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         if not isinstance(jid, str) or not LB_ID_RE.match(jid):
             raise ActionError("bad_args", text="룩북 릴스 번호가 맞지 않아요")
         return {"id": jid, "url": reel_url(g("url"))} if name == "lookbook_posted" else {"id": jid}
+    if name == "lookbook_trial":  # 사진 시험 새로 만들기 (주인 10/26 — 계약 action_lookbook_trial.json): {} 또는 {base: 바탕 릴스 번호}
+        base = g("base")
+        if base in (None, ""):
+            return {}
+        if not isinstance(base, str) or not LB_ID_RE.fullmatch(base):
+            raise ActionError("bad_args", text="룩북 릴스 번호가 맞지 않아요")
+        return {"base": base}
+    if name == "lookbook_style":  # 이 양식으로 정하기 (계약 action_lookbook_style.json): {style: mirror|studio}
+        style = g("style")
+        if not isinstance(style, str) or style not in LB_STYLES:
+            raise ActionError("bad_args", text="사진 양식이 맞지 않아요")
+        return {"style": style}
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
@@ -952,6 +966,8 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return f"xdraft-{args.get('pid')}"
     if action in ("x.stats", "x.handles"):
         return "x"
+    if action in ("blog.lookbook_trial", "blog.lookbook_style"):  # 사진 시험 — 한 번에 하나씩 (같은 단추 두 번 누름 막기)
+        return "lookbook-" + action[len("blog.lookbook_"):]
     if action in LB_ACTIONS:  # 룩북 릴스마다 따로 (할 일 줄 lookbook-<id> 와 같은 이름 — 누른 뒤 그 줄이 '하는 중')
         return f"lookbook-{args.get('id')}"
     if action in ("blog.mode", "blog.pause", "blog.resume", "blog.drafts_cleanup", "blog.unschedule_all",

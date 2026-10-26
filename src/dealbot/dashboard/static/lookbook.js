@@ -1,7 +1,8 @@
 /* 룩북 릴스 화면 (주인 10/25 — 실제 지그재그 상품 → 얼굴 없는 AI 모델 영상 → 주인이 새 인스타 계정에 유행 음악을 붙여 올림).
    블로그 탭 '룩북 릴스 →' 를 처음 열 때만 app.js 가 불러온다 (meta sb-lookbook). 값은 state.lookbook (lbview.py).
    편마다: 주제·훅 · 쉬운 말 상태 · 영상 미리보기(서버가 Range 206 — 아이폰도 재생) · 표지 · 영상·표지 저장 · 캡션·링크 복사 · 룩 목록 ·
-   올리기 전 확인 · 올린 릴스 주소 → 올렸어요 · 버리기 · 다시 만들기. 인스타그램을 열거나 자동으로 올리지 않음. 라이브러리 없음. */
+   올리기 전 확인 · 올린 릴스 주소 → 올렸어요 · 버리기 · 다시 만들기. 인스타그램을 열거나 자동으로 올리지 않음. 라이브러리 없음.
+   사진 시험(10/26): 목록은 열 때만 /dashboard/api/lbtrial. */
 'use strict';
 (() => {
 const D = document, W = window;
@@ -16,10 +17,15 @@ const CSS = '.lbw{display:grid;gap:10px}.lbw .itm{padding:14px}.lbh{white-space:
   'min-height:40px;font-size:15px}.lbc input{width:22px;height:22px;flex:none}.lbw input[type=url]{font:inherit;font-size:16px;padding:9px;' +
   'border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);width:100%;box-sizing:border-box;margin-top:8px}' +
   '.lbp{white-space:pre-wrap;font-size:13px;color:var(--sub);background:var(--tile);border-radius:10px;padding:10px;margin-top:8px;' +
-  'max-height:9em;overflow:auto;overflow-wrap:anywhere}.lbw details summary{min-height:40px;display:flex;align-items:center}';
+  'max-height:9em;overflow:auto;overflow-wrap:anywhere}.lbw details summary{min-height:40px;display:flex;align-items:center}' +
+  '.lbtr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;align-items:start;margin-top:6px}.lbtr b{font-size:13px}' +
+  '.lbtr small{display:block;font-weight:400;color:var(--sub)}.lbtc img,.lbte{display:block;width:100%;aspect-ratio:9/16;object-fit:contain;' +
+  'border-radius:8px;background:var(--tile)}.lbte{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub)}' +
+  '.lbtc span{display:block;font-size:13px;font-weight:600;text-align:center}.lbtn{margin:12px 0 0;font-size:13px}' +
+  '.lbtr .pb{width:100%;min-height:40px;padding:0 4px;margin:0;font-size:13px;white-space:normal}';
 const LOC = {}, TYPED = {}, CHK = {}, VID = {}, FILE = {}, SURE = {};  // 누른 뒤 상태(3분) · 쓰던 주소 · 확인 칸 · 재생 중인 영상 · 받은 파일 · 버리기 두 번
 const REEL = /^https:\/\/(www\.|m\.)?instagram\.com\/([A-Za-z0-9_.]{1,30}\/)?(p|reels?|tv)\/[A-Za-z0-9_-]{5,40}\/?(\?\S*)?$/;
-let H = null, B = null;
+let H = null, B = null, TR = null, TK = '', TOPEN = false, STY = '';  // TR: null · 0 받는 중 · false 실패 · 목록
 
 const css = () => { if (D.getElementById('lb-css')) return; const s = D.createElement('style'); s.id = 'lb-css'; s.textContent = CSS; D.head.append(s); };
 const loc = id => { const l = LOC[id]; return l && Date.now() - l.t < 180000 ? l : null; };
@@ -32,14 +38,14 @@ async function copy(t, what) {
   }
 }
 // 블로그 프로그램에 맡기는 일 (올렸어요·버리기·다시 만들기) — 결과를 기다리지 않고 화면부터 바꾼다 (다음 새로고침이 진짜 상태)
-async function send(a, b, state, msg, extra) {
+async function send(a, b, state, msg, extra, done) {
   if (!a || a.disabled) return H.toast('블로그 프로그램 업데이트를 기다리는 중이에요');
   b.disabled = true;
   const cid = 'c_' + Array.from(crypto.getRandomValues(new Uint8Array(10)), x => (x % 36).toString(36)).join('');
   const r = await H.api('/dashboard/api/action', {method: 'POST', body: {action: a.action, args: Object.assign({}, a.args, extra), cid, ctoken: null}});
   b.disabled = false;
   const d = r.data || {};
-  if (r.status === 202 || (r.status === 200 && d.status === 'ok')) { LOC[a.args.id] = {s: state, t: Date.now()}; H.toast(msg); draw(); return; }
+  if (r.status === 202 || (r.status === 200 && d.status === 'ok')) { if (a.args.id) LOC[a.args.id] = {s: state, t: Date.now()}; if (done) done(); H.toast(msg); draw(); return; }
   H.toast(d.text || '안 됐어요 — 잠시 뒤 다시 눌러 주세요');
 }
 // 폰에 저장: 공유 시트('동영상 저장' → 사진첩)가 되면 그걸로, 아니면 파일로 받기. 큰 영상은 받은 뒤 한 번 더 눌러야 할 수 있음
@@ -120,6 +126,49 @@ function card(it, L) {
     drop || redo ? el('div', {class: 'lbr'}, redo, drop) : null);
 }
 
+// 사진 시험 (주인 10/26): 룩마다 상품 사진 | 거울 셀카 | 예전 양식 · 양식 고르기
+const SW = {mirror: '거울 셀카', studio: '예전 양식'};
+function tload(L) {
+  const k = L.trial_n + '/' + L.trial_ready;
+  if (!TOPEN || TR === 0 || (TR !== null && TK === k)) return;
+  TR = 0; TK = k;
+  H.api('/dashboard/api/lbtrial').then(r => { TR = r.status === 200 && Array.isArray(r.data) ? r.data : false; draw(); });
+}
+function tcell(src, score, alt) {
+  const {el} = H;
+  return el('div', {class: 'lbtc'}, src ? el('a', {href: src, target: '_blank', rel: 'noopener noreferrer'}, el('img', {src, alt, loading: 'lazy'})) : el('div', {class: 'lbte'}, '사진 없음'),
+    score === undefined ? null : el('span', {}, score === null ? '채점 전' : `${score}점`));
+}
+function tgroup(g, L, cur) {
+  const {el, btn} = H, S = {}, ns = [];
+  g.sets.forEach(s => { S[s.style] = S[s.style] || s; s.looks.forEach(lk => { if (!ns.includes(lk.n)) ns.push(lk.n); }); });
+  const look = (s, n) => s && s.looks.find(x => x.n === n);
+  const head = st => el('b', {}, SW[st] + (cur === st ? ' · 지금' : ''), el('small', {}, S[st] ? S[st].word : '없음'));
+  const pick = st => btn('pb soft', cur === st ? '지금 양식' : '이 양식으로 정하기', e => send({action: 'blog.lookbook_style', args: {style: st}, disabled: !L.trial_ok},
+    e.currentTarget, '', `다음 룩북부터 ${SW[st]}${st === 'mirror' ? '로' : '으로'} 만들어요`, null, () => { STY = st; }), {disabled: cur === st || !S[st] || null});
+  return [el('p', {class: 'note', style: 'margin:14px 0 0'}, [g.theme, g.created].filter(Boolean).join(' · ')),
+    el('div', {class: 'lbtr'}, el('b', {}, '상품 사진'), head('mirror'), head('studio')),
+    ns.sort((a, b) => a - b).map(n => {
+      const m = look(S.mirror, n), t = look(S.studio, n), p = (m && m.product_thumb) || (t && t.product_thumb);
+      return [el('p', {class: 'lbtn'}, `Look ${n} · ${(m || t).name}`), el('div', {class: 'lbtr'}, tcell(p, undefined, '상품'),
+        tcell(m && m.thumb, m ? m.score : null, '거울 셀카'), tcell(t && t.thumb, t ? t.score : null, '예전 양식'))];
+    }),
+    el('div', {class: 'lbtr'}, el('span', {}), pick('mirror'), pick('studio'))];
+}
+function trial(L) {
+  const {el, btn} = H, cur = STY || L.style;
+  tload(L);
+  return el('section', {class: 'itm'},
+    el('div', {class: 'top'}, el('p', {class: 'h3', style: 'margin:0'}, '사진 시험' + (L.trial_n ? ` · ${L.trial_n}세트` : '')),
+      btn('pb soft', TOPEN ? '접기' : '열기', () => { TOPEN = !TOPEN; if (TR === false) TR = null; draw(); }, {style: 'width:auto;margin:0'})),
+    el('p', {class: 'note'}, `지금 양식: ${SW[cur] || '거울 셀카'} · 점수 = 사진 속 옷이 상품과 같은 정도 (10점 만점)`),
+    TOPEN ? [TR === null || TR === 0 ? el('p', {class: 'note'}, '불러오는 중…') : TR === false ? el('p', {class: 'note'}, '불러오지 못했어요 — 다시 열어 주세요')
+      : TR.length ? TR.map(g => tgroup(g, L, cur)) : el('p', {class: 'note'}, '아직 사진 시험이 없어요'),
+    el('div', {class: 'lbr'}, btn('pb', '시험 새로 만들기', e => send({action: 'blog.lookbook_trial', args: {}, disabled: !L.trial_ok}, e.currentTarget, '',
+      '사진 시험을 만들게요 — 20분쯤 뒤 여기서 보여요'))),
+    el('p', {class: 'note'}, '최근 릴스 상품으로 두 양식 한 세트씩 · 사진값 약 1,000원 · 쇼핑몰 접속 없음')] : null);
+}
+
 function draw() {
   if (!H || !B) return;
   css();
@@ -131,6 +180,7 @@ function draw() {
     el('div', {class: 'top'}, el('h2', {}, '룩북 릴스'), el('a', {class: 'lnk', href: '#/blog/issue'}, '블로그로')),
     el('p', {class: 'note', style: 'margin:0'}, L.rules, L.instagram ? ` · 계정 ${L.instagram}` : ''),
     L.server ? el('p', {class: 'note', style: 'margin:0;color:var(--red)'}, L.server) : null,
+    L.ready ? trial(L) : null,
     live.length ? live.map(it => card(it, L)) : el('section', {class: 'itm'}, el('p', {class: 'note', style: 'margin:0'}, L.empty)),
     done.length ? el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, '올린 릴스'),
       done.map(it => el('div', {class: 'lbl'}, el('span', {}, `${it.theme} · ${it.created}`, it.ably ? ` · ${it.ably}` : ''),

@@ -1206,6 +1206,7 @@ LB_REASON_RE = re.compile(r"^[a-z][a-z0-9_]{0,29}$")  # 이유 코드 (no_token 
 LB_POSTED_RE = re.compile(r"^https://www\.instagram\.com/(?:[A-Za-z0-9_.]{1,30}/)?(?:p|reels?|tv)/[A-Za-z0-9_-]{5,40}/$")
 LB_HANDLE_RE = re.compile(r"^[A-Za-z0-9._]{1,30}$")
 LB_ITEMS_MAX, LB_LOOKS_MAX, LB_CAPTION_MAX = 14, 10, 2200
+LB_STYLES = ("mirror", "studio")  # 사진 양식 (주인 10/26 사진 시험 — 거울 셀카 · 예전 양식)
 
 
 def _lb_link(v: Any) -> str:
@@ -1233,9 +1234,10 @@ def _lb_look(x: Any, jid: str) -> dict[str, Any] | None:
         return None
     thumb = x.get("thumb")
     thumb = thumb if isinstance(thumb, str) and THUMB_RE.match(thumb) and thumb.startswith(jid + "-") else None
+    product = x.get("product_thumb") if x.get("product_thumb") == f"{jid}-p{n}.jpg" else None  # 사진 시험의 상품 사진 사본 (이름이 정해짐)
     return {"n": n, "name": _one_line(x.get("name"), 60) or f"Look {n}", "link": _lb_link(x.get("link")),
             "price": _count(x.get("price"), top=100_000_000) or 0, "mall": x.get("mall") if x.get("mall") in LB_MALLS else "",
-            "score": _count(x.get("score"), top=10), "dropped": x.get("dropped") is True, "thumb": thumb}
+            "score": _count(x.get("score"), top=10), "dropped": x.get("dropped") is True, "thumb": thumb, "product_thumb": product}
 
 
 def _lb_item(x: Any) -> dict[str, Any] | None:
@@ -1252,6 +1254,11 @@ def _lb_item(x: Any) -> dict[str, Any] | None:
     view_video = x.get("view_video") if x.get("view_video") == f"{jid}.mp4" else None  # blog_view/reels 사본
     view_cover = x.get("view_cover") if x.get("view_cover") == f"{jid}-c.jpg" else None  # blog_view/thumbs 사본
     posted = x.get("posted_url") if isinstance(x.get("posted_url"), str) and LB_POSTED_RE.match(x["posted_url"]) else None
+    trial = x.get("trial") is True  # 사진 시험 (주인 10/26) — 바탕 릴스 번호(trial_of)가 맞아야만
+    base = x.get("trial_of")
+    base = base if trial and isinstance(base, str) and LB_ID_RE.fullmatch(base) and base != jid else None
+    if trial and base is None:
+        return None  # 바탕 번호가 이상한 시험 줄은 버림 (보통 릴스로 보여 '올리기' 할 일이 생기면 안 됨)
     return {"id": jid, "theme": _one_line(x.get("theme"), 40) or "", "hook": _one_line(x.get("hook"), 80) or "",
             "status": x["status"], "reason": _lb_reason(x.get("reason")), "warn": x.get("warn") if x.get("warn") in LB_WARNS else None,
             "caption": _th_text(x.get("caption"), LB_CAPTION_MAX), "looks": looks,
@@ -1259,13 +1266,15 @@ def _lb_item(x: Any) -> dict[str, Any] | None:
             "has_cover": x.get("has_cover") is True and bool(cover or view_cover),
             "video": video, "cover": cover, "view_video": view_video, "view_cover": view_cover,
             "created_at": _one_line(x.get("created_at"), 40), "posted_url": posted,
-            "ably": x.get("ably") if x.get("ably") in LB_ABLY else None}
+            "ably": x.get("ably") if x.get("ably") in LB_ABLY else None,
+            "trial": trial, "trial_of": base, "style": x.get("style") if x.get("style") in LB_STYLES else None}
 
 
 def _lookbook(v: Any) -> dict[str, Any] | None:
-    """{enabled, per_day, server, instagram, items: [{id, theme, hook, status, reason, warn, caption, looks, has_video, has_cover,
-    video, cover, view_video, view_cover, created_at, posted_url, ably}]} (새 것부터). 칸이 없으면(예전 Blog-Auto) None → 화면은
-    '업데이트를 기다리는 중'. 줄마다 따로 걸러 이상한 줄만 빠진다 (같은 번호는 처음 것만 · 링크는 지그재그·에이블리 https 만)."""
+    """{enabled, per_day, server, instagram, style, items: [{id, theme, hook, status, reason, warn, caption, looks, has_video, has_cover,
+    video, cover, view_video, view_cover, created_at, posted_url, ably, trial, trial_of, style}]} (새 것부터). 칸이 없으면(예전 Blog-Auto) None → 화면은
+    '업데이트를 기다리는 중'. 줄마다 따로 걸러 이상한 줄만 빠진다 (같은 번호는 처음 것만 · 링크는 지그재그·에이블리 https 만).
+    사진 시험(주인 10/26): trial 줄은 trial_of(바탕 릴스 번호)가 있어야 시험으로 보고 · looks[].product_thumb = <id>-p<n>.jpg 만 · style(칸) = 지금 양식."""
     if not isinstance(v, dict) or not isinstance(v.get("items"), list):
         return None
     items, seen = [], set()
@@ -1276,7 +1285,8 @@ def _lookbook(v: Any) -> dict[str, Any] | None:
     ig = v.get("instagram").lstrip("@") if isinstance(v.get("instagram"), str) else ""
     return {"enabled": v.get("enabled") is True, "per_day": _count(v.get("per_day"), top=10) or 0,
             "server": v.get("server") if v.get("server") in ("ok", "no_token") else "",
-            "instagram": ig if LB_HANDLE_RE.match(ig) else None, "items": items}
+            "instagram": ig if LB_HANDLE_RE.match(ig) else None, "style": v.get("style") if v.get("style") in LB_STYLES else None,
+            "items": items}
 
 
 POST_COUNT_NAMES = {"blogs": V2_BLOGS, "channels": ("threads", "threads_auto", "x")}
