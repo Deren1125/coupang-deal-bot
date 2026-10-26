@@ -24,7 +24,7 @@
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram>   스레드·인스타 다시 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -81,7 +81,8 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "theme.js": "text/javascript; charset=utf-8",  # theme.js: 화면 밝기 단추 (10/24, 머리에서 먼저)
              "xpost.js": "text/javascript; charset=utf-8",  # xpost.js: X(트위터) 초안함·진행률·글감 카드 (10/25, 블로그 탭에서 처음 열 때만)
              "lookbook.js": "text/javascript; charset=utf-8",  # lookbook.js: 룩북 릴스 (10/25, 블로그 탭에서 처음 열 때만)
-             "logins.js": "text/javascript; charset=utf-8"}  # logins.js: 연결 탭 '로그인 관리' 칸 (10/26, 셸이 defer 로 — app.js 는 예산 끝)
+             "logins.js": "text/javascript; charset=utf-8",  # logins.js: 연결 탭 '로그인 관리' 칸 (10/26, 셸이 defer 로 — app.js 는 예산 끝)
+             "sns.js": "text/javascript; charset=utf-8"}  # sns.js: SNS 탭 상자 (10/26, SNS 탭을 처음 열 때만)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096
