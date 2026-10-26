@@ -1,4 +1,4 @@
-"""인스타그램 @oneul_hot_deal: 팔로워·게시물 수(공식 Instagram Graph API) + 조회수·도달(인사이트 권한이 있을 때만).
+"""인스타그램 @oneul_hot_deal (+ 데런픽 룩 @derenpick.look — InstagramLookSource): 팔로워·게시물 수(공식 Instagram Graph API) + 조회수·도달(인사이트 권한이 있을 때만).
 
 토큰은 게시기가 저장·갱신하는 그대로 쓴다 (/instatoken 으로 넣은 것, 만료 전 자동 갱신). instagram.com 페이지는 읽지 않는다.
 인사이트 권한이 없다고 한 번 안 토큰으로는 조회수를 다시 부르지 않는다 (publisher.scopes, 주인 결정 10/15).
@@ -47,18 +47,25 @@ class InstagramSource(Source):
     program = "인스타그램 목표"
     default_goals = {"followers": 1000, "posts": 100}
 
+    NOT_LINKED = "인스타그램이 연결되지 않음 (/instatoken)"
+    RELINK = "인스타그램 토큰이 만료됐거나 잘못됨 — /instatoken 으로 다시 연결해 주세요"
+
+    def publisher(self):  # type: ignore[no-untyped-def]
+        """이 카드가 읽는 계정의 게시기 (토큰 저장·갱신은 게시기 그대로)."""
+        return self.ctx.instagram
+
     async def fetch(self) -> FetchResult:
-        pub = self.ctx.instagram
+        pub = self.publisher()
         if pub is None or pub.stored_token() is None:
-            return FetchResult(UNAVAILABLE, note="인스타그램이 연결되지 않음 (/instatoken)")
+            return FetchResult(UNAVAILABLE, note=self.NOT_LINKED)
         try:
             token = await pub.ensure_fresh()
             if token is None:
-                return FetchResult(UNAVAILABLE, note="인스타그램이 연결되지 않음 (/instatoken)")
+                return FetchResult(UNAVAILABLE, note=self.NOT_LINKED)
             acc = await pub.client.account_stats(token)
         except Exception as e:  # noqa: BLE001
             if is_token_problem(e):
-                return FetchResult(PERMISSION, note="인스타그램 토큰이 만료됐거나 잘못됨 — /instatoken 으로 다시 연결해 주세요")
+                return FetchResult(PERMISSION, note=self.RELINK)
             if is_permission(e):
                 return FetchResult(PERMISSION, note="권한 필요: 팔로워 수를 읽을 권한이 없음 (instagram_business_basic)")
             return FetchResult(ERROR, note=f"인스타그램을 못 읽음 ({safe_error(e)})")
@@ -87,6 +94,10 @@ class InstagramSource(Source):
                 values[f"{name}_{INSIGHT_DAYS}d"] = v
         return FetchResult(OK, values)
 
+    def counts(self, row: dict) -> bool:
+        """이 카드가 세는 글인가 — 딜 계정 카드는 데런픽 룩('look') 글을 빼고 (다른 계정)."""
+        return row.get("kind") != "look"
+
     def posted(self) -> PostCount:
         """올린 글 (주인 10/25): 봇 DB ig_posts — 딜 하나 · TOP5 · 릴스 · 단가표 · 데런픽 글(blog_share, Blog-Auto sns_share 가 준 것도
         딜봇이 올리고 여기에 남김). 올리다 끊겨 '올라갔을 수도' 로 남긴 줄(글 id 없음)과 연습 글은 뺀다. 기록은 30일만 남는다."""
@@ -97,7 +108,8 @@ class InstagramSource(Source):
             return PostCount(why="기록을 못 읽음")
         dry_ok = self.ctx.include_dry_run()
         days = [self.ctx.local_day(r["posted_at"]) for r in rows
-                if r.get("posted_at") is not None and r.get("media_id") and (dry_ok or (not r.get("dry_run") and r["media_id"] != "dry-run"))]
+                if r.get("posted_at") is not None and r.get("media_id") and self.counts(r)
+                and (dry_ok or (not r.get("dry_run") and r["media_id"] != "dry-run"))]
         return post_count(days, today)
 
     def card(self, data: CardData) -> CardView:
@@ -118,3 +130,22 @@ class InstagramSource(Source):
             spark_label="조회수" if spark_metric != "followers" else "팔로워", rows=rows, posted=self.posted(),
             summary={"audience_delta": d} if (d := data.today_delta("followers")) is not None else {},
         )
+
+
+@register
+class InstagramLookSource(InstagramSource):
+    """두 번째 인스타 '데런픽 룩' @derenpick.look (주인 10/26): 같은 읽기(팔로워·게시물 수 + 인사이트 권한이 있으면 28일 조회수·도달),
+    토큰만 데런픽 룩 것 (ctx.extra['instagram_look']). 올린 글 수는 ig_posts 의 데런픽 룩 글만."""
+
+    type = "instagram_look"
+    default_title = "데런픽 룩 인스타"
+    program = "데런픽 룩 목표"
+    default_goals = {"followers": 1000}
+    NOT_LINKED = "데런픽 룩이 아직 연결되지 않음 — 연결 탭 '데런픽 룩 연결'"
+    RELINK = "데런픽 룩 토큰이 만료됐거나 잘못됨 — 연결 탭 '데런픽 룩 인스타' 다시 연결"
+
+    def publisher(self):  # type: ignore[no-untyped-def]
+        return self.ctx.extra.get("instagram_look")
+
+    def counts(self, row: dict) -> bool:
+        return row.get("kind") == "look"

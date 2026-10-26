@@ -1385,8 +1385,19 @@ class Database(SnsStoreMixin):
         rows = self._q(sql + " ORDER BY posted_at ASC, id ASC", params)
         return [{**dict(r), "posted_at": from_iso(r["posted_at"]), "items": json.loads(r["items"] or "[]")} for r in rows]
 
-    def ig_last_post_at(self) -> datetime | None:
-        row = self._one("SELECT posted_at FROM ig_posts ORDER BY posted_at DESC, id DESC LIMIT 1")
+    def ig_last_post_at(self, *, kind: str | None = None, exclude: tuple[str, ...] = ()) -> datetime | None:
+        """가장 최근 인스타 글 시각. kind: 그 종류만 · exclude: 그 종류는 빼고 (데런픽 룩 'look' 은 다른 계정이라 딜 계정 간격에서 뺌)."""
+        sql, params = "SELECT posted_at FROM ig_posts", []
+        where = []
+        if kind:
+            where.append("kind = ?")
+            params.append(kind)
+        if exclude:
+            where.append(f"kind NOT IN ({','.join('?' * len(exclude))})")
+            params.extend(exclude)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        row = self._one(sql + " ORDER BY posted_at DESC, id DESC LIMIT 1", tuple(params))
         return from_iso(row["posted_at"]) if row else None
 
     def price_before(self, product_id: str, before: datetime, since: datetime) -> tuple[int, datetime] | None:

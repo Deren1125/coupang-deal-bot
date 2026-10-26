@@ -52,6 +52,7 @@ from dealbot.utils.timeutil import from_iso, in_time_window, to_iso, utcnow
 log = logging.getLogger(__name__)
 
 KINDS = ("reel", "unit", "top5")  # 날마다 정해진 시간대에 한 번씩 올리는 글
+OTHER_ACCOUNT_KINDS = ("look",)  # 다른 인스타 계정(데런픽 룩)에 올린 글 — 딜 계정 간격·하루 수에 세지 않음
 LABELS = {"single": "딜 하나", "reel": "점심 릴스", "top5": "TOP5 캐러셀", "unit": "생필품 단가표"}
 DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 FAIL_BACKOFF = timedelta(minutes=30)  # 올리다 실패하면 이만큼 쉼 (연결이 끊겼을 때 같은 알림이 줄줄이 가지 않게)
@@ -269,10 +270,21 @@ class InstagramScheduler:
 
     # ------------------------------------------------------------ 한 번 보기
     async def tick(self, now: datetime | None = None) -> str | None:
-        """올릴 차례인 글을 하나 올린다 (또는 건너뜀을 기록한다). 한 일을 짧게 돌려준다 (없으면 None)."""
+        """올릴 차례인 글을 하나 올린다 (또는 건너뜀을 기록한다). 한 일을 짧게 돌려준다 (없으면 None).
+        데런픽 룩(@derenpick.look — growth/look_share)은 다른 계정이라 먼저 따로 본다 (자기 시간대·간격·하루 수·쉼)."""
+        now = now or utcnow()
+        if self.cfg.enabled:
+            try:
+                from dealbot.growth import look_share
+
+                done = await look_share.tick(self, now)
+                if done:
+                    return done
+            except Exception as e:  # noqa: BLE001 — 데런픽 룩이 실패해도 딜 계정 글은 그대로
+                log.exception("instagram look tick failed")
+                self.db.log_event("WARNING", "instagram_look", f"tick: {type(e).__name__}: {e}"[:500])
         if not self.active:
             return None
-        now = now or utcnow()
         local = now.astimezone(self.tz)
         self._expire(now)
         if not in_time_window(local, self.cfg.hours):
@@ -297,7 +309,7 @@ class InstagramScheduler:
         recs = blog_share.due(blog_share.share_dir(self.bot.settings.dashboard.blogauto_metrics_path), self.db, now)
         if not recs:
             return None
-        last = self.db.ig_last_post_at()
+        last = self.db.ig_last_post_at(exclude=OTHER_ACCOUNT_KINDS)
         if last is not None and now - last < self.gap_after(last):
             return None
         guard = timedelta(minutes=self.cfg.slot_guard_minutes)
@@ -342,7 +354,7 @@ class InstagramScheduler:
         day_start = local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
         if len(self.db.ig_posts_since(day_start, kind="single")) >= cfg.daily_singles:
             return None
-        last = self.db.ig_last_post_at()
+        last = self.db.ig_last_post_at(exclude=OTHER_ACCOUNT_KINDS)
         if last is not None and now - last < self.gap_after(last):
             return None
         guard = timedelta(minutes=cfg.slot_guard_minutes)

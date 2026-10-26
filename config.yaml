@@ -680,6 +680,10 @@ dashboard:
       type: threads
       title: 스레드
       goals: { followers: 1000 }            # 팔로워·프로필 조회는 인사이트 권한(threads_manage_insights)이 있을 때만 보임
+    - key: instagram_look
+      type: instagram_look
+      title: 데런픽 룩 인스타                # @derenpick.look (주인 10/26) — 연결 탭 '데런픽 룩 연결' 뒤부터 팔로워·조회수(인사이트 권한이 있을 때)
+      goals: { followers: 1000 }
     - key: blog_finance
       type: naver_blog
       title: Deren의 아카이브
