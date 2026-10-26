@@ -598,6 +598,24 @@ class InstagramUnitConfig(BaseModel):
         return _window(v)
 
 
+class InstagramLookConfig(BaseModel):
+    """두 번째 인스타 계정 '데런픽 룩' @derenpick.look (주인 10/26): 데런픽 패션 글(셀럽 착장 + 비슷한 아이템)을 글자·상품 카드
+    캐러셀로 + AI 룩북 릴스(손으로). 같은 메타 앱에 인스타 테스터로 넣고 대시보드 연결 탭 '데런픽 룩 연결'로 승인한다.
+    연결 전에는 대기열이 기다리기만 하고 대시보드 할 일 '데런픽 룩 인스타 연결 필요' 한 줄."""
+
+    enabled: bool = True
+    username: str = "derenpick.look"  # 이 아이디가 아닌 계정으로 승인하면 연결 결과에 적어 둠 (딜 계정으로 승인하면 받지 않음)
+    per_day: int = Field(2, ge=0, le=6)  # 하루 패션 글 수 (주인 10/26 — 2편까지)
+    min_gap_hours: float = Field(3.0, ge=0)  # 글 사이 간격 (주인 10/26 — 3시간 이상)
+    hours: str | None = None  # 올리는 시간 — 비우면 instagram.hours (딜 계정과 같은 시간대)
+    expire_hours: float = Field(48, gt=0)  # 이보다 오래 기다린 글은 안 올림 (가격·재고가 바뀌었을 가능성)
+
+    @field_validator("hours")
+    @classmethod
+    def _hours(cls, v: str | None) -> str | None:
+        return _window(v) if v else None
+
+
 class InstagramConfig(BaseModel):
     """인스타그램 자동 게시 (Instagram API with Instagram Login). 인증은 /instaauth 로 한 번만.
     사진 없는 글은 못 올리므로 봇이 만든 카드 이미지를 올린다. 본문 링크는 눌리지 않아 프로필 링크(핫딜 페이지)로 유도."""
@@ -626,6 +644,7 @@ class InstagramConfig(BaseModel):
     carousel: InstagramCarouselConfig = Field(default_factory=lambda: InstagramCarouselConfig())
     reels: InstagramReelsConfig = Field(default_factory=lambda: InstagramReelsConfig())
     unit_carousel: InstagramUnitConfig = Field(default_factory=lambda: InstagramUnitConfig())
+    look: InstagramLookConfig = Field(default_factory=lambda: InstagramLookConfig())
 
     @field_validator("style", mode="before")
     @classmethod

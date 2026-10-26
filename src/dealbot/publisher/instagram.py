@@ -50,6 +50,47 @@ KV_USER_ID = "instagram_user_id"
 KV_TOKEN_SAVED_AT = KV_TOKEN + "_saved_at"
 KV_USERNAME = "instagram_username"
 
+# 인스타 계정 (주인 10/26): main = @oneul_hot_deal '데미얌의 쇼핑일기' (딜·릴스 — 예전 kv 이름 그대로),
+# look = @derenpick.look '데런픽 룩' (데런픽 패션 글 + AI 룩북 릴스). 같은 메타 앱·같은 콜백 주소, 토큰은 계정마다 따로.
+# 승인 화면의 state 앞에 'look.' 을 붙여 콜백이 어느 계정 연결인지 안다 (main 은 붙이지 않음 — 예전 링크 그대로).
+MAIN, LOOK = "main", "look"
+ACCOUNTS: dict[str, str] = {MAIN: "데미얌의 쇼핑일기", LOOK: "데런픽 룩"}
+DEFAULT_HANDLES: dict[str, str] = {MAIN: "oneul_hot_deal", LOOK: "derenpick.look"}
+
+
+@dataclass(frozen=True, slots=True)
+class AccountKeys:
+    """한 계정의 kv 이름들 (토큰·만료·계정 번호·저장 시각·아이디) + 권한 기억·기록(log_event kind) 이름."""
+
+    account: str
+    token: str
+    expires: str
+    user_id: str
+    saved_at: str
+    username: str
+    platform: str  # ScopeState·log_event kind ('instagram' · 'instagram_look')
+
+
+def account_keys(account: str = MAIN) -> AccountKeys:
+    if account not in ACCOUNTS:
+        raise ValueError(f"unknown instagram account: {account}")
+    if account == MAIN:
+        return AccountKeys(MAIN, KV_TOKEN, KV_TOKEN_EXPIRES, KV_USER_ID, KV_TOKEN_SAVED_AT, KV_USERNAME, "instagram")
+    pre = f"instagram_{account}"
+    return AccountKeys(account, f"{pre}_access_token", f"{pre}_token_expires_at", f"{pre}_user_id",
+                       f"{pre}_access_token_saved_at", f"{pre}_username", pre)
+
+
+def state_for(account: str, nonce: str) -> str:
+    """승인 화면 state: main 은 nonce 그대로, 다른 계정은 '<계정>.<nonce>' (token_urlsafe 에는 '.' 이 없음)."""
+    return nonce if account == MAIN else f"{account}.{nonce}"
+
+
+def account_of_state(state: str | None) -> str:
+    """콜백 state → 계정 ('look.xxx' → look · 그 밖 → main)."""
+    head, dot, _rest = str(state or "").partition(".")
+    return head if dot and head in ACCOUNTS and head != MAIN else MAIN
+
 CONTAINER_WAIT_SECONDS = 120.0
 CONTAINER_POLL_SECONDS = 4.0
 PUBLISH_ATTEMPT_DELAYS: tuple[float, ...] = (0.0, 5.0, 10.0, 20.0)
@@ -392,8 +433,11 @@ class InstagramPublisher:
         dry_run: bool = False,
         refresh_before_days: int = 7,
         style: str = "current",
+        account: str = MAIN,
     ) -> None:
         self.client = client
+        self.account = account
+        self.keys = account_keys(account)
         self.db = db
         self.renderer = renderer
         self.registry = registry or ShopRegistry()
@@ -403,24 +447,39 @@ class InstagramPublisher:
         self.refresh_before_days = refresh_before_days
         self.style = style  # current | A | B | C | P (config instagram.style)
         # 토큰이 가진 권한 기억 (인사이트 — 없으면 대시보드 조회수만 건너뜀)
-        self.scopes = ScopeState(db, "instagram", lambda: self.db.kv_get(KV_TOKEN))
+        self.scopes = ScopeState(db, self.keys.platform, lambda: self.db.kv_get(self.keys.token))
+
+    def sibling(self, account: str, *, enabled: bool | None = None) -> InstagramPublisher:
+        """같은 앱·같은 HTTP 로 다른 계정에 올리는 게시기 (토큰 kv 만 다름)."""
+        return InstagramPublisher(self.client, self.db, self.renderer, registry=self.registry, template=self.template,
+                                  enabled=self.enabled if enabled is None else enabled, dry_run=self.dry_run,
+                                  refresh_before_days=self.refresh_before_days, style=self.style, account=account)
+
+    @property
+    def label(self) -> str:
+        return ACCOUNTS[self.account]
+
+    @property
+    def username(self) -> str | None:
+        return self.db.kv_get(self.keys.username) or None
 
     # ------------------------------------------------------------ 토큰
     def stored_token(self) -> InstagramToken | None:
-        token = self.db.kv_get(KV_TOKEN)
-        user_id = self.db.kv_get(KV_USER_ID)
+        token = self.db.kv_get(self.keys.token)
+        user_id = self.db.kv_get(self.keys.user_id)
         if not token or not user_id:
             return None
-        return InstagramToken(access_token=token, user_id=user_id, expires_at=from_iso(self.db.kv_get(KV_TOKEN_EXPIRES)))
+        return InstagramToken(access_token=token, user_id=user_id, expires_at=from_iso(self.db.kv_get(self.keys.expires)))
 
     def save_token(self, token: InstagramToken, username: str | None = None) -> None:
-        self.db.kv_set(KV_TOKEN, token.access_token)
-        self.db.kv_set(KV_USER_ID, token.user_id)
-        self.db.kv_set(KV_TOKEN_SAVED_AT, to_iso(utcnow()))  # 이 뒤의 실패만 '최근 실패'로 (다시 연결한 뒤 '다시 연결'이 남지 않게)
+        k = self.keys
+        self.db.kv_set(k.token, token.access_token)
+        self.db.kv_set(k.user_id, token.user_id)
+        self.db.kv_set(k.saved_at, to_iso(utcnow()))  # 이 뒤의 실패만 '최근 실패'로 (다시 연결한 뒤 '다시 연결'이 남지 않게)
         if token.expires_at:
-            self.db.kv_set(KV_TOKEN_EXPIRES, to_iso(token.expires_at))
+            self.db.kv_set(k.expires, to_iso(token.expires_at))
         if username:
-            self.db.kv_set(KV_USERNAME, username)
+            self.db.kv_set(k.username, username)
 
     @property
     def configured(self) -> bool:
@@ -434,9 +493,9 @@ class InstagramPublisher:
             try:
                 token = await self.client.refresh(token)
                 self.save_token(token)
-                log.info("instagram token refreshed (expires %s)", token.expires_at)
+                log.info("instagram (%s) token refreshed (expires %s)", self.account, token.expires_at)
             except InstagramError as e:
-                log.error("instagram token refresh failed: %s", e)
+                log.error("instagram (%s) token refresh failed: %s", self.account, e)
         return token
 
     # ------------------------------------------------------------ 발행

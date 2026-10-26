@@ -1212,22 +1212,24 @@ class StatusReporter:
             "last_fail": last_fail,
         }
 
-    def _instagram_row(self, now: datetime) -> dict[str, Any]:
+    def _instagram_row(self, now: datetime, account: str = "main") -> dict[str, Any]:
+        """/status·대시보드의 인스타 줄. account: main(데미얌의 쇼핑일기) · look(데런픽 룩 — instagram.look.enabled 일 때만)."""
         from dealbot.publisher import instagram as ig
 
+        keys = ig.account_keys(account)
         row: dict[str, Any] = {"state": "off", "username": None, "expires": None, "last_fail": None, "no_domain": False}
-        if not self.settings.instagram.enabled:
+        if not self.settings.instagram.enabled or (account == "look" and not self.settings.instagram.look.enabled):
             return row
         if not self.settings.secrets.has_instagram_app:
             return row | {"state": "noapp"}
-        if not (self.db.kv_get(ig.KV_TOKEN) and self.db.kv_get(ig.KV_USER_ID)):
+        if not (self.db.kv_get(keys.token) and self.db.kv_get(keys.user_id)):
             return row | {"state": "unlinked"}
         tz = self.settings.app.timezone
-        expires = from_iso(self.db.kv_get(ig.KV_TOKEN_EXPIRES))
-        saved = from_iso(str(self.db.kv_get(ig.KV_TOKEN_SAVED_AT) or ""))
+        expires = from_iso(self.db.kv_get(keys.expires))
+        saved = from_iso(str(self.db.kv_get(keys.saved_at) or ""))
         last_fail = None
         for ev in self.db.recent_events(limit=30, level="WARNING"):
-            if ev.get("kind") != "instagram":
+            if ev.get("kind") != keys.platform:
                 continue
             ts = from_iso(str(ev.get("ts") or ""))
             if ts is not None and saved is not None and ts < saved:
@@ -1238,7 +1240,7 @@ class StatusReporter:
             break
         return row | {
             "state": "ok",
-            "username": self.db.kv_get(ig.KV_USERNAME) or None,
+            "username": self.db.kv_get(keys.username) or None,
             "expires": fmt_local(expires, tz, "%m-%d") if expires else None,
             "last_fail": last_fail,
             "no_domain": not self.settings.secrets.public_base_url,
