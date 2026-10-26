@@ -10,6 +10,7 @@
 - 비밀(.env·토큰·쿠키)은 출력·커밋 금지. 고친 일은 `docs/devlog.md` 와 playbook '사건 기록'에 한 줄.
 
 ## 세션 역할과 소통 (주인 10/26)
+- 서버 로그인 반복 금지 (주인 10/26): 점검·시험·확인용 로그인, 로그인 확인 반복, 실패한 로그인 다시 시도 하지 않는다. 풀리면 Blog-Auto 보드 '지금 쉬는 것'에 적고 주인 몫 (QR·원격 로그인은 주인이 할 때만).
 - 일을 시작할 때마다 Blog-Auto 공유 보드를 먼저 읽는다: Blog-Auto 클론에서 `git fetch -q --no-write-fetch-head origin +ops-board:refs/remotes/origin/ops-board && git show origin/ops-board:board.md`. 제보 처리 순서·보드 쓰는 법은 `git show origin/main:CLAUDE.md` (Blog-Auto) '세션 역할과 소통'.
 - 이 저장소 담당 (파일 단위, 표에 없는 파일 = 메인): 본체·대시보드 공용 = 메인 · static/threads.js = 스레드 · static/x.js·tests/test_dash_threads.py = X 봇 · dashboard/earn.py·static/earn.js·sources/creator_mall.py = 에이블리. 함께 씀(고치기 전 claim 줄): dashboard/threads_proxy.py(스레드·X 봇), dashboard/state.py·dashboard/blogauto.py·autolink.py(메인·에이블리·운영 AI). 오류 수정은 담당이 안 보일 때 운영 AI.
 - 딜봇이 스스로 쉬기 시작하면(인스타 백오프·자동 링크 멈춤 등) kv 에 until 을 남긴다 — Blog-Auto status.md holds 칸이 읽는다.
