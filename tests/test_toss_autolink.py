@@ -149,7 +149,8 @@ async def test_login_stop_alerts_once_and_toss_deals_wait(bot: DealBot, settings
     await bot.autolink_tick()
     assert bot.db.get_queue_item(qid).status == autolink.STATUS  # type: ignore[union-attr]
     notes = [u["owner_notice"] for u in _inbox(settings) if "owner_notice" in u and u["owner_notice"]["kind"] == "autolink_stop"]
-    assert len(notes) == 1 and "토스" in notes[0]["text"] and "affiliate-login.sh 토스" in notes[0]["text"]
+    assert len(notes) == 1 and "토스" in notes[0]["text"] and "대시보드 할 일에서 원격 로그인" in notes[0]["text"]  # 서버 명령 대신 (10/26)
+    assert "deploy/" not in notes[0]["text"] and "python -m" not in notes[0]["text"]
     assert not bot.db.kv_get(autolink.KV_STOP)  # 네이버 쇼핑커넥트 멈춤과는 따로
     asked = len([u for u in _inbox(settings) if "toss_link" in u])
     qid2 = _enqueue(bot, _product(url="https://toss.shopping/t/78829901"))

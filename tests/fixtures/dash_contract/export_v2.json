@@ -336,7 +336,97 @@
   "kakao": {
    "state": "ok",
    "expires_at": "2026-12-09T09:00:00"
-  }
+  },
+  "logins": [
+   {
+    "id": "finance",
+    "label": "아카이브 블로그(쇼핑커넥트도)",
+    "state": "ok",
+    "note": "",
+    "checked_at": "2026-10-18T09:00:00+09:00",
+    "since": null,
+    "until": null,
+    "target": "finance",
+    "where": ""
+   },
+   {
+    "id": "issue",
+    "label": "Pick 블로그",
+    "state": "needed",
+    "note": "로그인 풀림 — 다시 로그인할 때까지 자동 작업이 네이버를 열지 않아요",
+    "checked_at": "2026-10-18T08:40:00+09:00",
+    "since": "2026-10-18T08:12:00+09:00",
+    "until": null,
+    "target": "issue",
+    "where": ""
+   },
+   {
+    "id": "hotdeal",
+    "label": "핫딜 블로그",
+    "state": "unknown",
+    "note": "아직 확인 전",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": "hotdeal",
+    "where": ""
+   },
+   {
+    "id": "toss",
+    "label": "토스 쉐어링크",
+    "state": "ok",
+    "note": "",
+    "checked_at": "2026-10-18T08:02:00+09:00",
+    "since": "2026-10-15T08:00:00+09:00",
+    "until": null,
+    "target": "toss",
+    "where": ""
+   },
+   {
+    "id": "ably",
+    "label": "에이블리",
+    "state": "resting",
+    "note": "'사람인지 확인' 화면 — 하루 쉬었다가 한 번 다시 확인해요",
+    "checked_at": "2026-10-18T08:00:00+09:00",
+    "since": "2026-10-18T07:30:00+09:00",
+    "until": "2026-10-19T07:30:00+09:00",
+    "target": "ably",
+    "where": ""
+   },
+   {
+    "id": "zigzag",
+    "label": "지그재그",
+    "state": "needed",
+    "note": "로그인 풀림",
+    "checked_at": "2026-10-18T08:01:00+09:00",
+    "since": "2026-10-18T08:01:00+09:00",
+    "until": null,
+    "target": "zigzag",
+    "where": ""
+   },
+   {
+    "id": "instagram",
+    "label": "인스타 검색 계정",
+    "state": "needed",
+    "note": "로그인 안 됨 — 그동안 기사 속 게시물만 찾아요",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": "instagram",
+    "where": ""
+   },
+   {
+    "id": "threads_api",
+    "label": "스레드 API 토큰 (블로그 공유 글)",
+    "state": "ok",
+    "note": "토큰 41일 남음 (쓰는 동안 저절로 갱신)",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": null,
+    "where": "토큰 — 서버 .env 는 주인이 넣음 · 대시보드 연결 탭"
+   }
+  ]
  },
  "digest": {
   "day": "2026-10-18",
@@ -1233,7 +1323,7 @@
    ]
   }
  },
- "x": {"per_day": 3, "limit": 280, "url_len": 23, "drafts": [{"pid": 131, "title": "변우석 새 드라마 첫 촬영 현장 공개", "url": "https://blog.naver.com/derenpick/224000000131", "text": "변우석 첫 촬영 사진 3장, 분위기 완전 다름\n현장 사진은 소속사가 오늘 공개함\n로맨스 전작보다 훨씬 차분한 톤이라 기대됨\nhttps://blog.naver.com/derenpick/224000000131", "status": "draft", "created_at": "2026-10-18T09:05:00", "posted_at": null, "shop": false, "reply": "🔗 변우석 새 드라마 첫 촬영 현장 공개\nhttps://blog.naver.com/derenpick/224000000131"}, {"pid": 128, "title": "장원영 공항패션 니트 브랜드 정보", "url": "https://blog.naver.com/derenpick/224000000128", "text": "장원영 공항 니트, 브랜드 찾았음\n크림색 케이블 니트에 와이드 데님 조합\n가을 공항룩은 이 조합이 정답인 듯\n링크를 통해 수익의 일부를 지급받을 수 있어요\nhttps://blog.naver.com/derenpick/224000000128", "status": "posted", "created_at": "2026-10-17T21:10:00", "posted_at": "2026-10-17T22:02:11", "shop": true, "reply": "링크를 통해 수익의 일부를 지급받을 수 있어요\n블로그 정리글\n장원영 공항패션 니트 브랜드 정보\nhttps://blog.naver.com/derenpick/224000000128"}], "ideas": [{"id": "week", "title": "블로그 세 개 자동화 — 이번 주 기록", "facts": ["아카이브 9편 · 데런픽 14편 · 핫딜 12편 (최근 일주일 발행)"], "prompt": "글이 몇 편 나왔는지(위 숫자 그대로)와, 자동화해도 여전히 손이 가는 일 하나(사진 검수·로그인 같은)를 내 말로."}, {"id": "visits", "title": "방문자 숫자 솔직 공개", "facts": [], "prompt": "방문자를 늘리려고 해 본 것 하나와 결과를 내 말로 (숫자는 통계 화면에서 확인한 것만)."}, {"id": "deals", "title": "핫딜 고르는 기준 리스트", "facts": ["핫딜 글 12편에 딜 31개 소개 (최근 일주일)"], "prompt": "딜을 고를 때 보는 기준을 짧은 리스트로 (가격 확인·후기·배송처럼 내가 실제로 보는 것만)."}], "plan": {"title": "공대생데런 2주 계획", "account": "revenue", "start": "2026-10-27", "end": "2026-10-28", "rules": ["주인이 직접 고쳐서 X 앱에서 손으로 올림 (자동 게시 없음)", "[N]·[ ] 는 그날 실제 숫자·사실로 채우기 — 못 채우면 그 글은 미룸"], "reply_rules": "해요체 15~60자 · 칭찬만 하지 않기 · 링크 없음", "source": "docs/x_reference_hmmmmmm1458.md 4장", "days": [{"date": "2026-10-27", "label": "10/27 (화)", "posts": [{"time": "08:42", "head": "자동화) 10월 1일에 블로그 자동화 코드를 처음 짰음.", "outline": "공대생 소개 → 블로그 3개 → 이 계정에서 쓸 것", "attach": "커밋 목록 캡처(비밀 가림)"}, {"time": "21:07", "head": "블로그 하는 분들, 홈판 타 본 글 제목 기억나요? 저희는 아직 [N]번이라 궁금함.", "outline": "우리 홈판 유입 [N]회 → 진짜 질문", "attach": "유입 경로 화면"}]}, {"date": "2026-10-28", "label": "10/28 (수)", "posts": [{"time": "12:31", "head": "네이버블로그) 우리 블로그 제목 규칙 3개 공개함.", "outline": "데런픽·아카이브 제목 규칙", "attach": "실제 발행 제목 3개"}]}], "replies": [{"for": "홈판 수익 글", "text": "홈판 유입이랑 검색 유입 비율이 궁금해요. 수익이 난 달은 홈판이 몇 % 정도였나요?"}, {"for": "팔로워 기념 글", "text": "[N]명 축하드려요. 예전에 쓰신 [실제로 도움 된 글 주제] 보고 제목 바꿔 봤던 기억이 나요."}]}},
+ "x": {"per_day": 3, "limit": 280, "url_len": 23, "drafts": [{"pid": 131, "title": "변우석 새 드라마 첫 촬영 현장 공개", "url": "https://blog.naver.com/derenpick/224000000131", "text": "변우석 첫 촬영 사진 3장, 분위기 완전 다름\n현장 사진은 소속사가 오늘 공개함\n로맨스 전작보다 훨씬 차분한 톤이라 기대됨\nhttps://blog.naver.com/derenpick/224000000131", "status": "draft", "created_at": "2026-10-18T09:05:00", "posted_at": null, "shop": false}, {"pid": 128, "title": "장원영 공항패션 니트 브랜드 정보", "url": "https://blog.naver.com/derenpick/224000000128", "text": "장원영 공항 니트, 브랜드 찾았음\n크림색 케이블 니트에 와이드 데님 조합\n가을 공항룩은 이 조합이 정답인 듯\n링크를 통해 수익의 일부를 지급받을 수 있어요\nhttps://blog.naver.com/derenpick/224000000128", "status": "posted", "created_at": "2026-10-17T21:10:00", "posted_at": "2026-10-17T22:02:11", "shop": true}], "ideas": [{"id": "week", "title": "블로그 세 개 자동화 — 이번 주 기록", "facts": ["아카이브 9편 · 데런픽 14편 · 핫딜 12편 (최근 일주일 발행)"], "prompt": "글이 몇 편 나왔는지(위 숫자 그대로)와, 자동화해도 여전히 손이 가는 일 하나(사진 검수·로그인 같은)를 내 말로."}, {"id": "visits", "title": "방문자 숫자 솔직 공개", "facts": [], "prompt": "방문자를 늘리려고 해 본 것 하나와 결과를 내 말로 (숫자는 통계 화면에서 확인한 것만)."}, {"id": "deals", "title": "핫딜 고르는 기준 리스트", "facts": ["핫딜 글 12편에 딜 31개 소개 (최근 일주일)"], "prompt": "딜을 고를 때 보는 기준을 짧은 리스트로 (가격 확인·후기·배송처럼 내가 실제로 보는 것만)."}], "plan": {"title": "공대생데런 2주 계획", "account": "revenue", "start": "2026-10-27", "end": "2026-10-28", "rules": ["주인이 직접 고쳐서 X 앱에서 손으로 올림 (자동 게시 없음)", "[N]·[ ] 는 그날 실제 숫자·사실로 채우기 — 못 채우면 그 글은 미룸"], "reply_rules": "해요체 15~60자 · 칭찬만 하지 않기 · 링크 없음", "source": "docs/x_reference_hmmmmmm1458.md 4장", "days": [{"date": "2026-10-27", "label": "10/27 (화)", "posts": [{"time": "08:42", "head": "자동화) 10월 1일에 블로그 자동화 코드를 처음 짰음.", "outline": "공대생 소개 → 블로그 3개 → 이 계정에서 쓸 것", "attach": "커밋 목록 캡처(비밀 가림)"}, {"time": "21:07", "head": "블로그 하는 분들, 홈판 타 본 글 제목 기억나요? 저희는 아직 [N]번이라 궁금함.", "outline": "우리 홈판 유입 [N]회 → 진짜 질문", "attach": "유입 경로 화면"}]}, {"date": "2026-10-28", "label": "10/28 (수)", "posts": [{"time": "12:31", "head": "네이버블로그) 우리 블로그 제목 규칙 3개 공개함.", "outline": "데런픽·아카이브 제목 규칙", "attach": "실제 발행 제목 3개"}]}], "replies": [{"for": "홈판 수익 글", "text": "홈판 유입이랑 검색 유입 비율이 궁금해요. 수익이 난 달은 홈판이 몇 % 정도였나요?"}, {"for": "팔로워 기념 글", "text": "[N]명 축하드려요. 예전에 쓰신 [실제로 도움 된 글 주제] 보고 제목 바꿔 봤던 기억이 나요."}]}},
  "post_counts": {"days": 30, "blogs": {"finance": {"2026-10-12": 1, "2026-10-17": 2, "2026-10-18": 1}, "issue": {"2026-09-25": 3, "2026-10-16": 4, "2026-10-18": 2}, "hotdeal": {}}, "channels": {"threads": {"2026-10-17": 1, "2026-10-18": 2}, "threads_auto": {"2026-10-15": 1, "2026-10-18": 1}, "x": {"2026-10-18": 1}}},
  "lookbook": {"enabled": true, "per_day": 1, "server": "ok", "instagram": "derenpick.look", "style": "mirror", "items": [{"id": "lb-20261026-0911", "theme": "하객룩", "hook": "결혼식 뭐 입지? / 고민이라면", "status": "ready", "reason": "", "warn": null, "caption": "", "looks": [{"n": 1, "name": "브라운 타이 블라우스", "link": "https://s.zigzag.kr/AbC12dE", "price": 39800, "mall": "zigzag", "score": 9, "dropped": false, "thumb": "lb-20261026-0911-1.jpg", "product_thumb": "lb-20261026-0911-p1.jpg"}, {"n": 2, "name": "트위드 숏 재킷", "link": "https://s.zigzag.kr/FgH34iJ", "price": 52000, "mall": "zigzag", "score": 8, "dropped": false, "thumb": "lb-20261026-0911-2.jpg", "product_thumb": "lb-20261026-0911-p2.jpg"}, {"n": 3, "name": "아이보리 플리츠 스커트", "link": "https://s.zigzag.kr/KlM56nO", "price": 34900, "mall": "zigzag", "score": 9, "dropped": false, "thumb": "lb-20261026-0911-3.jpg", "product_thumb": "lb-20261026-0911-p3.jpg"}, {"n": 4, "name": "네이비 니트 원피스", "link": "https://s.zigzag.kr/PqR78sT", "price": 45900, "mall": "zigzag", "score": 7, "dropped": false, "thumb": "lb-20261026-0911-4.jpg", "product_thumb": "lb-20261026-0911-p4.jpg"}, {"n": 5, "name": "베이지 울 코트", "link": "https://s.zigzag.kr/UvW90xY", "price": 59000, "mall": "zigzag", "score": 8, "dropped": false, "thumb": "lb-20261026-0911-5.jpg", "product_thumb": "lb-20261026-0911-p5.jpg"}], "has_video": false, "has_cover": false, "video": null, "cover": null, "view_video": null, "view_cover": null, "created_at": "2026-10-26T09:12:05", "posted_url": null, "ably": null, "trial": true, "trial_of": "lb-20261026-0712", "style": "mirror"}, {"id": "lb-20261026-0910", "theme": "하객룩", "hook": "결혼식 뭐 입지? / 고민이라면", "status": "ready", "reason": "", "warn": null, "caption": "", "looks": [{"n": 1, "name": "브라운 타이 블라우스", "link": "https://s.zigzag.kr/AbC12dE", "price": 39800, "mall": "zigzag", "score": 8, "dropped": false, "thumb": "lb-20261026-0910-1.jpg", "product_thumb": "lb-20261026-0910-p1.jpg"}, {"n": 2, "name": "트위드 숏 재킷", "link": "https://s.zigzag.kr/FgH34iJ", "price": 52000, "mall": "zigzag", "score": 3, "dropped": false, "thumb": "lb-20261026-0910-2.jpg", "product_thumb": "lb-20261026-0910-p2.jpg"}, {"n": 3, "name": "아이보리 플리츠 스커트", "link": "https://s.zigzag.kr/KlM56nO", "price": 34900, "mall": "zigzag", "score": 7, "dropped": false, "thumb": "lb-20261026-0910-3.jpg", "product_thumb": "lb-20261026-0910-p3.jpg"}, {"n": 4, "name": "네이비 니트 원피스", "link": "https://s.zigzag.kr/PqR78sT", "price": 45900, "mall": "zigzag", "score": 9, "dropped": false, "thumb": "lb-20261026-0910-4.jpg", "product_thumb": "lb-20261026-0910-p4.jpg"}, {"n": 5, "name": "베이지 울 코트", "link": "https://s.zigzag.kr/UvW90xY", "price": 59000, "mall": "zigzag", "score": 6, "dropped": false, "thumb": "lb-20261026-0910-5.jpg", "product_thumb": null}], "has_video": false, "has_cover": false, "video": null, "cover": null, "view_video": null, "view_cover": null, "created_at": "2026-10-26T09:12:05", "posted_url": null, "ably": null, "trial": true, "trial_of": "lb-20261026-0712", "style": "studio"}, {"id": "lb-20261026-0712", "theme": "하객룩", "hook": "결혼식 뭐 입지? / 고민이라면", "status": "ready", "reason": "", "warn": null, "caption": "#광고 이 게시물은 지그재그 링크로 구매 시 수수료를 받아요 · AI 가상인물 포함\n결혼식 뭐 입지? 고민이라면 — 하객룩 5가지\nAI를 기반으로 생성된 가상인물 이미지예요 · 실제 상품과 색감·핏이 다를 수 있어요\n\nLook 1 · 브라운 타이 블라우스 · 39,800원 · 지그재그\nLook 2 · 트위드 숏 재킷 · 52,000원 · 지그재그\nLook 3 · 아이보리 플리츠 스커트 · 34,900원 · 지그재그\nLook 4 · 네이비 니트 원피스 · 45,900원 · 지그재그\nLook 5 · 베이지 울 코트 · 59,000원 · 지그재그\n전부 3.4~5.9만원대\n\n상품 링크는 프로필 링크에서 Look 번호로 찾으세요\n저장해 두고 옷 고를 때 다시 보세요\n#광고 #하객룩 #가을코디 #지그재그", "looks": [{"n": 1, "name": "브라운 타이 블라우스", "link": "https://s.zigzag.kr/AbC12dE", "price": 39800, "mall": "zigzag", "score": 9, "dropped": false, "thumb": "lb-20261026-0712-1.jpg", "product_thumb": null}, {"n": 2, "name": "트위드 숏 재킷", "link": "https://s.zigzag.kr/FgH34iJ", "price": 52000, "mall": "zigzag", "score": 8, "dropped": false, "thumb": "lb-20261026-0712-2.jpg", "product_thumb": null}, {"n": 3, "name": "아이보리 플리츠 스커트", "link": "https://s.zigzag.kr/KlM56nO", "price": 34900, "mall": "zigzag", "score": 7, "dropped": false, "thumb": "lb-20261026-0712-3.jpg", "product_thumb": null}, {"n": 4, "name": "네이비 니트 원피스", "link": "https://s.zigzag.kr/PqR78sT", "price": 45900, "mall": "zigzag", "score": 9, "dropped": false, "thumb": "lb-20261026-0712-4.jpg", "product_thumb": null}, {"n": 5, "name": "베이지 울 코트", "link": "https://s.zigzag.kr/UvW90xY", "price": 59000, "mall": "zigzag", "score": 8, "dropped": false, "thumb": "lb-20261026-0712-5.jpg", "product_thumb": null}], "has_video": true, "has_cover": true, "video": "lookbook/lb-20261026-0712/video.mp4", "cover": "lookbook/lb-20261026-0712/cover.jpg", "view_video": "lb-20261026-0712.mp4", "view_cover": "lb-20261026-0712-c.jpg", "created_at": "2026-10-26T07:12:40", "posted_url": null, "ably": null, "trial": false, "trial_of": null, "style": "mirror"}, {"id": "lb-20261025-0648", "theme": "꾸안꾸 데일리룩", "hook": "잠깐 나갈 때 / 편한데 예쁜 조합", "status": "posted", "reason": "", "warn": null, "caption": "#광고 이 게시물은 지그재그 링크로 구매 시 수수료를 받아요 · AI 가상인물 포함\n잠깐 나갈 때 편한데 예쁜 조합 — 꾸안꾸 데일리룩 4가지", "looks": [{"n": 1, "name": "그레이 후드 집업", "link": "https://s.zigzag.kr/ZzA11bB", "price": 32000, "mall": "zigzag", "score": 8, "dropped": false, "thumb": "lb-20261025-0648-1.jpg", "product_thumb": null}, {"n": 2, "name": "블랙 와이드 팬츠", "link": "https://s.zigzag.kr/ZzC22dD", "price": 29900, "mall": "zigzag", "score": 5, "dropped": true, "thumb": null, "product_thumb": null}], "has_video": true, "has_cover": true, "video": "lookbook/lb-20261025-0648/video.mp4", "cover": "lookbook/lb-20261025-0648/cover.jpg", "view_video": "lb-20261025-0648.mp4", "view_cover": "lb-20261025-0648-c.jpg", "created_at": "2026-10-25T06:48:02", "posted_url": "https://www.instagram.com/reel/DAbCdEfGhIj/", "ably": "no_link", "trial": false, "trial_of": null, "style": "studio"}]}
 }

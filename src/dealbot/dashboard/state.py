@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import earn, lbview, rank, schedview, thpost, xview
+from dealbot.dashboard import earn, lbview, logins, rank, schedview, thpost, xview
 from dealbot.dashboard.actions import (
     BLOG_NAMES,
     MAY_PUBLISH,
@@ -34,6 +34,7 @@ from dealbot.dashboard.actions import (
     x_stats_rows,
 )
 from dealbot.dashboard.remote_login import TARGETS as REMOTE_TARGETS
+from dealbot.dashboard.remote_login import target_of as remote_target
 from dealbot.dashboard.searchreg import SearchReg
 from dealbot.dashboard.today import count as today_count
 from dealbot.dashboard.todo import ago, left, link_target
@@ -572,8 +573,10 @@ class StateBuilder:
                 more.append(dismiss)
         elif iid.startswith("conn-naver-"):
             blog = iid.rsplit("-", 1)[-1]
-            primary = act("blog.login_check", "로그인 확인", {"blog": blog})
-            more.append(act("login.remote", "원격 화면으로 다시 로그인", {"target": blog}))
+            check = act("blog.login_check", "로그인 확인", {"blog": blog})
+            relogin = act("login.remote", "원격 화면으로 다시 로그인", {"target": blog})
+            # 로그인 풀림(login·login_down·login_keep)이면 원격 로그인이 첫 단추 (주인 10/26 '알림 주면 대시보드에서 바로') — 보안 확인·키자드는 그대로
+            primary, more = (relogin, [check]) if any(remote_target(r.key) == blog for r in rows) else (check, [relogin])
         elif iid.startswith("conn-mall-"):  # 쇼핑몰 로그인·사람 확인 — 원격 화면에서 주인이 한 번 (봇은 확인을 뚫지 않음)
             mall = iid.removeprefix("conn-mall-")
             primary = act("login.remote", "원격 화면으로 확인", {"target": mall}) if mall in REMOTE_TARGETS else goto("연결 보기", "#/connect")
@@ -596,8 +599,11 @@ class StateBuilder:
             primary = goto("자세히", f"#/i/{iid}")
             more.append(goto("연결 보기", "#/connect"))
         relog = {"autolink:login": "finance", "autolink_toss:login": "toss"}  # 쇼핑커넥트(아카이브 프로필)·토스 로그인 풀림
+        if key in relog:  # 첫 줄이 로그인 풀림이면 원격 로그인이 첫 단추 (주인 10/26) — 무엇이 멈췄는지는 '자세히'
+            more.insert(0, primary)
+            primary = act("login.remote", "원격 화면으로 다시 로그인", {"target": relog[key]})
         for r in rows:
-            if r.key in relog and not any(a["action"] == "login.remote" for a in more):
+            if r.key in relog and primary["action"] != "login.remote" and not any(a["action"] == "login.remote" for a in more):
                 more.insert(0, act("login.remote", "원격 화면으로 다시 로그인", {"target": relog[r.key]}))
         if not can_dismiss:
             more = [a for a in more if a["action"] != "todo.dismiss"]
@@ -695,15 +701,19 @@ class StateBuilder:
                 continue
             sev = {"⛔[멈춤]": "stop", "🔥[핫]": "hot", "ℹ️": "info"}.get(t.marker, "todo")
             mall = iid.removeprefix("conn-mall-") if iid.startswith("conn-mall-") else ""
-            primary = open_link(t.link and ("네이버에서 보기" if "naver.com" in t.link else "열기") or "열기", t.link) if t.link \
+            page = open_link(t.link and ("네이버에서 보기" if "naver.com" in t.link else "열기") or "열기", t.link) if t.link else None
+            target = t.login or remote_target(t.key)  # 로그인 할 일 줄 (주인 10/26 — Blog-Auto 가 login 칸을 붙임 · 예전 줄은 키로)
+            primary = act("login.remote", "원격 화면으로 확인" if mall else "원격 화면으로 다시 로그인", {"target": target}) if target \
+                else page if page is not None \
                 else act("login.remote", "원격 화면으로 확인", {"target": mall}) if mall in REMOTE_TARGETS \
                 else goto("스레드·인스타 보기", "#/blog/threads") if t.kind == "threads_todo" \
                 else goto("블로그 보기", f"#/blog/{blog}") if blog else goto("자세히", "#/connect")  # threads_todo: 스레드 자동화가 남긴 할 일 (10/23)
             out[iid] = {"iid": iid, "src": "blog", "blog": blog, "kind": t.kind, "sev": sev, "urgent": t.urgent, "title": t.short,
                         "status": truncate(t.what, 60) if t.what and t.what != t.short else (ago(t.since, now_dt) if t.since else ""),
                         "since": _ts(t.since), "expires_at": None, "primary": primary,
-                        "more": [act("todo.dismiss", "다 했어요", {"iid": iid, "key": t.key})]
-                        if dismissible(iid, t.key, dealbot_row=False) else [], "detail": {"lines": []}}
+                        "more": ([page] if target and page is not None else [])
+                        + ([act("todo.dismiss", "다 했어요", {"iid": iid, "key": t.key})] if dismissible(iid, t.key, dealbot_row=False) else []),
+                        "detail": {"lines": []}}
         # '오늘 들를 이웃 글'은 할 일에 넣지 않는다 (주인 10/23 — 알림 없이, 블로그 화면 '이웃' 칸에서만 본다)
         if (srow := self._search_item(self.search_view(v2))) is not None:
             out[srow["iid"]] = srow
@@ -718,6 +728,11 @@ class StateBuilder:
 
         if (vrow := remote_login.item(self.bot.db, open_link)) is not None:  # 원격 로그인 화면이 열려 있음 (주인 10/23)
             out[vrow["iid"]] = vrow
+        try:  # 딜봇 네이버 QR 로그인 (주인 10/26 — QR 이 떠 있으면 'QR 보기' · 딜봇이 쿠키 없음을 봤으면 'QR 로그인')
+            for lrow in logins.todo_items(self.bot, now, act=act, open_link=open_link, goto=goto):
+                out[lrow["iid"]] = lrow
+        except Exception as e:  # noqa: BLE001
+            log.warning("login todo failed: %s", type(e).__name__)
         hidden = hidden_rows(self.bot.db, now)  # 주인이 '알림 없애기'로 뺀 줄 (주인 10/23)
         items = [it for it in out.values() if not is_hidden(it, hidden)]
         for it in items:
@@ -1298,7 +1313,7 @@ ACTION_LABELS = {
     "deal.repost": "다시 올리기", "deal.late_photo": "사진 올리기", "deal.post": "새 딜 올리기", "bot.pause": "딜봇 멈춤",
     "bot.resume": "딜봇 다시 시작", "bot.run": "지금 수집", "sns.token": "토큰 넣기", "sns.code": "코드 넣기", "sns.test": "테스트 글",
     "sns.invites": "초대 링크 만들기", "push.test": "테스트 알림", "push.subscribe": "알림 켜기", "push.unsubscribe": "알림 끄기",
-    "todo.dismiss": "다 했어요", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기", "upload": "사진 올림",
+    "todo.dismiss": "다 했어요", "login.remote": "원격 로그인", "login.qr": "QR 로그인", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기", "upload": "사진 올림",
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",

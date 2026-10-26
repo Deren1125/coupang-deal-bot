@@ -508,7 +508,9 @@ async def test_late_login_answer_still_stops_and_alerts(bot: DealBot, settings: 
     _reply(settings, row)
     assert await bot.autolink_tick() == 0
     notes = [u["owner_notice"]["text"] for u in _inbox(settings) if u.get("owner_notice", {}).get("kind") == "autolink_stop"]
-    assert len(notes) == 1 and "deploy/login.sh finance" in notes[0] and "shopconnect resume" in notes[0]
+    # 로그인 멈춤은 서버 명령 대신 대시보드 원격 로그인 (주인 10/26) — 로그인되면 Blog-Auto 가 저절로 다시 켬
+    assert len(notes) == 1 and "대시보드 할 일에서 원격 로그인" in notes[0] and "저절로 다시" in notes[0]
+    assert "deploy/" not in notes[0] and "python -m" not in notes[0]
     assert bot._autolink_product_no(_enqueue_deal(), bot.registry.get("naver"), _ok_auth()) is None  # 멈춘 동안은 묻지 않음
     # 오래된 줄(한 시간 넘음)은 다시 읽어도 알림·멈춤에 쓰지 않는다
     bot.db.kv_set(autolink.KV_STOP, "")

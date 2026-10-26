@@ -36,11 +36,13 @@ NAVER_ME = re.compile(r"^https://naver\.me/[A-Za-z0-9]+$")
 _PRODUCTS = re.compile(r"/products/(\d+)")
 # 주인에게 알리는 멈춤 (로그인·제한 안내). 한도·시간 밖은 조용히 예전 흐름으로
 ALERT_REASONS = {
-    "login": "아카이브 계정 로그인이 필요해요 (bash deploy/login.sh finance)",
+    "login": "아카이브 계정 로그인이 필요해요 → 대시보드 할 일에서 원격 로그인",
     "blocked": "쇼핑커넥트에 제한·보호조치 안내가 떠서 오늘은 멈췄어요. 브랜드커넥트 화면을 확인해 주세요",
 }
 # 다시 켜는 법 (Blog-Auto 서버에서). 안 하면 다음 날 저절로 다시 시도
 RESUME_HINT = "확인 뒤 python -m blogauto shopconnect resume 하면 바로 다시 해요"
+# 로그인 멈춤은 원격 로그인이 끝나면 Blog-Auto 가 바로 다시 켠다 (resume_if_login · _resume_after_login) — 서버 명령 안내 없이 (주인 10/26)
+LOGIN_RESUME_HINT = "원격 로그인이 끝나면 저절로 다시 해요"
 
 # 토스쇼핑 쉐어링크 (주인 10/23): 같은 방식 — 딜봇 → {"toss_link": {...}} · Blog-Auto → toss_results.jsonl (blogauto/tosslink.py)
 TOSS_RESULTS_FILE = "toss_results.jsonl"
@@ -49,7 +51,7 @@ KV_TOSS_STOP = "autolink_toss_stop_until"
 TOSS_SHORT = re.compile(r"^https://(?:toss\.shopping|toss\.im)/_m/[A-Za-z0-9_-]+$")
 _TOSS_PATH = re.compile(r"^/(t|i)/(\d+)/?$")
 TOSS_ALERT_REASONS = {
-    "login": "토스 쉐어링크 로그인이 풀렸어요 (Blog-Auto 서버에서 bash deploy/affiliate-login.sh 토스)",
+    "login": "토스 쉐어링크 로그인이 풀렸어요 → 대시보드 할 일에서 원격 로그인",
     "blocked": "토스가 쉐어링크 요청을 잠시 막아 오늘은 멈췄어요",
 }
 TOSS_RESUME_HINT = "로그인한 뒤 python -m blogauto tosslink resume 하면 바로 다시 해요"

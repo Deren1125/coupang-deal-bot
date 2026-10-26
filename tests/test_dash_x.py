@@ -149,11 +149,23 @@ def test_eta_is_linear_from_the_last_two_entries() -> None:
 
 
 # ---------------------------------------------------------------- 초안함 (Blog-Auto x 칸)
+# 링크 답글 (주인 10/26 새 기준): 계약 파일 export_v2.json 은 두 저장소가 같아야 하는데 Blog-Auto 쪽에는 아직 x.drafts[].reply 가 없다 →
+# 이 시험은 기록 파일에 답글을 넣어서 쓴다 (계약 파일은 그대로 · Blog-Auto x_drafts 가 reply 를 보내기 시작하면 두 계약 파일에 같이 넣기)
+X_REPLIES = ["🔗 변우석 새 드라마 첫 촬영 현장 공개\nhttps://blog.naver.com/derenpick/224000000131",
+             "링크를 통해 수익의 일부를 지급받을 수 있어요\n블로그 정리글\n장원영 공항패션 니트 브랜드 정보\nhttps://blog.naver.com/derenpick/224000000128"]
+
+
+def _x_with_replies() -> dict:
+    fx = fixture("export_v2.json")["x"]
+    fx["drafts"] = [dict(d, reply=d.get("reply", r)) for d, r in zip(fx["drafts"], X_REPLIES, strict=True)]
+    return fx
+
+
 async def test_state_has_drafts_posted_ideas_and_the_intent_link(bot: DealBot, settings: Settings, tmp_path: Path) -> None:  # noqa: F811
-    write_export(tmp_path / "blogauto.json")
+    fx = _x_with_replies()
+    write_export(tmp_path / "blogauto.json", x=fx)
     blogauto_status(settings)
     x = (await state(bot))["x"]
-    fx = fixture("export_v2.json")["x"]
     assert x["ready"] and x["bridge_ok"] and x["limit"] == 280 and x["url_len"] == 23
     assert x["intent"] == "https://x.com/intent/post?text="  # 무료 글쓰기 화면 링크 (API 아님)
     assert x["reply_intent"] == "https://x.com/intent/tweet?in_reply_to="  # 링크 답글 쓰기 화면 (주인이 넣은 X 글 번호 + &text= 는 화면이)
