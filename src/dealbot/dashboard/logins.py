@@ -11,7 +11,8 @@ GET /dashboard/api/logins (연결 탭 맨 위 칸을 열 때만 — 첫 상태 �
   · 딜봇 네이버 (쇼핑커넥트 링크용 딜봇 크롬): 'QR 로그인' — 텔레그램 /naverlogin 과 같은 흐름 (app.naver_login · naver_login_wait).
     QR 화면은 GET /dashboard/api/naver_qr.png (대시보드 로그인 아래 · 떠 있는 동안만). 다른 기기 화면의 QR 을 네이버 앱으로 찍는다.
   · 다른 곳에서 하는 것 (읽기만, 단추 없음): 스레드·인스타·X 자동 활동 계정 (스레드·X 봇 세션 담당 — 이 칸은 그 로그인을 열지 않는다) ·
-    딜봇 인스타·스레드 API 연결 · 카톡 알림 토큰 · 텔레그램 봇 토큰.
+    텔레그램 봇 토큰. 딜봇 인스타·스레드 API 연결과 카톡 알림 토큰은 연결 탭 '인스타 · 스레드' · '알림' 칸에 상태와 단추가 있어
+    여기엔 다시 쓰지 않는다 (주인 10/26 '중복 없이').
 할 일 줄 (todo_items): QR 이 떠 있으면 'QR 보기'(sys-naverqr) · 딜봇이 일하다 네이버 쿠키가 없다고 본 뒤면 'QR 로그인'(conn-dealbot-naver).
 주인이 누를 때만 연다 — 이 칸은 상태를 읽기만 하고, 정해진 때 로그인 화면을 열거나 실패한 로그인을 다시 시도하지 않는다
 (주인 10/26 '서버 로그인 반복 금지'). 비밀번호·쿠키는 다루지 않는다 (원격 화면 비밀번호는 remote_login 세션 것 그대로).
@@ -215,35 +216,6 @@ def naver_row(bot: Any, tz: ZoneInfo, now: float) -> dict[str, Any]:
                 button={"action": "login.qr", "args": {}, "label": QR_LABEL})
 
 
-def _sns_row(bot: Any, tz: ZoneInfo, now: float) -> dict[str, Any]:
-    label, where = "딜봇 인스타·스레드 (API 연결)", "연결 탭 › 인스타 · 스레드 › 다시 연결"
-    try:
-        dt = datetime.fromtimestamp(now, tz)
-        got = [bot.reporter._threads_row(dt).get("state"), bot.reporter._instagram_row(dt).get("state")]
-    except Exception:  # noqa: BLE001
-        return _row("dealbot_sns", label, "unknown", "모름 · 확인 못 함", where=where)
-    if "unlinked" in got:
-        return _row("dealbot_sns", label, "needed", "연결 끊김 · 다시 연결이 필요해요", where=where)
-    if "ok" in got:
-        return _row("dealbot_sns", label, "ok", "연결됨" if got.count("ok") == 2 else "연결됨 (한쪽만 씀)", where=where)
-    return _row("dealbot_sns", label, "off", "안 씀", where=where)
-
-
-def _kakao_row(bot: Any, now: float) -> dict[str, Any]:
-    label, where = "카톡 알림 토큰", "연결 탭 › 카톡 (예비) › 다시 연결"
-    try:
-        st = bot.dash_state._ba_status()
-        k = st.kakao_state if st.fresh(now) else "unknown"
-        days = int((st.kakao_expires_at - now) // 86400) if st.kakao_expires_at else None
-    except Exception:  # noqa: BLE001
-        k, days = "unknown", None
-    if k == "ok" and days is not None and days <= 3:
-        k = "expiring"
-    state, text = {"ok": ("ok", "연결됨"), "down": ("needed", "끊김 · 다시 연결이 필요해요"),
-                   "expiring": ("ok", f"곧 만료{f' (D-{days})' if days is not None else ''}")}.get(k, ("unknown", "모름"))
-    return _row("kakao", label, state, text, where=where)
-
-
 def _stale(export: Any, now: float) -> str:
     """기록 파일이 오래됐으면(STALE · 못 읽음) 그 안내 한 줄 — 새것이면 ''."""
     if getattr(export, "status", OK) == OK:
@@ -285,8 +257,6 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
         if r["id"] not in remote_login.TARGETS:
             out.append(_row(r["id"], r["label"], *text_of(r), where=r["where"]))
     out.append(_row("threads_auto", "스레드·인스타·X 자동 활동 계정", None, "여기서는 상태를 안 봐요", where=THREADS_AUTO_WHERE))
-    out.append(_sns_row(bot, tz, now))
-    out.append(_kakao_row(bot, now))
     tg = bool(getattr(bot.settings.secrets, "telegram_bot_token", None))
     out.append(_row("telegram", "텔레그램 봇", "ok" if tg else "off", "로그인 없음 · 봇 토큰으로 연결" if tg else "안 씀 · 토큰 없음",
                     where="토큰 — 서버 .env (주인이 넣음)"))

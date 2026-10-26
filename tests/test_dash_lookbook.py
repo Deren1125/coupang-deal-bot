@@ -7,7 +7,7 @@
 3) 할 일 '룩북 릴스 올리기' (완성됐는데 안 올린 편이 있을 때만).
 4) 영상·표지 /dashboard/lookbook/<id>/video.mp4 · cover.jpg: 로그인 아래 · blog_view 사본 먼저, 없으면 Blog-Auto var/lookbook/<id>/ ·
    바로가기·밖으로 나가는 이름 안 됨 · Range → 206 (아이폰 사파리 <video>).
-5) lookbook.js: 처음 열 때만 (meta sb-lookbook) · 바깥 주소 없음 · 한국어 단추 · 블로그 탭 '룩북 릴스 →'.
+5) lookbook.js: 처음 열 때만 (meta sb-lookbook) · 바깥 주소 없음 · 한국어 단추 · SNS 탭 '룩북 릴스' 칸 (10/26 — 예전 '#/blog/lookbook' 은 새 자리로).
 6) 사진 시험 (주인 10/26): 시험 줄은 릴스 목록·할 일에 안 들어가고 첫 상태 값엔 수(trial_n)·지금 양식만 ·
    사진은 GET /dashboard/api/lbtrial (바탕 릴스마다 묶음) · 다리 일 blog.lookbook_trial {base?} · blog.lookbook_style {style}
    (계약 action_lookbook_trial.json · action_lookbook_style.json).
@@ -351,8 +351,8 @@ def test_lookbook_js_lazy_load_budget_and_safety() -> None:
     for label in re.findall(r"btn\('[^']*', '([^']*)'", js):
         assert re.search(r"[가-힣]", label), label
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "lazy('meta[name=sb-lookbook]', 'lookbook', 'SBLB')" in app and "'#/blog/lookbook'" in app and "'룩북 릴스 →'" in app
-    assert "lookbook: lbLoad" in app and "/^(pics|search|trial|ptrial|sched|threads|x|lookbook)$/" in app
+    assert "lazy('meta[name=sb-lookbook]', 'lookbook', 'SBLB')" in app and "'#/blog/lookbook': '#/sns/lookbook'" in app
+    assert "lookbook: lbLoad" in app and "['lookbook', '룩북 릴스']" in app and "/^(pics|search|trial|ptrial|sched)$/" in app
     html = shell.page({"me": {}})
     assert re.search(r'<meta name="sb-lookbook" content="/dashboard/static/lookbook\.js\?v=[0-9a-f]{10}">', html)
     assert html.count("<script src=") == 1  # lookbook.js 는 처음 열 때만

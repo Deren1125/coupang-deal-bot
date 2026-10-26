@@ -380,13 +380,13 @@ async def test_logins_view_lists_every_login_with_buttons_only_for_remote_rows(b
     status, view, _ = await get_json(bot, "/dashboard/api/logins", h)
     assert status == 200
     assert [r["id"] for r in view["rows"]] == ["finance", "issue", "hotdeal", "toss", "ably", "zigzag", "instagram", "dealbot_naver",
-                                               "threads_api", "threads_auto", "dealbot_sns", "kakao", "telegram"]
+                                               "threads_api", "threads_auto", "telegram"]  # 딜봇 API 연결 · 카톡은 연결 탭 제 칸에만
     r = rows_of(view)
     for t in remote_login.TARGETS:
         assert r[t]["button"] == {"action": "login.remote", "args": {"target": t}, "label": "원격 로그인"}, t
     assert r["issue"]["bad"] and r["issue"]["text"].startswith("로그인 필요") and "확인 10/18 08:40" in r["issue"]["text"]
     assert r["ably"]["state"] == "resting" and "쉬는 중" in r["ably"]["text"] and "10/19 07:30까지" in r["ably"]["text"]
-    for ro in ("threads_api", "threads_auto", "dealbot_sns", "kakao", "telegram"):
+    for ro in ("threads_api", "threads_auto", "telegram"):
         assert r[ro]["button"] is None and r[ro]["where"], ro
     assert "스레드·X 봇" in r["threads_auto"]["where"] and r["threads_auto"]["state"] is None
     assert view["need"] == 3 and view["qr"] is None and view["vnc"] is None  # Pick · 지그재그 · 인스타 검색 계정
