@@ -88,7 +88,7 @@ def test_config_cards_are_listed_in_order_with_every_v1_source(db: Database, tmp
     s = load_settings(ROOT / "config.yaml", load_env=False)
     keys = [c.key for c in s.dashboard.cards]
     # 주인이 할 일이 있는 카드(링크 기다리는 딜·발행 대기 글)가 맨 위 (주인 요청 10/15)
-    assert keys == ["links", "blog_waiting", "telegram", "instagram", "threads", "blog_finance", "blog_issue", "blog_hotdeal",
+    assert keys == ["links", "blog_waiting", "telegram", "instagram", "threads", "instagram_look", "blog_finance", "blog_issue", "blog_hotdeal",
                     "kakao", "coupang", "dealbot"]
     assert {"telegram", "instagram", "threads", "coupang_partners", "dealbot", "naver_blog", "kakao_openchat",
             "dealbot_links", "blog_waiting"} <= set(load_all())
