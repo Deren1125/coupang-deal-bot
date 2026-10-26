@@ -50,7 +50,7 @@ NAME_MAX = 50
 LINK_GROUP = "link_request"  # 링크 기다리는 딜 한 줄의 키·묶음 (두 봇 알림의 group 과 같은 이름)
 DEAL_KEY = re.compile(r"^(link|review|unsure):([0-9]{1,9})$")  # 딜봇이 맡긴 알림 키 (봇 DB 의 글 번호)
 WAITING_KINDS = ("waiting", "drafts_waiting", "draft_ready", "drafts")  # 주소가 없으면 '발행 대기 글' 카드로 가는 버튼
-BLOG_LABELS = {"finance": "아카이브", "issue": "Deren's Pick", "hotdeal": "오늘의 핫딜 블로그", "dealbot": "핫딜 봇"}
+BLOG_LABELS = {"finance": "아카이브", "issue": "Deren's Pick", "hotdeal": "데미얌의 쇼핑일기 블로그", "dealbot": "핫딜 봇"}
 _FAR = datetime.max.replace(tzinfo=UTC)
 
 

@@ -511,14 +511,14 @@ instagram:
 # 딜 카드 이미지 (1080×1350). 인스타그램만 (사진은 텔레그램 글과 같은 확인된 상품 사진만)
 card:
   enabled: true
-  footer: 오늘의 핫딜
+  footer: 데미얌의 쇼핑일기
   footer_note: 구매 링크는 프로필 링크에서
   keep_days: 7
 
 # 봇의 작은 웹 서버 (Railway 공개 도메인). "/" 는 최근 채널 딜 목록 페이지 — 인스타 프로필 링크에 넣는 용도
 web:
   public_page: true
-  site_title: 오늘의 핫딜
+  site_title: 데미얌의 쇼핑일기
   page_hours: 48
   page_max_items: 30                      # instagram.style current 일 때만 (점수 순 상위). A/B/C 는 기간 안의 딜을 모두 번호 순으로
   past_days: 7                            # 기간 안에 딜이 없으면 최근 7일 딜을 '지난 딜 · 가격이 바뀌었을 수 있어요' 로 (주인 결정 10/15)
@@ -586,8 +586,8 @@ channels:
   threads_url: "https://www.threads.net/@oneul_hot_deal"
   instagram_url: "https://www.instagram.com/oneul_hot_deal"   # 핫딜 페이지 위쪽·/channelguide 안내 글
   blog_url: "https://blog.naver.com/demiyum"                    # /channelguide 안내 글의 블로그 링크
-  telegram_name: "오늘의 핫딜"          # 블로그 글의 채널 안내에 쓰는 이름 ("텔레그램 · 오늘의 핫딜")
-  kakao_openchat_name: "오늘의 핫딜 오픈채팅"
+  telegram_name: "데미얌의 쇼핑일기"          # 블로그 글의 채널 안내에 쓰는 이름 ("텔레그램 · 데미얌의 쇼핑일기")
+  kakao_openchat_name: "데미얌의 쇼핑일기 오픈채팅"
 
 # ----------------------------------------------------------------------------
 # 모니터링 (관리자 개인 챗)
@@ -695,7 +695,7 @@ dashboard:
         open_date: null
     - key: blog_hotdeal
       type: naver_blog
-      title: 오늘의 핫딜 블로그
+      title: 데미얌의 쇼핑일기 블로그
       goals: { open_days: 90, posts: 50, avg_visitors: 100 }
       options:
         blog: hotdeal

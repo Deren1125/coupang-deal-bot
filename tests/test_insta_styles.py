@@ -173,7 +173,7 @@ def test_variant_captions_follow_the_rules(r: TemplateRenderer, style: str) -> N
         assert REG.get(shop).disclosure in text  # type: ignore[union-attr]
         tags = re.findall(r"(?<!\S)#[^\s#\d][^\s#]*", text)
         assert 3 <= len(tags) <= insta_style.MAX_HASHTAGS and len(set(tags)) == len(tags), tags
-        assert "#핫딜" in tags and "#오늘의핫딜" in tags
+        assert "#핫딜" in tags and "#데미얌의쇼핑일기" in tags
         assert len(text) <= 2200
 
 

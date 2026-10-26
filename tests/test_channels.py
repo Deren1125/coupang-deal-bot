@@ -17,7 +17,7 @@ def test_channels_default_empty() -> None:
     c = ChannelsConfig()
     # instagram_url·blog_url: 핫딜 페이지·채널 안내 글의 링크 (주인 결정 10/15)
     assert c.as_dict() == {"telegram_url": "", "kakao_openchat_url": "", "threads_url": "", "instagram_url": "", "blog_url": "",
-                           "telegram_name": "오늘의 핫딜", "kakao_openchat_name": "오늘의 핫딜 오픈채팅"}
+                           "telegram_name": "데미얌의 쇼핑일기", "kakao_openchat_name": "데미얌의 쇼핑일기 오픈채팅"}
 
 
 def test_post_footer_only_when_kakao_set(repo_root: Path) -> None:

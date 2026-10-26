@@ -645,7 +645,7 @@ class CardConfig(BaseModel):
     font_path: str | None = None  # 비우면 서버 글꼴(나눔고딕 등)을 찾음
     font_heavy_path: str | None = None  # 큰 가격용 아주 굵은 글꼴 (비우면 나눔고딕 ExtraBold → 없으면 font_path)
     font_regular_path: str | None = None  # 작은 안내 글자용 보통 굵기 (비우면 나눔고딕 → 없으면 font_path)
-    footer: str = "오늘의 핫딜"
+    footer: str = "데미얌의 쇼핑일기"
     footer_note: str = "구매 링크는 프로필 링크에서"
     keep_days: int = 7  # 만든 카드 파일 보관 기간
 
@@ -654,7 +654,7 @@ class WebConfig(BaseModel):
     """봇의 작은 웹 서버(공개 도메인). OAuth 콜백·카드 이미지·핫딜 페이지."""
 
     public_page: bool = True  # "/" 에 최근 채널 딜 목록(구매 링크 포함) 페이지를 연다 — 인스타 프로필 링크용
-    site_title: str = "오늘의 핫딜"
+    site_title: str = "데미얌의 쇼핑일기"
     page_hours: int = 48  # 페이지에 보여줄 기간
     past_days: int = Field(7, ge=1, le=30)  # 기간 안에 딜이 없으면 최근 N일 딜을 '지난 딜'로 보여 줌 (주인 결정 10/15)
     page_max_items: int = 30  # 예전 인스타 양식(current)만: 점수 순 위에서 이만큼. 번호 양식(A/B/C)은 기간 안의 딜을 모두 (인스타 '#번호' 를 찾게)
@@ -860,8 +860,8 @@ class ChannelsConfig(BaseModel):
     threads_url: str = ""  # 예: https://www.threads.net/@oneul_hot_deal
     instagram_url: str = ""  # 예: https://www.instagram.com/oneul_hot_deal (핫딜 페이지·채널 안내 글의 링크)
     blog_url: str = ""  # 예: https://blog.naver.com/demiyum (채널 안내 글의 블로그 링크)
-    telegram_name: str = "오늘의 핫딜"  # 블로그 글 채널 안내에 쓰는 이름
-    kakao_openchat_name: str = "오늘의 핫딜 오픈채팅"
+    telegram_name: str = "데미얌의 쇼핑일기"  # 블로그 글 채널 안내에 쓰는 이름
+    kakao_openchat_name: str = "데미얌의 쇼핑일기 오픈채팅"
 
     def as_dict(self) -> dict[str, str]:
         return {

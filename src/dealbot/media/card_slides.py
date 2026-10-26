@@ -65,7 +65,7 @@ class SlideSpec:
 
     kind: str  # deal | cover | end | list | reel_hook | reel_deal | reel_end
     ad: str  # 고지 줄 '광고 · 쿠팡 파트너스 활동으로 수수료를 받습니다' (모든 장)
-    head: str = ""  # 작은 머리글 ('오늘의 핫딜 · 샴푸', '점심 TOP3')
+    head: str = ""  # 작은 머리글 ('쇼핑일기 · 샴푸', '점심 TOP3')
     tag: str = ""  # 오른쪽 위 ('#12', '2/7')
     title: str = ""  # 상품명·큰 제목
     big: str = ""  # 큰 숫자 (가격)

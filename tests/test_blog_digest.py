@@ -77,8 +77,8 @@ async def test_blog_digest_follows_deren_format(bot: DealBot) -> None:
     text = body[0]
     # 도입부·채널 초대 블록(고정)
     assert "안녕하세요?\n\nDeren의 아카이브를 운영하고 있는 Deren입니다.\n\n본문 들어가기 전에 하나만 말씀드리면," in text
-    assert "텔레그램 오늘의 핫딜이랑 카카오 오픈톡방에 블로그보다 먼저 올리고 있어요!!" in text
-    assert "- 텔레그램 · 오늘의 핫딜\nhttps://t.me/hot_deal_and_info\n\n- 카카오톡 · 오늘의 핫딜 오픈채팅\nhttps://open.kakao.com/o/pHi1MkMi" in text
+    assert "텔레그램 데미얌의 쇼핑일기이랑 카카오 오픈톡방에 블로그보다 먼저 올리고 있어요!!" in text
+    assert "- 텔레그램 · 데미얌의 쇼핑일기\nhttps://t.me/hot_deal_and_info\n\n- 카카오톡 · 데미얌의 쇼핑일기 오픈채팅\nhttps://open.kakao.com/o/pHi1MkMi" in text
     # 딜 단락: 점수 높은 순, 어미 규칙
     assert "1. 스탠리 텀블러 1.18L\n\n쿠팡에서 스탠리 텀블러 1.18L이 29,900원입니다!\n정가 49,900원에서 40% 내려온 가격이에요!" in text
     assert "싼 가격이구요" not in text and "평균가" not in text  # 평소 가격 대비 몇 % 같은 말은 안 씀
@@ -92,10 +92,10 @@ async def test_blog_digest_follows_deren_format(bot: DealBot) -> None:
     assert "다만 몇 가지는 알고 가셔야 합니다.\n\n핫딜은 재고가 빠지면 가격이 원래대로 돌아가고,\n카드 즉시할인은" in text
     assert "본문의 구매 링크는 제 제휴 링크로" in text
     assert "이 포스팅은 쿠팡 파트너스 활동의 일환" in text and "토스쇼핑 쉐어링크 활동의 일환" in text and "링크프라이스" not in text
-    assert text.rstrip().endswith("- 카카오톡 · 오늘의 핫딜 오픈채팅\nhttps://open.kakao.com/o/pHi1MkMi\n\n\n궁금한 점은 댓글로 남겨주세요!</pre>")
+    assert text.rstrip().endswith("- 카카오톡 · 데미얌의 쇼핑일기 오픈채팅\nhttps://open.kakao.com/o/pHi1MkMi\n\n\n궁금한 점은 댓글로 남겨주세요!</pre>")
     assert "※" not in text and "■" not in text and "👉" not in text
     tags = [s for s in sent if "블로그 태그" in s]
-    assert tags and "핫딜, 오늘의핫딜" in tags[0] and "쿠팡핫딜" in tags[0] and "토스쇼핑핫딜" in tags[0]
+    assert tags and "핫딜, 데미얌의쇼핑일기" in tags[0] and "쿠팡핫딜" in tags[0] and "토스쇼핑핫딜" in tags[0]
 
     # 실제(밤 21:30) 실행은 기준 시각을 옮기고, 그 뒤엔 새 딜이 없으면 안 보낸다
     assert (await bot.blog_digest()).startswith("📝 블로그 글 문구를 보냈습니다")

@@ -97,7 +97,7 @@ class CardStyle:
     accent: str = "#E8442B"  # 가격·할인율
     badge_bg: str = "#111111"
     badge_ink: str = "#FFFFFF"
-    footer: str = "오늘의 핫딜"
+    footer: str = "데미얌의 쇼핑일기"
     footer_note: str = "구매 링크는 프로필 링크에서"
 
 

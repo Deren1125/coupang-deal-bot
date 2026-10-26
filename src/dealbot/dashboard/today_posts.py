@@ -20,7 +20,7 @@ from dealbot.dashboard.state import _name
 from dealbot.dashboard.today import naver_url
 from dealbot.utils.timeutil import from_iso, to_iso
 
-BLOG_LABELS = (("finance", "아카이브 (derenlog)"), ("issue", "Pick (derenpick)"), ("hotdeal", "오늘의 핫딜 (demiyum)"))
+BLOG_LABELS = (("finance", "아카이브 (derenlog)"), ("issue", "Pick (derenpick)"), ("hotdeal", "데미얌의 쇼핑일기 (demiyum)"))
 TITLE_MAX = 60
 LIMIT = 200
 

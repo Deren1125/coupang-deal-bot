@@ -32,7 +32,7 @@ from dealbot.utils.text import clean_name, unit_price
 # P(종이 카드)의 본문은 B 와 같은 템플릿 — 다른 점은 caption_context 의 카드 안내 줄 하나 (P 카드엔 표가 없음)
 STYLE_TEMPLATES = {"A": "deal_instagram_a.j2", "B": "deal_instagram_b.j2", "C": "deal_instagram_c.j2", "P": "deal_instagram_b.j2"}
 MAX_HASHTAGS = 5
-BRAND_TAG = "#오늘의핫딜"
+BRAND_TAG = "#데미얌의쇼핑일기"
 SHOP_TAGS = {"coupang": "#쿠팡핫딜", "naver": "#네이버쇼핑"}
 # 살림 계정 독자가 찾는 말 — 분류·이름에 이 말이 있을 때만 붙인다
 _LIVING = re.compile(r"주방|생활|세제|세탁|욕실|청소|수납|화장지|휴지|물티슈|키친|식기|냄비|프라이팬|텀블러|생수|기저귀")

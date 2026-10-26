@@ -31,7 +31,7 @@ MUTED = "#6E6E6E"
 LINE = "#E6E6E6"
 ACCENT = "#E8442B"
 PANEL = "#F4F4F2"
-BRAND = "오늘의 핫딜"
+BRAND = "데미얌의 쇼핑일기"
 
 Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
 

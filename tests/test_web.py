@@ -190,7 +190,7 @@ async def test_deals_page_lists_published_deals_with_buy_links(settings: Setting
     bot = DealBot(settings)
     try:
         status, body = await bot.web.dispatch("GET", "/")
-        assert status == 200 and "오늘의 핫딜" in body and "지금은 올라온 딜이 없어요" in body
+        assert status == 200 and "데미얌의 쇼핑일기" in body and "지금은 올라온 딜이 없어요" in body
         deal = sample_deal()
         assert bot.db.enqueue(deal, score=40.0)
         bot.db.update_queue_item(1, status="published", deal=deal)

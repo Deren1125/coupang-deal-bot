@@ -4401,7 +4401,7 @@ class DealBot:
             why.append("아직 적으니 21:30 정리에는 더 모일 수 있습니다")
         titles = "\n".join(f"{i}. {html.escape(t)}" for i, t in enumerate(digest.titles, 1))
         head = (
-            f"📝 <b>{'미리 보기 — ' if preview else ''}오늘의 핫딜 블로그 글</b> ({html.escape(span)})\n"
+            f"📝 <b>{'미리 보기 — ' if preview else ''}데미얌의 쇼핑일기 블로그 글</b> ({html.escape(span)})\n"
             f"어떤 글이 들어갔나: {html.escape(' · '.join(why))}\n\n"
             f"제목 후보 (하나 골라 제목 칸에):\n{titles}\n\n"
             "본문은 아래 회색 상자를 길게 눌러 복사한 뒤 블로그 글쓰기에 붙여넣으세요. "

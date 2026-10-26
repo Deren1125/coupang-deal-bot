@@ -44,7 +44,7 @@ from dealbot.utils.text import clean_name, truncate
 log = logging.getLogger(__name__)
 
 STATE_V = 1
-BLOG_LABELS = {"finance": "Deren의 아카이브", "issue": "Deren's Pick", "hotdeal": "오늘의 핫딜"}
+BLOG_LABELS = {"finance": "Deren의 아카이브", "issue": "Deren's Pick", "hotdeal": "데미얌의 쇼핑일기"}
 CHIPS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
 VISITS_IID = "visits"  # 할 일 '오늘 들를 이웃 글' 한 줄
 SEARCH_IID = "search"  # 할 일 '구글 검색 등록 N개' 한 줄 (주인 10/18 22:20)

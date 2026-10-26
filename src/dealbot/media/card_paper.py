@@ -38,7 +38,7 @@ LAYOUT = "P"  # config instagram.style 값
 W, H = 1080, 1350
 SS = 2  # 2배로 그리고 마지막에 줄임
 M = 60  # 바깥 여백 (프로필 격자 3:4 잘림 34px 보다 넉넉히)
-BRAND = "오늘의 핫딜"
+BRAND = "데미얌의 쇼핑일기"
 GUIDE = "프로필 링크 → 핫딜 페이지"  # 포스트잇의 구매 안내 (번호와 함께 한 번)
 GUIDE_NO_NUMBER = "구매 링크는 프로필 링크에서"  # 번호 없는 인스타 카드의 바닥 안내 (B 카드·card_slides.deal_spec 과 같은 말)
 STICKY_LABEL = "핫딜 번호"
@@ -645,7 +645,7 @@ def disclosure(d: ImageDraw.ImageDraw, ad: str, paper_col: tuple[int, int, int],
 
 
 def folio(d: ImageDraw.ImageDraw, paper_col: tuple[int, int, int], right: str = "") -> None:
-    """바닥: 가는 줄 + 빨간 가격표 + '오늘의 핫딜'. 오른쪽에 글(인스타 밖 카드의 안내)."""
+    """바닥: 가는 줄 + 빨간 가격표 + '데미얌의 쇼핑일기'. 오른쪽에 글(인스타 밖 카드의 안내)."""
     fy = H - FOLIO
     d.line([(S(M), S(fy)), (S(W - M), S(fy))], fill=INK, width=S(1.6))
     price_tag_icon(d, M, fy + 24, 26, hole=paper_col)

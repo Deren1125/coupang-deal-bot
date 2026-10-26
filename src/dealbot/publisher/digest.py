@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 WEEKDAYS = "월화수목금토일"
 CHUNK_LIMIT = 3000  # 텔레그램 한 메시지(4096자) 안에 <pre> 째로 안전하게 들어가는 길이
-BASE_TAGS = ["핫딜", "오늘의핫딜", "특가", "할인정보", "쇼핑핫딜", "가성비", "핫딜정보", "쿠팡핫딜"]
+BASE_TAGS = ["핫딜", "데미얌의쇼핑일기", "특가", "할인정보", "쇼핑핫딜", "가성비", "핫딜정보", "쿠팡핫딜"]
 # 영문 마지막 글자를 한국어로 읽었을 때 받침이 있는 것 (L→엘, M→엠, N→엔, R→알)
 _LATIN_JONG = set("lmnr")
 _DIGIT_JONG = set("013678")  # 영·일·삼·육·칠·팔
@@ -135,7 +135,7 @@ class BlogDigestBuilder:
             rate = top["discount_rate"] or 0
             tail = f" {rate:.0f}% 할인" if rate else ""
             rest = f" 외 {n - 1}건" if n > 1 else ""
-            out.append(f"{date_label} 오늘의 핫딜 총정리 ({short}{tail}{rest})")
+            out.append(f"{date_label} 오늘 싸진 것 총정리 ({short}{tail}{rest})")
             price = format_won(top["price"])
             if rate >= 40 or (top["below_market_pct"] or 0) >= 30:
                 out.append(f"{short}{particle(short, '이', '가')} {price}이라구요?? ({date_label} 핫딜 모음)")
