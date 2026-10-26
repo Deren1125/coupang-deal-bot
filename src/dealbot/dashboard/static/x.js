@@ -63,11 +63,8 @@ function head(X) {
     : s.auto ? `자동 · 접속 ${v[0]}/${v[1]}${X.next_visit ? ' · 다음 ' + X.next_visit : ''}` : '누른 글만 보내요';
   return [top, pick, w ? el('p', {class: 'bn' + (w[1] ? ' bad' : '')}, el('span', {}, w[0])) : null,
     card('오늘', el('div', {class: 'tq'}, tiles), el('p', {class: 'note'}, info),
-      el('div', {class: 'x2', style: 'margin-top:10px'}, btn('pb soft', s.on ? '끄기' : '켜기', () => act('x_settings', {on: !s.on}, s.on ? '껐어요' : '켰어요')),
-        // 서버 자동 시험 (주인 10/26): 3일 뒤나 X 가 사람 확인을 띄우면 저절로 폰 방식
-        ph ? btn('pb soft', '서버 자동 3일', () => confirm('3일 동안 서버가 이 계정으로 X에 들어가 직접 눌러요. 사람 확인이 뜨면 바로 폰 방식으로 돌아와요. 계정이 막힐 수 있어요. 켤까요?')
-          && act('x_settings', {trial_days: 3}, '3일 동안 서버 자동이에요'))
-          : btn('pb soft', '폰 방식으로', () => act('x_settings', {trial_days: 0}, '폰 방식으로 바꿨어요'))))];
+      el('div', {class: ph ? '' : 'x2', style: 'margin-top:10px'}, btn('pb soft', s.on ? '끄기' : '켜기', () => act('x_settings', {on: !s.on}, s.on ? '껐어요' : '켰어요')),
+        ph ? null : btn('pb soft', '폰 방식으로', () => act('x_settings', {trial_days: 0}, '폰 방식으로 바꿨어요'))))];  // 서버 자동 켜기 버튼은 주인 10/26 19:30 취소
 }
 // 승인함 (승인 방식) — 댓글 고치기 · 동작 고르기 · 보내기/건너뛰기
 function inbox(X) {
