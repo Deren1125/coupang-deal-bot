@@ -137,8 +137,8 @@ async def test_wrong_key_is_treated_as_off(bot: DealBot, threads_srv, tmp_path: 
 
 
 # X 화면 (주인 10/25) — 스레드 화면 'X →' 를 처음 누를 때만 x.js, 데이터는 같은 state 의 'x' 칸, 바꾸기는 x_* 일만
-X_JS_MAX = 12 * 1024
-X_JS_GZIP_MAX = 5 * 1024
+X_JS_MAX = 14 * 1024  # 10/26 폰 카드·서버 자동 버튼
+X_JS_GZIP_MAX = 6 * 1024
 
 
 def test_x_js_is_lazy_small_and_safe() -> None:
