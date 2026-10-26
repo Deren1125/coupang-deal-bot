@@ -15,6 +15,7 @@ state['lookbook'] = 블로그 탭 '룩북 릴스 →' 화면(static/lookbook.js)
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -50,6 +51,8 @@ REDOABLE = ("ready", "failed", "failed_match")  # Blog-Auto lookbook_jobs.redo_a
 MEDIA = "/dashboard/lookbook/"  # api.py blog_lookbook — blog_view 사본, 없으면 Blog-Auto var/lookbook/<id>/ 만
 THUMB = "/dashboard/thumb/"
 STYLE_WORDS = {"mirror": "거울 셀카", "studio": "예전 양식"}
+TRIAL_BUSY = ("new", "waiting_server", "submitted", "rendering")  # 사진 시험이 아직 만드는 중 (Blog-Auto 가 두 번째 시험을 거절함)
+TRIAL_MIN_LOOKS = 4  # 시험 바탕이 될 수 있는 보통 일감 (Blog-Auto lookbook.LOOKS[0])
 TRIAL_ACTIONS = {"lookbook_trial", "lookbook_style"}
 
 
@@ -117,6 +120,9 @@ def build(lv: dict[str, Any] | None, tz: ZoneInfo, now: float, act: Callable[...
             items.append(_row(x, tz, act, bridge_ok))
     ready = sum(it["status"] == "ready" for it in items)
     tr = [x for x in (lv or {}).get("items") or [] if x["trial"]]  # 사진 시험 — 수만 (사진은 GET /dashboard/api/lbtrial)
+    # trial_sig: 시험 세트 번호·상태가 하나라도 바뀌면 바뀌는 짧은 표시 — 화면이 목록을 다시 받을 때를 안다 (검토 10/26: 수만 보면 6/6 에서 멈춤)
+    sig = hashlib.sha1(",".join(f"{x['id']}:{x['status']}" for x in tr).encode()).hexdigest()[:10] if tr else ""
+    base_ok = any(not x["trial"] and len(x["looks"]) >= TRIAL_MIN_LOOKS for x in (lv or {}).get("items") or [])
     if lv is None:
         empty = "블로그 프로그램이 아직 룩북 릴스를 안 보내요 — 업데이트를 기다리는 중이에요"
     elif not lv["enabled"]:
@@ -133,6 +139,7 @@ def build(lv: dict[str, Any] | None, tz: ZoneInfo, now: float, act: Callable[...
         "entry": f"룩북 릴스 · 완성 {ready}편 →" if ready else "룩북 릴스 →",
         "checklist": list(CHECKLIST), "rules": RULES, "empty": empty,
         "trial_n": len(tr), "trial_ready": sum(x["status"] == "ready" for x in tr), "style": (lv or {}).get("style") or "",
+        "trial_busy": sum(x["status"] in TRIAL_BUSY for x in tr), "trial_sig": sig, "trial_base": base_ok,
         "style_word": STYLE_WORDS.get((lv or {}).get("style") or "", ""), "trial_ok": bool(trial_ok and lv is not None),
     }
 
@@ -141,19 +148,21 @@ def trials(lv: dict[str, Any] | None, tz: ZoneInfo) -> list[dict[str, Any]]:
     """GET /dashboard/api/lbtrial — 사진 시험을 바탕 릴스마다 묶음 (새 것부터):
     [{base_id, theme, created_at, created, sets: [{id, style, status, word, looks: [{n, name, score, thumb, product_thumb}]}]}].
     thumb·product_thumb = /dashboard/thumb/<이름> (없으면 ''). 세트는 거울 셀카 먼저."""
-    groups: dict[str, dict[str, Any]] = {}
+    # 한 번 누를 때 만든 두 세트는 created_at 이 같다 — 바탕 릴스가 같아도 누른 번마다 따로 (검토 10/26: 바탕으로만 묶으면 새 사진이 옛 사진 뒤에 숨음)
+    groups: dict[tuple[str, str], dict[str, Any]] = {}
     for x in (lv or {}).get("items") or []:
         if not x["trial"] or not x["trial_of"]:
             continue
-        g = groups.setdefault(x["trial_of"], {"base_id": x["trial_of"], "theme": x["theme"], "created_at": x["created_at"],
-                                              "created": _when(x["created_at"], tz), "sets": []})
+        g = groups.setdefault((x["trial_of"], x["created_at"] or ""), {"base_id": x["trial_of"], "theme": x["theme"], "created_at": x["created_at"],
+                                                                       "created": _when(x["created_at"], tz), "sets": []})
         g["sets"].append({"id": x["id"], "style": x["style"] or "", "status": x["status"], "word": WORDS.get(x["status"], x["status"]),
                           "looks": [{"n": lk["n"], "name": lk["name"], "score": lk["score"],
                                      "thumb": THUMB + lk["thumb"] if lk["thumb"] else "",
                                      "product_thumb": THUMB + lk["product_thumb"] if lk["product_thumb"] else ""} for lk in x["looks"]]})
     for g in groups.values():
-        g["sets"].sort(key=lambda st: (st["style"] != "mirror", st["id"]))
-    return list(groups.values())
+        g["sets"].sort(key=lambda st: st["id"], reverse=True)  # 같은 양식이 둘이면 새 것 먼저 (안정 정렬 두 번)
+        g["sets"].sort(key=lambda st: st["style"] != "mirror")
+    return sorted(groups.values(), key=lambda g: (g["created_at"] or "", g["base_id"]), reverse=True)  # 누른 번 새 것부터
 
 
 TODO_PREFIX = "lookbook-"

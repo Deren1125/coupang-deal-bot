@@ -497,3 +497,41 @@ def test_trials_put_mirror_first_and_tolerate_one_set() -> None:
     assert [it["id"] for it in view["items"]] == [JID] and view["trial_n"] == 3 and view["trial_ready"] == 2
     assert view["style_word"] == "예전 양식" and lbview.todo_item(lv, TZ, state_goto)["iid"] == f"lookbook-{JID}"
     assert lbview.trials(None, TZ) == []
+
+
+def test_second_trial_on_the_same_base_shows_its_own_photos_newest_first() -> None:
+    """검토 10/26: 바탕 릴스가 같으면 예전엔 한 묶음으로 합쳐 가장 옛 세트만 보였다 (새로 낸 사진값 1,000원어치가 안 보임).
+    한 번 누를 때 만든 두 세트는 created_at 이 같으니 누른 번마다 따로 · 새 것부터 · 번호가 섞여도(앞 시험 실패 뒤 1000/0957) 제 세트끼리."""
+    def t(jid: str, style: str, at: str, status: str = "ready") -> dict:
+        return _job(status, id=jid, trial=True, trial_of=JID, style=style, created_at=at, looks=[])
+    lv = {"enabled": True, "per_day": 1, "server": "ok", "instagram": None, "style": "mirror",
+          "items": [t("lb-20261026-1059", "mirror", "2026-10-26T11:00:30"), t("lb-20261026-1058", "studio", "2026-10-26T11:00:30"),
+                    t("lb-20261026-1000", "mirror", "2026-10-26T10:01:30", "rendering"),
+                    t("lb-20261026-0959", "mirror", "2026-10-26T10:00:30", "failed"), t("lb-20261026-0958", "studio", "2026-10-26T10:00:30"),
+                    t("lb-20261026-0957", "studio", "2026-10-26T10:01:30", "rendering"), _job("ready")]}
+    out = lbview.trials(lv, TZ)
+    assert [g["created_at"] for g in out] == ["2026-10-26T11:00:30", "2026-10-26T10:01:30", "2026-10-26T10:00:30"]
+    assert [[st["id"] for st in g["sets"]] for g in out] == [["lb-20261026-1059", "lb-20261026-1058"],
+                                                             ["lb-20261026-1000", "lb-20261026-0957"],
+                                                             ["lb-20261026-0959", "lb-20261026-0958"]]
+    view = lbview.build(lv, TZ, 0.0, state_act)
+    assert view["trial_busy"] == 2 and view["trial_base"] is False  # 만드는 중 2세트 · _job("ready") 는 룩이 없어 바탕이 못 됨
+    sig = view["trial_sig"]
+    assert re.fullmatch(r"[0-9a-f]{10}", sig) and "lb-" not in sig
+    lv["items"][2]["status"] = "ready"  # 세트 하나 상태만 바뀌어도 화면이 목록을 다시 받게
+    assert lbview.build(lv, TZ, 0.0, state_act)["trial_sig"] != sig
+    lv["items"][-1]["looks"] = [{"n": k, "name": f"옷 {k}", "price": 0, "link": "", "mall": "", "score": None, "thumb": None,
+                                 "product_thumb": None, "dropped": False} for k in range(1, 5)]
+    assert lbview.build(lv, TZ, 0.0, state_act)["trial_base"] is True
+    assert lbview.build({**lv, "items": []}, TZ, 0.0, state_act)["trial_sig"] == ""
+
+
+def test_trial_buttons_wait_for_the_real_result_and_the_list_refreshes() -> None:
+    """검토 10/26: 시험·양식 단추는 접수(202)만 보고 '됐어요' 하지 않고 app.js exec 가 결과까지 · 만드는 중엔 시험 단추를 끔 ·
+    목록은 세트 표시가 바뀌거나 칸을 다시 열 때 새로 받음 · 화면에만 기억한 양식(STY)은 없앰 (서버 값만)."""
+    js = (STATIC / "lookbook.js").read_text(encoding="utf-8")
+    assert "H.exec(a, {}, {btn: b})" in js and "run({action: 'blog.lookbook_trial'" in js and "run({action: 'blog.lookbook_style'" in js
+    assert "send({action: 'blog.lookbook_" not in js and "STY" not in js
+    assert "L.trial_busy ||" in js and "!L.trial_base" in js and "L.trial_sig ||" in js and "if (TOPEN) TR = null" in js
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "T.view(b, {el, btn, api, toast, S, exec, uploadAll})" in app  # exec 를 넘겨줌

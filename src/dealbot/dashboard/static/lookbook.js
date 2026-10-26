@@ -25,7 +25,7 @@ const CSS = '.lbw{display:grid;gap:10px}.lbw .itm{padding:14px}.lbh{white-space:
   '.lbtr .pb{width:100%;min-height:40px;padding:0 4px;margin:0;font-size:13px;white-space:normal}';
 const LOC = {}, TYPED = {}, CHK = {}, VID = {}, FILE = {}, SURE = {};  // 누른 뒤 상태(3분) · 쓰던 주소 · 확인 칸 · 재생 중인 영상 · 받은 파일 · 버리기 두 번
 const REEL = /^https:\/\/(www\.|m\.)?instagram\.com\/([A-Za-z0-9_.]{1,30}\/)?(p|reels?|tv)\/[A-Za-z0-9_-]{5,40}\/?(\?\S*)?$/;
-let H = null, B = null, TR = null, TK = '', TOPEN = false, STY = '';  // TR: null · 0 받는 중 · false 실패 · 목록
+let H = null, B = null, TR = null, TK = '', TOPEN = false;  // TR: null · 0 받는 중 · false 실패 · 목록
 
 const css = () => { if (D.getElementById('lb-css')) return; const s = D.createElement('style'); s.id = 'lb-css'; s.textContent = CSS; D.head.append(s); };
 const loc = id => { const l = LOC[id]; return l && Date.now() - l.t < 180000 ? l : null; };
@@ -129,7 +129,7 @@ function card(it, L) {
 // 사진 시험 (주인 10/26): 룩마다 상품 사진 | 거울 셀카 | 예전 양식 · 양식 고르기
 const SW = {mirror: '거울 셀카', studio: '예전 양식'};
 function tload(L) {
-  const k = L.trial_n + '/' + L.trial_ready;
+  const k = L.trial_sig || (L.trial_n + '/' + L.trial_ready);  // 세트 번호·상태가 바뀌면 다시 받음
   if (!TOPEN || TR === 0 || (TR !== null && TK === k)) return;
   TR = 0; TK = k;
   H.api('/dashboard/api/lbtrial').then(r => { TR = r.status === 200 && Array.isArray(r.data) ? r.data : false; draw(); });
@@ -144,8 +144,9 @@ function tgroup(g, L, cur) {
   g.sets.forEach(s => { S[s.style] = S[s.style] || s; s.looks.forEach(lk => { if (!ns.includes(lk.n)) ns.push(lk.n); }); });
   const look = (s, n) => s && s.looks.find(x => x.n === n);
   const head = st => el('b', {}, SW[st] + (cur === st ? ' · 지금' : ''), el('small', {}, S[st] ? S[st].word : '없음'));
-  const pick = st => btn('pb soft', cur === st ? '지금 양식' : '이 양식으로 정하기', e => send({action: 'blog.lookbook_style', args: {style: st}, disabled: !L.trial_ok},
-    e.currentTarget, '', `다음 룩북부터 ${SW[st]}${st === 'mirror' ? '로' : '으로'} 만들어요`, null, () => { STY = st; }), {disabled: cur === st || !S[st] || null});
+  // 결과는 app.js exec 가 기다렸다가 알려 줌 (거절되면 그 까닭) · 바뀐 양식은 다음 상태 값으로 (검토 10/26: 접수만 보고 '됐어요' 하지 않게)
+  const pick = st => btn('pb soft', cur === st ? '지금 양식' : '이 양식으로 정하기', e => run({action: 'blog.lookbook_style', args: {style: st}}, e.currentTarget, L),
+    {disabled: cur === st || !S[st] || null});
   return [el('p', {class: 'note', style: 'margin:14px 0 0'}, [g.theme, g.created].filter(Boolean).join(' · ')),
     el('div', {class: 'lbtr'}, el('b', {}, '상품 사진'), head('mirror'), head('studio')),
     ns.sort((a, b) => a - b).map(n => {
@@ -155,18 +156,20 @@ function tgroup(g, L, cur) {
     }),
     el('div', {class: 'lbtr'}, el('span', {}), pick('mirror'), pick('studio'))];
 }
+const run = (a, b, L) => (L.trial_ok && H.exec ? H.exec(a, {}, {btn: b}) : H.toast('블로그 프로그램 업데이트를 기다리는 중이에요'));
 function trial(L) {
-  const {el, btn} = H, cur = STY || L.style;
+  const {el, btn} = H, cur = L.style;
   tload(L);
   return el('section', {class: 'itm'},
     el('div', {class: 'top'}, el('p', {class: 'h3', style: 'margin:0'}, '사진 시험' + (L.trial_n ? ` · ${L.trial_n}세트` : '')),
-      btn('pb soft', TOPEN ? '접기' : '열기', () => { TOPEN = !TOPEN; if (TR === false) TR = null; draw(); }, {style: 'width:auto;margin:0'})),
+      btn('pb soft', TOPEN ? '접기' : '열기', () => { TOPEN = !TOPEN; if (TOPEN) TR = null; draw(); }, {style: 'width:auto;margin:0'})),
     el('p', {class: 'note'}, `지금 양식: ${SW[cur] || '거울 셀카'} · 점수 = 사진 속 옷이 상품과 같은 정도 (10점 만점)`),
     TOPEN ? [TR === null || TR === 0 ? el('p', {class: 'note'}, '불러오는 중…') : TR === false ? el('p', {class: 'note'}, '불러오지 못했어요 — 다시 열어 주세요')
       : TR.length ? TR.map(g => tgroup(g, L, cur)) : el('p', {class: 'note'}, '아직 사진 시험이 없어요'),
-    el('div', {class: 'lbr'}, btn('pb', '시험 새로 만들기', e => send({action: 'blog.lookbook_trial', args: {}, disabled: !L.trial_ok}, e.currentTarget, '',
-      '사진 시험을 만들게요 — 20분쯤 뒤 여기서 보여요'))),
-    el('p', {class: 'note'}, '최근 릴스 상품으로 두 양식 한 세트씩 · 사진값 약 1,000원 · 쇼핑몰 접속 없음')] : null);
+    el('div', {class: 'lbr'}, btn('pb', L.trial_busy ? '사진 시험 만드는 중…' : '시험 새로 만들기', e => run({action: 'blog.lookbook_trial', args: {}}, e.currentTarget, L),
+      {disabled: L.trial_busy || !L.trial_base || null})),
+    el('p', {class: 'note'}, L.trial_base ? '최근 릴스 상품으로 두 양식 한 세트씩 · 사진값 약 1,000원 · 쇼핑몰 접속 없음 · 20분쯤 뒤 여기서 보여요'
+      : '바탕이 될 릴스(4벌 이상)가 아직 없어요 — 아침에 첫 편이 만들어지면 눌러 주세요')] : null);
 }
 
 function draw() {
