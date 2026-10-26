@@ -324,6 +324,7 @@ class DealBot:
             store_breaker_max_seconds=ec.store_breaker_max_seconds,
             store_cache_seconds=ec.store_cache_seconds,
         )
+        self._enrich_memo: dict[str, tuple[float, PageMeta | None]] = {}  # 상품 → (기억 끝 시각, 읽은 페이지) — remember_hours
         # 일반 요청이 막힌(429) 네이버 스토어 딜: 발행 직전에만 실제 크롬(로그인 없는 빈 창)으로 한 번 (주인 결정 10/10)
         pc = settings.deal.page_check
         self.store_browser = StoreBrowser(
@@ -2135,11 +2136,28 @@ class DealBot:
             if seen is not None:
                 seen.append(got)
         else:
-            meta = await self.enricher.fetch(p.url)
+            meta = await self._remembered_fetch(p)
         filled = PageEnricher.apply(p, meta) if meta is not None else []
         if filled:
             log.info("enriched %s from page: %s", p.name[:40], ", ".join(filled))
         return filled
+
+    async def _remembered_fetch(self, p: Product) -> PageMeta | None:
+        """빈 칸 채우기용 페이지 읽기. 같은 상품은 remember_hours 동안 다시 읽지 않고 기억한 값 (못 읽은 것도 기억 — 매 판 다시 묻지 않게)."""
+        keep = self.settings.deal.enrich.remember_hours * 3600
+        key = p.product_id or p.url
+        now = time.monotonic()
+        hit = self._enrich_memo.get(key)
+        if keep > 0 and hit is not None and hit[0] > now:
+            return hit[1]
+        meta = await self.enricher.fetch(p.url)
+        if keep > 0:
+            if len(self._enrich_memo) >= 500:
+                self._enrich_memo = {k: v for k, v in self._enrich_memo.items() if v[0] > now}
+                while len(self._enrich_memo) >= 500:
+                    self._enrich_memo.pop(next(iter(self._enrich_memo)))
+            self._enrich_memo[key] = (now + keep, meta)
+        return meta
 
     def _wants_page_check(self, p: Product) -> bool:
         """제목 가격을 상품 페이지 가격과 대조할 딜인가 (토스·네이버, 가격 있는 상품 딜, 최근에 올린 상품 아님)."""

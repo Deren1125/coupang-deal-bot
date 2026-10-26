@@ -168,6 +168,9 @@ class EnrichConfig(BaseModel):
     store_breaker_seconds: float = 600.0
     store_breaker_max_seconds: float = 7200.0
     store_cache_seconds: float = 300.0  # 읽은 스토어 페이지를 이만큼 기억 (수집·정품 확인·발행 사진이 같은 페이지를 다시 안 읽게)
+    # 수집 때 빈 칸 채우기로 읽은 페이지(못 읽었어도)를 상품마다 이만큼 기억 — 그동안 같은 상품은 다시 안 읽고 기억한 값으로 채움
+    # (10/26 운영 AI: 몰 페이지를 5분마다 = 상품당 하루 288번 다시 읽음 · 주인 '접속은 진짜 필요할 때만'. 0 = 안 씀)
+    remember_hours: float = Field(6.0, ge=0)
     # 일반 요청이 막힌 네이버 스토어 페이지를 실제 크롬(로그인 없는 빈 창)으로 한 번 열어 가격을 읽음 (10/10 엔 사진용, 10/15 부터
     # 네이버 딜 사진은 주인이 보낸 사진만이라 크롬은 가격 확인용 — 수집 때 대조·쇼핑커넥트 전·발행 직전)
     store_browser: bool = False
