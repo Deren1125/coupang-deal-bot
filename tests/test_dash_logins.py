@@ -463,6 +463,9 @@ async def test_a_screen_that_never_came_up_does_not_lock_the_remote_login(bot: D
     assert [u["login_remote"]["target"] for u in inbox if "login_remote" in u] == ["ably", "ably"]  # finance 는 안 보냄
     # 화면이 뜬 뒤(seen)엔 시간이 지나도 계속 막음
     monkeypatch.setattr(remote_login.refresh, "__defaults__", (None, lambda: True))  # 서버 화면이 떠 있음
+    s = json.loads(bot.db.kv_get(remote_login.KV))
+    s["at"] -= remote_login.SEEN_AFTER_S  # 누른 바로 뒤엔 예전 창일 수 있어 '떴음'으로 안 침 (10/27)
+    bot.db.kv_set(remote_login.KV, json.dumps(s))
     assert remote_login.refresh(bot.db)["seen"] is True
     s = json.loads(bot.db.kv_get(remote_login.KV))
     s["at"] -= remote_login.GRACE_S + 1

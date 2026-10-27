@@ -59,6 +59,8 @@ LOCAL_DIGEST = ("soldout", "publish_failed", "sns_failed")
 LOCAL_URGENT = ("blogauto_down",)
 BLOGAUTO_DOWN_S = 20 * 60  # 생존 신호(60초마다)가 이만큼 없으면 멈춘 것 (자동 업데이트 재시작은 이보다 짧다)
 BLOGAUTO_SEEN_KV = "notify:blogauto_bridge_seen"
+REMOTE_LOGIN_KV = "notify:remote_login_live_at"  # 원격 로그인 창을 마지막으로 본 때 — 닫힌 뒤 서비스가 다시 켜질 동안도 조용히
+REMOTE_LOGIN_GRACE_S = 5 * 60
 # 카톡 예비로 넘길 종류 (주인 10/19 — "나머지는 카카오톡 알림 진짜 급한 거 아니면 안 오는 걸로"): 푸시가 안 간 급한 일 중에서도
 # 로그인·연결 끊김, 딜봇·블로그 프로그램 멈춤, 발행 실패·멈춤만. 링크·사진·확인 부탁은 푸시와 대시보드 할 일에만 (카톡 아님 —
 # 링크 요청이 곧 만료된다고 급함을 따로 표시하는 곳이 없어서). Blog-Auto 의 notify.KAKAO_URGENT 와 같은 뜻. 설정 notify.kakao_kinds
@@ -242,6 +244,8 @@ class NotifyRouter:
             return None
         if not self.db.kv_get(BLOGAUTO_SEEN_KV):
             return None
+        if self._remote_login_running(now):  # 네이버 원격 로그인 창(login.sh)은 그동안 Blog-Auto 를 일부러 멈춘다 — 고장이 아님 (주인 10/27)
+            return None
         cur = self.store.get("dealbot", "blogauto_down")
         if cur is not None and cur.open_at(now):
             return None
@@ -250,6 +254,23 @@ class NotifyRouter:
                    "body": "세 블로그 자동 작업이 멈춰 있어요 — 서버 점검이 필요해요",
                    "short": "블로그 프로그램 멈춤", "ttl_h": 24})
         return "open"
+
+    def _remote_login_running(self, now: float) -> bool:
+        """대시보드가 연 원격 로그인 창이 아직 돌 수 있는 동안 (세션 + 10분 — login.sh 창은 30분까지) 이거나, 그 창을 본 지
+        REMOTE_LOGIN_GRACE_S 안 (창이 닫히고 서비스가 다시 켜지는 동안)."""
+        from dealbot.dashboard import remote_login
+
+        try:
+            s = json.loads(self.db.kv_get(remote_login.KV) or "null")
+        except (TypeError, ValueError):
+            s = None
+        if isinstance(s, dict) and isinstance(s.get("at"), int | float) and now - float(s["at"]) < (remote_login.SESSION_MIN + 10) * 60:
+            self.db.kv_set(REMOTE_LOGIN_KV, str(now))
+            return True
+        try:
+            return now - float(self.db.kv_get(REMOTE_LOGIN_KV) or 0) < REMOTE_LOGIN_GRACE_S
+        except (TypeError, ValueError):
+            return False
 
     def summary(self, cat: str, text: str, *, replace: bool = False) -> None:
         """저녁 정리에 들어갈 딜봇 한 줄 (오늘·cat 마다 — replace 면 마지막 것만)."""

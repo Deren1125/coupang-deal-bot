@@ -457,3 +457,23 @@ async def test_photo_feedback_on_the_same_post_goes_through_while_the_last_one_i
     s1, first = await act(bot, "blog.photo_feedback", {"blog": "issue", "pid": 46, "slot": 1, "verdict": "ok"}, h)
     s2, second = await act(bot, "blog.photo_feedback", {"blog": "issue", "pid": 46, "slot": 2, "verdict": "ok"}, h)
     assert (s1, s2) == (202, 202) and first["id"] != second["id"]
+
+
+def test_blogauto_stop_is_quiet_while_a_remote_login_window_runs(env: Env) -> None:
+    """주인 10/27: 핫딜 원격 로그인하는 동안 '⛔ 블로그 프로그램이 멈췄어요' — 네이버 로그인 창(login.sh)은 그동안 Blog-Auto 를
+    일부러 멈춘다. 창이 돌 수 있는 동안 + 닫힌 뒤 5분은 울리지 않고, 그 뒤에도 안 돌아오면 울린다."""
+    import json
+
+    from dealbot.dashboard import remote_login
+
+    now = env.clock()
+    assert env.router.watch_blogauto(BlogAutoStatus(at=now - 30, bridge=1), now) is None  # 다리를 봄
+    env.router.db.kv_set(remote_login.KV, json.dumps({"target": "hotdeal", "pass": "abcd2345", "at": now}))
+    gone = BlogAutoStatus(at=now - 30, bridge=1)
+    env.clock.tick(25 * 60)
+    assert env.router.watch_blogauto(gone, env.clock()) is None  # 로그인 창이 도는 중
+    env.router.db.kv_set(remote_login.KV, json.dumps(None))  # 화면이 닫힘 → 서비스가 다시 켜지는 동안
+    env.clock.tick(60)
+    assert env.router.watch_blogauto(gone, env.clock()) is None
+    env.clock.tick(5 * 60)
+    assert env.router.watch_blogauto(gone, env.clock()) == "open"  # 닫힌 뒤에도 안 돌아오면 진짜 멈춤
