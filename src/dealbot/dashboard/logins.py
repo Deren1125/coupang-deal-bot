@@ -47,6 +47,7 @@ QR_FILE = "dash_naver_qr.png"
 QR_MAX_BYTES = 4_000_000
 STATE_TEXT = {"ok": "로그인됨", "needed": "로그인 필요", "resting": "쉬는 중", "off": "안 씀", "unknown": "모름"}
 REMOTE_LABEL, QR_LABEL = "원격 로그인", "QR 로그인"
+FORCE_LABEL = "그래도 열기 (오늘 이미 한 번)"  # 네이버 블로그 원격 로그인 하루 한 번 (Blog-Auto remote_block — 10/27 두 번째 계정 잠김 뒤)
 QR_HOW = "다른 기기(PC·아이패드)에 뜬 QR 을 휴대폰 네이버 앱 › QR 로 찍어 주세요"
 LAST_TEXT = {"ok": "✅ 성공", "keep_off": "⛔ '로그인 상태 유지' 꺼짐", "timeout": "⏰ 시간 초과", "closed": "창이 닫힘",
              "replaced": "새 창으로 바뀜"}  # 마지막 원격 로그인 (Blog-Auto remote_login 결과 — blogauto.LOGIN_LAST_RESULTS)
@@ -202,11 +203,14 @@ def _last(v: Any, tz: ZoneInfo, now: float) -> str | None:
     return f"마지막 원격 로그인: {LAST_TEXT[v['result']]}" + (f" · {w}" if w else "")
 
 
-def _remote_button(target: str, vnc: dict[str, Any] | None, now: float | None = None) -> dict[str, Any]:
+def _remote_button(target: str, vnc: dict[str, Any] | None, now: float | None = None, *, block: bool = False) -> dict[str, Any]:
+    """block = Blog-Auto remote_block (네이버 줄만 봄): 오늘 이미 열었음 → '그래도 열기' {target, force: true}. 그 밖에는 예전 단추 그대로."""
     vnc = vnc if remote_login.live(vnc, now) else None  # 못 뜬 화면(띄운 지 GRACE_S 지나도록 안 열림)은 없는 것으로 — 다시 누를 수 있게
     if vnc and vnc.get("target") == target:
         return {"url": remote_login.url(vnc), "label": "원격 화면 열기"}
     b: dict[str, Any] = {"action": "login.remote", "args": {"target": target}, "label": REMOTE_LABEL}
+    if block and target in remote_login.NAVER:
+        b = {"action": "login.remote", "args": {"target": target, "force": True}, "label": FORCE_LABEL}
     if vnc and vnc.get("target") not in remote_login.NAVER:  # 서버 화면은 한 번에 하나 (127.0.0.1:6080) — 열린 화면이 닫힌 뒤에
         b["disabled"] = True  # 네이버 창은 새 부탁을 보면 스스로 닫히므로 다른 대상도 바로 누를 수 있다 (주인 10/27 — Pick 창 때문에 핫딜이 막힘)
     return b
@@ -264,9 +268,13 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
         if r is None:
             out.append(_row(target, label, "unknown", "모름 · 블로그 프로그램이 아직 상태를 안 보냈어요", button=_remote_button(target, vnc, now)))
             continue
-        btn = _remote_button(r["target"], vnc, now) if r["target"] and r["state"] != "off" else None
+        block = bool(r.get("remote_block")) and target in remote_login.NAVER and not stale  # 오래된 기록이면 예전 단추 (Blog-Auto 가 어차피 막음)
+        btn = _remote_button(r["target"], vnc, now, block=block) if r["target"] and r["state"] != "off" else None
         last = None if stale else _last(r.get("last"), tz, now)  # 기록이 오래됐으면 안 보임 (지금 일처럼 보이지 않게)
-        out.append(_row(target, r["label"], *text_of(r), where=r["where"], button=btn, last=last))
+        state, text = text_of(r)
+        if btn and (btn.get("args") or {}).get("force"):  # 하루 한 번 넘음 — 왜 '그래도 열기'인지 한 줄
+            text += f" · 오늘 원격 로그인 {r.get('remote_today') or 1}번 — 내일 다시 하는 게 안전해요"
+        out.append(_row(target, r["label"], state, text, where=r["where"], button=btn, last=last))
     out.append(naver_row(bot, tz, now))
     for r in got:  # 블로그 프로그램의 읽기만 하는 줄 (스레드 API 토큰 …) — 단추 없음
         if r["id"] not in remote_login.TARGETS:

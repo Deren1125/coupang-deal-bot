@@ -1,10 +1,10 @@
-/* 로그인 관리 (주인 10/26 — 원격 로그인을 대시보드에서). 연결 탭 맨 위 칸 · 값은 GET /dashboard/api/logins (logins.py).
-   누르는 것은 login.remote {target} · login.qr 뿐 (확인 창 없음). 셸이 defer 로 받고 app.js 가 #main 을 다시 그리면 같은 칸을 다시 붙인다.
-   주인 몫이 없으면 한 줄로 접음 (10/27). 글은 textContent 로만 · 바깥 주소 없음. */
+/* 로그인 관리 (주인 10/26). 연결 탭 맨 위 칸 · 값은 GET /dashboard/api/logins (logins.py). 누르는 것은 login.remote
+   {target, force?} · login.qr 뿐. app.js 가 #main 을 다시 그리면 같은 칸을 다시 붙인다. 주인 몫이 없으면 한 줄로 접음 (10/27).
+   글은 textContent 로만 · 바깥 주소 없음. */
 'use strict';
 (() => {
 const D = document, W = window;
-const CSS = '#lgp .row .s{white-space:normal;overflow-wrap:anywhere}#lgp .w{display:block;font-size:12px;color:var(--sub);margin-top:2px}' +
+const CSS = '#lgp .row{flex-wrap:wrap;row-gap:8px}#lgp .grow{flex-basis:60%}#lgp .row .s{white-space:normal;overflow-wrap:anywhere}#lgp .w{display:block;font-size:12px;color:var(--sub);margin-top:2px}' +
   '#lgp .sm[disabled]{opacity:.45}#lgp .qr{display:grid;gap:8px;justify-items:center;padding:10px 0;border-top:1px solid var(--line)}' +
   '#lgp .qr img{width:100%;max-width:520px;height:auto;border-radius:8px;border:1px solid var(--line);background:#fff}' +
   '#lgp .qr p{margin:0;font-size:13px;text-align:center}#lgp .vn{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}' +

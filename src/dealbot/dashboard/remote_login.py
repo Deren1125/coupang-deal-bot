@@ -3,6 +3,7 @@
 - 할 일의 로그인 줄(네이버 블로그 셋 · 쇼핑커넥트 · 토스 · 에이블리 · 지그재그 · 인스타 검색 계정)에 '원격 화면으로 다시 로그인'
   (login.remote {target}) — 연결 탭 맨 위 '로그인 관리' 칸(logins.py)에도 같은 단추.
 - 누르면: 새 비밀번호(VNC)를 만들어 kv 에 세션으로 두고, Blog-Auto 받은편지함에 {"login_remote": {target, pass, at}} 한 줄.
+  네이버 블로그는 하루 한 번 (Blog-Auto remote_block — 10/27 계정 잠김 뒤): 막힌 줄에서 주인이 '그래도 열기'를 누르면 force: true 를 붙인다.
   Blog-Auto 가 서버 크롬 로그인 화면(deploy/login.sh · affiliate-login.sh)을 127.0.0.1:6080 에만 연다 — 바깥 포트는 열지 않는다.
 - 화면은 대시보드 주소 아래 /dashboard/vnc/ 로만 보인다 (web.route_tunnel — 대시보드 로그인을 통과해야 하고, 세션이 살아 있는
   SESSION_MIN 분 동안만 이어 줌). 할 일 맨 위에 '원격 로그인 화면' 줄 (열기 링크에 이번 비밀번호).
@@ -58,11 +59,12 @@ def session(db: Any, now: float | None = None) -> dict[str, Any] | None:
     return s if (now or time.time()) - float(s["at"]) < SESSION_MIN * 60 else None
 
 
-def start(db: Any, relay: Any, target: str, now: float | None = None) -> dict[str, Any]:
+def start(db: Any, relay: Any, target: str, now: float | None = None, *, force: bool = False) -> dict[str, Any]:
+    """force = 주인이 '그래도 열기'를 누름 — Blog-Auto 가 하루 한 번 막음(remote_block)을 넘기게 부탁에만 "force": true (참일 때만)."""
     now = now or time.time()
     s = {"target": target, "pass": "".join(secrets.choice(PASS_CHARS) for _ in range(8)), "at": now}  # VNC 비밀번호는 8자까지만 쓰임
     db.kv_set(KV, json.dumps(s))
-    relay({"login_remote": s})
+    relay({"login_remote": dict(s, force=True) if force is True else s})
     return s
 
 

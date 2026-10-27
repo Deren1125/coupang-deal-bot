@@ -1160,6 +1160,7 @@ def _login_last(v: Any) -> dict[str, str] | None:
 def _logins(v: Any) -> list[dict[str, Any]] | None:
     """[{id, label, state, note, checked_at, since, until, target, where, last}] — 칸이 없으면(예전 Blog-Auto) None.
     last = 마지막 원격 로그인 {result: ok|keep_off|timeout|closed|replaced, at} 또는 None (_login_last).
+    remote_today = 24시간 안에 연 원격 로그인 창 수 (0 이상 정수, 기본 0) · remote_block = 다음 누름은 force 없으면 거절 (참/거짓, 기본 거짓).
     target 은 딜봇 remote_login.TARGETS 에 있는 이름만 (모르는 이름·null 은 None → 단추 없이 읽기만). 같은 id 는 첫 줄만."""
     if not isinstance(v, list):
         return None
@@ -1175,7 +1176,9 @@ def _logins(v: Any) -> list[dict[str, Any]] | None:
         out.append({"id": x["id"], "label": label, "state": x.get("state") if x.get("state") in LOGIN_STATES else "unknown",
                     "note": text["note"], **{k: _iso_tz(x.get(k)) for k in ("checked_at", "since", "until")},
                     "target": x["target"] if isinstance(x.get("target"), str) and x["target"] in REMOTE_TARGETS else None,
-                    "where": text["where"], "last": _login_last(x.get("last"))})
+                    "where": text["where"], "last": _login_last(x.get("last")),
+                    "remote_today": n if type(n := x.get("remote_today")) is int and n >= 0 else 0,
+                    "remote_block": x.get("remote_block") is True})
     return out
 
 

@@ -671,3 +671,62 @@ def test_logins_js_shows_the_last_remote_login_as_a_second_line_in_the_same_row(
     assert got["hotdeal"] == [] and got["toss"] == []
     assert got["threads_auto"] == [rows_of(view)["threads_auto"]["where"]]  # 어디서 하는지 줄은 그대로
     assert len(got) == len(view["rows"])  # 둘째 줄은 같은 줄 안 — 줄 수는 그대로
+
+
+# ---------------------------------------------------------------- 6) 네이버 원격 로그인 하루 한 번 (Blog-Auto remote_today · remote_block, 10/27)
+def test_remote_today_and_block_are_parsed_strictly() -> None:
+    base = {"id": "issue", "label": "Pick 블로그", "state": "needed", "note": "", "target": "issue", "where": ""}
+    good = _logins([dict(base, remote_today=2, remote_block=True)])[0]
+    assert good["remote_today"] == 2 and good["remote_block"] is True
+    assert _logins([base])[0]["remote_today"] == 0 and _logins([base])[0]["remote_block"] is False  # 칸 없음 (예전 Blog-Auto)
+    for today, block in ((-1, 1), (True, "true"), ("2", "yes"), (1.5, None), (None, [True]), ([2], {"x": 1})):
+        r = _logins([dict(base, remote_today=today, remote_block=block)])[0]
+        assert r["remote_today"] == 0 and r["remote_block"] is False, (today, block)
+
+
+def _blocked(tmp_path: Path, **rows: dict) -> None:
+    st = fixture("export_v2.json")["status"]
+    for x in st["logins"]:
+        x.update(rows.get(x["id"], {}))
+    write_export(tmp_path / "blogauto.json", status=st)
+
+
+def test_blocked_naver_row_offers_open_anyway_with_force(bot: DealBot, tmp_path: Path) -> None:
+    _blocked(tmp_path, issue={"remote_today": 2, "remote_block": True}, finance={"remote_today": 1, "remote_block": False},
+             ably={"remote_today": 3, "remote_block": True})  # 네이버가 아닌 줄은 막음을 안 봄
+    r = rows_of(logins.view(bot))
+    assert r["issue"]["button"] == {"action": "login.remote", "args": {"target": "issue", "force": True}, "label": "그래도 열기 (오늘 이미 한 번)"}
+    assert r["issue"]["text"].endswith(" · 오늘 원격 로그인 2번 — 내일 다시 하는 게 안전해요") and r["issue"]["text"].startswith("로그인 필요")
+    for t in ("finance", "hotdeal", "ably"):
+        assert r[t]["button"] == {"action": "login.remote", "args": {"target": t}, "label": "원격 로그인"}, t
+        assert "내일 다시" not in r[t]["text"], t
+    remote_login.start(bot.db, lambda msg: None, "issue")  # 그 줄의 창이 떠 있으면 예전처럼 '원격 화면 열기'
+    r = rows_of(logins.view(bot))
+    assert r["issue"]["button"]["label"] == "원격 화면 열기" and "내일 다시" not in r["issue"]["text"]
+
+
+async def test_login_remote_force_is_relayed_only_when_true(bot: DealBot, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    blogauto_status(settings)
+    h = session_headers(bot)
+    for bad in ("true", "yes", 1, 0, [True], {"x": 1}):
+        status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote", "args": {"target": "issue", "force": bad}}, h)
+        assert status == 400 and got["code"] == "bad_args", bad
+    assert (await act(bot, "login.remote", {"target": "issue", "force": True}))["code"] == "done"
+    s = json.loads(bot.db.kv_get(remote_login.KV))
+    s["at"] -= remote_login.GRACE_S + 1  # 창이 안 떴음 → 다시 누를 수 있게
+    bot.db.kv_set(remote_login.KV, json.dumps(s))
+    assert (await act(bot, "login.remote", {"target": "hotdeal", "force": False}))["code"] == "done"
+    s = json.loads(bot.db.kv_get(remote_login.KV))
+    s["at"] -= remote_login.GRACE_S + 1
+    bot.db.kv_set(remote_login.KV, json.dumps(s))
+    assert (await act(bot, "login.remote", {"target": "finance"}))["code"] == "done"
+    monkeypatch.setattr(remote_login.refresh, "__defaults__", (None, lambda: True))  # 네이버 창이 떠 있을 때 다시 누름 → 닫고 새로 (force 그대로)
+    s = json.loads(bot.db.kv_get(remote_login.KV))
+    s["at"] -= remote_login.SEEN_AFTER_S
+    bot.db.kv_set(remote_login.KV, json.dumps(s))
+    assert "새로" in (await act(bot, "login.remote", {"target": "finance", "force": True}))["text"]
+    inbox = [json.loads(x) for x in (settings.data_dir / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()]
+    sent = [u["login_remote"] for u in inbox if "login_remote" in u]
+    assert [(j["target"], j.get("force")) for j in sent] == [("issue", True), ("hotdeal", None), ("finance", None), ("finance", True)]
+    assert all(set(j) == {"target", "pass", "at"} | ({"force"} if j.get("force") else set()) for j in sent)
+    assert "force" not in json.loads(bot.db.kv_get(remote_login.KV))  # 세션(kv)엔 안 남김 — 부탁에만

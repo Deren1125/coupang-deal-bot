@@ -577,9 +577,10 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
     if action == "login.remote":
         from dealbot.dashboard.remote_login import TARGETS
 
-        if g("target") not in TARGETS:
+        force = g("force")  # 하루 한 번 막힌 네이버 줄의 '그래도 열기' (10/27) — 참/거짓만
+        if g("target") not in TARGETS or (force is not None and not isinstance(force, bool)):
             raise ActionError("bad_args")
-        return {"target": g("target")}
+        return {"target": g("target"), "force": True} if force else {"target": g("target")}
     if action == "login.qr":
         return {}
     if action == "routine.done":  # {id: 오늘 할 일 줄 id, done: 참/거짓}
@@ -1526,7 +1527,7 @@ class ActionDesk:
             if s and remote_login.live(s) and s.get("target") in remote_login.NAVER:
                 # 네이버 창이 열려 있을 때 다시 누르면 닫고 새로 (주인 10/27 '창을 껐거나 한 번 더 누르면 새로 열어 줘') — Blog-Auto 로그인
                 # 창이 받은편지함의 새 부탁을 보고 스스로 닫히면, 멈춰 있던 서비스가 다시 켜지며 새 부탁(새 비밀번호)으로 새 창을 연다
-                remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"])
+                remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"], force=args.get("force") is True)
                 return "done", "열려 있던 원격 화면을 닫고 새로 띄우는 중이에요 — 1분쯤 뒤 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
             if s and remote_login.live(s):  # 화면이 떠 있거나 띄우는 중 — 로그인 화면을 거듭 띄우지 않는다 (주인 10/26)
                 if s.get("target") == args["target"]:
@@ -1534,7 +1535,7 @@ class ActionDesk:
                 # 서버 화면은 한 번에 하나 (127.0.0.1:6080) — 다른 대상을 띄우면 열린 화면의 비밀번호가 바뀌어 들어갈 수 없게 됨
                 name = remote_login.TARGETS.get(s.get("target"), s.get("target"))
                 return "busy", f"지금 {name} 원격 화면이 열려 있어요 — 그 화면이 닫힌 뒤(로그인하면 저절로 닫혀요) 다시 눌러 주세요"
-            remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"])
+            remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"], force=args.get("force") is True)
             return "done", "서버에 로그인 화면을 띄우는 중이에요 — 30초쯤 뒤 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
         if action == "login.qr":
             from dealbot.dashboard import logins
