@@ -98,11 +98,11 @@ function draw() {
     top.push(el('div', {class: 'qr'}, el('img', {src: q.img, alt: '네이버 QR 로그인 화면'}),
       el('p', {text: `${q.how} · ${q.left_s}초 남음`}), link('lnk', 'QR 크게 보기', q.img)));
   }
-  const nv = data && data.visits;  // 네이버 접속 (주인 10/27 — 블로그마다 오늘·24시간·상한)
+  const nv = data && data.visits;  // 네이버 접속 (10/27)
   const visits = nv ? [el('div', {class: 'top', style: 'margin:20px 0 6px'}, el('h2', {}, '네이버 접속')),
     el('div', {class: 'box'}, nv.rows.map(r => el('div', {class: 'row ro'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.name),
       el('span', {class: 's' + (r.bad ? ' bad' : '')}, r.text), r.jobs ? el('span', {class: 'w'}, r.jobs) : null)))),
-    el('p', {class: 'note'}, `${nv.total} · 적응 기간 = 로그인이 돌아온 뒤 3일, 상한을 낮추고 밀린 글을 천천히`)] : [];
+    el('p', {class: 'note'}, `${nv.total} · 적응 기간 = 다시 로그인한 뒤 3일`)] : [];
   box.replaceChildren(head, el('div', {class: 'box'}, data ? null : el('p', {class: 'note'}, '불러오는 중…'), top, rows.map(row)),
     el('p', {class: 'note'}, '로그인은 주인이 직접 해요 — 봇은 비밀번호를 넣거나 확인 화면을 대신 누르지 않고, 정해진 때 로그인 화면을 열지 않아요'),
     visits);
