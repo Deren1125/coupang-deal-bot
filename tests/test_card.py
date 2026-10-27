@@ -37,3 +37,18 @@ def test_card_save_is_deterministic_and_prunes(tmp_path: Path) -> None:
     other = card.save(sample_deal(), None, key="other")
     assert other != a
     assert card.prune(keep_days=0) >= 2 and not a.exists()
+
+
+def test_prune_keeps_blog_paste_photos(tmp_path: Path) -> None:
+    """주인이 붙여 넣은 네이버 글이 쓰는 blog_*.jpg 는 카드 정리에서 빠진다 (Blog-Auto 가 90일 관리 · 10/27)."""
+    import os
+
+    media = tmp_path / "media"
+    card = DealCard(media)
+    a = card.save(sample_deal(), None)
+    blog = media / "blog_finance_12_1_abcdef12.jpg"
+    blog.write_bytes(b"x")
+    old = 1_000_000_000
+    os.utime(blog, (old, old))
+    os.utime(a, (old, old))
+    assert card.prune(keep_days=7) == 1 and not a.exists() and blog.exists()

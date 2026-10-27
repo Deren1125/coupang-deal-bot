@@ -268,12 +268,15 @@ class DealCard:
         return path
 
     def prune(self, keep_days: int = 7) -> int:
-        """오래된 카드 파일 정리."""
+        """오래된 카드 파일 정리. 블로그 붙여넣기 사진(blog_*.jpg — Blog-Auto paste.py 가 90일 관리)은 건드리지 않는다:
+        주인이 붙여 넣은 네이버 글이 이 주소를 그대로 쓸 수 있다 (주인 10/27 붙여넣기 발행)."""
         import time
 
         cutoff = time.time() - keep_days * 86400
         n = 0
         for f in self.out_dir.glob("*.jpg"):
+            if f.name.startswith("blog_"):
+                continue
             try:
                 if f.stat().st_mtime < cutoff:
                     f.unlink()
