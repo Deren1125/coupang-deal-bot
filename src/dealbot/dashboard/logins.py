@@ -193,8 +193,8 @@ def _remote_button(target: str, vnc: dict[str, Any] | None, now: float | None = 
     if vnc and vnc.get("target") == target:
         return {"url": remote_login.url(vnc), "label": "원격 화면 열기"}
     b: dict[str, Any] = {"action": "login.remote", "args": {"target": target}, "label": REMOTE_LABEL}
-    if vnc:  # 서버 화면은 한 번에 하나 (127.0.0.1:6080) — 열린 화면이 닫힌 뒤에
-        b["disabled"] = True
+    if vnc and vnc.get("target") not in remote_login.NAVER:  # 서버 화면은 한 번에 하나 (127.0.0.1:6080) — 열린 화면이 닫힌 뒤에
+        b["disabled"] = True  # 네이버 창은 새 부탁을 보면 스스로 닫히므로 다른 대상도 바로 누를 수 있다 (주인 10/27 — Pick 창 때문에 핫딜이 막힘)
     return b
 
 

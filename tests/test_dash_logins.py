@@ -473,6 +473,22 @@ async def test_a_screen_that_never_came_up_does_not_lock_the_remote_login(bot: D
     assert (await act(bot, "login.remote", {"target": "instagram"}))["code"] == "busy"
     assert rows_of(logins.view(bot))["issue"]["button"]["disabled"] is True
 
+def test_an_open_naver_screen_does_not_block_other_buttons_and_offers_reopen(bot: DealBot, tmp_path: Path) -> None:
+    """주인 10/27: Pick 원격 화면(19분 남음)이 떠 있어 핫딜 '원격 로그인'이 흐리게 막혔고, 'password check failed' 에 다시 열 길이 없었음.
+    네이버 창은 새 부탁을 보면 스스로 닫히므로 다른 버튼을 막지 않고, 할 일 줄에 '새로 열기'."""
+    write_export(tmp_path / "blogauto.json")
+    remote_login.start(bot.db, lambda msg: None, "issue")
+    r = rows_of(logins.view(bot))
+    assert r["issue"]["button"]["label"] == "원격 화면 열기"
+    assert r["hotdeal"]["button"]["action"] == "login.remote" and "disabled" not in r["hotdeal"]["button"]
+    row = next(i for i in bot.dash_state.items() if i["iid"] == "sys-vnc")
+    again = [m for m in row["more"] if m["label"] == "새로 열기"]
+    assert len(again) == 1 and again[0]["args"] == {"target": "issue"}
+    remote_login.start(bot.db, lambda msg: None, "zigzag")  # 쇼핑몰 창은 예전처럼 하나만
+    assert rows_of(logins.view(bot))["hotdeal"]["button"]["disabled"] is True
+    assert "새로 열기" not in [m["label"] for m in next(i for i in bot.dash_state.items() if i["iid"] == "sys-vnc")["more"]]
+
+
 def test_logins_js_is_local_safe_and_korean() -> None:
     js = (STATIC / "logins.js").read_text(encoding="utf-8")
     assert "http://" not in js and "https://" not in js and "innerHTML" not in js and "eval(" not in js

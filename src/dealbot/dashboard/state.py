@@ -734,6 +734,9 @@ class StateBuilder:
         from dealbot.dashboard import remote_login
 
         if (vrow := remote_login.item(self.bot.db, open_link)) is not None:  # 원격 로그인 화면이 열려 있음 (주인 10/23)
+            tgt = (remote_login.session(self.bot.db) or {}).get("target")
+            if tgt in remote_login.NAVER:  # 비밀번호가 안 맞거나 창을 닫았으면 '새로 열기' (주인 10/27 — password check failed)
+                vrow["more"] = [act("login.remote", "새로 열기", {"target": tgt})]
             out[vrow["iid"]] = vrow
         try:  # 딜봇 네이버 QR 로그인 (주인 10/26 — QR 이 떠 있으면 'QR 보기' · 딜봇이 쿠키 없음을 봤으면 'QR 로그인')
             for lrow in logins.todo_items(self.bot, now, act=act, open_link=open_link, goto=goto):
