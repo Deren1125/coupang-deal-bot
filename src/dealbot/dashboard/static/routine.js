@@ -3,15 +3,17 @@
 'use strict';
 (() => {
 const D = document, W = window;
-const CSS = '#rtp .sh{display:flex;align-items:center;gap:8px;width:100%;padding:0;text-align:left;color:var(--text);border-top:1px solid var(--line);border-radius:0}' +
-  '#rtp .box>.sh:first-child{border-top:0}#rtp .sh b{flex:1;min-width:0;font-size:15px}#rtp .sh span{font-size:13px;color:var(--sub);font-weight:500}' +
-  '#rtp .sh.cur span{color:var(--ac-ink);font-weight:600}#rtp .it{display:flex;gap:10px;align-items:flex-start;padding:8px 0 8px 4px}' +
-  '#rtp .ck{flex:none;width:44px;border:2px solid var(--fline);border-radius:10px;background:var(--field);color:var(--gr);font-size:20px}' +
-  '#rtp .ck[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}#rtp .it .grow{flex:1;min-width:0}' +
-  '#rtp .t{display:block;font-size:15px;font-weight:600;overflow-wrap:anywhere}#rtp .dn .t{text-decoration:line-through;color:var(--sub)}' +
-  '#rtp .s{display:block;font-size:13px;color:var(--sub);overflow-wrap:anywhere}#rtp .bt{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}' +
+const CSS = '#rtp .box{padding:4px 16px 6px;margin-bottom:20px}#rtp .sl{display:flex;align-items:center;gap:10px;width:100%;min-height:56px;padding:12px 0;' +
+  'border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--text)}#rtp .box>.sl:first-child{border-top:0}' +
+  '#rtp .sl b{flex:1;min-width:0;font-size:15px;line-height:1.4}#rtp .sl span{font-size:13px;color:var(--sub);font-weight:500}' +
+  '#rtp .sl.cur span{color:var(--ac-ink);font-weight:600}#rtp .it{display:flex;gap:12px;align-items:flex-start;padding:14px 0}' +
+  '#rtp .it+.it{background:linear-gradient(var(--line),var(--line)) 56px 0/100% 1px no-repeat}' +
+  '#rtp .cb{flex:none;width:44px;height:44px;padding:0;border:2px solid var(--fline);border-radius:12px;background:var(--field);color:var(--gr);font-size:20px}' +
+  '#rtp .cb[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}#rtp .it .grow{flex:1;min-width:0;padding-top:10px}' +
+  '#rtp .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}#rtp .dn .t{text-decoration:line-through;color:var(--sub)}' +
+  '#rtp .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}#rtp .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
   '#rtp a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
-  '#rtp .bar{height:6px;border-radius:3px;background:var(--grey);overflow:hidden;margin:0 0 10px}#rtp .bar i{display:block;height:100%;background:var(--gr)}';
+  '#rtp .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}#rtp .bar i{display:block;height:100%;background:var(--gr)}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
 
 function el(t, a, ...kids) {
@@ -94,7 +96,7 @@ function item(it) {
   const btns = it.done ? [] : [it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label)),
     it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label))].flat();
   return el('div', {class: 'it' + (it.done ? ' dn' : ''), 'data-id': it.id},
-    el('button', {class: 'ck', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
+    el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
     el('div', {class: 'grow'}, el('span', {class: 't'}, it.title),
       el('span', {class: 's'}, [it.tag, `${it.min}분`, it.note].filter(Boolean).join(' · ')),
@@ -104,7 +106,7 @@ function item(it) {
 function slot(s) {
   const all = s.total && s.done === s.total;
   const tail = !s.total ? '없음' : `${s.done}/${s.total}` + (all ? ' · 끝' : ` · 약 ${s.min_left}분`) + (s.current ? ' · 지금' : '');
-  return [el('button', {class: 'sh' + (s.current ? ' cur' : ''), type: 'button', 'aria-expanded': open[s.key] ? 'true' : 'false',
+  return [el('button', {class: 'sl' + (s.current ? ' cur' : ''), type: 'button', 'aria-expanded': open[s.key] ? 'true' : 'false',
     onclick: () => { open[s.key] = !open[s.key]; draw(); }}, el('b', {}, `${open[s.key] ? '▾' : '▸'} ${s.label} ${s.at}`), el('span', {}, tail)),
     open[s.key] ? s.items.map(item) : null];
 }

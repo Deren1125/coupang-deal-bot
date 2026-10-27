@@ -137,6 +137,7 @@ function render() {
   DIRTY = false;
   const v = {todo: vTodo, deal: vDeal, blog: vBlog, sns: vSns, stats: vStats, connect: vConnect}[R.tab]();
   m.replaceChildren(...v.flat(9).filter(x => x != null && x !== false));
+  m.dataset.tab = R.tab;
   head();
   if (NEXT) {
     const it = $('i-' + NEXT), f = it && it.querySelector('input[data-url]'); NEXT = null;

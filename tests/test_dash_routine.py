@@ -236,20 +236,20 @@ const h2 = b => b.all(c => c.tagName === 'H2')[0].textContent;
   const box = () => main.children.find(c => c.attrs.id === 'rtp');
   out.first = main.firstChild.attrs.id; out.hidden = box().hidden;
   out.head = h2(box());
-  out.heads = box().all(c => c.className.startsWith('sh')).map(c => [c.textContent, c.attrs['aria-expanded']]);
+  out.heads = box().all(c => c.className.startsWith('sl')).map(c => [c.textContent, c.attrs['aria-expanded']]);
   out.items = box().all(c => c.className.startsWith('it')).map(c => c.attrs['data-id']);
   out.bar = box().all(c => c.tagName === 'I')[0].style.width;
   box().all(c => c.tagName === 'BUTTON' && c.textContent === '제목 복사')[0].click();
   await tick();
   out.clip = clip; out.copyToast = toast.textContent;
   out.links = box().all(c => c.tagName === 'A').map(a => [a.attrs.href, a.attrs.target, a.attrs.rel]);
-  box().all(c => c.className === 'ck')[1].click();
+  box().all(c => c.className === 'cb')[1].click();
   out.optimistic = h2(box());
   await tick(); await tick();
   const post = calls.find(c => c.url === '/dashboard/api/action');
   out.post = {token: post.opt.headers['X-Dash-Token'], body: JSON.parse(post.opt.body)};
-  out.after = h2(box()); out.checked = box().all(c => c.className === 'ck').map(c => c.attrs['aria-checked']);
-  box().all(c => c.className.startsWith('sh'))[2].click();  // 접힌 칸 펼치기
+  out.after = h2(box()); out.checked = box().all(c => c.className === 'cb').map(c => c.attrs['aria-checked']);
+  box().all(c => c.className.startsWith('sl'))[2].click();  // 접힌 칸 펼치기
   out.opened = box().all(c => c.className.startsWith('it')).map(c => c.attrs['data-id']);
   main.replaceChildren(new E('div'), new E('div'));  // app.js 가 할 일 탭을 다시 그림
   await tick();

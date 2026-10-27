@@ -79,6 +79,8 @@ EDIT_JS_GZIP_MAX = 7 * 1024 + 256
 EDIT_JS_MAX = 20 * 1024
 EDIT_JS_GZIP_MAX = 7 * 1024 + 512
 APP_CSS_MAX = 15 * 1024 + 512
+# 10/27 할 일 탭 여유 (주인 '답답한 감' — 카드·줄 간격, 줄 높이): #main data-tab 아래 할 일 탭 규칙만 → 16 KB (16295 B)
+APP_CSS_MAX = 16 * 1024
 SW_MAX = 8 * 1024
 # 10/21: 제품 테스트 화면 (후보 카드 ✅/❌·이유 칩·한 줄·테스트 끝·배운 기준) — 처음 열 때만 받는 product.js
 PRODUCT_JS_MAX = 6 * 1024
@@ -120,6 +122,10 @@ ROUTINE_JS_GZIP_MAX = 3 * 1024 + 512
 # — 머리 주석을 줄이고도 +0.25 KB / gzip +0.125 KB (8388 B / 3620 B)
 ROUTINE_JS_MAX = 8 * 1024 + 256
 ROUTINE_JS_GZIP_MAX = 3 * 1024 + 640
+# 10/27 (3): 할 일 탭 여유 — 칸 머리를 시트 .sh 와 겹치지 않는 .sl 로(가운데 정렬·테두리 버그), 체크 칸 44×44 .cb, 줄 사이 선·간격
+# → 8.5 KB / gzip 3.75 KB (8671 B / 3729 B)
+ROUTINE_JS_MAX = 8 * 1024 + 512
+ROUTINE_JS_GZIP_MAX = 3 * 1024 + 768
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

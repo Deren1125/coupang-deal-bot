@@ -7,6 +7,7 @@
    사진·질문처럼 다른 일이 남은 글, 칸에 없는 글은 그대로.
 4) routine.js: 급한 알림이 맨 위에 있으면 그 바로 아래에 붙음 · 할 일 id 목록(ids)과 'sb-routine' 알림 (app.js 가 다시 그림).
 5) logins.js: 주인 몫이 없으면 '로그인 모두 정상' 한 줄 (누르면 펼침) · 필요한 로그인이 있으면 늘 펼침.
+6) 할 일 탭 여유 (10/27 '답답한 감'): app.css 규칙은 [data-tab=todo] 아래만 · 체크 칸 44×44 · 칸 머리는 시트 .sh 와 겹치지 않는 .sl.
 """
 
 from __future__ import annotations
@@ -247,3 +248,16 @@ def test_logins_collapse_to_one_line_when_nothing_needs_the_owner(bot: DealBot, 
     need = dict(calm, need=1, rows=[dict(calm["rows"][0], bad=True, state="needed", text="로그인 필요")] + calm["rows"][1:])
     got = node(shim + "(async () => {" + LG_FLOW, str(STATIC / "logins.js"), json.dumps(need, ensure_ascii=False))
     assert got["fold"] == [] and got["h2"][0] == "로그인 관리 · 필요 1" and got["rows"] == len(calm["rows"])
+
+
+# ---------------------------------------------------------------- 6) 할 일 탭 여유 (주인 10/27 '답답한 감 — 간격을 넓혀 가독성')
+def test_todo_tab_spacing_is_scoped_and_tap_targets_are_44px() -> None:
+    js, css, rt = ((STATIC / f).read_text(encoding="utf-8") for f in ("app.js", "app.css", "routine.js"))
+    assert "m.dataset.tab = R.tab;" in js  # 탭 이름 → app.css 가 할 일 탭만 넓힘 (다른 탭 모양은 그대로)
+    tail = css.split("할 일 탭 여유", 1)[1].split("*/", 1)[1]
+    sels = [s.strip() for rule in re.findall(r"([^{}]+)\{", tail) for s in rule.split(",")]
+    assert sels and all(s.startswith("[data-tab=todo] ") for s in sels), sels
+    m = re.search(r"#rtp \.cb\{([^}]*)\}", rt)
+    assert m and "width:44px" in m.group(1) and "height:44px" in m.group(1)  # 체크 칸
+    assert re.search(r"#rtp \.sl\{[^}]*min-height:56px", rt) and "class: 'sl'" in rt and "class: 'cb'" in rt
+    assert "'sh'" not in rt and "'ck'" not in rt  # 시트(.sh)·사진 판(.ck) app.css 규칙과 겹치지 않는 이름
