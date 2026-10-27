@@ -3,7 +3,8 @@
 1) kkumi.bookmarklet(): static/kkumi.js 를 줄여 "javascript:" + encodeURIComponent — node 의 encodeURIComponent 와 같고 new Function 으로 읽힘 ·
    바깥 요청 없음.
 2) 가짜 글쓰기 화면(iframe 안 · 진짜 크롬, playwright 가 있을 때만): 주소만 있는 줄 둘 → 카드 둘 (주소 줄 바로 아래) · 이미 카드가 있는 줄·
-   글 속 주소는 그대로 · 다시 누르면 '없어요' · 링크 단추가 없으면 이유와 함께 0/1.
+   글 속 주소는 그대로 · 긴 구분선 → 짧은 선·가운데, 기본 인용구 → 포스트잇 (이미 맞는 것은 누르지 않음) · 다시 누르면 '고칠 것이 없어요' ·
+   단추가 없으면 종류마다 이유와 함께 0/m.
 3) GET /dashboard/api/kkumi (로그인 아래) · static/kkumi.js (공개 파일) · 연결 탭 '꾸미기 버튼 설치' 칸 (logins.js — 펼치면 4단계 + 코드 복사).
 """
 
@@ -41,10 +42,11 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     src = kkumi.SRC.read_text(encoding="utf-8")
     js = code()
     assert js == kkumi.minify(src) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
-    assert len(kkumi.bookmarklet()) < 8000  # 사파리 책갈피 주소 칸에 붙여 넣기 좋은 길이 (시험한 책갈피는 5KB)
+    assert len(kkumi.bookmarklet()) < 12000  # 사파리 책갈피 주소 칸에 붙여 넣는 길이 (시험한 책갈피는 5KB · 구분선·인용구까지 11KB 쯤)
     for net in ("fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "import(", ".src=", "location", "open(", "http://"):
         assert net not in js, net
-    for word in ("링크 카드 ", "개 만들었어요", "se-text-paragraph", "oglink", "se-popup-button-confirm", "15000", "8000", "pointerdown"):
+    for word in ("링크 카드 ", "개 만들었어요", "se-text-paragraph", "oglink", "se-popup-button-confirm", "15000", "8000", "pointerdown",
+                 "se-horizontalLine", "se-l-default", "align-drop-down-with-justify", "quotation_postit", "짧게·가운데", "포스트잇"):
         assert word in js, word
     assert kkumi.view() == {"code": kkumi.bookmarklet(), "len": len(kkumi.bookmarklet()), "steps": list(kkumi.STEPS)} and len(kkumi.STEPS) == 4
 
@@ -69,7 +71,7 @@ def test_bookmarklet_parses_and_matches_encode_uri_component() -> None:
 # ---------------------------------------------------------------- 2) 가짜 글쓰기 화면
 # 네이버 SmartEditor 처럼: 툴바 링크(oglink) 단추 → 팝업(주소 칸·검색·미리보기·확인). 확인 → 커서가 있던 문단 바로 아래에 카드.
 # 검색 뒤 0.4초 동안 '불러오는 중' 표시, 그 뒤 미리보기 — 꾸미기는 이것을 기다려야 한다.
-INNER = """<html><head><meta charset="utf-8"></head><body>
+INNER = r"""<html><head><meta charset="utf-8"></head><body>
 <div class="se-toolbar"><div class="se-popup-oglink" style="display:none"><input placeholder="URL을 입력하세요">
 <button class="se-popup-oglink-button">검색</button><div class="se-popup-loading" style="display:none">…</div><div class="pv"></div>
 <button class="se-popup-button-confirm">확인</button></div></div>
@@ -81,12 +83,40 @@ INNER = """<html><head><meta charset="utf-8"></head><body>
 <p class="se-text-paragraph"><span>&#8203;</span></p></div>
 <div class="se-component se-oglink" data-url="https://two.example/b">이미 있는 카드</div>
 <div class="se-component se-text"><p class="se-text-paragraph"><b>https://three.example/c</b></p></div>
+<div class="se-component se-horizontalLine se-l-line1" data-k="A"><div class="se-section se-section-horizontalLine"><hr></div></div>
+<div class="se-component se-horizontalLine se-l-default" data-k="B"><div class="se-section se-section-horizontalLine se-section-align-center"><hr></div></div>
+<div class="se-component se-horizontalLine se-l-default" data-k="C"><div class="se-section se-section-horizontalLine"><hr></div></div>
+<div class="se-component se-quotation se-l-default" data-k="Q1"><blockquote><p class="se-text-paragraph">인용 하나</p></blockquote></div>
+<div class="se-component se-quotation se-l-quotation_postit" data-k="Q2"><blockquote><p class="se-text-paragraph">이미 포스트잇</p></blockquote></div>
 </div>
 <script>
 const pop = document.querySelector('.se-popup-oglink'), inp = pop.querySelector('input'), pv = pop.querySelector('.pv'),
   ld = pop.querySelector('.se-popup-loading');
 let at = null, url = '';
+window.touched = [];
 if (TOOL) {
+  // 구분선·인용구 (서버 봇 editor.py 와 Blog-Auto test_editor_mock 모양): 선을 누르면 모양 단추가 뜸 · 정렬 메뉴 · 인용구 모양 메뉴
+  document.querySelector('.se-toolbar').insertAdjacentHTML('beforeend', `<button data-name="horizontal-line">ㅡ</button>
+<button data-name="horizontal-line-select">v</button><div id="lstyles" style="display:none"><button data-name="horizontal-line-style" data-value="default">짧은 선</button>
+<button data-value="line1">긴 선</button></div><button data-name="align-drop-down-with-justify">정렬</button><span id="aligns" style="display:none">
+<button data-value="left">왼쪽</button><button data-value="center">가운데</button></span><button data-name="quotation-select">인용 v</button>
+<div id="qstyles" style="display:none"><button data-value="quotation_postit">포스트잇</button></div>`);
+  const $ = q => document.querySelector(q), lst = $('#lstyles');
+  let sel = null;
+  document.addEventListener('click', e => {
+    if (e.target.closest('.se-toolbar')) return;
+    sel = e.target.closest('.se-horizontalLine,.se-quotation');
+    if (sel) window.touched.push(sel.dataset.k);
+    lst.style.display = sel && sel.matches('.se-horizontalLine') ? 'block' : 'none';
+  });
+  $('#lstyles [data-value=default]').onclick = () => { if (sel && sel.matches('.se-horizontalLine')) sel.className = sel.className.replace(/se-l-\S+/, 'se-l-default'); lst.style.display = 'none'; };
+  $('[data-name=align-drop-down-with-justify]').onclick = () => { $('#aligns').style.display = 'inline'; };
+  $('#aligns [data-value=center]').onclick = () => { $('#aligns').style.display = 'none';
+    const x = sel && sel.matches('.se-horizontalLine') && sel.querySelector('.se-section');
+    if (x) x.className = x.className.replace(/ ?se-section-align-\S+/g, '') + ' se-section-align-center'; };
+  $('[data-name=quotation-select]').onclick = () => { $('#qstyles').style.display = 'block'; };
+  $('[data-value=quotation_postit]').onclick = () => { $('#qstyles').style.display = 'none';
+    if (sel && sel.matches('.se-quotation')) sel.className = sel.className.replace(/se-l-\S+/, 'se-l-quotation_postit'); };
   const b = document.createElement('button'); b.setAttribute('data-name', 'oglink'); b.textContent = 'L';
   document.querySelector('.se-toolbar').prepend(b);
   b.onclick = () => { const s = getSelection(); at = s.rangeCount ? s.getRangeAt(0).startContainer : null;
@@ -112,14 +142,17 @@ const {chromium} = require('playwright');
   const frame = async () => (await p.waitForSelector('iframe')).contentFrame();
   const shape = async () => (await frame()).evaluate(() => [...document.querySelectorAll('.se-text-paragraph,.se-oglink')]
     .map(e => e.matches('.se-oglink') ? 'CARD ' + e.dataset.url : e.textContent.replace(/​/g, '').trim()).filter(Boolean));
+  const parts = async () => (await frame()).evaluate(() => ({touched: window.touched.slice(),
+    comps: [...document.querySelectorAll('.se-horizontalLine,.se-quotation')].map(e => [e.dataset.k, (e.className.match(/se-l-\S+/) || [''])[0],
+      /se-section-align-center/.test((e.querySelector('.se-section') || e).className)])}));
   const press = async () => { await p.evaluate(code); for (let i = 0; i < 100 && alerts.length === out.n; i++) await p.waitForTimeout(100); };
   await p.setContent('<iframe id="mainFrame" style="width:900px;height:600px"></iframe>');
   await p.$eval('iframe', (f, h) => { f.srcdoc = h; }, inner.replaceAll('TOOL', 'true'));
   await (await frame()).waitForSelector('.se-content');
   out.n = 0; await press();
-  out.first = alerts.slice(); out.shape = await shape();
+  out.first = alerts.slice(); out.shape = await shape(); out.parts = await parts();
   out.n = alerts.length; await press();
-  out.again = alerts.slice(1);
+  out.again = alerts.slice(1); out.touched2 = await (await frame()).evaluate(() => window.touched);
   // 링크 단추가 없는 화면: 이유와 함께 0/1
   await p.$eval('iframe', (f, h) => { f.srcdoc = h; }, inner.replaceAll('TOOL', 'false').replace('https://two.example/b</p>', 'x</p>')
     .replace('https://three.example/c', 'z'));
@@ -160,12 +193,19 @@ def test_bookmarklet_makes_cards_on_a_mock_editor() -> None:
     out = subprocess.run([NODE, "-e", RUN, INNER, code()], capture_output=True, text=True, timeout=120, env=env)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    assert got["first"] == ["링크 카드 2/2개 만들었어요"]
+    assert got["first"] == ["링크 카드 2/2개 만들었어요\n구분선 2/2개 짧게·가운데\n인용구 1/1개 포스트잇"]
     assert got["shape"] == ["소개 글이에요.", "https://one.example/a?x=1", "CARD https://one.example/a?x=1",
                             "글 속 주소 https://mid.example 는 그대로", "https://two.example/b", "CARD https://two.example/b",
-                            "https://three.example/c", "CARD https://three.example/c"]  # 주소 줄은 남기고 바로 아래 카드 · 있던 카드는 그대로
-    assert got["again"] == ["만들 링크 카드가 없어요 (주소만 있는 줄이 없거나 이미 카드가 있어요)"]
-    assert got["nobutton"] == ["링크 카드 0/1개 만들었어요\n못 만든 것:\nhttps://one.example/a?x=1 — 링크 단추를 못 찾음"]
+                            "https://three.example/c", "CARD https://three.example/c",  # 주소 줄은 남기고 바로 아래 카드 · 있던 카드는 그대로
+                            "인용 하나", "이미 포스트잇"]
+    # 긴 선 A → 짧은 선 + 가운데 · 가운데가 아닌 짧은 선 C → 가운데 · 기본 인용구 Q1 → 포스트잇. 이미 맞는 B·Q2 는 누르지도 않음
+    assert got["parts"]["comps"] == [["A", "se-l-default", True], ["B", "se-l-default", True], ["C", "se-l-default", True],
+                                     ["Q1", "se-l-quotation_postit", False], ["Q2", "se-l-quotation_postit", False]]
+    assert got["parts"]["touched"] == ["A", "A", "C", "Q1"]
+    assert got["again"] == ["고칠 것이 없어요 (링크 카드·구분선·인용구 모두 그대로예요)"] and got["touched2"] == got["parts"]["touched"]
+    assert got["nobutton"] == ["링크 카드 0/1개 만들었어요\n구분선 0/2개 짧게·가운데\n인용구 0/1개 포스트잇\n못 한 것:\n"
+                               "https://one.example/a?x=1 — 링크 단추를 못 찾음\n구분선 1번째 — 짧은 선 단추를 못 찾음\n"
+                               "구분선 3번째 — 가운데 단추를 못 찾음\n인용구 1번째 — 포스트잇 단추를 못 찾음"]
     assert got["elsewhere"] == ["글쓰기 화면을 못 찾았어요 — 네이버 블로그 글쓰기 화면에서 눌러 주세요"]
 
 
