@@ -25,7 +25,9 @@ GRACE_S = 180  # 누른 뒤 화면이 뜰 때까지 (login.sh 는 서비스를 �
 PREFIX = "/dashboard/vnc/"
 # Blog-Auto blogauto/remote_login.TARGETS 와 같은 이름·순서 (instagram = ig_lookup 인스타 검색 전용 계정 — deploy/ig-login.sh, 주인 10/26)
 TARGETS = {"finance": "아카이브 블로그(쇼핑커넥트도)", "issue": "Pick 블로그", "hotdeal": "핫딜 블로그", "toss": "토스 쉐어링크",
-           "ably": "에이블리", "zigzag": "지그재그", "instagram": "인스타 검색 계정"}
+           "ably": "에이블리", "zigzag": "지그재그", "instagram": "인스타 검색 계정",
+           # 스레드 자동화(threads-auto) 계정의 스레드·인스타 (주인 10/27 '로그인 관리에 스레드, 인스타 등도 넣어줘')
+           "threads": "스레드 (자동 팔로우·좋아요 계정)", "threads_ig": "핫딜 인스타 (자동 팔로우·좋아요 계정)"}
 NAVER = ("finance", "issue", "hotdeal")
 NAVER_HEADS = ("login", "login_down", "login_keep")  # 네이버 로그인 풀림·다시 로그인 (키 = <앞>:<블로그>)
 PASS_CHARS = "abcdefghjkmnpqrstuvwxyz23456789"

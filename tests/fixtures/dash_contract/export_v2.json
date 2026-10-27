@@ -425,6 +425,28 @@
     "until": null,
     "target": null,
     "where": "토큰 — 서버 .env 는 주인이 넣음 · 대시보드 연결 탭"
+   },
+   {
+    "id": "threads",
+    "label": "스레드 (자동 팔로우·좋아요 계정)",
+    "state": "needed",
+    "note": "로그인 풀림 — 스레드·인스타 자동 팔로우·좋아요·댓글이 멈춰 있어요 (10-26 14:50부터)",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": "threads",
+    "where": ""
+   },
+   {
+    "id": "threads_ig",
+    "label": "핫딜 인스타 (자동 팔로우·좋아요 계정)",
+    "state": "ok",
+    "note": "",
+    "checked_at": null,
+    "since": null,
+    "until": null,
+    "target": "threads_ig",
+    "where": ""
    }
   ]
  },

@@ -87,10 +87,10 @@ def rows_of(view: dict) -> dict[str, dict]:
 def test_fixture_logins_parse_with_targets_and_labels_matching_the_remote_targets() -> None:
     e = parse_export(fixture("export_v2.json"), "Asia/Seoul")
     got = e.v2["status"]["logins"]
-    assert [r["id"] for r in got] == ["finance", "issue", "hotdeal", "toss", "ably", "zigzag", "instagram", "threads_api"]
+    assert [r["id"] for r in got] == ["finance", "issue", "hotdeal", "toss", "ably", "zigzag", "instagram", "threads_api", "threads", "threads_ig"]
     assert {r["id"]: r["label"] for r in got if r["target"]} == remote_login.TARGETS  # 이름이 두 저장소에서 같다
     assert all(r["target"] == r["id"] for r in got if r["target"])
-    th = got[-1]
+    th = next(r for r in got if r["id"] == "threads_api")
     assert th["target"] is None and th["where"] and th["state"] == "ok"
     ably = next(r for r in got if r["id"] == "ably")
     assert ably["state"] == "resting" and ably["until"] == "2026-10-19T07:30:00+09:00" and ably["checked_at"].endswith("+09:00")
@@ -134,7 +134,7 @@ def test_login_keys_map_to_the_same_rows_and_targets_as_blog_auto() -> None:
              "own_stats_block:issue": None, "kz:issue": None, "ownstats:issue:x": None, "mall_login:../x": None,
              "mall_login:finance": None, "login:claude_cli": None, "login:issue:x": None, "": None}
     assert {k: remote_login.target_of(k) for k in table} == table
-    assert remote_login.TARGETS["instagram"] == "인스타 검색 계정" and list(remote_login.TARGETS)[-1] == "instagram"
+    assert remote_login.TARGETS["instagram"] == "인스타 검색 계정" and list(remote_login.TARGETS)[-3:] == ["instagram", "threads", "threads_ig"]
 
 
 # ---------------------------------------------------------------- 2) 할 일 줄 — 첫 단추가 원격 로그인
@@ -379,8 +379,8 @@ async def test_logins_view_lists_every_login_with_buttons_only_for_remote_rows(b
     h = session_headers(bot)
     status, view, _ = await get_json(bot, "/dashboard/api/logins", h)
     assert status == 200
-    assert [r["id"] for r in view["rows"]] == ["finance", "issue", "hotdeal", "toss", "ably", "zigzag", "instagram", "dealbot_naver",
-                                               "threads_api", "threads_auto", "telegram"]  # 딜봇 API 연결 · 카톡은 연결 탭 제 칸에만
+    assert [r["id"] for r in view["rows"]] == ["finance", "issue", "hotdeal", "toss", "ably", "zigzag", "instagram", "threads", "threads_ig",
+                                               "dealbot_naver", "threads_api", "threads_auto", "telegram"]  # 딜봇 API 연결 · 카톡은 연결 탭 제 칸에만
     r = rows_of(view)
     for t in remote_login.TARGETS:
         assert r[t]["button"] == {"action": "login.remote", "args": {"target": t}, "label": "원격 로그인"}, t
@@ -388,8 +388,8 @@ async def test_logins_view_lists_every_login_with_buttons_only_for_remote_rows(b
     assert r["ably"]["state"] == "resting" and "쉬는 중" in r["ably"]["text"] and "10/19 07:30까지" in r["ably"]["text"]
     for ro in ("threads_api", "threads_auto", "telegram"):
         assert r[ro]["button"] is None and r[ro]["where"], ro
-    assert "스레드·X 봇" in r["threads_auto"]["where"] and r["threads_auto"]["state"] is None
-    assert view["need"] == 3 and view["qr"] is None and view["vnc"] is None  # Pick · 지그재그 · 인스타 검색 계정
+    assert "X 봇" in r["threads_auto"]["where"] and r["threads_auto"]["state"] is None
+    assert view["need"] == 4 and view["qr"] is None and view["vnc"] is None  # Pick · 지그재그 · 인스타 검색 계정 · 스레드(기록 파일 예: 풀림)
     for row in view["rows"]:
         assert "http" not in json.dumps(row.get("button") or {}), row  # 바깥 주소 단추 없음
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}

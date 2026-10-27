@@ -46,7 +46,7 @@ QR_MAX_BYTES = 4_000_000
 STATE_TEXT = {"ok": "로그인됨", "needed": "로그인 필요", "resting": "쉬는 중", "off": "안 씀", "unknown": "모름"}
 REMOTE_LABEL, QR_LABEL = "원격 로그인", "QR 로그인"
 QR_HOW = "다른 기기(PC·아이패드)에 뜬 QR 을 휴대폰 네이버 앱 › QR 로 찍어 주세요"
-THREADS_AUTO_WHERE = "스레드·X 봇 세션 담당 — 스레드 화면 '스레드 로그인' · X 는 X 봇 세션에 부탁"
+THREADS_AUTO_WHERE = "X 봇 세션 담당 — SNS 탭 X 화면 (스레드·핫딜 인스타는 위 줄에서 원격 로그인, 주인 10/27)"
 _TASKS: set[asyncio.Task[Any]] = set()  # QR 기다림 (끝날 때까지 잡아 둠)
 
 
@@ -256,7 +256,7 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
     for r in got:  # 블로그 프로그램의 읽기만 하는 줄 (스레드 API 토큰 …) — 단추 없음
         if r["id"] not in remote_login.TARGETS:
             out.append(_row(r["id"], r["label"], *text_of(r), where=r["where"]))
-    out.append(_row("threads_auto", "스레드·인스타·X 자동 활동 계정", None, "여기서는 상태를 안 봐요", where=THREADS_AUTO_WHERE))
+    out.append(_row("threads_auto", "X 자동 활동 계정", None, "여기서는 상태를 안 봐요", where=THREADS_AUTO_WHERE))
     tg = bool(getattr(bot.settings.secrets, "telegram_bot_token", None))
     out.append(_row("telegram", "텔레그램 봇", "ok" if tg else "off", "로그인 없음 · 봇 토큰으로 연결" if tg else "안 씀 · 토큰 없음",
                     where="토큰 — 서버 .env (주인이 넣음)"))
