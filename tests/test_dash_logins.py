@@ -608,3 +608,66 @@ def test_naver_visits_section_shows_opens_per_blog(bot: DealBot, tmp_path: Path)
     assert fin["name"] == "아카이브" and fin["text"] == "오늘 12번 · 24시간 42/50번 · 막힘 3" and fin["jobs"] == "많이 연 일: 내 통계 3, neighbors 4"
     assert hot["name"] == "핫딜" and "적응 기간 · 곁일 쉼" in hot["text"] and hot["bad"] is True and hot["jobs"] == ""
     assert v["total"] == "서버 전체 24시간 94/160번" and len(v["rows"]) == 2  # 모르는 블로그는 뺌
+
+
+# ---------------------------------------------------------------- 5) 마지막 원격 로그인 (Blog-Auto status.logins[].last — 네이버 세 줄, 10/27)
+def test_login_last_is_parsed_strictly() -> None:
+    base = {"id": "finance", "label": "아카이브 블로그(쇼핑커넥트도)", "state": "ok", "note": "", "checked_at": None, "since": None,
+            "until": None, "target": "finance", "where": ""}
+    good = [{"result": r, "at": "2026-10-27T13:56:00+09:00"} for r in ("ok", "keep_off", "timeout", "closed", "replaced")]
+    got = _logins([dict(base, id=f"r{i}", last=x) for i, x in enumerate(good)])
+    assert [r["last"] for r in got] == good
+    assert _logins([dict(base, last={"result": "ok", "at": "2026-10-27T04:56:00Z"})])[0]["last"]["at"] == "2026-10-27T04:56:00Z"
+    bad = [None, "ok", ["ok"], {"result": "ok"}, {"at": "2026-10-27T13:56:00+09:00"},
+           {"result": "OK", "at": "2026-10-27T13:56:00+09:00"}, {"result": "failed", "at": "2026-10-27T13:56:00+09:00"},
+           {"result": ["ok"], "at": "2026-10-27T13:56:00+09:00"}, {"result": "ok", "at": "2026-10-27T13:56:00"},  # 시간대 없음
+           {"result": "ok", "at": "2026-13-40T99:00:00+09:00"}, {"result": "ok", "at": 1761540960}, {"result": "ok", "at": "어제"}]
+    got = _logins([dict(base, id=f"b{i}", last=x) for i, x in enumerate(bad)])
+    assert len(got) == len(bad) <= 12 and all(r["last"] is None for r in got)
+    assert _logins([base])[0]["last"] is None  # 칸이 없음 (예전 Blog-Auto)
+    fx = {r["id"]: r["last"] for r in parse_export(fixture("export_v2.json"), "Asia/Seoul").v2["status"]["logins"]}
+    assert fx["finance"] == {"result": "ok", "at": "2026-10-18T08:55:00+09:00"} and fx["issue"]["result"] == "keep_off"
+    assert fx["hotdeal"] is None and fx["toss"] is None
+
+
+def test_login_last_row_text(bot: DealBot, tmp_path: Path) -> None:
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    write_export(tmp_path / "blogauto.json")
+    r = rows_of(logins.view(bot))
+    assert r["finance"]["last"] == "마지막 원격 로그인: ✅ 성공 · 10/18 08:55"
+    assert r["issue"]["last"] == "마지막 원격 로그인: ⛔ '로그인 상태 유지' 꺼짐 · 10/17 14:05"
+    assert r["hotdeal"]["last"] is None and r["toss"]["last"] is None and r["dealbot_naver"]["last"] is None
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+    st = fixture("export_v2.json")["status"]
+    want = {"ok": "✅ 성공", "keep_off": "⛔ '로그인 상태 유지' 꺼짐", "timeout": "⏰ 시간 초과", "closed": "창이 닫힘", "replaced": "새 창으로 바뀜"}
+    for result, text in want.items():
+        for x in st["logins"]:
+            if x["id"] == "hotdeal":
+                x["last"] = {"result": result, "at": now.isoformat(timespec="seconds")}
+        write_export(tmp_path / "blogauto.json", status=st)
+        assert rows_of(logins.view(bot))["hotdeal"]["last"] == f"마지막 원격 로그인: {text} · {now:%H:%M}", result  # 오늘이면 시각만
+    data = json.loads((tmp_path / "blogauto.json").read_text(encoding="utf-8"))
+    data["written_at"] = (now - timedelta(hours=9)).isoformat(timespec="seconds")  # 기록이 오래됨 → 안 보임
+    (tmp_path / "blogauto.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert all(row["last"] is None for row in logins.view(bot)["rows"])
+
+
+def test_logins_js_shows_the_last_remote_login_as_a_second_line_in_the_same_row(bot: DealBot, tmp_path: Path) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node 없음")
+    write_export(tmp_path / "blogauto.json")
+    view = logins.view(bot)
+    shim = DOM_SHIM.replace("out.img =", "out.last = Object.fromEntries(box().all(c => c.className.startsWith('row'))"
+                                         ".map(r => [r.attrs['data-id'], r.all(c => c.className === 'w').map(c => c.textContent)])); out.img =")
+    out = subprocess.run([node, "-e", shim, str(STATIC / "logins.js"), json.dumps(view, ensure_ascii=False)],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)["last"]
+    assert got["finance"] == ["마지막 원격 로그인: ✅ 성공 · 10/18 08:55"]
+    assert got["issue"] == ["마지막 원격 로그인: ⛔ '로그인 상태 유지' 꺼짐 · 10/17 14:05"]
+    assert got["hotdeal"] == [] and got["toss"] == []
+    assert got["threads_auto"] == [rows_of(view)["threads_auto"]["where"]]  # 어디서 하는지 줄은 그대로
+    assert len(got) == len(view["rows"])  # 둘째 줄은 같은 줄 안 — 줄 수는 그대로

@@ -347,7 +347,11 @@
     "since": null,
     "until": null,
     "target": "finance",
-    "where": ""
+    "where": "",
+    "last": {
+     "result": "ok",
+     "at": "2026-10-18T08:55:00+09:00"
+    }
    },
    {
     "id": "issue",
@@ -358,7 +362,11 @@
     "since": "2026-10-18T08:12:00+09:00",
     "until": null,
     "target": "issue",
-    "where": ""
+    "where": "",
+    "last": {
+     "result": "keep_off",
+     "at": "2026-10-17T14:05:00+09:00"
+    }
    },
    {
     "id": "hotdeal",
@@ -369,7 +377,8 @@
     "since": null,
     "until": null,
     "target": "hotdeal",
-    "where": ""
+    "where": "",
+    "last": null
    },
    {
     "id": "toss",

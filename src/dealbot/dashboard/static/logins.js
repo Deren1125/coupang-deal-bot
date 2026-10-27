@@ -81,7 +81,7 @@ function right(b, hot) {
 function row(r) {
   return el('div', {class: 'row' + (r.button ? '' : ' ro'), 'data-id': r.id},
     el('div', {class: 'grow'}, el('span', {class: 't'}, r.label), el('span', {class: 's' + (r.bad ? ' bad' : '')}, r.text),
-      r.where ? el('span', {class: 'w'}, r.where) : null),
+      [r.where, r.last].map(x => x ? el('span', {class: 'w'}, x) : null)),
     right(r.button, r.bad));
 }
 

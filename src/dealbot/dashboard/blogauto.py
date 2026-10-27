@@ -1146,8 +1146,20 @@ def _iso_tz(v: Any) -> str | None:
         return None
 
 
+LOGIN_LAST_RESULTS = ("ok", "keep_off", "timeout", "closed", "replaced")
+
+
+def _login_last(v: Any) -> dict[str, str] | None:
+    """마지막 원격 로그인 {result, at} (Blog-Auto 10/27 — 네이버 세 줄). 결과가 정한 다섯 가지가 아니거나 시각이 틀리면 None."""
+    if not isinstance(v, dict) or v.get("result") not in LOGIN_LAST_RESULTS:
+        return None
+    at = _iso_tz(v.get("at"))
+    return {"result": v["result"], "at": at} if at else None
+
+
 def _logins(v: Any) -> list[dict[str, Any]] | None:
-    """[{id, label, state, note, checked_at, since, until, target, where}] — 칸이 없으면(예전 Blog-Auto) None.
+    """[{id, label, state, note, checked_at, since, until, target, where, last}] — 칸이 없으면(예전 Blog-Auto) None.
+    last = 마지막 원격 로그인 {result: ok|keep_off|timeout|closed|replaced, at} 또는 None (_login_last).
     target 은 딜봇 remote_login.TARGETS 에 있는 이름만 (모르는 이름·null 은 None → 단추 없이 읽기만). 같은 id 는 첫 줄만."""
     if not isinstance(v, list):
         return None
@@ -1163,7 +1175,7 @@ def _logins(v: Any) -> list[dict[str, Any]] | None:
         out.append({"id": x["id"], "label": label, "state": x.get("state") if x.get("state") in LOGIN_STATES else "unknown",
                     "note": text["note"], **{k: _iso_tz(x.get(k)) for k in ("checked_at", "since", "until")},
                     "target": x["target"] if isinstance(x.get("target"), str) and x["target"] in REMOTE_TARGETS else None,
-                    "where": text["where"]})
+                    "where": text["where"], "last": _login_last(x.get("last"))})
     return out
 
 

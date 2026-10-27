@@ -2,9 +2,11 @@
 탭 열어서 로그인 기능 넣어 주라. 대시보드에. 너가 알림 주면 대시보드에서 바로 처리할 수 있게").
 
 GET /dashboard/api/logins (연결 탭 맨 위 칸을 열 때만 — 첫 상태 값 예산 밖, 그리기는 static/logins.js) → view():
-    {"rows": [{id, label, state, text, where, bad, button}], "need": n, "qr": {img, left_s} | null, "vnc": {target, label, url, left_min} | null}
+    {"rows": [{id, label, state, text, where, bad, button, last}], "need": n, "qr": {img, left_s} | null, "vnc": {target, label, url, left_min} | null}
   state = ok · needed · resting · off · unknown · null(여기서 안 보는 것) — text 는 화면에 그대로 쓰는 한 줄 (한국어).
   button = {action: "login.remote", args: {target}, label} · {action: "login.qr", args: {}, label} · {url, label}(열린 원격 화면) · null.
+  last = 마지막 원격 로그인 한 줄 '마지막 원격 로그인: ✅ 성공 · 13:56' (Blog-Auto 기록 status.logins[].last — 네이버 세 줄) · 없거나 기록이
+  오래됐으면 None. 화면에서는 줄 글 아래 작은 회색 둘째 줄.
 줄:
   · 블로그 프로그램 기록 파일 status.logins — 아카이브(+쇼핑커넥트) · Pick · 핫딜 · 토스 · 에이블리 · 지그재그 · 인스타 검색 계정 (원격 로그인)
     · 스레드 API 토큰 (읽기만). Blog-Auto 가 사이트를 열지 않고 읽은 상태. 기록이 없는 대상도 '모름' 줄로 늘 보인다.
@@ -46,6 +48,8 @@ QR_MAX_BYTES = 4_000_000
 STATE_TEXT = {"ok": "로그인됨", "needed": "로그인 필요", "resting": "쉬는 중", "off": "안 씀", "unknown": "모름"}
 REMOTE_LABEL, QR_LABEL = "원격 로그인", "QR 로그인"
 QR_HOW = "다른 기기(PC·아이패드)에 뜬 QR 을 휴대폰 네이버 앱 › QR 로 찍어 주세요"
+LAST_TEXT = {"ok": "✅ 성공", "keep_off": "⛔ '로그인 상태 유지' 꺼짐", "timeout": "⏰ 시간 초과", "closed": "창이 닫힘",
+             "replaced": "새 창으로 바뀜"}  # 마지막 원격 로그인 (Blog-Auto remote_login 결과 — blogauto.LOGIN_LAST_RESULTS)
 THREADS_AUTO_WHERE = "X 봇 세션 담당 — SNS 탭 X 화면 (스레드·핫딜 인스타는 위 줄에서 원격 로그인, 주인 10/27)"
 _TASKS: set[asyncio.Task[Any]] = set()  # QR 기다림 (끝날 때까지 잡아 둠)
 
@@ -184,8 +188,18 @@ def _text(state: str | None, note: str, tz: ZoneInfo, now: float, *, checked: An
     return " · ".join(parts)
 
 
-def _row(rid: str, label: str, state: str | None, text: str, *, where: str = "", button: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {"id": rid, "label": label, "state": state, "text": text, "where": where, "bad": state == "needed", "button": button}
+def _row(rid: str, label: str, state: str | None, text: str, *, where: str = "", button: dict[str, Any] | None = None,
+         last: str | None = None) -> dict[str, Any]:
+    return {"id": rid, "label": label, "state": state, "text": text, "where": where, "bad": state == "needed", "button": button,
+            "last": last}
+
+
+def _last(v: Any, tz: ZoneInfo, now: float) -> str | None:
+    """'마지막 원격 로그인: ✅ 성공 · 13:56' — 기록이 없거나(예전 Blog-Auto · 아직 안 함) 모르는 결과면 None."""
+    if not isinstance(v, dict) or v.get("result") not in LAST_TEXT:
+        return None
+    w = _when(v.get("at"), tz, now)
+    return f"마지막 원격 로그인: {LAST_TEXT[v['result']]}" + (f" · {w}" if w else "")
 
 
 def _remote_button(target: str, vnc: dict[str, Any] | None, now: float | None = None) -> dict[str, Any]:
@@ -251,7 +265,8 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
             out.append(_row(target, label, "unknown", "모름 · 블로그 프로그램이 아직 상태를 안 보냈어요", button=_remote_button(target, vnc, now)))
             continue
         btn = _remote_button(r["target"], vnc, now) if r["target"] and r["state"] != "off" else None
-        out.append(_row(target, r["label"], *text_of(r), where=r["where"], button=btn))
+        last = None if stale else _last(r.get("last"), tz, now)  # 기록이 오래됐으면 안 보임 (지금 일처럼 보이지 않게)
+        out.append(_row(target, r["label"], *text_of(r), where=r["where"], button=btn, last=last))
     out.append(naver_row(bot, tz, now))
     for r in got:  # 블로그 프로그램의 읽기만 하는 줄 (스레드 API 토큰 …) — 단추 없음
         if r["id"] not in remote_login.TARGETS:
