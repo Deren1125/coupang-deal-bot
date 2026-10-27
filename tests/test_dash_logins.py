@@ -590,3 +590,21 @@ def test_logins_js_mounts_on_the_connect_tab_and_sends_the_remote_login(bot: Dea
     out = subprocess.run([node, "-e", DOM_SHIM.replace("const b = box()", "out.dis = box().all(c => c.tagName === 'BUTTON' && c.disabled).length; const b = box()"),
                           str(STATIC / "logins.js"), json.dumps(view, ensure_ascii=False)], capture_output=True, text=True, timeout=30)
     assert json.loads(out.stdout)["dis"] == len(remote_login.TARGETS) - 1  # 원격 화면이 열려 있으면 나머지 원격 로그인 단추는 흐림
+
+
+def test_naver_visits_section_shows_opens_per_blog(bot: DealBot, tmp_path: Path) -> None:
+    """주인 10/27 '네이버 접속 얼마나 줄었는지 대시보드에': 블로그마다 오늘·24시간/상한·막힘·적응 기간·많이 연 일."""
+    st = fixture("export_v2.json")["status"]
+    write_export(tmp_path / "blogauto.json")
+    assert logins.view(bot)["visits"] is None  # 예전 Blog-Auto (칸 없음)
+    nv = {"blogs": [{"blog": "finance", "today": 12, "day24": 42, "cap": 50, "blocked24": 3, "warm": False, "side_rest": False,
+                     "jobs": [{"job": "내 통계", "n": 3}, {"job": "neighbors", "n": 4}]},
+                    {"blog": "hotdeal", "today": 2, "day24": 40, "cap": 40, "blocked24": 0, "warm": True, "side_rest": True, "jobs": []},
+                    {"blog": "evil", "today": 1}],
+          "all24": 94, "all_cap": 160}
+    write_export(tmp_path / "blogauto.json", status={**st, "naver_visits": nv})
+    v = logins.view(bot)["visits"]
+    fin, hot = v["rows"]
+    assert fin["name"] == "아카이브" and fin["text"] == "오늘 12번 · 24시간 42/50번 · 막힘 3" and fin["jobs"] == "많이 연 일: 내 통계 3, neighbors 4"
+    assert hot["name"] == "핫딜" and "적응 기간 · 곁일 쉼" in hot["text"] and hot["bad"] is True and hot["jobs"] == ""
+    assert v["total"] == "서버 전체 24시간 94/160번" and len(v["rows"]) == 2  # 모르는 블로그는 뺌

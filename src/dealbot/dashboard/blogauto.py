@@ -1164,6 +1164,26 @@ def _logins(v: Any) -> list[dict[str, Any]] | None:
     return out
 
 
+NV_BLOGS = {"finance": "아카이브", "issue": "데런픽", "hotdeal": "핫딜"}
+
+
+def _naver_visits(v: Any) -> dict[str, Any] | None:
+    """네이버 접속 (주인 10/27 — Blog-Auto site_visits.naver_summary): {blogs: [{blog, name, today, day24, cap, blocked24, warm,
+    side_rest, jobs: [{job, n}]}], all24, all_cap}. 칸이 없으면(예전 Blog-Auto) None."""
+    if not isinstance(v, dict) or not isinstance(v.get("blogs"), list):
+        return None
+    out: list[dict[str, Any]] = []
+    for b in v["blogs"][:3]:
+        if not isinstance(b, dict) or b.get("blog") not in NV_BLOGS or any(x["blog"] == b["blog"] for x in out):
+            continue
+        jobs = [{"job": _one_line(safe_text(j.get("job"), 80), 40) or "", "n": _count(j.get("n"), top=10000) or 0}
+                for j in (b.get("jobs") or [])[:5] if isinstance(j, dict) and isinstance(j.get("job"), str)]
+        out.append({"blog": b["blog"], "name": NV_BLOGS[b["blog"]], **{k: _count(b.get(k), top=10000) or 0
+                    for k in ("today", "day24", "cap", "blocked24")},
+                    "warm": b.get("warm") is True, "side_rest": b.get("side_rest") is True, "jobs": jobs})
+    return {"blogs": out, "all24": _count(v.get("all24"), top=100000) or 0, "all_cap": _count(v.get("all_cap"), top=100000) or 0}
+
+
 def _shopconnect(v: Any) -> dict[str, Any] | None:
     """쇼핑커넥트 자동 링크 상태 (주인 10/24 — 연결 탭에서 실시간으로, Blog-Auto shopconnect.snapshot). 없으면 None."""
     if not isinstance(v, dict) or v.get("state") not in SC_STATES:
@@ -1434,6 +1454,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
                               "expires_at": _one_line(k.get("expires_at"), 40)}
     out["status"]["shopconnect"] = _shopconnect(st.get("shopconnect"))
     out["status"]["logins"] = _logins(st.get("logins"))  # 로그인 관리 칸 (주인 10/26 — 없으면 None: 예전 Blog-Auto)
+    out["status"]["naver_visits"] = _naver_visits(st.get("naver_visits"))  # 네이버 접속 칸 (주인 10/27)
     dg = data.get("digest") if isinstance(data.get("digest"), dict) else {}
     out["digest"] = {"day": _one_line(dg.get("day"), 10), "generated_at": _one_line(dg.get("generated_at"), 40),
                      "blogs": {b: _str_list((dg.get("blogs") or {}).get(b) if isinstance(dg.get("blogs"), dict) else None, 8, 200)

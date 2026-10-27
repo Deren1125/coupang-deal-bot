@@ -263,6 +263,28 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
     return out
 
 
+def visits(bot: Any) -> dict[str, Any] | None:
+    """네이버 접속 칸 (주인 10/27 '얼마나 줄었는지 대시보드에'): 블로그마다 한 줄 글. Blog-Auto 기록에 칸이 없으면 None."""
+    try:
+        export = bot.dash_state._export() if getattr(bot, "dash_state", None) is not None else None
+        nv = (((getattr(export, "v2", None) or {}).get("status") or {}).get("naver_visits"))
+    except Exception:  # noqa: BLE001
+        nv = None
+    if not nv:
+        return None
+    rows = []
+    for b in nv["blogs"]:
+        bits = [f"오늘 {b['today']}번", f"24시간 {b['day24']}/{b['cap']}번"]
+        if b["blocked24"]:
+            bits.append(f"막힘 {b['blocked24']}")
+        if b["warm"]:
+            bits.append("적응 기간" + (" · 곁일 쉼" if b["side_rest"] else ""))
+        top = ", ".join(f"{j['job']} {j['n']}" for j in b["jobs"][:3])
+        rows.append({"name": b["name"], "text": " · ".join(bits), "jobs": f"많이 연 일: {top}" if top else "",
+                     "bad": b["cap"] > 0 and b["day24"] >= b["cap"]})
+    return {"rows": rows, "total": f"서버 전체 24시간 {nv['all24']}/{nv['all_cap']}번"}
+
+
 def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     """GET /dashboard/api/logins 몸. 줄 하나가 틀려도 칸 전체는 보이게 (그 줄만 '확인 못 함')."""
     now = now or time.time()
@@ -277,7 +299,7 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     s = s if remote_login.live(s, now) else None
     vnc = {"target": s["target"], "label": remote_login.TARGETS.get(s["target"], s["target"]), "url": remote_login.url(s),
            "left_min": max(1, int(remote_login.SESSION_MIN - (now - float(s["at"])) / 60))} if s else None
-    return {"rows": rs, "need": sum(1 for r in rs if r["bad"]), "at": round(now, 1), "vnc": vnc,
+    return {"rows": rs, "need": sum(1 for r in rs if r["bad"]), "at": round(now, 1), "vnc": vnc, "visits": visits(bot),
             "qr": {"img": f"/dashboard/api/naver_qr.png?t={int(q['at'])}", "left_s": max(1, int(float(q["until"]) - now)), "how": QR_HOW}
             if q and qr_png(bot, now) is not None else None}
 
