@@ -136,7 +136,7 @@ function render() {
   if (a && m.contains(a) && a.matches('input,textarea') && !SH.length) { DIRTY = true; head(); return; }
   DIRTY = false;
   const v = {todo: vTodo, deal: vDeal, blog: vBlog, sns: vSns, stats: vStats, connect: vConnect}[R.tab]();
-  m.replaceChildren(...v);
+  m.replaceChildren(...v.flat(9).filter(x => x != null && x !== false));
   head();
   if (NEXT) {
     const it = $('i-' + NEXT), f = it && it.querySelector('input[data-url]'); NEXT = null;
@@ -492,7 +492,7 @@ function act(it, a, b, inline) {
     return;
   }
   if (!inline) { inputSheet(it, a, key); return; }
-  if (a.input === 'url') for (const k in OPEN) if (OPEN[k].includes('|deal.link|')) delete OPEN[k];
+  if (a.input === 'url') for (const k in OPEN) if (String(OPEN[k]).includes('|deal.link|')) delete OPEN[k];
   OPEN[it.iid] = key; render();
   const f = D.querySelector(`[data-k="${CSS.escape(key)}"]`); if (f) f.focus();
   if (a.input === 'url' && !IOS && !VAL[key] && N.clipboard && N.clipboard.readText) {
@@ -933,13 +933,27 @@ function banner() {
   }
   return el('div', {class: 'bn'}, el('span', {}, '알림을 켜면 할 일이 바로 와요'), btn('pb', '알림 켜기', pushOn), later);
 }
+// 오늘 할 일 칸(routine.js)에 같은 글(블로그·번호)이 있는 '발행 대기'는 그 칸에서만
+const rtIds = () => new Set((W.SBRoutine ? W.SBRoutine.ids() : []).map(x => (x = /^(?:pub|rsv):(finance|issue|hotdeal):(\d+)$/.exec(x)) && `post-${x[1]}-${x[2]}`));
+// 자동 작업: 정상은 한 줄(누르면 펼침) · 문제는 따로 줄
+function autoBox() {
+  const c = S.connect, d = c && c.bots.dealbot, a = c && c.bots.blogauto, o = OPEN.auto;
+  if (!d) return null;
+  const xs = [['딜봇', d.paused ? '멈춤' : '정상', d.paused], ['블로그 프로그램', a.ok ? `정상 · ${ago(a.seen_at)} 신호` : '응답 없음', !a.ok],
+    c.sc && c.sc.text !== '꺼짐' && ['쇼핑커넥트', c.sc.text, c.sc.bad], ...(d.collectors || []).filter(x => x.enabled).map(x => [x.label, (x.ok ? '정상 · ' : '오류 · ') + x.text, !x.ok, 1])].filter(Boolean);
+  const ok = xs.filter(x => !x[2]), n = ok.filter(x => x[3]).length;
+  return el('div', {class: 'box', style: 'padding:0 14px'}, xs.filter(x => x[2]).map(x => row(x[0], x[1], null, 1)),
+    ok.length ? btn('fold', '자동 작업 정상 · ' + ok.filter(x => !x[3]).map(x => x[0]).concat(n ? '수집기 ' + n : []).join('·'), () => { OPEN.auto = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'}) : null,
+    o ? ok.map(x => row(x[0], x[1])) : null);
+}
 function vTodo() {
-  const all = S.todo.flatMap(i => i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
+  const rt = rtIds(), all = S.todo.flatMap(i => i.kind === 'publish' && rt.has(i.iid) ? [] : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
   let items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, k = 0, rest = 0;
   if (R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
-  const b = banner(); if (b) out.push(b);
+  const b = banner(), urg = b && b.classList.contains('bad');
+  if (urg) out.push(b);  // 급한 알림만 맨 위 — 그 아래 '오늘 할 일' 칸(routine.js)
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
-  if (!items.length) out.push(doneRow(), el('p', {class: 'empty'}, '할 일 없어요'));
+  if (!items.length) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
   const n = ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');
   const more = rest ? el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`) : null;
@@ -947,10 +961,14 @@ function vTodo() {
   let g = null;
   shown.forEach((x, i) => { if (gs && x.group !== g) out.push(el('p', {class: 'grp'}, g = x.group)); out.push(item(x)); if (more && i === last) out.push(more); });
   if (more && last < 0) out.push(more);
-  if (items.length > n) out.push(btn('pb ghost', `더 보기 (${items.length - n})`, () => { ALL = true; render(); }));
-  if (items.length) out.push(doneRow());
-  if (S.digest && S.digest.latest) out.push(el('p', {class: 'foot'}, btn('lnk', '오늘 정리 보기', () => digestSheet(S.digest.latest))));
-  out.push(devRow(S.devlog), devRow(S.opscheck, '직전 AI 점검'));
+  if (items.length > n) out.push(btn('pb ghost', `할 일 ${items.length - n}개 더 보기`, () => { ALL = true; render(); }));
+  if (R.sub === 'deal') return out;
+  out.push(autoBox());
+  if (b && !urg) out.push(b);
+  // 가끔 보는 것: 오늘 한 일 · 오늘 정리 · 오늘 바뀐 것 · 직전 AI 점검
+  const o = OPEN.more;
+  out.push(el('p', {class: 'foot'}, btn('lnk mute', o ? '접기' : '더 보기', () => { OPEN.more = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'})));
+  if (o) out.push(doneRow(), S.digest && S.digest.latest ? el('p', {class: 'foot'}, btn('lnk', '오늘 정리 보기', () => digestSheet(S.digest.latest))) : null, devRow(S.devlog), devRow(S.opscheck, '직전 AI 점검'));
   return out;
 }
 
@@ -1308,6 +1326,7 @@ function start() {
   try { S = JSON.parse($('boot').textContent); } catch (e) { S = null; }
   $('rf').addEventListener('click', refresh);
   W.addEventListener('hashchange', route);
+  W.addEventListener('sb-routine', () => R.tab === 'todo' && render());
   D.addEventListener('visibilitychange', () => {
     if (D.visibilityState !== 'visible') return;
     if (D.querySelector('[data-pm]')) toast('토스 링크를 복사했다면 "붙여넣기"를 눌러 주세요');

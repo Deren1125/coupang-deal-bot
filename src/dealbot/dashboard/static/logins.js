@@ -1,7 +1,6 @@
-/* 로그인 관리 (주인 10/26 — "로그인이 필요한 사이트들은 다 원격으로 탭 열어서 로그인 … 너가 알림 주면 대시보드에서 바로 처리").
-   연결 탭 맨 위 칸. 값은 GET /dashboard/api/logins (연결 탭을 열 때만 — 첫 상태 값 예산 밖, logins.py). 누르는 것은 login.remote {target} ·
-   login.qr 뿐 (확인 창 없음 — 로그인은 주인이 원격 화면·네이버 앱에서 직접). app.js 는 예산 끝이라 이 칸을 넣지 않는다: 셸이 defer 로 받고,
-   app.js 가 #main 을 다시 그릴 때마다 같은 칸(상태 유지)을 맨 위에 다시 붙인다. 라이브러리 없음 · 글은 textContent 로만 · 바깥 주소 없음. */
+/* 로그인 관리 (주인 10/26 — 원격 로그인을 대시보드에서). 연결 탭 맨 위 칸 · 값은 GET /dashboard/api/logins (logins.py).
+   누르는 것은 login.remote {target} · login.qr 뿐 (확인 창 없음). 셸이 defer 로 받고 app.js 가 #main 을 다시 그리면 같은 칸을 다시 붙인다.
+   주인 몫이 없으면 한 줄로 접음 (10/27). 글은 textContent 로만 · 바깥 주소 없음. */
 'use strict';
 (() => {
 const D = document, W = window;
@@ -10,7 +9,7 @@ const CSS = '#lgp .row .s{white-space:normal;overflow-wrap:anywhere}#lgp .w{disp
   '#lgp .qr img{width:100%;max-width:520px;height:auto;border-radius:8px;border:1px solid var(--line);background:#fff}' +
   '#lgp .qr p{margin:0;font-size:13px;text-align:center}#lgp .vn{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}' +
   '#lgp .vn span{flex:1;min-width:0;font-size:14px}#lgp .ro .t{color:var(--sub)}';
-let box = null, data = null, at = 0, timer = null, busy = false, tt = null;
+let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = false;
 
 function el(t, a, ...kids) {
   const e = D.createElement(t);
@@ -89,8 +88,11 @@ function row(r) {
 function draw() {
   if (!box) return;
   const rows = (data && data.rows) || [], q = data && data.qr, v = data && data.vnc;
-  const head = el('div', {class: 'top', style: 'margin:20px 0 6px'},
-    el('h2', {}, data && data.need ? `로그인 관리 · 필요 ${data.need}` : '로그인 관리'),
+  // 주인 몫이 없으면 한 줄 (누르면 펼침) · 필요하면 늘 펼침
+  const calm = data && !data.need && !q && !v, f = calm && el('div', {class: 'box', style: 'padding:0 14px'}, el('button', {class: 'fold', type: 'button',
+    'aria-expanded': open ? 'true' : 'false', onclick: () => { open = !open; draw(); }}, rows.every(r => r.state !== 'resting' && r.state !== 'unknown') ? '로그인 모두 정상' : '로그인 · 지금 할 것 없음'));
+  if (calm && !open) { box.replaceChildren(f); return; }
+  const head = f || el('div', {class: 'top', style: 'margin:20px 0 6px'}, el('h2', {}, data && data.need ? `로그인 관리 · 필요 ${data.need}` : '로그인 관리'),
     el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기'));
   const top = [];
   if (v) top.push(el('div', {class: 'vn'}, el('span', {}, `원격 화면 — ${v.label} (${v.left_min}분 남음)`), link('sm ac', '원격 화면 열기', v.url)));
@@ -104,7 +106,7 @@ function draw() {
       el('span', {class: 's' + (r.bad ? ' bad' : '')}, r.text), r.jobs ? el('span', {class: 'w'}, r.jobs) : null)))),
     el('p', {class: 'note'}, `${nv.total} · 적응 기간 = 다시 로그인한 뒤 3일`)] : [];
   box.replaceChildren(head, el('div', {class: 'box'}, data ? null : el('p', {class: 'note'}, '불러오는 중…'), top, rows.map(row)),
-    el('p', {class: 'note'}, '로그인은 주인이 직접 해요 — 봇은 비밀번호를 넣거나 확인 화면을 대신 누르지 않고, 정해진 때 로그인 화면을 열지 않아요'),
+    el('p', {class: 'note'}, '로그인은 주인이 직접 해요 — 봇은 비밀번호·확인 화면을 대신하지 않아요'),
     visits);
 }
 

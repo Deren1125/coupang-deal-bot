@@ -1,5 +1,5 @@
-/* 오늘 할 일 (주인 10/27 — 블로그·SNS 손일을 하루 5번). 할 일 탭 맨 위 칸 · 값은 GET /dashboard/api/routine (routine.py).
-   셸이 defer 로 받고 #main 을 다시 그리면 같은 칸을 다시 붙인다 (logins.js 틀). 체크는 단추 — app.js 는 입력 칸 커서 동안 그리기를 미룸. */
+/* 오늘 할 일 (주인 10/27 — 손일 하루 5번). 할 일 탭 맨 위 칸(급한 알림만 그 위) · GET /dashboard/api/routine (routine.py).
+   #main 을 다시 그리면 같은 칸을 다시 붙임 (logins.js 틀). 체크는 단추 (app.js 는 입력 칸 커서 동안 그리기를 미룸). */
 'use strict';
 (() => {
 const D = document, W = window;
@@ -12,7 +12,7 @@ const CSS = '#rtp .sh{display:flex;align-items:center;gap:8px;width:100%;padding
   '#rtp .s{display:block;font-size:13px;color:var(--sub);overflow-wrap:anywhere}#rtp .bt{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}' +
   '#rtp a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
   '#rtp .bar{height:6px;border-radius:3px;background:var(--grey);overflow:hidden;margin:0 0 10px}#rtp .bar i{display:block;height:100%;background:var(--gr)}';
-let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '';
+let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
 
 function el(t, a, ...kids) {
   const e = D.createElement(t);
@@ -39,6 +39,7 @@ function csrf() {
 }
 const rid = () => 'c_' + Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
 
+const ids = () => data && data.slots ? data.slots.flatMap(s => s.items.map(i => i.id)) : [];
 async function load() {
   if (busy) return;
   busy = true;
@@ -50,6 +51,8 @@ async function load() {
   const c = data && (data.slots || []).find(s => s.current);
   if (c && c.key !== cur) { cur = c.key; open = {[cur]: true}; }
   draw();
+  const k = ids().join();
+  if (k !== sig && W.dispatchEvent) { sig = k; W.dispatchEvent(new Event('sb-routine')); }  // app.js 가 겹친 할 일을 빼고 다시 그림
   clearTimeout(timer);
   if (on() && D.visibilityState === 'visible') timer = setTimeout(load, 300000);
 }
@@ -132,7 +135,8 @@ function mount() {
     box.hidden = true;
     draw();
   }
-  if (m.firstChild !== box) m.prepend(box);
+  const f = m.firstChild, u = f && f !== box && f.className === 'bn bad' ? f : null;  // 급한 알림(app.js) 바로 아래
+  if ((u ? u.nextSibling : f) !== box) u ? u.after(box) : m.prepend(box);
   if (!data || Date.now() - at > 30000) load();
 }
 
@@ -146,6 +150,6 @@ function start() {
   if (rf) rf.addEventListener('click', () => { if (on() && !busy) setTimeout(load, 300); });
   mount();
 }
-W.SBRoutine = {load, mount};
+W.SBRoutine = {load, mount, ids};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

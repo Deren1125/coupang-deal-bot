@@ -241,7 +241,7 @@ async def test_today_needs_login_and_is_rate_limited(bot: DealBot) -> None:
 
 def test_app_has_the_todo_row_and_the_connect_entry_points_to_the_same_sheet() -> None:
     js = (webapp.STATIC_DIR / "app.js").read_text(encoding="utf-8")
-    assert "오늘 한 일 ${" in js and "fold('오늘 한 일', todaySheet)" in js and js.count("doneRow()") == 2
+    assert "오늘 한 일 ${" in js and "fold('오늘 한 일', todaySheet)" in js and js.count("doneRow()") == 1  # 할 일 탭 '더 보기' 안 (10/27)
     assert "fold('최근 한 일'" not in js  # 연결 탭의 예전 줄 → 같은 시트 (접속 기록은 시트 아래에)
     sw = (webapp.STATIC_DIR / "sw.js").read_text(encoding="utf-8")
     assert int(sw.split("'sb-v", 1)[1].split("'", 1)[0]) >= 8
