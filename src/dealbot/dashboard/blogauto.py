@@ -37,6 +37,9 @@ popular = 그중 score(0~100 인기 예상) 가 threshold 이상인 글 수, top
 
 v2 status.logins (주인 10/26 — Blog-Auto remote_login.states): 프로그램이 쓰는 로그인마다 지금 상태 (사이트를 열지 않고 읽은 것) —
     [{"id", "label", "state": ok|needed|resting|off|unknown, "note", "checked_at", "since", "until", "target", "where"}] → logins.py '로그인 관리' 칸.
+v2 status.routine (주인 10/27 — 블로그 반자동, 주인이 하루 5번 손으로): {"day", "slots": [{"key": s1~s5, "at": "HH:MM", "label"}],
+    "items": [{"id", "slot", "group": 발행|예약|이웃|SNS, "blog", "title", "note", "min", "copy": [{label, text}], "links": [{label, url}]}],
+    "overflow"} → routine.py '오늘 할 일' 칸 (할 일 탭 맨 위).
 """
 
 from __future__ import annotations
@@ -1184,6 +1187,88 @@ def _naver_visits(v: Any) -> dict[str, Any] | None:
     return {"blogs": out, "all24": _count(v.get("all24"), top=100000) or 0, "all_cap": _count(v.get("all_cap"), top=100000) or 0}
 
 
+# 오늘 할 일 (주인 10/27 — 네이버 블로그 반자동: 발행·예약·이웃 공감/댓글/신청·SNS 팔로우를 주인이 하루 5번 10~15분씩 손으로).
+# Blog-Auto 가 status.routine 에 그날 목록을 쓴다 → routine.py · static/routine.js (할 일 탭 맨 위). 줄마다 따로 걸러 이상한 줄만 빠진다
+ROUTINE_SLOT_KEYS = ("s1", "s2", "s3", "s4", "s5")
+ROUTINE_DEFAULT_SLOTS = (("s1", "09:00", "아침"), ("s2", "12:00", "점심"), ("s3", "15:00", "오후"), ("s4", "18:00", "저녁"),
+                         ("s5", "21:00", "밤"))
+ROUTINE_GROUPS = ("발행", "예약", "이웃", "SNS")
+ROUTINE_BLOGS = ("finance", "issue", "hotdeal", "")
+ROUTINE_ID_RE = re.compile(r"^[a-z0-9:_-]{1,80}$")
+_ROUTINE_DAY_RE = re.compile(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
+_ROUTINE_AT_RE = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+ROUTINE_ITEMS_MAX, ROUTINE_COPY_MAX, ROUTINE_LINKS_MAX = 80, 4, 3
+ROUTINE_TITLE_MAX, ROUTINE_NOTE_MAX, ROUTINE_LABEL_MAX, ROUTINE_COPY_TEXT_MAX, ROUTINE_COPY_LINES = 80, 160, 20, 1000, 12
+
+
+def _rt_line(v: Any, n: int) -> str:
+    """한 줄 글 (토큰 모양은 가림 · 보이지 않는 글자 뺌 · n 자). 글자가 아니면 ''."""
+    if not isinstance(v, str):
+        return ""
+    return _one_line("".join(c for c in safe_text(v, n * 2) if c.isprintable()), n) or ""
+
+
+def _rt_copy_text(v: Any) -> str:
+    """복사할 글 — 줄바꿈은 살린다 (댓글·SNS 글), 줄마다 _rt_line · 모두 ROUTINE_COPY_TEXT_MAX 자 안."""
+    if not isinstance(v, str):
+        return ""
+    lines = [_rt_line(x, ROUTINE_COPY_TEXT_MAX) for x in v.splitlines()[:ROUTINE_COPY_LINES]]
+    return "\n".join(lines).strip("\n")[:ROUTINE_COPY_TEXT_MAX]
+
+
+def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_KEYS) -> dict[str, Any] | None:
+    """{id, slot, group, blog, title, note, min, copy: [{label, text}], links: [{label, url}]} — 모양이 틀리면 None.
+    스레드 세션 몫(나중에 routine.threads_items)도 같은 모양이라 이 함수 하나로 거른다."""
+    if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ROUTINE_ID_RE.match(x["id"]):
+        return None
+    if x.get("slot") not in slot_keys or x.get("group") not in ROUTINE_GROUPS or not (title := _rt_line(x.get("title"), ROUTINE_TITLE_MAX)):
+        return None
+    m = x.get("min")
+    mins = min(15, max(1, round(m))) if isinstance(m, int | float) and not isinstance(m, bool) and math.isfinite(m) else 5
+    copy = []
+    for c in x.get("copy")[:ROUTINE_COPY_MAX] if isinstance(x.get("copy"), list) else []:
+        if isinstance(c, dict) and (text := _rt_copy_text(c.get("text"))):
+            copy.append({"label": _rt_line(c.get("label"), ROUTINE_LABEL_MAX) or "복사", "text": text})
+    links = []
+    for k in x.get("links")[:ROUTINE_LINKS_MAX] if isinstance(x.get("links"), list) else []:
+        if isinstance(k, dict) and (u := https_url(k.get("url"))) is not None:
+            links.append({"label": _rt_line(k.get("label"), ROUTINE_LABEL_MAX) or "열기", "url": u})
+    return {"id": x["id"], "slot": x["slot"], "group": x["group"], "blog": x.get("blog") if x.get("blog") in ROUTINE_BLOGS else "",
+            "title": title, "note": _rt_line(x.get("note"), ROUTINE_NOTE_MAX), "min": mins, "copy": copy, "links": links}
+
+
+def _routine_slots(v: Any) -> list[dict[str, str]]:
+    """[{key, at, label}] s1~s5 순서 · 같은 key 는 첫 줄만 · 하나도 맞지 않으면 기본 5칸 (아침·점심·오후·저녁·밤)."""
+    got: dict[str, dict[str, str]] = {}
+    for s in v[:10] if isinstance(v, list) else []:
+        if isinstance(s, dict) and s.get("key") in ROUTINE_SLOT_KEYS and s["key"] not in got and isinstance(s.get("at"), str) \
+                and _ROUTINE_AT_RE.match(s["at"]):
+            dflt = next(lab for k, _a, lab in ROUTINE_DEFAULT_SLOTS if k == s["key"])
+            got[s["key"]] = {"key": s["key"], "at": s["at"], "label": _rt_line(s.get("label"), 10) or dflt}
+    if not got:
+        return [{"key": k, "at": a, "label": lab} for k, a, lab in ROUTINE_DEFAULT_SLOTS]
+    return [got[k] for k in ROUTINE_SLOT_KEYS if k in got]
+
+
+def _routine(v: Any) -> dict[str, Any] | None:
+    """오늘 할 일 {day, slots: [{key, at, label}], items: [_routine_item], overflow} — 칸이 없으면(예전 Blog-Auto)·날짜가 틀리면 None.
+    없는 시간대(slot)의 줄은 뺀다 · 같은 id 는 첫 줄만 · 바깥 주소는 https 만."""
+    if not isinstance(v, dict) or not isinstance(v.get("items"), list) or not isinstance(v.get("day"), str) \
+            or not _ROUTINE_DAY_RE.match(v["day"]):
+        return None
+    try:
+        date.fromisoformat(v["day"])
+    except ValueError:
+        return None
+    slots = _routine_slots(v.get("slots"))
+    keys = {s["key"] for s in slots}
+    items: list[dict[str, Any]] = []
+    for x in v["items"][:ROUTINE_ITEMS_MAX]:
+        if (it := _routine_item(x, keys)) is not None and not any(i["id"] == it["id"] for i in items):
+            items.append(it)
+    return {"day": v["day"], "slots": slots, "items": items, "overflow": _count(v.get("overflow"), top=1000) or 0}
+
+
 def _shopconnect(v: Any) -> dict[str, Any] | None:
     """쇼핑커넥트 자동 링크 상태 (주인 10/24 — 연결 탭에서 실시간으로, Blog-Auto shopconnect.snapshot). 없으면 None."""
     if not isinstance(v, dict) or v.get("state") not in SC_STATES:
@@ -1455,6 +1540,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     out["status"]["shopconnect"] = _shopconnect(st.get("shopconnect"))
     out["status"]["logins"] = _logins(st.get("logins"))  # 로그인 관리 칸 (주인 10/26 — 없으면 None: 예전 Blog-Auto)
     out["status"]["naver_visits"] = _naver_visits(st.get("naver_visits"))  # 네이버 접속 칸 (주인 10/27)
+    out["status"]["routine"] = _routine(st.get("routine"))  # 오늘 할 일 (주인 10/27 — 없으면 None: 예전 Blog-Auto)
     dg = data.get("digest") if isinstance(data.get("digest"), dict) else {}
     out["digest"] = {"day": _one_line(dg.get("day"), 10), "generated_at": _one_line(dg.get("generated_at"), 40),
                      "blogs": {b: _str_list((dg.get("blogs") or {}).get(b) if isinstance(dg.get("blogs"), dict) else None, 8, 200)

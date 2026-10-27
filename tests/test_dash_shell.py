@@ -108,6 +108,10 @@ LOOKBOOK_JS_GZIP_MAX = 6 * 1024 + 256
 # 셸이 defer 로 받는 logins.js (CSS 도 여기서). 줄 값은 /dashboard/api/logins 로 열 때만
 LOGINS_JS_MAX = 8 * 1024
 LOGINS_JS_GZIP_MAX = 3 * 1024 + 512
+# 10/27: 오늘 할 일 칸(할 일 탭 맨 위 — 하루 5칸 중 지금 칸만 펼침 · 줄마다 체크 · 복사 단추 · 3/8 진행) — logins.js 처럼 셸이 defer 로 받는
+# routine.js (CSS 도 여기서). 목록은 /dashboard/api/routine 으로 열 때만
+ROUTINE_JS_MAX = 8 * 1024
+ROUTINE_JS_GZIP_MAX = 3 * 1024 + 512
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024
@@ -143,9 +147,10 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     assert "script-src 'self'" in csp and "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, re.S)
     # theme.js (화면 밝기, 10/24) · app.js · thpost.js (스레드 칸, 10/21 — threads.js 보다 먼저 떠 있어야 칸이 붙음) ·
-    # logins.js (연결 탭 '로그인 관리' 칸, 10/26 — app.js 예산 끝이라 셸이 받음) · boot
-    assert len(scripts) == 5
-    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (boot_attrs, _boot) = scripts
+    # logins.js (연결 탭 '로그인 관리' 칸, 10/26 — app.js 예산 끝이라 셸이 받음) · routine.js (할 일 탭 '오늘 할 일' 칸, 10/27) · boot
+    assert len(scripts) == 6
+    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (rt_attrs, rt_body), (boot_attrs, _boot) = scripts
+    assert re.fullmatch(r' defer src="/dashboard/static/routine\.js\?v=[0-9a-f]{10}"', rt_attrs) and rt_body == ""
     assert re.fullmatch(r' blocking="render" src="/dashboard/static/theme\.js\?v=[0-9a-f]{10}"', th_attrs) and th_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/thpost\.js\?v=[0-9a-f]{10}"', tp_attrs) and tp_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/logins\.js\?v=[0-9a-f]{10}"', lg_attrs) and lg_body == ""
@@ -205,7 +210,7 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
     for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css"), ("badge-72.png", "image/png"),
                         ("edit.js", "text/javascript"), ("product.js", "text/javascript"), ("sched.js", "text/javascript"),
                         ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript"),
-                        ("logins.js", "text/javascript"), ("sns.js", "text/javascript")):
+                        ("logins.js", "text/javascript"), ("sns.js", "text/javascript"), ("routine.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))
@@ -231,6 +236,8 @@ def test_asset_budgets() -> None:
     assert len(lb) <= LOOKBOOK_JS_MAX and len(gzip.compress(lb, 9)) <= LOOKBOOK_JS_GZIP_MAX
     lg = (STATIC / "logins.js").read_bytes()
     assert len(lg) <= LOGINS_JS_MAX and len(gzip.compress(lg, 9)) <= LOGINS_JS_GZIP_MAX
+    rt = (STATIC / "routine.js").read_bytes()
+    assert len(rt) <= ROUTINE_JS_MAX and len(gzip.compress(rt, 9)) <= ROUTINE_JS_GZIP_MAX
     sn = (STATIC / "sns.js").read_bytes()
     assert len(sn) <= SNS_JS_MAX and len(gzip.compress(sn, 9)) <= SNS_JS_GZIP_MAX
     assert shell.asset_url("app.js") != shell.asset_url("app.css")
@@ -247,7 +254,8 @@ def test_app_js_is_korean_local_and_safe() -> None:
     lb = (STATIC / "lookbook.js").read_text(encoding="utf-8")  # 룩북 영상·상품 링크는 state.lookbook 으로 (쇼츠 서버 주소는 화면에 없음)
     lg = (STATIC / "logins.js").read_text(encoding="utf-8")  # 로그인 관리 칸 — 원격 화면·QR 주소는 /dashboard/api/logins 로 (이 서버 주소만)
     sn = (STATIC / "sns.js").read_text(encoding="utf-8")  # SNS 탭 상자 — 화면 파일을 담기만
-    for text in (js, css, sw, ed, pj, sj, xj, lb, lg, sn):
+    rt = (STATIC / "routine.js").read_text(encoding="utf-8")  # 오늘 할 일 칸 — 링크는 /dashboard/api/routine 으로 (서버가 https 만 거름)
+    for text in (js, css, sw, ed, pj, sj, xj, lb, lg, sn, rt):
         assert "http://" not in text and "https://" not in text  # 바깥 주소·CDN 없음
         assert "eval(" not in text and "new Function" not in text and "document.write" not in text
     assert js.count("innerHTML") == 1  # 서버가 그린 통계 조각 하나뿐

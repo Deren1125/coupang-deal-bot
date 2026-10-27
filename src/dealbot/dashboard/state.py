@@ -1332,7 +1332,7 @@ ACTION_LABELS = {
     "deal.repost": "다시 올리기", "deal.late_photo": "사진 올리기", "deal.post": "새 딜 올리기", "bot.pause": "딜봇 멈춤",
     "bot.resume": "딜봇 다시 시작", "bot.run": "지금 수집", "sns.token": "토큰 넣기", "sns.code": "코드 넣기", "sns.test": "테스트 글",
     "sns.invites": "초대 링크 만들기", "push.test": "테스트 알림", "push.subscribe": "알림 켜기", "push.unsubscribe": "알림 끄기",
-    "todo.dismiss": "다 했어요", "login.remote": "원격 로그인", "login.qr": "QR 로그인", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기", "upload": "사진 올림",
+    "todo.dismiss": "다 했어요", "login.remote": "원격 로그인", "login.qr": "QR 로그인", "routine.done": "오늘 할 일 체크", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기", "upload": "사진 올림",
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",

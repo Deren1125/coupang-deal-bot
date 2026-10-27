@@ -114,6 +114,7 @@ DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "todo.hide", "login.remote", "stats.refresh", "stats.input", "search.check",
                 "login.qr",  # 딜봇 네이버 QR 로그인 (주인 10/26 — 대시보드 '로그인 관리' · 텔레그램 /naverlogin 과 같은 길)
+                "routine.done",  # 오늘 할 일 체크 (주인 10/27 — 하루 5번 손으로 하는 블로그·SNS 일, 봇 DB 에만 적음 · routine.py)
                 "earn.save", "earn.delete",  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
                 "x.stats", "x.handles")  # X 진행률 숫자·계정 이름 직접 넣기 (주인 10/25 — X API 없음, 크리에이터 스튜디오 숫자를 주인이 주마다)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
@@ -581,6 +582,13 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         return {"target": g("target")}
     if action == "login.qr":
         return {}
+    if action == "routine.done":  # {id: 오늘 할 일 줄 id, done: 참/거짓}
+        from dealbot.dashboard.blogauto import ROUTINE_ID_RE
+
+        rid = g("id")
+        if not isinstance(rid, str) or not ROUTINE_ID_RE.match(rid) or not isinstance(g("done"), bool):
+            raise ActionError("bad_args")
+        return {"id": rid, "done": g("done")}
     if action == "todo.hide":
         iid = _str(g("iid"), 64)
         since = g("since")
@@ -1532,6 +1540,11 @@ class ActionDesk:
             from dealbot.dashboard import logins
 
             return await logins.start_qr(self.bot)
+        if action == "routine.done":  # 오늘 할 일 체크 — 봇 DB 만 (밖으로 나가는 것 없음 · 사이트를 열지 않음)
+            from dealbot.dashboard import routine
+
+            routine.set_done(db, routine.day_of(bot, self.clock()), args["id"], args["done"])
+            return "done", "체크했어요" if args["done"] else "체크를 풀었어요"
         if action == "stats.refresh":
             dash = bot.dashboard
             got = await dash.refresh(args["src"])

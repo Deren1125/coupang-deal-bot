@@ -33,6 +33,7 @@ THREADS_JS = "threads.js"  # 스레드 (10/21) — SNS 탭 '스레드·인스타
 X_JS = "x.js"  # X (10/25) — SNS 탭 'X(트위터)' 칸을 처음 열 때만 (주소는 meta sb-x — threads.js 'X →' 도 같은 주소)
 SNS_JS = "sns.js"  # SNS 탭 (10/26) — 스레드·인스타 · X · 룩북 릴스 화면을 담는 상자. SNS 탭을 처음 열 때만 (주소는 meta sb-sns)
 LOGINS_JS = "logins.js"  # 로그인 관리 (10/26) — 연결 탭 맨 위 칸. app.js 가 예산 끝이라 셸이 defer 로 받고, 칸은 스스로 연결 탭에 붙는다
+ROUTINE_JS = "routine.js"  # 오늘 할 일 (10/27) — 할 일 탭 맨 위 칸. logins.js 와 같이 셸이 defer 로 받고, 칸은 스스로 할 일 탭에 붙는다
 
 
 @cache
@@ -65,6 +66,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<script src="{asset_url(APP_JS)}" defer></script>'
         f'<script defer src="{asset_url(THPOST_JS)}"></script>'  # "<script src=" 아님 — app.js 하나만 세는 시험과 구분
         f'<script defer src="{asset_url(LOGINS_JS)}"></script>'  # 로그인 관리 칸 (10/26) — 같은 이유로 "<script defer src="
+        f'<script defer src="{asset_url(ROUTINE_JS)}"></script>'  # 오늘 할 일 칸 (10/27) — 같은 이유로 "<script defer src="
         f'<meta name="sb-edit" content="{asset_url(EDIT_JS)}">'
         f'<meta name="sb-product" content="{asset_url(PRODUCT_JS)}">'
         f'<meta name="sb-sched" content="{asset_url(SCHED_JS)}">'
