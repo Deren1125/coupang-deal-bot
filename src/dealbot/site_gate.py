@@ -39,7 +39,7 @@ CAPS: dict[str, tuple[int, int, int]] = {
     "keyzard.cc": (2, 6, 15),
     "kakao.com": (3, 10, 30),
 }
-ALL_CAPS: dict[str, tuple[int, int, int]] = {"naver.com": (8, 50, 160)}
+ALL_CAPS: dict[str, tuple[int, int, int]] = {"naver.com": (8, 50, 160), "a-bly.com": (3, 20, 50), "zigzag.kr": (4, 30, 110)}  # 서버 IP 기준 (Blog-Auto site_visits 10/27)
 LOGIN_CAPS = (1, 2, 4)
 LOGIN_RE = re.compile(r"login|signin|sign-in", re.I)
 LOCK_H = 6
