@@ -50,9 +50,14 @@ def test_login_page_left_open_locks_the_account_until_owner_logs_in() -> None:
     assert "로그인이 풀려 멈춤" in why
     assert "로그인이 풀려 멈춤" in sg.gate(URL, "a", T + 3600)  # 계속 멈춤
     assert sg.gate(URL, "b", T + 3600) == ""  # 다른 계정은 그대로
-    assert sg.gate(URL, "a", T + sg.LOCK_H * 3600 + 10) == ""  # LOCK_H 뒤 한 번 다시 확인
-    sg.saw(LOGIN, "a", T + 30000)
-    assert sg.gate(URL, "a", T + 30010)
+    assert "로그인이 풀려 멈춤" in sg.gate(URL, "a", T + sg.LOCK_H * 3600 + 10)  # 10/27: 시간이 지나도 다시 확인 안 함 (UNTIL_OWNER)
+    sg.UNTIL_OWNER = False
+    try:
+        assert sg.gate(URL, "a", T + sg.LOCK_H * 3600 + 10) == ""  # 끄면 예전처럼 LOCK_H 뒤 한 번 다시 확인
+        sg.saw(LOGIN, "a", T + 30000)
+        assert sg.gate(URL, "a", T + 30010)
+    finally:
+        sg.UNTIL_OWNER = True
     sg.owner_window("a")  # 주인이 /naverlogin — 풀고, 그동안 세지도 막지도 않음
     assert sg.gate(LOGIN, "a") == "" and sg.saw(LOGIN, "a") is False
 

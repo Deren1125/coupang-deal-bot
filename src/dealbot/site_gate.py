@@ -6,8 +6,8 @@
 
 - 딜봇 크롬(쇼핑커넥트 로그인 크롬 browser.session · 상품 화면 크롬 store_browser)의 맨 위 창 화면 열기만 센다.
 - 상한을 넘으면 그 화면 열기를 취소한다 (그 일은 실패로 넘어가 다음 차례에).
-- 지난번 화면이 로그인 화면에서 멈췄으면(로그인 풀림) 그 계정의 그 사이트는 주인이 다시 로그인할 때까지(또는 LOCK_H 시간 뒤 한 번)
-  자동으로 열지 않는다. 주인이 /naverlogin 으로 다시 로그인하면 unlock.
+- 지난번 화면이 로그인 화면에서 멈췄으면(로그인 풀림) 그 계정의 그 사이트는 주인이 다시 로그인할 때까지 자동으로 열지 않는다
+  (10/27 주인: 다시 확인도 안 함 — UNTIL_OWNER, Blog-Auto 와 같음). 주인이 /naverlogin·대시보드 QR 로그인을 열면 owner_window 가 푼다.
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ CAPS: dict[str, tuple[int, int, int]] = {
 ALL_CAPS: dict[str, tuple[int, int, int]] = {"naver.com": (8, 50, 160), "a-bly.com": (3, 20, 50), "zigzag.kr": (4, 30, 110)}  # 서버 IP 기준 (Blog-Auto site_visits 10/27)
 LOGIN_CAPS = (1, 2, 4)
 LOGIN_RE = re.compile(r"login|signin|sign-in", re.I)
-LOCK_H = 6
+LOCK_H = 6  # UNTIL_OWNER 를 끄면 쓰는 값 (Blog-Auto site_visits 와 같음)
+UNTIL_OWNER = True  # 주인 10/27: 로그인이 풀린 계정·사이트는 주인이 다시 로그인(owner_window·unlock)할 때까지 자동으로 다시 열지 않음
 SETTLE_S = 5
 DEFAULT_DB = Path("/home/ubuntu/Blog-Auto/var/site_gate.db")  # 서버: 블로그 프로그램과 같은 파일
 
@@ -51,6 +52,10 @@ OWNER_S = 600  # 주인이 /naverlogin 으로 직접 로그인하는 동안은 �
 _path: Path | None = None
 _lock = threading.Lock()
 _owner_until: dict[str, float] = {}  # 계정 → 주인 로그인 창이 열린 시각까지 (이 프로세스)
+
+
+def _lock_live(since: float, now: float) -> bool:
+    return UNTIL_OWNER or now - float(since) < LOCK_H * 3600
 
 
 def owner_window(acct: str, seconds: float = OWNER_S) -> None:
@@ -129,13 +134,13 @@ def gate(url: str, acct: str, now: float | None = None) -> str:
         try:
             row = con.execute("SELECT since FROM locks WHERE site=? AND acct=?", (site, acct)).fetchone()
             last = con.execute("SELECT login, ts FROM last WHERE site=? AND acct=?", (site, acct)).fetchone()
-            if not (row and now - float(row[0]) < LOCK_H * 3600) and last and last[0] and now - float(last[1]) >= SETTLE_S:
+            if not (row and _lock_live(row[0], now)) and last and last[0] and now - float(last[1]) >= SETTLE_S:
                 con.execute("INSERT OR REPLACE INTO locks VALUES (?, ?, ?, ?)", (site, acct, now, "login_page"))
                 con.execute("DELETE FROM last WHERE site=? AND acct=?", (site, acct))
                 row = (now,)
                 log.warning("site gate: %s 로그인이 풀린 채 (%s) — 다시 로그인할 때까지 자동으로 열지 않음", site, acct)
-            if row and now - float(row[0]) < LOCK_H * 3600:
-                why = f"{site} 로그인이 풀려 멈춤 — 다시 로그인할 때까지 자동으로 열지 않음"
+            if row and _lock_live(row[0], now):
+                why = f"{site} 로그인이 풀려 멈춤 — 주인이 다시 로그인할 때까지 자동으로 열지 않음"
             elif over := _over(con, site, "page", acct, cap, now):
                 why = f"{site} {over} 다 엶 (이 계정)"
             elif site in ALL_CAPS and (over := _over(con, site, "page", None, ALL_CAPS[site], now)):
