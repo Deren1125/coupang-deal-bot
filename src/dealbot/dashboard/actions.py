@@ -1515,6 +1515,11 @@ class ActionDesk:
             from dealbot.dashboard import remote_login
 
             s = remote_login.refresh(self.bot.db)
+            if s and remote_login.live(s) and s.get("target") in remote_login.NAVER:
+                # 네이버 창이 열려 있을 때 다시 누르면 닫고 새로 (주인 10/27 '창을 껐거나 한 번 더 누르면 새로 열어 줘') — Blog-Auto 로그인
+                # 창이 받은편지함의 새 부탁을 보고 스스로 닫히면, 멈춰 있던 서비스가 다시 켜지며 새 부탁(새 비밀번호)으로 새 창을 연다
+                remote_login.start(self.bot.db, self.bot.relay_to_blog, args["target"])
+                return "done", "열려 있던 원격 화면을 닫고 새로 띄우는 중이에요 — 1분쯤 뒤 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"
             if s and remote_login.live(s):  # 화면이 떠 있거나 띄우는 중 — 로그인 화면을 거듭 띄우지 않는다 (주인 10/26)
                 if s.get("target") == args["target"]:
                     return "done", "이미 원격 화면이 열려 있어요 — 할 일 맨 위 '원격 화면 열기'를 눌러 주세요"

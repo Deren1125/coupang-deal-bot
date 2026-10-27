@@ -22,6 +22,7 @@ KV = "vnc_session"
 PORT = 6080
 SESSION_MIN = 25
 GRACE_S = 180  # 누른 뒤 화면이 뜰 때까지 (login.sh 는 서비스를 멈추고 띄워 1~2분) — 이 안에 한 번도 안 뜨면 못 뜬 것
+SEEN_AFTER_S = 20  # 누른 뒤 이만큼은 6080 이 열려 있어도 '떴음'으로 안 침 — 다시 누르면 닫히는 중인 예전 창일 수 있음 (주인 10/27)
 PREFIX = "/dashboard/vnc/"
 # Blog-Auto blogauto/remote_login.TARGETS 와 같은 이름·순서 (instagram = ig_lookup 인스타 검색 전용 계정 — deploy/ig-login.sh, 주인 10/26)
 TARGETS = {"finance": "아카이브 블로그(쇼핑커넥트도)", "issue": "Pick 블로그", "hotdeal": "핫딜 블로그", "toss": "토스 쉐어링크",
@@ -81,7 +82,7 @@ def refresh(db: Any, now: float | None = None, probe=listening) -> dict[str, Any
     if not s:
         return None
     up = probe()
-    if up and not s.get("seen"):
+    if up and not s.get("seen") and (now or time.time()) - float(s["at"]) >= SEEN_AFTER_S:
         s["seen"] = True
         db.kv_set(KV, json.dumps(s))
     elif not up and s.get("seen"):
@@ -117,4 +118,6 @@ def item(db: Any, act_open: Any) -> dict[str, Any] | None:
             "status": f"30초쯤 뒤 열기를 눌러 로그인하세요 · 로그인하면 저절로 닫혀요 ({left}분 남음)", "since": float(s["at"]),
             "expires_at": float(s["at"]) + SESSION_MIN * 60, "primary": act_open("원격 화면 열기", url(s)), "more": [],
             "detail": {"lines": ["화면이 안 뜨면 20~30초 뒤 다시 눌러 주세요 (서버가 화면을 띄우는 중)",
-                                 "아이패드: 화면 왼쪽 작은 탭 → 키보드 아이콘으로 글자 입력, 네이버는 QR 로그인도 돼요"]}}
+                                 "아이패드: 화면 왼쪽 작은 탭 → 키보드 아이콘으로 글자 입력",
+                                 "네이버는 아이디·비밀번호로 ('로그인 상태 유지' 켜기 — QR·일회용 번호는 저장이 안 돼요)",
+                                 "창을 닫았거나 화면이 이상하면 '원격 로그인'을 다시 누르면 새로 열려요 (네이버)"]}}

@@ -123,9 +123,29 @@ async def test_tunnel_serves_one_request_per_connection() -> None:
 def test_row_closes_once_the_opened_screen_closes(bot: DealBot) -> None:
     """주인 10/24 '원격 화면 열고 로그인했는데 이 할 일이 왜 남아 있어': 화면이 한 번 열렸다가 닫히면(로그인 끝 — 스크립트가 닫음)
     세션을 지워 줄도 사라진다. 아직 한 번도 안 열렸으면(서버가 띄우는 중) 그대로 둔다."""
-    remote_login.start(bot.db, lambda msg: None, "finance")
+    at = remote_login.start(bot.db, lambda msg: None, "finance")["at"]
+    later = at + remote_login.SEEN_AFTER_S + 10
     assert remote_login.refresh(bot.db, probe=lambda: False)  # 띄우는 중 — 아직 안 열림
-    assert remote_login.refresh(bot.db, probe=lambda: True)["seen"] is True  # 열림
-    assert remote_login.refresh(bot.db, probe=lambda: True)  # 로그인하는 중
-    assert remote_login.refresh(bot.db, probe=lambda: False) is None  # 로그인 끝 → 화면 닫힘 → 줄 사라짐
+    assert not remote_login.refresh(bot.db, at + 2, probe=lambda: True).get("seen")  # 누른 바로 뒤 6080 은 닫히는 중인 예전 창일 수 있음
+    assert remote_login.refresh(bot.db, later, probe=lambda: True)["seen"] is True  # 열림
+    assert remote_login.refresh(bot.db, later, probe=lambda: True)  # 로그인하는 중
+    assert remote_login.refresh(bot.db, later, probe=lambda: False) is None  # 로그인 끝 → 화면 닫힘 → 줄 사라짐
     assert remote_login.session(bot.db) is None and remote_login.port(bot.db) is None
+
+
+@pytest.mark.asyncio
+async def test_pressing_again_on_an_open_naver_screen_reopens_it(bot: DealBot, settings: Settings) -> None:
+    """주인 10/27 '창을 껐거나 원격 탭 열기를 한 번 더 누르면 새로 열어 줘': 네이버 창이 떠 있어도 새 부탁(새 비밀번호)을 보낸다 —
+    Blog-Auto 로그인 창이 그 부탁을 보고 닫히면 서비스가 다시 켜지며 새 창을 연다."""
+    from dash_helpers import blogauto_status
+
+    blogauto_status(settings)
+    first = remote_login.start(bot.db, lambda msg: None, "hotdeal")
+    bot.db.kv_set(remote_login.KV, json.dumps(dict(first, seen=True)))  # 화면이 떠 있음
+    status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote", "args": {"target": "hotdeal"}},
+                                      session_headers(bot))
+    assert status == 200 and body["code"] == "done"
+    s = remote_login.session(bot.db)
+    assert s["pass"] != first["pass"] and not s.get("seen")
+    inbox = [json.loads(x) for x in (settings.data_dir / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert inbox[-1]["login_remote"]["pass"] == s["pass"]
