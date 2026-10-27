@@ -114,6 +114,10 @@ LOOKBOOK_JS_GZIP_MAX = 6 * 1024 + 256
 # 셸이 defer 로 받는 logins.js (CSS 도 여기서). 줄 값은 /dashboard/api/logins 로 열 때만
 LOGINS_JS_MAX = 8 * 1024
 LOGINS_JS_GZIP_MAX = 3 * 1024 + 512
+# 10/27: 연결 탭 '꾸미기 버튼 설치' 칸(접힌 한 줄 · 펼치면 4단계 + 코드 복사 — 코드·단계 글은 /dashboard/api/kkumi 로 펼칠 때만)
+# + 네이버 접속 칸 배열을 펼쳐 넣음 → 9.75 KB / gzip 4.125 KB (9748 B / 4094 B)
+LOGINS_JS_MAX = 9 * 1024 + 768
+LOGINS_JS_GZIP_MAX = 4 * 1024 + 128
 # 10/27: 오늘 할 일 칸(할 일 탭 맨 위 — 하루 5칸 중 지금 칸만 펼침 · 줄마다 체크 · 복사 단추 · 3/8 진행) — logins.js 처럼 셸이 defer 로 받는
 # routine.js (CSS 도 여기서). 목록은 /dashboard/api/routine 으로 열 때만
 ROUTINE_JS_MAX = 8 * 1024
@@ -126,6 +130,10 @@ ROUTINE_JS_GZIP_MAX = 3 * 1024 + 640
 # → 8.5 KB / gzip 3.75 KB (8671 B / 3729 B)
 ROUTINE_JS_MAX = 8 * 1024 + 512
 ROUTINE_JS_GZIP_MAX = 3 * 1024 + 768
+# 10/27 (4): 발행·예약 줄 '붙여 넣기' 큰 단추 셋(제목·본문·태그 복사 — 본문은 text/html+text/plain, 안 되면 화면 밖 칸 복사) +
+# 링크 카드 안내 한 줄 → 10.5 KB / gzip 4.5 KB (10611 B / 4525 B)
+ROUTINE_JS_MAX = 10 * 1024 + 512
+ROUTINE_JS_GZIP_MAX = 4 * 1024 + 512
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

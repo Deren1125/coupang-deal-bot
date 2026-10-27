@@ -630,7 +630,8 @@ class DealBot:
             budget=self.budget,
             include_dry_run=lambda: self.state.dry_run,
             history_days=s.app.prune_events_days,  # 딜 기록을 지운 날은 다시 세지 않음
-            blogauto=BlogAutoReader(dc.blogauto_metrics_path, tz=s.app.timezone, stale_hours=dc.blogauto_stale_hours, now=utcnow),
+            blogauto=BlogAutoReader(dc.blogauto_metrics_path, tz=s.app.timezone, stale_hours=dc.blogauto_stale_hours, now=utcnow,
+                                    media_base=s.secrets.public_base_url),  # 할 일 '붙여 넣기' 글의 사진 → <공개 주소>/media/<파일>
             shop_label=self.notifier.shop_label,  # '링크 기다리는 딜' 의 몰 이름 (텔레그램 링크 요청과 같은 이름)
             link_ttl_hours=s.publish.manual_link_ttl_hours,  # '지금 할 일' 의 '14시간 남음' (expire_queue 와 같은 기준)
             extra={"instagram_look": self.instagram_look},  # 데런픽 룩 카드 (sources/instagram.InstagramLookSource)

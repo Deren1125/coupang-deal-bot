@@ -8,8 +8,9 @@ const CSS = '#lgp .row{flex-wrap:wrap;row-gap:8px}#lgp .grow{flex-basis:60%}#lgp
   '#lgp .sm[disabled]{opacity:.45}#lgp .qr{display:grid;gap:8px;justify-items:center;padding:10px 0;border-top:1px solid var(--line)}' +
   '#lgp .qr img{width:100%;max-width:520px;height:auto;border-radius:8px;border:1px solid var(--line);background:#fff}' +
   '#lgp .qr p{margin:0;font-size:13px;text-align:center}#lgp .vn{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}' +
-  '#lgp .vn span{flex:1;min-width:0;font-size:14px}#lgp .ro .t{color:var(--sub)}';
-let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = false;
+  '#lgp .vn span{flex:1;min-width:0;font-size:14px}#lgp .ro .t{color:var(--sub)}#lgp .kk ol{margin:0;padding:0 0 10px 20px;font-size:14px;line-height:1.6}' +
+  '#lgp .kk .ac{width:100%;min-height:48px;margin-bottom:12px;justify-content:center}';
+let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = false, kk = null, kd = null, ko = false;
 
 function el(t, a, ...kids) {
   const e = D.createElement(t);
@@ -85,13 +86,28 @@ function row(r) {
     right(r.button, r.bad));
 }
 
+// '꾸미기 버튼 설치' (10/27 — 붙여 넣은 글의 링크 카드를 만드는 사파리 책갈피 · 코드는 펼칠 때 /dashboard/api/kkumi 로)
+function kkDraw() {
+  const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
+    .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
+  kk.replaceChildren(el('button', {class: 'fold kf', type: 'button', 'aria-expanded': ko ? 'true' : 'false', onclick: () => {
+    ko = !ko; if (ko && !kd) kkLoad(); kkDraw(); }}, '꾸미기 버튼 설치 (링크 카드)'), ...(!ko ? [] : kd ? [el('ol', {}, kd.steps.map(x => el('li', {text: x}))),
+    el('button', {class: 'sm ac', type: 'button', onclick: () => c(kd.code)}, '코드 복사')] : [el('p', {class: 'note'}, '불러오는 중…')]));
+}
+async function kkLoad() {
+  try { const r = await fetch('/dashboard/api/kkumi', {credentials: 'same-origin', headers: {Accept: 'application/json'}}); if (r.status === 200) kd = await r.json(); } catch (e) { /* 다시 펼치면 */ }
+  if (!kd) { ko = false; toast('불러오지 못했어요 — 잠시 뒤 다시'); }
+  kkDraw();
+}
+
 function draw() {
   if (!box) return;
+  if (!kk) { kk = el('div', {class: 'box kk', style: 'padding:0 14px'}); kkDraw(); }
   const rows = (data && data.rows) || [], q = data && data.qr, v = data && data.vnc;
   // 주인 몫이 없으면 한 줄 (누르면 펼침) · 필요하면 늘 펼침
   const calm = data && !data.need && !q && !v, f = calm && el('div', {class: 'box', style: 'padding:0 14px'}, el('button', {class: 'fold', type: 'button',
     'aria-expanded': open ? 'true' : 'false', onclick: () => { open = !open; draw(); }}, rows.every(r => r.state !== 'resting' && r.state !== 'unknown') ? '로그인 모두 정상' : '로그인 · 지금 할 것 없음'));
-  if (calm && !open) { box.replaceChildren(f); return; }
+  if (calm && !open) { box.replaceChildren(f, kk); return; }
   const head = f || el('div', {class: 'top', style: 'margin:20px 0 6px'}, el('h2', {}, data && data.need ? `로그인 관리 · 필요 ${data.need}` : '로그인 관리'),
     el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기'));
   const top = [];
@@ -107,7 +123,7 @@ function draw() {
     el('p', {class: 'note'}, `${nv.total} · 적응 기간 = 다시 로그인한 뒤 3일`)] : [];
   box.replaceChildren(head, el('div', {class: 'box'}, data ? null : el('p', {class: 'note'}, '불러오는 중…'), top, rows.map(row)),
     el('p', {class: 'note'}, '로그인은 주인이 직접 해요 — 봇은 비밀번호·확인 화면을 대신하지 않아요'),
-    visits);
+    ...visits, kk);  // visits 는 배열 — 펼쳐 넣음 (replaceChildren 은 배열을 펴지 않음)
 }
 
 function mount() {

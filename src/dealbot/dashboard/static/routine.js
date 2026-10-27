@@ -13,7 +13,8 @@ const CSS = '#rtp .box{padding:4px 16px 6px;margin-bottom:20px}#rtp .sl{display:
   '#rtp .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}#rtp .dn .t{text-decoration:line-through;color:var(--sub)}' +
   '#rtp .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}#rtp .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
   '#rtp a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
-  '#rtp .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}#rtp .bar i{display:block;height:100%;background:var(--gr)}';
+  '#rtp .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}#rtp .bar i{display:block;height:100%;background:var(--gr)}' +
+  '#rtp .pb .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
 
 function el(t, a, ...kids) {
@@ -92,6 +93,34 @@ function copy(text) {
     .then(() => toast('복사했어요'), () => toast('복사하지 못했어요 — 글을 길게 눌러 복사해 주세요'));
 }
 
+// 본문 복사 (10/27): html+글 한 번에 · 안 되면 화면 밖 칸에 DOM 으로 담아 복사 (html 글을 그대로 넣지 않음 · on*·스크립트 한 번 더 뺌)
+function rich(p) {
+  const c = W.navigator && W.navigator.clipboard, B = (t, y) => new Blob([t], {type: y});
+  if (!c || !c.write || !W.ClipboardItem) return off(p);
+  c.write([new W.ClipboardItem({'text/html': B(p.html, 'text/html'), 'text/plain': B(p.text, 'text/plain')})]).then(() => toast('복사했어요'), () => off(p));
+}
+function off(p) {
+  let ok = false;
+  try {
+    const doc = new DOMParser().parseFromString(p.html, 'text/html'), d = el('div', {contenteditable: 'true',
+      style: 'position:fixed;left:-9999px;top:0;width:600px;opacity:0'}), r = D.createRange(), s = W.getSelection();
+    doc.querySelectorAll('script,style,iframe,object,embed,link,meta').forEach(x => x.remove());
+    doc.querySelectorAll('*').forEach(x => [...x.attributes].forEach(a => /^on/i.test(a.name) && x.removeAttribute(a.name)));
+    d.append(...Array.from(doc.body.childNodes, n => D.importNode(n, true)));
+    D.body.append(d);
+    r.selectNodeContents(d); s.removeAllRanges(); s.addRange(r);
+    ok = D.execCommand('copy');
+    s.removeAllRanges(); d.remove();
+  } catch (e) { ok = false; }
+  toast(ok ? '복사했어요' : '복사하지 못했어요 — 잠시 뒤 다시');
+}
+const big = (label, f) => el('button', {class: 'sm', type: 'button', onclick: f}, label);
+function paste(p) {
+  return [el('div', {class: 'bt pb'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => rich(p)),
+    p.tag_text ? big('태그 복사', () => copy(p.tag_text)) : null),
+  p.cards ? el('span', {class: 's'}, `링크 카드 ${p.cards}개 — 붙여 넣은 뒤 책갈피 '꾸미기'를 눌러요`) : null];
+}
+
 function item(it) {
   const btns = it.done ? [] : [it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label)),
     it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label))].flat();
@@ -100,7 +129,7 @@ function item(it) {
       onclick: () => check(it)}, it.done ? '✓' : ''),
     el('div', {class: 'grow'}, el('span', {class: 't'}, it.title),
       el('span', {class: 's'}, [it.tag, `${it.min}분`, it.note].filter(Boolean).join(' · ')),
-      btns.length ? el('div', {class: 'bt'}, btns) : null));
+      it.paste && !it.done ? paste(it.paste) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
 }
 
 function slot(s) {

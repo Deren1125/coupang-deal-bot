@@ -40,16 +40,21 @@ v2 status.logins (주인 10/26 — Blog-Auto remote_login.states): 프로그램�
 v2 status.routine (주인 10/27 — 블로그 반자동, 주인이 하루 5번 손으로): {"day", "slots": [{"key": s1~s5, "at": "HH:MM", "label"}],
     "items": [{"id", "slot", "group": 발행|예약|이웃|SNS, "blog", "title", "note", "min", "copy": [{label, text}], "links": [{label, url}]}],
     "overflow"} → routine.py '오늘 할 일' 칸 (할 일 탭 맨 위).
+  발행·예약 줄의 "paste" (주인 10/27 — 서버가 네이버에 로그인하지 않고 주인이 아이패드 사파리에서 붙여 넣기):
+    {"title", "html" (≤200000자 · 사진은 <img src="media:<파일>">), "tags": [≤30], "cards", "photos"} → _paste 가 엄격히 거름
+    (media: → <공개 주소>/media/<파일> · https 가 아닌 사진은 뺌 · 허용한 태그·속성만 다시 씀). 공개 주소가 없으면 paste 는 None.
 """
 
 from __future__ import annotations
 
+import html as htmllib
 import json
 import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -1231,9 +1236,149 @@ def _rt_copy_text(v: Any) -> str:
     return "\n".join(lines).strip("\n")[:ROUTINE_COPY_TEXT_MAX]
 
 
-def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_KEYS) -> dict[str, Any] | None:
-    """{id, slot, group, blog, title, note, min, copy: [{label, text}], links: [{label, url}]} — 모양이 틀리면 None.
-    스레드 세션 몫(나중에 routine.threads_items)도 같은 모양이라 이 함수 하나로 거른다."""
+# 붙여 넣기 (주인 10/27 — 네이버 글쓰기 화면에 대시보드에서 복사한 글을 붙여 넣음: 서버가 네이버에 로그인하지 않음)
+PASTE_TITLE_MAX, PASTE_HTML_MAX, PASTE_TAGS_MAX, PASTE_TAG_MAX, PASTE_COUNT_MAX = 120, 200_000, 30, 40, 1000
+PASTE_GROUPS = ("발행", "예약")
+PASTE_NO_BASE = "본문 복사 꺼짐 — 봇 공개 주소(public_domain)가 없어요"
+_MEDIA_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+# 다시 쓰는 태그 (그 밖의 태그는 빼고 안의 글만 남김) · 안의 글까지 통째로 빼는 태그
+_PASTE_TAGS = frozenset("p div span br b strong i em u s strike del ins sub sup small mark font center h1 h2 h3 h4 h5 h6 blockquote q "
+                        "ul ol li dl dt dd a img table thead tbody tfoot tr td th caption colgroup col hr pre code figure figcaption "
+                        "section article header footer".split())
+_PASTE_DROP = frozenset("script style iframe frame frameset object embed applet noscript template textarea select option button "
+                        "svg math head title xmp plaintext noembed noframes".split())
+_PASTE_VOID = frozenset(("br", "img", "hr", "col"))
+_PASTE_BLOCK = frozenset("p div h1 h2 h3 h4 h5 h6 blockquote li dt dd tr pre figure figcaption section article header footer table ul ol "
+                         "center hr".split())
+_PASTE_ATTRS = frozenset(("style", "class", "align", "color", "size", "face", "href", "src", "alt", "title", "width", "height",
+                          "colspan", "rowspan", "valign", "border", "cellpadding", "cellspacing"))
+_BAD_STYLE = re.compile(r"url\s*\(|expression|javascript:|@import|behavior|-moz-binding|\\", re.I)
+
+
+def _link_ok(u: str) -> bool:
+    """글 속 링크 (a href): http·https 만, 공백·따옴표·꺾쇠 없이."""
+    return bool(re.match(r"^https?://[^\s\"'<>`\\]+$", u, re.I)) and len(u) <= 2000
+
+
+class _PasteHTML(HTMLParser):
+    """붙여 넣을 본문을 다시 쓴다 — 믿지 않는 HTML: 허용한 태그·속성만, on* 속성·스크립트·바깥 틀(iframe 등)은 뺌,
+    a 는 http(s) 만, 사진은 media:<파일> → <base>/media/<파일> 로 바꾼 뒤 https 인 것만 (아니면 사진째 뺌). 글만 뽑은 text 도 같이."""
+
+    def __init__(self, base: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base = base
+        self.out: list[str] = []
+        self.text: list[str] = []
+        self.skip, self.skip_tag = 0, ""  # _PASTE_DROP 안 (글까지 뺌) — 바깥 태그 이름과 같은 태그가 겹친 수
+        self.open: list[str] = []
+        self.photos = 0
+
+    def _src(self, v: str | None) -> str | None:
+        v = (v or "").strip()
+        if v.lower().startswith("media:"):
+            name = v[6:]
+            return f"{self.base}/media/{name}" if _MEDIA_NAME_RE.match(name) else None
+        return https_url(v)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.skip or tag in _PASTE_DROP:
+            if not self.skip or tag == self.skip_tag:
+                self.skip, self.skip_tag = self.skip + 1, tag
+            return
+        if tag not in _PASTE_TAGS:
+            return
+        kept: list[str] = []
+        for k, v in attrs:
+            k, v = k.lower(), v or ""
+            if k not in _PASTE_ATTRS or (k == "href" and (tag != "a" or not _link_ok(v.strip()))) or k == "src":
+                continue
+            if k == "style" and _BAD_STYLE.search(v):
+                continue
+            kept.append(f' {k}="{htmllib.escape(v.strip() if k == "href" else v, quote=True)}"')
+        if tag == "img":
+            src = self._src(next((v for k, v in attrs if k.lower() == "src"), None))
+            if src is None:
+                return  # https 가 아닌 사진은 통째로 뺌
+            kept.insert(0, f' src="{htmllib.escape(src, quote=True)}"')
+            self.photos += 1
+        if tag in _PASTE_BLOCK or tag == "br":
+            self.text.append("\n")
+        self.out.append(f"<{tag}{''.join(kept)}>")
+        if tag not in _PASTE_VOID:
+            self.open.append(tag)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.skip or tag in _PASTE_DROP:
+            return  # <x/> — 열린 채로 남지 않음
+        self.handle_starttag(tag, attrs)
+        if tag not in _PASTE_VOID and self.open and self.open[-1] == tag:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.skip:
+            if tag == self.skip_tag:
+                self.skip -= 1
+            return
+        if tag not in self.open:
+            return
+        while self.open:  # 안 닫힌 태그는 같이 닫음 (짝이 맞는 HTML 만 내보냄)
+            t = self.open.pop()
+            self.out.append(f"</{t}>")
+            if t in _PASTE_BLOCK:
+                self.text.append("\n")
+            if t == tag:
+                break
+
+    def handle_data(self, data: str) -> None:
+        if not self.skip:
+            self.out.append(htmllib.escape(data, quote=False))
+            self.text.append(data)
+
+    def result(self) -> tuple[str, str]:
+        self.close()
+        self.out += [f"</{t}>" for t in reversed(self.open)]
+        lines = [" ".join(x.split()) for x in "".join(self.text).split("\n")]
+        text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+        return "".join(self.out), text
+
+
+def _paste_tag(v: Any) -> str | None:
+    """태그 하나: 한 줄 · 앞의 # 와 사이 공백·쉼표는 뺌 (네이버 태그는 띄어 쓰지 않음) · PASTE_TAG_MAX 자를 넘으면 버림."""
+    if not isinstance(v, str):
+        return None
+    t = re.sub(r"[\s#,]+", "", "".join(c for c in v if c.isprintable()))
+    return t if 0 < len(t) <= PASTE_TAG_MAX else None
+
+
+def _paste(v: Any, media_base: str | None) -> dict[str, Any] | None:
+    """{title, html, text, tags, tag_text, cards, photos} — 모양이 틀리면 None. media_base = 봇 공개 주소 (https://도메인)."""
+    if not isinstance(v, dict) or not isinstance(v.get("html"), str) or len(v["html"]) > PASTE_HTML_MAX or not media_base:
+        return None
+    title = _rt_line(v.get("title"), PASTE_TITLE_MAX)
+    base = media_base.rstrip("/")
+    if not title or https_url(base + "/media/x") is None:
+        return None
+    p = _PasteHTML(base)
+    try:
+        p.feed(v["html"])
+        body, text = p.result()
+    except Exception:  # noqa: BLE001 — html.parser 가 못 읽는 글이면 이 칸만 버림
+        return None
+    if not text and not p.photos:
+        return None
+    tags: list[str] = []
+    for t in v.get("tags")[:PASTE_TAGS_MAX * 2] if isinstance(v.get("tags"), list) else []:
+        if (t := _paste_tag(t)) and t not in tags and len(tags) < PASTE_TAGS_MAX:
+            tags.append(t)
+    return {"title": title, "html": body, "text": text, "tags": tags, "tag_text": " ".join("#" + t for t in tags),
+            "cards": _count(v.get("cards"), top=PASTE_COUNT_MAX) or 0, "photos": _count(v.get("photos"), top=PASTE_COUNT_MAX) or 0}
+
+
+def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_KEYS, *,
+                  media_base: str | None = None) -> dict[str, Any] | None:
+    """{id, slot, group, blog, title, note, min, copy: [{label, text}], links: [{label, url}], paste} — 모양이 틀리면 None.
+    스레드 세션 몫(나중에 routine.threads_items)도 같은 모양이라 이 함수 하나로 거른다.
+    paste (발행·예약 줄만): _paste 가 거른 붙여 넣기 글 · 없거나 틀리면 None · 공개 주소가 없으면 None 에 note 끝에 PASTE_NO_BASE."""
     if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ROUTINE_ID_RE.match(x["id"]):
         return None
     if x.get("slot") not in slot_keys or x.get("group") not in ROUTINE_GROUPS or not (title := _rt_line(x.get("title"), ROUTINE_TITLE_MAX)):
@@ -1248,8 +1393,12 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
     for k in x.get("links")[:ROUTINE_LINKS_MAX] if isinstance(x.get("links"), list) else []:
         if isinstance(k, dict) and (u := https_url(k.get("url"))) is not None:
             links.append({"label": _rt_line(k.get("label"), ROUTINE_LABEL_MAX) or "열기", "url": u})
+    note = _rt_line(x.get("note"), ROUTINE_NOTE_MAX)
+    paste = _paste(x.get("paste"), media_base) if x["group"] in PASTE_GROUPS else None
+    if paste is None and x["group"] in PASTE_GROUPS and isinstance(x.get("paste"), dict) and not media_base:
+        note = " · ".join(t for t in (note, PASTE_NO_BASE) if t)[:ROUTINE_NOTE_MAX]
     return {"id": x["id"], "slot": x["slot"], "group": x["group"], "blog": x.get("blog") if x.get("blog") in ROUTINE_BLOGS else "",
-            "title": title, "note": _rt_line(x.get("note"), ROUTINE_NOTE_MAX), "min": mins, "copy": copy, "links": links}
+            "title": title, "note": note, "min": mins, "copy": copy, "links": links, "paste": paste}
 
 
 def _routine_slots(v: Any) -> list[dict[str, str]]:
@@ -1265,7 +1414,7 @@ def _routine_slots(v: Any) -> list[dict[str, str]]:
     return [got[k] for k in ROUTINE_SLOT_KEYS if k in got]
 
 
-def _routine(v: Any) -> dict[str, Any] | None:
+def _routine(v: Any, media_base: str | None = None) -> dict[str, Any] | None:
     """오늘 할 일 {day, slots: [{key, at, label}], items: [_routine_item], overflow} — 칸이 없으면(예전 Blog-Auto)·날짜가 틀리면 None.
     없는 시간대(slot)의 줄은 뺀다 · 같은 id 는 첫 줄만 · 바깥 주소는 https 만."""
     if not isinstance(v, dict) or not isinstance(v.get("items"), list) or not isinstance(v.get("day"), str) \
@@ -1279,7 +1428,7 @@ def _routine(v: Any) -> dict[str, Any] | None:
     keys = {s["key"] for s in slots}
     items: list[dict[str, Any]] = []
     for x in v["items"][:ROUTINE_ITEMS_MAX]:
-        if (it := _routine_item(x, keys)) is not None and not any(i["id"] == it["id"] for i in items):
+        if (it := _routine_item(x, keys, media_base=media_base)) is not None and not any(i["id"] == it["id"] for i in items):
             items.append(it)
     return {"day": v["day"], "slots": slots, "items": items, "overflow": _count(v.get("overflow"), top=1000) or 0}
 
@@ -1494,7 +1643,7 @@ def _post_counts(v: Any) -> dict[str, dict[str, dict[str, int] | None]] | None:
     return out
 
 
-def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
+def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
                            "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits")),
@@ -1555,7 +1704,7 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     out["status"]["shopconnect"] = _shopconnect(st.get("shopconnect"))
     out["status"]["logins"] = _logins(st.get("logins"))  # 로그인 관리 칸 (주인 10/26 — 없으면 None: 예전 Blog-Auto)
     out["status"]["naver_visits"] = _naver_visits(st.get("naver_visits"))  # 네이버 접속 칸 (주인 10/27)
-    out["status"]["routine"] = _routine(st.get("routine"))  # 오늘 할 일 (주인 10/27 — 없으면 None: 예전 Blog-Auto)
+    out["status"]["routine"] = _routine(st.get("routine"), media_base)  # 오늘 할 일 (주인 10/27 — 없으면 None: 예전 Blog-Auto)
     dg = data.get("digest") if isinstance(data.get("digest"), dict) else {}
     out["digest"] = {"day": _one_line(dg.get("day"), 10), "generated_at": _one_line(dg.get("generated_at"), 40),
                      "blogs": {b: _str_list((dg.get("blogs") or {}).get(b) if isinstance(dg.get("blogs"), dict) else None, 8, 200)
@@ -1564,7 +1713,8 @@ def parse_v2(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def parse_export(data: Any, tz: str) -> BlogAutoExport:
+def parse_export(data: Any, tz: str, media_base: str | None = None) -> BlogAutoExport:
+    """media_base: 봇 공개 주소 (https://도메인 — 할 일 '붙여 넣기' 글의 사진 주소 앞부분). 없으면 붙여 넣기 칸은 None."""
     if not isinstance(data, dict):
         return BlogAutoExport(UNAVAILABLE, "Blog-Auto 활동 기록의 모양이 달라 읽지 못함")
     written = next((t for k in _TIME_KEYS if (t := _parse_time(data.get(k), tz)) is not None), None)
@@ -1585,14 +1735,16 @@ def parse_export(data: Any, tz: str) -> BlogAutoExport:
     version = data.get("version") if data.get("version") in (1, 2) else 1
     return BlogAutoExport(OK, written_at=written, blogs=blogs, waiting=parse_waiting(data.get("waiting"), tz),
                           own_stats=parse_own_stats(data.get("own_stats"), tz), todo=parse_todo(data.get("todo"), tz),
-                          version=version, v2=parse_v2(data) if version == 2 else {})
+                          version=version, v2=parse_v2(data, media_base) if version == 2 else {})
 
 
 class BlogAutoReader:
     """파일이 바뀌었을 때만 다시 읽는다 (카드 세 개가 한 번 읽은 것을 같이 씀)."""
 
-    def __init__(self, path: str | Path, *, tz: str, stale_hours: float, now: Callable[[], datetime]) -> None:
+    def __init__(self, path: str | Path, *, tz: str, stale_hours: float, now: Callable[[], datetime],
+                 media_base: str | None = None) -> None:
         self.path = Path(str(path)).expanduser()
+        self.media_base = media_base  # 봇 공개 주소 (settings.secrets.public_base_url) — 붙여 넣기 글의 사진 주소
         self.tz = tz
         self.stale_hours = stale_hours
         self.now = now
@@ -1611,7 +1763,7 @@ class BlogAutoReader:
                 parsed = BlogAutoExport(UNAVAILABLE, "Blog-Auto 활동 기록 파일이 너무 큼")
             else:
                 try:
-                    parsed = parse_export(json.loads(self.path.read_text(encoding="utf-8")), self.tz)
+                    parsed = parse_export(json.loads(self.path.read_text(encoding="utf-8")), self.tz, self.media_base)
                 except (OSError, ValueError, UnicodeDecodeError):
                     parsed = BlogAutoExport(UNAVAILABLE, "Blog-Auto 활동 기록을 읽지 못함 (쓰는 중이거나 형식 오류)")
             self._cache = (sig, parsed)
