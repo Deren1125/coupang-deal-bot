@@ -93,6 +93,11 @@ PT_NOTE_MAX = 200  # 제품 테스트 한 줄 (Blog-Auto product_trial.NOTE_MAX)
 # 비슷한 아이템 링크 넣기 (주인 10/20) — Blog-Auto bridge.x_similar_links 와 같은 한도 · 화면 글 칸은 한 줄에 '이름 | 링크'
 SIMILAR_LINKS_MAX, SIMILAR_URL_MAX, SIMILAR_NOTE_MAX, SIMILAR_TEXT_MAX = 6, 500, 40, 4000
 HTTPS_URL = re.compile(r"https://[^\s|<>\"']+")
+# 에이블리 '링크 부탁'에 답하기 (주인 10/28 — Blog-Auto ably_requests: rid = '<글 번호>-<에이블리 상품 번호>') · 앱 '공유' 문구째 붙여 넣어도
+# 첫 에이블리 주소만 (주소에 붙은 한글·괄호는 뺌 — Blog-Auto ably_requests.link_of 와 같은 생각)
+ABLY_RID = re.compile(r"^\d{1,9}-[0-9A-Za-z_-]{1,40}$")
+ABLY_IN_TEXT = re.compile(r"https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+")  # 주소에 쓰는 글자만 (RFC 3986)
+ABLY_HOSTS = ("a-bly.com",)
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
@@ -646,6 +651,16 @@ def _similar_url(v: Any) -> str:
     return u
 
 
+def ably_link_in(text: Any) -> str:
+    """에이블리 앱 '공유' 문구에서 첫 https 에이블리 주소 (a-bly.com · applink.a-bly.com …). 없으면 bad_args."""
+    for m in ABLY_IN_TEXT.finditer(_str(text, SIMILAR_TEXT_MAX)):
+        u = m.group(0).rstrip(").,]")
+        host = (urlparse(u).hostname or "").lower()
+        if any(host == h or host.endswith("." + h) for h in ABLY_HOSTS):
+            return _similar_url(u)
+    raise ActionError("bad_args", text="붙여 넣은 글에서 에이블리 링크를 찾지 못했어요")
+
+
 def similar_lines(text: str) -> list[tuple[str, str]]:
     """'비슷한 아이템 링크 넣기' 글 칸: 한 줄에 하나 — '이름 | 링크' · '링크' · '이름 링크'. (링크, 이름) 들 (이름은 40자)."""
     out = []
@@ -800,6 +815,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
             links, notes = g("links"), g("notes") if g("notes") is not None else []
             if not isinstance(links, list) or not isinstance(notes, list) or len(notes) > len(links):
                 raise ActionError("bad_args")
+            if len(links) == 1 and isinstance(links[0], str) and not HTTPS_URL.fullmatch(links[0].strip()):
+                links = [ably_link_in(links[0])]  # 앱 '공유' 문구째 붙여 넣음 (주인 10/28 링크 부탁)
             pairs = [(_similar_url(u), _str(n, SIMILAR_NOTE_MAX, required=False) if n != "" else "")
                      for u, n in zip(links, notes + [""] * (len(links) - len(notes)), strict=True)]
             for k, hi in (("ratings", 10), ("reviews", 10 ** 8)):  # 주인이 본 평점·후기 수 (선택 — 10/21 평점 기준, links 와 같은 순서)
@@ -821,6 +838,11 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         for k, m in extra.items():
             if m:
                 out[k] = [m.get(u) for u in seen]
+        if g("rid") is not None:  # 에이블리 '링크 부탁' 줄 (주인 10/28): 그 글의 부탁 하나 · 링크도 하나
+            rid = g("rid")
+            if not isinstance(rid, str) or not ABLY_RID.match(rid) or rid.split("-", 1)[0] != str(out["pid"]) or len(seen) != 1:
+                raise ActionError("bad_args")
+            out["rid"] = rid
         return out
     if name == "product_feedback":  # 제품 테스트 (주인 10/21 — 계약 action_product_feedback.json)
         iid, v = g("item_id"), g("verdict")

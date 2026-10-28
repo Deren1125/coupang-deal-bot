@@ -115,7 +115,8 @@ def test_parse_export_puts_routine_next_to_naver_visits(tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------- 2) 보기
 def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Path) -> None:
-    assert routine.view(bot) == {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0}  # 목록 없음 → 칸 숨김
+    assert routine.view(bot) == {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0,
+                                 "ably": None}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))
     v = routine.view(bot, now=at(bot, day, "13:10"))
@@ -207,7 +208,8 @@ def test_routine_js_is_local_safe_and_korean() -> None:
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "http://" not in js and "https://" not in js and "innerHTML" not in js and "eval(" not in js and "new Function" not in js
     assert "/dashboard/api/routine" in js and "X-Dash-Token" in js and "MutationObserver" in js and "routine.done" in js
-    assert "clipboard" in js and "writeText(" in js and "type: 'checkbox'" not in js and "'input'" not in js  # 체크는 단추 (app.js 그리기를 막지 않게)
+    assert "clipboard" in js and "writeText(" in js and "type: 'checkbox'" not in js  # 체크는 단추 (app.js 그리기를 막지 않게)
+    assert js.count("'input'") == 1 and "placeholder: '여기에 링크 붙여넣기'" in js  # 입력 칸은 에이블리 링크 부탁 하나뿐 (10/28)
     for word in ("오늘 할 일", "복사했어요", "다시 보기", "지금"):
         assert word in js, word
     node = shutil.which("node")

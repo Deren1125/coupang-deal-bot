@@ -3,8 +3,10 @@
 
 GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 밖, 그리기는 static/routine.js) → view():
     {"day", "today": bool, "slots": [{key, at, label, items: [{…item, done, tag}], done, total, min_left, current}],
-     "overflow", "done", "total"}
-  목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다.
+     "overflow", "done", "total", "ably": {n, note, rows: [{rid, pid, title, piece, name, price, shop, url, due, due_text}]} | None}
+  목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
+에이블리 링크 부탁 (주인 10/28): Blog-Auto 칸 ably_requests (blogauto._ably_requests) — 서버는 에이블리를 열지 않고 주인이 폰 앱에서
+  링크를 만들어 붙여 넣음 → 대시보드 일 blog.similar_links {blog: issue, pid, links: [붙여 넣은 글], rid}. 없거나 0개면 None.
 출처: 블로그 프로그램 기록 파일 status.routine (blogauto._routine) + EXTRA_SOURCES (지금은 스레드 세션 몫 threads_items 하나 — 늘 []).
   두 번째 출처는 같은 줄 모양(blogauto._routine_item)으로 함수 하나만 더하면 된다 — 같은 id 는 먼저 온 줄만, 없는 시간대 줄은 뺀다.
 체크: 봇 DB kv "routine_done:<그 목록의 날짜>" = id 목록 (JSON). 바꾸는 것은 대시보드 일 routine.done {id, done} (actions.py) 하나뿐.
@@ -129,6 +131,26 @@ def set_done(db: Any, day: str, rid: str, done: bool) -> None:
     db.kv_delete_prefix(DONE_KEY, keep=lambda k, _v: k in (DONE_KEY + day, DONE_KEY + prev))
 
 
+def _due_text(due: float | None, now: float, z: ZoneInfo) -> str:
+    """예약 발행 시각 — 오늘이면 'HH:MM', 다른 날이면 'M/D HH:MM'. 없거나 지났으면 ''."""
+    if due is None or due <= now:
+        return ""
+    d, n = datetime.fromtimestamp(due, z), datetime.fromtimestamp(now, z)
+    return d.strftime("%H:%M") if d.date() == n.date() else f"{d.month}/{d.day} {d:%H:%M}"
+
+
+def ably_view(bot: Any, now: float) -> dict[str, Any] | None:
+    """에이블리 링크 부탁 칸 (blogauto._ably_requests 가 거른 것 + 발행 시각 글). 줄이 없으면 None."""
+    st = getattr(bot, "dash_state", None)
+    export = st._export() if st is not None else None
+    a = (getattr(export, "v2", None) or {}).get("ably_requests")
+    if not a or not a.get("rows"):
+        return None
+    z = _tz(bot)
+    rows = [{**r, "due_text": _due_text(r["due"], now, z)} for r in a["rows"]]
+    return {"n": len(rows), "note": a["note"], "rows": rows}
+
+
 def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     """GET /dashboard/api/routine 몸. 지금 시간대 = 시각(대시보드 시간대)이 지난 마지막 칸 (첫 칸 전이면 첫 칸)."""
     now = now or time.time()
@@ -137,8 +159,13 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         log.warning("routine view failed: %s", type(e).__name__)
         r = None
+    try:
+        ably = ably_view(bot, now)
+    except Exception as e:  # noqa: BLE001 — 부탁 칸이 틀려도 할 일은 보이게
+        log.warning("routine ably view failed: %s", type(e).__name__)
+        ably = None
     if not r:
-        return {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0}
+        return {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0, "ably": ably}
     hm = datetime.fromtimestamp(now, _tz(bot)).strftime("%H:%M")
     by_at = sorted(r["slots"], key=lambda s: s["at"])
     cur = next((s["key"] for s in reversed(by_at) if s["at"] <= hm), by_at[0]["key"])
@@ -150,4 +177,4 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
         slots.append({**s, "items": its, "done": sum(i["done"] for i in its), "total": len(its),
                       "min_left": sum(i["min"] for i in its if not i["done"]), "current": s["key"] == cur})
     return {"day": r["day"], "today": r["day"] == today(bot, now), "slots": slots, "overflow": r["overflow"],
-            "done": sum(s["done"] for s in slots), "total": sum(s["total"] for s in slots)}
+            "done": sum(s["done"] for s in slots), "total": sum(s["total"] for s in slots), "ably": ably}

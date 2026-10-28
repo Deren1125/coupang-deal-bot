@@ -1447,6 +1447,53 @@ def _shopconnect(v: Any) -> dict[str, Any] | None:
             "last_at": _secs(v.get("last_at")), "last_ok_at": _secs(v.get("last_ok_at"))}
 
 
+# 에이블리 링크 부탁 (주인 10/28 — Blog-Auto ably_requests.export: 서버는 에이블리를 열지 않고, 주인이 폰 에이블리 앱에서 링크를 만들어
+# '오늘 할 일'에 붙여 넣음 → 다리 일 similar_links {blog: issue, pid, links: [하나], rid}). rid = '<글 번호>-<에이블리 상품 번호>'
+ABLY_REQ_ROWS_MAX = 30  # Blog-Auto ably_requests.MAX_ROWS
+ABLY_REQ_RID = re.compile(r"^\d{1,9}-[0-9A-Za-z_-]{1,40}$")  # actions.ABLY_RID 와 같게
+ABLY_REQ_HOSTS = ("a-bly.com",)  # 상품 주소는 에이블리(하위 주소 포함 — m.a-bly.com)만
+ABLY_REQ_NOTE_MAX = 160
+ABLY_REQ_PRICE_MAX = 100_000_000
+
+
+def _ably_req_row(x: Any) -> dict[str, Any] | None:
+    """{rid, pid, title, piece, name, price, shop, url, due} — 모양이 틀리면 None (줄만 뺌)."""
+    if not isinstance(x, dict) or not isinstance(x.get("rid"), str) or not ABLY_REQ_RID.match(x["rid"]):
+        return None
+    pid = x.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or not 0 < pid < 10**9 or x["rid"].split("-", 1)[0] != str(pid):
+        return None
+    u = https_url(x.get("url"))
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(u).hostname or "").lower() if u else ""
+    if not any(host == h or host.endswith("." + h) for h in ABLY_REQ_HOSTS):
+        return None
+    price, due = x.get("price"), x.get("due")
+    if price is not None and _count(price, top=ABLY_REQ_PRICE_MAX) is None:
+        return None
+    if due is not None and (isinstance(due, bool) or not isinstance(due, int | float) or not math.isfinite(due) or not 1e9 < due < 1e10):
+        return None
+    name, piece = _rt_line(x.get("name"), 80), _rt_line(x.get("piece"), 20)
+    if not name and not piece:
+        return None
+    return {"rid": x["rid"], "pid": pid, "title": _rt_line(x.get("title"), 60), "piece": piece, "name": name or piece,
+            "price": _count(price) or 0, "shop": _rt_line(x.get("shop"), 40) or "에이블리", "url": u,
+            "due": float(due) if due is not None else None}
+
+
+def _ably_requests(v: Any) -> dict[str, Any] | None:
+    """{n, rows, note} — 칸이 없거나(예전 Blog-Auto) 모양이 틀리면 None. 틀린 줄·같은 rid 는 빼고 ABLY_REQ_ROWS_MAX 줄까지."""
+    if not isinstance(v, dict) or not isinstance(v.get("rows"), list) or _count(v.get("n"), top=100_000) is None:
+        return None
+    rows: list[dict[str, Any]] = []
+    for x in v["rows"][:ABLY_REQ_ROWS_MAX * 2]:
+        if (r := _ably_req_row(x)) is not None and not any(o["rid"] == r["rid"] for o in rows):
+            rows.append(r)
+    rows = rows[:ABLY_REQ_ROWS_MAX]
+    return {"n": len(rows), "rows": rows, "note": _rt_line(v.get("note"), ABLY_REQ_NOTE_MAX)}
+
+
 # X(트위터) 초안함 (주인 10/25 — Blog-Auto x_drafts.export: X API 없음 · 주인이 'X에 올리기'로 손으로 올림)
 X_STATUSES = ("draft", "posted", "dropped")
 X_TEXT_MAX = 1000  # Blog-Auto 는 X 셈 280 안으로 보냄 — 한 번 더 (긴 글 구독이어도 화면 칸은 이만큼)
@@ -1655,7 +1702,8 @@ def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, A
                            "creator_mall": _creator_mall(data.get("creator_mall")),
                            "earnings": _earnings(data.get("earnings")), "x": _x(data.get("x")),
                            "post_counts": _post_counts(data.get("post_counts")),
-                           "lookbook": _lookbook(data.get("lookbook"))}
+                           "lookbook": _lookbook(data.get("lookbook")),
+                           "ably_requests": _ably_requests(data.get("ably_requests"))}  # 에이블리 링크 부탁 (주인 10/28 — 할 일 탭)
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

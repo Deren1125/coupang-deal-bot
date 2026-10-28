@@ -1,5 +1,6 @@
 /* 오늘 할 일 (주인 10/27 — 손일 하루 5번). 할 일 탭 맨 위 칸(급한 알림만 그 위) · GET /dashboard/api/routine (routine.py).
-   #main 을 다시 그리면 같은 칸을 다시 붙임 (logins.js 틀). 체크는 단추 (app.js 는 입력 칸 커서 동안 그리기를 미룸). */
+   #main 을 다시 그리면 같은 칸을 다시 붙임 (logins.js 틀). 체크는 단추 (app.js 는 입력 칸 커서 동안 그리기를 미룸).
+   그 아래 에이블리 링크 부탁 (10/28): 폰 앱에서 만든 링크를 붙여 넣어 blog.similar_links {blog, pid, links, rid}. */
 'use strict';
 (() => {
 const D = document, W = window;
@@ -14,8 +15,11 @@ const CSS = '#rtp .box{padding:4px 16px 6px;margin-bottom:20px}#rtp .sl{display:
   '#rtp .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}#rtp .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
   '#rtp a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
   '#rtp .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}#rtp .bar i{display:block;height:100%;background:var(--gr)}' +
-  '#rtp .pb .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}';
+  '#rtp .pb .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}' +
+  '#rtp .ab .grow{padding-top:0}#rtp .ab+.ab{background-position:0 0}#rtp .pf .fl{flex:1 1 60%;min-width:0;font-size:16px}' +
+  '#rtp .pf .sm{min-height:48px;font-size:15px;font-weight:600;padding:0 18px}#rtp .er{color:var(--red)}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
+const typed = {}, sent = {}, errs = {};  // 붙여 넣던 글 · 넣은 부탁(다음 목록까지 숨김) · 안 된 이유
 
 function el(t, a, ...kids) {
   const e = D.createElement(t);
@@ -53,7 +57,8 @@ async function load() {
   busy = false;
   const c = data && (data.slots || []).find(s => s.current);
   if (c && c.key !== cur) { cur = c.key; open = {[cur]: true}; }
-  draw();
+  const a = D.activeElement;
+  if (!(a && a.tagName === 'INPUT' && box && box.contains(a))) draw();  // 붙여 넣는 중이면 다음에
   const k = ids().join();
   if (k !== sig && W.dispatchEvent) { sig = k; W.dispatchEvent(new Event('sb-routine')); }  // app.js 가 겹친 할 일을 빼고 다시 그림
   clearTimeout(timer);
@@ -69,22 +74,70 @@ function recount() {
   }
 }
 
-async function check(it) {
-  const v = !it.done;
-  it.done = v; recount(); draw();
+async function send(body) {
   let r = null, d = {};
   try {
     r = await fetch('/dashboard/api/action', {method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: {'Content-Type': 'application/json', 'X-Dash-Token': csrf()},
-      body: JSON.stringify({action: 'routine.done', args: {id: it.id, done: v}, cid: rid(), ctoken: null})});
+      headers: {'Content-Type': 'application/json', 'X-Dash-Token': csrf()}, body: JSON.stringify(body)});
     d = await r.json().catch(() => ({}));
   } catch (x) { r = null; }
-  if (r && r.status === 200 && d.status === 'ok') return;
+  return [r ? r.status : 0, d];
+}
+const why = (s, d, f) => !s ? '인터넷 연결을 확인해 주세요' : s === 401 ? '다시 로그인해 주세요 — 새로고침하면 로그인 화면이 떠요'
+  : s === 403 && d.code === 'csrf' ? '화면이 오래됐어요 — 새로고침해 주세요' : d.text || f;
+
+async function check(it) {
+  const v = !it.done;
+  it.done = v; recount(); draw();
+  const [s, d] = await send({action: 'routine.done', args: {id: it.id, done: v}, cid: rid(), ctoken: null});
+  if (s === 200 && d.status === 'ok') return;
   it.done = !v; recount(); draw();
-  if (!r) toast('인터넷 연결을 확인해 주세요');
-  else if (r.status === 401) toast('다시 로그인해 주세요 — 새로고침하면 로그인 화면이 떠요');
-  else if (r.status === 403 && d.code === 'csrf') toast('화면이 오래됐어요 — 새로고침해 주세요');
-  else toast(d.text || '체크하지 못했어요 — 잠시 뒤 다시');
+  toast(why(s, d, '체크하지 못했어요 — 잠시 뒤 다시'));
+}
+
+// 에이블리 링크 부탁 (주인 10/28) — 넣으면 줄을 숨기고, 블로그 프로그램 결과가 실패면 이유와 함께 다시 보임
+async function put(r, f, b, m) {
+  const v = f.value.trim();
+  if (!v) { m.textContent = '에이블리 앱에서 만든 링크를 먼저 붙여 넣어 주세요'; return; }
+  b.disabled = true; m.textContent = '넣는 중…';
+  const body = {action: 'blog.similar_links', args: {blog: 'issue', pid: r.pid, links: [v], rid: r.rid}, cid: rid(), ctoken: null};
+  let [s, d] = await send(body);
+  if (s === 409 && d.ctoken && W.confirm && W.confirm(d.title || '이대로 넣을까요?')) { body.ctoken = d.ctoken; [s, d] = await send(body); }
+  b.disabled = false;
+  if (s === 202 || (s === 200 && d.status === 'ok')) {
+    sent[r.rid] = 1; delete typed[r.rid]; delete errs[r.rid]; toast('넣었어요'); draw();
+    if (d.id) watch(d.id, r.rid, 0);
+    return;
+  }
+  m.textContent = d.status === 'confirm' ? '취소했어요' : why(s, d, '넣지 못했어요 — 잠시 뒤 다시');
+}
+async function watch(id, k, n) {
+  let x = null;
+  try {
+    const r = await fetch('/dashboard/api/actions?ids=' + id, {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}});
+    x = ((await r.json()).actions || [])[0];
+  } catch (e) { x = null; }
+  if (x && /^(error|rejected|expired)$/.test(x.status)) {
+    delete sent[k]; errs[k] = x.text || '넣지 못했어요 — 다시 넣어 주세요'; toast(errs[k]); draw();
+  } else if (!(x && x.status === 'ok') && n < 60) setTimeout(() => watch(id, k, n + 1), 3000);
+}
+const won = n => n ? n.toLocaleString('ko-KR') + '원' : '';
+function req(r) {
+  const m = el('span', {class: 's' + (errs[r.rid] ? ' er' : ''), role: 'status'}, errs[r.rid] || '');
+  const f = el('input', {class: 'fl', type: 'text', placeholder: '여기에 링크 붙여넣기', autocomplete: 'off', autocapitalize: 'off',
+    spellcheck: 'false', enterkeyhint: 'done', 'aria-label': `${r.name} 에이블리 링크`, oninput: e => { typed[r.rid] = e.currentTarget.value; }});
+  f.value = typed[r.rid] || '';
+  const b = el('button', {class: 'sm ac', type: 'button', onclick: () => put(r, f, b, m)}, '넣기');
+  return el('div', {class: 'it ab', 'data-rid': r.rid}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.name),
+    el('span', {class: 's'}, [r.piece, won(r.price), r.shop].filter(Boolean).join(' · ')),
+    el('span', {class: 's'}, [r.title && `글: ${r.title}`, r.due_text && `발행 ${r.due_text} 전`].filter(Boolean).join(' · ')),
+    el('div', {class: 'bt'}, el('a', {class: 'sm', href: r.url, target: '_blank', rel: 'noopener noreferrer'}, '에이블리에서 열기 ↗')),
+    el('div', {class: 'bt pf'}, f, b), m));
+}
+function ably() {
+  const rs = data && data.ably && data.ably.rows ? data.ably.rows.filter(r => !sent[r.rid]) : [];
+  return rs.length ? [el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `에이블리 링크 부탁 (${rs.length})`)),
+    data.ably.note ? el('p', {class: 'note', style: 'margin:0 0 10px'}, data.ably.note) : null, el('div', {class: 'box'}, rs.map(req))] : [];
 }
 
 function copy(text) {
@@ -142,18 +195,18 @@ function slot(s) {
 
 function draw() {
   if (!box) return;
-  const ok = !!(data && data.slots && data.total);
-  box.hidden = !ok;
-  if (!ok) { box.replaceChildren(); return; }
+  const ok = !!(data && data.slots && data.total), ab = ably();
+  box.hidden = !ok && !ab.length;
+  if (box.hidden) { box.replaceChildren(); return; }
   const bar = el('i');
-  bar.style.width = Math.round(100 * data.done / data.total) + '%';
-  box.replaceChildren(...[
+  if (ok) bar.style.width = Math.round(100 * data.done / data.total) + '%';
+  box.replaceChildren(...[ok ? [
     el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `오늘 할 일 · ${data.done}/${data.total}`),
       el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기')),
     el('div', {class: 'bar'}, bar),
     data.today ? null : el('p', {class: 'note'}, `${data.day} 목록이에요 — 오늘 목록이 아직 안 왔어요`),
     el('div', {class: 'box'}, data.slots.map(slot)),
-    data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null].filter(Boolean));
+    data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab].flat().filter(Boolean));
 }
 
 function mount() {
