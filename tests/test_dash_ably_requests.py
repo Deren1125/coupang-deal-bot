@@ -99,6 +99,9 @@ def test_share_blurb_gives_the_first_ably_link() -> None:
     assert got == {"blog": "issue", "pid": 41, "links": ["https://applink.a-bly.com/aBcD1234"], "rid": "41-12345678"}
     assert ably_link_in("보기 https://zigzag.kr/x 와 (https://m.a-bly.com/goods/5).") == "https://m.a-bly.com/goods/5"
     assert ably_link_in("  https://a-bly.com/app/goods/6?ref=share  ") == "https://a-bly.com/app/goods/6?ref=share"
+    assert ably_link_in("에이블리에서 보기 https://ably.onelink.me/AbCd/x1") == "https://ably.onelink.me/AbCd/x1"  # 앱 공유 짧은 주소
+    with pytest.raises(ActionError):
+        ably_link_in("https://other.onelink.me/AbCd/x1")
     for bad in ("링크 없음", "http://m.a-bly.com/goods/1 보기", "https://a-bly.com.evil.example/x 보기", "https://zigzag.kr/x 보기",
                 "가" * 4001):
         with pytest.raises(ActionError) as e:

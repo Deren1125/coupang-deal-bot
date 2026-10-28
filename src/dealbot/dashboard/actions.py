@@ -652,11 +652,12 @@ def _similar_url(v: Any) -> str:
 
 
 def ably_link_in(text: Any) -> str:
-    """에이블리 앱 '공유' 문구에서 첫 https 에이블리 주소 (a-bly.com · applink.a-bly.com …). 없으면 bad_args."""
+    """에이블리 앱 '공유' 문구에서 첫 https 에이블리 주소 (a-bly.com · applink.a-bly.com · …ably….onelink.me — Blog-Auto
+    ably_requests.HOST_RE 와 같은 곳). 없으면 bad_args."""
     for m in ABLY_IN_TEXT.finditer(_str(text, SIMILAR_TEXT_MAX)):
         u = m.group(0).rstrip(").,]")
         host = (urlparse(u).hostname or "").lower()
-        if any(host == h or host.endswith("." + h) for h in ABLY_HOSTS):
+        if any(host == h or host.endswith("." + h) for h in ABLY_HOSTS) or (host.endswith(".onelink.me") and "ably" in host):
             return _similar_url(u)
     raise ActionError("bad_args", text="붙여 넣은 글에서 에이블리 링크를 찾지 못했어요")
 
