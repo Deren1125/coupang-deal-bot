@@ -65,6 +65,16 @@ def sample(day: str) -> dict:
     ]}
 
 
+@pytest.fixture(autouse=True)
+def _no_live_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """서버에서 돌려도 실제 threads-auto(127.0.0.1:8710) 목록이 섞이지 않게"""
+    from dealbot.dashboard import threads_proxy
+
+    def off(*a: object) -> None:
+        raise ConnectionError("test")
+    monkeypatch.setattr(threads_proxy, "_call", off)
+
+
 # ---------------------------------------------------------------- 1) 거름
 def test_routine_parser_drops_bad_rows_and_clips_text() -> None:
     assert _routine(None) is None and _routine({"day": "2026-10-27"}) is None  # 예전 Blog-Auto (칸 없음)
@@ -127,8 +137,19 @@ def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Pa
 
 
 def test_second_source_merges_by_one_function(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """스레드 세션 몫(threads-auto /api/routine) 자리 — 지금은 늘 [] · 더하면 같은 모양으로 걸러 합침."""
+    """스레드 세션 몫(threads-auto /api/routine) — 꺼져 있으면 [] · 오늘 것만 · 같은 모양으로 걸러 합침."""
+    from dealbot.dashboard import threads_proxy
+
+    def off(*a: object) -> None:
+        raise ConnectionError("no key")
+    monkeypatch.setattr(threads_proxy, "_call", off)
     assert routine.threads_items(bot) == [] and routine.threads_items in routine.EXTRA_SOURCES
+    today_ = tz_now(bot).date().isoformat()
+    row = {"id": "th:x:thback:0", "slot": "s1", "group": "SNS", "title": "스레드 맞팔 1", "copy": [], "links": []}
+    monkeypatch.setattr(threads_proxy, "_call", lambda *a: (200, json.dumps({"day": today_, "items": [row]}).encode(), "application/json"))
+    assert routine.threads_items(bot) == [row]
+    monkeypatch.setattr(threads_proxy, "_call", lambda *a: (200, json.dumps({"day": "2000-01-01", "items": [row]}).encode(), ""))
+    assert routine.threads_items(bot) == []  # 어제 목록은 안 씀
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))
 

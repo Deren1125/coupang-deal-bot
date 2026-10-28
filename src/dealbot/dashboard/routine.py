@@ -50,9 +50,23 @@ def blog_routine(bot: Any) -> dict[str, Any] | None:
 
 
 def threads_items(bot: Any) -> list[dict[str, Any]]:
-    """스레드 세션 몫 — 나중에 threads-auto(127.0.0.1:8710, threads_proxy.py) GET /api/routine 의 items (같은 줄 모양).
-    아직 부르지 않는다: 늘 []."""
-    return []
+    """스레드 세션 몫 — threads-auto(127.0.0.1:8710, threads_proxy._call) GET /api/routine 의 items (같은 줄 모양, 주인 10/27 반자동).
+    threads-auto 가 하루 한 번 읽기만 해서 만든 스레드·인스타 맞팔·팔로우·좋아요·댓글 초안·답글 초안·글 초안. 꺼져 있거나 오늘 것이 아니면 []."""
+    from dealbot.dashboard import threads_proxy
+
+    try:
+        status, raw, _ = threads_proxy._call("/api/routine", None, 3)
+    except (OSError, ConnectionError):
+        return []
+    if status != 200:
+        return []
+    try:
+        got = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return []
+    if not isinstance(got, dict) or got.get("day") != today(bot, time.time()) or not isinstance(got.get("items"), list):
+        return []
+    return got["items"]
 
 
 EXTRA_SOURCES: tuple[Callable[[Any], list[dict[str, Any]]], ...] = (threads_items,)  # 출처를 더할 때는 여기 함수 하나
