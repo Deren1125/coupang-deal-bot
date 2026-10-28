@@ -139,6 +139,7 @@ const {chromium} = require('playwright');
   const alerts = [];
   p.on('dialog', async d => { alerts.push(d.message()); await d.accept(); });
   const inner = process.argv[1], code = process.argv[2], out = {};
+  if (process.argv[3] === 'fix') await p.addInitScript(() => { window.__kkumiFix = 1; });
   const frame = async () => (await p.waitForSelector('iframe')).contentFrame();
   const shape = async () => (await frame()).evaluate(() => [...document.querySelectorAll('.se-text-paragraph,.se-oglink')]
     .map(e => e.matches('.se-oglink') ? 'CARD ' + e.dataset.url : e.textContent.replace(/​/g, '').trim()).filter(Boolean));
@@ -190,7 +191,7 @@ def test_bookmarklet_makes_cards_on_a_mock_editor() -> None:
     env = _playwright_env()
     if env is None:
         pytest.skip("node playwright·크롬 없음")
-    out = subprocess.run([NODE, "-e", RUN, INNER, code()], capture_output=True, text=True, timeout=120, env=env)
+    out = subprocess.run([NODE, "-e", RUN, INNER, code(), "fix"], capture_output=True, text=True, timeout=120, env=env)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     assert got["first"] == ["링크 카드 2/2개 만들었어요\n구분선 2/2개 짧게·가운데\n인용구 1/1개 포스트잇"]
@@ -202,11 +203,22 @@ def test_bookmarklet_makes_cards_on_a_mock_editor() -> None:
     assert got["parts"]["comps"] == [["A", "se-l-default", True], ["B", "se-l-default", True], ["C", "se-l-default", True],
                                      ["Q1", "se-l-quotation_postit", False], ["Q2", "se-l-quotation_postit", False]]
     assert got["parts"]["touched"] == ["A", "A", "C", "Q1"]
-    assert got["again"] == ["고칠 것이 없어요 (링크 카드·구분선·인용구 모두 그대로예요)"] and got["touched2"] == got["parts"]["touched"]
+    assert got["again"] == ["고칠 것이 없어요 (링크 카드가 모두 있어요)"] and got["touched2"] == got["parts"]["touched"]
     assert got["nobutton"] == ["링크 카드 0/1개 만들었어요\n구분선 0/2개 짧게·가운데\n인용구 0/1개 포스트잇\n못 한 것:\n"
                                "https://one.example/a?x=1 — 링크 단추를 못 찾음\n구분선 1번째 — 짧은 선 단추를 못 찾음\n"
                                "구분선 3번째 — 가운데 단추를 못 찾음\n인용구 1번째 — 포스트잇 단추를 못 찾음"]
     assert got["elsewhere"] == ["글쓰기 화면을 못 찾았어요 — 네이버 블로그 글쓰기 화면에서 눌러 주세요"]
+
+
+def test_bookmarklet_leaves_dividers_and_quotes_alone_by_default() -> None:
+    """10/28 주인 아이패드: 구분선·인용구 고치기가 기존 것을 못 고르고 새 짧은 선·빈 포스트잇을 더 넣음 → 기본은 링크 카드만."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    out = subprocess.run([NODE, "-e", RUN, INNER, code()], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["first"] == ["링크 카드 2/2개 만들었어요"] and got["parts"]["touched"] == []
 
 
 # ---------------------------------------------------------------- 3) 대시보드

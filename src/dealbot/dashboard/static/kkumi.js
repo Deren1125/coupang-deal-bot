@@ -158,10 +158,13 @@ try {
     if (why) { lf++; bad.push(u + ' — ' + why); } else n++;
   }
   if (m) out.push('링크 카드 ' + n + '/' + m + '개 만들었어요');
-  const [ln, lm] = await run('구분선', lines, e => short(e) && mid(e), [[short, LINE_OPENERS, LINE_DEFAULT, '짧은 선'], [mid, ALIGN, CENTER, '가운데']]);
-  if (lm) out.push('구분선 ' + ln + '/' + lm + '개 짧게·가운데');
-  const [qn, qm] = await run('인용구', quotes, postit, [[postit, QUOTE_OPENERS, QUOTE_POSTIT, '포스트잇']]);
-  if (qm) out.push('인용구 ' + qn + '/' + qm + '개 포스트잇');
+  // 구분선·인용구 고치기는 끔 (10/28 주인 아이패드: 기존 것을 못 고르고 새 짧은 선·빈 포스트잇을 하나씩 더 넣음) — 붙여넣기 모양으로 맞추는 길을 시험 중
+  if (window.__kkumiFix || W.__kkumiFix) {
+    const [ln, lm] = await run('구분선', lines, e => short(e) && mid(e), [[short, LINE_OPENERS, LINE_DEFAULT, '짧은 선'], [mid, ALIGN, CENTER, '가운데']]);
+    if (lm) out.push('구분선 ' + ln + '/' + lm + '개 짧게·가운데');
+    const [qn, qm] = await run('인용구', quotes, postit, [[postit, QUOTE_OPENERS, QUOTE_POSTIT, '포스트잇']]);
+    if (qm) out.push('인용구 ' + qn + '/' + qm + '개 포스트잇');
+  }
 } finally { W.__kkumi = 0; }
-alert(out.length ? out.join('\n') + (bad.length ? '\n못 한 것:\n' + bad.join('\n') : '') : '고칠 것이 없어요 (링크 카드·구분선·인용구 모두 그대로예요)');
+alert(out.length ? out.join('\n') + (bad.length ? '\n못 한 것:\n' + bad.join('\n') : '') : '고칠 것이 없어요 (링크 카드가 모두 있어요)');
 })().catch(e => alert('꾸미기 오류: ' + e));
