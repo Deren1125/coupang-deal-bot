@@ -180,7 +180,7 @@ const tick = () => new Promise(r => setTimeout(r, 5));
   const box = main.children.find(c => c.attrs.id === 'rtp');
   const its = box.all(c => c.className.startsWith('it'));
   out.big = its.map(i => i.all(c => c.tagName === 'BUTTON' && c.className === 'sm' && c.parentNode.className === 'bt pb').map(b => b.textContent));
-  out.hint = its.map(i => i.all(c => c.className === 's').map(c => c.textContent).filter(t => t.startsWith('링크 카드')));
+  out.hint = its.map(i => i.all(c => c.className === 's').map(c => c.textContent).filter(t => t.includes('꾸미기')));
   const press = async label => { its[0].all(c => c.tagName === 'BUTTON' && c.textContent === label)[0].click(); await tick(); await tick(); out.toasts.push(toast.textContent); };
   await press('제목 복사'); await press('본문 복사'); await press('태그 복사');
   out.bodyLeft = body.children.length;  // 화면 밖 칸은 복사 뒤 지움
@@ -211,7 +211,8 @@ def test_routine_js_copy_buttons(bot: DealBot, tmp_path: Path) -> None:
     p = view["slots"][0]["items"][0]["paste"]
     got = _run(node, view, "rich")
     assert got["big"] == [["제목 복사", "본문 복사", "태그 복사"], ["제목 복사", "본문 복사"], []]  # 태그가 없으면 태그 단추 없음
-    assert got["hint"] == [["링크 카드 2개 — 붙여 넣은 뒤 책갈피 '꾸미기'를 눌러요"], [], []]
+    hint = "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기"  # 꾸미기 v4 (10/29)
+    assert got["hint"] == [[hint], [hint], []]
     assert got["clip"] == ["적금 비교 정리", "#적금 #재테크 #적금통장"] and got["toasts"] == ["복사했어요"] * 3
     assert got["rich"] == [["text/html", "text/html", p["html"]], ["text/plain", "text/plain", p["text"]]]  # 한 번에 둘 다
     assert got["exec"] == [] and got["bodyLeft"] == 0 and got["inCard"] == 0
@@ -228,5 +229,5 @@ def test_routine_js_stays_local_and_never_injects_html() -> None:
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "innerHTML" not in js and "outerHTML" not in js and "insertAdjacentHTML" not in js and "document.write" not in js
     assert "ClipboardItem" in js and "'text/html'" in js and "'text/plain'" in js and "execCommand('copy')" in js and "DOMParser" in js
-    for word in ("제목 복사", "본문 복사", "태그 복사", "링크 카드", "꾸미기"):
+    for word in ("제목 복사", "본문 복사", "태그 복사", "뜨는 칸에 붙여넣기", "꾸미기"):
         assert word in js, word

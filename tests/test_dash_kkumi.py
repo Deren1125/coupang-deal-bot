@@ -1,10 +1,10 @@
-"""'꾸미기' 책갈피 (주인 10/27 — 붙여 넣은 글의 링크 카드를 주인 아이패드 사파리에서 만듦, 서버는 네이버에 로그인하지 않음).
+"""'꾸미기' 책갈피 (주인 10/27 — 서버는 네이버에 로그인하지 않고 주인이 아이패드 사파리에서 붙여 넣음 · 10/29 v4: 위에서부터 차례로 쌓기).
 
 1) kkumi.bookmarklet(): static/kkumi.js 를 줄여 "javascript:" + encodeURIComponent — node 의 encodeURIComponent 와 같고 new Function 으로 읽힘 ·
    바깥 요청 없음.
-2) 가짜 글쓰기 화면(iframe 안 · 진짜 크롬, playwright 가 있을 때만): 주소만 있는 줄 둘 → 카드 둘 (주소 줄 바로 아래) · 이미 카드가 있는 줄·
-   글 속 주소는 그대로 · 긴 구분선 → 짧은 선·가운데, 기본 인용구 → 포스트잇 (이미 맞는 것은 누르지 않음) · 다시 누르면 '고칠 것이 없어요' ·
-   단추가 없으면 종류마다 이유와 함께 0/m.
+2) 가짜 글쓰기 화면(iframe 안 · 진짜 크롬, playwright 가 있을 때만) — 10/29 아이패드에서 본 대로: 스크립트로 넣은 것은 늘 맨 끝 · 붙여넣기
+   신호는 맨 끝에 붙음 · 위 정렬 단추는 커서가 있는 글 덩어리에 · '본문 추가'로 맨 끝 새 줄. 칸에 붙여 넣은 글(표시 줄·인용구·주소 줄·태그 줄)이
+   글 → 짧은 선 → 글 → 포스트잇(안에 글) → 글 → 카드 … 차례로 쌓이고 태그는 발행 설정창에 · 글쓰기 화면이 아니면 알림 하나.
 3) GET /dashboard/api/kkumi (로그인 아래) · static/kkumi.js (공개 파일) · 연결 탭 '꾸미기 버튼 설치' 칸 (logins.js — 펼치면 4단계 + 코드 복사).
 """
 
@@ -42,12 +42,13 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     src = kkumi.SRC.read_text(encoding="utf-8")
     js = code()
     assert js == kkumi.minify(src) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
-    assert len(kkumi.bookmarklet()) < 12000  # 사파리 책갈피 주소 칸에 붙여 넣는 길이 (시험한 책갈피는 5KB · 구분선·인용구까지 11KB 쯤)
+    assert len(kkumi.bookmarklet()) < 26000  # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB 그대로 들어가고 돎)
     for net in ("fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "import(", ".src=", "location", "open(", "http://"):
         assert net not in js, net
-    for word in ("링크 카드 ", "개 만들었어요", "se-text-paragraph", "oglink", "se-popup-button-confirm", "15000", "8000", "pointerdown",
-                 "se-horizontalLine", "se-l-default", "align-drop-down-with-justify", "quotation_postit", "짧게·가운데", "포스트잇"):
+    for word in ("ClipboardEvent('paste'", "DataTransfer", "se-canvas-bottom-button", "oglink", "se-popup-button-confirm", "quotation_postit",
+                 "se-horizontalLine", "se-l-default", "publish_btn", "tag_input", "여기에 붙여넣기", "모두 됐어요", "placeholder"):
         assert word in js, word
+    assert "data-value='left'" not in js and "execCommand" not in js  # 왼쪽으로 바꾸지 않음 · 글자 고치기 없음
     assert kkumi.view() == {"code": kkumi.bookmarklet(), "len": len(kkumi.bookmarklet()), "steps": list(kkumi.STEPS)} and len(kkumi.STEPS) == 4
 
 
@@ -69,67 +70,73 @@ def test_bookmarklet_parses_and_matches_encode_uri_component() -> None:
 
 
 # ---------------------------------------------------------------- 2) 가짜 글쓰기 화면
-# 네이버 SmartEditor 처럼: 툴바 링크(oglink) 단추 → 팝업(주소 칸·검색·미리보기·확인). 확인 → 커서가 있던 문단 바로 아래에 카드.
-# 검색 뒤 0.4초 동안 '불러오는 중' 표시, 그 뒤 미리보기 — 꾸미기는 이것을 기다려야 한다.
-INNER = r"""<html><head><meta charset="utf-8"></head><body>
-<div class="se-toolbar"><div class="se-popup-oglink" style="display:none"><input placeholder="URL을 입력하세요">
-<button class="se-popup-oglink-button">검색</button><div class="se-popup-loading" style="display:none">…</div><div class="pv"></div>
-<button class="se-popup-button-confirm">확인</button></div></div>
-<div class="se-content" contenteditable="true">
-<div class="se-component se-text"><p class="se-text-paragraph">소개 글이에요.</p>
-<p class="se-text-paragraph"><span>https://one.example/a?x=1</span></p>
-<p class="se-text-paragraph">글 속 주소 https://mid.example 는 그대로</p>
-<p class="se-text-paragraph">https://two.example/b</p>
-<p class="se-text-paragraph"><span>&#8203;</span></p></div>
-<div class="se-component se-oglink" data-url="https://two.example/b">이미 있는 카드</div>
-<div class="se-component se-text"><p class="se-text-paragraph"><b>https://three.example/c</b></p></div>
-<div class="se-component se-horizontalLine se-l-line1" data-k="A"><div class="se-section se-section-horizontalLine"><hr></div></div>
-<div class="se-component se-horizontalLine se-l-default" data-k="B"><div class="se-section se-section-horizontalLine se-section-align-center"><hr></div></div>
-<div class="se-component se-horizontalLine se-l-default" data-k="C"><div class="se-section se-section-horizontalLine"><hr></div></div>
-<div class="se-component se-quotation se-l-default" data-k="Q1"><blockquote><p class="se-text-paragraph">인용 하나</p></blockquote></div>
-<div class="se-component se-quotation se-l-quotation_postit" data-k="Q2"><blockquote><p class="se-text-paragraph">이미 포스트잇</p></blockquote></div>
+# 10/29 아이패드에서 본 네이버 에디터처럼: 붙여넣기 신호·툴바로 넣은 것은 맨 끝에 (포스트잇 안에 커서가 있으면 그 안에) · 위 정렬 단추는
+# 지금 정렬과 마지막 글 덩어리를 바꿈 · 넣은 선은 지금 정렬을 따름 · 맨 아래 '본문 추가'는 맨 끝 새 줄(포스트잇에서 나옴) · 링크 팝업 · 발행 설정창 태그 칸.
+INNER = r"""<html><body>
+<div class="se-documentTitle"><p class="se-text-paragraph">제목</p></div>
+<div class="se-content" contenteditable="true"><div class="se-component se-text"><p class="se-text-paragraph"><span class="se-placeholder __se_placeholder">글감과 함께 나의 일상을 기록해보세요!</span></p></div></div>
+<div id="tb">
+<button data-name="horizontal-line">선</button><button data-name="horizontal-line-select">v</button>
+<button data-name="quotation">인용</button><button data-name="quotation-select">v</button>
+<button data-name="oglink">링크</button>
+<button class="publish_btn">발행</button>
+<button class="se-canvas-bottom-button __edge-area">본문 추가</button>
+<button data-value="left">왼</button><button data-value="center">가</button>
 </div>
 <script>
-const pop = document.querySelector('.se-popup-oglink'), inp = pop.querySelector('input'), pv = pop.querySelector('.pv'),
-  ld = pop.querySelector('.se-popup-loading');
-let at = null, url = '';
-window.touched = [];
-if (TOOL) {
-  // 구분선·인용구 (서버 봇 editor.py 와 Blog-Auto test_editor_mock 모양): 선을 누르면 모양 단추가 뜸 · 정렬 메뉴 · 인용구 모양 메뉴
-  document.querySelector('.se-toolbar').insertAdjacentHTML('beforeend', `<button data-name="horizontal-line">ㅡ</button>
-<button data-name="horizontal-line-select">v</button><div id="lstyles" style="display:none"><button data-name="horizontal-line-style" data-value="default">짧은 선</button>
-<button data-value="line1">긴 선</button></div><button data-name="align-drop-down-with-justify">정렬</button><span id="aligns" style="display:none">
-<button data-value="left">왼쪽</button><button data-value="center">가운데</button></span><button data-name="quotation-select">인용 v</button>
-<div id="qstyles" style="display:none"><button data-value="quotation_postit">포스트잇</button></div>`);
-  const $ = q => document.querySelector(q), lst = $('#lstyles');
-  let sel = null;
-  document.addEventListener('click', e => {
-    if (e.target.closest('.se-toolbar')) return;
-    sel = e.target.closest('.se-horizontalLine,.se-quotation');
-    if (sel) window.touched.push(sel.dataset.k);
-    lst.style.display = sel && sel.matches('.se-horizontalLine') ? 'block' : 'none';
-  });
-  $('#lstyles [data-value=default]').onclick = () => { if (sel && sel.matches('.se-horizontalLine')) sel.className = sel.className.replace(/se-l-\S+/, 'se-l-default'); lst.style.display = 'none'; };
-  $('[data-name=align-drop-down-with-justify]').onclick = () => { $('#aligns').style.display = 'inline'; };
-  $('#aligns [data-value=center]').onclick = () => { $('#aligns').style.display = 'none';
-    const x = sel && sel.matches('.se-horizontalLine') && sel.querySelector('.se-section');
-    if (x) x.className = x.className.replace(/ ?se-section-align-\S+/g, '') + ' se-section-align-center'; };
-  $('[data-name=quotation-select]').onclick = () => { $('#qstyles').style.display = 'block'; };
-  $('[data-value=quotation_postit]').onclick = () => { $('#qstyles').style.display = 'none';
-    if (sel && sel.matches('.se-quotation')) sel.className = sel.className.replace(/se-l-\S+/, 'se-l-quotation_postit'); };
-  const b = document.createElement('button'); b.setAttribute('data-name', 'oglink'); b.textContent = 'L';
-  document.querySelector('.se-toolbar').prepend(b);
-  b.onclick = () => { const s = getSelection(); at = s.rangeCount ? s.getRangeAt(0).startContainer : null;
-    at = at && (at.nodeType === 1 ? at : at.parentElement).closest('.se-text-paragraph'); pv.replaceChildren(); inp.value = ''; pop.style.display = 'block'; };
-}
-pop.querySelector('.se-popup-oglink-button').onclick = () => { url = inp.value; ld.style.display = 'block';
-  setTimeout(() => { ld.style.display = 'none'; const i = document.createElement('img'); i.className = 'se-oglink-thumbnail'; pv.append(i); }, 400); };
-pop.querySelector('.se-popup-button-confirm').onclick = () => {
-  if (!at || !url || !pv.firstChild) return;
-  const c = document.createElement('div'); c.className = 'se-component se-oglink'; c.dataset.url = url; c.textContent = '카드 ' + url;
-  at.after(c); pop.style.display = 'none';
+const C = document.querySelector('.se-content');
+let inPostit = null, selected = null, align = 'left';
+document.querySelector("[data-value='left']").onclick = () => { align = 'left'; const t = [...C.querySelectorAll('.se-component.se-text')].pop(); if (t && t.querySelector('.se-section')) t.querySelector('.se-section').className = 'se-section se-section-align-left'; };
+document.querySelector("[data-value='center']").onclick = () => { align = 'center'; const t = [...C.querySelectorAll('.se-component.se-text')].pop(); if (t && t.querySelector('.se-section')) t.querySelector('.se-section').className = 'se-section se-section-align-center'; };
+const add = el => { C.append(el); return el; };
+const comp = (cls, html) => { const d = document.createElement('div'); d.className = 'se-component ' + cls; d.innerHTML = html; return d; };
+C.addEventListener('paste', e => {
+  e.preventDefault();
+  const h = e.clipboardData.getData('text/html');
+  const doc = new DOMParser().parseFromString(h, 'text/html');
+  const ps = [...doc.body.querySelectorAll('p')];
+  // 빈 첫 줄 정리
+  const first = C.querySelector('.se-component.se-text');
+  if (first && C.children.length === 1 && first.querySelector('.se-placeholder')) first.remove();
+  for (const p of ps) {
+    const t = p.textContent;
+    if (inPostit) { const q = document.createElement('p'); q.className = 'se-text-paragraph'; q.textContent = t; inPostit.querySelector('.qbox').append(q); }
+    else { const lastc = C.lastElementChild; if (lastc && /se-text/.test(lastc.className) && !lastc.textContent) { lastc.querySelector('p').textContent = t; continue; } const c = add(comp('se-text', '<div class="se-section se-section-align-' + align + '"><p class="se-text-paragraph"></p></div>')); c.querySelector('p').textContent = t; }
+  }
+});
+const menu = (id, attrs, label, fn) => { if (document.getElementById(id)) return; const b = document.createElement('button'); b.id = id; for (const k in attrs) b.setAttribute(k, attrs[k]); b.textContent = label; b.onclick = () => { fn(); b.remove(); }; document.getElementById('tb').append(b); };
+const selectComp = c => { selected = c; document.querySelectorAll('.fbar').forEach(x => x.remove());
+  const bar = document.createElement('div'); bar.className = 'fbar'; bar.style.cssText = 'position:relative';
+  const al = document.createElement('button'); al.className = 'zz-al'; al.textContent = '≡';
+  al.onclick = () => { const o = document.createElement('button'); o.className = 'zz-opt'; o.setAttribute('data-value', 'center'); o.textContent = '가'; o.onclick = () => { selected.querySelector('.se-section').className = 'se-section se-section-align-center'; o.remove(); }; bar.append(o); };
+  const st = document.createElement('button'); st.className = 'zz-st'; st.textContent = '—';
+  const tr = document.createElement('button'); tr.className = 'zz-tr'; tr.textContent = '🗑'; tr.onclick = () => { if (selected) { selected.remove(); selected = null; } bar.remove(); };
+  bar.append(al, st, tr); c.before(bar); };
+document.querySelector("[data-name='horizontal-line-select']").onclick = () => menu('ld', {'data-value': 'default', 'data-name': 'horizontal-default'}, '기본', () => {
+  const c = comp('se-horizontalLine se-l-default', '<div class="se-section se-section-align-' + align + '"><hr></div>');
+  if (inPostit) { inPostit.after(c); inPostit = null; } else add(c);
+  selectComp(c);
+  
+});
+document.addEventListener('click', e => { if (e.target.getAttribute && e.target.getAttribute('data-name') === 'align') menu('ac', {'data-value': 'center'}, '가운데', () => { if (selected) selected.querySelector('.se-section').classList.add('se-section-align-center'); }); }, true);
+document.querySelector("[data-name='quotation-select']").onclick = () => menu('qp', {'data-value': 'quotation_postit'}, '포스트잇', () => {
+  const c = add(comp('se-quotation se-l-quotation_postit', '<div class="qbox"></div>')); inPostit = c;
+});
+document.querySelector("[data-name='oglink']").onclick = () => {
+  const pop = document.createElement('div'); pop.className = 'se-popup-oglink';
+  pop.innerHTML = '<input placeholder="URL"><button class="se-popup-oglink-button">검색</button><button class="se-popup-button-confirm">확인</button>';
+  document.body.append(pop);
+  pop.querySelector('.se-popup-oglink-button').onclick = () => { const i = document.createElement('img'); pop.append(i); };
+  pop.querySelector('.se-popup-button-confirm').onclick = () => { const u = pop.querySelector('input').value; const c = comp('se-oglink', '<a>' + u + '</a>'); if (inPostit) { inPostit.after(c); inPostit = null; } else add(c); pop.remove(); };
 };
-</script></body></html>"""
+document.querySelector('.se-canvas-bottom-button').onclick = () => { inPostit = null; add(comp('se-text', '<div class="se-section se-section-align-' + align + '"><p class="se-text-paragraph"></p></div>')); };
+document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<span class="chips"></span><input class="tag_input">'; document.body.append(d);
+  d.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { d.querySelector('.chips').textContent += ' #' + e.target.value; e.target.value=''; } }); };
+</script></body></html>
+"""
+
+# 대시보드 '본문 복사'와 같은 모양 (Blog-Auto paste 표시 줄 모드): 가운데 글 · \u2063 줄 = 구분선 자리 · 인용구 · 주소 줄 · 끝에 \u2064 태그 줄
+PASTED = "<p style=\"text-align:center\">[\uc2dc\ud5d8 2] \uac00\uc6b4\ub370 \uc815\ub82c \uae00 \u2014 \uc800\uc7a5\ud558\uc9c0 \uc54a\ub294 \uae00</p><p style=\"text-align:center\"><br></p><p style=\"text-align:center\">\uac00\uc6b4\ub370 \uc815\ub82c \uccab \ubb38\ub2e8\uc774\uc5d0\uc694.</p><p style=\"text-align:center\">\ub458\uc9f8 \uc904\ub3c4 \uac00\uc6b4\ub370\uc608\uc694.</p><p>\u2063</p><p style=\"text-align:center\">\uad6c\ubd84\uc120 \uc544\ub798\ub3c4 \uac00\uc6b4\ub370\uc608\uc694.</p><blockquote><p style=\"text-align:center\">\ud3ec\uc2a4\ud2b8\uc787 \uae00\uc774\uc5d0\uc694.</p><p style=\"text-align:center\">\ub458\uc9f8 \uc904\uc774\uc5d0\uc694.</p></blockquote><p style=\"text-align:center\">\ud3ec\uc2a4\ud2b8\uc787 \uc544\ub798 \uac00\uc6b4\ub370 \ubb38\ub2e8\uc774\uc5d0\uc694.</p><p style=\"text-align:center\">https://t.me/Derens_tip</p><p style=\"text-align:center\">\uce74\ub4dc \uc544\ub798 \uac00\uc6b4\ub370 \ubb38\ub2e8\uc774\uc5d0\uc694.</p><p>\u2063</p><p style=\"text-align:center\">\ub9c8\uc9c0\ub9c9 \uac00\uc6b4\ub370 \ubb38\ub2e8\uc774\uc5d0\uc694.</p><p>\u2064\u200d\u200d\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200d\u200c\u200c\u200d\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u200d\u200c\u200d\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200c\u200d\u200d\u200d\u200c\u200c\u200c\u200d\u200d\u200c\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200d\u200c\u200c\u200c\u200d\u200c\u200d\u200d\u200d\u200c\u200c\u200d\u200d\u200d\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200d\u200c\u200d\u200d\u200d\u200d\u200c\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200c\u200d\u200d\u200d\u200c\u200c\u200c\u200d\u200d\u200c\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200c\u200d\u200d\u200d\u200c\u200c\u200d\u200d\u200d\u200d\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200c\u200d\u200d\u200d\u200c\u200d\u200c\u200c\u200c\u200c\u200d\u200d\u200c\u200c\u200d\u200d\u200d\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u200d\u200c\u200d\u200d\u200d\u200d\u200c\u200d\u200d\u200d\u200c\u200c\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u200d\u200c\u200d\u200d\u200d\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200d\u200c\u200d\u200d\u200c\u200c\u200d\u200c\u200d\u200c\u200c\u200d\u200c\u200d\u200d\u200d\u200d\u200c\u200c</p>"
 
 RUN = r"""
 const {chromium} = require('playwright');
@@ -138,33 +145,29 @@ const {chromium} = require('playwright');
   const p = await b.newPage();
   const alerts = [];
   p.on('dialog', async d => { alerts.push(d.message()); await d.accept(); });
-  const inner = process.argv[1], code = process.argv[2], out = {};
-  if (process.argv[3] === 'fix') await p.addInitScript(() => { window.__kkumiFix = 1; });
-  const frame = async () => (await p.waitForSelector('iframe')).contentFrame();
-  const shape = async () => (await frame()).evaluate(() => [...document.querySelectorAll('.se-text-paragraph,.se-oglink')]
-    .map(e => e.matches('.se-oglink') ? 'CARD ' + e.dataset.url : e.textContent.replace(/​/g, '').trim()).filter(Boolean));
-  const parts = async () => (await frame()).evaluate(() => ({touched: window.touched.slice(),
-    comps: [...document.querySelectorAll('.se-horizontalLine,.se-quotation')].map(e => [e.dataset.k, (e.className.match(/se-l-\S+/) || [''])[0],
-      /se-section-align-center/.test((e.querySelector('.se-section') || e).className)])}));
-  const press = async () => { await p.evaluate(code); for (let i = 0; i < 100 && alerts.length === out.n; i++) await p.waitForTimeout(100); };
-  await p.setContent('<iframe id="mainFrame" style="width:900px;height:600px"></iframe>');
-  await p.$eval('iframe', (f, h) => { f.srcdoc = h; }, inner.replaceAll('TOOL', 'true'));
-  await (await frame()).waitForSelector('.se-content');
-  out.n = 0; await press();
-  out.first = alerts.slice(); out.shape = await shape(); out.parts = await parts();
-  out.n = alerts.length; await press();
-  out.again = alerts.slice(1); out.touched2 = await (await frame()).evaluate(() => window.touched);
-  // 링크 단추가 없는 화면: 이유와 함께 0/1
-  await p.$eval('iframe', (f, h) => { f.srcdoc = h; }, inner.replaceAll('TOOL', 'false').replace('https://two.example/b</p>', 'x</p>')
-    .replace('https://three.example/c', 'z'));
-  await p.waitForTimeout(300);
-  await (await frame()).waitForSelector('.se-content');
-  out.n = alerts.length; await press();
-  out.nobutton = alerts.slice(2);
-  // 글쓰기 화면이 아닌 곳
+  const [inner, code, pasted] = process.argv.slice(1), out = {};
+  await p.setContent('<iframe id="mainFrame" style="width:900px;height:700px"></iframe>');
+  await p.$eval('iframe', (f, h) => { f.srcdoc = h; }, inner);
+  const frame = await (await p.waitForSelector('iframe')).contentFrame();
+  await frame.waitForSelector('.se-content');
+  p.evaluate(code);
+  await frame.waitForSelector('[aria-label="여기에 붙여넣기"]');
+  await frame.evaluate(h => { const box = document.querySelector('[aria-label="여기에 붙여넣기"]'), dt = new DataTransfer();
+    dt.setData('text/html', h); dt.setData('text/plain', 'x');
+    box.dispatchEvent(new ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt})); }, pasted);
+  for (let i = 0; i < 400 && !alerts.length; i++) await p.waitForTimeout(100);
+  out.alert = alerts[0] || '';
+  out.comps = await frame.evaluate(() => [...document.querySelectorAll('.se-content > .se-component')].map(c => {
+    const k = /horizontalLine/.test(c.className) ? 'LINE' : /quotation/.test(c.className) ? 'POSTIT' : /oglink/.test(c.className) ? 'CARD' : 'TEXT';
+    const al = /align-center/.test((c.querySelector('.se-section') || {}).className || '') ? ' C' : '';
+    return k + al + (k === 'LINE' ? '' : ' ' + c.textContent.trim().slice(0, 14));
+  }).filter(x => x !== 'TEXT  ' && x !== 'TEXT C ' && x.trim() !== 'TEXT'));
+  out.tags = await frame.evaluate(() => (document.querySelector('.chips') || {}).textContent || '');
   await p.setContent('<p>다른 화면</p>');
-  out.n = alerts.length; await press();
-  out.elsewhere = alerts.slice(3);
+  const n = alerts.length;
+  await p.evaluate(code);
+  for (let i = 0; i < 50 && alerts.length === n; i++) await p.waitForTimeout(100);
+  out.elsewhere = alerts.slice(n);
   console.log(JSON.stringify(out));
   await b.close();
 })().catch(e => { console.error(String(e)); process.exit(2); });
@@ -187,38 +190,23 @@ def _playwright_env() -> dict[str, str] | None:
     return env if ok.returncode == 0 else None
 
 
-def test_bookmarklet_makes_cards_on_a_mock_editor() -> None:
+def test_bookmarklet_builds_the_post_top_down_on_a_mock_editor() -> None:
     env = _playwright_env()
     if env is None:
         pytest.skip("node playwright·크롬 없음")
-    out = subprocess.run([NODE, "-e", RUN, INNER, code(), "fix"], capture_output=True, text=True, timeout=120, env=env)
+    out = subprocess.run([NODE, "-e", RUN, INNER, code(), PASTED], capture_output=True, text=True, timeout=120, env=env)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    assert got["first"] == ["링크 카드 2/2개 만들었어요\n구분선 2/2개 짧게·가운데\n인용구 1/1개 포스트잇"]
-    assert got["shape"] == ["소개 글이에요.", "https://one.example/a?x=1", "CARD https://one.example/a?x=1",
-                            "글 속 주소 https://mid.example 는 그대로", "https://two.example/b", "CARD https://two.example/b",
-                            "https://three.example/c", "CARD https://three.example/c",  # 주소 줄은 남기고 바로 아래 카드 · 있던 카드는 그대로
-                            "인용 하나", "이미 포스트잇"]
-    # 긴 선 A → 짧은 선 + 가운데 · 가운데가 아닌 짧은 선 C → 가운데 · 기본 인용구 Q1 → 포스트잇. 이미 맞는 B·Q2 는 누르지도 않음
-    assert got["parts"]["comps"] == [["A", "se-l-default", True], ["B", "se-l-default", True], ["C", "se-l-default", True],
-                                     ["Q1", "se-l-quotation_postit", False], ["Q2", "se-l-quotation_postit", False]]
-    assert got["parts"]["touched"] == ["A", "A", "C", "Q1"]
-    assert got["again"] == ["고칠 것이 없어요 (링크 카드가 모두 있어요)"] and got["touched2"] == got["parts"]["touched"]
-    assert got["nobutton"] == ["링크 카드 0/1개 만들었어요\n구분선 0/2개 짧게·가운데\n인용구 0/1개 포스트잇\n못 한 것:\n"
-                               "https://one.example/a?x=1 — 링크 단추를 못 찾음\n구분선 1번째 — 짧은 선 단추를 못 찾음\n"
-                               "구분선 3번째 — 가운데 단추를 못 찾음\n인용구 1번째 — 포스트잇 단추를 못 찾음"]
-    assert got["elsewhere"] == ["글쓰기 화면을 못 찾았어요 — 네이버 블로그 글쓰기 화면에서 눌러 주세요"]
-
-
-def test_bookmarklet_leaves_dividers_and_quotes_alone_by_default() -> None:
-    """10/28 주인 아이패드: 구분선·인용구 고치기가 기존 것을 못 고르고 새 짧은 선·빈 포스트잇을 더 넣음 → 기본은 링크 카드만."""
-    env = _playwright_env()
-    if env is None:
-        pytest.skip("node playwright·크롬 없음")
-    out = subprocess.run([NODE, "-e", RUN, INNER, code()], capture_output=True, text=True, timeout=120, env=env)
-    assert out.returncode == 0, out.stderr
-    got = json.loads(out.stdout)
-    assert got["first"] == ["링크 카드 2/2개 만들었어요"] and got["parts"]["touched"] == []
+    assert got["alert"].startswith("모두 됐어요") and "링크 카드 1/1 · 구분선 2/2 · 포스트잇 1/1 · 태그 3/3" in got["alert"], got["alert"]
+    assert "포스트잇: 글 안 → 나옴" in got["alert"]
+    kinds = [c.split(" ")[0] for c in got["comps"]]
+    assert [k for i, k in enumerate(kinds) if not (k == "TEXT" and i and kinds[i - 1] == "TEXT")] == \
+        ["TEXT", "LINE", "TEXT", "POSTIT", "TEXT", "CARD", "TEXT", "LINE", "TEXT"], got["comps"]  # 맨 끝에 차례로 쌓아 원래 차례 그대로
+    assert all(c.startswith("LINE C") for c in got["comps"] if c.startswith("LINE"))  # 가운데 글 → 가운데 선
+    assert any("포스트잇 글이에요" in c for c in got["comps"] if c.startswith("POSTIT"))  # 인용구 글은 포스트잇 안에
+    assert sum(k == "CARD" for k in kinds) == 1 and got["comps"][kinds.index("CARD") - 1].endswith("https://t.me/D")  # 주소 줄 바로 아래 카드
+    assert got["tags"].split() == ["#가운데시험", "#데런로그", "#책갈피"]
+    assert got["elsewhere"] == ["꾸미기: 글쓰기 화면이 아니에요"]
 
 
 # ---------------------------------------------------------------- 3) 대시보드

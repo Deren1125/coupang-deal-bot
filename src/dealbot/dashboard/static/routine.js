@@ -177,7 +177,7 @@ const big = (label, f) => el('button', {class: 'sm', type: 'button', onclick: f}
 function paste(p) {
   return [el('div', {class: 'bt pb'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => rich(p)),
     p.tag_text ? big('태그 복사', () => copy(p.tag_text)) : null),
-  p.cards ? el('span', {class: 's'}, `링크 카드 ${p.cards}개 — 붙여 넣은 뒤 책갈피 '꾸미기'를 눌러요`) : null];
+  el('span', {class: 's'}, "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기")];
 }
 
 function item(it) {
