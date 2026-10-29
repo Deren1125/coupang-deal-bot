@@ -1430,7 +1430,24 @@ def _routine(v: Any, media_base: str | None = None) -> dict[str, Any] | None:
     for x in v["items"][:ROUTINE_ITEMS_MAX]:
         if (it := _routine_item(x, keys, media_base=media_base)) is not None and not any(i["id"] == it["id"] for i in items):
             items.append(it)
-    return {"day": v["day"], "slots": slots, "items": items, "overflow": _count(v.get("overflow"), top=1000) or 0}
+    return {"day": v["day"], "slots": slots, "items": items, "overflow": _count(v.get("overflow"), top=1000) or 0,
+            "times": _routine_times(v.get("times"))}
+
+
+_ROUTINE_TIME_RE = re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|바로)$")
+
+
+def _routine_times(v: Any) -> list[dict[str, Any]]:
+    """블로그별 예약 추천 시각 [{blog, name, times, note}] (주인 10/29 — Blog-Auto routine.best_times). 블로그마다 한 줄 · 틀린 줄은 뺌."""
+    out: list[dict[str, Any]] = []
+    for x in v[:len(ROUTINE_BLOGS)] if isinstance(v, list) else []:
+        if not isinstance(x, dict) or x.get("blog") not in ROUTINE_BLOGS or not x.get("blog") or any(o["blog"] == x["blog"] for o in out):
+            continue
+        times = [t for t in x.get("times")[:8] if isinstance(t, str) and _ROUTINE_TIME_RE.match(t)] if isinstance(x.get("times"), list) else []
+        if times:
+            out.append({"blog": x["blog"], "name": _rt_line(x.get("name"), 10) or x["blog"], "times": times,
+                        "note": _rt_line(x.get("note"), 80)})
+    return out
 
 
 def _shopconnect(v: Any) -> dict[str, Any] | None:

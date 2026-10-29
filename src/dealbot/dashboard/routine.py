@@ -177,4 +177,5 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
         slots.append({**s, "items": its, "done": sum(i["done"] for i in its), "total": len(its),
                       "min_left": sum(i["min"] for i in its if not i["done"]), "current": s["key"] == cur})
     return {"day": r["day"], "today": r["day"] == today(bot, now), "slots": slots, "overflow": r["overflow"],
-            "done": sum(s["done"] for s in slots), "total": sum(s["total"] for s in slots), "ably": ably}
+            "done": sum(s["done"] for s in slots), "total": sum(s["total"] for s in slots), "ably": ably,
+            "times": list(r.get("times") or [])}

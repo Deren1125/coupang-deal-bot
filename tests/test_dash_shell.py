@@ -142,6 +142,9 @@ ROUTINE_JS_GZIP_MAX = 5 * 1024 + 768
 # → 14.75 KB / gzip 5.9 KB (15123 B / 6066 B)
 ROUTINE_JS_MAX = 15 * 1024
 ROUTINE_JS_GZIP_MAX = 6 * 1024
+# 10/29: '블로그별 예약 추천 시각' 펼침 칸 (주인 '각 블로그 별로 예약하면 좋을 시간 대시보드에') → 15.4 KB / gzip 6.1 KB (15813 B / 6287 B)
+ROUTINE_JS_MAX = 16 * 1024
+ROUTINE_JS_GZIP_MAX = 6 * 1024 + 384
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

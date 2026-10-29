@@ -315,3 +315,20 @@ def test_routine_js_mounts_on_the_todo_tab_and_checks(bot: DealBot, tmp_path: Pa
                           str(STATIC / "routine.js"), json.dumps(empty, ensure_ascii=False)], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == {"first": "rtp", "hidden": True}
+
+
+def test_best_times_pass_through_and_bad_rows_drop(bot: DealBot, tmp_path: Path) -> None:
+    """블로그별 예약 추천 시각 (주인 10/29 — Blog-Auto routine.best_times) — 블로그마다 한 줄, 시각은 HH:MM 또는 '바로'만."""
+    times = [{"blog": "hotdeal", "name": "핫딜", "times": ["바로"], "note": "딜이 끝나기 전에"},
+             {"blog": "finance", "name": "아카이브", "times": ["07:30", "25:00", "<b>", 3, "21:00"], "note": "출근길"},
+             {"blog": "finance", "name": "또", "times": ["09:00"]}, {"blog": "x", "times": ["09:00"]},
+             {"blog": "issue", "name": "데런픽", "times": []}]
+    got = _routine({"day": "2026-10-29", "items": [], "times": times})["times"]
+    assert got == [{"blog": "hotdeal", "name": "핫딜", "times": ["바로"], "note": "딜이 끝나기 전에"},
+                   {"blog": "finance", "name": "아카이브", "times": ["07:30", "21:00"], "note": "출근길"}]
+    assert _routine({"day": "2026-10-29", "items": []})["times"] == []  # 예전 Blog-Auto
+    day = tz_now(bot).date().isoformat()
+    with_routine(tmp_path, {**sample(day), "times": times})
+    assert [t["blog"] for t in routine.view(bot)["times"]] == ["hotdeal", "finance"]
+    js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/routine.js").read_text(encoding="utf-8")
+    assert "블로그별 예약 추천 시각" in js and "data.times" in js

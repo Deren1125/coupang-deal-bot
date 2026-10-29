@@ -199,6 +199,14 @@ function slot(s) {
     open[s.key] ? s.items.map(item) : null];
 }
 
+function times() {  // 블로그별 예약 추천 시각 (주인 10/29) — 눌러서 펼침
+  const ts = data && data.times || [];
+  return ts.length ? el('div', {class: 'box'}, el('button', {class: 'sl', type: 'button', 'aria-expanded': open.tm ? 'true' : 'false',
+    onclick: () => { open.tm = !open.tm; draw(); }}, el('b', {}, `${open.tm ? '▾' : '▸'} 블로그별 예약 추천 시각`)),
+    open.tm ? ts.map(t => el('div', {class: 'it'}, el('div', {class: 'grow', style: 'padding-top:0'},
+      el('span', {class: 't'}, `${t.name} · ${t.times.join(' · ')}`), t.note ? el('span', {class: 's'}, t.note) : null))) : null) : null;
+}
+
 function draw() {
   if (!box) return;
   const ok = !!(data && data.slots && data.total), ab = ably();
@@ -212,6 +220,7 @@ function draw() {
     el('div', {class: 'bar'}, bar),
     data.today ? null : el('p', {class: 'note'}, `${data.day} 목록이에요 — 오늘 목록이 아직 안 왔어요`),
     el('div', {class: 'box'}, data.slots.map(slot)),
+    times(),
     data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab].flat().filter(Boolean));
 }
 
