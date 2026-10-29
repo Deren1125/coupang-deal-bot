@@ -1,5 +1,5 @@
 /* 로그인 관리 (주인 10/26). 연결 탭 맨 위 칸 · 값은 GET /dashboard/api/logins (logins.py). 누르는 것은 login.remote
-   {target, force?} · login.qr 뿐. app.js 가 #main 을 다시 그리면 같은 칸을 다시 붙인다. 주인 몫이 없으면 한 줄로 접음 (10/27).
+   {target, force?} · login.remote_cancel (열린 원격 화면 취소 — 10/29) · login.qr 뿐. app.js 가 #main 을 다시 그리면 같은 칸을 다시 붙인다. 주인 몫이 없으면 한 줄로 접음 (10/27).
    글은 textContent 로만 · 바깥 주소 없음. */
 'use strict';
 (() => {
@@ -111,7 +111,8 @@ function draw() {
   const head = f || el('div', {class: 'top', style: 'margin:20px 0 6px'}, el('h2', {}, data && data.need ? `로그인 관리 · 필요 ${data.need}` : '로그인 관리'),
     el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기'));
   const top = [];
-  if (v) top.push(el('div', {class: 'vn'}, el('span', {}, `원격 화면 — ${v.label} (${v.left_min}분 남음)`), link('sm ac', '원격 화면 열기', v.url)));
+  if (v) top.push(el('div', {class: 'vn'}, el('span', {}, `원격 화면 — ${v.label} (${v.left_min}분 남음)`), link('sm ac', '원격 화면 열기', v.url),
+    v.cancel ? el('button', {class: 'sm', type: 'button', onclick: e => press({action: 'login.remote_cancel'}, e)}, '취소') : null));
   if (q) {
     top.push(el('div', {class: 'qr'}, el('img', {src: q.img, alt: '네이버 QR 로그인 화면'}),
       el('p', {text: `${q.how} · ${q.left_s}초 남음`}), link('lnk', 'QR 크게 보기', q.img)));

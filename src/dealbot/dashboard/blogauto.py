@@ -1151,7 +1151,7 @@ def _iso_tz(v: Any) -> str | None:
         return None
 
 
-LOGIN_LAST_RESULTS = ("ok", "keep_off", "timeout", "closed", "replaced")
+LOGIN_LAST_RESULTS = ("ok", "keep_off", "timeout", "closed", "replaced", "cancelled")
 
 
 def _login_last(v: Any) -> dict[str, str] | None:

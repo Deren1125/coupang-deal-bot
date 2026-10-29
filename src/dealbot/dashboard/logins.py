@@ -50,7 +50,7 @@ REMOTE_LABEL, QR_LABEL = "원격 로그인", "QR 로그인"
 FORCE_LABEL = "그래도 열기 (오늘 이미 한 번)"  # 네이버 블로그 원격 로그인 하루 한 번 (Blog-Auto remote_block — 10/27 두 번째 계정 잠김 뒤)
 QR_HOW = "다른 기기(PC·아이패드)에 뜬 QR 을 휴대폰 네이버 앱 › QR 로 찍어 주세요"
 LAST_TEXT = {"ok": "✅ 성공", "keep_off": "⛔ '로그인 상태 유지' 꺼짐", "timeout": "⏰ 시간 초과", "closed": "창이 닫힘",
-             "replaced": "새 창으로 바뀜"}  # 마지막 원격 로그인 (Blog-Auto remote_login 결과 — blogauto.LOGIN_LAST_RESULTS)
+             "replaced": "새 창으로 바뀜", "cancelled": "취소함"}  # 마지막 원격 로그인 (Blog-Auto remote_login 결과 — blogauto.LOGIN_LAST_RESULTS)
 THREADS_AUTO_WHERE = "X 봇 세션 담당 — SNS 탭 X 화면 (스레드·핫딜 인스타는 위 줄에서 원격 로그인, 주인 10/27)"
 _TASKS: set[asyncio.Task[Any]] = set()  # QR 기다림 (끝날 때까지 잡아 둠)
 
@@ -321,7 +321,8 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     s = remote_login.session(bot.db, now)
     s = s if remote_login.live(s, now) else None
     vnc = {"target": s["target"], "label": remote_login.TARGETS.get(s["target"], s["target"]), "url": remote_login.url(s),
-           "left_min": max(1, int(remote_login.SESSION_MIN - (now - float(s["at"])) / 60))} if s else None
+           "left_min": max(1, int(remote_login.SESSION_MIN - (now - float(s["at"])) / 60)),
+           "cancel": s["target"] in remote_login.CANCELABLE} if s else None
     return {"rows": rs, "need": sum(1 for r in rs if r["bad"]), "at": round(now, 1), "vnc": vnc, "visits": visits(bot),
             "qr": {"img": f"/dashboard/api/naver_qr.png?t={int(q['at'])}", "left_s": max(1, int(float(q["until"]) - now)), "how": QR_HOW}
             if q and qr_png(bot, now) is not None else None}

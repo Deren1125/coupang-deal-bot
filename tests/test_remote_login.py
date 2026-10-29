@@ -149,3 +149,40 @@ async def test_pressing_again_on_an_open_naver_screen_reopens_it(bot: DealBot, s
     assert s["pass"] != first["pass"] and not s.get("seen")
     inbox = [json.loads(x) for x in (settings.data_dir / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()]
     assert inbox[-1]["login_remote"]["pass"] == s["pass"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_clears_the_session_and_asks_blogauto_to_close(bot: DealBot, settings: Settings) -> None:
+    """주인 10/29 '원격화면 열기 한거, 취소할 수 있는 기능': '취소' → 세션을 지워 줄이 바로 빠지고, Blog-Auto 에 취소 한 줄
+    (since = 그 창을 부탁한 시각). 스레드 창은 TERM 정리가 생길 때까지 취소하지 않는다."""
+    from dash_helpers import blogauto_status
+
+    blogauto_status(settings)
+    await post_json(bot, "/dashboard/api/action", {"action": "login.remote", "args": {"target": "issue"}}, session_headers(bot))
+    s = remote_login.session(bot.db)
+    row = next(i for i in bot.dash_state.items() if i["iid"] == "sys-vnc")
+    assert [a["action"] for a in row["more"]][:2] == ["login.remote", "login.remote_cancel"]
+    status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote_cancel", "args": {}}, session_headers(bot))
+    assert status == 200 and body["code"] == "done"
+    assert remote_login.session(bot.db) is None and not [i for i in bot.dash_state.items() if i["iid"] == "sys-vnc"]
+    inbox = [json.loads(x) for x in (settings.data_dir / "blogauto_inbox.jsonl").read_text(encoding="utf-8").splitlines()]
+    c = inbox[-1]["login_remote_cancel"]
+    assert c["target"] == "issue" and c["since"] == s["at"] and c["at"] >= s["at"]
+    status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote_cancel", "args": {}}, session_headers(bot))
+    assert body["code"] == "done" and "없어요" in body["text"]
+    remote_login.start(bot.db, lambda msg: None, "threads")
+    status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote_cancel", "args": {}}, session_headers(bot))
+    assert body["code"] == "busy" and remote_login.session(bot.db)
+
+
+def test_logins_view_offers_cancel_only_for_cancelable_screens(bot: DealBot) -> None:
+    from dealbot.dashboard import logins
+
+    remote_login.start(bot.db, lambda msg: None, "toss")
+    assert logins.view(bot)["vnc"]["cancel"] is True
+    remote_login.start(bot.db, lambda msg: None, "threads_ig")
+    assert logins.view(bot)["vnc"]["cancel"] is False
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/logins.js").read_text(encoding="utf-8")
+    assert "login.remote_cancel" in js and "v.cancel" in js

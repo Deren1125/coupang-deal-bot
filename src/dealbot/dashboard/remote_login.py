@@ -31,6 +31,8 @@ TARGETS = {"finance": "아카이브 블로그(쇼핑커넥트도)", "issue": "Pi
            # 스레드 자동화(threads-auto) 계정의 스레드·인스타 (주인 10/27 '로그인 관리에 스레드, 인스타 등도 넣어줘')
            "threads": "스레드 (자동 팔로우·좋아요 계정)", "threads_ig": "핫딜 인스타 (자동 팔로우·좋아요 계정)"}
 NAVER = ("finance", "issue", "hotdeal")
+# '취소'로 닫을 수 있는 창 (Blog-Auto remote_login.CANCELABLE 와 같게 — 스레드 창은 TERM 정리가 생길 때까지 뺌, 주인 10/29)
+CANCELABLE = (*NAVER, "toss", "ably", "zigzag", "instagram")
 NAVER_HEADS = ("login", "login_down", "login_keep")  # 네이버 로그인 풀림·다시 로그인 (키 = <앞>:<블로그>)
 PASS_CHARS = "abcdefghjkmnpqrstuvwxyz23456789"
 
@@ -65,6 +67,18 @@ def start(db: Any, relay: Any, target: str, now: float | None = None, *, force: 
     s = {"target": target, "pass": "".join(secrets.choice(PASS_CHARS) for _ in range(8)), "at": now}  # VNC 비밀번호는 8자까지만 쓰임
     db.kv_set(KV, json.dumps(s))
     relay({"login_remote": dict(s, force=True) if force is True else s})
+    return s
+
+
+def cancel(db: Any, relay: Any, now: float | None = None) -> dict[str, Any] | None:
+    """열린 원격 화면 취소 (주인 10/29 '원격화면 열기 한거, 취소할 수 있는 기능') — 세션을 지우고(할 일 줄·연결 탭 줄이 바로 빠짐,
+    다시 열기도 바로 됨) Blog-Auto 받은편지함에 {"login_remote_cancel": {target, since, at}} 한 줄: 쇼핑몰·인스타 창은 서비스가
+    그 창을 멈추고, 네이버 창은 창이 직접 보고 저장 없이 닫는다. 취소할 세션이 없거나 스레드 창이면 None (아무것도 안 보냄)."""
+    s = session(db, now)
+    if not s or s.get("target") not in CANCELABLE:
+        return None
+    db.kv_set(KV, json.dumps(None))
+    relay({"login_remote_cancel": {"target": s["target"], "since": float(s["at"]), "at": now or time.time()}})
     return s
 
 
