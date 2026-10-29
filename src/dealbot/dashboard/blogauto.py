@@ -1454,10 +1454,14 @@ ABLY_REQ_RID = re.compile(r"^\d{1,9}-[0-9A-Za-z_-]{1,40}$")  # actions.ABLY_RID 
 ABLY_REQ_HOSTS = ("a-bly.com",)  # 상품 주소는 에이블리(하위 주소 포함 — m.a-bly.com)만
 ABLY_REQ_NOTE_MAX = 160
 ABLY_REQ_PRICE_MAX = 100_000_000
+ABLY_REQ_REVIEWS_MAX = 10_000_000
+# 주인 10/29 '사진 보고 디자인이 비슷해야' — 같은 상품 사진(blog_view/thumbs/ar-…, 네이버 이미지 검색 · 에이블리 서버 아님)·후기 수·만족 %·
+# 글 속 옷과 AI 닮음(0~10). 모양이 틀리면 그 칸만 비움 (줄은 그대로)
 
 
 def _ably_req_row(x: Any) -> dict[str, Any] | None:
-    """{rid, pid, title, piece, name, price, shop, url, due} — 모양이 틀리면 None (줄만 뺌)."""
+    """{rid, pid, title, piece, name, price, shop, url, due, thumb, reviews, satisfaction, sim} — 모양이 틀리면 None (줄만 뺌).
+    thumb·reviews·satisfaction·sim 은 덧붙인 정보라 틀리면 그 칸만 null·0."""
     if not isinstance(x, dict) or not isinstance(x.get("rid"), str) or not ABLY_REQ_RID.match(x["rid"]):
         return None
     pid = x.get("pid")
@@ -1479,7 +1483,9 @@ def _ably_req_row(x: Any) -> dict[str, Any] | None:
         return None
     return {"rid": x["rid"], "pid": pid, "title": _rt_line(x.get("title"), 60), "piece": piece, "name": name or piece,
             "price": _count(price) or 0, "shop": _rt_line(x.get("shop"), 40) or "에이블리", "url": u,
-            "due": float(due) if due is not None else None}
+            "due": float(due) if due is not None else None, "thumb": th if isinstance(th := x.get("thumb"), str) and th.startswith("ar-")
+            and THUMB_RE.match(th) else None, "reviews": _count(x.get("reviews"), top=ABLY_REQ_REVIEWS_MAX) or 0,
+            "satisfaction": _count(x.get("satisfaction"), top=100) or 0, "sim": _count(x.get("sim"), top=10) or 0}
 
 
 def _ably_requests(v: Any) -> dict[str, Any] | None:

@@ -17,7 +17,8 @@ const CSS = '#rtp .box{padding:4px 16px 6px;margin-bottom:20px}#rtp .sl{display:
   '#rtp .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}#rtp .bar i{display:block;height:100%;background:var(--gr)}' +
   '#rtp .pb .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}' +
   '#rtp .ab .grow{padding-top:0}#rtp .ab+.ab{background-position:0 0}#rtp .pf .fl{flex:1 1 60%;min-width:0;font-size:16px}' +
-  '#rtp .pf .sm{min-height:48px;font-size:15px;font-weight:600;padding:0 18px}#rtp .er{color:var(--red)}';
+  '#rtp .pf .sm{min-height:48px;font-size:15px;font-weight:600;padding:0 18px}#rtp .er{color:var(--red)}' +
+  '#rtp .ath{flex:none;width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--line)}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
 const typed = {}, sent = {}, errs = {};  // 붙여 넣던 글 · 넣은 부탁(다음 목록까지 숨김) · 안 된 이유
 
@@ -128,8 +129,13 @@ function req(r) {
     spellcheck: 'false', enterkeyhint: 'done', 'aria-label': `${r.name} 에이블리 링크`, oninput: e => { typed[r.rid] = e.currentTarget.value; }});
   f.value = typed[r.rid] || '';
   const b = el('button', {class: 'sm ac', type: 'button', onclick: () => put(r, f, b, m)}, '넣기');
-  return el('div', {class: 'it ab', 'data-rid': r.rid}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.name),
+  // 주인 10/29 '사진 보고 디자인이 비슷해야' — 같은 상품 사진 · 후기 · 만족 · 글 속 옷과 닮음
+  const facts = [r.reviews && `후기 ${r.reviews.toLocaleString('ko-KR')}개`, r.satisfaction && `만족 ${r.satisfaction}%`, r.sim && `닮음 ${r.sim}점`].filter(Boolean);
+  return el('div', {class: 'it ab', 'data-rid': r.rid},
+    r.thumb ? el('img', {class: 'ath', src: '/dashboard/thumb/' + encodeURIComponent(r.thumb), alt: `${r.name} 사진`, loading: 'lazy'}) : null,
+    el('div', {class: 'grow'}, el('span', {class: 't'}, r.name),
     el('span', {class: 's'}, [r.piece, won(r.price), r.shop].filter(Boolean).join(' · ')),
+    facts.length ? el('span', {class: 's'}, facts.join(' · ')) : null,
     el('span', {class: 's'}, [r.title && `글: ${r.title}`, r.due_text && `발행 ${r.due_text} 전`].filter(Boolean).join(' · ')),
     el('div', {class: 'bt'}, el('a', {class: 'sm', href: r.url, target: '_blank', rel: 'noopener noreferrer'}, '에이블리에서 열기 ↗')),
     el('div', {class: 'bt pf'}, f, b), m));

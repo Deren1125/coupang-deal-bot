@@ -138,6 +138,10 @@ ROUTINE_JS_GZIP_MAX = 4 * 1024 + 512
 # 일 보내기 함수 하나로 합침 → 14.25 KB / gzip 5.75 KB (14480 B / 5830 B 안팎)
 ROUTINE_JS_MAX = 14 * 1024 + 256
 ROUTINE_JS_GZIP_MAX = 5 * 1024 + 768
+# 10/29: 에이블리 부탁 줄에 같은 상품 사진(/dashboard/thumb/ar-…) · '후기 n개 · 만족 n% · 닮음 n점' 한 줄 (주인 '사진 보고 디자인이 비슷해야')
+# → 14.75 KB / gzip 5.9 KB (15123 B / 6066 B)
+ROUTINE_JS_MAX = 15 * 1024
+ROUTINE_JS_GZIP_MAX = 6 * 1024
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

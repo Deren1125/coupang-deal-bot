@@ -65,11 +65,24 @@ def test_parser_keeps_good_rows_and_drops_bad_ones() -> None:
     assert len(one["title"]) == 60 and one["title"].endswith("…") and len(one["name"]) == 80 and "​" not in one["name"]
     assert one["shop"] == "에이블리" and one["due"] == 1_800_000_000.5 and one["price"] == 12900 and one["piece"] == "스커트"
     assert two["price"] == 0 and two["piece"] == "" and two["due"] is None and two["url"] == "https://a-bly.com/goods/7"
-    assert set(one) == {"rid", "pid", "title", "piece", "name", "price", "shop", "url", "due"}
+    assert set(one) == {"rid", "pid", "title", "piece", "name", "price", "shop", "url", "due", "thumb", "reviews", "satisfaction", "sim"}
+    assert (one["thumb"], one["reviews"], one["satisfaction"], one["sim"]) == (None, 0, 0, 0)  # 예전 Blog-Auto (칸 없음)
     # 이름이 없으면 옷 이름으로 · 줄은 30개까지 · 쪽지가 없으면 ''
     assert _ably_requests(export(row(name=None)))["rows"][0]["name"] == "스커트"
     many = _ably_requests({"n": 40, "rows": [row(sno=str(i)) for i in range(40)]})
     assert many["n"] == 30 and len(many["rows"]) == 30 and many["note"] == ""
+
+
+def test_photo_and_quality_facts_are_checked_one_by_one() -> None:
+    """주인 10/29 '사진 보고 디자인이 비슷해야' — 같은 상품 사진(blog_view/thumbs/ar-…)·후기·만족·닮음. 틀리면 그 칸만 비움."""
+    good = row(thumb="ar-0123456789ab.jpg", reviews=401, satisfaction=93, sim=8)
+    (r,) = _ably_requests(export(good))["rows"]
+    assert (r["thumb"], r["reviews"], r["satisfaction"], r["sim"]) == ("ar-0123456789ab.jpg", 401, 93, 8)
+    for bad in ({"thumb": "pk-0123.jpg"}, {"thumb": "ar-../x.jpg"}, {"thumb": "https://img.example/x.jpg"}, {"thumb": 3},
+                {"reviews": -1}, {"reviews": "401"}, {"satisfaction": 101}, {"satisfaction": True}, {"sim": 11}, {"sim": 7.5}):
+        (r,) = _ably_requests(export({**good, **bad}))["rows"]  # 줄은 그대로
+        k = next(iter(bad))
+        assert r[k] == (None if k == "thumb" else 0), bad
 
 
 def test_parse_export_reads_the_part() -> None:
@@ -149,7 +162,8 @@ def due_at(bot: DealBot, day: str, hm: str) -> float:
 
 
 def two_rows(bot: DealBot, day: str) -> dict:
-    return export(row(due=due_at(bot, day, "14:30")), row(sno="777", piece="니트", name="루즈핏 니트", price=0, title="", shop="에이블리"))
+    return export(row(due=due_at(bot, day, "14:30"), thumb="ar-0123456789ab.jpg", reviews=1401, satisfaction=93, sim=8),
+                  row(sno="777", piece="니트", name="루즈핏 니트", price=0, title="", shop="에이블리"))
 
 
 def test_view_adds_due_text_and_hides_when_empty(bot: DealBot, tmp_path: Path) -> None:
@@ -213,7 +227,8 @@ const rows = () => box().all(c => c.className === 'it ab').map(r => ({rid: r.att
   texts: r.all(c => c.tagName === 'SPAN').map(c => c.textContent),
   a: r.all(c => c.tagName === 'A').map(a => [a.textContent, a.attrs.href, a.attrs.target, a.attrs.rel]),
   input: r.all(c => c.tagName === 'INPUT').map(i => [i.attrs.placeholder, i.attrs.type]),
-  btn: r.all(c => c.tagName === 'BUTTON').map(b => [b.textContent, b.className])}));
+  btn: r.all(c => c.tagName === 'BUTTON').map(b => [b.textContent, b.className]),
+  img: r.all(c => c.tagName === 'IMG').map(i => [i.attrs.src, i.attrs.alt, i.className])}));
 (async () => {
   require(process.argv[1]);
   await tick(); await tick();
@@ -260,11 +275,12 @@ def test_routine_js_draws_requests_and_sends_the_pasted_link(bot: DealBot, tmp_p
     got = run_shim(view)
     assert got["hidden"] is False and got["h2"] == ["에이블리 링크 부탁 (2)"] and got["notes"] == [NOTE]  # 할 일 목록이 없으면 부탁 칸만
     one, two = got["rows"]
-    assert one["rid"] == "41-12345678" and one["texts"][:3] == ["크림 플리츠 스커트", "스커트 · 12,900원 · 에이블리 · 모니크샵",
-                                                                 "글: 가을 데이트룩 정리 · 발행 14:30 전"]
+    assert one["rid"] == "41-12345678" and one["texts"][:4] == ["크림 플리츠 스커트", "스커트 · 12,900원 · 에이블리 · 모니크샵",
+                                                                 "후기 1,401개 · 만족 93% · 닮음 8점", "글: 가을 데이트룩 정리 · 발행 14:30 전"]
+    assert one["img"] == [["/dashboard/thumb/ar-0123456789ab.jpg", "크림 플리츠 스커트 사진", "ath"]]
     assert one["a"] == [["에이블리에서 열기 ↗", "https://m.a-bly.com/goods/12345678", "_blank", "noopener noreferrer"]]
     assert one["input"] == [["여기에 링크 붙여넣기", "text"]] and one["btn"] == [["넣기", "sm ac"]]
-    assert two["texts"][:3] == ["루즈핏 니트", "니트 · 에이블리", ""]  # 가격 0·글 제목·발행 시각이 없으면 빼고 씀
+    assert two["texts"][:3] == ["루즈핏 니트", "니트 · 에이블리", ""] and two["img"] == []  # 가격 0·사진·후기·글 제목·발행 시각이 없으면 빼고 씀
     assert got["empty"] == "에이블리 앱에서 만든 링크를 먼저 붙여 넣어 주세요" and got["posts0"] == 0
     assert got["post"] == {"token": "tok123", "body": {"action": "blog.similar_links", "cid": got["post"]["body"]["cid"], "ctoken": None,
                                                        "args": {"blog": "issue", "pid": 41, "links": [BLURB.strip()], "rid": "41-12345678"}}}
@@ -312,6 +328,8 @@ const fs = require('fs');
     if (u.pathname.endsWith('app.css')) return r.fulfill({contentType: 'text/css', body: css});
     if (u.pathname.endsWith('routine.js')) return r.fulfill({contentType: 'text/javascript', body: js});
     if (u.pathname === '/dashboard/api/routine') return json(200, JSON.parse(view));
+    if (u.pathname.startsWith('/dashboard/thumb/ar-')) return r.fulfill({contentType: 'image/png', body: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')});
     if (u.pathname === '/dashboard/api/action') { posts.push(JSON.parse(r.request().postData())); return json(202, {status: 'queued', id: 'a_1'}); }
     if (u.pathname === '/dashboard/api/actions') return json(200, {actions: [{id: 'a_1', status: 'ok', code: 'done', text: ''}]});
     return r.fulfill({status: 404, body: ''});
@@ -352,7 +370,7 @@ def test_real_browser_renders_clean(bot: DealBot, tmp_path: Path) -> None:
         for bad in ("[object", "undefined", "NaN", "null"):
             assert bad not in text, (bad, text)
     assert "에이블리 링크 부탁 (2)" in got["text"] and "12,900원" in got["text"] and "발행 14:30 전" in got["text"]
-    assert "에이블리에서 열기 ↗" in got["text"] and got["text"].count(NOTE) == 1
+    assert "에이블리에서 열기 ↗" in got["text"] and got["text"].count(NOTE) == 1 and "후기 1,401개 · 만족 93% · 닮음 8점" in got["text"]
     assert got["wide"] <= 375 and got["btn"] >= 44  # 폰 너비에서 가로로 안 넘침 · 누르기 쉬운 단추
     assert got["toast"] == "넣었어요" and "에이블리 링크 부탁 (1)" in got["after"] and "크림 플리츠 스커트" not in got["after"]
     # 한 줄 칸이라 붙여 넣은 공유 문구의 줄바꿈은 브라우저가 바꿔 둠 — 서버(ably_link_in)가 그 안의 첫 에이블리 주소를 꺼냄
