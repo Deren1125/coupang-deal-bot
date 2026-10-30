@@ -1713,6 +1713,35 @@ def _post_counts(v: Any) -> dict[str, dict[str, dict[str, int] | None]] | None:
     return out
 
 
+PUBLIC_BLOGS = ("finance", "issue", "hotdeal")
+PUBLIC_ROWS = 10
+
+
+def _public_stats(v: Any) -> dict[str, dict[str, Any]]:
+    """로그인 없이 읽은 공개 숫자 (주인 10/30 — Blog-Auto public_stats.export): {블로그: {at, posts: [{title, likes, comments}],
+    ranks: [{title, q, rank}], trends: [{keyword, growth}]}}. 블로그마다 따로 걸러 이상한 줄만 빠짐 · 숫자는 0 이상 정수만."""
+    def n(x: Any, top: int = 100_000_000) -> int | None:
+        return x if isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top else None
+
+    out: dict[str, dict[str, Any]] = {}
+    for blog in PUBLIC_BLOGS:
+        b = v.get(blog) if isinstance(v, dict) else None
+        if not isinstance(b, dict):
+            continue
+        posts = [{"title": t, "likes": n(p.get("likes")), "comments": n(p.get("comments"))}
+                 for p in (b.get("posts") if isinstance(b.get("posts"), list) else [])[:PUBLIC_ROWS]
+                 if isinstance(p, dict) and (t := _one_line(p.get("title"), 80))]
+        ranks = [{"title": t, "q": _one_line(r.get("q"), 40) or "", "rank": n(r.get("rank"), 1000)}
+                 for r in (b.get("ranks") if isinstance(b.get("ranks"), list) else [])[:PUBLIC_ROWS]
+                 if isinstance(r, dict) and (t := _one_line(r.get("title"), 80))]
+        trends = [{"keyword": k, "growth": float(t["growth"])}
+                  for t in (b.get("trends") if isinstance(b.get("trends"), list) else [])[:PUBLIC_ROWS]
+                  if isinstance(t, dict) and (k := _one_line(t.get("keyword"), 40)) and isinstance(t.get("growth"), int | float)
+                  and not isinstance(t.get("growth"), bool) and math.isfinite(t["growth"]) and -1 <= t["growth"] <= 100]
+        out[blog] = {"at": _one_line(b.get("at"), 40) or "", "posts": posts, "ranks": ranks, "trends": trends}
+    return out
+
+
 def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, Any]:
     """v2 의 새 칸들 → 걸러 둔 사전 (블로그마다 따로 걸러 이상한 줄만 빠짐). 바깥 주소는 https 만, 글 주소는 네이버 블로그만."""
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
@@ -1726,7 +1755,8 @@ def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, A
                            "earnings": _earnings(data.get("earnings")), "x": _x(data.get("x")),
                            "post_counts": _post_counts(data.get("post_counts")),
                            "lookbook": _lookbook(data.get("lookbook")),
-                           "ably_requests": _ably_requests(data.get("ably_requests"))}  # 에이블리 링크 부탁 (주인 10/28 — 할 일 탭)
+                           "ably_requests": _ably_requests(data.get("ably_requests")),  # 에이블리 링크 부탁 (주인 10/28 — 할 일 탭)
+                           "public_stats": _public_stats(data.get("public_stats"))}  # 로그인 없이 읽은 숫자 (주인 10/30)
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
     for blog in V2_BLOGS:
         rows = posts.get(blog) if isinstance(posts.get(blog), list) else []

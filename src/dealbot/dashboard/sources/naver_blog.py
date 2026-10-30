@@ -39,6 +39,8 @@ from dealbot.dashboard.model import (
     CardView,
     FetchResult,
     GoalRow,
+    ListEntry,
+    ListGroup,
     ManualField,
     PostCount,
     Stat,
@@ -74,6 +76,7 @@ class BlogLive:
     activity_day: str | None = None
     activity: dict[str, float] = field(default_factory=dict)
     own: OwnStats | None = None
+    public: dict[str, Any] | None = None  # 로그인 없이 읽은 글별 공감·댓글·검색 순위·오르는 키워드 (주인 10/30 — public_stats)
 
 
 def day_word(d: date, today: date) -> str:
@@ -137,17 +140,18 @@ class NaverBlogSource(Source):
             own = None  # 앞날 값은 믿지 않는다 (시계가 어긋남)
         # 자기 통계는 활동 기록이 몇 시간 멈춰 있어도(STALE) 쓴다 — 오래됐는지는 자기 읽은 시각(read_at)으로 따로 본다
         days = self.own_days(own)
+        pub = (export.v2.get("public_stats") or {}).get(str(self.options.get("blog") or self.key)) if export.v2 else None
         if not export.ok:
-            return FetchResult(export.status, note=export.note, read_at=export.written_at, days=days, detail=BlogLive(own=own))
+            return FetchResult(export.status, note=export.note, read_at=export.written_at, days=days, detail=BlogLive(own=own, public=pub))
         blog = export.blog(*names)
         if blog is None:
             return FetchResult(UNAVAILABLE, note="Blog-Auto 활동 기록에 이 블로그가 없음 (options.blog 확인)", read_at=export.written_at,
-                               days=days, detail=BlogLive(own=own))
+                               days=days, detail=BlogLive(own=own, public=pub))
         assert export.written_at is not None
         day = self.ctx.local_day(export.written_at).isoformat()
         values = {k: v for k, v in blog.items() if k in AUTO_METRICS}
         days.setdefault(day, {}).update(values)
-        return FetchResult(OK, days=days, read_at=export.written_at, detail=BlogLive(day, values, own))
+        return FetchResult(OK, days=days, read_at=export.written_at, detail=BlogLive(day, values, own, pub))
 
     # ---- 자기 통계 (Blog-Auto own_stats)
     def stored(self, metric: str, day: date) -> dict[str, Any] | None:
@@ -283,6 +287,27 @@ class NaverBlogSource(Source):
         days = ((self.blogauto_post_counts() or {}).get("blogs") or {}).get(str(self.options.get("blog") or self.key))
         return post_count(days, today) if days is not None else PostCount(why="기록 없음 · 블로그 프로그램이 아직 안 보내요")
 
+    @staticmethod
+    def public_groups(pub: dict[str, Any] | None) -> list[ListGroup]:
+        """로그인 없이 읽은 목록 (주인 10/30): 공감·댓글 많은 글 · 검색 순위 · 오르는 키워드 — 각 5줄까지, 줄이 없으면 그 묶음은 뺌."""
+        if not pub:
+            return []
+        out = []
+        posts = [p for p in pub.get("posts") or [] if (p.get("likes") or 0) + (p.get("comments") or 0) > 0][:5]
+        if posts:
+            out.append(ListGroup("공감·댓글 많은 글", "공개 화면 · 로그인 없이", [
+                ListEntry(p["title"], pill=f"공감 {fmt_num(p.get('likes'))}", sub=f"댓글 {fmt_num(p.get('comments'))}") for p in posts]))
+        ranks = (pub.get("ranks") or [])[:5]
+        if ranks:
+            out.append(ListGroup("검색 순위", "네이버 검색 정확도순 · 100위까지", [
+                ListEntry(r["title"], pill=f"{r['rank']}위" if r.get("rank") else "100위 밖", hot=bool(r.get("rank") and r["rank"] <= 10),
+                          sub=f"검색어 「{r['q']}」" if r.get("q") else "") for r in ranks]))
+        trends = [t for t in pub.get("trends") or [] if t.get("growth", 0) > 0][:5]
+        if trends:
+            out.append(ListGroup("오르는 키워드", "데이터랩 · 최근 3일 검색", [
+                ListEntry(t["keyword"], pill=f"+{round(t['growth'] * 100)}%", hot=t["growth"] >= 0.5) for t in trends]))
+        return out
+
     def card(self, data: CardData) -> CardView:
         live = data.live
         info = live.detail if live is not None and isinstance(live.detail, BlogLive) else BlogLive()
@@ -342,5 +367,5 @@ class NaverBlogSource(Source):
             # 방문자는 날마다 오르내려 '7일 평균'(애드포스트 기준과 같은 셈)으로, 이웃 수는 쌓이는 수라 그대로
             spark=data.rolling("visitors", 7, how="avg") if use_visitors else data.series("neighbors"),
             spark_label="방문자 7일 평균" if use_visitors else "이웃 수", rows=rows, activity=activity,
-            read_at=read_at, summary=summary, detail=detail, posted=self.posted(data.today),
+            read_at=read_at, summary=summary, detail=detail, posted=self.posted(data.today), groups=self.public_groups(info.public),
         )
