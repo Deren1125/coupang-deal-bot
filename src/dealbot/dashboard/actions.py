@@ -1565,7 +1565,7 @@ class ActionDesk:
 
             s = remote_login.session(self.bot.db)
             if s and s.get("target") not in remote_login.CANCELABLE:
-                return "busy", "스레드 원격 화면은 아직 취소할 수 없어요 — 25분 뒤 저절로 닫혀요"
+                return "busy", "이 원격 화면은 취소할 수 없어요 — 25분 뒤 저절로 닫혀요"
             if remote_login.cancel(self.bot.db, self.bot.relay_to_blog) is None:
                 return "done", "열려 있는 원격 화면이 없어요"
             return "done", "원격 화면을 닫는 중이에요 — 저장하지 않고 닫혀요. 1분쯤 뒤 다시 열 수 있어요"

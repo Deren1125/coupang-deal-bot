@@ -170,9 +170,9 @@ async def test_cancel_clears_the_session_and_asks_blogauto_to_close(bot: DealBot
     assert c["target"] == "issue" and c["since"] == s["at"] and c["at"] >= s["at"]
     status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote_cancel", "args": {}}, session_headers(bot))
     assert body["code"] == "done" and "없어요" in body["text"]
-    remote_login.start(bot.db, lambda msg: None, "threads")
+    remote_login.start(bot.db, lambda msg: None, "threads")  # 10/30 스레드 창도 취소됨 (Blog-Auto 쪽 TERM 정리)
     status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "login.remote_cancel", "args": {}}, session_headers(bot))
-    assert body["code"] == "busy" and remote_login.session(bot.db)
+    assert body["code"] == "done" and remote_login.session(bot.db) is None
 
 
 def test_logins_view_offers_cancel_only_for_cancelable_screens(bot: DealBot) -> None:
@@ -181,7 +181,7 @@ def test_logins_view_offers_cancel_only_for_cancelable_screens(bot: DealBot) -> 
     remote_login.start(bot.db, lambda msg: None, "toss")
     assert logins.view(bot)["vnc"]["cancel"] is True
     remote_login.start(bot.db, lambda msg: None, "threads_ig")
-    assert logins.view(bot)["vnc"]["cancel"] is False
+    assert logins.view(bot)["vnc"]["cancel"] is True  # 10/30 스레드 창도
     from pathlib import Path
 
     js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/logins.js").read_text(encoding="utf-8")

@@ -31,8 +31,8 @@ TARGETS = {"finance": "아카이브 블로그(쇼핑커넥트도)", "issue": "Pi
            # 스레드 자동화(threads-auto) 계정의 스레드·인스타 (주인 10/27 '로그인 관리에 스레드, 인스타 등도 넣어줘')
            "threads": "스레드 (자동 팔로우·좋아요 계정)", "threads_ig": "핫딜 인스타 (자동 팔로우·좋아요 계정)"}
 NAVER = ("finance", "issue", "hotdeal")
-# '취소'로 닫을 수 있는 창 (Blog-Auto remote_login.CANCELABLE 와 같게 — 스레드 창은 TERM 정리가 생길 때까지 뺌, 주인 10/29)
-CANCELABLE = (*NAVER, "toss", "ably", "zigzag", "instagram")
+# '취소'로 닫을 수 있는 창 (Blog-Auto remote_login.CANCELABLE 와 같게 — 10/30 스레드 창도 TERM 에 정리가 생겨 모두)
+CANCELABLE = tuple(TARGETS)
 NAVER_HEADS = ("login", "login_down", "login_keep")  # 네이버 로그인 풀림·다시 로그인 (키 = <앞>:<블로그>)
 PASS_CHARS = "abcdefghjkmnpqrstuvwxyz23456789"
 
