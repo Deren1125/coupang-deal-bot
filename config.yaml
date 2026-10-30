@@ -41,7 +41,7 @@ browser:
 # 오류·시간 초과·로그인·한도면 예전처럼 주인에게 링크 요청. 로그인·제한 안내로 멈추면 카톡으로 한 번 알림.
 autolink:
   naver:
-    enabled: true         # 주인 결정 10/20: 켬 ("자동화. 책임도 내가 질게"). 바로 끄기: Blog-Auto 에서 python -m blogauto shopconnect stop
+    enabled: false        # 주인 10/30 끔: '보호조치가 계속 떠서 … 네이버 계정 외부 서버로 접속하는 기능은 끄는게' (Blog-Auto naver_off) — 네이버 딜은 예전처럼 링크 요청 (10/20 켬 "자동화. 책임도 내가 질게")
     wait_minutes: 30      # Blog-Auto 답을 기다리는 시간. 넘으면 링크 요청
     not_found_days: 7     # 쇼핑커넥트에 없던 상품번호는 이 기간 다시 찾지 않고 원본 주소로
     unverified: auto      # 판매처 확인이 안 된 딜: manual = 예전처럼 링크 요청 / auto = 그래도 자동 (주인 10/23 '자동으로 바꾸자')
@@ -49,6 +49,7 @@ autolink:
   toss:
     enabled: true         # 주인 10/23: 토스 딜 전부 자동 쉐어링크. 바로 끄기: Blog-Auto 에서 python -m blogauto tosslink stop
     wait_minutes: 30      # Blog-Auto 답을 기다리는 시간. 넘으면 링크 요청
+    no_link_until: "2026-11-05T00:00:00+09:00"  # 주인 10/30: 토스 쉐어링크 긴급 점검(10/30~11/4) 동안 토스 딜은 링크 없이 그냥 올림 (링크 요청·쉐어링크 부탁 없음)
 
 http:
   timeout_seconds: 20

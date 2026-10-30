@@ -89,6 +89,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     s = load_settings(ROOT / "config.yaml", load_env=False)
     s.publish.templates_dir = ROOT / "templates"
     s.publish.dry_run = True
+    s.autolink.toss.no_link_until = None  # 서버 설정의 토스 점검 기간(주인 10/30 — 11/4 까지 링크 없이)은 흐름 테스트에 넣지 않음 (test_toss_autolink 이 따로 봄)
     # 파이프라인 테스트는 '흐름'을 본다 → 판정 기준은 예전의 느슨한 값으로 (엄격한 기준은 test_strict_deal_rules.py 에서)
     d = s.deal
     d.min_price, d.community_min_recommend, d.min_history_samples, d.min_history_days = 1000, 5, 3, 0

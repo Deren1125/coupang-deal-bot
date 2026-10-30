@@ -2743,10 +2743,15 @@ class DealBot:
             self.relay_to_blog({kind: {"id": queue_id, "job": marker.get("job"), "at": time.time()}})
 
     # ------------------------------------------------- 토스쇼핑 쉐어링크 자동 링크 (주인 10/23, Blog-Auto 가 브라우저 일)
+    def _toss_no_link(self) -> bool:
+        """토스 딜을 링크 없이 올리는 기간인가 (autolink.toss.no_link_until — 주인 10/30 토스 쉐어링크 긴급 점검 10/30~11/4)."""
+        until = from_iso(self.settings.autolink.toss.no_link_until)
+        return until is not None and until > utcnow()
+
     def _toss_autolink_key(self, deal: Deal, shop: Any, *, ignore_stop: bool = False) -> tuple[str, str] | None:
         """자동 쉐어링크를 시도할 토스 딜이면 상품 주소의 (t|i, 번호), 아니면 None (→ 예전처럼 주인에게 링크 요청)."""
         cfg = self.settings.autolink.toss
-        if not cfg.enabled or shop is None or shop.key != "toss" or self.state.dry_run:
+        if not cfg.enabled or shop is None or shop.key != "toss" or self.state.dry_run or self._toss_no_link():
             return None
         until = from_iso(self.db.kv_get(autolink.KV_TOSS_STOP))
         if until and until > utcnow() and not ignore_stop:
@@ -2905,6 +2910,11 @@ class DealBot:
         for item in self.db.awaiting_items(50):
             if n >= self.BACKLOG_PER_TICK:
                 break
+            if item.deal.product.shop == "toss" and self._toss_no_link():  # 점검 전에 물어 둔 토스 링크 요청도 링크 없이 (주인 10/30)
+                self.notifier.resolve(f"link:{item.id}")
+                self._post_raw_link(item, item.deal, "토스 쉐어링크 점검 — 기다리던 링크 요청을 링크 없이", reason="toss_paused")
+                n += 1
+                continue
             key = f"{autolink.KV_TRIED}{item.id}"
             if self.db.kv_get(key) and not self.db.kv_get(f"autolink:timeout_retry:{item.id}") and self._timed_out_once(item.id):
                 # 예전 판은 시간 초과 한 번에 바로 주인에게 물었다 (주인 10/25 '이런 거는 왜 아직 떠') — 그런 딜도 한 번 더 자동으로
@@ -3206,6 +3216,12 @@ class DealBot:
                 if await self._held_before_autolink(item, deal):
                     return True
                 self._post_raw_link(item, deal, "쇼핑 커넥트 없는 판매처 (주인 표시)", reason="sc_store")
+                return True
+            if shop is not None and shop.key == "toss" and self._toss_no_link():
+                # 토스 쉐어링크 점검 동안 (주인 10/30 '링크 없이 그냥 올리는 걸로') — 묻지 않고 원본 주소로, 고지 없이. 가격이 안 맞는 딜은 보류
+                if await self._held_before_autolink(item, deal):
+                    return True
+                self._post_raw_link(item, deal, "토스 쉐어링크 점검 — 링크 없이", reason="toss_paused")
                 return True
             toss = self._toss_autolink_key(deal, shop, ignore_stop=True)
             if toss:

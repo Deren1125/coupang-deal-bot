@@ -224,3 +224,34 @@ def test_toss_key_and_verify_rules() -> None:
     assert autolink.verify_toss_link(LINK, URL, {"taca_id": 1}) == "mismatch"
     assert autolink.verify_toss_link(LINK, "https://toss.shopping/i/5", {"item_id": 5}) is None
     assert autolink.verify_toss_link(LINK, "https://toss.im/_m/x", row) == "deal_url"
+
+
+async def test_toss_maintenance_posts_without_a_link(bot: DealBot, settings: Settings) -> None:
+    """주인 10/30: 토스 쉐어링크 긴급 점검(10/30~11/4) 동안은 '링크 없이 그냥 올리는 걸로' — 주인에게 묻지도, Blog-Auto 에 부탁하지도
+    않고 원본 주소로 (고지 없음 · raw_link toss_paused). 점검 전에 물어 둔 링크 요청도 링크 없이. 기간이 지나면 예전 흐름."""
+    bot.settings.autolink.toss.no_link_until = "2999-01-01T00:00:00+09:00"
+    qid = _enqueue(bot)
+    assert await bot.process_queue_once()
+    item = bot.db.get_queue_item(qid)
+    assert item.deal.affiliate_url == URL and item.deal.product.extra.get("raw_link") == "toss_paused"  # type: ignore[union-attr]
+    assert not [u for u in _inbox(settings) if "toss_link" in u] and bot.db.queue_counts().get("awaiting_link") is None
+    bot.db.update_queue_item(qid, status="skipped")
+    waiting = _enqueue(bot, _product(url="https://toss.shopping/t/77", product_id="toss:77"))
+    bot.db.update_queue_item(waiting, status="awaiting_link", error="manual link required")
+    assert bot._autolink_backlog() == 1
+    item = bot.db.get_queue_item(waiting)
+    assert item.status == "pending" and item.deal.product.extra.get("raw_link") == "toss_paused"  # type: ignore[union-attr]
+    bot.db.update_queue_item(waiting, status="skipped")
+    bot.settings.autolink.toss.no_link_until = "2020-01-01T00:00:00+09:00"  # 끝남 → 다시 쉐어링크 부탁
+    qid, job = await _ask(bot, settings, _product(url="https://toss.shopping/t/88", product_id="toss:88"))
+    assert job["id"] == qid
+
+
+def test_server_config_turns_toss_links_off_until_nov_5_and_naver_autolink_off() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    raw = yaml.safe_load((Path(__file__).resolve().parents[1] / "config.yaml").read_text(encoding="utf-8"))
+    assert raw["autolink"]["toss"]["no_link_until"] == "2026-11-05T00:00:00+09:00"
+    assert raw["autolink"]["naver"]["enabled"] is False  # 주인 10/30 서버 네이버 계정 접속 끔

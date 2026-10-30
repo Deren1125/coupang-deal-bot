@@ -736,6 +736,9 @@ class TossAutoLinkConfig(BaseModel):
 
     enabled: bool = False
     wait_minutes: float = 30  # Blog-Auto 의 답을 이만큼 기다리고, 없으면 예전처럼 주인에게 링크 요청
+    # 이 시각 전에는 토스 딜을 링크 없이(원본 주소·고지 없이) 올린다 — 주인 10/30: 토스 쉐어링크 긴급 점검(10/30~11/4) 동안
+    # '링크 없이 그냥 올리는 걸로'. 주인에게 링크를 묻지도, Blog-Auto 에 쉐어링크를 부탁하지도 않음. 비우면 예전처럼
+    no_link_until: str | None = None
 
 
 class AutoLinkConfig(BaseModel):
