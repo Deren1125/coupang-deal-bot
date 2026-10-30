@@ -1,0 +1,64 @@
+{#
+  공개 '룩북 링크 모음' (/look — 주인 10/30 결정 LB-3 ②: 룩북 인스타 프로필 링크 1번 자리). 변수: title, top (맨 위 광고·AI 표시 한 줄),
+  reels[] (theme, day, reel, looks[] (n, name, price, mall, button, link)), zigzag_note (지그재그 적립 안내), instagram (@아이디 또는 '').
+  Look 번호 = 릴스 화면·캡션 순서. 링크는 Blog-Auto 가 만든 지그재그·에이블리 제휴 링크 그대로 (딜봇이 걸러 둔 https 만).
+#}
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{ title }}</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; background: #f4efe8; color: #2b2320; }
+  .ad { background: #3b2f2a; color: #fff; font-size: 12px; line-height: 1.5; padding: 8px 16px; margin: 0; text-align: center; }
+  header { padding: 22px 16px 6px; max-width: 640px; margin: 0 auto; }
+  h1 { font-family: "Playfair Display", Georgia, serif; font-size: 28px; margin: 0 0 4px; }
+  .sub { color: #6b5d55; font-size: 13px; margin: 0; }
+  main { padding: 6px 16px 24px; max-width: 640px; margin: 0 auto; }
+  .reel { background: #fff; border-radius: 14px; padding: 14px 16px 6px; margin: 12px 0; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+  .theme { font-size: 16px; font-weight: 700; margin: 0; }
+  .day { color: #8a7b72; font-size: 12px; white-space: nowrap; }
+  .watch { color: #6b5d55; font-size: 12px; }
+  .look { border-top: 1px solid #eee5dc; padding: 10px 0; }
+  .look:first-of-type { border-top: 0; }
+  .name { font-size: 15px; margin: 0 0 2px; line-height: 1.4; overflow-wrap: anywhere; }
+  .no { font-weight: 700; margin-right: 4px; }
+  .price { font-size: 14px; color: #6b5d55; margin: 0 0 8px; }
+  .btn { display: block; text-align: center; background: #3b2f2a; color: #fff; text-decoration: none; padding: 11px; border-radius: 10px; font-weight: 600; font-size: 15px; }
+  .btn.ably { background: #ff5288; }
+  .empty { color: #6b5d55; padding: 32px 0; text-align: center; }
+  footer { color: #8a7b72; font-size: 12px; line-height: 1.6; padding: 8px 16px 32px; max-width: 640px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<p class="ad">{{ top }}</p>
+<header>
+  <h1>Look.</h1>
+  <p class="sub">릴스 화면의 Look 번호 그대로예요{% if instagram %} · 인스타 @{{ instagram }}{% endif %}</p>
+</header>
+<main>
+{% for r in reels %}
+  <section class="reel">
+    <div class="head"><p class="theme">{{ r.theme or "오늘의 룩" }}</p><span class="day">{{ r.day }} · <a class="watch" href="{{ r.reel }}" rel="nofollow">릴스 보기</a></span></div>
+    {% for lk in r.looks %}
+    <div class="look">
+      <p class="name"><span class="no">Look {{ lk.n }}</span>{{ lk.name }}</p>
+      {% if lk.price %}<p class="price">{{ "{:,}".format(lk.price) }}원 (올린 날 기준)</p>{% endif %}
+      <a class="btn {{ lk.mall }}" href="{{ lk.link }}" rel="nofollow sponsored">{{ lk.button }}</a>
+    </div>
+    {% endfor %}
+  </section>
+{% else %}
+  <p class="empty">아직 올린 룩북 릴스가 없어요.</p>
+{% endfor %}
+</main>
+<footer>
+  <p>{{ zigzag_note }}.</p>
+  <p>모델은 AI로 만든 가상인물이에요. 실제 상품과 색·핏이 다를 수 있어요. 가격·재고는 올린 날 기준이며 바뀔 수 있어요.</p>
+</footer>
+</body>
+</html>

@@ -932,9 +932,10 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
             return {"id": jid}
         url = reel_url(g("url"))
         # '올림 완료' 필수 체크 (주인 10/26 — 제작 기준 v1 M3·B7): 앱에서 음악 붙임 · AI 레이블 켬. 고정 댓글(pin)은 선택 (D3)
-        if g("music") is not True or g("ai_label") is not True:
-            raise ActionError("bad_args", text="'앱에서 음악 붙임'과 'AI 정보 켬'을 체크해야 저장돼요")
-        return {"id": jid, "url": url, "music": True, "ai_label": True, **({"pin": True} if g("pin") is True else {})}
+        # 유료 파트너십 레이블(paid)도 필수 (주인 10/30 결정 — 룩북 LB-3 ①)
+        if g("music") is not True or g("ai_label") is not True or g("paid") is not True:
+            raise ActionError("bad_args", text="'앱에서 음악 붙임'·'AI 정보 켬'·'유료 파트너십 레이블 켬'을 체크해야 저장돼요")
+        return {"id": jid, "url": url, "music": True, "ai_label": True, "paid": True, **({"pin": True} if g("pin") is True else {})}
     if name == "lookbook_trial":  # 사진 시험 새로 만들기 (주인 10/26 — 계약 action_lookbook_trial.json): {} 또는 {base: 바탕 릴스 번호}
         base = g("base")
         if base in (None, ""):

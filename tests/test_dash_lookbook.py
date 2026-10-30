@@ -95,17 +95,19 @@ def test_posted_needs_the_music_and_ai_label_checks() -> None:
     """'올림 완료' 필수 체크 (주인 10/26 — 쇼츠 총괄 제작 기준 v1 P0-8 · M3·B7): 앱에서 음악 붙임 · AI 레이블 켬 — 체크 없이는 저장 안 됨.
     고정 댓글(pin, D3)은 선택 — 체크하면 같이 실림. 화면 체크리스트도 같은 키 (need 둘 · 선택 칸)."""
     url = fixture("action_lookbook_posted.json")["args"]["url"]
-    for args in ({}, {"music": True}, {"ai_label": True}, {"music": "true", "ai_label": 1}, {"music": True, "ai_label": False}):
+    for args in ({}, {"music": True}, {"ai_label": True}, {"music": "true", "ai_label": 1}, {"music": True, "ai_label": False},
+                 {"music": True, "ai_label": True}, {"music": True, "ai_label": True, "paid": "yes"}):  # 유료 파트너십도 필수 (10/30 LB-3)
         with pytest.raises(ActionError) as e:
             clean_args("blog.lookbook_posted", {"id": JID, "url": url, **args})
-        assert "음악" in e.value.text and "AI 정보" in e.value.text
-    ok = clean_args("blog.lookbook_posted", {"id": JID, "url": url, "music": True, "ai_label": True, "pin": True})
-    assert ok == {"id": JID, "url": url, "music": True, "ai_label": True, "pin": True}
-    assert "pin" not in clean_args("blog.lookbook_posted", {"id": JID, "url": url, "music": True, "ai_label": True, "pin": "yes"})
+        assert "음악" in e.value.text and "AI 정보" in e.value.text and "유료 파트너십" in e.value.text
+    need = {"music": True, "ai_label": True, "paid": True}
+    ok = clean_args("blog.lookbook_posted", {"id": JID, "url": url, **need, "pin": True})
+    assert ok == {"id": JID, "url": url, **need, "pin": True}
+    assert "pin" not in clean_args("blog.lookbook_posted", {"id": JID, "url": url, **need, "pin": "yes"})
     from dealbot.dashboard import lbview
 
     need = [c["k"] for c in lbview.CHECKLIST if c["need"]]
-    assert need == ["music", "ai_label"] and any(c["k"] == "pin" and not c["need"] for c in lbview.CHECKLIST)
+    assert need == ["music", "ai_label", "paid"] and any(c["k"] == "pin" and not c["need"] for c in lbview.CHECKLIST)
 
 
 def test_reel_url_is_checked_by_its_letters_only_and_normalized() -> None:
@@ -138,7 +140,7 @@ async def test_posted_reaches_the_spool_like_the_contract_fixture(bot: DealBot, 
                              session_headers(bot))
     assert status == 400 and "AI 정보" in body["text"]  # 필수 체크 하나라도 없으면 저장 안 됨
     status, body = await act(bot, "blog.lookbook_posted", {"id": JID, "url": want["args"]["url"] + "?igsh=abc", "music": True,
-                                                           "ai_label": True}, session_headers(bot))
+                                                           "ai_label": True, "paid": True}, session_headers(bot))
     assert status == 202, body  # 확인 창 없음 (서버에서 밖으로 나가는 것 없음 — 올리기는 주인 손)
     f = spool.read(spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new" / f"{body['id']}.json")
     assert set(f) == set(want)
@@ -214,8 +216,9 @@ async def test_state_has_cards_media_looks_checklist_and_actions(bot: DealBot, s
     lb = (await state(bot))["lookbook"]
     assert lb["ready"] and lb["bridge_ok"] and lb["enabled"] and lb["server"] == "" and lb["instagram"] == "@derenpick.look"
     assert lb["entry"] == "룩북 릴스 · 완성 1편 →" and lb["ready_n"] == 1
-    assert [(c["k"], c["need"]) for c in lb["checklist"]] == [("music", True), ("ai_label", True), ("", False), ("pin", False)]
-    assert "음악" in lb["checklist"][0]["t"] and "AI 정보" in lb["checklist"][1]["t"] and "선택" in lb["checklist"][3]["t"]
+    assert [(c["k"], c["need"]) for c in lb["checklist"]] == [("music", True), ("ai_label", True), ("paid", True), ("", False), ("pin", False)]
+    assert "음악" in lb["checklist"][0]["t"] and "AI 정보" in lb["checklist"][1]["t"] and "유료 파트너십" in lb["checklist"][2]["t"]
+    assert "선택" in lb["checklist"][4]["t"]
     assert "AI 정보" in lb["rules"] and "#광고" in lb["rules"]
     [it] = lb["items"]
     assert (it["id"], it["status"], it["word"], it["tone"]) == (JID, "ready", "완성", "ok")
@@ -557,3 +560,38 @@ def test_trial_buttons_wait_for_the_real_result_and_the_list_refreshes() -> None
     assert "L.trial_busy ||" in js and "!L.trial_base" in js and "L.trial_sig ||" in js and "if (TOPEN) TR = null" in js
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "T.view(b, {el, btn, api, toast, S, exec, uploadAll})" in app  # exec 를 넘겨줌
+
+
+def test_link_page_lists_posted_reels_with_look_numbers(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """공개 '룩북 링크 모음' (주인 10/30 LB-3 ②): 올린 릴스만 최신순 · Look 번호 순 · 링크 없는/뺀 룩은 빼기 · 맨 위 광고·AI 표시 ·
+    지그재그 앱 적립 안내 · 사진 시험·안 올린 편은 안 나옴."""
+    from zoneinfo import ZoneInfo
+
+    from dealbot.dashboard import lbview
+
+    reel = "https://www.instagram.com/reel/DAbCdEfGhIj/"
+    look = lambda n, mall, link, dropped=False: {"n": n, "name": f"상품 {n}", "price": 29000 + n, "mall": mall,  # noqa: E731
+                                                  "link": link, "dropped": dropped}
+    lb = {"instagram": "derenpick.look", "items": [
+        {"id": "a", "theme": "하객룩", "created_at": "2026-10-30T07:12:00+09:00", "posted_url": reel, "trial": False,
+         "looks": [look(2, "ably", "https://m.a-bly.com/goods/2"), look(1, "zigzag", "https://s.zigzag.kr/x1"),
+                   look(3, "zigzag", ""), look(4, "zigzag", "https://s.zigzag.kr/x4", dropped=True)]},
+        {"id": "b", "theme": "출근룩", "posted_url": None, "looks": [look(1, "zigzag", "https://s.zigzag.kr/y")]},
+        {"id": "c", "theme": "시험", "posted_url": reel, "trial": True, "looks": [look(1, "zigzag", "https://s.zigzag.kr/z")]}]}
+    got = lbview.link_page(lb, ZoneInfo("Asia/Seoul"))
+    assert [r["theme"] for r in got] == ["하객룩"] and got[0]["day"] == "10/30" and got[0]["reel"] == reel
+    assert [(x["n"], x["button"]) for x in got[0]["looks"]] == [(1, "지그재그 앱에서 열기"), (2, "에이블리에서 보기")]
+    html_text = bot.renderer.render("look_page.j2", title="t", top=lbview.LINK_PAGE_TOP, reels=got, zigzag_note=lbview.ZIGZAG_NOTE,
+                                    instagram="derenpick.look")
+    assert html_text.index("#광고") < html_text.index("Look 1") < html_text.index("Look 2")
+    assert "AI 가상인물" in html_text and "24시간" in html_text and 'href="https://s.zigzag.kr/x1"' in html_text
+    assert "x4" not in html_text and "상품 3" not in html_text
+    assert lbview.link_page(None, ZoneInfo("Asia/Seoul")) == []
+
+
+async def test_look_route_renders_from_the_blogauto_record(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    write_export(export_path(tmp_path))
+    status, html_text = await bot._look_page({})
+    assert status == 200 and "#광고" in html_text and "Look." in html_text
+    if settings.web.public_page:
+        assert "/look" in bot.web.routes

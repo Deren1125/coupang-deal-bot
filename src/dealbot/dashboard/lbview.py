@@ -51,6 +51,8 @@ MALLS = {"zigzag": "지그재그", "ably": "에이블리"}
 CHECKLIST = (
     {"t": "앱에서 음악 붙임 (인스타 앱 라이브러리 곡 — 음소거 알림이 오면 그 편만 바꾸기)", "k": "music", "need": True},
     {"t": "인스타 'AI 정보' 켬 (고급 설정 → AI 레이블)", "k": "ai_label", "need": True},
+    # 주인 10/30 결정 (룩북 LB-3 ①): 제휴 링크가 든 릴스라 '유료 파트너십' 라벨도 붙임
+    {"t": "인스타 '유료 파트너십' 레이블 켬 (고급 설정 → 브랜디드 콘텐츠)", "k": "paid", "need": True},
     {"t": "캡션 붙여넣기", "k": "", "need": False},
     {"t": "고정 댓글 달기 (선택 · 올린 직후 권장)", "k": "pin", "need": False},
 )
@@ -63,6 +65,30 @@ STYLE_WORDS = {"mirror": "거울 셀카", "studio": "예전 양식"}
 TRIAL_BUSY = ("new", "waiting_server", "submitted", "rendering")  # 사진 시험이 아직 만드는 중 (Blog-Auto 가 두 번째 시험을 거절함)
 TRIAL_MIN_LOOKS = 4  # 시험 바탕이 될 수 있는 보통 일감 (Blog-Auto lookbook.LOOKS[0])
 TRIAL_ACTIONS = {"lookbook_trial", "lookbook_style"}
+
+
+# 공개 '룩북 링크 모음' (주인 10/30 LB-3 ② — 인스타 프로필 링크 1번 자리 · 사양 2-5 1안): 올린 릴스만 최신순, 편마다 Look 번호 = 화면·캡션 순서
+LINK_PAGE_MAX = 14
+LINK_PAGE_TOP = "#광고 · 링크로 구매 시 수수료를 받아요 · AI 가상인물 이미지"
+MALL_BUTTON = {"zigzag": "지그재그 앱에서 열기", "ably": "에이블리에서 보기"}
+ZIGZAG_NOTE = "지그재그는 앱에서 24시간 안에 사야 적립돼요"
+
+
+def link_page(lb: dict[str, Any] | None, tz: ZoneInfo) -> list[dict[str, Any]]:
+    """링크 모음 한 장의 편들: [{theme, day, reel, looks: [{n, name, price, mall, button, link}]}]. 올린(posted_url) 보통 릴스만
+    (사진 시험·안 올린 편 없음) · 링크 없는 룩·뺀 룩(dropped)은 빼고 · 남은 룩이 없으면 그 편도 뺌."""
+    out: list[dict[str, Any]] = []
+    for it in (lb or {}).get("items") or []:
+        if it.get("trial") or not it.get("posted_url"):
+            continue
+        looks = [{"n": x["n"], "name": x["name"], "price": x["price"], "mall": x["mall"], "button": MALL_BUTTON.get(x["mall"], "열기"),
+                  "link": x["link"]} for x in sorted(it.get("looks") or [], key=lambda x: x["n"]) if x.get("link") and not x.get("dropped")]
+        if looks:
+            out.append({"theme": it.get("theme") or "", "day": _when(it.get("created_at"), tz).split(" ")[0], "reel": it["posted_url"],
+                        "looks": looks})
+        if len(out) >= LINK_PAGE_MAX:
+            break
+    return out
 
 
 def _reason(code: str) -> str:

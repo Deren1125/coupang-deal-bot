@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 from telegram import Bot, BotCommand, Update
@@ -563,6 +564,7 @@ class DealBot:
         if settings.web.public_page:
             self.web.route("/", self._deals_page)  # 인스타 프로필 링크용 핫딜 목록
             self.web.route_prefix("/d/", self._deal_redirect)  # /d/번호 → 구매 링크
+            self.web.route("/look", self._look_page)  # 룩북 링크 모음 (주인 10/30 LB-3 — 룩북 인스타 프로필 링크)
         # ---- 채널 대시보드 (/dashboard, 기본 인증 — 주인 요청 10/14). 만들다 실패해도 봇은 계속 돈다
         self.dashboard: Dashboard | None = None
         try:
@@ -4233,6 +4235,23 @@ class DealBot:
             telegram_join=self.db.kv_get(f"{invites.KV_PREFIX}deals_page") or channels.get("telegram_url") or "",
             picks=self._pick_links(),
         )
+        return 200, html_text
+
+    async def _look_page(self, query: dict[str, str]) -> tuple[int, str]:
+        """'/look' 룩북 링크 모음 (주인 10/30 결정 LB-3 ②). Blog-Auto 기록 파일의 lookbook 칸(대시보드가 걸러 둔 것)만 읽음 —
+        올린 릴스 최신순 · Look 번호 = 화면·캡션 순서 · 맨 위 '#광고 · … · AI 가상인물 이미지'. 기록을 못 읽으면 빈 목록."""
+        from dealbot.dashboard import lbview
+
+        lb = None
+        try:
+            reader = getattr(getattr(self.dashboard, "ctx", None), "blogauto", None)
+            export = reader.read() if reader is not None else None
+            lb = (getattr(export, "v2", None) or {}).get("lookbook")
+        except Exception as e:  # noqa: BLE001 — 기록이 이상해도 화면은 뜸
+            log.warning("look page: Blog-Auto 기록을 못 읽음: %s", type(e).__name__)
+        html_text = self.renderer.render("look_page.j2", title="Look. 룩북 링크 모음", top=lbview.LINK_PAGE_TOP,
+                                         reels=lbview.link_page(lb, ZoneInfo(self.settings.app.timezone)),
+                                         zigzag_note=lbview.ZIGZAG_NOTE, instagram=(lb or {}).get("instagram") or "")
         return 200, html_text
 
     def _pick_links(self, limit: int = 3) -> list[dict[str, str]]:
