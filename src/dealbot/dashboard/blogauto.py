@@ -540,6 +540,8 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         **({"hot_rank": hr} if (hr := _count(v.get("hot_rank"), top=10)) else {}),
         # 업로드 실패 이유 (주인 10/21 — Blog-Auto failwhy, 선택 칸: 실패한 글만) → 할 일 줄 '업로드 실패 · 이유'
         **({"fail": fl} if (fl := _fail(v.get("fail"))) is not None else {}),
+        # 붙여넣기 기다림 (주인 10/29 — 서버가 네이버에 안 올림) → 할 일 줄은 '발행·다시 올리기' 대신 '오늘 할 일'로
+        **({"paste": True} if v.get("paste") is True else {}),
         # 비슷한 아이템 (주인 10/20 — Blog-Auto issue_similar, 선택 칸: Pick 패션 글만) → '비슷한 아이템 링크 넣기'
         **({"similar": sim} if (sim := _similar(v.get("similar"))) is not None else {}),
     }
@@ -1798,11 +1800,13 @@ def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, A
                 "login_checked": _one_line(b.get("login_checked"), 40),
                 "blog_id": b.get("blog_id") if isinstance(b.get("blog_id"), str) and re.fullmatch(r"[a-z0-9_-]{2,40}", b.get("blog_id")) else None,
                 "neighbors": _neighbors(b.get("neighbors")),
+                "paste": b.get("paste") is True,  # 붙여넣기 방식 (주인 10/29) — 서버 발행·예약·고치기 단추를 숨김
             }
     k = st.get("kakao") if isinstance(st.get("kakao"), dict) else {}
     out["status"]["kakao"] = {"state": k.get("state") if k.get("state") in ("ok", "down", "expiring", "unknown") else "unknown",
                               "expires_at": _one_line(k.get("expires_at"), 40)}
     out["status"]["shopconnect"] = _shopconnect(st.get("shopconnect"))
+    out["status"]["naver_off"] = st.get("naver_off") is True  # 서버 네이버 계정 접속 끔 (주인 10/30) — 로그인 단추를 숨김
     out["status"]["logins"] = _logins(st.get("logins"))  # 로그인 관리 칸 (주인 10/26 — 없으면 None: 예전 Blog-Auto)
     out["status"]["naver_visits"] = _naver_visits(st.get("naver_visits"))  # 네이버 접속 칸 (주인 10/27)
     out["status"]["routine"] = _routine(st.get("routine"), media_base)  # 오늘 할 일 (주인 10/27 — 없으면 None: 예전 Blog-Auto)

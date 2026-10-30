@@ -377,8 +377,9 @@ def _challenge(c: dict[str, Any] | None) -> dict[str, Any] | None:
     warn = ""
     if running and not c.get("content"):
         # 주인 10/25 '이거는 왜 계속 떠 있는 거야': 봇이 자동으로 내는 조건(에이블리 상품 링크가 든 Pick 글 발행 뒤 24시간 안)을 같이 적는다
-        warn = ("콘텐츠 링크를 아직 안 냈어요 (내지 않으면 몇 명이 와도 0원) — 에이블리 상품 링크가 들어간 데런픽 글이 발행되면 봇이 24시간 안에 자동으로 내요. "
-                "그런 글이 아직 없어서 남아 있어요 (직접 내려면: 에이블리 크리에이터 > 방문 수 챌린지 > 콘텐츠 제출하기)")
+        # 10/30: 서버는 에이블리를 열지 않음 (주인 10/28 폰 링크 방식) — 봇이 대신 내지 않으니 앱에서
+        warn = ("콘텐츠 링크를 아직 안 냈어요 (내지 않으면 몇 명이 와도 0원) — 서버는 에이블리를 열지 않아요(10/28~). "
+                "에이블리 상품 링크가 들어간 데런픽 글을 발행한 뒤 앱에서 직접 내 주세요: 에이블리 크리에이터 > 방문 수 챌린지 > 콘텐츠 제출하기")
     earned = f"지금 닿은 단계 {money(c['earned'])} (콘텐츠 검수 뒤 확정)" if c.get("earned") else ""
     tiers = [{"visits": f"{t['visits']:,}명", "reward": money(t["reward"]), "hit": visits is not None and visits >= t["visits"]}
              for t in c.get("tiers") or []]
@@ -538,5 +539,7 @@ def build(store: EarnStore, tz: str, now: float, sc_field: dict[str, Any] | None
                                                    "commission": m["commission"], "memo": m["memo"],
                                                    "text": f"{_md(m['day'])} · {m['shop']} · {m['product'] or '상품 이름 없음'} · {money(m['amount'])} (수익 {money(m['commission'])})"}
                                                   for m in rows]},
-        "note": "에이블리·지그재그·토스쇼핑은 자동이에요 (하루 한 번 읽고 4시간마다 로그인 확인) — 무신사·29CM·기타만 ‘수익 직접 넣기’로 넣어 주세요",
+        # 10/30: 에이블리는 서버가 안 엶(10/28~ 폰 링크) · 토스는 쉐어링크 점검(~11/4) · 쇼핑커넥트는 네이버 접속 끔(10/30~)
+        "note": "지그재그는 자동이에요 · 에이블리(10/28~)·쇼핑커넥트(10/30~)는 서버가 안 읽어 숫자가 멈춰 있고, 토스는 11/4까지 점검이에요 "
+                "— 무신사·29CM·기타는 ‘수익 직접 넣기’로 넣어 주세요",
     }

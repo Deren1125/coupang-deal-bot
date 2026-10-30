@@ -319,7 +319,8 @@ def test_partial_nulls_show_dashes_and_fall_back_to_the_last_stored_neighbors(db
     assert fin.stats[0].delta is None and fin.summary["audience_delta"] == 0.0  # 통계의 오늘 이웃증감수
     # 숫자가 하나도 없으면 자기 통계가 없는 것과 같음 (직접 입력 안내)
     assert iss.stats_note.startswith(STATS_NOTE) and len(iss.stats) == 2
-    assert tiles(hot)[2:] == [("조회수 · 오늘", None, ""), ("조회수 · 어제", None, "")]
+    # 조회수·공감·댓글이 다 없는 날 = 공개 화면으로 읽은 날 (주인 10/30 네이버 접속 끔) → 빈 조회수 칸을 그리지 않고 '공개 화면 · 읽음'
+    assert tiles(hot)[2:] == [] and hot.stats_note.startswith("공개 화면 · ")
     card = card_html(dash.page_html(), "blog_finance")
     assert '<p class="label">방문자 · 오늘</p><p class="value">-</p>' in card
 

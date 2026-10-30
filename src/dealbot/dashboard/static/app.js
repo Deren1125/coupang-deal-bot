@@ -29,7 +29,7 @@ const MSG = {published: '발행했어요', saved: '저장했어요', done: '했�
   wrong_state: '지금 상태에서는 할 수 없어요', owner_edited: '직접 고친 글이라 멈췄어요 — 할 일에서 정해 주세요',
   busy: '다른 일을 하는 중이에요 — 잠시 뒤 다시', expired: '시간이 지나 취소됐어요 — 다시 눌러 주세요',
   bad_args: '입력한 값을 다시 확인해 주세요', bad_upload: '올린 파일을 쓸 수 없어요', failed: '하지 못했어요 — 잠시 뒤 다시',
-  login_needed: '네이버 로그인이 필요해요 — 연결에서 확인해 주세요', unsupported: '블로그 프로그램 업데이트를 기다리는 중이에요',
+  login_needed: '지금은 서버가 로그인하지 않아요', unsupported: '블로그 프로그램 업데이트를 기다리는 중이에요',
   blogauto_down: '블로그 프로그램이 응답하지 않아요', rate: '너무 자주 눌렀어요 — 조금 뒤에 다시', net: '인터넷 연결을 확인해 주세요',
   unknown: '확인이 필요해요 — 잠시 뒤 상태를 봐 주세요', confirm_expired: '확인 창이 오래됐어요 — 다시 눌러 주세요'};
 const SCH = /^blog\.(un)?schedule/, PIX = /^blog\.pics_/;
@@ -941,14 +941,14 @@ function autoBox() {
   const c = S.connect, d = c && c.bots.dealbot, a = c && c.bots.blogauto, o = OPEN.auto;
   if (!d) return null;
   const xs = [['딜봇', d.paused ? '멈춤' : '정상', d.paused], ['블로그 프로그램', a.ok ? `정상 · ${ago(a.seen_at)} 신호` : '응답 없음', !a.ok],
-    c.sc && c.sc.text !== '꺼짐' && ['쇼핑커넥트', c.sc.text, c.sc.bad], ...(d.collectors || []).filter(x => x.enabled).map(x => [x.label, (x.ok ? '정상 · ' : '오류 · ') + x.text, !x.ok, 1])].filter(Boolean);
+    c.sc && !/^꺼/.test(c.sc.text) && ['쇼핑커넥트', c.sc.text, c.sc.bad], ...(d.collectors || []).filter(x => x.enabled).map(x => [x.label, (x.ok ? '정상 · ' : '오류 · ') + x.text, !x.ok, 1])].filter(Boolean);
   const ok = xs.filter(x => !x[2]), n = ok.filter(x => x[3]).length;
   return el('div', {class: 'box', style: 'padding:0 14px'}, xs.filter(x => x[2]).map(x => row(x[0], x[1], null, 1)),
     ok.length ? btn('fold', '자동 작업 정상 · ' + ok.filter(x => !x[3]).map(x => x[0]).concat(n ? '수집기 ' + n : []).join('·'), () => { OPEN.auto = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'}) : null,
     o ? ok.map(x => row(x[0], x[1])) : null);
 }
 function vTodo() {
-  const rt = rtIds(), all = S.todo.flatMap(i => i.kind === 'publish' && rt.has(i.iid) ? [] : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
+  const rt = rtIds(), all = S.todo.flatMap(i => /^(publish|paste|app)$/.test(i.kind) && rt.has(i.iid) ? [] : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
   let items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, k = 0, rest = 0;
   if (R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
   const b = banner(), urg = b && b.classList.contains('bad');
@@ -1006,7 +1006,7 @@ const IDEA = ['blog.scan', 'blog.issue', 'blog.hotdeal_now'];
 const mineT = (i, k) => i.kind === 'visits' ? vis(i.detail.visits).some(x => x.blog === k) : i.blog === k && !pendingOf(i.iid);
 const todoN = k => S.todo.filter(i => mineT(i, k)).length;
 // Pick 인기 검색어
-const TSRC = {advisor: '어드바이저', google: '구글', pick: 'Pick', news: '뉴스', early: '급상승'}, TTAG = {fashion: '패션', ent: '연예'};
+const TSRC = {advisor: '데이터랩', google: '구글', pick: 'Pick', news: '뉴스', early: '급상승'}, TTAG = {fashion: '패션', ent: '연예'};
 function trendBox(t) {
   const all = OPEN.trends, mv = x => x.new ? el('i', {class: 'up'}, 'NEW') : x.change ? el('i', {class: x.change > 0 ? 'up' : 'dn'}, (x.change > 0 ? '▲' : '▼') + Math.abs(x.change)) : el('i', {}, '–');
   return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '인기 검색어'), el('span', {class: 'note'}, ago(t.at))),
@@ -1032,7 +1032,7 @@ function vBlog() {
   const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
   const write = acts.find(a => /^blog\.(write|post_notes)$/.test(a.action)), seed = acts.find(a => a.action === 'blog.topic_seed');
   const more = acts.filter(a => !idea.includes(a) && a !== write && a !== seed);
-  out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편${b.paused ? ' · 멈춤' : ''}`),
+  out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, (b.head || `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편`) + (b.paused ? ' · 멈춤' : '')),
     b.login === 'needed' ? el('a', {class: 'lnk bad', href: '#/connect'}, '로그인 필요') : null, more.length ? btn('lnk', '더보기', () => moreSheet(pseudo, more)) : null));
   // 도구는 한 칸에 모아 글 아래로
   const sr = S.search, tools = [S.sched && S.sched.total && {href: '#/blog/sched', t: `예약 일정 보기 · ${S.sched.total}편`}, S.pics && {href: '#/blog/pics', t: '링크에서 사진 뽑기'},
@@ -1287,7 +1287,7 @@ function vConnect() {
   out.push(...sec('봇 상태', BLOGS.map(([b, l]) => nv[b] && nv[b].action && Object.assign({}, nv[b].action, {label: l + ' 로그인 확인'})).filter(Boolean), row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.updated ? ` · ${bd.updated} 업데이트` : ''}`, null, bd.paused),
     row('블로그 프로그램', ba.ok ? `정상 · ${ago(ba.seen_at)} 신호` : `응답 없음${ba.seen_at ? ' · ' + ago(ba.seen_at) : ''}`, null, !ba.ok),
     (x => x && row('쇼핑커넥트', x.text, x.action && btn('sm', x.action.label, e => exec(x.action, {}, {btn: e.currentTarget})), x.bad))(c.sc),
-    row('서버 점검', '로그인·서비스·메모리·스레드를 한 번에', btn('sm', '점검', e => exec(c.check, {}, {btn: e.currentTarget}))),
+    row('서버 점검', '서비스·메모리·스레드를 한 번에', btn('sm', '점검', e => exec(c.check, {}, {btn: e.currentTarget}))),
     cols.length ? fold(`수집기 ${cols.length}개`, () => listSheet('수집기', cols.map(x => row(x.label, `${x.enabled ? (x.ok ? '정상' : '오류') : '꺼짐'} · ${x.text}`, null, !x.ok)))) : null));
   out.push(el('div', {class: 'box', style: 'margin-top:20px'},
     c.errors.length ? fold(`오류 ${c.errors.length}개`, () => listSheet('오류', c.errors.map(x => row(x.where || '오류', `${hhmm(x.at)} · ${x.text}`)))) : row('오류', '없어요'),

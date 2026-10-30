@@ -3,7 +3,8 @@
 
 GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 밖, 그리기는 static/routine.js) → view():
     {"day", "today": bool, "slots": [{key, at, label, items: [{…item, done, tag}], done, total, min_left, current}],
-     "overflow", "done", "total", "ably": {n, note, rows: [{rid, pid, title, piece, name, price, shop, url, due, due_text}]} | None}
+     "overflow", "done", "total", "ably": {n, note, rows: [{rid, pid, title, piece, name, price, shop, url, due, due_text}]} | None,
+     "times", "rising": [키워드], "rests": [한 줄]} — rising·rests 는 extras() (주인 10/30)
   목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
 에이블리 링크 부탁 (주인 10/28): Blog-Auto 칸 ably_requests (blogauto._ably_requests) — 서버는 에이블리를 열지 않고 주인이 폰 앱에서
   링크를 만들어 붙여 넣음 → 대시보드 일 blog.similar_links {blog: issue, pid, links: [붙여 넣은 글], rid}. 없거나 0개면 None.
@@ -151,6 +152,30 @@ def ably_view(bot: Any, now: float) -> dict[str, Any] | None:
     return {"n": len(rows), "note": a["note"], "rows": rows}
 
 
+RISING_MAX = 3
+
+
+def extras(bot: Any) -> dict[str, Any]:
+    """할 일 칸 위아래 두 줄 (주인 10/30 '대시보드 전면 수정'):
+    rising = Pick 인기 검색어 중 '⚡ 막 뜨는 중'(badge) 이고 아직 안 쓴 키워드 (최대 RISING_MAX — 누르면 Pick 화면) ·
+    rests = 지금 쉬는 것 한 줄씩 (네이버 접속 끔 · 붙여넣기 · 토스 점검 — 예전 단추가 왜 없는지)."""
+    st = getattr(bot, "dash_state", None)
+    v2 = (getattr(st._export(), "v2", None) or {}) if st is not None else {}
+    tr = v2.get("trends") or {}
+    rising = [x["keyword"] for x in tr.get("items") or [] if x.get("badge") and not x.get("written")][:RISING_MAX]
+    status = v2.get("status") or {}
+    paste = [NV_BLOGS.get(b, b) for b in ("finance", "issue", "hotdeal") if ((status.get("blogs") or {}).get(b) or {}).get("paste")]
+    rests: list[str] = []
+    if status.get("naver_off"):
+        rests.append("네이버 계정 서버 접속 꺼 둠 — 블로그 글은 붙여넣기로 올리고, 로그인·쇼핑커넥트·예약 단추는 없어요")
+    elif paste:
+        rests.append(f"붙여넣기 방식 ({'·'.join(paste)}) — 서버는 네이버에 글을 올리지 않아요")
+    toss = getattr(bot, "_toss_no_link", None)
+    if callable(toss) and toss():
+        rests.append("토스 쉐어링크 점검 — 11/4까지 토스 딜은 링크 없이 올려요")
+    return {"rising": rising, "rests": rests}
+
+
 def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     """GET /dashboard/api/routine 몸. 지금 시간대 = 시각(대시보드 시간대)이 지난 마지막 칸 (첫 칸 전이면 첫 칸)."""
     now = now or time.time()
@@ -164,8 +189,13 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001 — 부탁 칸이 틀려도 할 일은 보이게
         log.warning("routine ably view failed: %s", type(e).__name__)
         ably = None
+    try:
+        ex = extras(bot)
+    except Exception as e:  # noqa: BLE001 — 두 줄이 틀려도 할 일은 보이게
+        log.warning("routine extras failed: %s", type(e).__name__)
+        ex = {"rising": [], "rests": []}
     if not r:
-        return {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0, "ably": ably}
+        return {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0, "ably": ably, **ex}
     hm = datetime.fromtimestamp(now, _tz(bot)).strftime("%H:%M")
     by_at = sorted(r["slots"], key=lambda s: s["at"])
     cur = next((s["key"] for s in reversed(by_at) if s["at"] <= hm), by_at[0]["key"])
@@ -178,4 +208,4 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
                       "min_left": sum(i["min"] for i in its if not i["done"]), "current": s["key"] == cur})
     return {"day": r["day"], "today": r["day"] == today(bot, now), "slots": slots, "overflow": r["overflow"],
             "done": sum(s["done"] for s in slots), "total": sum(s["total"] for s in slots), "ably": ably,
-            "times": list(r.get("times") or [])}
+            "times": list(r.get("times") or []), **ex}

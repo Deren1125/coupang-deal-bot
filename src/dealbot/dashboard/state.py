@@ -56,10 +56,13 @@ NAME_MAX = 40
 # 알림 종류 → 글의 할 일 (기록 파일 posts[] 가 아직 없을 때)
 KIND_NEED = {"draft_ready": "publish", "ask": "answers", "pick_photos": "photos", "hot": "photos", "upload_fail": "retry",
              "owner_edit": "owner_edit", "share_confirm": "share", "channel_ask": "channel", "channel_review": "channel"}
-NEED_ORDER = ("owner_edit", "answers", "photos", "retry", "publish", "share", "channel")  # 하나만 고를 때 앞의 것
+NEED_ORDER = ("owner_edit", "answers", "photos", "retry", "paste", "app", "publish", "share", "channel")  # 하나만 고를 때 앞의 것
 NEED_STATUS = {"owner_edit": "직접 고친 글 · 건드리지 않음", "answers": "질문에 답해 주세요", "photos": "사진 필요",
                "retry": "업로드 실패", "publish": "발행 대기", "share": "직접 발행 · 채널·카톡 보낼까요",
-               "channel": "채널에 아직 안 올림"}
+               "channel": "채널에 아직 안 올림",
+               # 붙여넣기 방식·네이버 접속 끔 (주인 10/29·10/30) — 서버가 네이버에 올리지 않음: 주인이 붙여넣기 / 앱에서 발행
+               "paste": "붙여넣기 대기 · 오늘 할 일에서 복사", "app": "임시저장에 있어요 · 네이버 앱에서 발행"}
+NAVER_BLOGS = ("finance", "issue", "hotdeal")
 
 
 def _app_ver() -> str:
@@ -119,8 +122,30 @@ class StateBuilder:
         sch = v2.get("schedule")
         supported = self._supported(self._ba_status())
         ok = isinstance(sch, dict) and (supported is None or {"schedule", "unschedule"} <= supported)
+        st = v2.get("status") or {}
         self._sctx = {"ok": ok, "spaced": {b: bool((x or {}).get("spaced_only")) for b, x in ((sch or {}).get("blogs") or {}).items()}
-                      if ok else {}, "sup": supported}
+                      if ok else {}, "sup": supported,
+                      # 서버가 그 블로그로 네이버를 여는가 (주인 10/29 붙여넣기 · 10/30 네이버 접속 끔 — 아니면 발행·예약·다시 올리기·고치기 단추 없음)
+                      "off": bool(st.get("naver_off")), "paste": {b: bool((x or {}).get("paste")) for b, x in (st.get("blogs") or {}).items()}}
+
+    def _srv(self, blog: str) -> bool:
+        """서버가 이 블로그 계정으로 네이버에 글을 올리는가 (붙여넣기 방식·네이버 접속 끔이면 False)."""
+        return not self._sctx.get("off") and not (self._sctx.get("paste") or {}).get(blog)
+
+    def _owner_needs(self, blog: str, post: dict[str, Any] | None, needs: list[str]) -> list[str]:
+        """서버가 네이버에 안 올리는 블로그: 발행·다시 올리기 → 붙여넣기(오늘 할 일) · 임시저장된 글은 '네이버 앱에서 발행'."""
+        p = post or {}
+        if self._srv(blog):
+            return needs
+        paste = bool(p.get("paste")) or (p.get("fail") or {}).get("kind") == "paste" \
+            or (bool((self._sctx.get("paste") or {}).get(blog)) and p.get("status") != "saved")
+        out: list[str] = []
+        for n in needs or (["paste"] if p.get("paste") else []):
+            n = ("paste" if paste else "app" if p.get("status") == "saved" else "") if n == "publish" else \
+                ("paste" if paste else "") if n == "retry" else n
+            if n and n not in out:
+                out.append(n)
+        return out
 
     @staticmethod
     def queued(post: dict[str, Any] | None) -> bool:
@@ -338,12 +363,15 @@ class StateBuilder:
             "photos": act("blog.photos", "사진 올리기", a, input="photos", accept="image/*", multiple=True,
                           options=["replace", "in_order", "crop", "credit"]),
             "retry": act("blog.retry", "다시 올리기", a),
+            "paste": goto("붙여넣기 하러 가기", "#/todo"),  # 할 일 탭 맨 위 '붙여넣기 대기' (routine.js)
+            "app": goto("자세히", f"#/i/{iidmod.post_iid(blog, pid)}"),
             "publish": act("blog.publish", "발행", a),
             "share": act("blog.share", "보내기", a),
             "channel": act("blog.channel", "채널에 올리기", a),
         }
         sch = (post or {}).get("schedule") or {}
-        sched_ok, spaced = self._sctx["ok"], bool(self._sctx["spaced"].get(blog))
+        srv = self._srv(blog)
+        sched_ok, spaced = self._sctx["ok"] and srv, bool(self._sctx["spaced"].get(blog)) or not srv
         now_pub = act("blog.publish", "지금 발행", a)  # 확인 창(★) 그대로
         if sched_ok and sch.get("status") in ("scheduled", "publishing"):
             # 예약된 글: 차분한 상태 한 줄만 (누를 것 없음) · 더보기 → 예약 취소 / 지금 발행
@@ -379,8 +407,8 @@ class StateBuilder:
             more.append(act("blog.noshare", "보내지 않기", a))
         if "channel" in needs:
             more.append(act("blog.channel", "직접 발행한 주소 넣기", a, input="url", placeholder="내 블로그 글 주소"))
-        if blog in ("finance", "issue"):
-            more.append(act("blog.fix", "말로 고치기", a, input="text", placeholder="어떻게 고칠지 적어 주세요"))
+        if blog in ("finance", "issue"):  # 붙여넣기 방식이면 원고만 고침 (붙여넣기 묶음에 들어감)
+            more.append(act("blog.fix", "말로 고치기" if srv else "원고 고치기", a, input="text", placeholder="어떻게 고칠지 적어 주세요"))
         if (post or {}).get("status") != "published" and (na := self._notes_act(blog, pid)):
             more.append(na)
         if (post or {}).get("status") not in ("published", "drafting") and (sa := self._similar_act(blog, pid, post)):
@@ -396,11 +424,11 @@ class StateBuilder:
 
     def _post_item(self, blog: str, post: dict[str, Any] | None, *, pid: int, title: str = "", needs: list[str] | None = None,
                    long: bool = False) -> dict[str, Any]:
-        needs = list((post or {}).get("needs") or needs or [])
+        needs = self._owner_needs(blog, post, list((post or {}).get("needs") or needs or []))
         primary, more = self._post_actions(blog, pid, needs, post)
         first = next((n for n in NEED_ORDER if n in needs), "")
         status = NEED_STATUS.get(first, "기다리는 글")
-        sch = ((post or {}).get("schedule") or {}) if self._sctx["ok"] else {}
+        sch = ((post or {}).get("schedule") or {}) if self._sctx["ok"] and self._srv(blog) else {}
         kind = first or "waiting"
         if first == "photos" and post and post.get("photo_request"):
             n = len(post["photo_request"].get("must") or [])
@@ -622,7 +650,8 @@ class StateBuilder:
         v2 = getattr(export, "v2", None) or {}
         posts = {b: {p["pid"]: p for p in v2.get("posts", {}).get(b, [])} for b in ("finance", "issue", "hotdeal")}
         self._sched_ctx(v2)
-        queued = {iidmod.post_iid(b, pid) for b, rows in posts.items() for pid, p in rows.items() if self._sctx["ok"] and self.queued(p)}
+        queued = {iidmod.post_iid(b, pid) for b, rows in posts.items() for pid, p in rows.items()
+                  if self._sctx["ok"] and self._srv(b) and self.queued(p)}
         out: dict[str, dict[str, Any]] = {}
         try:
             out.update(self._deal_items(now_dt, long=long))
@@ -677,7 +706,7 @@ class StateBuilder:
                 iid = iidmod.post_iid(blog, pid)
                 if iid in queued:
                     continue
-                blocked = self._sctx["ok"] and (p.get("schedule") or {}).get("status") == "blocked"
+                blocked = self._sctx["ok"] and self._srv(blog) and (p.get("schedule") or {}).get("status") == "blocked"
                 if iid not in out and (p.get("needs") or blocked) and p.get("status") != "published":
                     out[iid] = self._post_item(blog, p, pid=pid, long=long)
         # 기록 파일 todo (알림 줄이 없는 것: 셈한 일 · 예전 길로 열린 일)
@@ -746,7 +775,7 @@ class StateBuilder:
         except Exception as e:  # noqa: BLE001
             log.warning("login todo failed: %s", type(e).__name__)
         hidden = hidden_rows(self.bot.db, now)  # 주인이 '알림 없애기'로 뺀 줄 (주인 10/23)
-        items = [it for it in out.values() if not is_hidden(it, hidden)]
+        items = [it for it in out.values() if not is_hidden(it, hidden) and not self._resting(it)]
         for it in items:
             if not any(a and a["action"] == "todo.dismiss" for a in (it["primary"], *it["more"])):
                 it["more"] = [*it["more"], act("todo.hide", "알림 없애기", {"iid": it["iid"], "since": it.get("since")})]
@@ -762,6 +791,32 @@ class StateBuilder:
                 it["primary"] = dict(it["primary"], disabled=True, note="블로그 프로그램 업데이트를 기다리는 중")
             it.setdefault("chip", CHIPS.get(it.get("blog") or "", "딜" if it["src"] == "deal" else ""))
         return rank.order(items, now)  # 중요한·핫한 순 (rank.py)
+
+    def _toss_paused(self) -> bool:
+        f = getattr(self.bot, "_toss_no_link", None)
+        try:
+            return bool(f()) if callable(f) else False
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _login_dead(self, a: dict[str, Any] | None) -> bool:
+        """쉬는 동안 누를 일 없는 로그인 단추: 네이버 접속 끔이면 블로그 원격 로그인·로그인 확인 · 토스 점검이면 토스 원격 로그인."""
+        if not a:
+            return False
+        tgt = (a.get("args") or {}).get("target") or (a.get("args") or {}).get("blog")
+        if self._sctx.get("off") and (a["action"] == "blog.login_check" or (a["action"] == "login.remote" and tgt in NAVER_BLOGS)):
+            return True
+        return a["action"] == "login.remote" and tgt == "toss" and self._toss_paused()
+
+    def _resting(self, it: dict[str, Any]) -> bool:
+        """쉬는 것 때문에 생긴 지난 할 일은 숨김 (주인 10/30 — 네이버 접속 끔 · 토스 점검): 블로그 로그인 줄 · 쇼핑커넥트·토스 로그인 줄.
+        남는 줄에서도 죽은 로그인 단추는 뺌."""
+        if self._sctx.get("off") and it["iid"].startswith("conn-naver-"):
+            return True
+        if self._login_dead(it.get("primary")):
+            return True
+        it["more"] = [a for a in it["more"] if not self._login_dead(a)]
+        return False
 
     # ---------------------------------------------------------- 오늘 들를 이웃 글 (주인 10/18 — Blog-Auto visits)
     @staticmethod
@@ -867,6 +922,8 @@ class StateBuilder:
                                                        include_dry_run=bot.state.dry_run), key=lambda x: x.id, reverse=True)[:10]
         tc = bot.toss_counts(start)  # 주인 10/23: 토스 쉐어링크 딜이 얼마나 모이고 올라가는지 한 줄 (서버가 글까지 만들어 앱은 그대로 그림)
         toss = f"토스 후보 {tc['candidates']} · 링크 대기 {tc['waiting']} · 오늘 올림 {tc['today']}"
+        if self._toss_paused():  # 토스 쉐어링크 점검 (주인 10/30 — 11/4까지 링크 없이)
+            toss = f"토스 점검 중 — 11/4까지 토스 딜은 링크 없이 올려요 · 오늘 올림 {tc['today']}"
         return {"status": {"paused": bot.state.paused, "ok": not bot.state.paused, "today": len(today), "dry_run": bot.state.dry_run,
                            "toss": toss},
                 "today": [self._deal_row(it, hotdeal) for it in recent], "queue": bot.queue_view(10), "collectors": bot.collector_names(),
@@ -903,7 +960,7 @@ class StateBuilder:
             planned: list[tuple[float, dict[str, Any]]] = []
             for p in v2.get("posts", {}).get(blog, []):
                 iid = iidmod.post_iid(blog, p["pid"])
-                if self._sctx["ok"] and self.queued(p):  # 예약된 글은 '예약된 글' 칸에만 (두 번 보이지 않게)
+                if self._sctx["ok"] and self._srv(blog) and self.queued(p):  # 예약된 글은 '예약된 글' 칸에만 (두 번 보이지 않게)
                     at = _iso_ts((p.get("schedule") or {}).get("scheduled_at"), self.tz) or 0.0
                     planned.append((at, rank.public(self._post_item(blog, p, pid=p["pid"]))))
                 elif iid not in have and p.get("status") != "published":
@@ -921,34 +978,43 @@ class StateBuilder:
                 if (na := self._notes_act(blog)):
                     acts.append(na)
             mode = st.get("mode") or "draft"
-            acts.append(act("blog.mode", "발행 모드로" if mode == "draft" else "초안 모드로",
-                            {"blog": blog, "mode": "publish" if mode == "draft" else "draft"}))
+            srv = self._srv(blog)  # 붙여넣기·네이버 접속 끔이면 네이버를 여는 일(발행 모드·임시저장 정리·크리에이터 키워드)은 없음
+            if srv:
+                acts.append(act("blog.mode", "발행 모드로" if mode == "draft" else "초안 모드로",
+                                {"blog": blog, "mode": "publish" if mode == "draft" else "draft"}))
             acts.append(act("blog.resume", "다시 시작", {"blog": blog}) if st.get("paused") else act("blog.pause", "멈추기", {"blog": blog}))
-            acts.append(act("blog.drafts_cleanup", "임시저장 정리", {"blog": blog}))
+            if srv:
+                acts.append(act("blog.drafts_cleanup", "임시저장 정리", {"blog": blog}))
             if blog == "finance":
                 acts.append(act("blog.ledger", "정리본 올리기", input="file", accept=".md,.txt,text/markdown,text/plain"))
-            acts.append(act("blog.info", "크리에이터 키워드", {"what": "creator"}))
+            if srv:
+                acts.append(act("blog.info", "크리에이터 키워드", {"what": "creator"}))
             # 소재 넣기 (주인 10/21): 카페 인기글 주제·아이디어를 붙여 넣으면 다음 글감 고르기의 첫 후보 (Blog-Auto 는 카페를 열지 않음)
             acts.append(act("blog.topic_seed", "소재 넣기", {"blog": blog}, input="text",
                             placeholder="카페 인기글 주제나 아이디어 한두 줄 — 사실은 뉴스·공식 자료로만 확인해요"))
             scan = v2.get("scan") if blog == "finance" else None
+            n_paste = sum(1 for w in waiting if w.get("kind") == "paste")
             out[blog] = {"label": BLOG_LABELS[blog], "chip": CHIPS[blog], "mode": mode, "paused": bool(st.get("paused")),
-                         "today": st.get("today") or 0, "login": st.get("login") or "unknown",
+                         "today": st.get("today") or 0, "login": "off" if self._sctx.get("off") else st.get("login") or "unknown",
+                         # 머리 한 줄 (주인 10/30): 서버가 안 올리는 블로그는 '붙여넣기 대기 N · 오늘 발행 N' (발행/초안 모드 말 대신)
+                         "head": None if srv else f"붙여넣기 대기 {n_paste} · 오늘 발행 {st.get('today') or 0}편",
                          "waiting": waiting, "recent": [dict(r, at=_iso_ts(r.get("at"), self.tz)) for r in v2.get("recent", {}).get(blog, [])],
                          "scan": ({"sid": scan["sid"], "at": _iso_ts(scan.get("at"), self.tz),
                                    "items": [{"n": x["n"], "title": x["title"], "why": "인기 예상" if x.get("recommend") else "",
                                               "action": act("blog.pick", "이걸로 쓰기", {"sid": scan["sid"], "n": x["n"]})}
                                              for x in scan["items"]]} if scan else None),
                          "actions": self._filter(acts, supported),
-                         "visits": self._visits(v2.get("visits"), blog), "neighbors": neighbors_line(st.get("neighbors")),
-                         "schedule": self._sched_blog(blog, v2, planned) if self._sctx["ok"] else None}
+                         "visits": self._visits(v2.get("visits"), blog),
+                         # 서로이웃 자동은 꺼 둠 (주인 10/27) — 서버가 네이버를 안 열면 신청 상한 줄도 없음 · 들를 이웃 글 목록은 그대로
+                         "neighbors": neighbors_line(st.get("neighbors")) if srv else None,
+                         "schedule": self._sched_blog(blog, v2, planned) if self._sctx["ok"] and srv else None}
             if blog == "issue":  # 인기 검색어 (10/20) — 누르면 '키워드로 쓰기'(blog.issue) 그대로 · 그 일이 없으면(예전 Blog-Auto) 보기만
                 out[blog]["trends"] = self._trends(v2.get("trends"), out[blog]["actions"])
             out[blog]["learn"] = self._learn(v2.get("learn"), blog, supported)  # 이번 주 개선안·적용 규칙 (10/20)
             for r in out[blog]["recent"]:
                 r.update(self._submit_links(r))
                 ph = r.pop("photos", None)
-                if ph is not None and r.get("pid") and (supported is None or "post_edit" in supported):
+                if ph is not None and r.get("pid") and (supported is None or "post_edit" in supported) and self._srv(blog):
                     # 발행 글 고치기 (주인 10/21): 사진마다 빼기·교체 · '이 문장 빼기' 칸 → blog.post_edit (★ 확인)
                     r["edit"] = {"photos": [dict(p, thumb=f"/dashboard/thumb/{p['thumb']}" if p.get("thumb") else None) for p in ph],
                                  "act": act("blog.post_edit", "고치기", {"blog": blog, "pid": r["pid"]})}
@@ -1076,7 +1142,7 @@ class StateBuilder:
             return None
         st = sc["state"]
         if st == "off":
-            return {"text": "꺼짐", "bad": False}
+            return {"text": "꺼 둠 (10/30 네이버 접속 끔) — 네이버 딜은 직접 링크" if self._sctx.get("off") else "꺼짐", "bad": False}
         if st == "unknown":
             return {"text": "확인 못 함", "bad": True}
         tz = ZoneInfo(self.tz)
@@ -1093,7 +1159,7 @@ class StateBuilder:
         if sc.get("last_ok_at"):
             parts.append(f"마지막 성공 {datetime.fromtimestamp(sc['last_ok_at'], tz):%m/%d %H:%M}")
         row: dict[str, Any] = {"text": " · ".join(parts), "bad": st == "stopped" and sc["reason"] != "owner"}
-        if st == "stopped" and sc["reason"] == "login":
+        if st == "stopped" and sc["reason"] == "login" and not self._sctx.get("off"):
             row["action"] = act("login.remote", "원격 로그인", {"target": "finance"})
         return row
 
@@ -1115,9 +1181,11 @@ class StateBuilder:
         if k_state == "ok" and exp_days is not None and exp_days <= 3:
             k_state = "expiring"
         v2 = getattr(export, "v2", None) or {}
-        naver = {b: {"login": (v2.get("status", {}).get("blogs", {}).get(b) or {}).get("login") or "unknown",
+        self._sched_ctx(v2)
+        off = self._sctx.get("off")  # 네이버 접속 끔 (주인 10/30) — 로그인 확인 단추 없음
+        naver = {b: {"login": "off" if off else (v2.get("status", {}).get("blogs", {}).get(b) or {}).get("login") or "unknown",
                      "checked_at": _iso_ts((v2.get("status", {}).get("blogs", {}).get(b) or {}).get("login_checked"), self.tz),
-                     "action": act("blog.login_check", "지금 확인", {"blog": b})} for b in ("finance", "issue", "hotdeal")}
+                     "action": None if off else act("blog.login_check", "지금 확인", {"blog": b})} for b in NAVER_BLOGS}
         kakao_actions = [act("blog.kakao_test", "테스트 카톡")]
         if k_state in ("down", "expiring") or st.kakao_relink:
             kakao_actions = [act("blog.kakao_auth_url", "다시 연결"),

@@ -116,7 +116,7 @@ def test_parse_export_puts_routine_next_to_naver_visits(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- 2) 보기
 def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Path) -> None:
     assert routine.view(bot) == {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0,
-                                 "ably": None}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
+                                 "ably": None, "rising": [], "rests": []}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))
     v = routine.view(bot, now=at(bot, day, "13:10"))

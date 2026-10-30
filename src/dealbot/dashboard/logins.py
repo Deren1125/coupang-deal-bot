@@ -108,7 +108,7 @@ def qr_png(bot: Any, now: float | None = None) -> Path | None:
 def browser_off(bot: Any) -> str | None:
     """딜봇 네이버를 못 쓰는 이유 (쓰면 None)."""
     if not bot.settings.browser.enabled:
-        return "딜봇 브라우저 자동화가 꺼져 있어요 (쇼핑커넥트 링크는 아카이브 블로그 계정이 만들어요)"
+        return "딜봇 브라우저 자동화가 꺼져 있어요 (네이버 딜 링크는 주인이 직접 — 10/30 네이버 접속 끔)"
     if getattr(bot, "naver_connect", None) is None:
         return "딜봇 크롬을 띄울 수 없어요 — 서버 점검이 필요해요"
     return None
@@ -274,6 +274,8 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
         state, text = text_of(r)
         if btn and (btn.get("args") or {}).get("force"):  # 하루 한 번 넘음 — 왜 '그래도 열기'인지 한 줄
             text += f" · 오늘 원격 로그인 {r.get('remote_today') or 1}번 — 내일 다시 하는 게 안전해요"
+        if target == "toss" and _toss_paused(bot):  # 토스 쉐어링크 점검 (주인 10/30) — 11/4까지 로그인할 일 없음
+            state, text, btn = "off", "11/4까지 필요 없음 · 토스 점검 — 토스 딜은 링크 없이 올려요", None
         out.append(_row(target, r["label"], state, text, where=r["where"], button=btn, last=last))
     out.append(naver_row(bot, tz, now))
     for r in got:  # 블로그 프로그램의 읽기만 하는 줄 (스레드 API 토큰 …) — 단추 없음
@@ -286,6 +288,14 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
     return out
 
 
+def _toss_paused(bot: Any) -> bool:
+    f = getattr(bot, "_toss_no_link", None)
+    try:
+        return bool(f()) if callable(f) else False
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def visits(bot: Any) -> dict[str, Any] | None:
     """네이버 접속 칸 (주인 10/27 '얼마나 줄었는지 대시보드에'): 블로그마다 한 줄 글. Blog-Auto 기록에 칸이 없으면 None."""
     try:
@@ -295,6 +305,8 @@ def visits(bot: Any) -> dict[str, Any] | None:
         nv = None
     if not nv:
         return None
+    if (((getattr(export, "v2", None) or {}).get("status") or {}).get("naver_off")):  # 네이버 접속 끔 (주인 10/30) — 칸 대신 한 줄
+        return {"rows": [], "total": "블로그 계정 네이버 접속 0번 — 꺼 둠 (10/30)"}
     rows = []
     for b in nv["blogs"]:
         bits = [f"오늘 {b['today']}번", f"24시간 {b['day24']}/{b['cap']}번"]

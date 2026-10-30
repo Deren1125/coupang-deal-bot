@@ -106,7 +106,7 @@ function draw() {
   const rows = (data && data.rows) || [], q = data && data.qr, v = data && data.vnc;
   // 주인 몫이 없으면 한 줄 (누르면 펼침) · 필요하면 늘 펼침
   const calm = data && !data.need && !q && !v, f = calm && el('div', {class: 'box', style: 'padding:0 14px'}, el('button', {class: 'fold', type: 'button',
-    'aria-expanded': open ? 'true' : 'false', onclick: () => { open = !open; draw(); }}, rows.every(r => r.state !== 'resting' && r.state !== 'unknown') ? '로그인 모두 정상' : '로그인 · 지금 할 것 없음'));
+    'aria-expanded': open ? 'true' : 'false', onclick: () => { open = !open; draw(); }}, rows.every(r => r.state === 'ok' || r.state == null) ? '로그인 모두 정상' : '로그인 · 지금 할 것 없음'));
   if (calm && !open) { box.replaceChildren(f, kk); return; }
   const head = f || el('div', {class: 'top', style: 'margin:20px 0 6px'}, el('h2', {}, data && data.need ? `로그인 관리 · 필요 ${data.need}` : '로그인 관리'),
     el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기'));
@@ -119,12 +119,12 @@ function draw() {
   }
   const nv = data && data.visits;  // 네이버 접속 (10/27)
   const visits = nv ? [el('div', {class: 'top', style: 'margin:20px 0 6px'}, el('h2', {}, '네이버 접속')),
-    el('div', {class: 'box'}, nv.rows.map(r => el('div', {class: 'row ro'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.name),
-      el('span', {class: 's' + (r.bad ? ' bad' : '')}, r.text), r.jobs ? el('span', {class: 'w'}, r.jobs) : null)))),
-    el('p', {class: 'note'}, `${nv.total} · 적응 기간 = 다시 로그인한 뒤 3일`)] : [];
+    nv.rows.length ? el('div', {class: 'box'}, nv.rows.map(r => el('div', {class: 'row ro'}, el('div', {class: 'grow'}, el('span', {class: 't'}, r.name),
+      el('span', {class: 's' + (r.bad ? ' bad' : '')}, r.text), r.jobs ? el('span', {class: 'w'}, r.jobs) : null)))) : null,
+    el('p', {class: 'note'}, nv.rows.length ? `${nv.total} · 적응 기간 = 다시 로그인한 뒤 3일` : nv.total)] : [];
   box.replaceChildren(head, el('div', {class: 'box'}, data ? null : el('p', {class: 'note'}, '불러오는 중…'), top, rows.map(row)),
     el('p', {class: 'note'}, '로그인은 주인이 직접 해요 — 봇은 비밀번호·확인 화면을 대신하지 않아요'),
-    ...visits, kk);  // visits 는 배열 — 펼쳐 넣음 (replaceChildren 은 배열을 펴지 않음)
+    ...visits.filter(Boolean), kk);  // 배열은 펼쳐 넣음 (replaceChildren 은 배열을 안 폄)
 }
 
 function mount() {

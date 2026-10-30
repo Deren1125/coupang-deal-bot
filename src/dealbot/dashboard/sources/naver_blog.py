@@ -227,14 +227,17 @@ class NaverBlogSource(Source):
         # 오늘 조회수는 하루 중간에 읽은 값이라 몇 시 기준인지 함께
         bits = [f"{local_read:%H:%M} 기준"] if local_read else []
         bits += [f"{name} {fmt_num(v)}" for name, v in (("공감", own.likes_today), ("댓글", own.comments_today)) if v is not None]
-        stats = [neighbors, visitors,
-                 Stat(f"조회수 · {day_word(own.day, today)}", own.views_today, "회", sub=" · ".join(bits), stale=stale)]
-        if (y := own.yesterday) is not None:
+        # 로그인 없이 공개 화면으로 읽은 날(주인 10/30 — 네이버 접속 끔)은 조회수가 없음 → 빈 칸을 그리지 않음
+        public = own.views_today is None and own.likes_today is None and own.comments_today is None
+        stats = [neighbors, visitors]
+        if not public:
+            stats.append(Stat(f"조회수 · {day_word(own.day, today)}", own.views_today, "회", sub=" · ".join(bits), stale=stale))
+        if (y := own.yesterday) is not None and y.views is not None:
             ybits = [f"{name} {fmt_num(v)}" for name, v in (("공감", y.likes), ("댓글", y.comments)) if v is not None]
             if y.neighbor_change is not None:
                 ybits.append(f"이웃 {fmt_signed(y.neighbor_change)}")
             stats.append(Stat(f"조회수 · {day_word(y.day, today)}", y.views, "회", sub=" · ".join(ybits), stale=stale))
-        note = f"자동 · {fmt_time(local_read) if local_read else fmt_short_day(own.day)} 읽음"
+        note = f"{'공개 화면' if public else '자동'} · {fmt_time(local_read) if local_read else fmt_short_day(own.day)} 읽음"
         warn = missed_text(own.day, today) if stale else ""
         y, p = own.yesterday, own.prev
         detail = {
@@ -330,11 +333,16 @@ class NaverBlogSource(Source):
             # 자정 직후(Blog-Auto 가 다음 기록을 쓰기 전)에는 어제 기록이라 '오늘' 이라 하지 않는다
             when = ("오늘" if auto_day == today else
                     "어제" if auto_day == (data.today - timedelta(days=1)).isoformat() else fmt_short_day(str(auto_day)))
-            bits = [f"{when} 발행 {fmt_num(auto.get('posts_today'))}", f"임시저장 {fmt_num(auto.get('drafts_today'))}"]
-            req = f"서로이웃 신청 {fmt_num(auto.get('neighbor_req_today'))}"
-            if auto.get("neighbor_req_7d") is not None:
-                req += f" (7일 {fmt_num(auto.get('neighbor_req_7d'))})"
-            bits += [req, f"댓글 {fmt_num(auto.get('comments_today'))}", f"답글 {fmt_num(auto.get('replies_today'))}"]
+            bits = [f"{when} 발행 {fmt_num(auto.get('posts_today'))}"]
+            # 봇이 안 하는 일(임시저장·서로이웃·댓글 — 주인 10/27·10/30 끔)은 0 이면 빼서 늘 0 인 줄이 안 보이게
+            if auto.get("drafts_today"):
+                bits.append(f"임시저장 {fmt_num(auto.get('drafts_today'))}")
+            if auto.get("neighbor_req_today") or auto.get("neighbor_req_7d"):
+                req = f"서로이웃 신청 {fmt_num(auto.get('neighbor_req_today'))}"
+                if auto.get("neighbor_req_7d") is not None:
+                    req += f" (7일 {fmt_num(auto.get('neighbor_req_7d'))})"
+                bits.append(req)
+            bits += [f"{name} {fmt_num(auto.get(k))}" for name, k in (("댓글", "comments_today"), ("답글", "replies_today")) if auto.get(k)]
             activity.append(" · ".join(bits))
         use_visitors = len(data.series("visitors")) >= 2 or not data.series("neighbors")
         read_at = live.read_at if live and live.read_at else None

@@ -196,7 +196,13 @@ function slot(s) {
   const tail = !s.total ? '없음' : `${s.done}/${s.total}` + (all ? ' · 끝' : ` · 약 ${s.min_left}분`) + (s.current ? ' · 지금' : '');
   return [el('button', {class: 'sl' + (s.current ? ' cur' : ''), type: 'button', 'aria-expanded': open[s.key] ? 'true' : 'false',
     onclick: () => { open[s.key] = !open[s.key]; draw(); }}, el('b', {}, `${open[s.key] ? '▾' : '▸'} ${s.label} ${s.at}`), el('span', {}, tail)),
-    open[s.key] ? s.items.map(item) : null];
+    open[s.key] ? s.items.filter(i => !(i.paste && !i.done)).map(item) : null];
+}
+// 붙여넣기 대기 (주인 10/30) — 시간대 칸과 상관없이 맨 위에 모두 (안 한 것만 · 체크하면 제 칸으로) · 꾸미기 설치는 연결 탭
+function pasteBox() {
+  const ps = data && data.slots ? data.slots.flatMap(s => s.items.filter(i => i.paste && !i.done)) : [];
+  return ps.length ? [el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `붙여넣기 대기 (${ps.length})`),
+    el('a', {class: 'lnk', href: '#/connect'}, '꾸미기 설치')), el('div', {class: 'box'}, ps.map(item))] : [];
 }
 
 function times() {  // 블로그별 예약 추천 시각 (주인 10/29) — 눌러서 펼침
@@ -207,21 +213,33 @@ function times() {  // 블로그별 예약 추천 시각 (주인 10/29) — 눌�
       el('span', {class: 't'}, `${t.name} · ${t.times.join(' · ')}`), t.note ? el('span', {class: 's'}, t.note) : null))) : null) : null;
 }
 
+// ⚡ 막 뜨는 중 (주인 10/30 '실시간으로 오르는 키워드') 한 줄 → Pick 화면 · 쉬는 중 (예전 단추가 왜 없는지 — 누르면 펼침)
+function rising() {
+  const xs = data && data.rising || [];
+  return xs.length ? el('a', {class: 'bn', href: '#/blog/issue'}, `⚡ 막 뜨는 중 · ${xs.join(' · ')} → Pick 쓰기`) : null;
+}
+function rests() {
+  const rs = data && data.rests || [];
+  return rs.length ? el('div', {class: 'box'}, el('button', {class: 'sl', type: 'button', 'aria-expanded': open.rs ? 'true' : 'false',
+    onclick: () => { open.rs = !open.rs; draw(); }}, el('b', {}, `${open.rs ? '▾' : '▸'} 쉬는 중 ${rs.length}가지 — 그래서 없는 단추가 있어요`)),
+    open.rs ? rs.map(t => el('p', {class: 'note', style: 'margin:0 0 10px'}, t)) : null) : null;
+}
+
 function draw() {
   if (!box) return;
-  const ok = !!(data && data.slots && data.total), ab = ably();
-  box.hidden = !ok && !ab.length;
+  const ok = !!(data && data.slots && data.total), ab = ably(), top = rising(), rs = rests();
+  box.hidden = !ok && !ab.length && !top && !rs;
   if (box.hidden) { box.replaceChildren(); return; }
   const bar = el('i');
   if (ok) bar.style.width = Math.round(100 * data.done / data.total) + '%';
-  box.replaceChildren(...[ok ? [
+  box.replaceChildren(...[top, ok ? [...pasteBox(),
     el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `오늘 할 일 · ${data.done}/${data.total}`),
       el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기')),
     el('div', {class: 'bar'}, bar),
     data.today ? null : el('p', {class: 'note'}, `${data.day} 목록이에요 — 오늘 목록이 아직 안 왔어요`),
     el('div', {class: 'box'}, data.slots.map(slot)),
     times(),
-    data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab].flat().filter(Boolean));
+    data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab, rs].flat().filter(Boolean));
 }
 
 function mount() {
