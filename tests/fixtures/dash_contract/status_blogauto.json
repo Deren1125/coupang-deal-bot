@@ -64,7 +64,8 @@
   "lookbook_drop",
   "lookbook_redo",
   "lookbook_trial",
-  "lookbook_style"
+  "lookbook_style",
+  "lookbook_cands_pick"
  ],
  "kakao": {
   "state": "ok",

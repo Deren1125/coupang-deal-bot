@@ -19,6 +19,8 @@
   GET  /dashboard/api/xplan             수익 계정 X 2주 계획 (blogauto._x_plan — X 화면을 열 때만, 첫 상태 값 예산 밖) · 없으면 404
   GET  /dashboard/api/lbtrial           룩북 사진 시험 [{base_id, theme, created_at, sets: [{id, style, status, looks}]}] (lbview.trials —
                                         '사진 시험'을 열 때만, 첫 상태 값 예산 밖) · 없으면 []
+  GET  /dashboard/api/lbcands           룩북 상품 후보 {n, max_pick, groups, picked, picked_at} (lbview.cands — 주인 11/03 · 룩북 화면을 열 때만,
+                                        첫 상태 값 예산 밖 · no-store) · 후보가 없으면 404
   GET  /dashboard/api/logins            로그인 관리 칸 (logins.view — 연결 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/routine           오늘 할 일 칸 (routine.view — 할 일 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만)
@@ -213,6 +215,7 @@ class DashApi:
         web.route_prefix(f"{API}/digest/", self.digest)
         web.route(f"{API}/xplan", self.xplan)
         web.route(f"{API}/lbtrial", self.lbtrial)
+        web.route(f"{API}/lbcands", self.lbcands)
         web.route(f"{API}/logins", self.logins)
         web.route(f"{API}/routine", self.routine)
         web.route(f"{API}/kkumi", self.kkumi)
@@ -533,6 +536,10 @@ class DashApi:
 
     async def lbtrial(self, query: dict[str, str]) -> Any:
         return jresp(200, self.bot.dash_state.lbtrial(), {"Cache-Control": "no-store"})
+
+    async def lbcands(self, query: dict[str, str]) -> Any:
+        c = self.bot.dash_state.lbcands()
+        return jresp(200, c, {"Cache-Control": "no-store"}) if c else err(404, "not_found", "룩북 상품 후보가 아직 없어요")
 
     async def logins(self, query: dict[str, str]) -> Any:
         """로그인 관리 칸 (주인 10/26) — 상태를 읽기만 (사이트를 열지 않음). 원격 화면 주소(이번 비밀번호)가 들어 있어 저장하지 않게."""

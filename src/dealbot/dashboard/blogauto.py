@@ -47,6 +47,7 @@ v2 status.routine (주인 10/27 — 블로그 반자동, 주인이 하루 5번 �
 
 from __future__ import annotations
 
+import hashlib
 import html as htmllib
 import json
 import math
@@ -1668,11 +1669,69 @@ def _lb_item(x: Any) -> dict[str, Any] | None:
             "trial": trial, "trial_of": base, "style": x.get("style") if x.get("style") in LB_STYLES else None}
 
 
+# 상품 후보 5개 고르기 (주인 11/03 '후보 15~20개 보여 드리고 5개 고르기' — Blog-Auto lookbook_cands.export): 지그재그 상품 주소만 ·
+# 번호 = 주소의 sha1 앞 10자 (Blog-Auto cand_id 와 같게 — 맞지 않으면 그 줄을 버림) · 사진은 blog_view/thumbs/lc-… 만
+LB_CAND_URL_RE = re.compile(r"^https://zigzag\.kr/catalog/products/[0-9]{1,15}$")
+LB_CAND_ID_RE = re.compile(r"^[0-9a-f]{10}$")
+LB_CAND_RUN_RE = re.compile(r"^[0-9A-Za-z_-]{1,20}$")
+LB_CANDS_MAX, LB_CAND_GROUPS_MAX, LB_CAND_PICK_MAX = 30, 12, 5
+
+
+def _lb_cand(x: Any) -> dict[str, Any] | None:
+    if not isinstance(x, dict) or not isinstance(x.get("url"), str) or not LB_CAND_URL_RE.fullmatch(x["url"]):
+        return None
+    cid = x.get("id")
+    if not isinstance(cid, str) or not LB_CAND_ID_RE.fullmatch(cid) or hashlib.sha1(x["url"].encode()).hexdigest()[:10] != cid:
+        return None
+    name = _one_line(x.get("name"), 80)
+    if not name:
+        return None
+    r = x.get("rating")
+    rating = round(float(r), 1) if isinstance(r, int | float) and not isinstance(r, bool) and math.isfinite(r) and 0 <= r <= 5 else 0.0
+    th = x.get("thumb")
+    return {"id": cid, "name": name, "price": _count(x.get("price"), top=100_000_000) or 0,
+            "reviews": _count(x.get("reviews"), top=100_000_000) or 0, "rating": rating, "shop": _one_line(x.get("shop"), 40) or "",
+            "url": x["url"], "thumb": th if isinstance(th, str) and th.startswith("lc-") and THUMB_RE.match(th) else None,
+            "boost": x.get("boost") is True}
+
+
+def _lb_cands(v: Any) -> dict[str, Any] | None:
+    """{run, at, max_pick, groups: [{query, items: [{id, name, price, reviews, rating, shop, url, thumb, boost}]}], picked, picked_at} —
+    아는 칸만 다시 만든다 (모르는 칸은 버림) · 이상한 줄·같은 번호는 빼고 LB_CANDS_MAX 개까지 · picked 는 지금 후보에 있는 번호만 5개까지.
+    후보가 하나도 없으면 None (화면 칸 숨김)."""
+    if not isinstance(v, dict) or not isinstance(v.get("groups"), list):
+        return None
+    groups, seen = [], set()
+    for g in v["groups"][:LB_CAND_GROUPS_MAX]:
+        if not isinstance(g, dict) or not (q := _one_line(g.get("query"), 40)) or not isinstance(g.get("items"), list):
+            continue
+        items = []
+        for x in g["items"][:LB_CANDS_MAX]:
+            if len(seen) >= LB_CANDS_MAX:
+                break
+            if (row := _lb_cand(x)) is not None and row["id"] not in seen:
+                seen.add(row["id"])
+                items.append(row)
+        if items:
+            groups.append({"query": q, "items": items})
+    if not groups:
+        return None
+    picked: list[str] = []
+    for i in v.get("picked") if isinstance(v.get("picked"), list) else []:
+        if isinstance(i, str) and i in seen and i not in picked and len(picked) < LB_CAND_PICK_MAX:
+            picked.append(i)
+    run = v.get("run")
+    return {"run": run if isinstance(run, str) and LB_CAND_RUN_RE.fullmatch(run) else "", "at": _one_line(v.get("at"), 40) or "",
+            "max_pick": LB_CAND_PICK_MAX, "groups": groups, "picked": picked,
+            "picked_at": (_one_line(v.get("picked_at"), 40) or "") if picked else ""}
+
+
 def _lookbook(v: Any) -> dict[str, Any] | None:
     """{enabled, per_day, server, instagram, style, items: [{id, theme, hook, status, reason, warn, caption, looks, has_video, has_cover,
     video, cover, view_video, view_cover, created_at, posted_url, ably, trial, trial_of, style}]} (새 것부터). 칸이 없으면(예전 Blog-Auto) None → 화면은
     '업데이트를 기다리는 중'. 줄마다 따로 걸러 이상한 줄만 빠진다 (같은 번호는 처음 것만 · 링크는 지그재그·에이블리 https 만).
-    사진 시험(주인 10/26): trial 줄은 trial_of(바탕 릴스 번호)가 있어야 시험으로 보고 · looks[].product_thumb = <id>-p<n>.jpg 만 · style(칸) = 지금 양식."""
+    사진 시험(주인 10/26): trial 줄은 trial_of(바탕 릴스 번호)가 있어야 시험으로 보고 · looks[].product_thumb = <id>-p<n>.jpg 만 · style(칸) = 지금 양식.
+    cands = 상품 후보 5개 고르기 (11/03 — _lb_cands · 없으면 None)."""
     if not isinstance(v, dict) or not isinstance(v.get("items"), list):
         return None
     items, seen = [], set()
@@ -1684,7 +1743,7 @@ def _lookbook(v: Any) -> dict[str, Any] | None:
     return {"enabled": v.get("enabled") is True, "per_day": _count(v.get("per_day"), top=10) or 0,
             "server": v.get("server") if v.get("server") in ("ok", "no_token") else "",
             "instagram": ig if LB_HANDLE_RE.match(ig) else None, "style": v.get("style") if v.get("style") in LB_STYLES else None,
-            "items": items}
+            "items": items, "cands": _lb_cands(v.get("cands"))}
 
 
 POST_COUNT_NAMES = {"blogs": V2_BLOGS, "channels": ("threads", "threads_auto", "x")}

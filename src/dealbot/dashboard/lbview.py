@@ -11,12 +11,16 @@ state['lookbook'] = 블로그 탭 '룩북 릴스 →' 화면(static/lookbook.js)
   양식마다(거울 셀카 · 예전 양식) 만든 시험 사진. 첫 상태 값엔 세트 수(trial_n)·지금 양식만 (상태 104 KB 예산) — 사진 목록은
   GET /dashboard/api/lbtrial (trials — 화면에서 '사진 시험'을 열 때만). 단추: 시험 새로 만들기(blog.lookbook_trial) ·
   이 양식으로 정하기(blog.lookbook_style {style}). 시험 줄은 릴스 목록·할 일에 넣지 않는다 (올리는 것이 아님).
+- 상품 후보 5개 고르기 (주인 11/03 '후보 15~20개 보여 드리고 5개 고르기' · '대시보드에서 볼 수 있게 미리'): Blog-Auto lookbook_cands 가
+  지그재그에서 찾은 후보를 검색어마다 카드로 (사진 · 이름 · 가격 · 리뷰·별점 · 쇼핑몰 · 부스트 · 지그재그에서 보기 · 고르기 칸).
+  첫 상태 값엔 수(cands_n)·바뀜 표시(cands_sig)만 — 목록은 GET /dashboard/api/lbcands (cands). 단추: 이 5개로 정하기(blog.lookbook_cands_pick {ids}).
 - 하지 않는 것: 인스타그램 열기·읽기 · 자동 게시 · 자동 좋아요·댓글·팔로우. 쇼츠 서버 주소·토큰은 화면에 오지 않는다.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -65,6 +69,7 @@ STYLE_WORDS = {"mirror": "거울 셀카", "studio": "예전 양식"}
 TRIAL_BUSY = ("new", "waiting_server", "submitted", "rendering")  # 사진 시험이 아직 만드는 중 (Blog-Auto 가 두 번째 시험을 거절함)
 TRIAL_MIN_LOOKS = 4  # 시험 바탕이 될 수 있는 보통 일감 (Blog-Auto lookbook.LOOKS[0])
 TRIAL_ACTIONS = {"lookbook_trial", "lookbook_style"}
+CANDS_ACTIONS = {"lookbook_cands_pick"}  # 상품 후보 고르기 (11/03)
 
 
 # 공개 '룩북 링크 모음' (주인 10/30 LB-3 ② — 인스타 프로필 링크 1번 자리 · 사양 2-5 1안): 올린 릴스만 최신순, 편마다 Look 번호 = 화면·캡션 순서
@@ -141,10 +146,11 @@ def _row(x: dict[str, Any], tz: ZoneInfo, act: Callable[..., dict[str, Any]], br
 
 
 def build(lv: dict[str, Any] | None, tz: ZoneInfo, now: float, act: Callable[..., dict[str, Any]], *,
-          bridge_ok: bool = True, trial_ok: bool = True) -> dict[str, Any]:
+          bridge_ok: bool = True, trial_ok: bool = True, cands_ok: bool = True) -> dict[str, Any]:
     """화면 값. lv = blogauto._lookbook 로 걸러 둔 기록 파일 lookbook 칸 (예전 Blog-Auto 면 None → 일감 없음).
     items = 올리기 전 편 (새 것부터 · 버린 편은 뺌 · 사진 시험은 뺌), posted = 올린 편. entry = 블로그 탭 입구 단추 글.
-    trial_n·trial_ready = 사진 시험 세트 수·그중 완성 수 · style = 지금 양식 (사진은 trials 로 따로) · trial_ok = Blog-Auto 가 사진 시험 다리 일을 앎."""
+    trial_n·trial_ready = 사진 시험 세트 수·그중 완성 수 · style = 지금 양식 (사진은 trials 로 따로) · trial_ok = Blog-Auto 가 사진 시험 다리 일을 앎.
+    cands_n·cands_picked·cands_sig = 상품 후보 수·정한 수·바뀜 표시 (목록은 cands 로 따로 — 11/03) · cands_ok = Blog-Auto 가 고르기 다리 일을 앎."""
     items, posted = [], []
     for x in (lv or {}).get("items") or []:
         if x["status"] == "dropped" or x["trial"]:
@@ -176,7 +182,39 @@ def build(lv: dict[str, Any] | None, tz: ZoneInfo, now: float, act: Callable[...
         "trial_n": len(tr), "trial_ready": sum(x["status"] == "ready" for x in tr), "style": (lv or {}).get("style") or "",
         "trial_busy": sum(x["status"] in TRIAL_BUSY for x in tr), "trial_sig": sig, "trial_base": base_ok,
         "style_word": STYLE_WORDS.get((lv or {}).get("style") or "", ""), "trial_ok": bool(trial_ok and lv is not None),
+        **_cands_head(lv, cands_ok),
     }
+
+
+def _cands_head(lv: dict[str, Any] | None, ok: bool) -> dict[str, Any]:
+    """첫 상태 값에 싣는 후보 칸 머리 (104 KB 예산 — 목록은 GET /dashboard/api/lbcands). 후보가 없으면 cands_n 0 → 화면 칸 숨김."""
+    c = (lv or {}).get("cands")
+    if not c:
+        return {"cands_n": 0, "cands_picked": 0, "cands_sig": "", "cands_ok": False}
+    ids = [it["id"] + ("t" if it["thumb"] else "") for g in c["groups"] for it in g["items"]]
+    sig = hashlib.sha1(json.dumps([c["run"], ids, c["picked"], c["picked_at"]]).encode()).hexdigest()[:10]
+    return {"cands_n": len(ids), "cands_picked": len(c["picked"]), "cands_sig": sig, "cands_ok": bool(ok)}
+
+
+def cands(lv: dict[str, Any] | None, tz: ZoneInfo) -> dict[str, Any] | None:
+    """GET /dashboard/api/lbcands — 상품 후보 (11/03): {n, max_pick, at, groups: [{query, items: [{id, name, price, reviews, rating, shop, url,
+    thumb, boost}]}], picked: [{id, name, price, url, thumb}], picked_at}. price = '49,740원' · thumb = /dashboard/thumb/<이름> (없으면 '').
+    후보가 없으면 None."""
+    c = (lv or {}).get("cands")
+    if not c:
+        return None
+    by: dict[str, dict[str, Any]] = {}
+    groups = []
+    for g in c["groups"]:
+        items = []
+        for it in g["items"]:
+            row = {**it, "price": _won(it["price"]), "thumb": THUMB + it["thumb"] if it["thumb"] else ""}
+            by[it["id"]] = row
+            items.append(row)
+        groups.append({"query": g["query"], "items": items})
+    picked = [{k: by[i][k] for k in ("id", "name", "price", "url", "thumb")} for i in c["picked"] if i in by]
+    return {"n": len(by), "max_pick": c["max_pick"], "at": _when(c["at"], tz), "groups": groups, "picked": picked,
+            "picked_at": _when(c["picked_at"], tz) if picked else ""}
 
 
 def trials(lv: dict[str, Any] | None, tz: ZoneInfo) -> list[dict[str, Any]]:

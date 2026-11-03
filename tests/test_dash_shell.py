@@ -110,6 +110,10 @@ LOOKBOOK_JS_GZIP_MAX = 5 * 1024
 # /dashboard/api/lbtrial 로 열 때만 받아 파일엔 그리는 코드만 (12 → 16 KB / gzip 5 → 6.25 KB)
 LOOKBOOK_JS_MAX = 16 * 1024
 LOOKBOOK_JS_GZIP_MAX = 6 * 1024 + 256
+# 11/03: + 상품 후보 5개 고르기(검색어마다 카드 · 사진·이름·가격·리뷰·별점·쇼핑몰·부스트·지그재그에서 보기 · 체크 · n/5 · 정하기 · 정한 5개) —
+# 목록은 /dashboard/api/lbcands 로 열 때만 (16 → 20 KB / gzip 6.25 → 7.5 KB)
+LOOKBOOK_JS_MAX = 20 * 1024
+LOOKBOOK_JS_GZIP_MAX = 7 * 1024 + 512
 # 10/26: 로그인 관리 칸(연결 탭 맨 위 — 줄마다 상태·원격 로그인/QR 로그인 단추 · 열린 원격 화면 · QR 화면) — app.js 가 예산 끝이라
 # 셸이 defer 로 받는 logins.js (CSS 도 여기서). 줄 값은 /dashboard/api/logins 로 열 때만
 LOGINS_JS_MAX = 8 * 1024

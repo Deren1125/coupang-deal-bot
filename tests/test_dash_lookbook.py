@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -40,7 +41,7 @@ from dealbot.dashboard.actions import (
     reel_url,
     target_of,
 )
-from dealbot.dashboard.blogauto import _lookbook
+from dealbot.dashboard.blogauto import _lb_cands, _lookbook
 from dealbot.dashboard.state import act as state_act
 from dealbot.dashboard.state import goto as state_goto
 from test_dash_api_actions import act
@@ -206,7 +207,7 @@ def test_export_parsing_tolerates_missing_and_bad_rows() -> None:
                      "dropped": False, "thumb": "lb-20261024-0101-2.jpg", "product_thumb": None}
     assert lk[3]["link"] == "" and lk[4]["link"] == ""
     assert _lookbook({"items": [], "instagram": "a b", "server": "weird", "per_day": "x", "style": "weird"}) == {
-        "enabled": False, "per_day": 0, "server": "", "instagram": None, "style": None, "items": []}
+        "enabled": False, "per_day": 0, "server": "", "instagram": None, "style": None, "items": [], "cands": None}
 
 
 # ---------------------------------------------------------------- 화면 값 (state.lookbook)
@@ -595,3 +596,116 @@ async def test_look_route_renders_from_the_blogauto_record(bot: DealBot, setting
     assert status == 200 and "#광고" in html_text and "Look." in html_text
     if settings.web.public_page:
         assert "/look" in bot.web.routes
+
+
+# ---------------------------------------------------------------- 상품 후보 5개 고르기 (주인 11/03)
+CAND_A, CAND_B, CAND_C = "d20d01f131", "41258bd531", "def3ba3df2"
+
+
+def test_cands_parsing_reads_the_contract_and_rejects_junk() -> None:
+    fx = copy.deepcopy(fixture("export_v2.json")["lookbook"]["cands"])
+    got = _lookbook({**fixture("export_v2.json")["lookbook"]})["cands"]
+    assert got == fx  # 계약 그대로 (Blog-Auto lookbook_cands.export 와 같은 파일)
+    good = fx["groups"][0]["items"][0]
+    fx["groups"][0]["items"] += [
+        {**good, "name": "같은 번호"},  # 같은 번호는 처음 것만
+        {**good, "id": "0123456789"},  # 주소 해시와 다른 번호
+        {**good, "url": "http://zigzag.kr/catalog/products/172533956"}, {**good, "url": "https://evil.example/catalog/products/1"},
+        {**good, "url": "https://zigzag.kr.evil.example/catalog/products/1"}, {**good, "url": "https://zigzag.kr/catalog/products/1\n"},
+        {**good, "url": "javascript:alert(1)"}, "junk", None, {**good, "name": "  "}]
+    fx["groups"][1]["items"][0] = {**fx["groups"][1]["items"][0], "thumb": "../../etc/passwd", "rating": 99, "price": -1, "reviews": "많음",
+                                   "boost": "yes", "shop": "몰\n이름", "evil": "<script>", "image": "https://x.example/a.jpg"}
+    fx["groups"] += [{"query": "", "items": [good]}, {"query": "빈 검색어", "items": []}, "junk", {"query": "x", "items": "x"}]
+    fx.update(run="1103b; drop", picked=[CAND_A, "0123456789", CAND_A, CAND_C], extra="x")
+    got = _lb_cands(fx)
+    assert set(got) == {"run", "at", "max_pick", "groups", "picked", "picked_at"} and got["run"] == "" and got["max_pick"] == 5
+    assert [g["query"] for g in got["groups"]] == ["하이넥 울 숏코트", "블랙 미디 스커트"]
+    assert [x["id"] for x in got["groups"][0]["items"]] == [CAND_A, CAND_B]
+    c = got["groups"][1]["items"][0]
+    assert set(c) == {"id", "name", "price", "reviews", "rating", "shop", "url", "thumb", "boost"}  # 모르는 칸은 버림
+    assert (c["thumb"], c["rating"], c["price"], c["reviews"], c["boost"], c["shop"]) == (None, 0.0, 0, 0, False, "몰 이름")
+    assert got["picked"] == [CAND_A, CAND_C]  # 지금 후보에 있는 번호만 · 한 번씩
+    many = {"groups": [{"query": "q", "items": [{**good, "url": f"https://zigzag.kr/catalog/products/{i}",
+                                                 "id": hashlib.sha1(f"https://zigzag.kr/catalog/products/{i}".encode()).hexdigest()[:10]}
+                                                for i in range(50)]}], "picked": []}
+    assert len(_lb_cands(many)["groups"][0]["items"]) == 30
+    for bad in (None, [], {"groups": "x"}, {"groups": []}, {"groups": [{"query": "q", "items": [{**good, "url": "http://x"}]}]}):
+        assert _lb_cands(bad) is None  # 후보가 없으면 칸 없음 → 화면에서 숨김
+
+
+def test_cands_pick_action_matches_the_contract_and_checks_ids() -> None:
+    want = fixture("action_lookbook_cands_pick.json")
+    assert (want["action"], want["blog"], want["confirmed"], want["target"]) == ("lookbook_cands_pick", None, False, "lookbook-cands")
+    assert "lookbook_cands_pick" in BLOG_ACTIONS and "lookbook_cands_pick" in fixture("status_blogauto.json")["actions"]
+    out = clean_args("blog.lookbook_cands_pick", {**want["args"], "blog": "issue", "extra": 1})
+    assert out == want["args"] and not needs_confirm("blog.lookbook_cands_pick", out)
+    assert target_of("blog.lookbook_cands_pick", out) == want["target"]
+    assert clean_args("blog.lookbook_cands_pick", {"ids": [CAND_A]}) == {"ids": [CAND_A]}
+    for bad in ({}, {"ids": []}, {"ids": CAND_A}, {"ids": [CAND_A, CAND_A]}, {"ids": [f"012345678{i}" for i in range(6)]},
+                {"ids": ["D20D01F131"]}, {"ids": [CAND_A + "\n"]}, {"ids": [1]}, {"ids": [None]}, {"ids": ["../etc"]}):
+        with pytest.raises(ActionError) as e:
+            clean_args("blog.lookbook_cands_pick", bad)
+        assert "1~5개" in e.value.text
+
+
+async def test_cands_state_head_endpoint_and_spool(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    from dash_helpers import get_json
+
+    write_export(export_path(tmp_path))
+    blogauto_status(settings)
+    lb = (await state(bot))["lookbook"]
+    assert (lb["cands_n"], lb["cands_picked"], lb["cands_ok"]) == (3, 1, True) and len(lb["cands_sig"]) == 10
+    assert "groups" not in json.dumps(lb)  # 목록은 첫 상태 값에 안 실음 (104 KB 예산)
+    status, _p, _ = await get_json(bot, "/dashboard/api/lbcands", {})
+    assert status in (401, 302, 303)  # 로그인 아래
+    status, data, headers = await get_json(bot, "/dashboard/api/lbcands", session_headers(bot))
+    assert status == 200 and headers.get("Cache-Control") == "no-store"
+    assert (data["n"], data["max_pick"], data["at"], data["picked_at"]) == (3, 5, "11/3 13:05", "11/3 14:02")
+    assert [g["query"] for g in data["groups"]] == ["하이넥 울 숏코트", "블랙 미디 스커트"]
+    assert data["groups"][0]["items"][0] == {"id": CAND_A, "name": "하이넥 기모 울코트 (44~110)", "price": "49,740원", "reviews": 266,
+                                             "rating": 4.7, "shop": "핫핑", "url": "https://zigzag.kr/catalog/products/172533956",
+                                             "thumb": "/dashboard/thumb/lc-a9dc8d451d11.jpg", "boost": True}
+    assert data["groups"][0]["items"][1]["thumb"] == ""
+    assert data["picked"] == [{"id": CAND_A, "name": "하이넥 기모 울코트 (44~110)", "price": "49,740원",
+                               "url": "https://zigzag.kr/catalog/products/172533956", "thumb": "/dashboard/thumb/lc-a9dc8d451d11.jpg"}]
+    want = fixture("action_lookbook_cands_pick.json")
+    status, body = await act(bot, "blog.lookbook_cands_pick", want["args"], session_headers(bot))
+    assert status == 202, body  # 확인 창 없음 (기록만)
+    f = spool.read(spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new" / f"{body['id']}.json")
+    assert set(f) == set(want)
+    assert {k: f[k] for k in ("v", "action", "blog", "target", "confirmed", "args")} == \
+        {k: want[k] for k in ("v", "action", "blog", "target", "confirmed", "args")}
+    status, body = await act(bot, "blog.lookbook_cands_pick", {"ids": [CAND_A] * 6}, session_headers(bot))
+    assert status == 400 and body["code"] == "bad_args"
+    # 예전 Blog-Auto (고르기를 모름) → 단추를 꺼 두고 맡기지 않음 · 후보가 없으면 칸 숨김·404
+    blogauto_status(settings, actions=[a for a in fixture("status_blogauto.json")["actions"] if a != "lookbook_cands_pick"])
+    assert (await state(bot))["lookbook"]["cands_ok"] is False
+    status, body = await act(bot, "blog.lookbook_cands_pick", {"ids": [CAND_A]})
+    assert status == 503 and body["code"] == "unsupported"
+    lbx = fixture("export_v2.json")["lookbook"]
+    del lbx["cands"]
+    write_export(export_path(tmp_path), lookbook=lbx)
+    lb = (await state(bot))["lookbook"]
+    assert (lb["cands_n"], lb["cands_sig"], lb["cands_ok"]) == (0, "", False)
+    assert (await get_json(bot, "/dashboard/api/lbcands", session_headers(bot)))[0] == 404
+
+
+def test_cands_sig_changes_when_the_pick_or_thumbs_change() -> None:
+    lv = _lookbook(fixture("export_v2.json")["lookbook"])
+    a = lbview._cands_head(lv, True)["cands_sig"]
+    lv2 = copy.deepcopy(lv)
+    lv2["cands"]["picked"] = [CAND_B]
+    lv3 = copy.deepcopy(lv)
+    lv3["cands"]["groups"][0]["items"][1]["thumb"] = "lc-000000000000.jpg"
+    assert len({a, lbview._cands_head(lv2, True)["cands_sig"], lbview._cands_head(lv3, True)["cands_sig"]}) == 3
+    assert lbview.cands(None, TZ) is None and lbview.cands({"cands": None}, TZ) is None
+
+
+def test_lookbook_js_cands_section() -> None:
+    js = (STATIC / "lookbook.js").read_text(encoding="utf-8")
+    for word in ("'/dashboard/api/lbcands'", "상품 후보 (${L.cands_n}개) — ${max}개 고르기", "'이 5개로 정하기'", "`${n}/${max}`",
+                 "'blog.lookbook_cands_pick'", "args: {ids: [...PK]}", "'지그재그에서 보기 ↗'", "target: '_blank', rel: 'noopener noreferrer'",
+                 "type: 'checkbox'", "PK.size >= max", "n < 1 || n > max || !L.cands_ok", "'부스트'", "`리뷰 ${", "★${x.rating}",
+                 "`정한 ${CD.picked.length}개 · ${CD.picked_at}`", "L.cands_n ? cands(L) : null", "-webkit-line-clamp:2",
+                 "minmax(150px,1fr)", "position:sticky", "H.exec({action: 'blog.lookbook_cands_pick'"):
+        assert word in js, word

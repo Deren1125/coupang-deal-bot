@@ -19,7 +19,15 @@ const CSS = '.lbw{display:grid;gap:10px}.lbw .itm{padding:14px}.lbh{white-space:
   '.lbtr small{display:block;font-weight:400;color:var(--sub)}.lbtc img,.lbte{display:block;width:100%;aspect-ratio:9/16;object-fit:contain;' +
   'border-radius:8px;background:var(--tile)}.lbte{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub)}' +
   '.lbtc span{display:block;font-size:13px;font-weight:600;text-align:center}.lbtn{margin:12px 0 0;font-size:13px}' +
-  '.lbtr .pb{width:100%;min-height:40px;padding:0 4px;margin:0;font-size:13px;white-space:normal}';
+  '.lbtr .pb{width:100%;min-height:40px;padding:0 4px;margin:0;font-size:13px;white-space:normal}' +
+  // 상품 후보 (11/03): 폰 두 줄 카드 · 이름 두 줄까지 · 아래 붙는 n/5 + 정하기
+  '.lbcg{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.lbcc{position:relative;display:flex;' +
+  'flex-direction:column;gap:2px;padding:6px;border:2px solid var(--line);border-radius:10px;font-size:13px;min-width:0}.lbcc.on{border-color:var(--ac)}' +
+  '.lbcc img,.lbcc .lbte{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}.lbcc input{position:absolute;top:10px;right:10px;' +
+  'width:26px;height:26px}.lbcb{position:absolute;top:10px;left:10px}.lbcn{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;' +
+  'overflow:hidden;overflow-wrap:anywhere}.lbcc small{color:var(--sub)}.lbcc a{color:var(--ac);font-weight:600;text-decoration:none;padding:6px 0 2px}' +
+  '.lbcf{position:sticky;bottom:0;display:flex;gap:10px;align-items:center;background:var(--card);padding:10px 0 4px;margin-top:8px}' +
+  '.lbcf .pb{flex:1;margin:0;min-height:44px}.lbcp{background:var(--tile);border-radius:10px;padding:10px;margin-bottom:8px}';
 const LOC = {}, TYPED = {}, CHK = {}, VID = {}, FILE = {}, SURE = {};  // 누른 뒤 상태(3분) · 쓰던 주소 · 확인 칸 · 재생 중인 영상 · 받은 파일 · 버리기 두 번
 const REEL = /^https:\/\/(www\.|m\.)?instagram\.com\/([A-Za-z0-9_.]{1,30}\/)?(p|reels?|tv)\/[A-Za-z0-9_-]{5,40}\/?(\?\S*)?$/;
 let H = null, B = null, TR = null, TK = '', TOPEN = false;  // TR: null · 0 받는 중 · false 실패 · 목록
@@ -172,6 +180,45 @@ function trial(L) {
       : '바탕이 될 릴스(4벌 이상)가 아직 없어요 — 아침에 첫 편이 만들어지면 눌러 주세요')] : null);
 }
 
+// 상품 후보 5개 고르기 (주인 11/03): 목록은 /dashboard/api/lbcands (바뀌면 다시) · 1~5개 체크 → blog.lookbook_cands_pick
+const PK = new Set();
+let CD = null, CK = '';  // CD: null · 0 받는 중 · false 실패 · {groups, picked}
+function cload(L) {
+  if (CD === 0 || (CD !== null && CK === L.cands_sig)) return;
+  CD = 0; CK = L.cands_sig;
+  H.api('/dashboard/api/lbcands').then(r => {
+    CD = r.status === 200 && r.data && Array.isArray(r.data.groups) ? r.data : false;
+    if (CD) { const ok = new Set(CD.groups.flatMap(g => g.items.map(x => x.id))); PK.forEach(i => ok.has(i) || PK.delete(i)); if (!PK.size) CD.picked.forEach(x => PK.add(x.id)); }
+    draw();
+  });
+}
+function ccard(x, max) {
+  const {el} = H, on = PK.has(x.id);
+  return el('label', {class: 'lbcc' + (on ? ' on' : '')},
+    x.thumb ? el('img', {src: x.thumb, alt: '', loading: 'lazy'}) : el('div', {class: 'lbte'}, '사진 없음'),
+    el('input', {type: 'checkbox', checked: on, 'aria-label': x.name + ' 고르기', onchange: e => {
+      if (e.target.checked && PK.size >= max) { e.target.checked = false; return H.toast(`${max}개까지 골라요`); }
+      if (e.target.checked) PK.add(x.id); else PK.delete(x.id);
+      draw(); }}),
+    x.boost ? el('span', {class: 'lbs ok lbcb'}, '부스트') : null,
+    el('b', {class: 'lbcn'}, x.name), el('span', {}, x.price || '가격 모름'),
+    el('small', {}, `리뷰 ${(x.reviews || 0).toLocaleString()} · ★${x.rating}`), x.shop ? el('small', {}, x.shop) : null,
+    el('a', {href: x.url, target: '_blank', rel: 'noopener noreferrer'}, '지그재그에서 보기 ↗'));
+}
+function cands(L) {
+  const {el, btn} = H, max = (CD && CD.max_pick) || 5, n = PK.size;
+  cload(L);
+  const go = e => (L.cands_ok && H.exec ? H.exec({action: 'blog.lookbook_cands_pick', args: {ids: [...PK]}}, {}, {btn: e.currentTarget})
+    : H.toast('블로그 프로그램 업데이트를 기다리는 중이에요'));
+  return el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, `상품 후보 (${L.cands_n}개) — ${max}개 고르기`),
+    !CD ? el('p', {class: 'note'}, CD === false ? '불러오지 못했어요 — 새로고침해 주세요' : '불러오는 중…') : [
+      CD.picked.length ? el('div', {class: 'lbcp'}, el('b', {}, `정한 ${CD.picked.length}개 · ${CD.picked_at}`),
+        CD.picked.map(x => el('div', {class: 'lbl'}, x.thumb ? el('img', {src: x.thumb, alt: ''}) : null, el('span', {}, x.name, x.price ? ` · ${x.price}` : '')))) : null,
+      CD.groups.map(g => [el('p', {class: 'lbtn'}, el('b', {}, g.query)), el('div', {class: 'lbcg'}, g.items.map(x => ccard(x, max)))]),
+      el('div', {class: 'lbcf'}, el('b', {}, `${n}/${max}`),
+        btn('pb', '이 5개로 정하기', go, {disabled: n < 1 || n > max || !L.cands_ok || null}))]);
+}
+
 function draw() {
   if (!H || !B) return;
   css();
@@ -182,6 +229,7 @@ function draw() {
   B.replaceChildren(el('div', {class: 'lbw'},
     el('p', {class: 'note', style: 'margin:0'}, L.rules, L.instagram ? ` · 계정 ${L.instagram}` : ''),
     L.server ? el('p', {class: 'note', style: 'margin:0;color:var(--red)'}, L.server) : null,
+    L.cands_n ? cands(L) : null,
     L.ready ? trial(L) : null,
     live.length ? live.map(it => card(it, L)) : el('section', {class: 'itm'}, el('p', {class: 'note', style: 'margin:0'}, L.empty)),
     done.length ? el('section', {class: 'itm'}, el('p', {class: 'h3', style: 'margin-top:0'}, '올린 릴스'),
