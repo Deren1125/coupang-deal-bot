@@ -87,6 +87,36 @@ def open_link(label: str, url: str) -> dict[str, Any]:
     return act("open", label, input="open", url=url)
 
 
+WAIT_LINES_MAX = 15  # '발행 대기 N편' 줄 자세히에 보일 글 수
+
+
+def _waits(p: dict[str, Any]) -> bool:
+    """Blog-Auto metrics.waiting_posts 와 같은 기준: 임시저장 · 주인이 고친 임시저장 · 붙여넣기를 기다리는 글 (발행된 글 빼고)."""
+    st = p.get("status")
+    return st != "published" and (st == "saved" or p.get("owner_edited") is True or (st == "failed" and p.get("paste") is True))
+
+
+def score_chip(post: dict[str, Any] | None) -> str:
+    """기다리는 글 줄 옆 칩 글자 (주인 11/04 '기다리는 글 옆에도 뜨게'): 인기 예상(popular)은 '🔥 88점', 그 밖 '62점', 모르면 ''."""
+    sc = (post or {}).get("score")
+    return "" if sc is None else ("🔥 " if (post or {}).get("popular") else "") + f"{sc}점"
+
+
+def waiting_lines(rows: dict[Any, dict[str, Any]]) -> list[str]:
+    """'Pick 발행 대기 N편 · 인기 M' 할 일 줄을 누르면 보이는 글 목록 (주인 11/04 '인기 2가 뭔지, 대기가 뭔지 볼 수 있으면').
+    인기 예상 점수(0~100) 높은 순, 인기 예상 글은 🔥. 점수를 모르는 글은 맨 뒤."""
+    ws = sorted((p for p in rows.values() if isinstance(p, dict) and _waits(p)), key=lambda p: str(p.get("saved_at") or ""), reverse=True)
+    ws.sort(key=lambda p: (p.get("score") is None, -(p.get("score") or 0)))
+    out = []
+    for p in ws[:WAIT_LINES_MAX]:
+        sc = p.get("score")
+        head = ("🔥 인기 예상 · " if p.get("popular") else "") + (f"{sc}점" if sc is not None else "점수 없음")
+        out.append(f"{head} · #{p.get('pid')} {truncate(str(p.get('title') or ''), 60)}")
+    if len(ws) > WAIT_LINES_MAX:
+        out.append(f"… 그 밖 {len(ws) - WAIT_LINES_MAX}편은 블로그 보기에서")
+    return out
+
+
 def goto(label: str, route: str) -> dict[str, Any]:
     return act("goto", label, input="goto", goto=route)
 
@@ -472,6 +502,9 @@ class StateBuilder:
                            "owner_edited": bool((post or {}).get("owner_edited")), "pics": pics, "ig": self._ig_view(blog, pid, post),
                            "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
                 "links": list((pr or {}).get("links") or [])[:LINKS_MAX] if "photos" in needs else [],
+                # 인기 예상 점수 (주인 11/04 '기다리는 글 옆에도 뜨게') — 블로그 화면 기다리는 글 줄에 '🔥 88점' · '62점'
+                "score": (post or {}).get("score"), "popular": bool((post or {}).get("popular")),
+                "sc": score_chip(post),  # 칩 글자 ('🔥 88점' · '62점' · 점수 모르면 '') — app.js 크기 한도라 글자는 여기서
                 "_hot": rank.post_hot(post), "_hot_rank": (post or {}).get("hot_rank")}
 
     def _fail_text(self, status: str, fail: dict[str, Any]) -> str:
@@ -742,7 +775,7 @@ class StateBuilder:
                         "since": _ts(t.since), "expires_at": None, "primary": primary,
                         "more": ([page] if target and page is not None else [])
                         + ([act("todo.dismiss", "다 했어요", {"iid": iid, "key": t.key})] if dismissible(iid, t.key, dealbot_row=False) else []),
-                        "detail": {"lines": []}}
+                        "detail": {"lines": waiting_lines(posts.get(blog) or {}) if t.kind == "drafts_waiting" and blog else []}}
         # '오늘 들를 이웃 글'은 할 일에 넣지 않는다 (주인 10/23 — 알림 없이, 블로그 화면 '이웃' 칸에서만 본다)
         if (srow := self._search_item(self.search_view(v2))) is not None:
             out[srow["iid"]] = srow
@@ -965,6 +998,9 @@ class StateBuilder:
                     planned.append((at, rank.public(self._post_item(blog, p, pid=p["pid"]))))
                 elif iid not in have and p.get("status") != "published":
                     waiting.append(rank.public(self._post_item(blog, p, pid=p["pid"])))
+            # 기다리는 글 줄 옆 인기 예상 점수 (주인 11/04 '기다리는 글 옆에도 뜨게'): 상태 줄 끝에 '· 🔥 82점'·'· 60점'.
+            # 할 일 탭과 같은 줄 객체라 복사해서 블로그 탭에만 (app.js 는 크기 한도라 글자로 — 화면 코드 그대로)
+            waiting = [dict(w, status=f"{w['status']} · {w['sc']}" if w.get("status") else w["sc"]) if w.get("sc") else w for w in waiting]
             acts: list[dict[str, Any]] = []
             if blog == "finance":
                 acts += [act("blog.scan", "다시 찾기"), act("blog.write", "새 글 쓰기", input="text", placeholder="어떤 글을 쓸지",

@@ -29,3 +29,7 @@
 - 매시간 오류 점검 AI 가 Blog-Auto 의 `ops-check` 가지에 `last.json` 하나만 덮어 올린다 (직전 차례만 남음 — `docs/ai_ops_playbook.md` 3장 8번).
 - Blog-Auto `blogauto/opscheck.py` 가 10분마다 그 가지를 받아 기록 파일 `opscheck` 칸에 넣고, 딜봇 `dashboard/state.py` 가 `state["opscheck"]` 로 만든다.
 - 모양: `opscheck = {at "MM/DD HH:MM", result ok|fixed|blocked|owner, summary, lines: [한 줄]}`. 가지가 없거나 git 이 안 되면 칸이 안 보인다.
+
+## 2026-11-04 — 발행 대기 글 목록·점수 (주인 '인기 2가 뭔지, 대기가 뭔지 볼 수 있으면' · '기다리는 글 옆에도')
+- 할 일 'Pick 발행 대기 N편 · 인기 M' 줄(Blog-Auto todo kind drafts_waiting)을 누르면 자세히에 대기 글 목록: 인기 예상 점수 높은 순 · 🔥 = 인기 예상(70점+) · 최대 15편 (`state.waiting_lines` — 대기 기준은 Blog-Auto metrics.waiting_posts 와 같게).
+- 블로그 탭 '기다리는 글' 줄의 상태 끝에 '· 🔥 82점'·'· 60점' (`state.score_chip`, 할 일 탭 줄은 그대로). app.js 는 크기 한도(90KB·gzip 30080)라 안 고침 — 글자는 서버에서.
