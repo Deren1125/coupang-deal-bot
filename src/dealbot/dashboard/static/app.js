@@ -947,14 +947,15 @@ function autoBox() {
     ok.length ? btn('fold', '자동 작업 정상 · ' + ok.filter(x => !x[3]).map(x => x[0]).concat(n ? '수집기 ' + n : []).join('·'), () => { OPEN.auto = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'}) : null,
     o ? ok.map(x => row(x[0], x[1])) : null);
 }
-// 한눈에 (주인 11/05 '뭘 해야 하는지 한눈에') — 종류별 수 · 누르면 그 탭
+// 한눈에 (주인 11/05)
 const GL = [['딜 링크', i => i.src === 'deal', '#/todo/deal'], ['글', i => i.src === 'blog' && i.blog, '#/blog'], ['룩북', i => i.kind === 'lookbook', '#/sns/lookbook']];
+const RDY = i => /^(publish|paste|app|draft_ready)$/.test(i.kind);
 function glance(all) {
-  const c = GL.map(([l, f, h]) => [l, all.filter(f).length, h]), etc = all.length - c.reduce((a, x) => a + x[1], 0);
-  return el('div', {class: 'box gl'}, el('p', {class: 'h3', style: 'margin:0 0 8px'}, `지금 할 일 ${all.length}개`),
+  const c = GL.map(([l, f, h]) => [l, all.filter(f).length, h]), etc = all.length - c.reduce((a, x) => a + x[1], 0), r = all.filter(RDY).length;
+  return el('div', {class: 'box gl'}, el('p', {class: 'h3', style: 'margin:0 0 6px'}, `지금 할 일 ${all.length}개`),
+    el('p', {class: 'st'}, el('b', {}, `바로 올리기 ${r}`), ' · 붙여넣고 발행만'), el('p', {class: 'st'}, el('b', {}, `내가 넣을 것 ${all.length - r}`), ' · 답·사진·링크 먼저'),
     el('div', {class: 'tools'}, c.filter(x => x[1]).map(([l, n, h]) => el('a', {class: 'sm', href: h}, `${l} ${n}`)), etc ? el('span', {class: 'cp'}, `그 밖 ${etc}`) : null));
 }
-// 가끔 쓰는 것은 접어 두기 (주인 11/05 '세부 조정은 세션에서')
 const tuck = (k, t, f) => { const o = OPEN[k]; return [el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, btn('fold', t, () => { OPEN[k] = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'})), ...(o ? f() : [])]; };
 function vTodo() {
   const rt = rtIds(), all = S.todo.flatMap(i => /^(publish|paste|app)$/.test(i.kind) && rt.has(i.iid) ? [] : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
@@ -963,7 +964,7 @@ function vTodo() {
   const b = banner(), urg = b && b.classList.contains('bad');
   if (urg) out.push(b);  // 급한 알림만 맨 위 — 그 아래 '오늘 할 일' 칸(routine.js)
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
-  else if (all.length) out.push(glance(all));
+  else if (S.todo.length) out.push(glance(S.todo));
   if (!items.length) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
   const n = ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');

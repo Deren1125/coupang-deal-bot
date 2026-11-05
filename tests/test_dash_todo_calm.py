@@ -74,7 +74,7 @@ const click = (n, label) => find(n, label).a.onclick();
 
 
 def todo_script(js: str) -> str:
-    parts = [re.search(r"^const rtIds = .*$", js, re.M), re.search(r"^const GL = .*$", js, re.M), re.search(r"^function glance\(all\) \{.*?^\}$", js, re.M | re.S),
+    parts = [re.search(r"^const rtIds = .*$", js, re.M), re.search(r"^const GL = .*$", js, re.M), re.search(r"^const RDY = .*$", js, re.M), re.search(r"^function glance\(all\) \{.*?^\}$", js, re.M | re.S),
              re.search(r"^function autoBox\(\) \{.*?^\}$", js, re.M | re.S),
              re.search(r"^function vTodo\(\) \{.*?^\}$", js, re.M | re.S)]
     assert all(parts), "vTodo·autoBox·rtIds 를 app.js 에서 못 찾음"
@@ -141,7 +141,7 @@ console.log(JSON.stringify(out));
     # 할 일 → 자동 작업 한 줄 → '더 보기' (오늘 한 일·정리·바뀐 것·점검은 접힘). Pick #12 '발행 대기'는 오늘 할 일 칸에 → 뺌
     # (같은 번호의 핫딜 #12 는 칸에 rsv:hotdeal:12 로 있어서 뺌 · 사진이 남은 #13·칸에 없는 아카이브 #3 은 그대로)
     # 11/05 맨 위 '지금 할 일' 한눈에 칸 (종류별 수 · 누르면 그 탭)
-    assert got["glance"] == "지금 할 일 4개글 2그 밖 2"  # 글 = 블로그 글 줄 · 그 밖 = 시스템 알림 등
+    assert got["glance"] == "지금 할 일 6개바로 올리기 3 · 붙여넣고 발행만내가 넣을 것 3 · 답·사진·링크 먼저글 4그 밖 2"  # 바로 = 발행 대기 · 글 = 블로그 글 줄 · 그 밖 = 시스템 알림 등
     assert got["plain"] == ["box gl", "grp", "sys-blogauto", "grp", "post-issue-13", "post-finance-3", "grp", "blog-issue-stall", "auto", "foot:더 보기"]
     assert got["autoLine"] == ["자동 작업 정상 · 딜봇·블로그 프로그램·쇼핑커넥트·수집기 2"] and got["autoOpen"] == "false"
     assert got["autoRows"] == ["자동 작업 정상 · 딜봇·블로그 프로그램·쇼핑커넥트·수집기 2", "딜봇 | 정상", "블로그 프로그램 | 정상 · 방금 신호",
