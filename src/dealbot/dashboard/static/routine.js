@@ -175,9 +175,9 @@ function off(p) {
 }
 const big = (label, f) => el('button', {class: 'sm', type: 'button', onclick: f}, label);
 function paste(p) {
-  return [el('div', {class: 'bt pb'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => rich(p)),
-    p.tag_text ? big('태그 복사', () => copy(p.tag_text)) : null),
-  el('span', {class: 's'}, "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기")];
+  // 태그는 '꾸미기'가 발행 설정창에 넣어 줘서 따로 복사 단추 없음 (주인 11/06 '태그 복사 안 해도 들어가는데')
+  return [el('div', {class: 'bt pb'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => rich(p))),
+  el('span', {class: 's'}, "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기 (태그도 저절로)")];
 }
 
 function item(it) {

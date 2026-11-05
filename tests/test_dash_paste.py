@@ -182,7 +182,7 @@ const tick = () => new Promise(r => setTimeout(r, 5));
   out.big = its.map(i => i.all(c => c.tagName === 'BUTTON' && c.className === 'sm' && c.parentNode.className === 'bt pb').map(b => b.textContent));
   out.hint = its.map(i => i.all(c => c.className === 's').map(c => c.textContent).filter(t => t.includes('꾸미기')));
   const press = async label => { its[0].all(c => c.tagName === 'BUTTON' && c.textContent === label)[0].click(); await tick(); await tick(); out.toasts.push(toast.textContent); };
-  await press('제목 복사'); await press('본문 복사'); await press('태그 복사');
+  await press('제목 복사'); await press('본문 복사');
   out.bodyLeft = body.children.length;  // 화면 밖 칸은 복사 뒤 지움
   out.inCard = box.all(c => c.attrs.contenteditable).length;  // 살아 있는 칸엔 아무것도 넣지 않음
   its[1].all(c => c.className === 'cb')[0].click();
@@ -210,16 +210,16 @@ def test_routine_js_copy_buttons(bot: DealBot, tmp_path: Path) -> None:
     view = routine.view(bot, now=at(bot, day, "10:00"))
     p = view["slots"][0]["items"][0]["paste"]
     got = _run(node, view, "rich")
-    assert got["big"] == [["제목 복사", "본문 복사", "태그 복사"], ["제목 복사", "본문 복사"], []]  # 태그가 없으면 태그 단추 없음
-    hint = "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기"  # 꾸미기 v4 (10/29)
+    assert got["big"] == [["제목 복사", "본문 복사"], ["제목 복사", "본문 복사"], []]  # 태그는 꾸미기가 넣음 — 복사 단추 없음 (11/06)
+    hint = "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기 (태그도 저절로)"  # 꾸미기 v4 (10/29)
     assert got["hint"] == [[hint], [hint], []]
-    assert got["clip"] == ["적금 비교 정리", "#적금 #재테크 #적금통장"] and got["toasts"] == ["복사했어요"] * 3
+    assert got["clip"] == ["적금 비교 정리"] and got["toasts"] == ["복사했어요"] * 2
     assert got["rich"] == [["text/html", "text/html", p["html"]], ["text/plain", "text/plain", p["text"]]]  # 한 번에 둘 다
     assert got["exec"] == [] and got["bodyLeft"] == 0 and got["inCard"] == 0
     assert got["doneBig"] == 1  # 체크한 줄은 단추를 숨김
     # ClipboardItem 이 없는 사파리: 화면 밖 칸에 DOM 으로 옮겨 담아 선택·복사 (스크립트·on* 은 뺌), 끝나면 칸을 지움
     got = _run(node, view, "off")
-    assert got["rich"] == [] and got["parsed"] == [len(p["html"]), "text/html"] and got["toasts"] == ["복사했어요"] * 3
+    assert got["rich"] == [] and got["parsed"] == [len(p["html"]), "text/html"] and got["toasts"] == ["복사했어요"] * 2
     (cmd, editable, style, attached, text, attrs, script), = got["exec"]
     assert cmd == "copy" and editable == "true" and "left:-9999px" in style and attached is True and text == "붙여 넣을 글"
     assert attrs == ["style"] and script is False and got["bodyLeft"] == 0 and got["inCard"] == 0
@@ -229,5 +229,5 @@ def test_routine_js_stays_local_and_never_injects_html() -> None:
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "innerHTML" not in js and "outerHTML" not in js and "insertAdjacentHTML" not in js and "document.write" not in js
     assert "ClipboardItem" in js and "'text/html'" in js and "'text/plain'" in js and "execCommand('copy')" in js and "DOMParser" in js
-    for word in ("제목 복사", "본문 복사", "태그 복사", "뜨는 칸에 붙여넣기", "꾸미기"):
+    for word in ("제목 복사", "본문 복사", "뜨는 칸에 붙여넣기", "꾸미기"):
         assert word in js, word

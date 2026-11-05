@@ -301,6 +301,8 @@ const ask = () => new Promise(res => {
 const kind = c => /se-horizontalLine/.test(c.className) ? '선' : /se-quotation/.test(c.className) ? (postit(c) ? '포스트잇' : '인용구') : c.matches(CARD) || c.querySelector(CARD) ? '카드' : /se-image/.test(c.className) ? '사진' : txt(c) ? '글' : '';
 const shape = () => comps().map(kind).filter(Boolean).filter((k, i, a) => !(k === '글' && a[i - 1] === '글')).join(' ');
 const want = ps => ps.map(p => ({text: '글', rule: '선', card: '카드', quote: '포스트잇'})[p.k]).filter(Boolean).filter((k, i, a) => !(k === '글' && a[i - 1] === '글')).join(' ');
+// 글자 꾸밈 세기 (주인 11/06 '형광펜·색이 하나도 안 됨'): 받은 글과 에디터에 들어간 글에서 형광펜·글자 색·굵게 수 — 어디서 빠지는지 알림에 보임
+const fx = h => [/background-color/gi, /[^-]color\s*:/gi, /<(b|strong)[\s>]|font-weight:\s*(bold|[6-9]00)|class="[^"]*bold/gi].map(x => (h.match(x) || []).length);
 const R = {pieces: 0, done: 0, cards: [0, 0], lines: [0, 0], quotes: [0, 0], tags: [0, 0], q: [], bad: [], notes: []};
 W.__kkumiReport = R;
 try { window.__kkumiReport = R; } catch (e) {}
@@ -310,6 +312,7 @@ if (!got) return;
 const ps = pieces(got.h, got.t);
 R.pieces = ps.length;
 R.want = want(ps);
+R.fx = [fx(ps.filter(p => p.k === 'text').map(p => p.html).join('')), [0, 0, 0]];
 if (!ps.length) { alert('꾸미기: 붙여 넣은 글이 비었어요'); return; }
 W.__kkumi = 1;
 try {
@@ -338,6 +341,7 @@ try {
     R.done++;
   }
   R.shape = shape();
+  R.fx[1] = fx(body_().map(p => p.innerHTML).join(''));
   if (R.tagList && R.done === ps.length) {
     const [n, why] = await tagsIn(R.tagList);
     R.tags[0] = n;
@@ -350,6 +354,9 @@ nm(R.cards, '링크 카드');
 nm(R.lines, '구분선');
 nm(R.quotes, '포스트잇');
 nm(R.tags, '태그');
+const fs = a => `형광펜 ${a[0]}·색 ${a[1]}·굵게 ${a[2]}`;
+if (R.fx[0].some(Boolean)) { out.push('글자 꾸밈 받음 ' + fs(R.fx[0]) + ' → 들어감 ' + fs(R.fx[1])); if (R.fx[0][0] && !R.fx[1][0]) R.notes.push('형광펜이 에디터에서 빠짐'); }
+else R.notes.push('받은 글에 글자 꾸밈 없음 (복사할 때 빠짐?)');
 R.ok = R.shape === R.want && !R.bad.length;
 R.finished = true;
 alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.tags[1] ? '\n발행 설정창에서 확인 뒤 발행' : ''));
