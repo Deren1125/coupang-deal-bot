@@ -947,6 +947,15 @@ function autoBox() {
     ok.length ? btn('fold', '자동 작업 정상 · ' + ok.filter(x => !x[3]).map(x => x[0]).concat(n ? '수집기 ' + n : []).join('·'), () => { OPEN.auto = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'}) : null,
     o ? ok.map(x => row(x[0], x[1])) : null);
 }
+// 한눈에 (주인 11/05 '뭘 해야 하는지 한눈에') — 종류별 수 · 누르면 그 탭
+const GL = [['딜 링크', i => i.src === 'deal', '#/todo/deal'], ['글', i => i.src === 'blog' && i.blog, '#/blog'], ['룩북', i => i.kind === 'lookbook', '#/sns/lookbook']];
+function glance(all) {
+  const c = GL.map(([l, f, h]) => [l, all.filter(f).length, h]), etc = all.length - c.reduce((a, x) => a + x[1], 0);
+  return el('div', {class: 'box gl'}, el('p', {class: 'h3', style: 'margin:0 0 8px'}, `지금 할 일 ${all.length}개`),
+    el('div', {class: 'tools'}, c.filter(x => x[1]).map(([l, n, h]) => el('a', {class: 'sm', href: h}, `${l} ${n}`)), etc ? el('span', {class: 'cp'}, `그 밖 ${etc}`) : null));
+}
+// 가끔 쓰는 것은 접어 두기 (주인 11/05 '세부 조정은 세션에서')
+const tuck = (k, t, f) => { const o = OPEN[k]; return [el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, btn('fold', t, () => { OPEN[k] = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'})), ...(o ? f() : [])]; };
 function vTodo() {
   const rt = rtIds(), all = S.todo.flatMap(i => /^(publish|paste|app)$/.test(i.kind) && rt.has(i.iid) ? [] : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
   let items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, k = 0, rest = 0;
@@ -954,6 +963,7 @@ function vTodo() {
   const b = banner(), urg = b && b.classList.contains('bad');
   if (urg) out.push(b);  // 급한 알림만 맨 위 — 그 아래 '오늘 할 일' 칸(routine.js)
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
+  else if (all.length) out.push(glance(all));
   if (!items.length) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
   const n = ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');
@@ -1021,7 +1031,7 @@ async function trendGo(t, x, e) {
 }
 function vBlog() {
   const key = R.sub, b = S.blogs[key];
-  const out = [seg(BLOGS.map(([k, l]) => [k, l, todoN(k)]), '#/blog/')];
+  let out = [seg(BLOGS.map(([k, l]) => [k, l, todoN(k)]), '#/blog/')];
   if (key === 'pics') return out.concat(vPics());
   if (key === 'search') return out.concat(vSearch());
   if (key === 'trial') return out.concat(vTrial());
@@ -1053,6 +1063,7 @@ function vBlog() {
       sc.cancel_all ? btn('lnk mute', sc.cancel_all.label, e => exec(sc.cancel_all, {}, {btn: e.currentTarget})) : null));
     out.push(...sc.items.map(x => item(x, true)));
   }
+  const main = out; out = [];
   if (tools.length) out.push(el('p', {class: 'h3'}, '도구'), el('div', {class: 'box', style: 'padding:0 14px'}, tools.map(x => el('a', {class: 'mr', href: x.href}, x.t))));
   if (b.trends && b.trends.items.length) out.push(...trendBox(b.trends));
   if (b.learn) out.push(...learnBox(b.learn));
@@ -1074,6 +1085,8 @@ function vBlog() {
   }
   // 소재 넣기 → 다음 글감 첫 후보
   if (seed) { const s = {iid: 'blog-' + key + '-seed', title: seed.label}; out.push(el('p', {class: 'h3'}, '소재 넣기'), el('div', {class: 'box'}, panel(s, seed, pk(s.iid, seed), {fixed: true}))); }
+  const ex = out; out = main;
+  if (ex.length) out.push(...tuck('bt-' + key, '글감·도구 · 가끔', () => ex));
   if (b.recent.length) {
     const open = OPEN['recent-' + key];
     out.push(el('div', {class: 'box', style: 'margin-top:12px'}, btn('fold', `최근 글 ${b.recent.length}개`, () => { OPEN['recent-' + key] = !open; render(); }, {'aria-expanded': open ? 'true' : 'false'}),
@@ -1165,8 +1178,9 @@ let ER;
 function vStats() {
   const box = el('div', {class: 'stx', onclick: statsClick});
   if (STATS) box.innerHTML = STATS; else box.append(el('p', {class: 'boot'}, '불러오는 중…'));
-  if (!S || !S.earnings) return [box];
-  return [...(ER ? ER.view(S.earnings, {el, btn, sheet, back, exec, confirmSheet}) : (erLoad().then(m => { ER = m; render(); }, () => 0), [])), box];
+  const ch = tuck('st-ch', '채널별 숫자 자세히', () => [box]);
+  if (!S || !S.earnings) return ch;
+  return [...(ER ? ER.view(S.earnings, {el, btn, sheet, back, exec, confirmSheet}) : (erLoad().then(m => { ER = m; render(); }, () => 0), [])), ...ch];
 }
 async function loadStats() {
   let r = null;
@@ -1271,7 +1285,8 @@ function vConnect() {
   const kAuth = (k.actions || []).find(a => a.action === 'blog.kakao_auth_url'), kConn = (k.actions || []).find(a => a.action === 'blog.kakao_connect');
   const kKid = {iid: 'conn-kakao', title: '카톡'};
   // 맨 위 '로그인 관리'는 logins.js · 카톡(예비)은 알림 칸 안에
-  out.push(...sec('알림', (k.actions || []).filter(a => a !== kAuth && a !== kConn), row('이 기기', s, right),
+  const set = [];
+  set.push(...sec('알림', (k.actions || []).filter(a => a !== kAuth && a !== kConn), row('이 기기', s, right),
     push.devices.length ? row('테스트 알림', '알림이 오는지 확인해요', btn('sm', '보내기', e => exec({action: 'push.test', args: {}}, {}, {btn: e.currentTarget}))) : null,
     others.map(d => row(d.label, d.last_ok ? `마지막 성공 ${ago(d.last_ok)}` : '아직 받은 적 없어요', btn('sm', '끄기', () => devOff(d)), !d.ok)),
     row('카톡 (예비)', KS[k.state] || KS.unknown,
@@ -1279,9 +1294,11 @@ function vConnect() {
       : btn('sm ac', kAuth.label, e => { KSTEP = true; exec(kAuth, {}, {btn: e.currentTarget, iid: 'conn-kakao'}); })) : null, k.state === 'down'),
   kConn && KSTEP ? panel(kKid, kConn, pk(kKid.iid, kConn), {fixed: true}) : null));
   const sns = S.sns, conn = (name, x, opt) => x && !(opt && x.state === 'off') ? row(name, x.text, x.fix ? el('a', {class: 'sm ac', href: x.connect_url}, x.fix_label || '다시 연결') : null, x.state === 'broken') : null;
-  out.push(...sec('인스타 · 스레드', sns.actions, conn('인스타그램', sns.instagram), conn('데런픽 룩 인스타', sns.instagram_look, 1), conn('스레드', sns.threads),
+  set.push(...sec('인스타 · 스레드', sns.actions, conn('인스타그램', sns.instagram), conn('데런픽 룩 인스타', sns.instagram_look, 1), conn('스레드', sns.threads),
     sns.invites.length ? fold(`초대 링크 ${sns.invites.length}개`, () => listSheet('초대 링크', sns.invites.map(v => el('div', {class: 'box'},
       el('p', {class: 'q'}, v.label), v.where ? el('p', {class: 'note'}, v.where) : null, el('div', {class: 'kv'}, el('code', {text: v.url}), btn('sm', '복사', () => copy(v.url))))))) : null));
+  const bad = k.state === 'down' || ['instagram', 'instagram_look', 'threads'].some(x => sns[x] && sns[x].state === 'broken');
+  out.push(...(bad ? set : tuck('cn-set', '알림·인스타·스레드 연결 · 정상', () => set)));
   // 네이버 로그인 상태·원격 로그인은 '로그인 관리' — 블로그별 로그인 확인은 봇 상태 더보기
   const nv = c.naver, bd = c.bots.dealbot, ba = c.bots.blogauto, cols = bd.collectors || [];
   out.push(...sec('봇 상태', BLOGS.map(([b, l]) => nv[b] && nv[b].action && Object.assign({}, nv[b].action, {label: l + ' 로그인 확인'})).filter(Boolean), row('딜봇', `${bd.paused ? '멈춤' : '정상'}${bd.updated ? ` · ${bd.updated} 업데이트` : ''}`, null, bd.paused),

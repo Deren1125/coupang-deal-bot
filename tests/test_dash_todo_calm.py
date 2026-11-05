@@ -74,7 +74,8 @@ const click = (n, label) => find(n, label).a.onclick();
 
 
 def todo_script(js: str) -> str:
-    parts = [re.search(r"^const rtIds = .*$", js, re.M), re.search(r"^function autoBox\(\) \{.*?^\}$", js, re.M | re.S),
+    parts = [re.search(r"^const rtIds = .*$", js, re.M), re.search(r"^const GL = .*$", js, re.M), re.search(r"^function glance\(all\) \{.*?^\}$", js, re.M | re.S),
+             re.search(r"^function autoBox\(\) \{.*?^\}$", js, re.M | re.S),
              re.search(r"^function vTodo\(\) \{.*?^\}$", js, re.M | re.S)]
     assert all(parts), "vTodo·autoBox·rtIds 를 app.js 에서 못 찾음"
     return TODO_STUB + "\n".join(m.group(0) for m in parts if m)
@@ -82,7 +83,8 @@ def todo_script(js: str) -> str:
 
 def todo_items() -> list[dict]:
     def it(iid: str, kind: str, sev: str = "todo", group: str = "오늘 안에") -> dict:
-        return {"iid": iid, "kind": kind, "sev": sev, "group": group, "src": "blog", "title": iid, "detail": {}}
+        return {"iid": iid, "kind": kind, "sev": sev, "group": group, "src": "blog", "title": iid, "detail": {},
+                "blog": iid.split("-")[1] if iid.startswith("post-") else None}
 
     return [it("sys-blogauto", "blogauto_down", "stop", "지금 꼭"), it("post-issue-12", "publish"), it("post-issue-13", "photos"),
             it("post-finance-3", "publish"), it("post-hotdeal-12", "publish"), it("blog-issue-stall", "stall", "info", "여유 있을 때")]
@@ -110,7 +112,7 @@ S = JSON.parse(process.argv[1]);
 const out = {};
 W.SBRoutine = {ids: () => ['pub:issue:12', 'rsv:hotdeal:12', 'nb:issue:a', 'pub:finance:x', 'post-finance-3']};
 let v = vTodo();
-out.plain = v.map(name);
+out.plain = v.map(name); out.glance = txt(v[0]);
 const auto = v.find(n => n.a.class === 'box');
 out.autoLine = auto.k.map(txt); out.autoOpen = auto.k[0].a['aria-expanded'];
 click(auto, out.autoLine[0]);
@@ -138,14 +140,16 @@ console.log(JSON.stringify(out));
     got = node(script, json.dumps(st, ensure_ascii=False))
     # 할 일 → 자동 작업 한 줄 → '더 보기' (오늘 한 일·정리·바뀐 것·점검은 접힘). Pick #12 '발행 대기'는 오늘 할 일 칸에 → 뺌
     # (같은 번호의 핫딜 #12 는 칸에 rsv:hotdeal:12 로 있어서 뺌 · 사진이 남은 #13·칸에 없는 아카이브 #3 은 그대로)
-    assert got["plain"] == ["grp", "sys-blogauto", "grp", "post-issue-13", "post-finance-3", "grp", "blog-issue-stall", "auto", "foot:더 보기"]
+    # 11/05 맨 위 '지금 할 일' 한눈에 칸 (종류별 수 · 누르면 그 탭)
+    assert got["glance"] == "지금 할 일 4개글 2그 밖 2"  # 글 = 블로그 글 줄 · 그 밖 = 시스템 알림 등
+    assert got["plain"] == ["box gl", "grp", "sys-blogauto", "grp", "post-issue-13", "post-finance-3", "grp", "blog-issue-stall", "auto", "foot:더 보기"]
     assert got["autoLine"] == ["자동 작업 정상 · 딜봇·블로그 프로그램·쇼핑커넥트·수집기 2"] and got["autoOpen"] == "false"
     assert got["autoRows"] == ["자동 작업 정상 · 딜봇·블로그 프로그램·쇼핑커넥트·수집기 2", "딜봇 | 정상", "블로그 프로그램 | 정상 · 방금 신호",
                                "쇼핑커넥트 | 정상 · 오늘 링크 3/40", "뽐뿌 | 정상 · 방금", "퀘이사존 | 정상 · 3분 전"]  # 꺼 둔 수집기는 안 셈
     assert got["more"] == ["auto", "foot:접기", "done", "foot:오늘 정리 보기", "dev", "dev"]
     assert got["moreText"] == ["오늘 한 일", "오늘 정리 보기", "오늘 바뀐 것 · 2개", "직전 AI 점검 · 10/27 09:04 · 이상 없음"]
-    assert got["urgent"] == ["urgent", "grp"]  # 급한 알림만 맨 위 (오늘 할 일 칸은 routine.js 가 그 바로 아래에)
-    assert got["nag"].index("banner") == got["nag"].index("auto") + 1 and got["nag"][0] == "grp"  # 알림 켜기 안내는 아래로
+    assert got["urgent"] == ["urgent", "box gl"]  # 급한 알림만 맨 위 (오늘 할 일 칸은 routine.js 가 그 바로 아래에)
+    assert got["nag"].index("banner") == got["nag"].index("auto") + 1 and got["nag"][0] == "box gl"  # 알림 켜기 안내는 아래로
     assert got["noRoutine"] == ["sys-blogauto", "post-issue-12", "post-issue-13", "post-finance-3", "post-hotdeal-12", "blog-issue-stall"]
     assert got["bad"] == [["row bad", "블로그 프로그램 | 응답 없음"], ["row bad", "퀘이사존 | 오류 · 3분 전"],
                           ["fold", "자동 작업 정상 · 딜봇·쇼핑커넥트·수집기 1"]]  # 문제는 따로 줄 · 정상은 한 줄
