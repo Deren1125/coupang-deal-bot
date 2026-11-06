@@ -97,6 +97,17 @@ const align = async want => {
   await S(400);
   return centered(lastPara());
 };
+// 제목 가운데 (주인 11/06 '제목은 원래 가운데였잖아' — 서버가 올릴 땐 맞췄음): 본문이 가운데 글이면 끝에 제목 줄을 누르고 가운데 단추
+const titleMid = async () => {
+  const t = D.querySelector('.se-documentTitle .se-text-paragraph,.se-section-documentTitle .se-text-paragraph');
+  if (!t || !txt(t)) return '제목 없음';
+  if (centered(t)) return '';
+  press(t); setSel(t); await S(400);
+  const b = vis(MAIN_CENTER);
+  if (!b) return '정렬 단추 없음';
+  press(b); await S(500);
+  return centered(t) ? '' : '못 함';
+};
 // 링크 카드: 툴바 링크 단추 → 주소 → 검색 → 미리보기 → 확인 (카드는 맨 끝 = 바로 위 주소 줄 다음)
 const card = async u => {
   const before = cards();
@@ -342,6 +353,7 @@ try {
   }
   R.shape = shape();
   R.fx[1] = fx(body_().map(p => p.innerHTML).join(''));
+  if (ps.some(p => p.align === 'center')) { R.title = await titleMid(); if (R.title) R.notes.push('제목 가운데 ' + R.title + ' — 제목 칸 누르고 가운데 단추'); }
   if (R.tagList && R.done === ps.length) {
     const [n, why] = await tagsIn(R.tagList);
     R.tags[0] = n;
