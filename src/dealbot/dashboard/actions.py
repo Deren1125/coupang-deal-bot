@@ -98,6 +98,7 @@ HTTPS_URL = re.compile(r"https://[^\s|<>\"']+")
 ABLY_RID = re.compile(r"^\d{1,9}-[0-9A-Za-z_-]{1,40}$")
 ABLY_IN_TEXT = re.compile(r"https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+")  # 주소에 쓰는 글자만 (RFC 3986)
 ABLY_HOSTS = ("a-bly.com",)
+ABLY_RANK_MAX = 12  # 에이블리 코디 랭킹 캡처 한 번에 (LB-15)
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
@@ -115,7 +116,8 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "x_posted", "x_drop", "x_redo",  # X 초안 (주인 10/25 — 올렸어요 · 버리기 · 다시 쓰기 · X API 없음, 올리기는 주인이 X 앱에서)
                 "lookbook_posted", "lookbook_drop", "lookbook_redo",  # 룩북 릴스 (주인 10/25 — 올렸어요 {id, url} · 버리기 · 다시 만들기 · 올리기는 주인이 인스타 앱에서)
                 "lookbook_trial", "lookbook_style",  # 사진 시험 (주인 10/26 — 시험 새로 만들기 {base?} · 이 양식으로 정하기 {style})
-                "lookbook_cands_pick")  # 룩북 상품 후보 고르기 (주인 11/03 — '이 5개로 정하기' {ids} 1~5개)
+                "lookbook_cands_pick",  # 룩북 상품 후보 고르기 (주인 11/03 — '이 5개로 정하기' {ids} 1~5개)
+                "ably_rank")  # 에이블리 코디 랭킹 캡처 올리기 (LB-15 주인 11/07 — {uploads} 1~12장, 서버는 에이블리 접속 없음)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
                 "todo.dismiss", "todo.hide", "login.remote", "login.remote_cancel", "stats.refresh", "stats.input", "search.check",
@@ -957,6 +959,8 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
                 or not all(isinstance(i, str) and LB_CAND_ID_RE.fullmatch(i) for i in ids):
             raise ActionError("bad_args", text=f"후보를 1~{LB_CAND_PICK_MAX}개 골라 주세요")
         return {"ids": list(ids)}
+    if name == "ably_rank":  # 에이블리 코디 랭킹 캡처 (LB-15 — 계약 action_ably_rank.json): {uploads: [1~12장]}
+        return {"uploads": _uploads(g("uploads"), 1, ABLY_RANK_MAX)}
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):

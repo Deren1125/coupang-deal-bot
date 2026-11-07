@@ -83,6 +83,20 @@ def act(action: str, label: str, args: dict[str, Any] | None = None, *, input: s
     return out
 
 
+def ably_rank_item(v: dict[str, Any] | None) -> dict[str, Any] | None:
+    """할 일 한 줄 '에이블리 코디 랭킹 캡처' (LB-15 — 주인 11/07 '텔레그램 봇보다 대시보드가 쉬워서'). 오늘 올렸으면 None.
+    큰 단추 = 캡처 여러 장 올리기 (blog.ably_rank {uploads}) — 사진은 Blog-Auto 가 룩북 감독 폴더로 넘김. 서버는 에이블리 접속 없음."""
+    if not v or v.get("done"):
+        return None
+    steps = v.get("steps") or []
+    return {"iid": "ably-rank", "src": "blog", "blog": "", "kind": "ably_rank", "sev": "todo", "urgent": False,
+            "title": "에이블리 코디 랭킹 캡처", "status": " → ".join(steps[:2]) if steps else "에이블리 앱 › 코디 › 랭킹 캡처 3~9장",
+            "since": None, "expires_at": None,
+            "primary": act("blog.ably_rank", "캡처 올리기", {}, input="photos", multiple=True,
+                           note="순위 숫자·코디 사진·좋아요 수가 보이게 · 3~9장 한 번에"),
+            "more": [], "detail": {"lines": steps}}
+
+
 def open_link(label: str, url: str) -> dict[str, Any]:
     return act("open", label, input="open", url=url)
 
@@ -693,7 +707,11 @@ class StateBuilder:
         router = getattr(self.bot, "router", None)
         notices = router.store.open_rows(now) if router is not None else []
         by_iid: dict[str, list[Any]] = {}
+        ably_late = False
         for n in notices:
+            if n.src == "blogauto" and str(n.key).startswith("ably_rank:"):  # 저녁 알림은 푸시만 — 줄은 아래 '에이블리 코디 랭킹 캡처' 한 줄로 (겹치지 않게)
+                ably_late = True
+                continue
             by_iid.setdefault(n.iid, []).append(n)
         for iid, rows in by_iid.items():
             if iid.startswith("deal-"):
@@ -786,6 +804,9 @@ class StateBuilder:
                 out[lrow["iid"]] = lrow
         except Exception as e:  # noqa: BLE001
             log.warning("lookbook todo failed: %s", type(e).__name__)
+        if (arow := ably_rank_item(v2.get("ably_rank"))) is not None:  # 에이블리 코디 랭킹 캡처 (LB-15 주인 11/07 — 하루 한 번, 올리면 빠짐)
+            arow["urgent"] = ably_late  # 저녁까지 안 올리면 (Blog-Auto 저녁 알림이 열려 있으면) 급함
+            out[arow["iid"]] = arow
         try:  # 데런픽 룩 인스타 연결 필요 (주인 10/26 — 연결 전 한 줄, 알림 없이 · 연결하면 저절로 빠짐)
             from dealbot.growth import look_share
 

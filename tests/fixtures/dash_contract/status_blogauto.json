@@ -65,7 +65,8 @@
   "lookbook_redo",
   "lookbook_trial",
   "lookbook_style",
-  "lookbook_cands_pick"
+  "lookbook_cands_pick",
+  "ably_rank"
  ],
  "kakao": {
   "state": "ok",

@@ -1774,6 +1774,15 @@ def _post_counts(v: Any) -> dict[str, dict[str, dict[str, int] | None]] | None:
     return out
 
 
+def _ably_rank(v: Any) -> dict[str, Any] | None:
+    """에이블리 코디 랭킹 캡처 (LB-15 — Blog-Auto ably_rank.view): {day, done, n, at, steps}. 칸이 없으면(예전 Blog-Auto) None."""
+    if not isinstance(v, dict) or not isinstance(v.get("day"), str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v["day"]):
+        return None
+    steps = [str(x)[:120] for x in (v.get("steps") or []) if isinstance(x, str)][:5]
+    n = v.get("n") if isinstance(v.get("n"), int) and not isinstance(v.get("n"), bool) else 0
+    return {"day": v["day"], "done": v.get("done") is True, "n": max(0, min(n, 99)), "at": str(v.get("at") or "")[:25], "steps": steps}
+
+
 PUBLIC_BLOGS = ("finance", "issue", "hotdeal")
 PUBLIC_ROWS = 10
 
@@ -1816,6 +1825,7 @@ def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, A
                            "earnings": _earnings(data.get("earnings")), "x": _x(data.get("x")),
                            "post_counts": _post_counts(data.get("post_counts")),
                            "lookbook": _lookbook(data.get("lookbook")),
+                           "ably_rank": _ably_rank(data.get("ably_rank")),  # 에이블리 코디 랭킹 캡처 (LB-15 주인 11/07)
                            "ably_requests": _ably_requests(data.get("ably_requests")),  # 에이블리 링크 부탁 (주인 10/28 — 할 일 탭)
                            "public_stats": _public_stats(data.get("public_stats"))}  # 로그인 없이 읽은 숫자 (주인 10/30)
     posts = data.get("posts") if isinstance(data.get("posts"), dict) else {}
