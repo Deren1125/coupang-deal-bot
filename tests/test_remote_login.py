@@ -186,3 +186,27 @@ def test_logins_view_offers_cancel_only_for_cancelable_screens(bot: DealBot) -> 
 
     js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/logins.js").read_text(encoding="utf-8")
     assert "login.remote_cancel" in js and "v.cancel" in js
+
+
+async def test_closed_remote_screen_shows_a_way_back() -> None:
+    """주인 11/08: 원격 화면이 막 닫혔을 때 '잘못된 요청'에 갇히지 않고 '닫혔어요' + 대시보드로 돌아가기 (홈 화면 앱은 뒤로 가기가 없음)."""
+    srv = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
+    dead = srv.sockets[0].getsockname()[1]
+    srv.close()
+    await srv.wait_closed()  # 이 번호엔 아무도 없음 (websockify 가 꺼진 것과 같음)
+    web = WebServer(0, host="127.0.0.1")
+    web.guard_prefix("/dashboard", lambda h: h.get("authorization") == "ok")
+    web.route_tunnel("/dashboard/vnc/", lambda: dead)
+    await web.start()
+    port = web._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+    try:
+        body = (await _get(port, "/dashboard/vnc/vnc.html", "Authorization: ok\r\n")).decode()
+        assert " 404 " in body[:20] and "원격 화면이 닫혔어요" in body and "href='/dashboard/#/connect'" in body and "대시보드로 돌아가기" in body
+        r, w = await asyncio.open_connection("127.0.0.1", port)
+        w.write(b"\r\n\r\n")  # 읽을 수 없는 요청
+        await w.drain()
+        bad = (await asyncio.wait_for(r.read(), timeout=5)).decode()
+        w.close()
+        assert " 400 " in bad[:20] and "잘못된 요청" in bad and "href='/dashboard/'" in bad
+    finally:
+        await web.stop()

@@ -108,15 +108,22 @@ def _json_error(code: str, text: str) -> str:
     return json.dumps({"status": "error", "code": code, "text": text}, ensure_ascii=False)
 
 
-def page(title: str, body: str) -> str:
-    """결과 안내용 최소 HTML. body 는 이미 이스케이프된 텍스트/HTML."""
+BACK_HOME = "/dashboard/"
+BACK_CONNECT = "/dashboard/#/connect"
+
+
+def page(title: str, body: str, back: str | None = None) -> str:
+    """결과 안내용 최소 HTML. body 는 이미 이스케이프된 텍스트/HTML.
+    back: 큰 '대시보드로 돌아가기' 단추 주소 (주인 11/08 — 홈 화면 앱은 뒤로 가기가 없어 오류 화면에 갇히던 것)."""
+    btn = (f"<p><a href='{html.escape(back, quote=True)}' style='display:inline-block;padding:.8rem 1.4rem;border-radius:12px;"
+           "background:#111827;color:#fff;font-weight:600;text-decoration:none'>대시보드로 돌아가기</a></p>") if back else ""
     return (
         "<!doctype html><html lang='ko'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{html.escape(title)}</title>"
         "<style>body{font-family:-apple-system,system-ui,sans-serif;margin:2rem;line-height:1.6;max-width:36rem}"
         "h1{font-size:1.25rem}</style></head>"
-        f"<body><h1>{html.escape(title)}</h1><p>{body}</p></body></html>"
+        f"<body><h1>{html.escape(title)}</h1><p>{body}</p>{btn}</body></html>"
     )
 
 
@@ -270,7 +277,7 @@ class WebServer:
         self.tunnels[prefix.rstrip("/") + "/"] = port
 
     async def _tunnel(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, port: int, head: bytes,
-                      prefix: str) -> None:
+                      prefix: str) -> bool:
         """요청 첫 줄의 경로에서 prefix 를 떼고, 받은 머리를 그대로 보낸 뒤 양쪽을 끝날 때까지 잇는다 (최대 TUNNEL_MAX_S).
         웹소켓이 아닌 요청은 연결 하나에 요청 하나 (주인 10/24 — 원격 화면이 꾸밈 없이 'noVNC encountered an error'):
         앞단(Caddy·브라우저)이 같은 연결로 다음 요청을 보내면 그 요청은 prefix 를 떼지 못해 websockify 에서 404 였다.
@@ -281,7 +288,10 @@ class WebServer:
         upgrade = b"upgrade: websocket" in head.lower()
         if not upgrade:
             rest = _close_header(rest)
-        up_r, up_w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=5)
+        try:
+            up_r, up_w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=5)
+        except (OSError, TimeoutError):
+            return False  # 원격 화면 프로그램이 꺼짐 — 부른 쪽이 '닫혔어요' 화면을 보냄
         up_w.write(f"{method} {target} {version}\r\n".encode("latin-1") + rest)
         await up_w.drain()
         if not upgrade:
@@ -299,7 +309,7 @@ class WebServer:
                 for w in (up_w, writer):
                     with contextlib.suppress(Exception):
                         w.close()
-            return
+            return True
 
         async def pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
             with contextlib.suppress(Exception):
@@ -317,6 +327,7 @@ class WebServer:
             for w in (up_w, writer):
                 with contextlib.suppress(Exception):
                     w.close()
+        return True
 
     def serve_static(self, prefix: str, directory: Path) -> None:
         self.static[prefix.rstrip("/") + "/"] = Path(directory)
@@ -345,7 +356,7 @@ class WebServer:
         self._server = None
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        status, body = 400, page("잘못된 요청", "요청을 읽을 수 없습니다.")
+        status, body = 400, page("잘못된 요청", "요청을 읽을 수 없습니다.", back=BACK_HOME)
         try:
             try:
                 head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=_READ_TIMEOUT)
@@ -372,10 +383,11 @@ class WebServer:
                 denied = self._precheck(method, tpath, headers) if guarded and guard is not None else \
                     (404, page("없는 주소", "이 주소는 쓰지 않습니다."))
                 port = self.tunnels[tprefix]() if denied is None else None
-                if denied is None and port:
-                    await self._tunnel(reader, writer, port, head, tprefix)
+                if denied is None and port and await self._tunnel(reader, writer, port, head, tprefix):
                     return
-                result = denied or (404, page("닫혀 있어요", "원격 화면이 열려 있지 않아요 — 대시보드에서 다시 열어 주세요."))
+                # 세션이 없거나 막 닫혀 원격 화면에 닿지 않음 (11/08 — 예전엔 잇다 터져서 '잘못된 요청'으로 갇힘)
+                result = denied or (404, page("원격 화면이 닫혔어요", "시간이 지나 닫혔거나 아직 준비 중이에요 — 대시보드에서 다시 열어 주세요.",
+                                              back=BACK_CONNECT))
                 await self._respond(writer, result[0], result[1], result[2] if len(result) >= 3 else None,  # type: ignore[misc]
                                     result[3] if len(result) >= 4 else None)  # type: ignore[misc]
                 return
