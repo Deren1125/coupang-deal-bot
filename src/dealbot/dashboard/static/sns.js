@@ -15,7 +15,7 @@ const CSS = '.snb>.top:first-child .lnk{display:none}.snb>.top:first-child{min-h
   + '.snx .tl p{margin:0;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}.snx .tl p:last-child{border:0}.snx .tl i{display:block;font-style:normal;color:var(--sub)}'
   + '.snx .tb{flex:none;height:34px;padding:0 14px;border:0;border-radius:999px;font:inherit;font-size:14px;font-weight:600;background:var(--grey);color:var(--text)}.snx .tb:active{opacity:.6}'
   // 칸 이름이 두 줄로 꺾이지 않게: 할 일 숫자는 모서리 동그라미
-  + '#snt{grid-template-columns:1.4fr 1.1fr 1fr .8fr}#snt button{position:relative;white-space:nowrap;font-size:13px;padding:0 2px;letter-spacing:-.03em}#snt .cp{position:absolute;top:-5px;right:-1px;margin:0;padding:0 6px;line-height:18px;font-size:11px}';
+  + '#snt{grid-template-columns:1.35fr 1.05fr 1fr 1.05fr}#snt button{position:relative;white-space:nowrap;font-size:13px;padding:0 2px;letter-spacing:-.03em}#snt .cp{position:absolute;top:-5px;right:-1px;margin:0;padding:0 6px;line-height:18px;font-size:11px}';
 const BOX = {};
 let RF = 0, LAST = null;
 function css() {

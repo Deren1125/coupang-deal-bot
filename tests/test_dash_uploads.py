@@ -137,7 +137,7 @@ def test_view_groups_lookbook_and_todo(bot: DealBot) -> None:
         return {"label": label, "goto": route}
 
     row = uploadplan.todo_item(bot, now, goto, lb)
-    assert row["title"] == "쇼츠 올리기 2" and row["primary"]["goto"] == "#/sns/shorts" and row["iid"] == "uploads"
+    assert row["title"] == "숏폼·롱폼 올리기 2" and row["primary"]["goto"] == "#/sns/shorts" and row["iid"] == "uploads"
     uploadplan.set_done(bot.db, "t2", True)
     uploadplan.set_done(bot.db, "late", True)
     assert uploadplan.todo_item(bot, now, goto, lb) is None
@@ -149,7 +149,7 @@ def test_state_todo_has_uploads_line(bot: DealBot) -> None:
     now = datetime.now(ZoneInfo(bot.settings.app.timezone))
     put(bot, [{"id": "n1", "when": iso(now - timedelta(minutes=5)), "what": "쇼츠 A"}])
     rows = [i for i in bot.dash_state.items() if i["iid"] == "uploads"]
-    assert rows and rows[0]["title"] == "쇼츠 올리기 1"
+    assert rows and rows[0]["title"] == "숏폼·롱폼 올리기 1"
 
 
 # ---------------------------------------------------------------- 4) 체크 · API
@@ -184,7 +184,7 @@ def test_shorts_js_local_safe_korean_and_wired() -> None:
     sns = (STATIC / "sns.js").read_text(encoding="utf-8")
     assert "meta[name=sb-shorts]" in sns and "W.SBShorts" in sns and "k === 'shorts'" in sns
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "['shorts', '올리기']" in app and "'lookbook', 'shorts']" in app
+    assert "['shorts', '숏폼/롱폼']" in app and "'lookbook', 'shorts']" in app
     html = shell.page({"me": {}})
     assert re.search(r'<meta name="sb-shorts" content="/dashboard/static/shorts\.js\?v=[0-9a-f]{10}">', html)
     assert html.count("<script src=") == 1
@@ -271,7 +271,7 @@ def test_real_browser_renders_clean(bot: DealBot, tmp_path: Path) -> None:
     assert got["errors"] == []
     for bad in ("[object", "undefined", "NaN", "null"):
         assert bad not in got["text"], (bad, got["text"])
-    for word in ("오늘 · 남은 2", "19:00", "유튜브", "쇼츠 A", "파일 받기", "제목 복사", "설명글+태그 복사", "룩북 릴스 칸에서 올리기", "지난 것 1개", "검수 대기 · 아직 올리지 마세요", "유튜브 (롱폼)"):
+    for word in ("오늘 · 남은 2", "19:00", "유튜브", "쇼츠 A", "파일 받기", "제목 복사", "설명글+태그 복사", "룩북 릴스 칸에서 올리기", "지난 것 1개", "검수 대기 · 아직 올리지 마세요", "유튜브 (롱폼)", "영상 보기"):
         assert word in got["text"], word
     assert got["wide"] <= 360 and got["btn"] >= 44
     (sent,) = got["posts"]

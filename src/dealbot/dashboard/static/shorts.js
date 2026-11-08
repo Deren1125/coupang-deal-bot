@@ -12,7 +12,7 @@ const CSS = '.upw{display:grid;gap:10px}.upw .itm{padding:12px 14px}.upg{margin:
   '.upb{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.upb .pb,.upb a.pb{width:auto;flex:1 1 auto;min-height:44px;padding:0 12px;margin:0;' +
   'display:inline-flex;align-items:center;justify-content:center;text-decoration:none}' +
   '.upk{display:flex;gap:8px;align-items:center;min-height:44px;margin-top:4px;font-size:15px}.upk input{width:24px;height:24px;flex:none}' +
-  '.upr.g{opacity:.5}.upq{display:inline-block;margin-top:6px;font-size:13px;font-weight:700;color:var(--red)}.upn{white-space:pre-line}' +
+  '.upr.g>:not(.upb){opacity:.5}.upq{display:inline-block;margin-top:6px;font-size:13px;font-weight:700;color:var(--red)}.upn{white-space:pre-line}' +
   '.upw details summary{min-height:44px;display:flex;align-items:center;font-weight:600}';
 let H = null, B = null, V = null, BUSY = false;
 
@@ -49,7 +49,8 @@ function row(x) {
       el('div', {class: 'uph'}, el('b', {}, x.hm || x.when_text), x.plat ? el('span', {class: 'upc'}, x.plat) : null, el('span', {}, x.what)),
       x.title ? el('p', {class: 'upt'}, x.title) : null,
       el('span', {class: 'upq'}, '검수 대기 · 아직 올리지 마세요'),
-      x.note ? el('p', {class: 'upn'}, x.note) : null);
+      x.note ? el('p', {class: 'upn'}, x.note) : null,
+      x.file_url ? el('div', {class: 'upb'}, el('a', {class: 'pb', href: x.file_url, target: '_blank', rel: 'noopener noreferrer'}, '영상 보기')) : null);
   }
   const box = el('input', {type: 'checkbox'});
   box.checked = !!x.done;

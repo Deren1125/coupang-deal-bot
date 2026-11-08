@@ -884,7 +884,7 @@ function vSns() {
   const b = el('div', {});
   snLoad().then(N => N.view(b, R.sub, {el, mount, NAV, S, j: R.j, L: {threads: thLoad, x: [xbLoad, xLoad], lookbook: lbLoad}}), () => toast(MSG.net));
   const go = i => ((i.primary || {}).goto || '').replace('#/blog/', '#/sns/');
-  return [Object.assign(seg([['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스'], ['shorts', '올리기']].map(([k, l]) => [k, l, S.todo.filter(i => go(i) === '#/sns/' + k).length]), '#/sns/'), {id: 'snt'}), b];
+  return [Object.assign(seg([['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스'], ['shorts', '숏폼/롱폼']].map(([k, l]) => [k, l, S.todo.filter(i => go(i) === '#/sns/' + k).length]), '#/sns/'), {id: 'snt'}), b];
 }
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {

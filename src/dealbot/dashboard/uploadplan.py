@@ -4,7 +4,7 @@
 - 데이터: 쇼츠 서버 upload_tasks.json (일정은 쇼츠 총괄이 정함 · 코딩 4 가 만듦). 딜봇은 **읽기만** — 10분마다(scheduler.dashboard_loop → tick)
   타임아웃 5초 · 크기 512KB 까지 · 실패하면 지난 목록 그대로 두고 '쇼츠 서버 응답 없음' 한 줄. 쇼츠 서버에 쓰는 일은 없음.
 - 항목 필드 (코딩 4 이름): id · when(ISO 시각) · platform · platform_label · what(롱폼/쇼츠 A~D/룩북 릴스) · file_url(https) · title · description ·
-  tags · order · gate_ok(false = 감독 검수 전 — '검수 대기 · 아직 올리지 마세요' 회색, 파일·체크 없음, 할 일 수에 안 셈) · note.
+  tags · order · gate_ok(false = 감독 검수 전 — '검수 대기 · 아직 올리지 마세요' 회색, '영상 보기'만(미리 보기) · 체크 없음, 할 일 수에 안 셈) · note.
   맨 위는 목록 그대로 또는 {"items"|"tasks": [...]} 둘 다 받음. id 가 없으면 when·platform·what·title 로 만든 짧은 해시 (체크가 붙도록).
 - 체크(올렸어요): 봇 DB kv "uploads_done" = id 목록 (JSON). 바꾸는 일은 대시보드 일 uploads.done {id, done} 하나뿐 (actions.py).
 - 화면: GET /dashboard/api/uploads → view() (SNS 탭 '올리기' 칸을 열 때만 · 그리기는 static/shorts.js).
@@ -241,5 +241,5 @@ def todo_item(bot: Any, now: float, goto: Any, lookbook: dict[str, Any] | None =
     if not n:
         return None
     return {"iid": TODO_IID, "src": "blog", "blog": "", "kind": "uploads", "sev": "todo", "urgent": False,
-            "title": f"쇼츠 올리기 {n}", "status": "오늘 올릴 영상 · 파일 받기 → 제목·설명 복사 → 앱에서 올리고 체크",
+            "title": f"숏폼·롱폼 올리기 {n}", "status": "오늘 올릴 영상 · 파일 받기 → 제목·설명 복사 → 앱에서 올리고 체크",
             "since": None, "expires_at": None, "primary": goto("보기", "#/sns/shorts"), "more": [], "detail": {"lines": []}}
