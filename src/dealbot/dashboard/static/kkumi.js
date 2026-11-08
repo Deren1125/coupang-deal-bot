@@ -310,7 +310,8 @@ const ask = () => new Promise(res => {
   setTimeout(() => box.focus(), 50);
 });
 const kind = c => /se-horizontalLine/.test(c.className) ? '선' : /se-quotation/.test(c.className) ? (postit(c) ? '포스트잇' : '인용구') : c.matches(CARD) || c.querySelector(CARD) ? '카드' : /se-image/.test(c.className) ? '사진' : txt(c) ? '글' : '';
-const shape = () => comps().map(kind).filter(Boolean).filter((k, i, a) => !(k === '글' && a[i - 1] === '글')).join(' ');
+// 사진은 글 조각 안에 같이 붙어 들어가 원래 차례(want)에 없음 — 비교에서 빼고 셈 (11/08 '원래: 글'인데 '확인해 주세요'로 뜨던 것)
+const shape = () => comps().map(kind).filter(k => k && k !== '사진').filter((k, i, a) => !(k === '글' && a[i - 1] === '글')).join(' ');
 const want = ps => ps.map(p => ({text: '글', rule: '선', card: '카드', quote: '포스트잇'})[p.k]).filter(Boolean).filter((k, i, a) => !(k === '글' && a[i - 1] === '글')).join(' ');
 // 글자 꾸밈 세기 (주인 11/06 '형광펜·색이 하나도 안 됨'): 받은 글과 에디터에 들어간 글에서 형광펜·글자 색·굵게 수 — 어디서 빠지는지 알림에 보임
 const fx = h => [/background-color/gi, /[^-]color\s*:/gi, /<(b|strong)[\s>]|font-weight:\s*(bold|[6-9]00)|class="[^"]*bold/gi].map(x => (h.match(x) || []).length);
