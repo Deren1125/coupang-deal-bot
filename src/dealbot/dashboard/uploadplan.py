@@ -3,7 +3,8 @@
 
 - 데이터: 쇼츠 서버 upload_tasks.json (일정은 쇼츠 총괄이 정함 · 코딩 4 가 만듦). 딜봇은 **읽기만** — 10분마다(scheduler.dashboard_loop → tick)
   타임아웃 5초 · 크기 512KB 까지 · 실패하면 지난 목록 그대로 두고 '쇼츠 서버 응답 없음' 한 줄. 쇼츠 서버에 쓰는 일은 없음.
-- 항목 필드 (코딩 4 이름): id · when(ISO 시각) · platform · what(롱폼/쇼츠 A~D/룩북 릴스) · file_url(https) · title · description · tags · order · note.
+- 항목 필드 (코딩 4 이름): id · when(ISO 시각) · platform · platform_label · what(롱폼/쇼츠 A~D/룩북 릴스) · file_url(https) · title · description ·
+  tags · order · gate_ok(false = 감독 검수 전 — '검수 대기 · 아직 올리지 마세요' 회색, 파일·체크 없음, 할 일 수에 안 셈) · note.
   맨 위는 목록 그대로 또는 {"items"|"tasks": [...]} 둘 다 받음. id 가 없으면 when·platform·what·title 로 만든 짧은 해시 (체크가 붙도록).
 - 체크(올렸어요): 봇 DB kv "uploads_done" = id 목록 (JSON). 바꾸는 일은 대시보드 일 uploads.done {id, done} 하나뿐 (actions.py).
 - 화면: GET /dashboard/api/uploads → view() (SNS 탭 '올리기' 칸을 열 때만 · 그리기는 static/shorts.js).
@@ -39,7 +40,7 @@ PAST_DAYS = 7  # 지난 것은 일주일만 보여 줌
 ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 TODO_IID = "uploads"
 
-PLATFORMS = {"youtube": "유튜브", "yt": "유튜브", "youtube_shorts": "유튜브", "instagram": "인스타", "ig": "인스타", "reels": "인스타",
+PLATFORMS = {"youtube_long": "유튜브 (롱폼)", "youtube_shorts": "유튜브 쇼츠", "instagram_reels": "인스타 릴스", "youtube": "유튜브", "yt": "유튜브", "instagram": "인스타", "ig": "인스타", "reels": "인스타",
              "naver_clip": "네이버 클립", "clip": "네이버 클립", "naverclip": "네이버 클립", "tiktok": "틱톡", "threads": "스레드"}
 WEEK = "월화수목금토일"
 
@@ -97,11 +98,12 @@ def clean(raw: Any, tz: ZoneInfo) -> list[dict[str, Any]]:
         seen.add(rid)
         fu = _s(r.get("file_url"), 1000)
         order = r.get("order")
-        out.append({"id": rid, "when": when, "platform": plat, "plat": PLATFORMS.get(plat.lower(), plat),
+        out.append({"id": rid, "when": when, "platform": plat, "plat": _s(r.get("platform_label"), 30) or PLATFORMS.get(plat.lower(), plat),
+                    "gate": r.get("gate_ok") is not False,
                     "what": what, "title": title, "desc": _s(r.get("description"), 5000), "tags": _tags(r.get("tags")),
                     "file_url": fu if fu.startswith("https://") else "",
                     "order": order if isinstance(order, (int, float)) and not isinstance(order, bool) else 0,
-                    "note": _s(r.get("note"), 200)})
+                    "note": _s(r.get("note"), 600)})
     return out
 
 
@@ -230,7 +232,7 @@ def count(bot: Any, now: float, lookbook: dict[str, Any] | None = None) -> int:
     lo, hi = (today - timedelta(days=PAST_DAYS)).timestamp(), (today + timedelta(days=1)).timestamp()
     done, lbs = done_ids(bot.db), _lb_ids(lookbook)
     return sum(1 for x in cache(bot.db).get("items") or []
-               if x.get("when") is not None and lo <= x["when"] < hi and x["id"] not in done and x["id"] not in lbs)
+               if x.get("when") is not None and lo <= x["when"] < hi and x.get("gate", True) and x["id"] not in done and x["id"] not in lbs)
 
 
 def todo_item(bot: Any, now: float, goto: Any, lookbook: dict[str, Any] | None = None) -> dict[str, Any] | None:

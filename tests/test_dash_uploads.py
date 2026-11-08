@@ -120,6 +120,16 @@ def test_view_groups_lookbook_and_todo(bot: DealBot) -> None:
     today = v["groups"][0]["items"]
     assert today[0]["hm"] == "19:00" and today[0]["when_text"] == "3/5(수) 19:00" and today[0]["plat"] == "인스타" and today[1]["lb"]
     assert v["todo"] == 3  # late·t1·t2 (룩북 같은 편 빼고)
+    put(bot, [{"id": "t1", "when": iso(now_dt.replace(hour=19)), "gate_ok": False, "platform": "youtube_shorts", "platform_label": "유튜브 쇼츠"},
+              {"id": "t2", "when": iso(now_dt.replace(hour=20)), "platform": "youtube_long"}])
+    v = uploadplan.view(bot, now=now)
+    a, b = v["groups"][0]["items"]
+    assert (a["gate"], a["plat"], b["gate"], b["plat"], v["todo"]) == (False, "유튜브 쇼츠", True, "유튜브 (롱폼)", 1)  # 검수 대기는 안 셈
+    put(bot, [
+        {"id": "late", "when": iso(now_dt - timedelta(days=1)), "what": "쇼츠 B", "title": "어제 것"},
+        {"id": "t2", "when": iso(now_dt.replace(hour=21)), "what": "롱폼", "order": 1},
+        {"id": "t1", "when": iso(now_dt.replace(hour=19)), "what": "쇼츠 A", "platform": "instagram"},
+        {"id": "lb-1", "when": iso(now_dt.replace(hour=20)), "what": "룩북 릴스"}])
     uploadplan.set_done(bot.db, "t1", True)
     assert uploadplan.count(bot, now, lb) == 2 and uploadplan.view(bot, now=now, lookbook=lb)["groups"][0]["items"][0]["done"]
 
@@ -248,6 +258,8 @@ def test_real_browser_renders_clean(bot: DealBot, tmp_path: Path) -> None:
          "title": "겨울 니트 코디 3가지 — 아주 긴 제목이 폰에서 어떻게 꺾이는지 보는 줄", "description": "설명", "tags": ["코디", "데일리룩"],
          "note": "음악은 앱에서"},
         {"id": "t2", "when": iso(now_dt.replace(hour=21)), "platform": "naver_clip", "what": "롱폼", "title": "롱폼 제목"},
+        {"id": "t3", "when": iso(now_dt.replace(hour=22)), "platform": "youtube_long", "platform_label": "유튜브 (롱폼)", "what": "롱폼",
+         "title": "검수 전", "gate_ok": False, "file_url": "https://x.example/c.mp4", "note": "통과 전엔 올리지 마세요\n두 번째 줄"},
         {"id": "lb-1", "when": iso(now_dt.replace(hour=20)), "platform": "instagram", "what": "룩북 릴스"},
         {"id": "old", "when": iso(now_dt - timedelta(days=1)), "what": "쇼츠 B", "title": "어제 것"}])
     view = uploadplan.view(bot, now=now_dt.timestamp(), lookbook={"items": [{"id": "lb-1"}]})
@@ -259,7 +271,7 @@ def test_real_browser_renders_clean(bot: DealBot, tmp_path: Path) -> None:
     assert got["errors"] == []
     for bad in ("[object", "undefined", "NaN", "null"):
         assert bad not in got["text"], (bad, got["text"])
-    for word in ("오늘 · 남은 2", "19:00", "유튜브", "쇼츠 A", "파일 받기", "제목 복사", "설명글+태그 복사", "룩북 릴스 칸에서 올리기", "지난 것 1개"):
+    for word in ("오늘 · 남은 2", "19:00", "유튜브", "쇼츠 A", "파일 받기", "제목 복사", "설명글+태그 복사", "룩북 릴스 칸에서 올리기", "지난 것 1개", "검수 대기 · 아직 올리지 마세요", "유튜브 (롱폼)"):
         assert word in got["text"], word
     assert got["wide"] <= 360 and got["btn"] >= 44
     (sent,) = got["posts"]
