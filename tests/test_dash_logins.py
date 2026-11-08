@@ -730,3 +730,25 @@ async def test_login_remote_force_is_relayed_only_when_true(bot: DealBot, settin
     assert [(j["target"], j.get("force")) for j in sent] == [("issue", True), ("hotdeal", None), ("finance", None), ("finance", True)]
     assert all(set(j) == {"target", "pass", "at"} | ({"force"} if j.get("force") else set()) for j in sent)
     assert "force" not in json.loads(bot.db.kv_get(remote_login.KV))  # 세션(kv)엔 안 남김 — 부탁에만
+
+
+async def test_mall_rows_get_a_check_now_button_only_when_blog_auto_knows_it(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """주인 11/08: 토스·지그재그 줄에 '지금 확인' (원격 로그인 뒤 저장됐는지 바로) · 에이블리 줄은 없음 (서버가 열지 않는 몰)."""
+    write_export(tmp_path / "blogauto.json")
+    h = session_headers(bot)
+    blogauto_status(settings)  # 예전 Blog-Auto (mall_check 모름) — 단추 없음
+    r = rows_of((await get_json(bot, "/dashboard/api/logins", h))[1])
+    assert all("check" not in r[t] for t in ("toss", "zigzag", "ably"))
+    blogauto_status(settings, actions=["login_check", "mall_check"])
+    r = rows_of((await get_json(bot, "/dashboard/api/logins", h))[1])
+    for t in ("toss", "zigzag"):
+        assert r[t]["check"] == {"action": "blog.mall_check", "args": {"mall": t}, "label": "지금 확인"}, t
+        assert r[t]["button"]["action"] == "login.remote"  # 원격 로그인 단추는 그대로
+    assert "check" not in r["ably"] and "check" not in r["finance"]
+    for bad in ({"mall": "ably"}, {"mall": "naver"}, {}, {"mall": 1}):
+        status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "blog.mall_check", "args": bad}, h)
+        assert status == 400 and got["code"] == "bad_args", bad
+    js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/logins.js").read_text(encoding="utf-8")
+    assert "right(r.check), right(r.button, r.bad)" in js
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "blog.mall_check", "args": {"mall": "toss"}}, h)
+    assert status in (200, 202) and got.get("code") != "bad_args", got  # Blog-Auto 로 넘김

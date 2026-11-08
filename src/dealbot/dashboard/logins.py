@@ -4,6 +4,8 @@
 GET /dashboard/api/logins (연결 탭 맨 위 칸을 열 때만 — 첫 상태 값 예산 밖, 그리기는 static/logins.js) → view():
     {"rows": [{id, label, state, text, where, bad, button, last}], "need": n, "qr": {img, left_s} | null, "vnc": {target, label, url, left_min} | null}
   state = ok · needed · resting · off · unknown · null(여기서 안 보는 것) — text 는 화면에 그대로 쓰는 한 줄 (한국어).
+  check = (토스·지그재그 줄만, 주인 11/08) {action: "blog.mall_check", args: {mall}, label: "지금 확인"} — Blog-Auto 가 그 몰 화면을 한 번 열어
+    로그인 상태만 다시 봄 (로그인 화면·다시 로그인 없음 · 몰마다 하루 3번 · 10분에 1번 — blogauto/mall_check.py).
   button = {action: "login.remote", args: {target}, label} · {action: "login.qr", args: {}, label} · {url, label}(열린 원격 화면) · null.
   last = 마지막 원격 로그인 한 줄 '마지막 원격 로그인: ✅ 성공 · 13:56' (Blog-Auto 기록 status.logins[].last — 네이버 세 줄) · 없거나 기록이
   오래됐으면 None. 화면에서는 줄 글 아래 작은 회색 둘째 줄.
@@ -46,7 +48,8 @@ QR_GAP_S = 60  # 끝난 뒤 이만큼은 다시 열지 않음 (두 번 눌러 �
 QR_FILE = "dash_naver_qr.png"
 QR_MAX_BYTES = 4_000_000
 STATE_TEXT = {"ok": "로그인됨", "needed": "로그인 필요", "resting": "쉬는 중", "off": "안 씀", "unknown": "모름"}
-REMOTE_LABEL, QR_LABEL = "원격 로그인", "QR 로그인"
+REMOTE_LABEL, QR_LABEL, CHECK_LABEL = "원격 로그인", "QR 로그인", "지금 확인"
+MALL_CHECK = ("toss", "zigzag")  # '지금 확인' 단추 (주인 11/08) — 에이블리는 서버가 열지 않는 몰 (폰 링크 방식)이라 없음
 FORCE_LABEL = "그래도 열기 (오늘 이미 한 번)"  # 네이버 블로그 원격 로그인 하루 한 번 (Blog-Auto remote_block — 10/27 두 번째 계정 잠김 뒤)
 QR_HOW = "다른 기기(PC·아이패드)에 뜬 QR 을 휴대폰 네이버 앱 › QR 로 찍어 주세요"
 LAST_TEXT = {"ok": "✅ 성공", "keep_off": "⛔ '로그인 상태 유지' 꺼짐", "timeout": "⏰ 시간 초과", "closed": "창이 닫힘",
@@ -255,6 +258,7 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
     by_id = {r["id"]: r for r in got}
     stale = _stale(export, now) if got else ""
     vnc = remote_login.refresh(bot.db, now)
+    mall_ok = _supports(bot, "mall_check")
     out: list[dict[str, Any]] = []
 
     def text_of(r: dict[str, Any]) -> tuple[str, str]:
@@ -276,7 +280,10 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
             text += f" · 오늘 원격 로그인 {r.get('remote_today') or 1}번 — 내일 다시 하는 게 안전해요"
         if target == "toss" and _toss_paused(bot):  # 토스 쉐어링크 점검 (주인 10/30) — 11/4까지 로그인할 일 없음
             state, text, btn = "off", "11/4까지 필요 없음 · 토스 점검 — 토스 딜은 링크 없이 올려요", None
-        out.append(_row(target, r["label"], state, text, where=r["where"], button=btn, last=last))
+        row = _row(target, r["label"], state, text, where=r["where"], button=btn, last=last)
+        if target in MALL_CHECK and state != "off" and mall_ok:  # '지금 확인' (주인 11/08 — 원격 로그인 뒤 저장됐는지 바로)
+            row["check"] = {"action": "blog.mall_check", "args": {"mall": target}, "label": CHECK_LABEL}
+        out.append(row)
     out.append(naver_row(bot, tz, now))
     for r in got:  # 블로그 프로그램의 읽기만 하는 줄 (스레드 API 토큰 …) — 단추 없음
         if r["id"] not in remote_login.TARGETS:
@@ -286,6 +293,16 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
     out.append(_row("telegram", "텔레그램 봇", "ok" if tg else "off", "로그인 없음 · 봇 토큰으로 연결" if tg else "안 씀 · 토큰 없음",
                     where="토큰 — 서버 .env (주인이 넣음)"))
     return out
+
+
+def _supports(bot: Any, action: str) -> bool:
+    """Blog-Auto 가 그 다리 일을 받는가 (모르면 받는 것으로 — 예전 Blog-Auto 면 unsupported 한 줄이 옴)."""
+    try:
+        ds = bot.dash_state
+        sup = ds._supported(ds._ba_status())
+    except Exception:  # noqa: BLE001
+        return True
+    return sup is None or action in sup
 
 
 def _toss_paused(bot: Any) -> bool:

@@ -98,6 +98,7 @@ HTTPS_URL = re.compile(r"https://[^\s|<>\"']+")
 ABLY_RID = re.compile(r"^\d{1,9}-[0-9A-Za-z_-]{1,40}$")
 ABLY_IN_TEXT = re.compile(r"https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+")  # 주소에 쓰는 글자만 (RFC 3986)
 ABLY_HOSTS = ("a-bly.com",)
+MALL_CHECK = ("toss", "zigzag")  # 로그인 관리 '지금 확인' 단추가 붙는 몰 (Blog-Auto mall_check.MALLS 와 같게)
 ABLY_RANK_MAX = 12  # 에이블리 코디 랭킹 캡처 한 번에 (LB-15)
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
@@ -111,6 +112,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "topic_seed",  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
                 "photo_feedback",  # 사진 테스트 (주인 10/21 — 시험 글 사진마다 ✅/❌·이유 · 글 전체 · 테스트 끝)
                 "product_feedback",  # 제품 테스트 (주인 10/21 — Pick 비슷한 아이템 후보 ✅/❌·이유 · 글마다 한 줄·테스트 끝)
+                "mall_check",  # 쇼핑몰 로그인 '지금 확인' (주인 11/08 — {mall: toss|zigzag}, 화면 한 번·다시 로그인 안 함·하루 3번은 Blog-Auto 가 셈)
                 "threads_post", "threads_cancel", "threads_reply",  # 스레드 (주인 10/21 — 주인이 쓴 글 바로·예약 · 예약 취소 · 내 글 답글에 답)
                 "post_edit",  # 발행 글 고치기 (주인 10/21 — 최근 글 '고치기': 사진 빼기·교체 · 문장 빼기)
                 "x_posted", "x_drop", "x_redo",  # X 초안 (주인 10/25 — 올렸어요 · 버리기 · 다시 쓰기 · X API 없음, 올리기는 주인이 X 앱에서)
@@ -767,6 +769,10 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"blog": _blog(g("blog")), "mode": g("mode")}
     if name in ("pause", "resume", "drafts_cleanup", "login_check"):
         return {"blog": _blog(g("blog"))}
+    if name == "mall_check":  # 쇼핑몰 로그인 지금 확인 (주인 11/08) — 에이블리는 서버가 열지 않는 몰이라 받지 않음
+        if g("mall") not in MALL_CHECK:
+            raise ActionError("bad_args", text="확인할 수 있는 몰이 아니에요")
+        return {"mall": g("mall")}
     if name == "server_check":  # 서버 점검 (주인): 고를 값이 없다 — 정해진 점검만, 명령에 끼어들 자리 없음
         return {}
     if name == "ledger":

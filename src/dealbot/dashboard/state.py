@@ -1488,7 +1488,7 @@ ACTION_LABELS = {
     "blog.share": "보내기", "blog.noshare": "보내지 않기", "blog.channel": "채널에 올리기", "blog.scan": "글감 찾기",
     "blog.pick": "글감으로 쓰기", "blog.write": "새 글 쓰기", "blog.issue": "키워드로 쓰기", "blog.hotdeal_now": "한 편 쓰기",
     "blog.mode": "모드 바꾸기", "blog.pause": "블로그 멈춤", "blog.resume": "블로그 다시 시작", "blog.drafts_cleanup": "임시저장 정리",
-    "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.server_check": "서버 점검", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
+    "blog.ledger": "정리본 바꾸기", "blog.login_check": "로그인 확인", "blog.server_check": "서버 점검", "blog.mall_check": "몰 로그인 지금 확인", "blog.info": "보기", "blog.kakao_auth_url": "카톡 다시 연결",
     "blog.kakao_connect": "카톡 연결", "blog.kakao_test": "테스트 카톡", "blog.dismiss": "다 했어요",
     "blog.pics_fetch": "사진 찾기", "blog.pics_clear": "사진 후보 지우기", "search.check": "검색 등록 표시",
     "blog.x_posted": "X 올렸어요", "blog.x_drop": "X 초안 버리기", "blog.x_redo": "X 초안 다시 쓰기", "x.stats": "X 숫자 저장",

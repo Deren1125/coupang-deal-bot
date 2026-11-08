@@ -48,7 +48,7 @@ async function load() {
   busy = false;
   draw();
   clearTimeout(timer);
-  // QR·원격 화면이 떠 있는 동안만 자주 (로그인되면 저절로 바뀐 줄을 보이게) — 그 밖에는 탭을 다시 열 때만
+  // QR·원격 화면이 떠 있는 동안만 자주 — 그 밖에는 탭을 다시 열 때만
   if (on() && data && (data.qr || data.vnc) && D.visibilityState === 'visible') timer = setTimeout(load, 4000);
 }
 
@@ -83,7 +83,7 @@ function row(r) {
   return el('div', {class: 'row' + (r.button ? '' : ' ro'), 'data-id': r.id},
     el('div', {class: 'grow'}, el('span', {class: 't'}, r.label), el('span', {class: 's' + (r.bad ? ' bad' : '')}, r.text),
       [r.where, r.last].map(x => x ? el('span', {class: 'w'}, x) : null)),
-    right(r.button, r.bad));
+    right(r.check), right(r.button, r.bad));  // check: 몰 '지금 확인'
 }
 
 // '꾸미기 버튼 설치' (10/27 — 붙여 넣은 글의 링크 카드를 만드는 사파리 책갈피 · 코드는 펼칠 때 /dashboard/api/kkumi 로)
