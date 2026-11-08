@@ -20,7 +20,7 @@ const btn = (cls, label, on, x) => el('button', Object.assign({class: cls, type:
 const ext = (cls, label, url) => el('a', {class: cls, href: url, target: '_blank', rel: 'noopener noreferrer'}, label, ' ↗');
 const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
 
-const TABS = {todo: '할 일', deal: '딜', blog: '블로그', sns: 'SNS', stats: '통계', connect: '연결'}, SUBS = {sns: ['threads', 'x', 'lookbook']};
+const TABS = {todo: '할 일', deal: '딜', blog: '블로그', sns: 'SNS', stats: '통계', connect: '연결'}, SUBS = {sns: ['threads', 'x', 'lookbook', 'shorts']};
 const BLOGS = [['finance', '아카이브'], ['issue', 'Pick'], ['hotdeal', '핫딜']];
 const seg = (xs, base) => el('div', {class: 'seg', role: 'group'}, xs.map(([k, l, n]) => btn('', [l, n ? el('span', {class: 'cp hot', 'aria-label': `할 일 ${n}개`}, n) : null],
   () => { location.hash = base + k; }, {'aria-pressed': k === R.sub ? 'true' : 'false'})));
@@ -884,7 +884,7 @@ function vSns() {
   const b = el('div', {});
   snLoad().then(N => N.view(b, R.sub, {el, mount, NAV, S, j: R.j, L: {threads: thLoad, x: [xbLoad, xLoad], lookbook: lbLoad}}), () => toast(MSG.net));
   const go = i => ((i.primary || {}).goto || '').replace('#/blog/', '#/sns/');
-  return [Object.assign(seg([['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스']].map(([k, l]) => [k, l, S.todo.filter(i => go(i) === '#/sns/' + k).length]), '#/sns/'), {id: 'snt'}), b];
+  return [Object.assign(seg([['threads', '스레드·인스타'], ['x', 'X(트위터)'], ['lookbook', '룩북 릴스'], ['shorts', '올리기']].map(([k, l]) => [k, l, S.todo.filter(i => go(i) === '#/sns/' + k).length]), '#/sns/'), {id: 'snt'}), b];
 }
 const ED = it => /^(finance|issue)$/.test(it.blog) && !pendingOf(it.iid);
 async function edGo(it, fn) {

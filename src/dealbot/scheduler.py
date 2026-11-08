@@ -356,6 +356,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
                     log.info("earnings coupang: %s", got)
             except Exception as e:  # noqa: BLE001
                 log.warning("earnings coupang failed: %s", type(e).__name__)
+        try:  # 올리기 할 일: 쇼츠 서버 일정 10분마다 읽기만 (주인 11/08 — dashboard/uploadplan.py, 5초 타임아웃)
+            from dealbot.dashboard import uploadplan
+
+            await uploadplan.tick(bot)
+        except Exception as e:  # noqa: BLE001
+            log.warning("upload tasks failed: %s", type(e).__name__)
         try:  # 새 제휴 수익 → 앱 알림 (주인 10/24 — notify/earn_watch)
             from dealbot.notify import earn_watch
 

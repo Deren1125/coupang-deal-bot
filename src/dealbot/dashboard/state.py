@@ -804,6 +804,13 @@ class StateBuilder:
                 out[lrow["iid"]] = lrow
         except Exception as e:  # noqa: BLE001
             log.warning("lookbook todo failed: %s", type(e).__name__)
+        try:  # 쇼츠 올리기 N (주인 11/08 — 합친 대시보드 '올리기 할 일' · 쇼츠 서버 일정, 오늘·밀린 것만 · uploadplan.py)
+            from dealbot.dashboard import uploadplan
+
+            if (urow := uploadplan.todo_item(self.bot, now, goto, v2.get("lookbook"))) is not None:
+                out[urow["iid"]] = urow
+        except Exception as e:  # noqa: BLE001
+            log.warning("uploads todo failed: %s", type(e).__name__)
         if (arow := ably_rank_item(v2.get("ably_rank"))) is not None:  # 에이블리 코디 랭킹 캡처 (LB-15 주인 11/07 — 하루 한 번, 올리면 빠짐)
             arow["urgent"] = ably_late  # 저녁까지 안 올리면 (Blog-Auto 저녁 알림이 열려 있으면) 급함
             out[arow["iid"]] = arow
@@ -1432,6 +1439,12 @@ class StateBuilder:
         """룩북 상품 후보 (주인 11/03 — 룩북 화면을 열 때만 /dashboard/api/lbcands). 후보가 없으면 None."""
         return lbview.cands((getattr(self._export(), "v2", None) or {}).get("lookbook"), ZoneInfo(self.tz))
 
+    def uploads(self) -> dict[str, Any]:
+        """올리기 할 일 칸 (주인 11/08 — uploadplan.py) · 룩북 칸과 같은 편은 그 칸으로."""
+        from dealbot.dashboard import uploadplan
+
+        return uploadplan.view(self.bot, lookbook=(getattr(self._export(), "v2", None) or {}).get("lookbook"))
+
     def lookbook(self, export: Any) -> dict[str, Any] | None:
         """룩북 릴스 화면 (주인 10/25): Blog-Auto lookbook 칸 — 영상·표지·캡션·룩 목록·올리기 전 확인 · 올렸어요/버리기/다시 만들기."""
         sup = self._supported(self._ba_status())
@@ -1464,7 +1477,7 @@ ACTION_LABELS = {
     "deal.repost": "다시 올리기", "deal.late_photo": "사진 올리기", "deal.post": "새 딜 올리기", "bot.pause": "딜봇 멈춤",
     "bot.resume": "딜봇 다시 시작", "bot.run": "지금 수집", "sns.token": "토큰 넣기", "sns.code": "코드 넣기", "sns.test": "테스트 글",
     "sns.invites": "초대 링크 만들기", "push.test": "테스트 알림", "push.subscribe": "알림 켜기", "push.unsubscribe": "알림 끄기",
-    "todo.dismiss": "다 했어요", "login.remote": "원격 로그인", "login.remote_cancel": "원격 화면 취소", "login.qr": "QR 로그인", "routine.done": "오늘 할 일 체크", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기", "upload": "사진 올림",
+    "todo.dismiss": "다 했어요", "login.remote": "원격 로그인", "login.remote_cancel": "원격 화면 취소", "login.qr": "QR 로그인", "routine.done": "오늘 할 일 체크", "uploads.done": "올리기 체크", "stats.refresh": "다시 읽기", "stats.input": "직접 넣기", "earn.save": "수익 넣기", "earn.delete": "수익 지우기", "upload": "사진 올림",
     "blog.publish": "발행", "blog.drop": "버리기", "blog.retry": "다시 올리기", "blog.fix": "말로 고치기", "blog.fixpic": "사진도 바꾸기",
     "blog.rewrite": "다시 쓰기", "blog.restyle": "스타일 다시", "blog.photos": "사진 올리기", "blog.photo_clear": "자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기", "blog.post_notes": "내 후기 쓰기",

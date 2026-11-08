@@ -31,6 +31,7 @@ XPOST_JS = "xpost.js"  # X(트위터) 초안함·진행률 (10/25) — SNS 탭 '
 LOOKBOOK_JS = "lookbook.js"  # 룩북 릴스 (10/25) — SNS 탭 '룩북 릴스' 칸을 처음 열 때만 (주소는 meta sb-lookbook)
 THREADS_JS = "threads.js"  # 스레드 (10/21) — SNS 탭 '스레드·인스타' 칸을 처음 열 때만 (주소는 meta sb-threads, threads_proxy.py)
 X_JS = "x.js"  # X (10/25) — SNS 탭 'X(트위터)' 칸을 처음 열 때만 (주소는 meta sb-x — threads.js 'X →' 도 같은 주소)
+SHORTS_JS = "shorts.js"  # 올리기 할 일 (11/08) — SNS 탭 '올리기' 칸을 처음 열 때만 (주소는 meta sb-shorts — sns.js 가 받음)
 SNS_JS = "sns.js"  # SNS 탭 (10/26) — 스레드·인스타 · X · 룩북 릴스 화면을 담는 상자. SNS 탭을 처음 열 때만 (주소는 meta sb-sns)
 LOGINS_JS = "logins.js"  # 로그인 관리 (10/26) — 연결 탭 맨 위 칸. app.js 가 예산 끝이라 셸이 defer 로 받고, 칸은 스스로 연결 탭에 붙는다
 ROUTINE_JS = "routine.js"  # 오늘 할 일 (10/27) — 할 일 탭 맨 위 칸. logins.js 와 같이 셸이 defer 로 받고, 칸은 스스로 할 일 탭에 붙는다
@@ -76,6 +77,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<meta name="sb-xpost" content="{asset_url(XPOST_JS)}">'
         f'<meta name="sb-lookbook" content="{asset_url(LOOKBOOK_JS)}">'
         f'<meta name="sb-sns" content="{asset_url(SNS_JS)}">'
+        f'<meta name="sb-shorts" content="{asset_url(SHORTS_JS)}">'
         '</head><body>'
         '<header class="hd"><h1 id="ttl">할 일</h1><span class="old" id="old" hidden></span>'
         '<button type="button" class="rf" id="rf">새로고침</button></header>'

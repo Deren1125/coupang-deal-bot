@@ -42,7 +42,7 @@ GROUP_OF = {
 SKIP = frozenset({"blog.info", "stats.refresh", "push.test", "push.subscribe", "push.unsubscribe", "blog.login_check", "blog.server_check",
                   "blog.kakao_auth_url", "blog.kakao_connect", "blog.kakao_test", "sns.token", "sns.code", "upload", "login",
                   "logout", "state", "connect", "blog.dismiss",
-                  "routine.done"})  # blog.dismiss: todo.dismiss 가 맡긴 것 (두 번 세지 않게) · routine.done: 오늘 할 일 체크 (주인 손일 표시뿐)
+                  "routine.done", "uploads.done"})  # blog.dismiss: todo.dismiss 가 맡긴 것 (두 번 세지 않게) · routine.done: 오늘 할 일 체크 (주인 손일 표시뿐)
 LABELS = {
     "deal.link": "링크 넣기", "deal.late_photo": "사진 올리기", "blog.photos": "사진 올리기", "blog.photo_clear": "사진 자리 비우기",
     "blog.photos_batch": "사진 한 번에 고치기",

@@ -23,6 +23,7 @@
                                         첫 상태 값 예산 밖 · no-store) · 후보가 없으면 404
   GET  /dashboard/api/logins            로그인 관리 칸 (logins.view — 연결 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/routine           오늘 할 일 칸 (routine.view — 할 일 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
+  GET  /dashboard/api/uploads           올리기 할 일 칸 (uploadplan.view — SNS 탭 '올리기'를 열 때만 · no-store)
   GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만)
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
@@ -88,6 +89,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "logins.js": "text/javascript; charset=utf-8",  # logins.js: 연결 탭 '로그인 관리' 칸 (10/26, 셸이 defer 로 — app.js 는 예산 끝)
              "sns.js": "text/javascript; charset=utf-8",  # sns.js: SNS 탭 상자 (10/26, SNS 탭을 처음 열 때만)
              "routine.js": "text/javascript; charset=utf-8",  # routine.js: 할 일 탭 '오늘 할 일' 칸 (10/27, 셸이 defer 로 — app.js 는 예산 끝)
+             "shorts.js": "text/javascript; charset=utf-8",  # shorts.js: SNS 탭 '올리기' 칸 (11/08, 처음 열 때만 — sns.js 가 meta sb-shorts 로)
              "kkumi.js": "text/javascript; charset=utf-8"}  # kkumi.js: '꾸미기' 책갈피 원본 (10/27 — 화면은 받지 않음, kkumi.py 가 javascript: 주소로)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -218,6 +220,7 @@ class DashApi:
         web.route(f"{API}/lbcands", self.lbcands)
         web.route(f"{API}/logins", self.logins)
         web.route(f"{API}/routine", self.routine)
+        web.route(f"{API}/uploads", self.uploads_plan)
         web.route(f"{API}/kkumi", self.kkumi)
         web.route(f"{API}/naver_qr.png", self.naver_qr)
         web.route(f"{API}/deal/hot", self.deal_hot)
@@ -552,6 +555,10 @@ class DashApi:
         from dealbot.dashboard import routine
 
         return jresp(200, routine.view(self.bot), {"Cache-Control": "no-store"})
+
+    async def uploads_plan(self, query: dict[str, str]) -> Any:
+        """올리기 할 일 (주인 11/08) — 쇼츠 서버 일정(10분마다 읽어 둔 것) + 체크 (읽기만, 쇼츠 서버에 쓰지 않음)."""
+        return jresp(200, self.bot.dash_state.uploads(), {"Cache-Control": "no-store"})
 
     async def kkumi(self, query: dict[str, str]) -> Any:
         """'꾸미기' 책갈피 코드 (주인 10/27 — 네이버 글쓰기에 붙여 넣은 글의 링크 카드를 주인 아이패드에서 만듦 · 바깥 요청 없는 코드)."""

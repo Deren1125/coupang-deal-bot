@@ -140,7 +140,7 @@ def _fn(js: str, head: str) -> str:
 
 def test_sns_tab_routes_and_old_addresses_move() -> None:
     js = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "sns: 'SNS'" in js and "SUBS = {sns: ['threads', 'x', 'lookbook']}" in js and "sns: vSns" in js
+    assert "sns: 'SNS'" in js and "SUBS = {sns: ['threads', 'x', 'lookbook', 'shorts']}" in js and "sns: vSns" in js
     # 예전 주소(Blog-Auto 알림 '/dashboard/#/blog/threads' · 할 일 goto · 홈 화면)는 새 자리로 — 주소를 바꿔 쓰고(뒤로 가기에 안 남게) 다시 그림
     mv = re.search(r"const MV = \{([^}]*)\};", js)
     assert mv

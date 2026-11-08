@@ -123,6 +123,7 @@ DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal
                 "todo.dismiss", "todo.hide", "login.remote", "login.remote_cancel", "stats.refresh", "stats.input", "search.check",
                 "login.qr",  # 딜봇 네이버 QR 로그인 (주인 10/26 — 대시보드 '로그인 관리' · 텔레그램 /naverlogin 과 같은 길)
                 "routine.done",  # 오늘 할 일 체크 (주인 10/27 — 하루 5번 손으로 하는 블로그·SNS 일, 봇 DB 에만 적음 · routine.py)
+                "uploads.done",  # 올리기 할 일 체크 (주인 11/08 — 쇼츠 서버 일정, 봇 DB 에만 적음 · 쇼츠 서버에 쓰지 않음 · uploadplan.py)
                 "earn.save", "earn.delete",  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
                 "x.stats", "x.handles")  # X 진행률 숫자·계정 이름 직접 넣기 (주인 10/25 — X API 없음, 크리에이터 스튜디오 숫자를 주인이 주마다)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
@@ -598,6 +599,13 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
 
         rid = g("id")
         if not isinstance(rid, str) or not ROUTINE_ID_RE.match(rid) or not isinstance(g("done"), bool):
+            raise ActionError("bad_args")
+        return {"id": rid, "done": g("done")}
+    if action == "uploads.done":  # {id: 올리기 할 일 id, done: 참/거짓}
+        from dealbot.dashboard.uploadplan import ID_RE as UP_ID_RE
+
+        rid = g("id")
+        if not isinstance(rid, str) or not UP_ID_RE.match(rid) or not isinstance(g("done"), bool):
             raise ActionError("bad_args")
         return {"id": rid, "done": g("done")}
     if action == "todo.hide":
@@ -1594,6 +1602,11 @@ class ActionDesk:
 
             routine.set_done(db, routine.day_of(bot, self.clock()), args["id"], args["done"])
             return "done", "체크했어요" if args["done"] else "체크를 풀었어요"
+        if action == "uploads.done":  # 올리기 할 일 체크 — 봇 DB 만 (쇼츠 서버에 쓰지 않음)
+            from dealbot.dashboard import uploadplan
+
+            uploadplan.set_done(db, args["id"], args["done"])
+            return "done", "올렸어요로 표시했어요" if args["done"] else "체크를 풀었어요"
         if action == "stats.refresh":
             dash = bot.dashboard
             got = await dash.refresh(args["src"])

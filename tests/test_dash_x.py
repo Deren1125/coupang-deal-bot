@@ -273,7 +273,7 @@ def test_xpost_js_lazy_load_budget_and_safety() -> None:
         assert re.search(r"[가-힣]", label), label
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "lazy('meta[name=sb-xpost]', 'xpost', 'SBXP')" in app and "'#/blog/x': '#/sns/x'" in app and "['x', 'X(트위터)']" in app
-    assert "/^(pics|search|trial|ptrial|sched)$/" in app and "SUBS = {sns: ['threads', 'x', 'lookbook']}" in app
+    assert "/^(pics|search|trial|ptrial|sched)$/" in app and "SUBS = {sns: ['threads', 'x', 'lookbook', 'shorts']}" in app
     assert "x: [xbLoad, xLoad]" in app  # X 칸 = x.js 자동 반응 + xpost.js 직접 올리는 글
     html = shell.page({"me": {}})
     assert re.search(r'<meta name="sb-xpost" content="/dashboard/static/xpost\.js\?v=[0-9a-f]{10}">', html)
