@@ -42,7 +42,7 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     src = kkumi.SRC.read_text(encoding="utf-8")
     js = code()
     assert js == kkumi.minify(src) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
-    assert len(kkumi.bookmarklet()) < 26000  # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB 그대로 들어가고 돎)
+    assert len(kkumi.bookmarklet()) < 28000  # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB · 11/09 25.9KB 돎 → 카테고리 넣으며 28KB 안 · 주인 확인)
     # 받기는 사진 하나뿐 (11/09 — 우리 공개 사진 /media/blog_*.jpg 만 · 쿠키 없이 → 네이버에 파일로 올림)
     assert js.count("fetch(") == 1 and "fetch(u,{credentials:'omit'})" in js and "if(!PIC.test(u))throw 0;" in js
     for net in ("XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "import(", ".src=", "location", "open(", "http://"):
@@ -137,7 +137,10 @@ document.querySelector("[data-name='oglink']").onclick = () => {
   pop.querySelector('.se-popup-button-confirm').onclick = () => { const u = pop.querySelector('input').value; const c = comp('se-oglink', '<a>' + u + '</a>'); if (inPostit) { inPostit.after(c); inPostit = null; } else add(c); pop.remove(); };
 };
 document.querySelector('.se-canvas-bottom-button').onclick = () => { inPostit = null; add(comp('se-text', '<div class="se-section se-section-align-' + align + '"><p class="se-text-paragraph"></p></div>')); };
-document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<span class="chips"></span><input class="tag_input">'; document.body.append(d);
+document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<div class="option_category"><button>셀럽 패션</button></div><ul class="category_list" style="display:none"><li><span>셀럽 패션</span></li><li><span>ㄴ 하위 카테고리 셀럽 소식</span></li></ul><span class="chips"></span><input class="tag_input">'; document.body.append(d);
+  const cb = d.querySelector('.option_category button'), ul = d.querySelector('.category_list');
+  cb.onclick = () => { ul.style.display = 'block'; };
+  ul.querySelectorAll('li').forEach(li => { li.onclick = () => { cb.textContent = li.textContent.replace(/ㄴ 하위 카테고리 /, ''); ul.style.display = 'none'; }; });
   d.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { d.querySelector('.chips').textContent += ' #' + e.target.value; e.target.value=''; } }); };
 </script></body></html>
 """
@@ -170,6 +173,7 @@ const {chromium} = require('playwright');
     return k + al + (k === 'LINE' ? '' : ' ' + c.textContent.trim().slice(0, 14));
   }).filter(x => x !== 'TEXT  ' && x !== 'TEXT C ' && x.trim() !== 'TEXT'));
   out.tags = await frame.evaluate(() => (document.querySelector('.chips') || {}).textContent || '');
+  out.cat = await frame.evaluate(() => (document.querySelector('.option_category button') || {}).textContent || '');
   await p.setContent('<p>다른 화면</p>');
   const n = alerts.length;
   await p.evaluate(code);
@@ -293,3 +297,22 @@ def test_bookmarklet_uploads_our_photos_as_files_and_keeps_others_as_address() -
     got = json.loads(out.stdout)
     assert got["imgs"] == ["https://blogfiles.pstatic.net/up.jpg", other], got
     assert "사진 1/2" in got["alert"] and "사진 주소로" in got["alert"], got["alert"]
+
+
+
+def _tags_line(tags: list[str], category: str) -> str:
+    """Blog-Auto paste.tags_line 과 같은 모양 (카테고리 + \\x01 + 태그 → 비트 → 안 보이는 글자)."""
+    bits = "".join(f"{b:08b}" for b in (category + "\x01" + " ".join(tags)).encode("utf-8"))
+    return "<p>\u2064" + bits.replace("0", "\u200c").replace("1", "\u200d") + "</p>"
+
+
+def test_bookmarklet_picks_the_category_in_the_publish_layer() -> None:
+    """주인 11/09 '카테고리가 다 셀럽 패션으로': 태그 줄 앞 카테고리를 발행창에서 고름 (하위 카테고리 말·'ㄴ' 무시)."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    pasted = '<p style="text-align:center">첫 글이에요.</p><p>끝 글이에요.</p>' + _tags_line(["아일릿", "키링"], "셀럽 소식")
+    out = subprocess.run([NODE, "-e", RUN, INNER, code(), pasted], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["cat"] == "셀럽 소식" and "카테고리 셀럽 소식" in got["alert"] and "태그 2/2" in got["alert"], got

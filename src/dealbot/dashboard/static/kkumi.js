@@ -217,6 +217,21 @@ const chips = t => {
   for (let k = 0; box && k < 6 && !(box.innerText || '').includes('#'); k++) box = box.parentElement;
   return !!box && (box.innerText || '').replace(/\s/g, '').includes('#' + t);
 };
+// 발행창 카테고리 고르기 (서버 업로더 _select_category 와 같은 칸 · 띄어쓰기·'하위 카테고리' 말 무시하고 비교)
+const nz = s => (s || '').replace(/하위\s*카테고리|카테고리|[\sㄴ└·>-]/g, '');
+const catBtn = () => { for (const q of ["[class*='option_category'] button", "button[aria-label*='카테고리']", "button[class*='selectbox_button']"]) for (const d of [document, D]) for (const e of d.querySelectorAll(q)) if (e.offsetParent !== null) return e; return null; };
+const catIn = async c => {
+  let b = catBtn();
+  if (!b) return '칸 없음';
+  if (nz(b.innerText) === nz(c)) return '';
+  press(b);
+  const it = await wait(() => { let f = null; for (const d of [document, D]) for (const e of d.querySelectorAll('[class*=category] *,[role=option]')) if (e.offsetParent !== null && !e.children.length && e !== b && !b.contains(e) && nz(e.innerText) === nz(c)) f = e; return f; }, 3000);
+  if (!it) return '목록에 없음';
+  press(it);
+  await S(600);
+  b = catBtn();
+  return b && nz(b.innerText) === nz(c) ? '' : '확인 못 함';
+};
 const tagsIn = async tags => {
   let inp = tagIn();
   if (!inp) {
@@ -247,7 +262,8 @@ const tagsOf = t => {
   const bits = t.slice(1).replace(/[^\u200c\u200d]/g, '');
   const bytes = new Uint8Array(Math.floor(bits.length / 8));
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8).replace(/\u200c/g, '0').replace(/\u200d/g, '1'), 2);
-  try { return new TextDecoder('utf-8').decode(bytes).split(/[\s,#]+/).filter(Boolean); } catch (e) { return []; }
+  // 카테고리는 맨 앞 '\u0001' 앞에 (11/09 — 발행창 카테고리가 늘 지난번 것으로 남음)
+  try { const a = new TextDecoder('utf-8').decode(bytes).split('\u0001'), t_ = a.pop(); return {cat: a[0] || '', tags: t_.split(/[\s,#]+/).filter(Boolean)}; } catch (e) { return {cat: '', tags: []}; }
 };
 // 붙여 넣은 HTML → 조각 [{k: text|rule|card|quote|tags}] (사파리가 감싼 div·span 은 풀어서 문단만)
 const BLOCK = /^(P|BLOCKQUOTE|HR|H[1-6]|UL|OL|TABLE|FIGURE|PRE)$/;
@@ -288,7 +304,7 @@ const pieces = (html, plain) => {
       const lines_ = qs.length ? qs : [t];
       out.push({k: 'quote', html: lines_.map(x => '<p>' + esc(x) + '</p>').join(''), lines: lines_});
     } else if (n.tagName === 'HR' || t === ZL) { flush(); out.push({k: 'rule'}); }
-    else if (t.startsWith(ZT)) { flush(); out.push({k: 'tags', tags: tagsOf(t)}); }
+    else if (t.startsWith(ZT)) { flush(); out.push({k: 'tags', ...tagsOf(t)}); }
     else if (!t && n.el && (n.el.tagName === 'IMG' || n.el.querySelector('img'))) { flush(); out.push({k: 'img', u: (n.el.tagName === 'IMG' ? n.el : n.el.querySelector('img')).getAttribute('src')}); }
     else {
       chunk.push(n);
@@ -366,9 +382,10 @@ try {
       R.quotes[1]++;
       const why = await quote(p);
       if (why) R.bad.push('포스트잇 ' + why); else R.quotes[0]++;
-    } else if (p.k === 'tags' && p.tags.length) {
+    } else if (p.k === 'tags') {
       R.tags[1] = p.tags.length;
       R.tagList = p.tags;
+      R.cat = p.cat;
     }
     R.done++;
   }
@@ -379,6 +396,7 @@ try {
     const [n, why] = await tagsIn(R.tagList);
     R.tags[0] = n;
     if (why) R.bad.push('태그 ' + why);
+    if (R.cat) { const w = await catIn(R.cat); if (w) R.bad.push('카테고리 ' + w); else R.catOk = 1; }
   }
 } finally { W.__kkumi = 0; }
 const out = [];
@@ -388,6 +406,7 @@ nm(R.cards, '링크 카드');
 nm(R.lines, '구분선');
 nm(R.quotes, '포스트잇');
 nm(R.tags, '태그');
+if (R.catOk) out.push('카테고리 ' + R.cat);
 const fs = a => `형광펜 ${a[0]}·색 ${a[1]}·굵게 ${a[2]}`;
 if (R.fx[0].some(Boolean)) { out.push('글자 꾸밈 받음 ' + fs(R.fx[0]) + ' → 들어감 ' + fs(R.fx[1])); if (R.fx[0][0] && !R.fx[1][0]) R.notes.push('형광펜 빠짐'); }
 else R.notes.push('받은 글에 꾸밈 없음');
