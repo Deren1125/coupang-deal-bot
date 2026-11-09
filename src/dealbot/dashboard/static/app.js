@@ -965,15 +965,19 @@ function vTodo() {
   if (urg) out.push(b);  // 급한 알림만 맨 위 — 그 아래 '오늘 할 일' 칸(routine.js)
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
   else if (S.todo.length) out.push(glance(S.todo));
-  if (!items.length) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
-  const n = ALL ? items.length : 10;
+  // 블로그별 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서') — 블로그마다 손일 체크(routine.js) + 할 일 카드
+  const RB = R.sub !== 'deal' && W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by(), bk = i => /^(issue|finance|hotdeal)$/.test(i.blog) ? i.blog : '';
+  if (RB) [['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜'], ['', '딜·SNS·그 밖']].forEach(([k, l]) => out.push(...W.SBRoutine.part(k, l,
+    items.filter(i => bk(i) === k).map(x => item(x)).concat(k || !rest ? [] : el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`)))));
+  if (!items.length && !RB) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
+  const n = RB ? 0 : ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');
-  const more = rest ? el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`) : null;
+  const more = rest && !RB ? el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`) : null;
   const gs = new Set(shown.map(i => i.group)).size > 1;
   let g = null;
   shown.forEach((x, i) => { if (gs && x.group !== g) out.push(el('p', {class: 'grp'}, g = x.group)); out.push(item(x)); if (more && i === last) out.push(more); });
   if (more && last < 0) out.push(more);
-  if (items.length > n) out.push(btn('pb ghost', `할 일 ${items.length - n}개 더 보기`, () => { ALL = true; render(); }));
+  if (!RB && items.length > n) out.push(btn('pb ghost', `할 일 ${items.length - n}개 더 보기`, () => { ALL = true; render(); }));
   if (R.sub === 'deal') return out;
   out.push(autoBox());
   if (b && !urg) out.push(b);

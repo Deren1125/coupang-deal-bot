@@ -155,7 +155,7 @@ let sel = null;
 global.location = {hash: '#/todo'};
 const clipboard = {writeText: async t => { out.clip.push(t); }};
 if (mode === 'rich') clipboard.write = async items => { for (const it of items) for (const [k, b] of Object.entries(it.parts)) out.rich.push([k, b.type, await b.text()]); };
-global.window = {addEventListener() {}, navigator: {clipboard}, getSelection: () => ({removeAllRanges() { sel = null; }, addRange(r) { sel = r; }})};
+global.window = {addEventListener() {}, localStorage: {getItem: () => 'slot'}, navigator: {clipboard}, getSelection: () => ({removeAllRanges() { sel = null; }, addRange(r) { sel = r; }})};
 if (mode === 'rich') window.ClipboardItem = class { constructor(parts) { this.parts = parts; } };
 // 가짜 DOMParser: 스크립트 하나 + onclick 이 붙은 문단 하나로 읽힌 것처럼
 global.DOMParser = class { parseFromString(h, type) {
@@ -179,7 +179,7 @@ const tick = () => new Promise(r => setTimeout(r, 5));
   await tick(); await tick();
   const box = main.children.find(c => c.attrs.id === 'rtp');
   const its = box.all(c => c.className.startsWith('it'));
-  out.big = its.map(i => i.all(c => c.tagName === 'BUTTON' && c.className === 'sm' && c.parentNode.className === 'bt pb').map(b => b.textContent));
+  out.big = its.map(i => i.all(c => c.tagName === 'BUTTON' && c.className === 'sm' && c.parentNode.className === 'bt pp').map(b => b.textContent));
   out.hint = its.map(i => i.all(c => c.className === 's').map(c => c.textContent).filter(t => t.includes('꾸미기')));
   const press = async label => { its[0].all(c => c.tagName === 'BUTTON' && c.textContent === label)[0].click(); await tick(); await tick(); out.toasts.push(toast.textContent); };
   await press('제목 복사'); await press('본문 복사');
@@ -187,7 +187,7 @@ const tick = () => new Promise(r => setTimeout(r, 5));
   out.inCard = box.all(c => c.attrs.contenteditable).length;  // 살아 있는 칸엔 아무것도 넣지 않음
   its[1].all(c => c.className === 'cb')[0].click();
   await tick(); await tick();
-  out.doneBig = main.children.find(c => c.attrs.id === 'rtp').all(c => c.className === 'bt pb').length;
+  out.doneBig = main.children.find(c => c.attrs.id === 'rtp').all(c => c.className === 'bt pp').length;
   console.log(JSON.stringify(out));
   process.exit(0);
 })();

@@ -244,7 +244,7 @@ const main = mk('main', 'main'), boot = mk('script', 'boot'), toast = mk('div', 
 boot.textContent = JSON.stringify({me: {csrf: 'tok123'}});
 main.append(new E('p'));
 global.location = {hash: '#/todo'};
-global.window = {addEventListener() {}, navigator: {clipboard: {writeText: async t => { clip.push(t); }}}};
+global.window = {addEventListener() {}, localStorage: {getItem: () => 'slot'}, navigator: {clipboard: {writeText: async t => { clip.push(t); }}}};
 global.MutationObserver = class { constructor(cb) { this.cb = cb; } observe(t) { this.t = t; observer = this; } };
 global.document = {readyState: 'complete', visibilityState: 'visible', head: new E('head'), getElementById: i => ids[i] || null,
   createElement: t => new E(t), addEventListener() {}};
@@ -338,3 +338,13 @@ def test_rising_keywords_start_a_pick_post() -> None:
     """11/09 주인 '막 뜨는 중 … Pick 쓰기 눌러도 연결이 안 돼': 키워드마다 단추 → blog.issue {keyword} (예전엔 화면만 옮김)."""
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "action: 'blog.issue', args: {keyword: k}" in js and "xs.map(k => el('button'" in js and "href: '#/blog/issue'" not in js
+
+
+def test_todo_tab_groups_by_blog() -> None:
+    """11/09 주인 '한 블로그 로그인하면 그 블로그 작업 싹 몰아서 — 할 일 탭 블로그별로, 이웃추가도 거기에'."""
+    rt = (STATIC / "routine.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "W.SBRoutine = {load, mount, ids, by, part}" in rt
+    assert "filter(i => (i.blog || '') === k)" in rt and "'이웃': 2" in rt  # 그 블로그 손일 (이웃 신청·공감 포함)
+    assert "setBy(by() ? 'slot' : 'blog')" in rt  # 예전 시간대별로 돌아가기
+    assert "W.SBRoutine.part(k, l," in app and "['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜']" in app

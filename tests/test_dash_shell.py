@@ -71,6 +71,9 @@ APP_JS_GZIP_MAX = 29 * 1024 + 384
 # 접는 칸 하나(tuck)로 → 93.5 KB / gzip 30.5 KB
 APP_JS_MAX = 92 * 1024
 APP_JS_GZIP_MAX = 30 * 1024
+# 11/09: 할 일 블로그별 — vTodo 가 블로그마다 routine.js part() 에 그 블로그 카드를 넘김 (+0.6 KB / gzip +0.2 KB)
+APP_JS_MAX = 92 * 1024 + 512
+APP_JS_GZIP_MAX = 30 * 1024 + 256
 # 10/20: 편집기 비율(원본·16:9) + 사람만 남기기 + 사진 한 장 바로 저장 + 지금 사진도 편집 → 12 → 14 KB / gzip 5 → 5.75 KB
 # 10/21: 발행 글 고치기 시트(사진마다 빼기·교체 + '이 문장 빼기') — app.js 는 버튼 하나만, 시트는 edit.js 에 → 16.5 KB / gzip 6.25 KB
 EDIT_JS_MAX = 16 * 1024 + 512
@@ -163,6 +166,9 @@ ROUTINE_JS_GZIP_MAX = 6 * 1024 + 768
 # 11/09: '⚡ 막 뜨는 중' 키워드마다 Pick 글 쓰기 단추 (예전엔 화면만 옮겨 '연결이 안 돼')
 ROUTINE_JS_MAX = 17 * 1024 + 768
 ROUTINE_JS_GZIP_MAX = 6 * 1024 + 960
+# 11/09: 할 일 블로그별 (주인 '한 블로그 로그인하면 그 블로그 작업 싹 몰아서') — 블로그마다 펼치는 칸 part() + 블로그별/시간대별 바꾸기
+ROUTINE_JS_MAX = 19 * 1024 + 768
+ROUTINE_JS_GZIP_MAX = 7 * 1024 + 512
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

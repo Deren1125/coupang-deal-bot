@@ -4,22 +4,23 @@
 'use strict';
 (() => {
 const D = document, W = window;
-const CSS = '#rtp .box{padding:4px 16px 6px;margin-bottom:20px}#rtp .sl{display:flex;align-items:center;gap:10px;width:100%;min-height:56px;padding:12px 0;' +
-  'border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--text)}#rtp .box>.sl:first-child{border-top:0}' +
-  '#rtp .sl b{flex:1;min-width:0;font-size:15px;line-height:1.4}#rtp .sl span{font-size:13px;color:var(--sub);font-weight:500}' +
-  '#rtp .sl.cur span{color:var(--ac-ink);font-weight:600}#rtp .it{display:flex;gap:12px;align-items:flex-start;padding:14px 0}' +
-  '#rtp .it+.it{background:linear-gradient(var(--line),var(--line)) 56px 0/100% 1px no-repeat}' +
-  '#rtp .cb{flex:none;width:44px;height:44px;padding:0;border:2px solid var(--fline);border-radius:12px;background:var(--field);color:var(--gr);font-size:20px}' +
-  '#rtp .cb[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}#rtp .it .grow{flex:1;min-width:0;padding-top:10px}' +
-  '#rtp .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}#rtp .dn .t{text-decoration:line-through;color:var(--sub)}' +
-  '#rtp .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}#rtp .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
-  '#rtp a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
-  '#rtp .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}#rtp .bar i{display:block;height:100%;background:var(--gr)}' +
-  '#rtp .pb .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}' +
-  '#rtp .ab .grow{padding-top:0}#rtp .ab+.ab{background-position:0 0}#rtp .pf .fl{flex:1 1 60%;min-width:0;font-size:16px}' +
-  '#rtp .pf .sm{min-height:48px;font-size:15px;font-weight:600;padding:0 18px}#rtp .er{color:var(--red)}' +
-  '#rtp .ath{flex:none;width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--line)}';
+const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{display:flex;align-items:center;gap:10px;width:100%;min-height:56px;padding:12px 0;' +
+  'border:0;border-top:1px solid var(--line);background:none;text-align:left;color:var(--text)}.rt .box>.sl:first-child,.box.rt>.sl:first-child{border-top:0}' +
+  '.rt .sl b{flex:1;min-width:0;font-size:15px;line-height:1.4}.rt .sl span{font-size:13px;color:var(--sub);font-weight:500}' +
+  '.rt .sl.cur span{color:var(--ac-ink);font-weight:600}.rt .it{display:flex;gap:12px;align-items:flex-start;padding:14px 0}' +
+  '.rt .it+.it{background:linear-gradient(var(--line),var(--line)) 56px 0/100% 1px no-repeat}' +
+  '.rt .cb{flex:none;width:44px;height:44px;padding:0;border:2px solid var(--fline);border-radius:12px;background:var(--field);color:var(--gr);font-size:20px}' +
+  '.rt .cb[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}.rt .it .grow{flex:1;min-width:0;padding-top:10px}' +
+  '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}' +
+  '.rt .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}.rt .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
+  '.rt a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
+  '.rt .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}.rt .bar i{display:block;height:100%;background:var(--gr)}' +
+  '.rt .pp .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}' +
+  '.rt .ab .grow{padding-top:0}.rt .ab+.ab{background-position:0 0}.rt .pf .fl{flex:1 1 60%;min-width:0;font-size:16px}' +
+  '.rt .pf .sm{min-height:48px;font-size:15px;font-weight:600;padding:0 18px}.rt .er{color:var(--red)}' +
+  '.rt .ath{flex:none;width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--line)}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
+const bo = {};  // 블로그별 칸 펼침 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서')
 const typed = {}, sent = {}, errs = {};  // 붙여 넣던 글 · 넣은 부탁(다음 목록까지 숨김) · 안 된 이유
 
 function el(t, a, ...kids) {
@@ -57,7 +58,7 @@ async function load() {
   } catch (e) { /* 다음에 다시 */ }
   busy = false;
   const c = data && (data.slots || []).find(s => s.current);
-  if (c && c.key !== cur) { cur = c.key; open = {[cur]: true}; }
+  if (c && c.key !== cur) { cur = c.key; open = {[cur]: true, tm: open.tm, rs: open.rs}; }
   const a = D.activeElement;
   if (!(a && a.tagName === 'INPUT' && box && box.contains(a))) draw();  // 붙여 넣는 중이면 다음에
   const k = ids().join();
@@ -89,10 +90,10 @@ const why = (s, d, f) => !s ? '인터넷 연결을 확인해 주세요' : s === 
 
 async function check(it) {
   const v = !it.done;
-  it.done = v; recount(); draw();
+  it.done = v; recount(); draw(); bump();
   const [s, d] = await send({action: 'routine.done', args: {id: it.id, done: v}, cid: rid(), ctoken: null});
   if (s === 200 && d.status === 'ok') return;
-  it.done = !v; recount(); draw();
+  it.done = !v; recount(); draw(); bump();
   toast(why(s, d, '체크하지 못했어요 — 잠시 뒤 다시'));
 }
 
@@ -176,7 +177,7 @@ function off(p) {
 const big = (label, f) => el('button', {class: 'sm', type: 'button', onclick: f}, label);
 function paste(p) {
   // 태그는 '꾸미기'가 발행 설정창에 넣어 줘서 따로 복사 단추 없음 (주인 11/06 '태그 복사 안 해도 들어가는데')
-  return [el('div', {class: 'bt pb'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => rich(p))),
+  return [el('div', {class: 'bt pp'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => rich(p))),
   el('span', {class: 's'}, "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기 (태그도 저절로)")];
 }
 
@@ -230,6 +231,22 @@ function rests() {
     open.rs ? rs.map(t => el('p', {class: 'note', style: 'margin:0 0 10px'}, t)) : null) : null;
 }
 
+// 블로그별 (주인 11/09) — 할 일 탭(app.js)이 블로그마다 part(블로그, 이름, 그 블로그 할 일 카드) 를 붙임: 손일 체크(붙여넣기·발행·예약·이웃) + 카드
+const by = () => { try { return W.localStorage.getItem('rt-by') !== 'slot'; } catch (e) { return true; } };
+function setBy(v) { try { W.localStorage.setItem('rt-by', v); } catch (e) { /* 이번만 */ } draw(); bump(); }
+const bump = () => by() && W.dispatchEvent && W.dispatchEvent(new Event('sb-routine'));
+const ORD = {'발행': 0, '예약': 1, '이웃': 2, 'SNS': 3};
+const mine = k => data && data.slots ? data.slots.flatMap(s => s.items).filter(i => (i.blog || '') === k)
+  .sort((a, b) => a.done - b.done || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
+function part(k, label, extra) {
+  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length, m = left.reduce((a, i) => a + i.min, 0);
+  if (!xs.length && !extra.length) return [];
+  const o = bo[k];
+  return [el('div', {class: 'box rt'}, el('button', {class: 'sl', type: 'button', 'aria-expanded': o ? 'true' : 'false',
+    onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('b', {}, `${o ? '▾' : '▸'} ${label}`),
+    el('span', {}, n ? `할 일 ${n}` + (m ? ` · 손일 약 ${m}분` : '') : '끝')), o ? xs.map(item) : null), ...(o ? extra : [])];
+}
+
 function draw() {
   if (!box) return;
   const ok = !!(data && data.slots && data.total), ab = ably(), top = rising(), rs = rests();
@@ -237,12 +254,13 @@ function draw() {
   if (box.hidden) { box.replaceChildren(); return; }
   const bar = el('i');
   if (ok) bar.style.width = Math.round(100 * data.done / data.total) + '%';
-  box.replaceChildren(...[top, ok ? [...pasteBox(),
+  box.replaceChildren(...[top, ok ? [...(by() ? [] : pasteBox()),
     el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `오늘 할 일 · ${data.done}/${data.total}`),
+      el('button', {class: 'lnk', type: 'button', onclick: () => setBy(by() ? 'slot' : 'blog')}, by() ? '시간대별로' : '블로그별로'),
       el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기')),
     el('div', {class: 'bar'}, bar),
     data.today ? null : el('p', {class: 'note'}, `${data.day} 목록이에요 — 오늘 목록이 아직 안 왔어요`),
-    el('div', {class: 'box'}, data.slots.map(slot)),
+    by() ? el('p', {class: 'note', style: 'margin:0 0 12px'}, '아래 블로그를 눌러 펼쳐요 — 로그인한 블로그 일을 한 번에') : el('div', {class: 'box'}, data.slots.map(slot)),
     times(),
     data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab, rs].flat().filter(Boolean));
 }
@@ -253,7 +271,7 @@ function mount() {
   if (!on()) { clearTimeout(timer); return; }
   if (!box) {
     if (!D.getElementById('rt-css')) D.head.append(el('style', {id: 'rt-css', text: CSS}));
-    box = el('section', {id: 'rtp', 'aria-label': '오늘 할 일'});
+    box = el('section', {id: 'rtp', class: 'rt', 'aria-label': '오늘 할 일'});
     box.hidden = true;
     draw();
   }
@@ -272,6 +290,6 @@ function start() {
   if (rf) rf.addEventListener('click', () => { if (on() && !busy) setTimeout(load, 300); });
   mount();
 }
-W.SBRoutine = {load, mount, ids};
+W.SBRoutine = {load, mount, ids, by, part};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

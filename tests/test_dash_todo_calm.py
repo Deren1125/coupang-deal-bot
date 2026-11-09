@@ -261,7 +261,7 @@ def test_todo_tab_spacing_is_scoped_and_tap_targets_are_44px() -> None:
     tail = css.split("할 일 탭 여유", 1)[1].split("*/", 1)[1]
     sels = [s.strip() for rule in re.findall(r"([^{}]+)\{", tail) for s in rule.split(",")]
     assert sels and all(s.startswith("[data-tab=todo] ") for s in sels), sels
-    m = re.search(r"#rtp \.cb\{([^}]*)\}", rt)
+    m = re.search(r"\.rt \.cb\{([^}]*)\}", rt)
     assert m and "width:44px" in m.group(1) and "height:44px" in m.group(1)  # 체크 칸
-    assert re.search(r"#rtp \.sl\{[^}]*min-height:56px", rt) and "class: 'sl'" in rt and "class: 'cb'" in rt
+    assert re.search(r"\.rt \.sl\{[^}]*min-height:56px", rt) and "class: 'sl'" in rt and "class: 'cb'" in rt
     assert "'sh'" not in rt and "'ck'" not in rt  # 시트(.sh)·사진 판(.ck) app.css 규칙과 겹치지 않는 이름
