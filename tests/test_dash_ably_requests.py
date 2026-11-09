@@ -304,7 +304,7 @@ def test_requests_sit_below_the_checklist(bot: DealBot, tmp_path: Path) -> None:
     rt = {"day": day, "slots": SLOTS, "overflow": 0, "items": [item("nb:issue:a", "s1")]}
     write_export(tmp_path / "blogauto.json", status={**st, "routine": rt}, ably_requests=two_rows(bot, day))
     got = run_shim(routine.view(bot, now=at(bot, day, "10:00")))
-    assert got["h2"] == ["오늘 할 일 · 0/1", "에이블리 링크 부탁 (2)"]
+    assert got["h2"] == ["오늘 손일 0/1 끝냄", "에이블리 링크 부탁 (2)"]
 
 
 # 진짜 크롬 (ops 원칙 24 — 그려진 화면에 '[object'·'undefined'·'NaN' 없음 · 콘솔 오류 없음 · 폰 너비에서 가로로 안 넘침)

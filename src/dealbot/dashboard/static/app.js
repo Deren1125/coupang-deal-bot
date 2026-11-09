@@ -964,7 +964,7 @@ function vTodo() {
   const b = banner(), urg = b && b.classList.contains('bad');
   if (urg) out.push(b);  // 급한 알림만 맨 위 — 그 아래 '오늘 할 일' 칸(routine.js)
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
-  else if (S.todo.length) out.push(glance(S.todo));
+  else if (S.todo.length && !(W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by())) out.push(glance(S.todo));  // 블로그별이면 칸마다 수가 보여 '한눈에'는 뺌 (11/09 숫자 세 곳 헷갈림)
   // 블로그별 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서') — 블로그마다 손일 체크(routine.js) + 할 일 카드
   const RB = R.sub !== 'deal' && W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by(), bk = i => /^(issue|finance|hotdeal)$/.test(i.blog) ? i.blog : '';
   if (RB) [['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜'], ['', '딜·SNS·그 밖']].forEach(([k, l]) => out.push(...W.SBRoutine.part(k, l,

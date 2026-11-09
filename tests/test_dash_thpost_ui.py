@@ -37,7 +37,7 @@ def test_thpost_js_is_loaded_early_and_app_hands_over_exec_and_upload() -> None:
     assert page.count("<script src=") == 1
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "T.view(b, {el, btn, api, toast, S, exec, uploadAll})" in app
-    assert len((STATIC / "app.js").read_bytes()) <= 92 * 1024 + 512  # test_dash_shell.APP_JS_MAX 와 같게 (11/09 할 일 블로그별)
+    assert len((STATIC / "app.js").read_bytes()) <= 92 * 1024 + 768  # test_dash_shell.APP_JS_MAX 와 같게 (11/09 할 일 블로그별)
 
 
 def test_stat_tiles_grow_with_their_label_even_with_the_threads_button_style() -> None:

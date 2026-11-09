@@ -18,6 +18,12 @@ const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{di
   '.rt .pp .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}' +
   '.rt .ab .grow{padding-top:0}.rt .ab+.ab{background-position:0 0}.rt .pf .fl{flex:1 1 60%;min-width:0;font-size:16px}' +
   '.rt .pf .sm{min-height:48px;font-size:15px;font-weight:600;padding:0 18px}.rt .er{color:var(--red)}' +
+  '.bk{padding:0 16px 4px}.bk .bh{display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:14px 0 10px;border:0;background:none;text-align:left;color:var(--text)}' +
+  '.bk .dt{flex:none;width:12px;height:12px;border-radius:50%}.bk .bn2{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}' +
+  '.bk .bn2 b{font-size:17px;line-height:1.3}.bk .bn2 span{font-size:13px;color:var(--sub)}.bk .cv{flex:none;font-size:14px;font-weight:600;color:var(--ac-ink)}' +
+  '.bk .bar{margin:0 0 12px}.rt .sg{display:flex;justify-content:space-between;margin:14px 0 2px;font-size:13px;font-weight:700;color:var(--sub)}' +
+  '.rt .sg i{font-style:normal;font-weight:600}.rt .mi{padding:10px 0;gap:10px}.rt .mi .grow{padding-top:2px}.rt .mi .t{font-size:14px}' +
+  '.rt .mi .bt{margin-top:8px;gap:6px}.rt .mi .sm{min-height:36px;padding:0 12px;font-size:13px}' +
   '.rt .ath{flex:none;width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--line)}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
 const bo = {};  // 블로그별 칸 펼침 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서')
@@ -182,14 +188,26 @@ function paste(p) {
 }
 
 function item(it) {
+  if (by() && it.group === '이웃') return mini(it);
   const btns = it.done ? [] : [it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label)),
     it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label))].flat();
   return el('div', {class: 'it' + (it.done ? ' dn' : ''), 'data-id': it.id},
     el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
     el('div', {class: 'grow'}, el('span', {class: 't'}, it.title),
-      el('span', {class: 's'}, [it.tag, `${it.min}분`, it.note].filter(Boolean).join(' · ')),
+      el('span', {class: 's'}, [by() ? it.group : it.tag, `${it.min}분`, it.note].filter(Boolean).join(' · ')),
       it.paste && !it.done ? paste(it.paste) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
+}
+
+// 이웃 줄은 짧게 (블로그마다 하루 15줄 — 주인 11/09): 이름 한 줄 + 단추, 앞말·블로그 이름·분은 빼고
+function mini(it) {
+  const t = it.title.replace(/^(서로이웃 신청|공감·댓글) · /, '');
+  return el('div', {class: 'it mi' + (it.done ? ' dn' : ''), 'data-id': it.id},
+    el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
+      onclick: () => check(it)}, it.done ? '✓' : ''),
+    el('div', {class: 'grow'}, el('span', {class: 't'}, t), it.done ? null : el('div', {class: 'bt'},
+      it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label + ' ↗')),
+      it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label + ' 복사')))));
 }
 
 function slot(s) {
@@ -238,13 +256,25 @@ const bump = () => by() && W.dispatchEvent && W.dispatchEvent(new Event('sb-rout
 const ORD = {'발행': 0, '예약': 1, '이웃': 2, 'SNS': 3};
 const mine = k => data && data.slots ? data.slots.flatMap(s => s.items).filter(i => (i.blog || '') === k)
   .sort((a, b) => a.done - b.done || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
+// 블로그 칸 (주인 11/09 '직관적으로') — 색 점·남은 일·막대 · 펼치면 올리기 / 이웃 글 들르기 / 서로이웃 신청 / 확인할 것 순서로 작은 제목
+const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', '': '#94A3B8'};
+const SEC = [['올리기', i => i.group === '발행' || i.group === '예약'], ['이웃 글 들르기 (공감·댓글)', i => i.id.startsWith('nb-visit')],
+  ['서로이웃 신청', i => i.id.startsWith('nb-add')], ['그 밖', i => true]];
+const sh = (t, n) => el('p', {class: 'sg'}, t, n ? el('i', {}, n) : null);
 function part(k, label, extra) {
   const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length, m = left.reduce((a, i) => a + i.min, 0);
   if (!xs.length && !extra.length) return [];
-  const o = bo[k];
-  return [el('div', {class: 'box rt'}, el('button', {class: 'sl', type: 'button', 'aria-expanded': o ? 'true' : 'false',
-    onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('b', {}, `${o ? '▾' : '▸'} ${label}`),
-    el('span', {}, n ? `할 일 ${n}` + (m ? ` · 손일 약 ${m}분` : '') : '끝')), o ? xs.map(item) : null), ...(o ? extra : [])];
+  const o = bo[k], bar = el('i'), all = xs.length + extra.length, body = [];
+  bar.style.width = Math.round(100 * (all - n) / all) + '%';
+  if (o) {
+    const used = new Set();
+    SEC.forEach(([t, f]) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); if (g.length) body.push(sh(t, g.filter(i => !i.done).length || '끝'), g.map(item)); });
+    if (extra.length) body.push(sh('확인할 것', extra.length));
+  }
+  return [el('div', {class: 'box rt bk' + (o ? ' on' : '')}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
+    onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),
+    el('span', {class: 'bn2'}, el('b', {}, label), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
+    el('span', {class: 'cv'}, o ? '접기' : '열기')), el('div', {class: 'bar'}, bar), body), ...(o ? extra : [])];
 }
 
 function draw() {
@@ -255,12 +285,12 @@ function draw() {
   const bar = el('i');
   if (ok) bar.style.width = Math.round(100 * data.done / data.total) + '%';
   box.replaceChildren(...[top, ok ? [...(by() ? [] : pasteBox()),
-    el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `오늘 할 일 · ${data.done}/${data.total}`),
+    el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, by() ? `오늘 손일 ${data.done}/${data.total} 끝냄` : `오늘 할 일 · ${data.done}/${data.total}`),
       el('button', {class: 'lnk', type: 'button', onclick: () => setBy(by() ? 'slot' : 'blog')}, by() ? '시간대별로' : '블로그별로'),
       el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기')),
     el('div', {class: 'bar'}, bar),
     data.today ? null : el('p', {class: 'note'}, `${data.day} 목록이에요 — 오늘 목록이 아직 안 왔어요`),
-    by() ? el('p', {class: 'note', style: 'margin:0 0 12px'}, '아래 블로그를 눌러 펼쳐요 — 로그인한 블로그 일을 한 번에') : el('div', {class: 'box'}, data.slots.map(slot)),
+    by() ? null : el('div', {class: 'box'}, data.slots.map(slot)),
     times(),
     data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab, rs].flat().filter(Boolean));
 }
