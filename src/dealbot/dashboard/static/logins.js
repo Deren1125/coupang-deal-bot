@@ -67,9 +67,21 @@ async function press(b, e) {
   if (!r) toast('인터넷 연결을 확인해 주세요');
   else if (r.status === 401) toast('다시 로그인해 주세요 — 새로고침하면 로그인 화면이 떠요');
   else if (r.status === 403 && d.code === 'csrf') toast('화면이 오래됐어요 — 새로고침해 주세요');
+  else if (r.status === 202 && d.id) return wait(d.id);  // 블로그 프로그램에 맡긴 일 (몰 '지금 확인' 11/09) — 결과까지 기다림
   else toast(d.text || (d.status === 'ok' ? '했어요' : '하지 못했어요 — 잠시 뒤 다시'));
   const rf = D.getElementById('rf');
   if (r && r.status === 200 && rf) rf.click(); else load();  // 새로고침: 할 일 맨 위 '원격 화면 열기'·'QR 보기' 줄과 이 칸을 같이
+}
+
+async function wait(id) {
+  toast('확인하는 중이에요 — 1~2분 걸려요');
+  for (let i = 0; i < 60; i++) {
+    await new Promise(f => setTimeout(f, 3000));
+    let s = null;
+    try { s = ((await (await fetch('/dashboard/api/actions?ids=' + id, {credentials: 'same-origin', cache: 'no-store'})).json()).actions || [])[0]; } catch (e) { /* 다시 */ }
+    if (s && s.status !== 'queued' && s.status !== 'running') { toast(s.text || '끝났어요'); return load(); }
+  }
+  toast('아직 확인 중이에요 — 잠시 뒤 다시 보기를 눌러 주세요');
 }
 
 function right(b, hot) {

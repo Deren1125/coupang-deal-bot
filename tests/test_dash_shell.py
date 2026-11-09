@@ -126,6 +126,9 @@ LOGINS_JS_GZIP_MAX = 3 * 1024 + 512
 # + 네이버 접속 칸 배열을 펼쳐 넣음 → 9.75 KB / gzip 4.125 KB (9748 B / 4094 B)
 LOGINS_JS_MAX = 9 * 1024 + 768
 LOGINS_JS_GZIP_MAX = 4 * 1024 + 128
+# 11/09: 몰 '지금 확인'(블로그 프로그램에 맡기는 일)의 결과 기다리기 — 202 를 '하지 못했어요'로 보이던 것
+LOGINS_JS_MAX = 10 * 1024 + 512
+LOGINS_JS_GZIP_MAX = 4 * 1024 + 448
 # 10/27: 오늘 할 일 칸(할 일 탭 맨 위 — 하루 5칸 중 지금 칸만 펼침 · 줄마다 체크 · 복사 단추 · 3/8 진행) — logins.js 처럼 셸이 defer 로 받는
 # routine.js (CSS 도 여기서). 목록은 /dashboard/api/routine 으로 열 때만
 ROUTINE_JS_MAX = 8 * 1024

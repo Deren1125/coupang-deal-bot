@@ -752,3 +752,10 @@ async def test_mall_rows_get_a_check_now_button_only_when_blog_auto_knows_it(bot
     assert "right(r.check), right(r.button, r.bad)" in js
     status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "blog.mall_check", "args": {"mall": "toss"}}, h)
     assert status in (200, 202) and got.get("code") != "bad_args", got  # Blog-Auto 로 넘김
+
+
+def test_queued_check_waits_for_the_real_result() -> None:
+    """11/09 주인 '토스 확인 눌렀더니 하지 못했어요': 블로그 프로그램에 맡긴 일(202 queued)은 실패가 아님 — 결과까지 기다려 그 글을 보임."""
+    js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/logins.js").read_text(encoding="utf-8")
+    assert "r.status === 202 && d.id) return wait(d.id)" in js and "/dashboard/api/actions?ids=" in js
+    assert "s.status !== 'queued' && s.status !== 'running'" in js and "toast(s.text" in js
