@@ -27,7 +27,8 @@ const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{di
   '.bk .hu{margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--red);color:#fff;font-size:12px;font-style:normal;font-weight:700;vertical-align:2px}' +
   '.bk .itm{margin:8px 0}.rt .ath{flex:none;width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--line)}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
-const bo = {};  // 블로그별 칸 펼침 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서')
+const bo = {};
+let up = null;  // 숏폼·릴스·롱폼 올리기 (uploadplan.py · 주인 11/09 '릴스·쇼츠·룩북도 다 할 일 탭에')  // 블로그별 칸 펼침 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서')
 const typed = {}, sent = {}, errs = {};  // 붙여 넣던 글 · 넣은 부탁(다음 목록까지 숨김) · 안 된 이유
 
 function el(t, a, ...kids) {
@@ -62,6 +63,7 @@ async function load() {
   try {
     const r = await fetch('/dashboard/api/routine', {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}});
     if (r.status === 200) { data = await r.json(); at = Date.now(); }
+    if (by()) { const u = await fetch('/dashboard/api/uploads', {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}}); if (u.status === 200) up = await u.json(); }
   } catch (e) { /* 다음에 다시 */ }
   busy = false;
   const c = data && (data.slots || []).find(s => s.current);
@@ -258,29 +260,51 @@ const ORD = {'발행': 0, '예약': 1, '이웃': 2, 'SNS': 3};
 const mine = k => data && data.slots ? data.slots.flatMap(s => s.items).filter(i => (i.blog || '') === k)
   .sort((a, b) => a.done - b.done || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
 // 블로그 칸 (주인 11/09 '직관적으로') — 색 점·남은 일·막대 · 펼치면 올리기 / 이웃 글 들르기 / 서로이웃 신청 / 확인할 것 순서로 작은 제목
-const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', '': '#94A3B8'};
+const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', shorts: '#A855F7', '': '#94A3B8'};
 const SEC = [['올리기', i => i.group === '발행' || i.group === '예약'], ['이웃 글 들르기 (공감·댓글)', i => i.id.startsWith('nb-visit')],
   ['서로이웃 신청', i => i.id.startsWith('nb-add')], ['그 밖', i => true]];
 const sh = (t, n) => el('p', {class: 'sg'}, t, n ? el('i', {}, n) : null);
 // 급한 순 (주인 11/09 '중요도 순') — 칸 안: 급한 것 → 올리기 → 확인할 것 → 이웃 글 들르기 → 서로이웃 신청 → 그 밖
 // 칸 순서는 app.js 가 score(): 급한 카드 > 올리기(핫딜 두 배) > 확인할 것 > 이웃. 맨 위 칸은 처음에 펼쳐 둠
-const score = k => mine(k).filter(i => !i.done).reduce((a, i) => a + (i.group === '이웃' ? 1 : i.group === 'SNS' ? 2 : k === 'hotdeal' ? 40 : 20), 0);
+const score = k => (k === 'shorts' ? uscore() : 0) + mine(k).filter(i => !i.done).reduce((a, i) => a + (i.group === '이웃' ? 1 : i.group === 'SNS' ? 2 : k === 'hotdeal' ? 40 : 20), 0);
+// 영상 올리기 줄: 밀린 것·오늘·내일 (룩북 칸과 같은 편은 그 카드로) · 체크 = uploads.done
+const UG = {past: '밀린 영상', today: '오늘 올릴 영상', tomorrow: '내일 올릴 영상'};
+const urows = () => up && up.groups ? up.groups.filter(g => UG[g.key]).flatMap(g => g.items.filter(x => !x.lb && !(g.key === 'past' && x.done)).map(x => Object.assign(x, {g: g.key}))) : [];
+async function udone(x) {
+  const v = !x.done;
+  x.done = v; bump();
+  const [st, d] = await send({action: 'uploads.done', args: {id: x.id, done: v}, cid: rid(), ctoken: null});
+  if (!(st === 200 && d.status === 'ok')) { x.done = !v; bump(); toast(why(st, d, '체크하지 못했어요 — 잠시 뒤 다시')); }
+}
+function vid(x) {
+  const tg = (x.tags || []).map(t => '#' + t).join(' '), d = [x.desc, tg].filter(Boolean).join('\n\n');
+  return el('div', {class: 'it mi' + (x.done ? ' dn' : ''), 'data-id': 'up:' + x.id},
+    x.gate ? el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': x.done ? 'true' : 'false', 'aria-label': x.title || x.what, onclick: () => udone(x)}, x.done ? '✓' : '') : el('span', {class: 'cb', style: 'opacity:.35'}),
+    el('div', {class: 'grow'}, el('span', {class: 't'}, [x.g === 'past' ? x.when_text : x.hm, x.plat, x.what].filter(Boolean).join(' · ')),
+      el('span', {class: 's'}, x.gate ? [x.title, x.note].filter(Boolean).join(' · ') : '검수 대기 · 아직 올리지 마세요'),
+      x.done ? null : el('div', {class: 'bt'}, x.file_url ? el('a', {class: 'sm', href: x.file_url, target: '_blank', rel: 'noopener noreferrer'}, x.gate ? '파일 받기 ↗' : '영상 보기 ↗') : null,
+        x.gate && x.title ? el('button', {class: 'sm', type: 'button', onclick: () => copy(x.title)}, '제목 복사') : null,
+        x.gate && d ? el('button', {class: 'sm', type: 'button', onclick: () => copy(d)}, '설명·태그 복사') : null)));
+}
+const uscore = () => urows().reduce((a, x) => a + (x.done || !x.gate ? 0 : x.g === 'past' ? 1000 : x.g === 'today' ? 30 : 2), 0);
 function part(k, label, extra, hot, first) {
   hot = hot || [];
-  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length + hot.length, m = left.reduce((a, i) => a + i.min, 0);
-  if (!xs.length && !extra.length && !hot.length) return [];
-  const o = bo[k] == null ? !!first : bo[k], bar = el('i'), all = xs.length + extra.length + hot.length, body = [];
+  const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done);
+  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length + hot.length + ul.length, m = left.reduce((a, i) => a + i.min, 0) + ul.length * 3;
+  if (!xs.length && !extra.length && !hot.length && !ur.length) return [];
+  const o = bo[k] == null ? !!first : bo[k], bar = el('i'), all = xs.length + extra.length + hot.length + ur.filter(x => x.gate).length || 1, body = [];
   bar.style.width = Math.round(100 * (all - n) / all) + '%';
   if (o) {
     const used = new Set(), sec = (t, f) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); if (g.length) body.push(sh(t, g.filter(i => !i.done).length || '끝'), g.map(item)); };
     if (hot.length) body.push(sh('급한 것', hot.length), hot);
+    Object.keys(UG).forEach(g => { const r = ur.filter(x => x.g === g); if (r.length) body.push(sh(UG[g], r.filter(x => x.gate && !x.done).length || '끝'), r.map(vid)); });
     sec(...SEC[0]);
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
     SEC.slice(1).forEach(x => sec(...x));
   }
   return [el('div', {class: 'box rt bk' + (o ? ' on' : '')}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
     onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),
-    el('span', {class: 'bn2'}, el('b', {}, label, hot.length ? el('em', {class: 'hu'}, `급함 ${hot.length}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
+    el('span', {class: 'bn2'}, el('b', {}, label, hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length ? el('em', {class: 'hu'}, `급함 ${hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
     el('span', {class: 'cv'}, o ? '접기' : '열기')), el('div', {class: 'bar'}, bar), body)];
 }
 

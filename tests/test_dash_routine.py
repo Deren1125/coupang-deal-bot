@@ -397,3 +397,11 @@ def test_todo_tab_puts_urgent_first() -> None:
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "if (hot.length) body.push(sh('급한 것', hot.length), hot);" in rt and "bo[k] == null ? !!first : bo[k]" in rt
     assert ".sort((a, b) => b[4] - a[4])" in app and "i.sev === 'stop' || i.sev === 'hot'" in app
+
+
+def test_todo_tab_has_video_box() -> None:
+    """11/09 주인 '릴스·쇼츠·룩북 등도 다 할 일 탭에': 쇼츠 서버 올리기 일정 줄(밀린·오늘·내일) + 룩북 카드가 '숏폼·릴스·룩북' 칸에."""
+    rt = (STATIC / "routine.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "fetch('/dashboard/api/uploads'" in rt and "action: 'uploads.done'" in rt and "'검수 대기 · 아직 올리지 마세요'" in rt
+    assert "['shorts', '숏폼·릴스·룩북']" in app and "i.kind !== 'uploads'" in app

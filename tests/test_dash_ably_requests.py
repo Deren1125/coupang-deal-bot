@@ -328,6 +328,7 @@ const fs = require('fs');
     if (u.pathname.endsWith('app.css')) return r.fulfill({contentType: 'text/css', body: css});
     if (u.pathname.endsWith('routine.js')) return r.fulfill({contentType: 'text/javascript', body: js});
     if (u.pathname === '/dashboard/api/routine') return json(200, JSON.parse(view));
+    if (u.pathname === '/dashboard/api/uploads') return json(200, {groups: []});  // 블로그별 보기의 영상 칸 (11/09)
     if (u.pathname.startsWith('/dashboard/thumb/ar-')) return r.fulfill({contentType: 'image/png', body: Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')});
     if (u.pathname === '/dashboard/api/action') { posts.push(JSON.parse(r.request().postData())); return json(202, {status: 'queued', id: 'a_1'}); }
