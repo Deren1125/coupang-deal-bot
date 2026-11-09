@@ -77,6 +77,21 @@ const pasteIn = async (html, plain, probe) => {
   await S(500);
   return !!ok;
 };
+// 사진은 받아서 파일로 붙여 네이버에 올림 (주인 11/09 — 주소로 붙이면 서버 사진을 불러 써 대표 사진이 안 됨). 안 되면 예전처럼 주소로.
+// 받는 곳은 우리 공개 사진(/media/blog_*.jpg)만 · 쿠키 없이
+const PIC = /^https:\/\/[\w.-]+\/media\/blog_[a-z]+_\d+_\d+_[0-9a-f]{8}\.jpg$/;
+const pic = async u => {
+  const n = D.querySelectorAll('.se-component.se-image').length;
+  try {
+    if (!PIC.test(u)) throw 0;
+    const b = await (await fetch(u, {credentials: 'omit'})).blob(), dt = new W.DataTransfer(), me = u.split('/')[2];
+    dt.items.add(new W.File([b], 'p.jpg', {type: 'image/jpeg'}));
+    setSel(body_().slice(-1)[0]);
+    host().dispatchEvent(new W.ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt}));
+    if (await wait(() => { const a = D.querySelectorAll('.se-component.se-image img'), i = a[a.length - 1]; return a.length > n && /^https:/.test(i.src) && !i.src.includes(me); }, 30000)) return '';
+  } catch (e) {}
+  return await pasteIn('<p><img src="' + esc(u).replace(/"/g, '%22') + '"></p>', '', '') ? 'url' : 'x';
+};
 const shut = () => {
   const x = vis(['.se-popup-oglink .se-popup-close-button', '.se-popup-oglink button[class*="close"]', '.se-popup-oglink button[class*="cancel"]']);
   if (x) press(x);
@@ -274,6 +289,7 @@ const pieces = (html, plain) => {
       out.push({k: 'quote', html: lines_.map(x => '<p>' + esc(x) + '</p>').join(''), lines: lines_});
     } else if (n.tagName === 'HR' || t === ZL) { flush(); out.push({k: 'rule'}); }
     else if (t.startsWith(ZT)) { flush(); out.push({k: 'tags', tags: tagsOf(t)}); }
+    else if (!t && n.el && (n.el.tagName === 'IMG' || n.el.querySelector('img'))) { flush(); out.push({k: 'img', u: (n.el.tagName === 'IMG' ? n.el : n.el.querySelector('img')).getAttribute('src')}); }
     else {
       chunk.push(n);
       if (isUrl(t)) { flush(); out.push({k: 'card', u: t}); }
@@ -288,7 +304,7 @@ const ask = () => new Promise(res => {
   wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
   const card_ = T.createElement('div');
   card_.style.cssText = 'background:#fff;color:#111;border-radius:16px;padding:20px;width:min(520px,100%);font:16px -apple-system,sans-serif;display:grid;gap:12px';
-  msg.textContent = '꾸미기: 복사한 본문을 아래 칸에 길게 눌러 붙여넣기. 그다음 화면을 만지지 말고 기다려요.';
+  msg.textContent = '꾸미기: 아래 칸에 길게 눌러 붙여넣고 기다려요';
   msg.style.margin = '0';
   box.contentEditable = 'true';
   box.style.cssText = 'min-height:120px;border:2px dashed #03a94f;border-radius:12px;padding:12px;outline:none;color:#555';
@@ -315,17 +331,17 @@ const shape = () => comps().map(kind).filter(k => k && k !== '사진').filter((k
 const want = ps => ps.map(p => ({text: '글', rule: '선', card: '카드', quote: '포스트잇'})[p.k]).filter(Boolean).filter((k, i, a) => !(k === '글' && a[i - 1] === '글')).join(' ');
 // 글자 꾸밈 세기 (주인 11/06 '형광펜·색이 하나도 안 됨'): 받은 글과 에디터에 들어간 글에서 형광펜·글자 색·굵게 수 — 어디서 빠지는지 알림에 보임
 const fx = h => [/background-color/gi, /[^-]color\s*:/gi, /<(b|strong)[\s>]|font-weight:\s*(bold|[6-9]00)|class="[^"]*bold/gi].map(x => (h.match(x) || []).length);
-const R = {pieces: 0, done: 0, cards: [0, 0], lines: [0, 0], quotes: [0, 0], tags: [0, 0], q: [], bad: [], notes: []};
+const R = {pieces: 0, done: 0, pics: [0, 0], cards: [0, 0], lines: [0, 0], quotes: [0, 0], tags: [0, 0], q: [], bad: [], notes: []};
 W.__kkumiReport = R;
 try { window.__kkumiReport = R; } catch (e) {}
-if (!empty() && !confirm('꾸미기: 본문에 이미 글이 있어요. 그 아래에 이어서 넣을까요?')) return;
+if (!empty() && !confirm('꾸미기: 본문에 글이 있어요. 아래에 이어서 넣을까요?')) return;
 const got = await ask();
 if (!got) return;
 const ps = pieces(got.h, got.t);
 R.pieces = ps.length;
 R.want = want(ps);
 R.fx = [fx(ps.filter(p => p.k === 'text').map(p => p.html).join('')), [0, 0, 0]];
-if (!ps.length) { alert('꾸미기: 붙여 넣은 글이 비었어요'); return; }
+if (!ps.length) { alert('꾸미기: 빈 글'); return; }
 W.__kkumi = 1;
 try {
   for (const p of ps) {
@@ -334,6 +350,10 @@ try {
       if (!await pasteIn(p.html, p.lines.join('\n'), probe)) { R.bad.push('글 안 들어감: ' + (probe || '사진')); if (!R.done) break; }
       if (!R.done && probe && [...D.querySelectorAll('.se-documentTitle,.se-section-documentTitle')].some(t => (t.textContent || '').includes(probe))) { R.bad.push('제목 칸에 들어감'); break; }
       if (probe && !await align(p.align)) R.notes.push('가운데 정렬 못 함: ' + probe);
+    } else if (p.k === 'img') {
+      R.pics[1]++;
+      const why = await pic(p.u);
+      if (why === 'x') R.bad.push('사진 안 들어감'); else if (why) R.notes.push('사진 주소로'); else R.pics[0]++;
     } else if (p.k === 'rule') {
       R.lines[1]++;
       const [, why] = await rule();
@@ -363,14 +383,15 @@ try {
 } finally { W.__kkumi = 0; }
 const out = [];
 const nm = (a, label) => { if (a[1]) out.push(label + ' ' + a[0] + '/' + a[1]); };
+nm(R.pics, '사진');
 nm(R.cards, '링크 카드');
 nm(R.lines, '구분선');
 nm(R.quotes, '포스트잇');
 nm(R.tags, '태그');
 const fs = a => `형광펜 ${a[0]}·색 ${a[1]}·굵게 ${a[2]}`;
-if (R.fx[0].some(Boolean)) { out.push('글자 꾸밈 받음 ' + fs(R.fx[0]) + ' → 들어감 ' + fs(R.fx[1])); if (R.fx[0][0] && !R.fx[1][0]) R.notes.push('형광펜이 에디터에서 빠짐'); }
-else R.notes.push('받은 글에 글자 꾸밈 없음 (복사할 때 빠짐?)');
+if (R.fx[0].some(Boolean)) { out.push('글자 꾸밈 받음 ' + fs(R.fx[0]) + ' → 들어감 ' + fs(R.fx[1])); if (R.fx[0][0] && !R.fx[1][0]) R.notes.push('형광펜 빠짐'); }
+else R.notes.push('받은 글에 꾸밈 없음');
 R.ok = R.shape === R.want && !R.bad.length;
 R.finished = true;
-alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.tags[1] ? '\n발행 설정창에서 확인 뒤 발행' : ''));
+alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : ''));
 })().catch(e => alert('꾸미기 오류: ' + e));

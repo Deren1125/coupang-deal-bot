@@ -158,6 +158,7 @@ async def test_static_files_and_redirects(tmp_path: Path) -> None:
     media.mkdir()
     (media / "a.jpg").write_bytes(b"\xff\xd8\xff\xe0JPEG")
     (media / "secret.txt").write_text("no")
+    (media / "blog_issue_1_1_0123abcd.jpg").write_bytes(b"\xff\xd8\xff\xe0JPEG")
     srv = WebServer(0, host="127.0.0.1")
     srv.serve_static("/media/", media)
 
@@ -176,6 +177,9 @@ async def test_static_files_and_redirects(tmp_path: Path) -> None:
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{srv.port}") as c:
             r = await c.get("/media/a.jpg")
             assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and "max-age" in r.headers["cache-control"]
+            assert "access-control-allow-origin" not in r.headers  # 카드 사진은 그대로
+            r = await c.get("/media/blog_issue_1_1_0123abcd.jpg")  # 블로그 붙여넣기 사진: 꾸미기가 네이버에서 받아 올림 (11/09)
+            assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*"
             r = await c.get("/d/42")
             assert r.status_code == 302 and r.headers["location"] == "https://link.coupang.com/a/42"
     finally:

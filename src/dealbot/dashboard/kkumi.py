@@ -63,7 +63,12 @@ def _squeeze(line: str) -> str:
 def minify(src: str) -> str:
     """머리 /* */ 주석 · '//' 로 시작하는 줄 · 빈 줄을 빼고 줄마다 공백을 줄인다 (줄바꿈은 남김 — 문장 끝을 바꾸지 않게)."""
     src = re.sub(r"\A\s*/\*.*?\*/", "", src, count=1, flags=re.S)
-    return "\n".join(_squeeze(s) for line in src.splitlines() if (s := line.strip()) and not s.startswith("//"))
+    out = ""
+    for line in src.splitlines():
+        if (s := line.strip()) and not s.startswith("//"):
+            # ';'·'{' 로 끝난 줄 다음은 줄바꿈 없이 (책갈피 주소에서 줄바꿈은 %0A 세 글자 — 11/09 사진 올리기 넣으며 26KB 안으로)
+            out += ("" if not out or out[-1] in ";{,([&|+?:=" else "\n") + _squeeze(s)
+    return out
 
 
 def encode(code: str) -> str:

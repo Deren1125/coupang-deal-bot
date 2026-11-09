@@ -43,7 +43,9 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     js = code()
     assert js == kkumi.minify(src) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
     assert len(kkumi.bookmarklet()) < 26000  # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB 그대로 들어가고 돎)
-    for net in ("fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "import(", ".src=", "location", "open(", "http://"):
+    # 받기는 사진 하나뿐 (11/09 — 우리 공개 사진 /media/blog_*.jpg 만 · 쿠키 없이 → 네이버에 파일로 올림)
+    assert js.count("fetch(") == 1 and "fetch(u,{credentials:'omit'})" in js and "if(!PIC.test(u))throw 0;" in js
+    for net in ("XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "import(", ".src=", "location", "open(", "http://"):
         assert net not in js, net
     for word in ("ClipboardEvent('paste'", "DataTransfer", "se-canvas-bottom-button", "oglink", "se-popup-button-confirm", "quotation_postit",
                  "se-horizontalLine", "se-l-default", "publish_btn", "tag_input", "여기에 붙여넣기", "모두 됐어요", "placeholder"):
@@ -54,7 +56,8 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
 
 def test_minify_keeps_strings_and_word_gaps() -> None:
     assert kkumi.minify("/* 머리 */\n  // 주석\nconst a = 'x  y' + \"p q\";\n\n  if (a) return b;\nawait  S(1);") == \
-        "const a='x  y'+\"p q\";\nif(a)return b;\nawait S(1);"
+        "const a='x  y'+\"p q\";if(a)return b;await S(1);"  # ';' 로 끝난 줄은 이어 붙임 (11/09)
+    assert kkumi.minify("if (a) {\n  b();\n}\nc();") == "if(a){b();}\nc();"  # '}' 뒤는 줄바꿈 그대로
     assert kkumi.minify("const s = '\\' a';") == "const s='\\' a';"  # 따옴표 안 역슬래시
 
 
@@ -92,7 +95,11 @@ const add = el => { C.append(el); return el; };
 const comp = (cls, html) => { const d = document.createElement('div'); d.className = 'se-component ' + cls; d.innerHTML = html; return d; };
 C.addEventListener('paste', e => {
   e.preventDefault();
+  // 사진 파일 붙여넣기 → 네이버처럼 올린 뒤 네이버 주소로 (11/09 아이패드 시험: blogfiles.pstatic.net · '대표' 뜸)
+  if (e.clipboardData.files.length) { const c = add(comp('se-image', '<img src="data:image/svg+xml;base64,PHN2">')); setTimeout(() => { c.querySelector('img').src = 'https://blogfiles.pstatic.net/up.jpg'; }, 300); return; }
   const h = e.clipboardData.getData('text/html');
+  const im = new DOMParser().parseFromString(h, 'text/html').querySelector('img');
+  if (im) { add(comp('se-image', '<img src="' + im.getAttribute('src') + '">')); return; }
   const doc = new DOMParser().parseFromString(h, 'text/html');
   const ps = [...doc.body.querySelectorAll('p')];
   // 빈 첫 줄 정리
@@ -262,3 +269,27 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
     assert got["fold"] == ["꾸미기 버튼 설치 (링크 카드)", "false"] and got["before"] == 0  # 접혀 있고 펼칠 때만 받음
     assert got["steps"] == list(kkumi.STEPS) and got["clip"] == [kkumi.bookmarklet()] and got["toast"].startswith("복사했어요")
     assert got["keep"] == "true" and got["calls"] == 1
+
+
+PHOTO_RUN = RUN.replace("const [inner, code, pasted] = process.argv.slice(1), out = {};",
+                        "const [inner, code, pasted] = process.argv.slice(1), out = {};"
+                        "await p.route('**/media/**', r => r.fulfill({status: 200, contentType: 'image/jpeg', body: Buffer.from([255, 216, 255, 217]),"
+                        " headers: {'Access-Control-Allow-Origin': '*'}}));") \
+    .replace("out.tags =", "out.imgs = await frame.evaluate(() => [...document.querySelectorAll('.se-component.se-image img')].map(i => i.src));out.tags =")
+
+
+def test_bookmarklet_uploads_our_photos_as_files_and_keeps_others_as_address() -> None:
+    """주인 11/09: 꾸미기로 붙인 사진이 서버 주소로 남아 대표 사진이 안 됨 → 우리 공개 사진은 받아서 파일로 붙여 네이버에 올림.
+    우리 사진 모양이 아닌 주소는 받지 않고 예전처럼 주소로."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    ours = "https://52-79-136-64.sslip.io/media/blog_issue_267_1_b6af4b78.jpg"
+    other = "https://example.com/x.jpg"
+    pasted = (f'<p style="text-align:center">첫 글이에요.</p><p style="text-align:center"><img src="{ours}"></p>'
+              f'<p style="text-align:center">가운데 글이에요.</p><p style="text-align:center"><img src="{other}"></p><p>끝 글이에요.</p>')
+    out = subprocess.run([NODE, "-e", PHOTO_RUN, INNER, code(), pasted], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["imgs"] == ["https://blogfiles.pstatic.net/up.jpg", other], got
+    assert "사진 1/2" in got["alert"] and "사진 주소로" in got["alert"], got["alert"]

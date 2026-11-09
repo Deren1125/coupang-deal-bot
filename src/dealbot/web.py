@@ -600,6 +600,8 @@ class WebServer:
         path = directory / name
         if not path.is_file():
             return 404, page("없는 파일", "파일이 없습니다.")
+        if name.startswith("blog_"):  # 꾸미기가 네이버 글쓰기에서 받아 네이버에 올림 (11/09 — 공개 사진, 쿠키 없이)
+            return 200, path.read_bytes(), _STATIC_TYPES[path.suffix.lower()], {"Access-Control-Allow-Origin": "*"}
         return 200, path.read_bytes(), _STATIC_TYPES[path.suffix.lower()]
 
     async def _respond(
