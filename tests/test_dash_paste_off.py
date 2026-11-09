@@ -100,3 +100,14 @@ async def test_toss_pause_line_login_row_and_routine_extras(bot: DealBot, settin
     bot.settings.autolink.toss.no_link_until = None
     write_export(tmp_path / "blogauto.json")
     assert routine.extras(bot)["rests"] == [] and next(r for r in logins.rows(bot) if r["id"] == "toss")["state"] != "off"
+
+
+async def test_blog_tab_shows_paste_posts_as_one_line(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """블로그 탭은 붙여넣기 글을 '붙여넣기 N편 → 할 일' 한 줄로만 (주인 11/09 대시보드 줄이기 ③) — 글 카드는 hide 로 빠짐."""
+    _export(tmp_path, paste=True)
+    blogauto_status(settings)
+    issue = (await state(bot))["blogs"]["issue"]
+    rows = [w for w in issue["waiting"] if w["kind"] == "paste_sum"]
+    assert len(rows) == 1 and rows[0]["title"] == f"붙여넣기 {len(issue['hide'])}편 → 할 일" and issue["hide"]
+    assert rows[0]["primary"]["goto"] == "#/todo" and not any(w["kind"] == "paste" for w in issue["waiting"])
+    assert "post-issue-60" in issue["hide"]

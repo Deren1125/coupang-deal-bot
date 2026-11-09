@@ -1058,11 +1058,18 @@ class StateBuilder:
                             placeholder="카페 인기글 주제나 아이디어 한두 줄 — 사실은 뉴스·공식 자료로만 확인해요"))
             scan = v2.get("scan") if blog == "finance" else None
             n_paste = sum(1 for w in waiting if w.get("kind") == "paste")
+            # 블로그 탭은 붙여넣기 글을 한 줄로만 (주인 11/09 '좋다' — 대시보드 줄이기 ③): '붙여넣기 N편 → 할 일' · 글은 할 일 탭에서
+            hide = [w["iid"] for w in waiting if w.get("kind") == "paste"]
+            if hide:
+                waiting = [{"iid": f"paste-{blog}", "src": "blog", "blog": blog, "kind": "paste_sum", "sev": "todo",
+                            "title": f"붙여넣기 {len(hide)}편 → 할 일", "chip": CHIPS[blog],
+                            "status": "할 일 탭 '오늘 할 일'에서 복사해 붙여넣기", "primary": goto("할 일로 가기", "#/todo")}] + \
+                    [w for w in waiting if w.get("kind") != "paste"]
             out[blog] = {"label": BLOG_LABELS[blog], "chip": CHIPS[blog], "mode": mode, "paused": bool(st.get("paused")),
                          "today": st.get("today") or 0, "login": "off" if self._sctx.get("off") else st.get("login") or "unknown",
                          # 머리 한 줄 (주인 10/30): 서버가 안 올리는 블로그는 '붙여넣기 대기 N · 오늘 발행 N' (발행/초안 모드 말 대신)
                          "head": None if srv else f"붙여넣기 대기 {n_paste} · 오늘 발행 {st.get('today') or 0}편",
-                         "waiting": waiting, "recent": [dict(r, at=_iso_ts(r.get("at"), self.tz)) for r in v2.get("recent", {}).get(blog, [])],
+                         "waiting": waiting, "hide": hide, "recent": [dict(r, at=_iso_ts(r.get("at"), self.tz)) for r in v2.get("recent", {}).get(blog, [])],
                          "scan": ({"sid": scan["sid"], "at": _iso_ts(scan.get("at"), self.tz),
                                    "items": [{"n": x["n"], "title": x["title"], "why": "인기 예상" if x.get("recommend") else "",
                                               "action": act("blog.pick", "이걸로 쓰기", {"sid": scan["sid"], "n": x["n"]})}

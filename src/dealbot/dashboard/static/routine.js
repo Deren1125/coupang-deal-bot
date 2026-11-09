@@ -192,13 +192,16 @@ function paste(p) {
 
 function item(it) {
   if (by() && it.group === '이웃') return mini(it);
-  const btns = it.done ? [] : [it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label)),
+  // Pick '사진 N장 필요' 카드는 이 붙여넣기 줄에 한 마디로 (주인 11/09 대시보드 줄이기 ④) — 누르면 그 글 화면에서 사진 올리기
+  const m = /^(?:pub|rsv):(\w+):(\d+)$/.exec(it.id), ph = m && (W.SBPh || {})[`post-${m[1]}-${m[2]}`], pk = ph && ph.kind === 'photos' ? ph : null;
+  const btns = it.done ? [] : [pk ? el('button', {class: 'sm', type: 'button', onclick: () => { location.hash = '#/i/' + pk.iid; }}, '사진 올리기') : [],
+    it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label)),
     it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label))].flat();
   return el('div', {class: 'it' + (it.done ? ' dn' : ''), 'data-id': it.id},
     el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
     el('div', {class: 'grow'}, el('span', {class: 't'}, it.title),
-      el('span', {class: 's'}, [by() ? it.group : it.tag, `${it.min}분`, it.note].filter(Boolean).join(' · ')),
+      el('span', {class: 's'}, [by() ? it.group : it.tag, `${it.min}분`, it.note, pk && pk.status.split(' · ')[0]].filter(Boolean).join(' · ')),
       it.paste && !it.done ? paste(it.paste) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
 }
 

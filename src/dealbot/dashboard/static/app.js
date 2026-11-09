@@ -958,7 +958,7 @@ function glance(all) {
 }
 const tuck = (k, t, f) => { const o = OPEN[k]; return [el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, btn('fold', t, () => { OPEN[k] = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'})), ...(o ? f() : [])]; };
 function vTodo() {
-  const rt = rtIds(), all = S.todo.flatMap(i => /^(publish|paste|app)$/.test(i.kind) && rt.has(i.iid) ? [] : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
+  const rt = rtIds(), all = (W.SBPh = {}, S.todo).flatMap(i => /^(publish|paste|app|photos)$/.test(i.kind) && rt.has(i.iid) ? (W.SBPh[i.iid] = i, []) : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
   let items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, k = 0, rest = 0;
   if (R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
   const b = banner(), urg = b && b.classList.contains('bad');
@@ -1058,7 +1058,7 @@ function vBlog() {
   const sr = S.search, tools = [S.sched && S.sched.total && {href: '#/blog/sched', t: `예약 일정 보기 · ${S.sched.total}편`}, S.pics && {href: '#/blog/pics', t: '링크에서 사진 뽑기'},
     S.photo_trial && key === 'issue' && {href: '#/blog/trial', t: '사진 테스트'}, key === 'issue' && S.ptrial && {href: '#/blog/ptrial', t: `제품 테스트 · ${S.ptrial.posts.length}편`},
     sr && sr.days.length && {href: '#/blog/search', t: sr.left ? `구글 검색 등록 · ${sr.left}개` : '구글 검색 등록'}].filter(Boolean);
-  const mt = S.todo.filter(i => mineT(i, key) && !b.waiting.some(w => w.iid === i.iid));  // 기다리는 글과 같은 카드는 한 번만
+  const mt = S.todo.filter(i => mineT(i, key) && !b.waiting.some(w => w.iid === i.iid) && !(b.hide || []).includes(i.iid));  // 기다리는 글과 같은 카드는 한 번만
   if (mt.length) out.push(el('p', {class: 'h3'}, `이 블로그 할 일 ${mt.length}`), ...mt.map(i => item(i)));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
   const sc = b.schedule, want = sc ? 'blog.schedule' : 'blog.publish';
