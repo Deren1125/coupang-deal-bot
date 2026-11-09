@@ -213,10 +213,15 @@ function times() {  // 블로그별 예약 추천 시각 (주인 10/29) — 눌�
       el('span', {class: 't'}, `${t.name} · ${t.times.join(' · ')}`), t.note ? el('span', {class: 's'}, t.note) : null))) : null) : null;
 }
 
-// ⚡ 막 뜨는 중 (주인 10/30 '실시간으로 오르는 키워드') 한 줄 → Pick 화면 · 쉬는 중 (예전 단추가 왜 없는지 — 누르면 펼침)
+// ⚡ 막 뜨는 중 (주인 10/30) — 키워드마다 단추: 누르면 그 키워드로 Pick 글 쓰기 (blog.issue · 11/09 '눌러도 연결이 안 돼' — 예전엔 화면만 옮김)
 function rising() {
   const xs = data && data.rising || [];
-  return xs.length ? el('a', {class: 'bn', href: '#/blog/issue'}, `⚡ 막 뜨는 중 · ${xs.join(' · ')} → Pick 쓰기`) : null;
+  return xs.length ? el('div', {class: 'bn', style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center'}, '⚡ 막 뜨는 중 — 누르면 Pick 글 쓰기', xs.map(k => el('button', {class: 'sm', type: 'button', onclick: e => write(k, e)}, k))) : null;
+}
+async function write(k, e) {
+  e.currentTarget.disabled = true;
+  const [s, d] = await send({action: 'blog.issue', args: {keyword: k}, cid: rid(), ctoken: null});
+  toast(s === 202 || s === 200 ? `'${k}' Pick 글 쓰기 시작 — 몇 분 뒤 발행 대기에 떠요` : why(s, d, '시작하지 못했어요 — 잠시 뒤 다시'));
 }
 function rests() {
   const rs = data && data.rests || [];

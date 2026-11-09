@@ -160,6 +160,9 @@ ROUTINE_JS_GZIP_MAX = 6 * 1024 + 384
 # (주인 '대시보드 전면 수정' — app.js 예산을 넘지 않게 할 일 칸 쪽에) → 16.9 KB / gzip 6.55 KB (17283 B / 6705 B)
 ROUTINE_JS_MAX = 17 * 1024 + 256
 ROUTINE_JS_GZIP_MAX = 6 * 1024 + 768
+# 11/09: '⚡ 막 뜨는 중' 키워드마다 Pick 글 쓰기 단추 (예전엔 화면만 옮겨 '연결이 안 돼')
+ROUTINE_JS_MAX = 17 * 1024 + 768
+ROUTINE_JS_GZIP_MAX = 6 * 1024 + 960
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

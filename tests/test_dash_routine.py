@@ -332,3 +332,9 @@ def test_best_times_pass_through_and_bad_rows_drop(bot: DealBot, tmp_path: Path)
     assert [t["blog"] for t in routine.view(bot)["times"]] == ["hotdeal", "finance"]
     js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/routine.js").read_text(encoding="utf-8")
     assert "블로그별 예약 추천 시각" in js and "data.times" in js
+
+
+def test_rising_keywords_start_a_pick_post() -> None:
+    """11/09 주인 '막 뜨는 중 … Pick 쓰기 눌러도 연결이 안 돼': 키워드마다 단추 → blog.issue {keyword} (예전엔 화면만 옮김)."""
+    js = (STATIC / "routine.js").read_text(encoding="utf-8")
+    assert "action: 'blog.issue', args: {keyword: k}" in js and "xs.map(k => el('button'" in js and "href: '#/blog/issue'" not in js
