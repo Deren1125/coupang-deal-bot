@@ -17,10 +17,19 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dash_helpers import fixture, get_json, post_json, push_settings, session_headers
+from dash_helpers import (
+    blogauto_status,
+    fixture,
+    get_json,
+    post_json,
+    push_settings,
+    session_headers,
+)
 from dealbot.app import DealBot
+from dealbot.bridge import spool
 from dealbot.config import Settings
 from dealbot.dashboard import routine
+from dealbot.dashboard.actions import BLOG_ACTIONS, clean_args
 from dealbot.dashboard.blogauto import _routine, parse_export
 from test_dash_state import write_export
 
@@ -194,6 +203,38 @@ async def test_routine_done_action_toggles_and_keeps_days_apart(bot: DealBot, tm
     status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "sns:x:1", "done": True}}, h)
     assert status == 200 and json.loads(bot.db.kv_get(f"routine_done:{tomorrow}")) == ["sns:x:1"]  # 그 목록의 날짜로 적음
     assert json.loads(bot.db.kv_get(f"routine_done:{day}")) == ["sns:x:1"]  # 전날 것은 남김
+
+
+async def test_publish_row_check_also_tells_blogauto_it_was_pasted(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """주인 11/09 '붙여넣기 대기로 발행한 글들이 블로그 탭에 그대로 남아 있다': 발행·예약 줄(pub:/rsv:) 체크는 blog.pasted 도 맡김 —
+    Blog-Auto 가 '발행 확인 중'으로 기다리는 글에서 빼고 직접 발행 확인이 주소를 붙임. 이웃 줄·예전 Blog-Auto 는 체크만."""
+    day = tz_now(bot).date().isoformat()
+    with_routine(tmp_path, sample(day))
+    h = session_headers(bot)
+    new = spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new"
+
+    def queued() -> list[dict]:
+        return [spool.read(f) for f in sorted(new.glob("*.json"))] if new.exists() else []
+
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "rsv:issue:270", "done": True}}, h)
+    assert status == 200 and got["text"] == "체크했어요" and queued() == []  # 블로그 프로그램 신호 없음 → 체크만
+    blogauto_status(settings, actions=[a for a in fixture("status_blogauto.json")["actions"] if a != "pasted"])
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "rsv:issue:270", "done": True}}, h)
+    assert status == 200 and got["text"] == "체크했어요" and queued() == []  # 예전 Blog-Auto
+    blogauto_status(settings)
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "nb:issue:a", "done": True}}, h)
+    assert status == 200 and got["text"] == "체크했어요" and queued() == []  # 이웃 줄은 글이 아님
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "rsv:issue:270", "done": True}}, h)
+    assert status == 200 and got["status"] == "ok" and "발행 확인 중" in got["text"]
+    assert json.loads(bot.db.kv_get(f"routine_done:{day}")) == ["nb:issue:a", "rsv:issue:270"]
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "pub:hotdeal:289", "done": False}}, h)
+    assert status == 200 and "다시 기다리는 글" in got["text"]  # 바로 풀어도 '하는 중'으로 막히지 않음
+    q = queued()
+    assert [(x["action"], x["blog"], x["args"]) for x in q] == [
+        ("pasted", "issue", {"blog": "issue", "pid": 270, "done": True}),
+        ("pasted", "hotdeal", {"blog": "hotdeal", "pid": 289, "done": False})]
+    assert all(x["confirmed"] is False for x in q)
+    assert "pasted" in BLOG_ACTIONS and clean_args("blog.pasted", {"blog": "issue", "pid": 3, "done": True}) == {"blog": "issue", "pid": 3, "done": True}
 
 
 async def test_routine_api_needs_login(bot: DealBot) -> None:

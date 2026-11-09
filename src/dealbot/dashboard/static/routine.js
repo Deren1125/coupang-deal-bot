@@ -98,7 +98,7 @@ async function check(it) {
   const v = !it.done;
   it.done = v; recount(); draw(); bump();
   const [s, d] = await send({action: 'routine.done', args: {id: it.id, done: v}, cid: rid(), ctoken: null});
-  if (s === 200 && d.status === 'ok') return;
+  if (s === 200 && d.status === 'ok') { if (/^(pub|rsv):/.test(it.id)) toast(d.text); return; }
   it.done = !v; recount(); draw(); bump();
   toast(why(s, d, '체크하지 못했어요 — 잠시 뒤 다시'));
 }

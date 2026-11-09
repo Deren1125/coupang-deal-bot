@@ -100,6 +100,7 @@ ABLY_IN_TEXT = re.compile(r"https://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+")  # 주소
 ABLY_HOSTS = ("a-bly.com",)
 MALL_CHECK = ("toss", "zigzag")  # 로그인 관리 '지금 확인' 단추가 붙는 몰 (Blog-Auto mall_check.MALLS 와 같게)
 ABLY_RANK_MAX = 12  # 에이블리 코디 랭킹 캡처 한 번에 (LB-15)
+PASTE_ROW_RE = re.compile(r"^(?:pub|rsv):(finance|issue|hotdeal):(\d{1,9})$")  # 오늘 할 일 발행·예약 줄 id (Blog-Auto routine.draft_items)
 # Blog-Auto 에 맡기는 일 (blog.<이름> → Blog-Auto 의 이름)
 BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle", "photos", "photo_clear", "answer", "noanswer",
                 "photos_batch",  # 사진 일괄 수정 (주인 10/19 — '수정 완료' 한 번)
@@ -107,6 +108,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "oedit_keep", "oedit_redo", "share", "noshare", "channel", "scan", "pick", "write", "issue", "hotdeal_now", "mode",
                 "pause", "resume", "drafts_cleanup", "ledger", "login_check", "server_check", "info", "kakao_auth_url", "kakao_connect", "kakao_test",
                 "dismiss", "schedule", "unschedule", "unschedule_all", "schedule_move", "visit_done", "pics_fetch", "pics_clear",
+                "pasted",  # 오늘 할 일 발행·예약 줄 체크 → 발행 확인 중 (주인 11/09 — routine.done 이 함께 맡김 · {blog, pid, done})
                 "post_feedback", "learn_decide",  # 배운 것으로 나아지기 (주인 10/20): 글마다 👍/👎 · 이번 주 개선안 적용·빼기·규칙 지우기
                 "similar_links",  # 비슷한 아이템 링크 넣기 (주인 10/20 — Pick 패션 글에 에이블리 링크)
                 "topic_seed",  # 소재 넣기 (주인 10/21 — 카페 인기글 주제·아이디어를 다음 글감의 첫 후보로)
@@ -975,6 +977,10 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"ids": list(ids)}
     if name == "ably_rank":  # 에이블리 코디 랭킹 캡처 (LB-15 — 계약 action_ably_rank.json): {uploads: [1~12장]}
         return {"uploads": _uploads(g("uploads"), 1, ABLY_RANK_MAX)}
+    if name == "pasted":  # 오늘 할 일 발행·예약 줄 체크 (주인 11/09) — 발행했다고 표시 · 되돌릴 수 있어 확인 없음
+        if not isinstance(g("done"), bool):
+            raise ActionError("bad_args")
+        return {"blog": _blog(g("blog")), "pid": _int(g("pid")), "done": g("done")}
     if name == "visit_done":  # '오늘 들를 이웃 글' 했어요 (주인 10/18) — 블로그는 id 에서 (visit-<블로그>-<번호>)
         vid = g("id")
         if not isinstance(vid, str) or not (m := VISIT_ID.match(vid)):
@@ -1436,6 +1442,30 @@ class ActionDesk:
         self._audit(caller, action, target, args, "queued", aid)
         return 202, {"status": "queued", "id": aid}
 
+    def _pasted(self, rid: str, done: bool, caller: Caller) -> bool:
+        """오늘 할 일 발행·예약 줄(pub:/rsv:<블로그>:<글 번호>) 체크 → Blog-Auto 에 blog.pasted 를 함께 맡긴다 (주인 11/09 — 붙여넣어 발행한
+        글이 할 일·블로그 탭에 그대로 남음): 그 글을 '발행 확인 중'으로 기다리는 글에서 빼고 직접 발행 확인이 주소를 붙인다.
+        맡기지 못하면(블로그 프로그램 꺼짐·예전 판) 체크만 — 예전처럼. 맡겼으면 True."""
+        m = PASTE_ROW_RE.match(rid)
+        if not m:
+            return False
+        try:
+            st = self.outbox.status()
+            if not st.bridge_ok(self.clock()) or (st.actions and not st.supports("pasted")):
+                return False
+        except Exception as e:  # noqa: BLE001 — 체크는 그대로 되게
+            log.warning("routine pasted status failed: %s", type(e).__name__)
+            return False
+        args = {"blog": m.group(1), "pid": int(m.group(2)), "done": done}
+        try:  # target 없음 — 체크·풀기를 잇달아 눌러도 '하는 중'으로 막지 않게 (Blog-Auto 가 차례대로)
+            aid, _ = self.outbox.submit(action="pasted", blog=args["blog"], args=args, target="", confirmed=False,
+                                        session=caller.session, cid=None)
+        except (ActionsBusy, OSError, ValueError) as e:
+            log.warning("routine pasted relay failed: %s", type(e).__name__)
+            return False
+        self._audit(caller, "blog.pasted", iidmod.post_iid(args["blog"], args["pid"]), args, "queued", aid)
+        return True
+
     # ---------------------------------------------------------- 딜봇 일 (바로)
     async def _deal(self, action: str, args: dict[str, Any], target: str, caller: Caller, cid: str | None) -> tuple[int, dict[str, Any]]:
         router = getattr(self.bot, "router", None)
@@ -1607,6 +1637,8 @@ class ActionDesk:
             from dealbot.dashboard import routine
 
             routine.set_done(db, routine.day_of(bot, self.clock()), args["id"], args["done"])
+            if self._pasted(args["id"], args["done"], caller):
+                return "done", "발행 확인 중 — 기다리는 글에서 뺐어요" if args["done"] else "체크를 풀었어요 — 다시 기다리는 글로"
             return "done", "체크했어요" if args["done"] else "체크를 풀었어요"
         if action == "uploads.done":  # 올리기 할 일 체크 — 봇 DB 만 (쇼츠 서버에 쓰지 않음)
             from dealbot.dashboard import uploadplan

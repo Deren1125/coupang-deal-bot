@@ -45,6 +45,7 @@
   "unschedule_all",
   "schedule_move",
   "visit_done",
+  "pasted",
   "pics_fetch",
   "pics_clear",
   "post_feedback",
