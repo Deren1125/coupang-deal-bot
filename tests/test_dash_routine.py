@@ -385,7 +385,15 @@ def test_todo_tab_groups_by_blog() -> None:
     """11/09 주인 '한 블로그 로그인하면 그 블로그 작업 싹 몰아서 — 할 일 탭 블로그별로, 이웃추가도 거기에'."""
     rt = (STATIC / "routine.js").read_text(encoding="utf-8")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "W.SBRoutine = {load, mount, ids, by, part}" in rt
+    assert "W.SBRoutine = {load, mount, ids, by, part, score}" in rt
     assert "filter(i => (i.blog || '') === k)" in rt and "'이웃': 2" in rt  # 그 블로그 손일 (이웃 신청·공감 포함)
     assert "setBy(by() ? 'slot' : 'blog')" in rt  # 예전 시간대별로 돌아가기
     assert "W.SBRoutine.part(k, l," in app and "['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜']" in app
+
+
+def test_todo_tab_puts_urgent_first() -> None:
+    """11/09 주인 '할 일 탭 급한 순으로 — 중요도 순': 급한 카드 블로그 먼저, 칸 안에서도 '급한 것' 맨 위, 맨 위 칸은 펼쳐 둠."""
+    rt = (STATIC / "routine.js").read_text(encoding="utf-8")
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "if (hot.length) body.push(sh('급한 것', hot.length), hot);" in rt and "bo[k] == null ? !!first : bo[k]" in rt
+    assert ".sort((a, b) => b[4] - a[4])" in app and "i.sev === 'stop' || i.sev === 'hot'" in app

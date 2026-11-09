@@ -967,8 +967,13 @@ function vTodo() {
   else if (S.todo.length && !(W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by())) out.push(glance(S.todo));  // 블로그별이면 칸마다 수가 보여 '한눈에'는 뺌 (11/09 숫자 세 곳 헷갈림)
   // 블로그별 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서') — 블로그마다 손일 체크(routine.js) + 할 일 카드
   const RB = R.sub !== 'deal' && W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by(), bk = i => /^(issue|finance|hotdeal)$/.test(i.blog) ? i.blog : '';
-  if (RB) [['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜'], ['', '딜·SNS·그 밖']].forEach(([k, l]) => out.push(...W.SBRoutine.part(k, l,
-    items.filter(i => bk(i) === k).map(x => item(x)).concat(k || !rest ? [] : el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`)))));
+  // 급한 순 (주인 11/09 '중요도 순'): 급한 카드(멈춤·핫·급해요) 있는 블로그 → 올리기 많은 블로그(핫딜 두 배) → 확인할 것 → 이웃만 남은 블로그
+  const hu = i => i.sev === 'stop' || i.sev === 'hot' || i.cue === '급해요' || (i.expires_at && i.expires_at - now() < 3 * 3600);
+  if (RB) [['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜'], ['', '딜·SNS·그 밖']].map(([k, l]) => {
+    const xs = items.filter(i => bk(i) === k), h = xs.filter(hu);
+    return [k, l, xs, h, h.length * 1000 + (W.SBRoutine.score ? W.SBRoutine.score(k) : 0) + (xs.length - h.length) * 10];
+  }).sort((a, b) => b[4] - a[4]).forEach(([k, l, xs, h], n) => out.push(...W.SBRoutine.part(k, l,
+    xs.filter(i => !hu(i)).map(x => item(x)).concat(k || !rest ? [] : el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`)), h.map(x => item(x)), !n)));
   if (!items.length && !RB) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
   const n = RB ? 0 : ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');

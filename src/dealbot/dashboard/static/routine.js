@@ -24,7 +24,8 @@ const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{di
   '.bk .bar{margin:0 0 12px}.rt .sg{display:flex;justify-content:space-between;margin:14px 0 2px;font-size:13px;font-weight:700;color:var(--sub)}' +
   '.rt .sg i{font-style:normal;font-weight:600}.rt .mi{padding:10px 0;gap:10px}.rt .mi .grow{padding-top:2px}.rt .mi .t{font-size:14px}' +
   '.rt .mi .bt{margin-top:8px;gap:6px}.rt .mi .sm{min-height:36px;padding:0 12px;font-size:13px}' +
-  '.rt .ath{flex:none;width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--line)}';
+  '.bk .hu{margin-left:8px;padding:2px 8px;border-radius:999px;background:var(--red);color:#fff;font-size:12px;font-style:normal;font-weight:700;vertical-align:2px}' +
+  '.bk .itm{margin:8px 0}.rt .ath{flex:none;width:76px;height:76px;object-fit:cover;border-radius:10px;background:var(--line)}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = {}, cur = '', sig = '';
 const bo = {};  // 블로그별 칸 펼침 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서')
 const typed = {}, sent = {}, errs = {};  // 붙여 넣던 글 · 넣은 부탁(다음 목록까지 숨김) · 안 된 이유
@@ -261,20 +262,26 @@ const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', '': '#94A
 const SEC = [['올리기', i => i.group === '발행' || i.group === '예약'], ['이웃 글 들르기 (공감·댓글)', i => i.id.startsWith('nb-visit')],
   ['서로이웃 신청', i => i.id.startsWith('nb-add')], ['그 밖', i => true]];
 const sh = (t, n) => el('p', {class: 'sg'}, t, n ? el('i', {}, n) : null);
-function part(k, label, extra) {
-  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length, m = left.reduce((a, i) => a + i.min, 0);
-  if (!xs.length && !extra.length) return [];
-  const o = bo[k], bar = el('i'), all = xs.length + extra.length, body = [];
+// 급한 순 (주인 11/09 '중요도 순') — 칸 안: 급한 것 → 올리기 → 확인할 것 → 이웃 글 들르기 → 서로이웃 신청 → 그 밖
+// 칸 순서는 app.js 가 score(): 급한 카드 > 올리기(핫딜 두 배) > 확인할 것 > 이웃. 맨 위 칸은 처음에 펼쳐 둠
+const score = k => mine(k).filter(i => !i.done).reduce((a, i) => a + (i.group === '이웃' ? 1 : i.group === 'SNS' ? 2 : k === 'hotdeal' ? 40 : 20), 0);
+function part(k, label, extra, hot, first) {
+  hot = hot || [];
+  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length + hot.length, m = left.reduce((a, i) => a + i.min, 0);
+  if (!xs.length && !extra.length && !hot.length) return [];
+  const o = bo[k] == null ? !!first : bo[k], bar = el('i'), all = xs.length + extra.length + hot.length, body = [];
   bar.style.width = Math.round(100 * (all - n) / all) + '%';
   if (o) {
-    const used = new Set();
-    SEC.forEach(([t, f]) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); if (g.length) body.push(sh(t, g.filter(i => !i.done).length || '끝'), g.map(item)); });
-    if (extra.length) body.push(sh('확인할 것', extra.length));
+    const used = new Set(), sec = (t, f) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); if (g.length) body.push(sh(t, g.filter(i => !i.done).length || '끝'), g.map(item)); };
+    if (hot.length) body.push(sh('급한 것', hot.length), hot);
+    sec(...SEC[0]);
+    if (extra.length) body.push(sh('확인할 것', extra.length), extra);
+    SEC.slice(1).forEach(x => sec(...x));
   }
   return [el('div', {class: 'box rt bk' + (o ? ' on' : '')}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
     onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),
-    el('span', {class: 'bn2'}, el('b', {}, label), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
-    el('span', {class: 'cv'}, o ? '접기' : '열기')), el('div', {class: 'bar'}, bar), body), ...(o ? extra : [])];
+    el('span', {class: 'bn2'}, el('b', {}, label, hot.length ? el('em', {class: 'hu'}, `급함 ${hot.length}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
+    el('span', {class: 'cv'}, o ? '접기' : '열기')), el('div', {class: 'bar'}, bar), body)];
 }
 
 function draw() {
@@ -320,6 +327,6 @@ function start() {
   if (rf) rf.addEventListener('click', () => { if (on() && !busy) setTimeout(load, 300); });
   mount();
 }
-W.SBRoutine = {load, mount, ids, by, part};
+W.SBRoutine = {load, mount, ids, by, part, score};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();
