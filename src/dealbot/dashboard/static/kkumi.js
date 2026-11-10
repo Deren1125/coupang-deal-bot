@@ -225,8 +225,11 @@ const catIn = async c => {
   if (!b) return '칸 없음';
   if (nz(b.innerText) === nz(c)) return '';
   press(b);
-  const it = await wait(() => { let f = null; for (const d of [document, D]) for (const e of d.querySelectorAll('[class*=category] *,[role=option]')) if (e.offsetParent !== null && !e.children.length && e !== b && !b.contains(e) && nz(e.innerText) === nz(c)) f = e; return f; }, 3000);
-  if (!it) return '목록에 없음';
+  // 하위 카테고리 항목은 <label><span 숨김>하위 카테고리</span>드라마 패션</label> — 글자가 자식 칸 밖에 있어 '맨 끝 칸만' 보면 못 찾음 (11/10 드라마 패션)
+  // → 이름이 맞는 칸 중 가장 안쪽 (문서 순서라 뒤에 오는 자손이 덮음)
+  const it = await wait(() => { let f = null; for (const d of [document, D]) for (const e of d.querySelectorAll('[class*=category] *,[role=option]')) if (e.offsetParent !== null && e !== b && !b.contains(e) && !e.contains(b) && nz(e.innerText) === nz(c)) f = e; return f; }, 3000);
+  if (!it) return '목록에 없음 (' + c + ')';
+  it.scrollIntoView && it.scrollIntoView({block: 'nearest'});
   press(it);
   await S(600);
   b = catBtn();

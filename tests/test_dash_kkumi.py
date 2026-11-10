@@ -137,10 +137,10 @@ document.querySelector("[data-name='oglink']").onclick = () => {
   pop.querySelector('.se-popup-button-confirm').onclick = () => { const u = pop.querySelector('input').value; const c = comp('se-oglink', '<a>' + u + '</a>'); if (inPostit) { inPostit.after(c); inPostit = null; } else add(c); pop.remove(); };
 };
 document.querySelector('.se-canvas-bottom-button').onclick = () => { inPostit = null; add(comp('se-text', '<div class="se-section se-section-align-' + align + '"><p class="se-text-paragraph"></p></div>')); };
-document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<div class="option_category"><button>셀럽 패션</button></div><ul class="category_list" style="display:none"><li><span>셀럽 패션</span></li><li><span>ㄴ 하위 카테고리 셀럽 소식</span></li></ul><span class="chips"></span><input class="tag_input">'; document.body.append(d);
+document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<div class="option_category"><button>셀럽 패션</button></div><ul class="category_list" style="display:none"><li><span>셀럽 패션</span></li><li><span>ㄴ 하위 카테고리 셀럽 소식</span></li><li><label><span style=\"position:absolute;width:1px;height:1px;overflow:hidden\">하위 카테고리</span>드라마 패션</label></li><li><span>드라마, 예능</span></li></ul><span class="chips"></span><input class="tag_input">'; document.body.append(d);
   const cb = d.querySelector('.option_category button'), ul = d.querySelector('.category_list');
   cb.onclick = () => { ul.style.display = 'block'; };
-  ul.querySelectorAll('li').forEach(li => { li.onclick = () => { cb.textContent = li.textContent.replace(/ㄴ 하위 카테고리 /, ''); ul.style.display = 'none'; }; });
+  ul.querySelectorAll('li').forEach(li => { li.onclick = () => { cb.textContent = li.textContent.replace(/ㄴ 하위 카테고리 |하위 카테고리/, ''); ul.style.display = 'none'; }; });
   d.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { d.querySelector('.chips').textContent += ' #' + e.target.value; e.target.value=''; } }); };
 </script></body></html>
 """
@@ -316,3 +316,17 @@ def test_bookmarklet_picks_the_category_in_the_publish_layer() -> None:
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     assert got["cat"] == "셀럽 소식" and "카테고리 셀럽 소식" in got["alert"] and "태그 2/2" in got["alert"], got
+
+
+def test_bookmarklet_picks_a_sub_category_whose_label_has_a_hidden_prefix() -> None:
+    """11/10 아이패드: 네이버 하위 카테고리는 <label><span 숨김>하위 카테고리</span>드라마 패션</label> — 글자가 자식 칸 밖이라
+    '맨 끝 칸'만 보던 꾸미기가 '카테고리 목록에 없음'으로 넘어감 → 이름이 맞는 가장 안쪽 칸을 누른다. 쉼표 든 이름도."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    for cat in ("드라마 패션", "드라마, 예능"):
+        pasted = '<p style="text-align:center">첫 글이에요.</p><p>끝 글이에요.</p>' + _tags_line(["신민아"], cat)
+        out = subprocess.run([NODE, "-e", RUN, INNER, code(), pasted], capture_output=True, text=True, timeout=120, env=env)
+        assert out.returncode == 0, out.stderr
+        got = json.loads(out.stdout)
+        assert got["cat"] == cat and f"카테고리 {cat}" in got["alert"] and "목록에 없음" not in got["alert"], got
