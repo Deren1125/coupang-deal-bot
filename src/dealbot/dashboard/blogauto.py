@@ -1400,8 +1400,10 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
     paste = _paste(x.get("paste"), media_base) if x["group"] in PASTE_GROUPS else None
     if paste is None and x["group"] in PASTE_GROUPS and isinstance(x.get("paste"), dict) and not media_base:
         note = " · ".join(t for t in (note, PASTE_NO_BASE) if t)[:ROUTINE_NOTE_MAX]
+    sc = _count(x.get("score"), top=100) if x["group"] in PASTE_GROUPS else None  # 발행·예약 줄 인기 예상 점수 (주인 11/10 — 선택 칸)
     return {"id": x["id"], "slot": x["slot"], "group": x["group"], "blog": x.get("blog") if x.get("blog") in ROUTINE_BLOGS else "",
-            "title": title, "note": note, "min": mins, "copy": copy, "links": links, "paste": paste}
+            "title": title, "note": note, "min": mins, "copy": copy, "links": links, "paste": paste,
+            **({"score": sc, "popular": x.get("popular") is True} if sc is not None else {})}
 
 
 def _routine_slots(v: Any) -> list[dict[str, str]]:

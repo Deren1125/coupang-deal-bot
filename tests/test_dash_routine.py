@@ -432,3 +432,23 @@ def test_post_rows_sorted_by_score_with_chip(bot: DealBot, tmp_path: Path) -> No
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "a.done - b.done || (b.sco + 1 || 0) - (a.sco + 1 || 0)" in js  # 블로그별 칸도 점수 높은 순 (점수 모르는 줄은 뒤)
     assert "el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null)" in js
+
+
+def test_row_own_score_wins_even_if_post_missing_from_v2_posts(bot: DealBot, tmp_path: Path) -> None:
+    """11/10 19:37 주인 화면 '점수가 안 뜨고 정렬도 안 됨': v2 posts 는 블로그마다 잘려서 많은 예약 줄이 점수를 못 찾았음 →
+    Blog-Auto 가 줄에 직접 실은 score·popular 를 먼저 쓴다 (v2 posts 에 없는 글도 칩·정렬)."""
+    day = tz_now(bot).date().isoformat()
+    data = fixture("export_v2.json")
+    st = data["status"]
+    rt = {"day": day, "slots": SLOTS, "overflow": 0, "items": [
+        item("rsv:issue:7001", "s1", group="예약", blog="issue", score=12),
+        item("nb:issue:a", "s1", blog="issue"),
+        item("rsv:issue:7002", "s1", group="예약", blog="issue", score=91, popular=True),
+        item("rsv:issue:7003", "s1", group="예약", blog="issue", score=55),
+        item("rsv:issue:7004", "s1", group="예약", blog="issue", score="99"),  # 틀린 값은 없는 것으로
+    ]}
+    write_export(tmp_path / "blogauto.json", posts=data["posts"], status={**st, "routine": rt})
+    its = routine.view(bot, now=at(bot, day, "09:30"))["slots"][0]["items"]
+    assert [i["id"] for i in its] == ["rsv:issue:7002", "rsv:issue:7003", "rsv:issue:7001", "nb:issue:a", "rsv:issue:7004"]
+    assert its[0]["sc"] == "🔥 91점" and its[0]["hot"] is True and its[1]["sc"] == "55점" and its[2]["sco"] == 12
+    assert "sc" not in its[4]

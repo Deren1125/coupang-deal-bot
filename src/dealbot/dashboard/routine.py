@@ -196,7 +196,11 @@ def post_scores(bot: Any) -> dict[tuple[str, int], tuple[int, bool]]:
 def with_score(it: dict[str, Any], scores: dict[tuple[str, int], tuple[int, bool]]) -> dict[str, Any]:
     """발행·예약 줄에 점수(sco)와 제목 옆 칩 글자(sc '🔥 88점'·'62점', hot)를 단다. 글 줄이 아니거나 점수를 모르면 그대로."""
     m = POST_ROW.match(str(it.get("id") or ""))
-    got = scores.get((m.group(1), int(m.group(2)))) if m else None
+    own = it.get("score")  # Blog-Auto 가 줄에 직접 실은 점수가 먼저 (11/10 — v2 posts 는 블로그마다 잘려 많은 줄이 못 찾았음)
+    if m and isinstance(own, int) and not isinstance(own, bool):
+        got: tuple[int, bool] | None = (own, it.get("popular") is True)
+    else:
+        got = scores.get((m.group(1), int(m.group(2)))) if m else None
     if not got:
         return it
     chip = ("🔥 " if got[1] else "") + f"{got[0]}점"
