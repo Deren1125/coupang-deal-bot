@@ -287,15 +287,6 @@ https 주소만, 새 탭·`rel="noopener noreferrer"`), 그리고 링크 칸 + `
   ("링크 카드 n/m개 만들었어요" · "구분선 n/m개 짧게·가운데" · "인용구 n/m개 포스트잇" + 못 한 것과 이유). 바깥 요청 없음.
   있던 인용구 모양 바꾸기(인용구 누름 → 모양 메뉴 → 포스트잇)는 서버 봇에 없던 길이라 진짜 편집기에서 아직 확인 안 됨.
 
-### 결재함 (주인 11/10 — "대시보드에 결재함을 새로 만들어서 실시간으로 직접 보내게")
-- 데이터: Blog-Auto 저장소 owner-inbox 가지 (배포 없음 · 형식은 그 가지 README.md). 쓰는 쪽은 주인 대리 중계 세션(inbox/*.json)과 이 대시보드(answers/<ms>.json)뿐.
-- 서버: 딜봇이 서버의 Blog-Auto 저장소(server-status 를 올리는 그 저장소·토큰)에 이 가지만 담는 worktree 를 데이터 폴더 `owner-inbox/` 에 두고 1분마다 받음
-  (scheduler.dashboard_loop → `dashboard/inbox.py` tick). 저장소 위치는 `DEALBOT_OWNER_INBOX_REPO`, 없으면 `blogauto_metrics_path` 의 Blog-Auto.
-- 화면: 할 일 탭 '오늘 할 일' 칸 맨 위 '결재함 N개' 줄 → 화면 전체 결재함 (`static/inbox.js` — 셸이 defer 로 받음). 한 번 할 일(문구 복사·했어요) → 정해 주세요(선택지·답 칸) → 알려 드림(읽음),
-  보낸 것, 밤사이 소식(퍼프덱스·블로그·숏폼) + 서버 상태. 쓰던 답은 그 기기 localStorage 에만.
-- '한 번에 보내기' = 대시보드 일 `inbox.send {answers:[{id, choice, text}], done:[id]}` → answers/<ms>.json 을 바로 commit + push (실패하면 fetch·rebase 3번 · 강제 push 없음 ·
-  그래도 안 되면 커밋을 남기고 1분마다 다시). 빈 답은 넣지 않음. 화면엔 세션 id 를 보내지 않음.
-
 ## 목표 바꾸기
 
 `config.yaml` 의 `dashboard.cards[].goals`. 이름은 카드마다:

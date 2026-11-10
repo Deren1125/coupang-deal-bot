@@ -362,12 +362,6 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
             await uploadplan.tick(bot)
         except Exception as e:  # noqa: BLE001
             log.warning("upload tasks failed: %s", type(e).__name__)
-        try:  # 결재함: owner-inbox 가지 1분마다 받기 · 못 올린 답 다시 올리기 (주인 11/10 — dashboard/inbox.py)
-            from dealbot.dashboard import inbox
-
-            await inbox.tick(bot)
-        except Exception as e:  # noqa: BLE001
-            log.warning("owner inbox sync failed: %s", type(e).__name__)
         try:  # 새 제휴 수익 → 앱 알림 (주인 10/24 — notify/earn_watch)
             from dealbot.notify import earn_watch
 

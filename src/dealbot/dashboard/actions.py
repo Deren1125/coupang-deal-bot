@@ -127,7 +127,6 @@ DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal
                 "todo.dismiss", "todo.hide", "login.remote", "login.remote_cancel", "stats.refresh", "stats.input", "search.check",
                 "login.qr",  # 딜봇 네이버 QR 로그인 (주인 10/26 — 대시보드 '로그인 관리' · 텔레그램 /naverlogin 과 같은 길)
                 "routine.done",  # 오늘 할 일 체크 (주인 10/27 — 하루 5번 손으로 하는 블로그·SNS 일, 봇 DB 에만 적음 · routine.py)
-                "inbox.send",  # 결재함 '한 번에 보내기' (주인 11/10 — owner-inbox 가지에 answers/<ms>.json 하나를 바로 올림 · inbox.py)
                 "uploads.done",  # 올리기 할 일 체크 (주인 11/08 — 쇼츠 서버 일정, 봇 DB 에만 적음 · 쇼츠 서버에 쓰지 않음 · uploadplan.py)
                 "earn.save", "earn.delete",  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
                 "x.stats", "x.handles")  # X 진행률 숫자·계정 이름 직접 넣기 (주인 10/25 — X API 없음, 크리에이터 스튜디오 숫자를 주인이 주마다)
@@ -606,13 +605,6 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         if not isinstance(rid, str) or not ROUTINE_ID_RE.match(rid) or not isinstance(g("done"), bool):
             raise ActionError("bad_args")
         return {"id": rid, "done": g("done")}
-    if action == "inbox.send":  # {answers: [{id, choice(1~ 또는 null), text}], done: [id]} — 빈 답은 빼고, 다 비면 bad_args
-        from dealbot.dashboard import inbox as inboxmod
-
-        try:
-            return inboxmod.clean_send(args)
-        except ValueError as e:
-            raise ActionError("bad_args") from e
     if action == "uploads.done":  # {id: 올리기 할 일 id, done: 참/거짓}
         from dealbot.dashboard.uploadplan import ID_RE as UP_ID_RE
 
@@ -1648,11 +1640,6 @@ class ActionDesk:
             if self._pasted(args["id"], args["done"], caller):
                 return "done", "발행 확인 중 — 기다리는 글에서 뺐어요" if args["done"] else "체크를 풀었어요 — 다시 기다리는 글로"
             return "done", "체크했어요" if args["done"] else "체크를 풀었어요"
-        if action == "inbox.send":  # 결재함 답 — owner-inbox 가지에 파일 하나 올림 (다른 사이트를 열지 않음 · 비밀 없음)
-            from dealbot.dashboard import inbox as inboxmod
-
-            st, text = await asyncio.to_thread(inboxmod.of(bot).send, args["answers"], args["done"])
-            return ("done" if st in ("done", "queued") else "failed"), text
         if action == "uploads.done":  # 올리기 할 일 체크 — 봇 DB 만 (쇼츠 서버에 쓰지 않음)
             from dealbot.dashboard import uploadplan
 
