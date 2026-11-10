@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -176,6 +177,37 @@ def extras(bot: Any) -> dict[str, Any]:
     return {"rising": rising, "rests": rests}
 
 
+POST_ROW = re.compile(r"^(?:pub|rsv):(finance|issue|hotdeal):(\d{1,9})$")  # 발행·예약 줄 id = 글 하나 (actions.PASTE_ROW_RE 와 같음)
+
+
+def post_scores(bot: Any) -> dict[tuple[str, int], tuple[int, bool]]:
+    """(블로그, 글 번호) → (인기 예상 점수 0~100, 🔥) — v2 posts 에서 점수가 있는 글만 (주인 11/10 '할 일 탭 점수 높은 순')."""
+    st = getattr(bot, "dash_state", None)
+    export = st._export() if st is not None else None
+    posts = (getattr(export, "v2", None) or {}).get("posts") or {}
+    out: dict[tuple[str, int], tuple[int, bool]] = {}
+    for blog, rows in posts.items():
+        for p in rows if isinstance(rows, list) else []:
+            if isinstance(p, dict) and isinstance(p.get("pid"), int) and isinstance(p.get("score"), int):
+                out[(blog, p["pid"])] = (p["score"], bool(p.get("popular")))
+    return out
+
+
+def with_score(it: dict[str, Any], scores: dict[tuple[str, int], tuple[int, bool]]) -> dict[str, Any]:
+    """발행·예약 줄에 점수(sco)를 달고 note 앞에 '🔥 88점'·'62점' 칩 글자를 붙인다. 글 줄이 아니거나 점수를 모르면 그대로."""
+    m = POST_ROW.match(str(it.get("id") or ""))
+    got = scores.get((m.group(1), int(m.group(2)))) if m else None
+    if not got:
+        return it
+    chip = ("🔥 " if got[1] else "") + f"{got[0]}점"
+    return {**it, "sco": got[0], "note": " · ".join(x for x in (chip, it.get("note") or "") if x)}
+
+
+def by_score(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """같은 시간대 안: 점수 있는 글 줄 높은 순 → 점수 모르는 줄은 원래 차례 그대로 뒤에 (안정 정렬)."""
+    return sorted(items, key=lambda i: -i["sco"] if isinstance(i.get("sco"), int) else 1)
+
+
 def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     """GET /dashboard/api/routine 몸. 지금 시간대 = 시각(대시보드 시간대)이 지난 마지막 칸 (첫 칸 전이면 첫 칸)."""
     now = now or time.time()
@@ -200,10 +232,15 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     by_at = sorted(r["slots"], key=lambda s: s["at"])
     cur = next((s["key"] for s in reversed(by_at) if s["at"] <= hm), by_at[0]["key"])
     done = done_ids(bot.db, r["day"])
+    try:
+        scores = post_scores(bot)
+    except Exception as e:  # noqa: BLE001 — 점수를 못 읽어도 할 일은 원래 차례로
+        log.warning("routine scores failed: %s", type(e).__name__)
+        scores = {}
     slots = []
     for s in r["slots"]:
-        its = [{**i, "done": i["id"] in done, "tag": " · ".join(x for x in (i["group"], NV_BLOGS.get(i["blog"], "")) if x)}
-               for i in r["items"] if i["slot"] == s["key"]]
+        its = by_score([with_score({**i, "done": i["id"] in done, "tag": " · ".join(x for x in (i["group"], NV_BLOGS.get(i["blog"], "")) if x)}, scores)
+                        for i in r["items"] if i["slot"] == s["key"]])
         slots.append({**s, "items": its, "done": sum(i["done"] for i in its), "total": len(its),
                       "min_left": sum(i["min"] for i in its if not i["done"]), "current": s["key"] == cur})
     return {"day": r["day"], "today": r["day"] == today(bot, now), "slots": slots, "overflow": r["overflow"],

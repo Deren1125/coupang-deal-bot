@@ -261,7 +261,7 @@ function setBy(v) { try { W.localStorage.setItem('rt-by', v); } catch (e) { /* �
 const bump = () => by() && W.dispatchEvent && W.dispatchEvent(new Event('sb-routine'));
 const ORD = {'발행': 0, '예약': 1, '이웃': 2, 'SNS': 3};
 const mine = k => data && data.slots ? data.slots.flatMap(s => s.items).filter(i => (i.blog || '') === k)
-  .sort((a, b) => a.done - b.done || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
+  .sort((a, b) => a.done - b.done || (b.sco + 1 || 0) - (a.sco + 1 || 0) || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
 // 블로그 칸 (주인 11/09 '직관적으로') — 색 점·남은 일·막대 · 펼치면 올리기 / 이웃 글 들르기 / 서로이웃 신청 / 확인할 것 순서로 작은 제목
 const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', shorts: '#A855F7', '': '#94A3B8'};
 const SEC = [['올리기', i => i.group === '발행' || i.group === '예약'], ['이웃 글 들르기 (공감·댓글)', i => i.id.startsWith('nb-visit')],

@@ -405,3 +405,27 @@ def test_todo_tab_has_video_box() -> None:
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "fetch('/dashboard/api/uploads'" in rt and "action: 'uploads.done'" in rt and "'검수 대기 · 아직 올리지 마세요'" in rt
     assert "['shorts', '숏폼·릴스·룩북']" in app and "i.kind !== 'uploads'" in app
+
+
+def test_post_rows_sorted_by_score_with_chip(bot: DealBot, tmp_path: Path) -> None:
+    """11/10 주인 '할 일 탭 점수 높은 순으로 — 블로그 안에서도': 발행·예약 줄에 인기 예상 점수 칩, 같은 시간대 안에서 점수 높은 순,
+    점수 모르는 줄(이웃·SNS·점수 없는 글)은 원래 차례 그대로 뒤에."""
+    day = tz_now(bot).date().isoformat()
+    data = fixture("export_v2.json")
+    for p in data["posts"]["issue"]:
+        p["popular"] = p["pid"] == 46
+    st = data["status"]
+    rt = {"day": day, "slots": SLOTS, "overflow": 0, "items": [
+        item("nb:issue:a", "s1", blog="issue"),
+        item("pub:issue:48", "s1", group="발행", blog="issue", note="사진 5장"),
+        item("pub:issue:999", "s1", group="발행", blog="issue"),
+        item("rsv:issue:46", "s1", group="예약", blog="issue"),
+        item("pub:issue:47", "s1", group="발행", blog="issue"),
+    ]}
+    write_export(tmp_path / "blogauto.json", posts=data["posts"], status={**st, "routine": rt})
+    its = routine.view(bot, now=at(bot, day, "09:30"))["slots"][0]["items"]
+    assert [i["id"] for i in its] == ["rsv:issue:46", "pub:issue:47", "pub:issue:48", "nb:issue:a", "pub:issue:999"]
+    assert its[0]["note"] == "🔥 82점" and its[0]["sco"] == 82
+    assert its[2]["note"] == "60점 · 사진 5장" and "sco" not in its[3] and "sco" not in its[4]
+    js = (STATIC / "routine.js").read_text(encoding="utf-8")
+    assert "a.done - b.done || (b.sco + 1 || 0) - (a.sco + 1 || 0)" in js  # 블로그별 칸도 점수 높은 순 (점수 모르는 줄은 뒤)
