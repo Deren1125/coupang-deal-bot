@@ -75,5 +75,5 @@ async def test_blog_tab_status_line_ends_with_score_but_todo_row_unchanged(bot: 
     todo_rows = {x["iid"]: x for x in body["todo"]}
     iid = next(i for i in blog_rows if i.endswith("46"))
     assert blog_rows[iid]["status"].endswith("· 🔥 82점")
-    if iid in todo_rows:
-        assert "82점" not in todo_rows[iid]["status"]  # 할 일 탭 줄은 그대로
+    if iid in todo_rows:  # 11/10 주인 '점수도 할 일 탭에서 글 옆에' — 할 일 카드에도 한 번만 (두 번 붙지 않게)
+        assert todo_rows[iid]["status"].count("82점") == 1

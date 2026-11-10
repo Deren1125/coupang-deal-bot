@@ -483,6 +483,8 @@ class StateBuilder:
             status = self._fail_text(status, post["fail"])
         if first == "publish" and post and post.get("popular"):
             status = "발행 대기 · 인기 예상"
+        if first in ("photos", "answers") and (sc := score_chip(post)):  # 할 일 카드에도 점수 (주인 11/10 '글 옆에 점수') — '사진 N장 필요' 맨 앞·마감 시각 맨 끝은 그대로
+            status = f"{status} · {sc}"
         # 끝나는 시간 (질문 마감·사진 부탁 마감) → 줄에 '· 18:00까지' + 정렬·경고색 (딜 줄과 같은 기준으로 앞에)
         pr = (post or {}).get("photo_request") if isinstance((post or {}).get("photo_request"), dict) else {}
         exp = (_iso_ts((post or {}).get("deadline"), self.tz) or _iso_ts(pr.get("deadline"), self.tz)) if needs else None
@@ -1028,7 +1030,8 @@ class StateBuilder:
                     waiting.append(rank.public(self._post_item(blog, p, pid=p["pid"])))
             # 기다리는 글 줄 옆 인기 예상 점수 (주인 11/04 '기다리는 글 옆에도 뜨게'): 상태 줄 끝에 '· 🔥 82점'·'· 60점'.
             # 할 일 탭과 같은 줄 객체라 복사해서 블로그 탭에만 (app.js 는 크기 한도라 글자로 — 화면 코드 그대로)
-            waiting = [dict(w, status=f"{w['status']} · {w['sc']}" if w.get("status") else w["sc"]) if w.get("sc") else w for w in waiting]
+            waiting = [dict(w, status=f"{w['status']} · {w['sc']}" if w.get("status") else w["sc"])
+                       if w.get("sc") and w["sc"] not in str(w.get("status") or "") else w for w in waiting]
             acts: list[dict[str, Any]] = []
             if blog == "finance":
                 acts += [act("blog.scan", "다시 찾기"), act("blog.write", "새 글 쓰기", input="text", placeholder="어떤 글을 쓸지",

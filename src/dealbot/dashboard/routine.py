@@ -194,13 +194,13 @@ def post_scores(bot: Any) -> dict[tuple[str, int], tuple[int, bool]]:
 
 
 def with_score(it: dict[str, Any], scores: dict[tuple[str, int], tuple[int, bool]]) -> dict[str, Any]:
-    """발행·예약 줄에 점수(sco)를 달고 note 앞에 '🔥 88점'·'62점' 칩 글자를 붙인다. 글 줄이 아니거나 점수를 모르면 그대로."""
+    """발행·예약 줄에 점수(sco)와 제목 옆 칩 글자(sc '🔥 88점'·'62점', hot)를 단다. 글 줄이 아니거나 점수를 모르면 그대로."""
     m = POST_ROW.match(str(it.get("id") or ""))
     got = scores.get((m.group(1), int(m.group(2)))) if m else None
     if not got:
         return it
     chip = ("🔥 " if got[1] else "") + f"{got[0]}점"
-    return {**it, "sco": got[0], "note": " · ".join(x for x in (chip, it.get("note") or "") if x)}
+    return {**it, "sco": got[0], "sc": chip, "hot": got[1]}  # 칩은 제목 옆 (주인 11/10 '글 옆에 점수') — routine.js
 
 
 def by_score(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

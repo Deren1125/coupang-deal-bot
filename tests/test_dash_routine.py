@@ -425,7 +425,10 @@ def test_post_rows_sorted_by_score_with_chip(bot: DealBot, tmp_path: Path) -> No
     write_export(tmp_path / "blogauto.json", posts=data["posts"], status={**st, "routine": rt})
     its = routine.view(bot, now=at(bot, day, "09:30"))["slots"][0]["items"]
     assert [i["id"] for i in its] == ["rsv:issue:46", "pub:issue:47", "pub:issue:48", "nb:issue:a", "pub:issue:999"]
-    assert its[0]["note"] == "🔥 82점" and its[0]["sco"] == 82
-    assert its[2]["note"] == "60점 · 사진 5장" and "sco" not in its[3] and "sco" not in its[4]
+    # 11/10 주인 '점수도 글 옆에': 칩은 회색 줄(note) 앞이 아니라 제목 옆 (sc·hot → routine.js 알약)
+    assert its[0]["sc"] == "🔥 82점" and its[0]["hot"] is True and its[0]["sco"] == 82 and "점" not in its[0]["note"]
+    assert its[2]["sc"] == "60점" and its[2]["hot"] is False and its[2]["note"] == "사진 5장"
+    assert "sco" not in its[3] and "sc" not in its[3] and "sco" not in its[4]
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "a.done - b.done || (b.sco + 1 || 0) - (a.sco + 1 || 0)" in js  # 블로그별 칸도 점수 높은 순 (점수 모르는 줄은 뒤)
+    assert "el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null)" in js

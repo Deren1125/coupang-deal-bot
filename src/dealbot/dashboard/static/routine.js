@@ -11,7 +11,7 @@ const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{di
   '.rt .it+.it{background:linear-gradient(var(--line),var(--line)) 56px 0/100% 1px no-repeat}' +
   '.rt .cb{flex:none;width:44px;height:44px;padding:0;border:2px solid var(--fline);border-radius:12px;background:var(--field);color:var(--gr);font-size:20px}' +
   '.rt .cb[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}.rt .it .grow{flex:1;min-width:0;padding-top:10px}' +
-  '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}' +
+  '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}.rt .sc{display:inline-block;margin-left:6px;padding:0 7px;border-radius:9px;font-size:12px;font-weight:600;line-height:20px;font-style:normal;color:var(--sub);background:var(--line);white-space:nowrap}.rt .sc.h{color:#E8590C;background:rgba(232,89,12,.14)}' +
   '.rt .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}.rt .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
   '.rt a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
   '.rt .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}.rt .bar i{display:block;height:100%;background:var(--gr)}' +
@@ -200,7 +200,7 @@ function item(it) {
   return el('div', {class: 'it' + (it.done ? ' dn' : ''), 'data-id': it.id},
     el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
-    el('div', {class: 'grow'}, el('span', {class: 't'}, it.title),
+    el('div', {class: 'grow'}, el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null),
       el('span', {class: 's'}, [by() ? it.group : it.tag, `${it.min}분`, it.note, pk && pk.status.split(' · ')[0]].filter(Boolean).join(' · ')),
       it.paste && !it.done ? paste(it.paste) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
 }

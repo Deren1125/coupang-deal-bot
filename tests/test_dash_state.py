@@ -73,7 +73,7 @@ async def test_todo_merges_deals_notices_and_export_posts(bot: DealBot, settings
     assert pick["primary"]["action"] == "blog.photos" and pick["primary"]["multiple"] is True
     assert pick["detail"]["photo_request"]["must"] and pick["chip"] == "Pick"
     ask = by["post-finance-12"]
-    assert ask["primary"]["action"] == "blog.answer" and ask["status"] == "질문 1개"
+    assert ask["primary"]["action"] == "blog.answer" and ask["status"] == "질문 1개 · 65점"  # 11/10 할 일 카드에도 점수
     # Pick 은 간격 두고만 발행 (주인 10/18): 큰 버튼은 '간격 두고 발행' (확인 없이 줄 끝으로), '지금 발행' 은 없다
     pub = by["post-issue-31"]
     assert pub["primary"]["action"] == "blog.schedule" and pub["primary"]["label"] == "간격 두고 발행"
