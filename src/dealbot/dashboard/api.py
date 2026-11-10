@@ -24,12 +24,13 @@
   GET  /dashboard/api/logins            로그인 관리 칸 (logins.view — 연결 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/routine           오늘 할 일 칸 (routine.view — 할 일 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/uploads           올리기 할 일 칸 (uploadplan.view — SNS 탭 '올리기'를 열 때만 · no-store)
+  GET  /dashboard/api/inbox             결재함 (inbox.view — owner-inbox 가지 카드·밤사이 소식 · 할 일 탭에서 · no-store)
   GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만)
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kkumi.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,inbox.js,kkumi.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -90,6 +91,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "sns.js": "text/javascript; charset=utf-8",  # sns.js: SNS 탭 상자 (10/26, SNS 탭을 처음 열 때만)
              "routine.js": "text/javascript; charset=utf-8",  # routine.js: 할 일 탭 '오늘 할 일' 칸 (10/27, 셸이 defer 로 — app.js 는 예산 끝)
              "shorts.js": "text/javascript; charset=utf-8",  # shorts.js: SNS 탭 '올리기' 칸 (11/08, 처음 열 때만 — sns.js 가 meta sb-shorts 로)
+             "inbox.js": "text/javascript; charset=utf-8",  # inbox.js: 결재함 (11/10, 셸이 defer 로 — 할 일 탭 맨 위 줄 + 결재함 화면)
              "kkumi.js": "text/javascript; charset=utf-8"}  # kkumi.js: '꾸미기' 책갈피 원본 (10/27 — 화면은 받지 않음, kkumi.py 가 javascript: 주소로)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -221,6 +223,7 @@ class DashApi:
         web.route(f"{API}/logins", self.logins)
         web.route(f"{API}/routine", self.routine)
         web.route(f"{API}/uploads", self.uploads_plan)
+        web.route(f"{API}/inbox", self.inbox)
         web.route(f"{API}/kkumi", self.kkumi)
         web.route(f"{API}/naver_qr.png", self.naver_qr)
         web.route(f"{API}/deal/hot", self.deal_hot)
@@ -559,6 +562,12 @@ class DashApi:
     async def uploads_plan(self, query: dict[str, str]) -> Any:
         """올리기 할 일 (주인 11/08) — 쇼츠 서버 일정(10분마다 읽어 둔 것) + 체크 (읽기만, 쇼츠 서버에 쓰지 않음)."""
         return jresp(200, self.bot.dash_state.uploads(), {"Cache-Control": "no-store"})
+
+    async def inbox(self, query: dict[str, str]) -> Any:
+        """결재함 (주인 11/10) — owner-inbox 가지에서 1분마다 받아 둔 카드·소식 (읽기만 · 세션 id 없음)."""
+        from dealbot.dashboard import inbox
+
+        return jresp(200, await asyncio.to_thread(inbox.view, self.bot), {"Cache-Control": "no-store"})
 
     async def kkumi(self, query: dict[str, str]) -> Any:
         """'꾸미기' 책갈피 코드 (주인 10/27 — 네이버 글쓰기에 붙여 넣은 글의 링크 카드를 주인 아이패드에서 만듦 · 바깥 요청 없는 코드)."""

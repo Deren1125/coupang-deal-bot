@@ -222,8 +222,10 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, re.S)
     # theme.js (화면 밝기, 10/24) · app.js · thpost.js (스레드 칸, 10/21 — threads.js 보다 먼저 떠 있어야 칸이 붙음) ·
     # logins.js (연결 탭 '로그인 관리' 칸, 10/26 — app.js 예산 끝이라 셸이 받음) · routine.js (할 일 탭 '오늘 할 일' 칸, 10/27) · boot
-    assert len(scripts) == 6
-    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (rt_attrs, rt_body), (boot_attrs, _boot) = scripts
+    # · inbox.js (할 일 탭 '결재함' 줄 + 결재함 화면, 11/10)
+    assert len(scripts) == 7
+    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (rt_attrs, rt_body), (ib_attrs, ib_body), (boot_attrs, _boot) = scripts
+    assert re.fullmatch(r' defer src="/dashboard/static/inbox\.js\?v=[0-9a-f]{10}"', ib_attrs) and ib_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/routine\.js\?v=[0-9a-f]{10}"', rt_attrs) and rt_body == ""
     assert re.fullmatch(r' blocking="render" src="/dashboard/static/theme\.js\?v=[0-9a-f]{10}"', th_attrs) and th_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/thpost\.js\?v=[0-9a-f]{10}"', tp_attrs) and tp_body == ""
