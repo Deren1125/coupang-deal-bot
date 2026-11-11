@@ -10,7 +10,7 @@ const CSS = '#lgp .row{flex-wrap:wrap;row-gap:8px}#lgp .grow{flex-basis:60%}#lgp
   '#lgp .qr p{margin:0;font-size:13px;text-align:center}#lgp .vn{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}' +
   '#lgp .vn span{flex:1;min-width:0;font-size:14px}#lgp .ro .t{color:var(--sub)}#lgp .kk ol{margin:0;padding:0 0 10px 20px;font-size:14px;line-height:1.6}' +
   '#lgp .kk .ac{width:100%;min-height:48px;margin-bottom:12px;justify-content:center}';
-let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = false, kk = null, kd = null, ko = false;
+let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = false, kk = null;
 
 function el(t, a, ...kids) {
   const e = D.createElement(t);
@@ -98,17 +98,18 @@ function row(r) {
     right(r.check), right(r.button, r.bad));  // check: 몰 '지금 확인'
 }
 
-// '꾸미기 버튼 설치' (10/27 — 붙여 넣은 글의 링크 카드를 만드는 사파리 책갈피 · 코드는 펼칠 때 /dashboard/api/kkumi 로)
+// 책갈피 설치 칸 — '꾸미기'(10/27 링크 카드) · '통계 보내기'(11/11 네이버 내 통계 → 대시보드) · 코드는 펼칠 때 /dashboard/api/<api> 로
+const BM = [{api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드)'}, {api: 'statscap', t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'}];
 function kkDraw() {
   const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
-  kk.replaceChildren(el('button', {class: 'fold kf', type: 'button', 'aria-expanded': ko ? 'true' : 'false', onclick: () => {
-    ko = !ko; if (ko && !kd) kkLoad(); kkDraw(); }}, '꾸미기 버튼 설치 (링크 카드)'), ...(!ko ? [] : kd ? [el('ol', {}, kd.steps.map(x => el('li', {text: x}))),
-    el('button', {class: 'sm ac', type: 'button', onclick: () => c(kd.code)}, '코드 복사')] : [el('p', {class: 'note'}, '불러오는 중…')]));
+  kk.replaceChildren(...BM.flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
+    b.o = !b.o; if (b.o && !b.d) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o ? [] : b.d ? [el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
+    el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사')] : [el('p', {class: 'note'}, '불러오는 중…')])]));
 }
-async function kkLoad() {
-  try { const r = await fetch('/dashboard/api/kkumi', {credentials: 'same-origin', headers: {Accept: 'application/json'}}); if (r.status === 200) kd = await r.json(); } catch (e) { /* 다시 펼치면 */ }
-  if (!kd) { ko = false; toast('불러오지 못했어요 — 잠시 뒤 다시'); }
+async function kkLoad(b) {
+  try { const r = await fetch('/dashboard/api/' + b.api, {credentials: 'same-origin', headers: {Accept: 'application/json'}}); if (r.status === 200) b.d = await r.json(); } catch (e) { /* 다시 펼치면 */ }
+  if (!b.d) { b.o = false; toast('불러오지 못했어요 — 잠시 뒤 다시'); }
   kkDraw();
 }
 

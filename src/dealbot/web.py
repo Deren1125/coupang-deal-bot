@@ -196,6 +196,7 @@ class WebServer:
         self.guard_denied: dict[str, DeniedHook] = {}  # 앞부분 → 막혔을 때 401 대신 쓸 응답을 정하는 함수
         self.header_get: set[str] = set()  # 핸들러가 요청 헤더도 받는 GET 경로 (with_headers=True)
         self.header_post: set[str] = set()  # 핸들러가 요청 헤더도 받는 POST 경로
+        self.cross_site_post: set[str] = set()  # 다른 사이트에서 온 폼도 받는 POST 경로 (핸들러가 열쇠로 확인)
         self.header_prefix: set[str] = set()  # 핸들러가 요청 헤더도 받는 앞부분 경로
         self.json_routes: dict[str, tuple[JsonHandler, int]] = {}  # POST JSON 경로 → (핸들러, 본문 최대 바이트)
         # POST 로 큰 본문을 파일로 받는 경로 → (핸들러, 요청 헤더 → 받을 수 있는 최대 바이트(0 이면 안 받음), 임시 파일 경로 만들기)
@@ -222,11 +223,16 @@ class WebServer:
             self.header_get.discard(path)
 
     def route_post(self, path: str, handler: Handler | HeaderHandler, *, max_body: int = 4096,
-                   with_headers: bool = False) -> None:
+                   with_headers: bool = False, cross_site: bool = False) -> None:
         """폼 하나를 POST 로 받는 경로. 주소의 쿼리는 쓰지 않고 본문(application/x-www-form-urlencoded)만 핸들러로 넘긴다.
         본문이 max_body 보다 크면 읽지 않고 413. 인증은 route 와 같다 (guard_prefix 아래면 먼저 확인).
-        with_headers 면 핸들러를 (폼, 요청 헤더) 로 부른다."""
+        with_headers 면 핸들러를 (폼, 요청 헤더) 로 부른다.
+        cross_site: 다른 사이트에서 보낸 폼도 핸들러까지 (핸들러가 본문의 열쇠로 직접 확인 — '통계 보내기' 책갈피, 주인 11/11)."""
         self.post_routes[path] = (handler, max_body)  # type: ignore[assignment]
+        if cross_site:
+            self.cross_site_post.add(path)
+        else:
+            self.cross_site_post.discard(path)
         if with_headers:
             self.header_post.add(path)
         else:
@@ -547,7 +553,7 @@ class WebServer:
             denied = self._auth_denied(check, headers)
             if denied is not None:
                 return denied
-        if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
+        if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site" and path not in self.cross_site_post:
             return 403, page("받지 않음", "다른 사이트에서 보낸 요청은 받지 않습니다.")
         if (headers.get("content-type") or "").split(";", 1)[0].strip().lower() != FORM_TYPE:
             return 415, page("받지 않는 형식", "폼으로만 보내 주세요.")

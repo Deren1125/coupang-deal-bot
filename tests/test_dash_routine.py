@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -28,7 +29,7 @@ from dash_helpers import (
 from dealbot.app import DealBot
 from dealbot.bridge import spool
 from dealbot.config import Settings
-from dealbot.dashboard import routine
+from dealbot.dashboard import routine, statscap
 from dealbot.dashboard.actions import BLOG_ACTIONS, clean_args
 from dealbot.dashboard.blogauto import _routine, parse_export
 from test_dash_state import write_export
@@ -125,7 +126,8 @@ def test_parse_export_puts_routine_next_to_naver_visits(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- 2) 보기
 def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Path) -> None:
     assert routine.view(bot) == {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0,
-                                 "ably": None, "rising": [], "rests": []}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
+                                 "ably": None, "rising": [], "rests": [],
+                                 "stats": statscap.nudge(bot.db, time.time(), ZoneInfo(bot.settings.app.timezone))}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))
     v = routine.view(bot, now=at(bot, day, "13:10"))
@@ -351,7 +353,7 @@ def test_routine_js_mounts_on_the_todo_tab_and_checks(bot: DealBot, tmp_path: Pa
     assert got["opened"] == ["pub:finance:1", "nb:issue:a", "sns:x:1"]
     assert got["again"] == "rtp" and got["keep"] == "오늘 할 일 · 1/3" and got["connect"] is False
     # 목록이 없으면 칸 전체를 숨김
-    empty = routine.view(bot, now=at(bot, day, "10:00")) | {"slots": [], "total": 0}
+    empty = routine.view(bot, now=at(bot, day, "10:00")) | {"slots": [], "total": 0, "stats": None}  # '오늘 통계 보내기' 줄만 있어도 보임 (11/11)
     out = subprocess.run([node, "-e", DOM_SHIM.split("  out.head = ")[0] + "  console.log(JSON.stringify(out)); process.exit(0);\n})();",
                           str(STATIC / "routine.js"), json.dumps(empty, ensure_ascii=False)], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr

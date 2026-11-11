@@ -4,7 +4,8 @@
 GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 밖, 그리기는 static/routine.js) → view():
     {"day", "today": bool, "slots": [{key, at, label, items: [{…item, done, tag}], done, total, min_left, current}],
      "overflow", "done", "total", "ably": {n, note, rows: [{rid, pid, title, piece, name, price, shop, url, due, due_text}]} | None,
-     "times", "rising": [키워드], "rests": [한 줄]} — rising·rests 는 extras() (주인 10/30)
+     "times", "rising": [키워드], "rests": [한 줄], "stats": 한 줄 | None} — rising·rests 는 extras() (주인 10/30) ·
+     stats = statscap.nudge '오늘 통계 보내기' (주인 11/11 — 오늘 책갈피로 보낸 통계가 있으면 None)
   목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
 에이블리 링크 부탁 (주인 10/28): Blog-Auto 칸 ably_requests (blogauto._ably_requests) — 서버는 에이블리를 열지 않고 주인이 폰 앱에서
   링크를 만들어 붙여 넣음 → 대시보드 일 blog.similar_links {blog: issue, pid, links: [붙여 넣은 글], rid}. 없거나 0개면 None.
@@ -230,6 +231,13 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001 — 두 줄이 틀려도 할 일은 보이게
         log.warning("routine extras failed: %s", type(e).__name__)
         ex = {"rising": [], "rests": []}
+    try:
+        from dealbot.dashboard import statscap
+
+        ex["stats"] = statscap.nudge(bot.db, now, _tz(bot))  # '오늘 통계 보내기' (주인 11/11 — 오늘 보낸 통계가 있으면 None)
+    except Exception as e:  # noqa: BLE001
+        log.warning("routine stats nudge failed: %s", type(e).__name__)
+        ex["stats"] = None
     if not r:
         return {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0, "ably": ably, **ex}
     hm = datetime.fromtimestamp(now, _tz(bot)).strftime("%H:%M")

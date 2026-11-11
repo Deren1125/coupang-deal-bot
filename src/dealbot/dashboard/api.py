@@ -25,6 +25,9 @@
   GET  /dashboard/api/routine           오늘 할 일 칸 (routine.view — 할 일 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/uploads           올리기 할 일 칸 (uploadplan.view — SNS 탭 '올리기'를 열 때만 · no-store)
   GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만)
+  GET  /dashboard/api/statscap          '통계 보내기' 책갈피 {code, len, steps} (statscap.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
+  POST /dashboard/api/stats_capture     책갈피가 네이버 내 통계 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 — 본문 열쇠 k 로만 받음 ·
+                                        CORS 는 https://*.naver.com 만 · via=form 이면 HTML 한 장) → statscap.save
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
@@ -62,6 +65,7 @@ from dealbot.dashboard.uploads import ID_RE as UPLOAD_ID_RE
 from dealbot.dashboard.uploads import UploadError, Uploads, max_bytes, media_type
 from dealbot.notify import iid as iidmod
 from dealbot.notify import webpush
+from dealbot.web import page as webapp_page
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +101,8 @@ SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096
 TEST_BODY_MAX = 1024
+STATSCAP_BODY_MAX = 1_500_000  # statscap.BODY_MAX 와 같게
+NAVER_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*naver\.com$")
 LABELS = ("Galaxy", "iPhone", "iPad", "컴퓨터", "휴대폰")
 
 
@@ -140,6 +146,7 @@ class DashApi:
         self.today_rate = RateWindow(30, 60.0)
         self.upload_rate = RateWindow(60, 600.0)
         self.sub_rate = RateWindow(10, 3600.0)
+        self.statscap_rate = RateWindow(30, 600.0)  # 통계 보내기 (손님마다 10분에 30번)
         self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
         self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,
                                facts=self._facts, test_rate=self.test_rate)
@@ -224,6 +231,8 @@ class DashApi:
         web.route(f"{API}/routine", self.routine)
         web.route(f"{API}/uploads", self.uploads_plan)
         web.route(f"{API}/kkumi", self.kkumi)
+        web.route(f"{API}/statscap", self.statscap)
+        web.route_post(f"{API}/stats_capture", self.stats_capture, max_body=STATSCAP_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/naver_qr.png", self.naver_qr)
         web.route(f"{API}/deal/hot", self.deal_hot)
         web.route(f"{API}/deal/find", self.deal_find)
@@ -244,7 +253,7 @@ class DashApi:
     @staticmethod
     def public_paths() -> list[str]:
         """로그인 없이 여는 앱 파일 (데이터 없음)."""
-        return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES)]
+        return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture"]  # stats_capture: 열쇠로 직접 확인
 
     # ---------------------------------------------------------- 화면
     def state_body(self, headers: dict[str, str]) -> dict[str, Any]:
@@ -570,6 +579,44 @@ class DashApi:
         from dealbot.dashboard import kkumi
 
         return jresp(200, kkumi.view(), {"Cache-Control": "no-cache"})
+
+    async def statscap(self, query: dict[str, str]) -> Any:
+        """'통계 보내기' 책갈피 코드 (주인 11/11 — 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
+        from dealbot.dashboard import statscap
+
+        try:
+            return jresp(200, statscap.view(self.bot.db, self.bot.settings.dashboard.public_url), {"Cache-Control": "no-store"})
+        except ValueError:
+            return err(503, "failed", "대시보드 공개 주소가 이상해요")
+
+    async def stats_capture(self, form: dict[str, str], headers: dict[str, str]) -> Any:
+        """책갈피가 보낸 통계 (주인 11/11). 열쇠·크기·하루 개수 확인 → 저장 → {ok, label}. 응답 CORS 는 네이버 화면에만."""
+        import html as _html
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import statscap
+
+        origin = (headers.get("origin") or "").strip().rstrip("/")
+        cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if NAVER_ORIGIN_RE.match(origin) else {"Vary": "Origin"}
+        as_page = form.get("via") == "form"
+
+        def answer(status: int, obj: dict[str, Any]) -> Any:
+            if as_page:
+                title = f"통계 보냄 ✓ ({obj['label']})" if obj.get("ok") else "통계 보내기 — 받지 않았어요"
+                body = "뒤로 가기를 눌러 통계 화면으로 돌아가요." if obj.get("ok") else _html.escape(str(obj.get("text") or ""))
+                return status, webapp_page(title, body), "text/html; charset=utf-8", {}
+            return jresp(status, obj, cors)
+
+        if not self.statscap_rate.hit(client_key(headers)):
+            return answer(429, {"ok": False, "code": "rate", "text": "너무 자주 보냈어요 — 잠시 뒤 다시"})
+        try:
+            got = statscap.save(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone))
+        except statscap.CaptureError as e:
+            if e.code == "key":
+                log.info("stats_capture: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
+            return answer(e.status, {"ok": False, "code": e.code, "text": e.text})
+        log.info("stats_capture saved: %s", got["label"])
+        return answer(200, got)
 
     async def naver_qr(self, query: dict[str, str]) -> Any:
         from dealbot.dashboard import logins

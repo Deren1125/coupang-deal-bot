@@ -313,12 +313,12 @@ function part(k, label, extra, hot, first) {
 
 function draw() {
   if (!box) return;
-  const ok = !!(data && data.slots && data.total), ab = ably(), top = rising(), rs = rests();
-  box.hidden = !ok && !ab.length && !top && !rs;
+  const ok = !!(data && data.slots && data.total), ab = ably(), top = rising(), rs = rests(), st = data && data.stats && el('p', {class: 'note'}, '📊 ' + data.stats);
+  box.hidden = !ok && !ab.length && !top && !rs && !st;
   if (box.hidden) { box.replaceChildren(); return; }
   const bar = el('i');
   if (ok) bar.style.width = Math.round(100 * data.done / data.total) + '%';
-  box.replaceChildren(...[top, ok ? [...(by() ? [] : pasteBox()),
+  box.replaceChildren(...[top, st, ok ? [...(by() ? [] : pasteBox()),
     el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, by() ? `오늘 손일 ${data.done}/${data.total} 끝냄` : `오늘 할 일 · ${data.done}/${data.total}`),
       el('button', {class: 'lnk', type: 'button', onclick: () => setBy(by() ? 'slot' : 'blog')}, by() ? '시간대별로' : '블로그별로'),
       el('button', {class: 'lnk', type: 'button', onclick: load}, '다시 보기')),

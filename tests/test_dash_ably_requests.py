@@ -261,6 +261,7 @@ const rows = () => box().all(c => c.className === 'it ab').map(r => ({rid: r.att
 
 
 def run_shim(view: dict, mode: str = "ok", text: str = BLURB) -> dict:
+    view = {**view, "stats": None}  # '오늘 통계 보내기' 줄(11/11)은 test_dash_statscap 에서
     out = subprocess.run([NODE, "-e", SHIM, str(STATIC / "routine.js"), json.dumps(view, ensure_ascii=False), mode, text],
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
