@@ -1059,7 +1059,7 @@ function vBlog() {
   const sr = S.search, tools = [S.sched && S.sched.total && {href: '#/blog/sched', t: `예약 일정 보기 · ${S.sched.total}편`}, S.pics && {href: '#/blog/pics', t: '링크에서 사진 뽑기'},
     S.photo_trial && key === 'issue' && {href: '#/blog/trial', t: '사진 테스트'}, key === 'issue' && S.ptrial && {href: '#/blog/ptrial', t: `제품 테스트 · ${S.ptrial.posts.length}편`},
     sr && sr.days.length && {href: '#/blog/search', t: sr.left ? `구글 검색 등록 · ${sr.left}개` : '구글 검색 등록'},
-    {href: '/dashboard/keyzard/', t: '키자드 등록 도우미 · 룩북 레시피'}].filter(Boolean);  // 주인 11/11 — Blog-Auto 도구 화면 (대시보드 로그인 그대로)
+    {href: '/dashboard/keyzard/', t: '키자드 등록 도우미 · 코디 레시피'}].filter(Boolean);  // 주인 11/11 — Blog-Auto 도구 화면 (대시보드 로그인 그대로)
   const mt = S.todo.filter(i => mineT(i, key) && !b.waiting.some(w => w.iid === i.iid) && !(b.hide || []).includes(i.iid));  // 기다리는 글과 같은 카드는 한 번만
   if (mt.length) out.push(el('p', {class: 'h3'}, `이 블로그 할 일 ${mt.length}`), ...mt.map(i => item(i)));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));
