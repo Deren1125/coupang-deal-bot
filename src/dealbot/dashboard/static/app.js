@@ -729,7 +729,8 @@ async function mark(urls, on) {
 function vSearch() {
   const s = S.search, out = [el('div', {class: 'top'}, el('h2', {}, '구글 검색 등록'), el('a', {class: 'lnk', href: '#/blog/' + (LS.g('blog') || 'finance')}, '블로그로'))];
   if (!s || !s.days.length) return out.concat(el('p', {class: 'empty'}, '새로 발행한 글이 아직 없어요'));
-  out.push(el('p', {class: 'note'}, '블로그 아이디마다 키자드에 붙여넣고 등록함을 눌러 주세요'));
+  out.push(el('p', {class: 'note'}, '블로그 아이디마다 키자드에 붙여넣고 등록함을 눌러 주세요'),
+    el('a', {class: 'mr', href: '/dashboard/keyzard/'}, '키자드 등록 도우미 열기 (버튼으로 등록 · 계정당 하루 5번)'));
   for (const g of s.blogs) {
     const left = g.items.filter(x => !isOn(x)).map(x => x.url);
     out.push(el('div', {class: 'top hs'}, el('p', {class: 'h3'}, `${g.label} · ${left.length ? left.length + '개 남음' : '다 했어요'}`),
@@ -1057,7 +1058,8 @@ function vBlog() {
   // 도구는 한 칸에 모아 글 아래로
   const sr = S.search, tools = [S.sched && S.sched.total && {href: '#/blog/sched', t: `예약 일정 보기 · ${S.sched.total}편`}, S.pics && {href: '#/blog/pics', t: '링크에서 사진 뽑기'},
     S.photo_trial && key === 'issue' && {href: '#/blog/trial', t: '사진 테스트'}, key === 'issue' && S.ptrial && {href: '#/blog/ptrial', t: `제품 테스트 · ${S.ptrial.posts.length}편`},
-    sr && sr.days.length && {href: '#/blog/search', t: sr.left ? `구글 검색 등록 · ${sr.left}개` : '구글 검색 등록'}].filter(Boolean);
+    sr && sr.days.length && {href: '#/blog/search', t: sr.left ? `구글 검색 등록 · ${sr.left}개` : '구글 검색 등록'},
+    {href: '/dashboard/keyzard/', t: '키자드 등록 도우미 · 룩북 레시피'}].filter(Boolean);  // 주인 11/11 — Blog-Auto 도구 화면 (대시보드 로그인 그대로)
   const mt = S.todo.filter(i => mineT(i, key) && !b.waiting.some(w => w.iid === i.iid) && !(b.hide || []).includes(i.iid));  // 기다리는 글과 같은 카드는 한 번만
   if (mt.length) out.push(el('p', {class: 'h3'}, `이 블로그 할 일 ${mt.length}`), ...mt.map(i => item(i)));
   out.push(el('p', {class: 'h3'}, '기다리는 글'));

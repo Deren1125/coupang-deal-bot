@@ -160,6 +160,18 @@ def redirect_target_ok(target: str) -> bool:
     return target.startswith("/") and target[1:2] not in ("/", "\\") and "\\" not in target
 
 
+TUNNEL_BODY_MAX = 64 * 1024  # 이어 주는 화면(키자드 도구)으로 넘기는 POST 본문 상한 — 버튼·설정 값만
+
+
+def _same_site(headers: dict[str, str]) -> bool:
+    """GET 이 아닌 이어 주기 요청: Origin(없으면 Referer)의 호스트가 Host 와 같아야 (다른 사이트에서 로그인 쿠키로 누르게 하는 것 막기)."""
+    host = (headers.get("host") or "").strip().lower()
+    src = (headers.get("origin") or headers.get("referer") or "").strip()
+    if not host or not src or src == "null":
+        return False
+    return (urlsplit(src).netloc or "").lower() == host
+
+
 def _close_header(block: bytes) -> bytes:
     """머리 덩어리(첫 줄 뒤 · 빈 줄로 끝남)에서 Connection·Keep-Alive 줄을 빼고 Connection: close 를 넣는다."""
     lines = [ln for ln in block.split(b"\r\n") if ln and not ln.lower().startswith((b"connection:", b"keep-alive:"))]
@@ -191,6 +203,7 @@ class WebServer:
         # 앞부분 → 그 아래를 그대로 넘길 이 서버 안쪽(127.0.0.1) 포트를 돌려주는 함수 (None 이면 닫힘). 지키는 앞부분(guard)의
         # 로그인을 먼저 통과해야 함 — 주인 10/23 대시보드에서 원격 로그인 화면 (noVNC 정적 파일·웹소켓 → 127.0.0.1 의 websockify)
         self.tunnels: dict[str, Callable[[], int | None]] = {}
+        self.tunnel_methods: dict[str, frozenset[str]] = {}
         self.auth_realm = "dashboard"
         self._server: asyncio.AbstractServer | None = None
 
@@ -271,10 +284,14 @@ class WebServer:
             "WWW-Authenticate": f'Basic realm="{self.auth_realm}", charset="UTF-8"',
         }
 
-    def route_tunnel(self, prefix: str, port: Callable[[], int | None]) -> None:
+    def route_tunnel(self, prefix: str, port: Callable[[], int | None], methods: tuple[str, ...] = ("GET",)) -> None:
         """prefix 아래 GET(웹소켓 포함)을 127.0.0.1:port() 로 그대로 잇는다 (prefix 는 떼고). port() 가 None 이면 404.
-        인증은 지키는 앞부분 규칙 그대로 — prefix 는 guard_prefix 로 지키는 경로 아래여야 한다 (아니면 열지 않음)."""
-        self.tunnels[prefix.rstrip("/") + "/"] = port
+        인증은 지키는 앞부분 규칙 그대로 — prefix 는 guard_prefix 로 지키는 경로 아래여야 한다 (아니면 열지 않음).
+        methods 에 POST·DELETE 를 주면 그것도 잇는다 (키자드 도구 화면 — 주인 11/11). GET 이 아닌 요청은 같은 사이트에서 온 것만
+        (Origin·Referer 의 호스트 = Host — 다른 사이트가 로그인 쿠키로 버튼을 누르게 하지 못하게) · 본문은 TUNNEL_BODY_MAX 까지."""
+        key = prefix.rstrip("/") + "/"
+        self.tunnels[key] = port
+        self.tunnel_methods[key] = frozenset(m.upper() for m in methods)
 
     async def _tunnel(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, port: int, head: bytes,
                       prefix: str) -> bool:
@@ -286,13 +303,26 @@ class WebServer:
         method, target, version = first.decode("latin-1").split(" ", 2)
         target = "/" + target[len(prefix):]
         upgrade = b"upgrade: websocket" in head.lower()
+        body = b""
+        if method != "GET" and not upgrade:  # 본문은 머리 뒤에 남아 있음 — 길이만큼 읽어 같이 보냄
+            hdrs = parse_headers(rest.split(b"\r\n"))
+            if "transfer-encoding" in hdrs:  # 길이 없는 본문은 받지 않음 (브라우저 fetch 는 늘 Content-Length)
+                return False
+            n = content_length(hdrs) if "content-length" in hdrs else 0
+            if n is None or n > TUNNEL_BODY_MAX:
+                return False
+            if n:
+                try:
+                    body = await asyncio.wait_for(reader.readexactly(n), timeout=_READ_TIMEOUT)
+                except (asyncio.IncompleteReadError, TimeoutError):
+                    return False
         if not upgrade:
             rest = _close_header(rest)
         try:
             up_r, up_w = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=5)
         except (OSError, TimeoutError):
             return False  # 원격 화면 프로그램이 꺼짐 — 부른 쪽이 '닫혔어요' 화면을 보냄
-        up_w.write(f"{method} {target} {version}\r\n".encode("latin-1") + rest)
+        up_w.write(f"{method} {target} {version}\r\n".encode("latin-1") + rest + body)
         await up_w.drain()
         if not upgrade:
             try:
@@ -378,10 +408,12 @@ class WebServer:
                 headers[PEER_HEADER] = str(peer[0])
             tpath = urlsplit(target).path or "/"
             tprefix = next((p for p in self.tunnels if tpath.startswith(p)), None)
-            if tprefix is not None and method == "GET":
+            if tprefix is not None and method in self.tunnel_methods.get(tprefix, frozenset({"GET"})):
                 guarded, guard, _gp = self._guard_for(tpath)
                 denied = self._precheck(method, tpath, headers) if guarded and guard is not None else \
                     (404, page("없는 주소", "이 주소는 쓰지 않습니다."))
+                if denied is None and method != "GET" and not _same_site(headers):
+                    denied = (403, page("막았어요", "다른 곳에서 보낸 요청이라 넘기지 않았어요."))
                 port = self.tunnels[tprefix]() if denied is None else None
                 if denied is None and port and await self._tunnel(reader, writer, port, head, tprefix):
                     return

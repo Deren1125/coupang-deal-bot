@@ -67,6 +67,8 @@ log = logging.getLogger(__name__)
 
 JT = "application/json; charset=utf-8"
 API = "/dashboard/api"
+KEYZARD_PREFIX = "/dashboard/keyzard/"  # Blog-Auto tools/keyzard_indexer (127.0.0.1:KEYZARD_PORT)
+KEYZARD_PORT = 8110
 THUMB_RE = re.compile(r"^[a-z0-9-]{1,64}\.(jpg|webp)$")
 PIC_MAX_BYTES = 8_000_000
 # 룩북 릴스 (주인 10/25): /dashboard/lookbook/<id>/video.mp4 · cover.jpg — 이름은 번호에서 정해짐 (붙여 넣은 경로를 그대로 쓰지 않음)
@@ -231,6 +233,9 @@ class DashApi:
 
         # 원격 로그인 화면 (주인 10/23): 대시보드 로그인 뒤, 세션이 살아 있을 때만 127.0.0.1:6080(websockify)로 잇는다
         web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))
+        # 키자드 등록 도우미·룩북 수집·코디 트렌드 화면 (주인 11/11): Blog-Auto 데몬이 127.0.0.1:8110 에 띄움 (blogauto/keyzard_tool.py).
+        # 대시보드 로그인을 그대로 쓴다 — 화면 자체 비밀번호 없음. 버튼(POST·DELETE)은 같은 사이트에서 온 것만.
+        web.route_tunnel(KEYZARD_PREFIX, lambda: KEYZARD_PORT, methods=("GET", "POST", "DELETE"))
         web.route_prefix("/dashboard/connect/", self.connect, with_headers=True)
         web.route(SW_PATH, self.sw)
         for name in APP_FILES:
