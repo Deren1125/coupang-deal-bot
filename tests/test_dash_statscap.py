@@ -5,6 +5,8 @@
 2) save(): 열쇠 · 네이버 주소만 · 태그·스크립트 빼기 · 이메일·전화 가리기 · 크기 제한 · 블로그·화면 종류·날짜 짐작 · 30일 지우기 · 하루 개수.
 3) GET /dashboard/api/statscap (로그인 아래) · POST /dashboard/api/stats_capture (로그인 없이 · 교차 사이트 · CORS 는 네이버만 · 폼이면 HTML) ·
    할 일 탭 '오늘 통계 보내기' (오늘 보낸 것이 있으면 사라짐).
+4) 11/11 밤 실사용에서 '저장 중 잠시만 기다려 주세요.' 덮개 글만 옴 → 덮개 사라질 때까지 기다림 · 덮개·안 보이는 요소 뺌 ·
+   ROOT 가 덮개면 body 전체(메뉴 뺌) · div 표([role=row]) 도 읽음.
 """
 
 from __future__ import annotations
@@ -82,8 +84,7 @@ const cell = t => ({innerText: t});
 const table = {rows: [{cells: [cell('유입 경로'), cell('조회수')]}, {cells: [cell('네이버 검색'), cell('120')]}, {cells: [cell(''), cell('')]}]};
 const doc = {title: '블로그 통계', location: {href: 'https://blog.stat.naver.com/blog/inflow?blogId=derenpick'},
   body: {querySelectorAll: s => s.startsWith('header') ? [nav] : []},
-  querySelector: s => s.startsWith('main') ? root : null,
-  querySelectorAll: s => s === 'iframe,frame' ? [] : s === 'table' ? [table] : s.startsWith('[aria-selected') ? [tab] :
+  querySelectorAll: s => s === 'iframe,frame' ? [] : s.startsWith('main') ? [root] : s === 'table' ? [table] : s.startsWith('[aria-selected') ? [tab] :
     s.startsWith('a[href') ? [{href: 'https://blog.naver.com/derenpick'}] : []};
 global.window = {}; global.document = doc; global.location = {hostname: 'blog.stat.naver.com', href: doc.location.href};
 global.alert = m => out.alerts.push(m); global.confirm = () => false;
@@ -113,6 +114,62 @@ def test_bookmarklet_on_fake_stats_page_sends_text_rows_and_server_saves() -> No
     assert out == {"ok": True, "label": "데런픽 · 유입 분석 · 11/10", "kind": "유입 분석", "blog": "issue", "day": "2026-11-10"}
     rec = json.loads(next(v for k, v in db.kv.items() if k.startswith(statscap.PREFIX)))
     assert "a.b@ex.com" not in rec["text"] and "010-1234-5678" not in rec["text"] and "[이메일]" in rec["text"] and "[전화]" in rec["text"]
+
+
+LOADING = r"""
+const [code] = process.argv.slice(1), out = {alerts: [], waited: 0};
+let polls = 0;
+const LOAD = '저장 중\n잠시만 기다려 주세요.';
+const el = (t, kids, o) => ({innerText: t, contains: x => (kids || []).includes(x), ...(o || {})});
+const hidden = {getClientRects: () => []};
+const nav = el('블로그 홈\n내 통계\n조회수 순위');
+// ROOT 로 고른 #container 가 덮개(글이 덮개뿐) · body 는 처음 두 번 덮개만, 그 뒤 통계 · 덮개 든 표 줄 · 숨은 표·줄
+const layer = el(LOAD);
+const real = '2026.11.10. 조회수 순위\n' + Array.from({length: 12}, (_, i) => (i + 1) + ' 겨울 패딩 고르는 법 ' + (i + 1) + '편 조회수 ' + (300 - i * 7)).join('\n');
+const body = {querySelectorAll: s => s.startsWith('header') ? [nav] : [],
+  get innerText() { polls++; return polls < 3 ? '블로그 홈\n내 통계\n조회수 순위\n' + LOAD : '블로그 홈\n내 통계\n조회수 순위\n' + real; }};
+const cell = (t, o) => ({innerText: t, ...(o || {})});
+const loadingTable = {rows: [{cells: [cell('-'), cell('저장 중잠시만 기다려 주세요.'), cell('-')]}]};
+const hiddenTable = {rows: [{cells: [cell('숨은'), cell('999')]}], ...hidden};
+const row = cs => ({closest: s => s === 'table' ? null : grid, querySelectorAll: () => cs.map(t => cell(t))});
+const grid = {};
+const gridRows = [row(['순위', '제목', '조회수']), row(['1', '겨울 패딩 고르는 법 1편', '300']), row(['2', '저장 중', '-']),
+  {...row(['9', '숨은 줄', '1']), ...hidden}];
+const doc = {title: '블로그 통계', location: {href: 'https://admin.blog.naver.com/derenpick/stat/rank_pv'}, body,
+  querySelectorAll: s => s === 'iframe,frame' ? [] : s.startsWith('main') ? [el('', [], hidden), layer] : s === 'table' ? [loadingTable, hiddenTable] :
+    s === '[role=row]' ? gridRows : []};
+global.window = {}; global.document = doc; global.location = {hostname: 'admin.blog.naver.com', href: doc.location.href};
+global.alert = m => out.alerts.push(m); global.confirm = () => false;
+global.fetch = async (u, o) => { out.body = o.body.toString(); return {json: async () => ({ok: true, label: '데런픽 · 조회수 순위 · 11/10'})}; };
+(async () => { const t = Date.now(); await eval(code); out.waited = Date.now() - t; out.polls = polls; console.log(JSON.stringify(out)); })();
+"""
+
+
+@needs_node
+def test_bookmarklet_waits_out_loading_overlay_and_reads_body_and_div_grid() -> None:
+    db = FakeDb()
+    res = subprocess.run([NODE, "-e", LOADING, code(db)], capture_output=True, text=True, timeout=30)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    assert got["alerts"] == ["통계 보냄 ✓ (데런픽 · 조회수 순위 · 11/10)"]
+    assert 900 <= got["waited"] < 5000  # 덮개가 보이는 동안 0.5초씩 기다림 (끝없이는 아님)
+    sent = dict(parse_qsl(got["body"], keep_blank_values=True))
+    lines = sent["x"].splitlines()
+    assert "저장 중" not in sent["x"] and "잠시만 기다려" not in sent["x"] and "블로그 홈" not in lines  # 덮개 · 메뉴 뺌
+    assert lines[0] == "2026.11.10. 조회수 순위" and "1 겨울 패딩 고르는 법 1편 조회수 300" in lines and len(lines) == 13
+    assert json.loads(sent["r"]) == [[["순위", "제목", "조회수"], ["1", "겨울 패딩 고르는 법 1편", "300"]]]  # 덮개 줄 · 숨은 표·줄 뺌
+    out = statscap.save(db, sent, now=NOW, tz=TZ)
+    assert out["kind"] == "조회수 순위" and out["blog"] == "issue" and out["day"] == "2026-11-10"
+
+
+def test_bookmarklet_source_keeps_one_statement_per_line_rules() -> None:
+    src = (STATIC / "statscap.js").read_text(encoding="utf-8")
+    body = src.split("*/", 1)[1]
+    for ln in body.splitlines():
+        s = ln.strip()
+        assert "//" not in s or s.startswith("//") or "://" in s or "\\/" in s, ln  # // 주석은 줄 맨 앞에만
+    for rx in __import__("re").findall(r"(?<![\w)])/(?![/*])((?:\\.|[^/\n])+)/[gimsuy]*[.;),]", body):
+        assert " " not in rx and "'" not in rx and '"' not in rx, rx  # 정규식 안에 공백·따옴표 없음
 
 
 # ---------------------------------------------------------------- 2) 받기

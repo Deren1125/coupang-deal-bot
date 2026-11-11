@@ -55,3 +55,4 @@
 - 받기: 로그인 대신 책갈피 열쇠(kv statscap_secret HMAC — 지우면 예전 책갈피 무효) · 교차 사이트 폼 한 곳만(web.route_post cross_site) · CORS 는 https://*.naver.com 만 · 손님마다 10분 30번 · 하루 60개 · 글 60KB·표 300줄 · 태그·스크립트 빼고 이메일·전화 가림 → kv stats_capture:<날>:… 30일. 막히면 이 창에서 폼으로 보내기(HTML 한 장).
 - 할 일 탭 '📊 오늘 통계 보내기' 한 줄 — 오늘 보낸 것이 있으면 사라짐. Blog-Auto 서버 보고 '== stats_capture ==' 칸이 최근 7일을 읽음.
 - app.js gzip 한도: 96e1216(키자드 메뉴)이 31440 B 로 넘긴 채 올라가 30.75 KB 로 (test_dash_shell).
+- 11/11 밤 고침: 갤럭시 크롬 첫 실사용(today·referer·rank_pv)에서 세 화면 모두 '저장 중 잠시만 기다려 주세요.' 덮개 글만 옴 → 책갈피가 덮개 글이 보이는 동안 0.5초씩 최대 5초 기다리고, 덮개·로딩 줄과 안 보이는 요소·표를 빼고, ROOT 글이 200자보다 짧으면 body 전체(메뉴 줄 뺌)를 읽고, div 표([role=row] 안 cell·gridcell·columnheader)도 읽음. 덮개 칸이 든 줄·'-'뿐인 줄은 뺌. 열쇠는 그대로라 서버 쪽 변경 없음 — 책갈피 코드만 다시 복사해 넣으면 됨.
