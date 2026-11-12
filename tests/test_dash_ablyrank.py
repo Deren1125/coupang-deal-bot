@@ -67,8 +67,8 @@ def test_bookmarklet_has_endpoint_key_and_keeps_file_rules() -> None:
     db = FakeDb()
     js = code(db)
     assert "'https://dash.example/dashboard/api/ably_rank_capture'" in js and f"'{ablyrank.key(db)}'" in js and "@@" not in js
-    # 사파리 책갈피 주소 칸: 꾸미기 책갈피 28KB 가 아이패드에서 돎 (test_dash_kkumi) · 11/12 코디 랭킹 넣으며 16→22KB
-    assert "/*" not in js and "\n//" not in js and len(ablyrank.view(db, "https://dash.example")["code"]) < 22000
+    # 사파리 책갈피 주소 칸: 꾸미기 책갈피 28KB 가 아이패드에서 돎 (test_dash_kkumi) · 11/12 코디 랭킹 넣으며 16→22KB · 진행 띠 넣으며 24KB
+    assert "/*" not in js and "\n//" not in js and len(ablyrank.view(db, "https://dash.example")["code"]) < 24000
     # 대시보드로 쿠키 없이 한 번만 · 코디 화면은 같은 출처만 숨은 iframe 으로 (받아 오기 없음)
     assert js.count("fetch(") == 1 and "fetch(U,{method:'POST',mode:'cors',credentials:'omit'" in js and "XMLHttpRequest" not in js and "cookie" not in js
     assert "credentials:'include'" not in js and "origin===location.origin" in js and "allow-top-navigation" not in js
@@ -275,10 +275,17 @@ const {chromium} = require('playwright');
     out.outside.push(u);
     return r.fulfill({status: 204, body: ''});
   });
+  await p.addInitScript(() => { window.__ov = []; setInterval(() => { const h = document.querySelector('[data-abcap]:not(iframe)'); const m = h && h.shadowRoot && h.shadowRoot.textContent;
+    if (m && window.__ov[window.__ov.length - 1] !== m) window.__ov.push(m); }, 50); });
   await p.goto('https://mobile.a-bly.com/content/style/home');
   const t = Date.now();
   await p.evaluate(code);
   out.waited = Date.now() - t;
+  out.ov = await p.evaluate(() => window.__ov);
+  out.left = await p.evaluate(() => document.querySelectorAll('[data-abcap]').length);
+  await p.evaluate(() => { window.__abcap = 1; });
+  await p.evaluate(code);
+  out.busy = out.alerts.pop();
   out.scroll = await p.evaluate(() => PLACE_SCROLL.scrollTop);
   out.frames = await p.evaluate(() => document.querySelectorAll('iframe').length);
   console.log(JSON.stringify(out));
@@ -299,6 +306,11 @@ def test_bookmarklet_on_fake_coordi_ranking_tab_collects_looks_without_items(mod
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
     assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 36 · 상품 9)"]
+    # 진행 띠 (주인 11/12): 누르자마자 · 카드 찾기 → 내리기 → 상세 → 보내기 · 끝나면 치움
+    ov = got["ov"]
+    assert ov[0].startswith("에이블리 모으는 중… 카드 찾는 중 (") and any(re.fullmatch(r"카드 \d+개 · 아래로 내리는 중 1/6", m) for m in ov)
+    assert "상세 읽는 중 0/3" in ov and got["left"] == 0  # 상세 1~3/3·보내는 중은 순간이라 50ms 보기에 안 잡힐 때도
+    assert got["busy"] == "Ably 랭킹 보내기: 이미 모으는 중이에요"
     assert sorted(got["details"]) == [f"https://mobile.a-bly.com/coordi/{9000 + n}" for n in (1, 2, 3)]  # 같은 출처 코디 화면만 · 숨은 iframe (주인 브라우저)
     assert all(u.startswith("https://img.cdn.example/") for u in got["outside"]) and got["scroll"] == 0 and got["frames"] == (mode == "iframe")  # 내린 뒤 제자리 · 숨은 iframe 치움
     assert 900 <= got["waited"] < 25000

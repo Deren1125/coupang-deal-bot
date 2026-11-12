@@ -10,9 +10,14 @@
    11/12 두 번째: 그래도 0개(글은 위 띠만)로 와서 dbg(화면 모양 2KB)를 늘 함께 보내고, 사진 6장 넘게 뜰 때까지 기다린다. 알림은 '코디 N · 상품 M'. */
 (async function () {
 const U = '@@URL@@', K = '@@KEY@@', W = window, D = document;
-if (W.__abcap) { alert('Ably 랭킹 보내기: 보내는 중이에요'); return; }
+if (W.__abcap) { alert('Ably 랭킹 보내기: 이미 모으는 중이에요'); return; }
 if (!/(^|\.)a-bly\.com$/.test(location.hostname)) { alert('Ably 랭킹 보내기: 에이블리 랭킹 화면(a-bly.com)에서 눌러 주세요'); return; }
 W.__abcap = 1;
+// 진행 띠 (주인 11/12 '눌렀는지 모르겠어요'): 위에 크게 · 그림자 DOM 안이라 읽는 글·카드에 안 섞임 (data-abcap 은 건너뜀)
+let ov = null, ot = null, bad = 0;
+const say = m => { try { if (!ov) { ov = D.createElement('div'); ov.setAttribute('data-abcap', '1'); ov.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#e8344e;color:#fff;padding:14px 16px;font:bold 18px sans-serif;text-align:center'; ot = ov.attachShadow ? ov.attachShadow({mode: 'open'}) : ov; D.documentElement.appendChild(ov); } ot.textContent = m; } catch (e) {} };
+const bye = () => { if (ov) ov.remove(); ov = null; };
+say('에이블리 모으는 중… 카드 찾는 중 (0초)');
 try {
 const SEL = '[aria-selected=true],[aria-current=page],[aria-current=true],[aria-checked=true],[aria-pressed=true],.on,.active,.selected,.is_selected';
 const GOODS = /\/goods\/(\d{2,14})/;
@@ -92,8 +97,9 @@ const roots = (d0) => {
   const o = [d0 || D];
   for (let i = 0; i < o.length && o.length < 60; i++) {
     for (const e of o[i].querySelectorAll('*')) {
+      if (e.hasAttribute('data-abcap')) continue;
       if (e.shadowRoot) o.push(e.shadowRoot);
-      if (e.tagName === 'IFRAME' && !e.hasAttribute('data-abcap')) { try { if (e.contentDocument && e.contentDocument.body) o.push(e.contentDocument); } catch (x) {} }
+      if (e.tagName === 'IFRAME') { try { if (e.contentDocument && e.contentDocument.body) o.push(e.contentDocument); } catch (x) {} }
     }
   }
   return o;
@@ -163,7 +169,7 @@ const box = e => {
 const busy = () => tx(D.body).split('\n').some(l => l.trim().length < 40 && LOAD.test(l.trim()));
 // 사진이 6장 넘게 뜨고, 상품 링크나 코디 카드 2개가 보일 때까지 (최대 8초 · 그림자 DOM·iframe 안 포함)
 const gl = () => Q('a[href*="/goods/"]').length;
-for (let i = 0; i < 16 && (busy() || (!gl() && (Q('img').length <= 6 || (coordi(), LK.size < 2)))); i++) await sleep(500);
+for (let i = 0; i < 16 && (busy() || (!gl() && (Q('img').length <= 6 || (coordi(), LK.size < 2)))); i++) { say('에이블리 모으는 중… 카드 찾는 중 (' + Math.round(i * 0.5) + '초)'); await sleep(500); }
 coordi();
 // 코디 카드가 보이면 몇 화면 내려 20~40개 모은 뒤 제자리로
 if (first) {
@@ -171,6 +177,7 @@ if (first) {
   const go = y => { bx.scrollTop = y; };
   for (let i = 1; i <= 6 && LK.size < 40; i++) {
     const was = bx.scrollTop;
+    say('카드 ' + LK.size + '개 · 아래로 내리는 중 ' + i + '/6');
     go(y0 + bx.clientHeight * 0.9 * i);
     await sleep(700);
     coordi();
@@ -213,7 +220,10 @@ const one = lk => new Promise(res => {
   D.body.appendChild(f);
 });
 const q = [...LK.values()].filter(l => l.url && new URL(l.url).origin === location.origin).slice(0, 40);
-const work = async () => { while (q.length && Date.now() - t0 < 88000) await one(q.shift()); };
+const nq = q.length;
+let nd = 0, np = 0;
+const work = async () => { while (q.length && Date.now() - t0 < 88000) { const l = q.shift(); await one(l); nd++; np += l.items.length; say('상세 읽는 중 ' + nd + '/' + nq + ' · 상품 ' + np + '개'); } };
+if (nq) say('상세 읽는 중 0/' + nq);
 await Promise.all([work(), work(), work()]);
 const items = [], looks = [], seen = new Set(), lseen = new Set();
 looks.push(...[...LK.values()].sort((a, b) => a.rank - b.rank).slice(0, 50));
@@ -285,7 +295,7 @@ const cls = [];
 for (const e of all) { const c = ((e.getAttribute('class') || '').split(/\s/)[0] || '').split(/__/)[0].slice(0, 24); if (c && cls.length < 20 && cls.indexOf(c) < 0) cls.push(c); }
 const scs = all.filter(e => e.scrollHeight > e.clientHeight + 200 && e.clientHeight > 0).slice(0, 8).map(e => e.tagName.toLowerCase() + '.' + ((e.getAttribute('class') || '').split(/\s/)[0] || '').slice(0, 24));
 const bt = (D.body && D.body.innerText) || '';
-const dbg = ['ready ' + D.readyState, 'els ' + all.length, 'img ' + Q('img').length, 'a ' + Q('a').length, 'iframe ' + Q('iframe').length, 'shadow ' + all.filter(e => e.shadowRoot).length, 'custom ' + all.filter(e => e.tagName.indexOf('-') > 0).length,
+const dbg = ['ready ' + D.readyState, 'els ' + all.length, 'img ' + Q('img').length, 'a ' + Q('a').length, 'iframe ' + Q('iframe').length, 'shadow ' + all.filter(e => e.shadowRoot && !e.hasAttribute('data-abcap')).length, 'custom ' + all.filter(e => e.tagName.indexOf('-') > 0).length,
   'roots ' + rs.length, 'rank(num/arrow) ' + Object.keys(cnt).map(k => k + cnt[k]).join(''), 'badges ' + badges().length, 'cards ' + LK.size + ' urls ' + [...LK.values()].filter(l => l.url).length,
   'ifr ' + Q('iframe').slice(0, 10).map(f => (f.getAttribute('src') || '-').slice(0, 60)).join(' '), 'cls ' + cls.join(' '), 'scroll ' + scs.join(' '), 'text ' + bt.length + ' ' + bt.slice(0, 300).replace(/\s+/g, ' ')].join(' | ').slice(0, 1900);
 const pack = () => JSON.stringify({items: items, looks: looks, upd: upd, dbg: dbg});
@@ -293,11 +303,13 @@ let j = pack();
 while (j.length > 60000 && (items.length || looks.length)) { if (items.length) items.pop(); else looks.pop(); j = pack(); }
 const F = {k: K, u: location.href, t: D.title || '', s: sel.join('\n'), h: heads.join('\n'), j: j, x: out.join('\n').slice(0, 15000)};
 let res = null;
+say('보내는 중…');
 try {
   const r = await fetch(U, {method: 'POST', mode: 'cors', credentials: 'omit', body: new URLSearchParams(F)});
   res = await r.json();
 } catch (e) { res = null; }
 const ng = items.length + looks.reduce((a, l) => a + l.items.length, 0);
+bye();
 if (res && res.ok) { alert('Ably 랭킹 보냄 ✓ (코디 ' + looks.length + ' · 상품 ' + ng + ')' + (ng || looks.length ? '' : ' · dbg 보냄 — 메인에게 알려 주세요')); return; }
 if (res) { alert('Ably 랭킹 보내기: ' + (res.text || '받지 않았어요')); return; }
 if (!confirm('Ably 랭킹 보내기: 이 화면에서 바로 보내지 못했어요. 이 창에서 보낼까요? (보낸 뒤 뒤로 가기로 돌아와요)')) return;
@@ -308,6 +320,8 @@ for (const k in F) { const i = D.createElement('input'); i.type = 'hidden'; i.na
 D.body.appendChild(fm);
 fm.submit();
 } catch (e) {
-  alert('Ably 랭킹 보내기: 보내지 못했어요 (' + ((e && e.message) || e) + ')');
-} finally { W.__abcap = 0; }
+  bad = 1;
+  say('Ably 랭킹 보내기: 보내지 못했어요 (' + ((e && e.message) || e) + ')');
+  setTimeout(bye, 5000);
+} finally { W.__abcap = 0; if (!bad) bye(); }
 })();
