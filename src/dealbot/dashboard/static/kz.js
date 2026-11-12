@@ -62,7 +62,15 @@ async function get(o, path, max) {
   if (r.ok) { o.d = r.d; o.err = ''; } else o.err = r.msg;
   draw();
 }
-const status = (force) => { if (force) ST.at = 0; return get(ST, 'status', 30000); };
+// 원격 로그인이 서버 크롬 차례를 기다리는 동안엔 4초마다 다시 봐서 '기다리는 중 — n초' 가 움직이게
+let LT = 0;
+const LWAIT = ['waiting', 'memory', 'opening'];
+const lstate = () => (ST.d && ST.d.login_state) || {};
+const status = async (force) => {
+  if (force) ST.at = 0;
+  await get(ST, 'status', 30000);
+  if (LWAIT.includes(lstate().phase) && !LT) LT = setTimeout(() => { LT = 0; status(true); }, 4000);
+};
 
 // 단추 — 사람이 누를 때만. 한 번에 하나 (WORK = 지금 하는 일 글)
 async function act(slot, work, path, body, done, ask) {
@@ -150,13 +158,14 @@ function loginBox() {
   const open = ST.d.login_blog || '';
   const rows = (ST.d.blogs || []).map(b => {
     const k = keyOf(b), mine = open === b.id, bad = !mine && (b.need_login || (b.active && !b.logged_in_before));
-    const txt = mine ? '원격 화면 열림 — 로그인한 뒤 닫기' : b.need_login ? '로그인 필요' + (b.message ? ' — ' + String(b.message).slice(0, 80) : '')
+    const ls = lstate(), waiting = !mine && ls.target === b.id && LWAIT.includes(ls.phase), failed = !mine && ls.target === b.id && ls.phase === 'failed';
+    const txt = mine ? '원격 화면 열림 — 로그인한 뒤 닫기' : waiting ? String(ls.message || '차례 기다리는 중') : failed ? String(ls.message || '원격 화면을 못 열었어요') : b.need_login ? '로그인 필요' + (b.message ? ' — ' + String(b.message).slice(0, 80) : '')
       : !b.active ? '꺼짐 (RSS 주소 없음)' : b.logged_in_before ? '로그인 확인 전 — 첫 등록 때 확인돼요' : '아직 로그인한 적 없어요';
-    return el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, `${(k && NAME[k]) || b.name || b.id} 키자드`), el('span', {class: 's' + (bad ? ' bad' : '')}, txt)),
+    return el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, `${(k && NAME[k]) || b.name || b.id} 키자드`), el('span', {class: 's' + (bad || failed ? ' bad' : '')}, txt)),
       mine ? [el('a', {class: 'sm ac', href: OLD, target: '_blank', rel: 'noopener'}, '원격 화면 열기'),
         btn('sm', '닫기', () => act('login', '닫는 중…', 'login/done', {}, () => ({text: '원격 화면을 닫았어요'})))]
-        : btn('sm' + (bad ? ' ac' : ''), '원격 로그인', () => act('login', '원격 화면 여는 중…', 'login/start/' + b.id, {}, () => ({text: '원격 화면을 열었어요 — \'원격 화면 열기\'를 눌러 로그인해 주세요'})),
-          {disabled: !!WORK || (!!open && open !== b.id)}));
+        : btn('sm' + (bad ? ' ac' : ''), '원격 로그인', () => act('login', '원격 화면 여는 중…', 'login/start/' + b.id, {}, d => ({text: d && LWAIT.includes(d.phase) ? String(d.message || '브라우저 차례 기다리는 중') + ' — 이 칸에서 계속 알려 드려요' : '원격 화면을 열었어요 — \'원격 화면 열기\'를 눌러 로그인해 주세요'})),
+          {disabled: !!WORK || waiting || (!!open && open !== b.id)}));
   });
   return [head, el('div', {class: 'box'}, rows.length ? rows : el('p', {class: 'note'}, '블로그가 없어요'), msgEl('login')),
     el('p', {class: 'note'}, '로그인은 주인이 직접 해요 — 아이디·비밀번호는 저장하지 않아요')];
