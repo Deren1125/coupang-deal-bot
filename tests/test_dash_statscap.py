@@ -266,3 +266,88 @@ async def test_api_code_needs_login_and_capture_takes_key_only(bot: DealBot) -> 
 
 async def test_routine_has_stats_line_until_today_capture(bot: DealBot) -> None:
     assert routine.view(bot)["stats"].startswith("오늘 통계 보내기")
+
+
+# ---------------------------------------------------------------- 4) 진짜 크롬 (playwright 가 있을 때만)
+# 11/12 갤럭시 크롬 today·referer·rank_pv: 왼쪽 메뉴 글만 옴 — 통계는 다른 출처 iframe 안 (여기선 다른 포트로 흉내)
+MENU_HTML = ("<div class='skip'><a href='#lnb'>메뉴 바로가기</a><a href='#c'>본문 바로가기</a></div><div id='lnb'><ul>"
+             + "".join(f"<li><a href='#'>{m}</a></li>" for m in ("오늘", "일간 현황", "방문 분석", "조회수", "순방문자수", "방문 횟수",
+                                                               "유입 분석", "조회수 순위", "블로그 스마트봇"))
+             + "</ul></div>")
+TOP = ("<!doctype html><html><head><title>블로그 통계</title></head><body>" + MENU_HTML
+       + "<div id='c'><iframe src='https://admin.blog.naver.com:8443/stat/today?blogId=derenpick' style='width:600px;height:400px'></iframe>"
+       "<iframe src='https://ad.example/banner' style='width:10px;height:10px'></iframe></div></body></html>")
+INNER_HTML = ("<!doctype html><html><body><h2>2026.11.12. 일간 현황</h2><table><tr><th>지표</th><th>값</th></tr>"
+              "<tr><td>조회수</td><td>1,234</td></tr><tr><td>순방문자수</td><td>567</td></tr></table></body></html>")
+CHART = ("<!doctype html><html><head><title>블로그 통계</title></head><body>" + MENU_HTML
+         + "<div id='c'><svg width='300' height='100'><title>11.12 조회수 그래프</title><text x='5' y='20'>11.11 98</text>"
+         "<text x='5' y='40'>11.12 152</text></svg><div role='img' aria-label='순방문자수 11.12 87명' style='width:50px;height:50px'></div>"
+         "<span id='sh'></span></div><script>document.getElementById('sh').attachShadow({mode:'open'}).innerHTML='<p>평균 사용 시간 2분 31초</p>';"
+         "</script></body></html>")
+PW = r"""
+const {chromium} = require('playwright');
+(async () => {
+  const [code, top, inner, chart] = process.argv.slice(1), out = {dialogs: [], bodies: [], urls: []};
+  const b = await chromium.launch();
+  const p = await b.newPage();
+  await p.route('**/*', r => {
+    const u = r.request().url();
+    if (u.startsWith('https://dash.example/')) { out.bodies.push(r.request().postData() || '');
+      return r.fulfill({status: 200, contentType: 'application/json', headers: {'Access-Control-Allow-Origin': '*'}, body: JSON.stringify({ok: true, label: '데런픽 · 일간 현황 · 11/12'})}); }
+    if (u.startsWith('https://admin.blog.naver.com:8443/')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: inner});
+    if (u.startsWith('https://admin.blog.naver.com/derenpick/stat/visit')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: chart});
+    if (u.startsWith('https://admin.blog.naver.com/')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: top});
+    return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: '<p>광고</p>'});
+  });
+  p.on('dialog', async d => { out.dialogs.push(d.type() + ':' + d.message()); await d.accept(); });
+  const run = async () => { const n = out.dialogs.length; p.evaluate(code).catch(() => {}); for (let i = 0; i < 100 && out.dialogs.length === n; i++) await p.waitForTimeout(100); };
+  await p.goto('https://admin.blog.naver.com/derenpick/stat/today');
+  await run();
+  await p.waitForURL('https://admin.blog.naver.com:8443/**');
+  out.urls.push(p.url());
+  await run();
+  await p.goto('https://admin.blog.naver.com/derenpick/stat/visit');
+  await run();
+  console.log(JSON.stringify(out));
+  await b.close();
+})().catch(e => { console.error(String(e)); process.exit(2); });
+"""
+
+
+def test_bookmarklet_in_chrome_sends_iframe_src_opens_it_and_reads_charts() -> None:
+    from test_dash_kkumi import _playwright_env
+
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    db = FakeDb()
+    res = subprocess.run([NODE, "-e", PW, code(db), TOP, INNER_HTML, CHART], capture_output=True, text=True, timeout=120, env=env)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    d = got["dialogs"]
+    assert len(d) == 3 and d[0].startswith("confirm:통계 보냄 ✓") and "통계 화면만 따로 열까요? 열린 화면에서 책갈피를 한 번 더 눌러 주세요" in d[0]
+    assert d[1] == "alert:통계 보냄 ✓ (데런픽 · 일간 현황 · 11/12)" and d[2].startswith("alert:통계 보냄 ✓")
+    assert got["urls"] == ["https://admin.blog.naver.com:8443/stat/today?blogId=derenpick"]  # OK → 그 화면만 열림
+    first, second, third = (dict(parse_qsl(x, keep_blank_values=True)) for x in got["bodies"])
+    # 1) 메뉴뿐인 바깥 화면: 메뉴 줄은 빠지고 iframe 주소(다른 출처 · 광고도)는 f 에
+    for m in ("메뉴 바로가기", "본문 바로가기", "오늘", "일간 현황", "조회수", "순방문자수", "블로그 스마트봇"):
+        assert m not in first["x"].splitlines(), first["x"]
+    assert first["f"].splitlines() == ["https://admin.blog.naver.com:8443/stat/today?blogId=derenpick", "https://ad.example/banner"]
+    out = statscap.save(db, first, now=NOW, tz=TZ)
+    assert out["blog"] == "issue" and out["kind"] == "일간 현황"
+    rec = json.loads(next(v for k, v in db.kv.items() if k.startswith(statscap.PREFIX)))
+    assert "admin.blog.naver.com:8443/stat/today" in rec["frames"]
+    # 2) 따로 연 안쪽 화면: 같은 출처라 표가 읽힘
+    assert json.loads(second["r"]) == [[["지표", "값"], ["조회수", "1,234"], ["순방문자수", "567"]]]
+    assert statscap.save(db, second, now=NOW + 1, tz=TZ)["day"] == "2026-11-12"
+    # 3) 차트 화면: svg 글 · aria-label · shadow root 글 (iframe 이 없으니 묻지 않음)
+    x = third["x"].splitlines()
+    assert any(ln.startswith("차트: ") and "11.12 152" in ln and "11.11 98" in ln for ln in x), x
+    assert "순방문자수 11.12 87명" in x and "평균 사용 시간 2분 31초" in x and "블로그 스마트봇" not in x and "방문 분석" not in x
+    assert statscap.save(db, third, now=NOW + 2, tz=TZ)["ok"]
+
+
+def test_save_keeps_menu_only_capture_with_frames() -> None:
+    db = FakeDb()
+    out = statscap.save(db, form(db, x="", r="[]", f="https://admin.blog.naver.com:8443/stat/today"), now=NOW, tz=TZ)
+    assert out["ok"]

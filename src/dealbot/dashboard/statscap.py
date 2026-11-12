@@ -214,14 +214,14 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
     if len(db.kv_items(f"{PREFIX}{sent}:")) >= DAY_MAX:
         raise CaptureError(429, "day_max", f"오늘은 {DAY_MAX}번까지 받았어요 — 내일 다시")
     url = clean(form.get("u"), 600)
-    if not re.match(r"https://([a-z0-9-]+\.)*naver\.com(/|$)", url):
+    if not re.match(r"https://([a-z0-9-]+\.)*naver\.com(:\d{2,5})?(/|$)", url):
         raise CaptureError(400, "where", "네이버 화면에서 보낸 것만 받아요")
     frames = clean(form.get("f"), 3000)
     title = clean(form.get("t"), 300)
     sel = clean(form.get("s"), 1000)
     text = clean(form.get("x"), TEXT_MAX)
     rows = _rows(str(form.get("r") or "")[:200_000])
-    if not text and not rows:
+    if not text and not rows and not frames:  # 11/12: 메뉴만 읽힌 화면도 iframe 주소(f)는 남김
         raise CaptureError(400, "empty", "화면 글을 못 읽었어요 — 통계가 다 뜬 뒤 다시 눌러 주세요")
     blog, bid = guess_blog(url, frames, str(form.get("b") or "")[:400], text)
     kind = guess_kind(url, sel, title, text)
