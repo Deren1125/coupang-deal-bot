@@ -225,7 +225,7 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
     sel = [s for s in clean(form.get("s"), 1000).splitlines() if s][:12]
     heads = [s for s in clean(form.get("h"), 1000).splitlines() if s][:8]
     rec = {"at": int(now), "sent": sent, "url": url, "title": clean(form.get("t"), 300), "sel": sel, "heads": heads,
-           "tab": sel[0] if sel else "", "upd": clean(extra.get("upd"), 90)[:30], "dbg": clean(extra.get("dbg"), 400),
+           "tab": sel[0] if sel else "", "upd": clean(extra.get("upd"), 90)[:30], "dbg": clean(extra.get("dbg"), 2400),
            "items": items, "looks": looks, "text": text}
     body = _fit(rec)
     k = f"{PREFIX}{sent}:{datetime.fromtimestamp(now, tz).strftime('%H%M%S')}-{secrets.token_hex(2)}"

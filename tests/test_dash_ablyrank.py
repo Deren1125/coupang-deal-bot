@@ -69,9 +69,9 @@ def test_bookmarklet_has_endpoint_key_and_keeps_file_rules() -> None:
     assert "'https://dash.example/dashboard/api/ably_rank_capture'" in js and f"'{ablyrank.key(db)}'" in js and "@@" not in js
     # 사파리 책갈피 주소 칸: 꾸미기 책갈피 28KB 가 아이패드에서 돎 (test_dash_kkumi) · 11/12 코디 랭킹 넣으며 16→22KB
     assert "/*" not in js and "\n//" not in js and len(ablyrank.view(db, "https://dash.example")["code"]) < 22000
-    # 대시보드로는 쿠키 없이 한 번 · 쿠키 포함(include)은 같은 출처 코디 화면 받기에만
-    assert js.count("fetch(") == 2 and "fetch(U,{method:'POST',mode:'cors',credentials:'omit'" in js and "XMLHttpRequest" not in js and "cookie" not in js
-    assert js.count("credentials:'include'") == 1 and "origin===location.origin" in js
+    # 대시보드로 쿠키 없이 한 번만 · 코디 화면은 같은 출처만 숨은 iframe 으로 (받아 오기 없음)
+    assert js.count("fetch(") == 1 and "fetch(U,{method:'POST',mode:'cors',credentials:'omit'" in js and "XMLHttpRequest" not in js and "cookie" not in js
+    assert "credentials:'include'" not in js and "origin===location.origin" in js and "allow-top-navigation" not in js
     assert ablyrank.key(db) != statscap.key(db) and len(ablyrank.INSTALL_STEPS) == 4
     with pytest.raises(ValueError):
         ablyrank.bookmarklet("https://x.example/a'b", "k")
@@ -171,7 +171,7 @@ def test_bookmarklet_on_fake_ably_ranking_collects_cards_and_server_saves() -> N
     res = subprocess.run([NODE, "-e", RUN, code(db), PAGE], capture_output=True, text=True, timeout=120, env=env)
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
-    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (상품 2 · 코디 1 · 코디)", "Ably 랭킹 보내기: 에이블리 랭킹 화면(a-bly.com)에서 눌러 주세요"]
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 1 · 상품 4)", "Ably 랭킹 보내기: 에이블리 랭킹 화면(a-bly.com)에서 눌러 주세요"]
     assert all(u.startswith("https://img.cdn.example/") for u in got["outside"])  # 사진은 화면(브라우저)이 받음 — 책갈피는 대시보드로만 보냄
     assert 900 <= got["waited"] < 6000  # 카드가 늦게 떠서 0.5초씩 기다림
     assert len(got["posts"]) == 1 and got["posts"][0]["url"] == "https://dash.example/dashboard/api/ably_rank_capture"
@@ -223,7 +223,16 @@ const card = n => {
     + '<span>' + NICK[n % 4] + '</span></div><p>#겨울코디 #빈티지 #모리걸</p></div>';
 };
 setTimeout(() => {
-  const root = document.getElementById('host').attachShadow({mode: 'open'});
+  let root = null;
+  if ('%MODE%' === 'iframe') {
+    const f = document.createElement('iframe');
+    f.style.cssText = 'width:390px;height:760px;border:0';
+    document.getElementById('host').appendChild(f);
+    root = f.contentDocument;
+    root.body.style.margin = '0';
+    root = root.body.appendChild(root.createElement('div'));
+    root.getElementById = id => root.querySelector('#' + id);
+  } else root = document.getElementById('host').attachShadow({mode: 'open'});
   root.innerHTML = '<div><b>랭킹순위 ?</b><p>12:00 PM 업데이트</p></div><div id="sc" style="height:700px;overflow-y:auto">'
     + '<div id="grid" style="display:grid;grid-template-columns:180px 180px;gap:8px"></div></div>';
   const g = root.getElementById('grid'), sc = root.getElementById('sc');
@@ -234,11 +243,17 @@ setTimeout(() => {
 }, 1000);
 </script></body></html>"""
 
-DETAIL = """<!doctype html><html><head><title>코디</title></head><body><div id="__next"></div>
-<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"coordi":{"sno":%d,"goods":[
- {"sno":%d1,"name":"앙고라 브이넥 니트","price":31200,"market_name":"러브마켓","image":"https://img.cdn.example/g/a.jpg"},
- {"sno":%d2,"name":"A라인 미니 스커트","price":25900,"market":{"name":"데일리룸"},"image":"https://img.cdn.example/g/b.jpg"}]}}}}</script>
-</body></html>"""
+# 코디 화면(요즘코디): 앱 화면이라 HTML 에는 상품이 없고 0.6초 뒤 그림 — 큰 사진 · 하트·댓글 · 가로 상품 줄(할인·가격·작은 이름) · 해시태그
+DETAIL = """<!doctype html><html><head><meta charset="utf-8"><title>요즘코디</title></head><body style="margin:0"><div id="app"></div>
+<script>
+const P = [['빈티지 니트', 63, '6,900'], ['코듀로이 팬츠', 0, '14,800'], ['울 머플러', 54, '17,800']];
+setTimeout(() => {
+  document.getElementById('app').innerHTML = '<h1>요즘코디</h1><img style="width:390px;height:480px;display:block" src="https://img.cdn.example/d/%d.jpg">'
+    + '<div><img width="16" height="16" src="https://img.cdn.example/i/heart.png"> 120 · 댓글 3</div><div style="display:flex;overflow-x:auto;gap:8px">'
+    + P.map((p, i) => '<a href="/goods/%d' + i + '" style="flex:0 0 100px;display:block"><img style="width:100px;height:120px;display:block" src="https://img.cdn.example/g/%d' + i + '.jpg">'
+      + '<p>' + p[0] + '</p><p>' + (p[1] ? '<b>' + p[1] + '%</b> ' : '') + p[2] + '</p></a>').join('') + '</div><p>#빈티지룩 #겨울코디</p><ul><li>예뻐요</li></ul>';
+}, 600);
+</script></body></html>"""
 
 RUN_CO = r"""
 const {chromium} = require('playwright');
@@ -264,31 +279,36 @@ const {chromium} = require('playwright');
   const t = Date.now();
   await p.evaluate(code);
   out.waited = Date.now() - t;
-  out.scroll = await p.evaluate(() => document.getElementById('host').shadowRoot.getElementById('sc').scrollTop);
+  out.scroll = await p.evaluate(() => PLACE_SCROLL.scrollTop);
+  out.frames = await p.evaluate(() => document.querySelectorAll('iframe').length);
   console.log(JSON.stringify(out));
   await b.close();
 })().catch(e => { console.error(String(e)); process.exit(2); });
 """
 
 
-def test_bookmarklet_on_fake_coordi_ranking_tab_collects_looks_without_items() -> None:
+@pytest.mark.parametrize("mode", ["shadow", "iframe"])  # 카드가 그림자 DOM 안이든 같은 출처 iframe 안이든
+def test_bookmarklet_on_fake_coordi_ranking_tab_collects_looks_without_items(mode: str) -> None:
     env = _playwright_env()
     if env is None:
         pytest.skip("node playwright·크롬 없음")
     db = FakeDb()
-    res = subprocess.run([NODE, "-e", RUN_CO, code(db), COORDI, DETAIL], capture_output=True, text=True, timeout=120, env=env)
+    run = RUN_CO.replace("PLACE_SCROLL", "document.getElementById('host').querySelector('iframe').contentDocument.querySelector('#sc')" if mode == "iframe"
+                         else "document.getElementById('host').shadowRoot.getElementById('sc')")
+    res = subprocess.run([NODE, "-e", run, code(db), COORDI.replace("%MODE%", mode), DETAIL], capture_output=True, text=True, timeout=180, env=env)
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
-    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 36 · 랭킹) · 코디 3개 열어 상품 6개"]
-    assert got["details"] == [f"https://mobile.a-bly.com/coordi/{9000 + n}" for n in (1, 2, 3)]  # 같은 출처 코디 화면만 (주인 브라우저)
-    assert all(u.startswith("https://img.cdn.example/") for u in got["outside"]) and got["scroll"] == 0  # 내린 뒤 제자리
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 36 · 상품 9)"]
+    assert sorted(got["details"]) == [f"https://mobile.a-bly.com/coordi/{9000 + n}" for n in (1, 2, 3)]  # 같은 출처 코디 화면만 · 숨은 iframe (주인 브라우저)
+    assert all(u.startswith("https://img.cdn.example/") for u in got["outside"]) and got["scroll"] == 0 and got["frames"] == (mode == "iframe")  # 내린 뒤 제자리 · 숨은 iframe 치움
     assert 900 <= got["waited"] < 25000
     (post,) = got["posts"]
     assert post["cookie"] == ""
     sent = dict(parse_qsl(post["body"], keep_blank_values=True))
     assert sent["s"].splitlines()[0] == "랭킹"
     cards = json.loads(sent["j"])
-    assert cards["items"] == [] and cards["upd"] == "12:00 PM 업데이트" and "roots 2" in cards["dbg"]
+    assert cards["items"] == [] and cards["upd"] == "12:00 PM 업데이트" and "roots 2" in cards["dbg"] and "cards 36 urls 3" in cards["dbg"]
+    assert "ready complete" in cards["dbg"] and ("shadow 1" if mode == "shadow" else "iframe 1") in cards["dbg"] and len(cards["dbg"]) < 2000
     lk = cards["looks"]
     assert [x["rank"] for x in lk] == list(range(1, 37))  # 내리며 더 뜬 카드까지
     by = {x["rank"]: x for x in lk}
@@ -297,16 +317,34 @@ def test_bookmarklet_on_fake_coordi_ranking_tab_collects_looks_without_items() -
     assert (by[1]["nick"], by[2]["nick"]) == ("읍스읍스", "mori_girl") and by[4]["nick"] == "llilililii"
     assert by[1]["tags"] == ["#겨울코디", "#빈티지", "#모리걸"] and by[1]["quick"] is True and by[2]["quick"] is False
     assert by[1]["url"] == "https://mobile.a-bly.com/coordi/9001" and by[4]["url"] == ""
-    assert [(i["name"], i.get("shop"), i.get("price"), i["url"]) for i in by[1]["items"]] == [
-        ("앙고라 브이넥 니트", "러브마켓", 31200, "https://mobile.a-bly.com/goods/90011"),
-        ("A라인 미니 스커트", "데일리룸", 25900, "https://mobile.a-bly.com/goods/90012")]
+    assert [(i["name"], i.get("disc"), i["price"], i["url"], i["img"]) for i in by[1]["items"]] == [
+        ("빈티지 니트", 63, 6900, "https://mobile.a-bly.com/goods/90010", "https://img.cdn.example/g/90010.jpg"),
+        ("코듀로이 팬츠", None, 14800, "https://mobile.a-bly.com/goods/90011", "https://img.cdn.example/g/90011.jpg"),
+        ("울 머플러", 54, 17800, "https://mobile.a-bly.com/goods/90012", "https://img.cdn.example/g/90012.jpg")]
     assert "읍스읍스" in sent["x"] and "#겨울코디" in sent["x"]  # 그림자 DOM 안 글도
     out = ablyrank.save(db, sent, now=NOW, tz=TZ)
     assert out["label"] == "코디 36 · 랭킹" and out["items"] == 0
     (rec,) = recs(db)
     r1 = rec["looks"][0]
     assert (rec["tab"], rec["upd"]) == ("랭킹", "12:00 PM 업데이트")
-    assert (r1["rank"], r1["chg"], r1["nick"], r1["quick"], r1["tags"][0], r1["items"][0]["price"]) == (1, "–", "읍스읍스", True, "#겨울코디", 31200)
+    assert (r1["rank"], r1["chg"], r1["nick"], r1["quick"], r1["tags"][0], r1["items"][0]["price"]) == (1, "–", "읍스읍스", True, "#겨울코디", 6900)
+    assert "cards 36" in rec["dbg"]
+
+
+def test_bookmarklet_on_empty_looking_page_sends_dbg_and_says_so() -> None:
+    """11/12 실제: 코디 › 랭킹에서 눌렀는데 글은 위 띠만 — 그래도 화면 모양(dbg)을 보내고 알림으로 알려 줌."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    page = '<!doctype html><html><head><meta charset="utf-8"><title>스타일 - 에이블리 스토어</title></head><body><div class="Banner_top__a1">앱에서 더 많은 상품을 볼 수 있어요! 앱에서 보기</div><app-root></app-root></body></html>'
+    run = RUN_CO.replace("PLACE_SCROLL", "document.body")
+    res = subprocess.run([NODE, "-e", run, code(FakeDb()), page, DETAIL], capture_output=True, text=True, timeout=120, env=env)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 0 · 상품 0) · dbg 보냄 — 메인에게 알려 주세요"] and 7500 <= got["waited"] < 15000
+    sent = dict(parse_qsl(got["posts"][0]["body"], keep_blank_values=True))
+    dbg = json.loads(sent["j"])["dbg"]
+    assert "ready complete" in dbg and "custom 1" in dbg and "cls Banner_top" in dbg and "text 28 앱에서 더 많은" in dbg
 
 
 def test_save_takes_coordi_cards_alone_and_checks_their_fields() -> None:

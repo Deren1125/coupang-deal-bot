@@ -6,7 +6,8 @@
    줄마다 문장이 끝나게 쓴다 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음). 카드가 아직 안 떴으면 0.5초마다 최대 8초 기다린다.
    11/12 코디 랭킹(mobile.a-bly.com/content/style/home 랭킹 탭 — 링크·가격 없는 사진 카드)이 0개로 와서: 사진 왼쪽 위 순위 딱지('1 –'·'3 9↑')에서
    카드까지 올라가 순위·변동·사진·닉네임·해시태그·바로입기·카드 링크를 코디(looks)로, 몇 화면 내려 더 모은 뒤 제자리로. 그림자 DOM·같은 출처 iframe 도 본다.
-   카드 링크가 같은 출처면 그 화면을 이 브라우저가 받아(쿠키 포함 · 최대 40개 · 90초 — 주인 11/12 "10개로 제한 안해도 돼") 든 상품을 읽는다 — 서버는 그대로 에이블리를 열지 않음. */
+   카드 링크가 같은 출처면 그 화면을 이 브라우저의 숨은 iframe 으로 열어(최대 40개 · 90초 — 주인 11/12 "10개로 제한 안해도 돼") 가로 상품 줄을 읽는다 — 서버는 그대로 에이블리를 열지 않음.
+   11/12 두 번째: 그래도 0개(글은 위 띠만)로 와서 dbg(화면 모양 2KB)를 늘 함께 보내고, 사진 6장 넘게 뜰 때까지 기다린다. 알림은 '코디 N · 상품 M'. */
 (async function () {
 const U = '@@URL@@', K = '@@KEY@@', W = window, D = document;
 if (W.__abcap) { alert('Ably 랭킹 보내기: 보내는 중이에요'); return; }
@@ -87,12 +88,12 @@ const css = e => { try { return (e.ownerDocument.defaultView || W).getComputedSt
 const up = e => e.parentElement || (e.parentNode && e.parentNode.host) || null;
 const own = e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.data).join('').trim();
 // 그림자 DOM·같은 출처 iframe 안도 본다 (11/12 아이패드 코디 화면: 카드 0 · 글은 위 띠만 왔음)
-const roots = () => {
-  const o = [D];
+const roots = (d0) => {
+  const o = [d0 || D];
   for (let i = 0; i < o.length && o.length < 60; i++) {
     for (const e of o[i].querySelectorAll('*')) {
       if (e.shadowRoot) o.push(e.shadowRoot);
-      if (e.tagName === 'IFRAME') { try { if (e.contentDocument && e.contentDocument.body) o.push(e.contentDocument); } catch (x) {} }
+      if (e.tagName === 'IFRAME' && !e.hasAttribute('data-abcap')) { try { if (e.contentDocument && e.contentDocument.body) o.push(e.contentDocument); } catch (x) {} }
     }
   }
   return o;
@@ -142,7 +143,7 @@ const coordi = () => {
   const bs = badges(), all = bs.map(x => x.b);
   for (const x of bs) {
     let c = x.b;
-    for (let k = 0; k < 10; k++) { const p = up(c); if (!p || p === D.body || p === D.documentElement || tx(p).length > 600 || all.some(o => o !== x.b && p.contains(o))) break; c = p; }
+    for (let k = 0; k < 10; k++) { const p = up(c); if (!p || /^(BODY|HTML)$/.test(p.tagName) || tx(p).length > 600 || all.some(o => o !== x.b && p.contains(o))) break; c = p; }
     const im = ims(c)[0], t = tx(c), n = own(x.e);
     if (!im || /\d{1,3}(,\d{3})+원?|\d{4,8}원/.test(t) || c.querySelector('a[href*="/goods/"]')) continue;
     first = first || x.b;
@@ -157,14 +158,17 @@ const coordi = () => {
 };
 const box = e => {
   for (let p = e; p; p = up(p)) { if (p.nodeType === 1 && p.scrollHeight - p.clientHeight > 100 && /auto|scroll/.test(css(p).overflowY || '')) return p; }
-  return D.scrollingElement || D.documentElement;
+  return (e.ownerDocument || D).scrollingElement || D.documentElement;
 };
 const busy = () => tx(D.body).split('\n').some(l => l.trim().length < 40 && LOAD.test(l.trim()));
-for (let i = 0; i < 16 && (busy() || (!D.querySelector('a[href*="/goods/"]') && (coordi(), LK.size < 2))); i++) await sleep(500);
+// 사진이 6장 넘게 뜨고, 상품 링크나 코디 카드 2개가 보일 때까지 (최대 8초 · 그림자 DOM·iframe 안 포함)
+const gl = () => Q('a[href*="/goods/"]').length;
+for (let i = 0; i < 16 && (busy() || (!gl() && (Q('img').length <= 6 || (coordi(), LK.size < 2)))); i++) await sleep(500);
+coordi();
 // 코디 카드가 보이면 몇 화면 내려 20~40개 모은 뒤 제자리로
 if (first) {
-  const bx = box(first), y0 = bx.scrollTop, doc = bx === D.scrollingElement || bx === D.documentElement;
-  const go = y => { if (doc) W.scrollTo(0, y); else bx.scrollTop = y; };
+  const bx = box(first), y0 = bx.scrollTop;
+  const go = y => { bx.scrollTop = y; };
   for (let i = 1; i <= 6 && LK.size < 40; i++) {
     const was = bx.scrollTop;
     go(y0 + bx.clientHeight * 0.9 * i);
@@ -174,36 +178,43 @@ if (first) {
   }
   go(y0);
 }
-// 코디 안 상품: 같은 출처 코디 화면을 주인 브라우저가 받아 (최대 40개 · 90초) 화면 속 JSON·상품 주소에서
+// 코디 안 상품: 같은 출처 코디 화면(요즘코디)을 이 브라우저의 숨은 iframe 으로 열어 가로 상품 줄(사진 + 가까운 가격)을 읽음 · 3개씩 · 최대 40개 · 90초
+// (앱 화면이라 HTML 에는 상품이 없음 · 서버는 그대로 에이블리를 열지 않음)
 const t0 = Date.now();
-let nd = 0, ng = 0;
-const walk = (o, its, d) => {
-  if (!o || typeof o !== 'object' || d > 14 || its.length >= 12) return;
-  if (Array.isArray(o)) { o.forEach(v => walk(v, its, d + 1)); return; }
-  const nm = o.name || o.goods_name || o.goodsName, pr = o.price || o.sale_price || o.salePrice || o.final_price || o.discounted_price, id = o.sno || o.goods_sno || o.goodsSno || o.id;
-  if (typeof nm === 'string' && typeof pr === 'number' && id) {
-    const m = o.market || {};
-    its.push({name: nm.slice(0, 200), price: pr, shop: String(o.market_name || o.marketName || m.name || o.shop_name || '').slice(0, 80), url: abs('/goods/' + id), img: abs(String(o.image || o.image_url || o.imageUrl || o.cover_image || o.thumbnail || ''))});
-    return;
-  }
-  for (const k in o) walk(o[k], its, d + 1);
-};
-for (const lk of [...LK.values()].filter(l => l.url && new URL(l.url).origin === location.origin).slice(0, 40)) {
-  if (Date.now() - t0 > 88000) break;
-  nd++;
-  try {
-    const ac = W.AbortController ? new AbortController() : null, tm = setTimeout(() => ac && ac.abort(), Math.max(1000, 90000 - (Date.now() - t0)));
-    const h = await (await fetch(lk.url, {credentials: 'include', signal: ac ? ac.signal : undefined})).text();
-    clearTimeout(tm);
-    for (const m of h.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) {
-      const s = m[1].trim(), i = s.indexOf('{');
-      if (i < 0 || i > 80) continue;
-      try { walk(JSON.parse(s.slice(i).replace(/;\s*$/, '')), lk.items, 0); } catch (x) {}
+const prods = d => {
+  const o = [], seen = new Set();
+  for (const r of roots(d)) {
+    for (const i of r.querySelectorAll('img')) {
+      if (o.length >= 12) break;
+      let c = i, ok = false;
+      for (let k = 0; k < 5 && up(c) && !ok; k++) { const p = up(c); if (/^(BODY|HTML)$/.test(p.tagName) || p.querySelectorAll('img').length > 2 || tx(p).length > 300) break; c = p; ok = /\d{1,3}(,\d{3})+/.test(tx(c)); }
+      if (!ok || seen.has(c)) continue;
+      seen.add(c);
+      const a = (c.closest && c.closest('a[href]')) || c.querySelector('a[href]'), it = parse(c, a ? href(a) : '');
+      delete it.rank;
+      if (it.price) o.push(it);
     }
-    for (const m of h.matchAll(/\/goods\/(\d{2,14})/g)) { const u = abs('/goods/' + m[1]); if (lk.items.length < 12 && !lk.items.some(x => x.url === u)) lk.items.push({url: u}); }
-    ng += lk.items.length;
-  } catch (x) {}
-}
+  }
+  return o;
+};
+const one = lk => new Promise(res => {
+  const f = D.createElement('iframe');
+  let n = 0, last = -1;
+  f.setAttribute('data-abcap', '1');
+  f.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+  f.style.cssText = 'position:fixed;left:-4000px;top:0;width:390px;height:844px;border:0';
+  f.src = lk.url;
+  const iv = setInterval(() => {
+    let p = [];
+    try { p = prods(f.contentDocument); } catch (x) {}
+    if ((p.length && p.length === last) || ++n > 16 || Date.now() - t0 > 88000) { clearInterval(iv); lk.items = p; f.remove(); res(); }
+    last = p.length;
+  }, 500);
+  D.body.appendChild(f);
+});
+const q = [...LK.values()].filter(l => l.url && new URL(l.url).origin === location.origin).slice(0, 40);
+const work = async () => { while (q.length && Date.now() - t0 < 88000) await one(q.shift()); };
+await Promise.all([work(), work(), work()]);
 const items = [], looks = [], seen = new Set(), lseen = new Set();
 looks.push(...[...LK.values()].sort((a, b) => a.rank - b.rank).slice(0, 50));
 // 코디 카드 (코디 링크 하나 + 안에 든 상품 링크들) — 순위 딱지 카드가 없을 때만
@@ -267,7 +278,16 @@ for (const r of rs) {
   }
 }
 const upd = out.find(l => /업데이트|기준/.test(l) && /\d/.test(l) && l.length < 30) || '';
-const dbg = ['roots ' + rs.length, 'els ' + Q('*').length, 'badges ' + badges().length, 'ifr ' + Q('iframe').map(f => (f.getAttribute('src') || '-').slice(0, 60)).join(' ')].join(' · ').slice(0, 400);
+// 화면 모양 (2KB 안 · Blog-Auto 상태 확인이 찍음 — 0개일 때 진짜 구조를 보려고)
+const all = Q('*'), cnt = {};
+for (const r of rs) { const t = r === D ? 'D' : r.host ? 'S' : 'F'; cnt[t] = (cnt[t] || 0) + [...r.querySelectorAll('*')].filter(e => /^\d{1,3}$/.test(own(e))).length + '/' + ((r.textContent || '').match(/↑|↓|NEW/g) || []).length + ' '; }
+const cls = [];
+for (const e of all) { const c = ((e.getAttribute('class') || '').split(/\s/)[0] || '').split(/__/)[0].slice(0, 24); if (c && cls.length < 20 && cls.indexOf(c) < 0) cls.push(c); }
+const scs = all.filter(e => e.scrollHeight > e.clientHeight + 200 && e.clientHeight > 0).slice(0, 8).map(e => e.tagName.toLowerCase() + '.' + ((e.getAttribute('class') || '').split(/\s/)[0] || '').slice(0, 24));
+const bt = (D.body && D.body.innerText) || '';
+const dbg = ['ready ' + D.readyState, 'els ' + all.length, 'img ' + Q('img').length, 'a ' + Q('a').length, 'iframe ' + Q('iframe').length, 'shadow ' + all.filter(e => e.shadowRoot).length, 'custom ' + all.filter(e => e.tagName.indexOf('-') > 0).length,
+  'roots ' + rs.length, 'rank(num/arrow) ' + Object.keys(cnt).map(k => k + cnt[k]).join(''), 'badges ' + badges().length, 'cards ' + LK.size + ' urls ' + [...LK.values()].filter(l => l.url).length,
+  'ifr ' + Q('iframe').slice(0, 10).map(f => (f.getAttribute('src') || '-').slice(0, 60)).join(' '), 'cls ' + cls.join(' '), 'scroll ' + scs.join(' '), 'text ' + bt.length + ' ' + bt.slice(0, 300).replace(/\s+/g, ' ')].join(' | ').slice(0, 1900);
 const pack = () => JSON.stringify({items: items, looks: looks, upd: upd, dbg: dbg});
 let j = pack();
 while (j.length > 60000 && (items.length || looks.length)) { if (items.length) items.pop(); else looks.pop(); j = pack(); }
@@ -277,7 +297,8 @@ try {
   const r = await fetch(U, {method: 'POST', mode: 'cors', credentials: 'omit', body: new URLSearchParams(F)});
   res = await r.json();
 } catch (e) { res = null; }
-if (res && res.ok) { alert('Ably 랭킹 보냄 ✓ (' + res.label + ')' + (nd ? ' · 코디 ' + nd + '개 열어 상품 ' + ng + '개' : '')); return; }
+const ng = items.length + looks.reduce((a, l) => a + l.items.length, 0);
+if (res && res.ok) { alert('Ably 랭킹 보냄 ✓ (코디 ' + looks.length + ' · 상품 ' + ng + ')' + (ng || looks.length ? '' : ' · dbg 보냄 — 메인에게 알려 주세요')); return; }
 if (res) { alert('Ably 랭킹 보내기: ' + (res.text || '받지 않았어요')); return; }
 if (!confirm('Ably 랭킹 보내기: 이 화면에서 바로 보내지 못했어요. 이 창에서 보낼까요? (보낸 뒤 뒤로 가기로 돌아와요)')) return;
 const fm = D.createElement('form');
