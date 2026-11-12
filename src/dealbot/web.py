@@ -205,6 +205,7 @@ class WebServer:
         # 로그인을 먼저 통과해야 함 — 주인 10/23 대시보드에서 원격 로그인 화면 (noVNC 정적 파일·웹소켓 → 127.0.0.1 의 websockify)
         self.tunnels: dict[str, Callable[[], int | None]] = {}
         self.tunnel_methods: dict[str, frozenset[str]] = {}
+        self.tunnel_wait: dict[str, float] = {}
         self.auth_realm = "dashboard"
         self._server: asyncio.AbstractServer | None = None
 
@@ -290,14 +291,17 @@ class WebServer:
             "WWW-Authenticate": f'Basic realm="{self.auth_realm}", charset="UTF-8"',
         }
 
-    def route_tunnel(self, prefix: str, port: Callable[[], int | None], methods: tuple[str, ...] = ("GET",)) -> None:
+    def route_tunnel(self, prefix: str, port: Callable[[], int | None], methods: tuple[str, ...] = ("GET",),
+                     wait_s: float = 30) -> None:
         """prefix 아래 GET(웹소켓 포함)을 127.0.0.1:port() 로 그대로 잇는다 (prefix 는 떼고). port() 가 None 이면 404.
         인증은 지키는 앞부분 규칙 그대로 — prefix 는 guard_prefix 로 지키는 경로 아래여야 한다 (아니면 열지 않음).
         methods 에 POST·DELETE 를 주면 그것도 잇는다 (키자드 도구 화면 — 주인 11/11). GET 이 아닌 요청은 같은 사이트에서 온 것만
-        (Origin·Referer 의 호스트 = Host — 다른 사이트가 로그인 쿠키로 버튼을 누르게 하지 못하게) · 본문은 TUNNEL_BODY_MAX 까지."""
+        (Origin·Referer 의 호스트 = Host — 다른 사이트가 로그인 쿠키로 버튼을 누르게 하지 못하게) · 본문은 TUNNEL_BODY_MAX 까지.
+        wait_s: 웹소켓이 아닌 요청의 응답 머리를 기다리는 시간 (키자드 '모두 등록'은 몇 분 걸림 — 11/12)."""
         key = prefix.rstrip("/") + "/"
         self.tunnels[key] = port
         self.tunnel_methods[key] = frozenset(m.upper() for m in methods)
+        self.tunnel_wait[key] = wait_s
 
     async def _tunnel(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, port: int, head: bytes,
                       prefix: str) -> bool:
@@ -332,7 +336,7 @@ class WebServer:
         await up_w.drain()
         if not upgrade:
             try:
-                resp = await asyncio.wait_for(up_r.readuntil(b"\r\n\r\n"), timeout=30)
+                resp = await asyncio.wait_for(up_r.readuntil(b"\r\n\r\n"), timeout=self.tunnel_wait.get(prefix, 30))
                 line, _, hdrs = resp.partition(b"\r\n")
                 writer.write(line + b"\r\n" + _close_header(hdrs))
                 while chunk := await asyncio.wait_for(up_r.read(65536), timeout=60):

@@ -32,7 +32,7 @@
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kkumi.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kz.js,kkumi.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -96,6 +96,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "sns.js": "text/javascript; charset=utf-8",  # sns.js: SNS 탭 상자 (10/26, SNS 탭을 처음 열 때만)
              "routine.js": "text/javascript; charset=utf-8",  # routine.js: 할 일 탭 '오늘 할 일' 칸 (10/27, 셸이 defer 로 — app.js 는 예산 끝)
              "shorts.js": "text/javascript; charset=utf-8",  # shorts.js: SNS 탭 '올리기' 칸 (11/08, 처음 열 때만 — sns.js 가 meta sb-shorts 로)
+             "kz.js": "text/javascript; charset=utf-8",  # kz.js: 키자드 칸 셋 (11/12, 셸이 defer 로 — /dashboard/keyzard/api/… 를 부름)
              "kkumi.js": "text/javascript; charset=utf-8"}  # kkumi.js: '꾸미기' 책갈피 원본 (10/27 — 화면은 받지 않음, kkumi.py 가 javascript: 주소로)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -244,7 +245,8 @@ class DashApi:
         web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))
         # 키자드 등록 도우미·룩북 수집·코디 트렌드 화면 (주인 11/11): Blog-Auto 데몬이 127.0.0.1:8110 에 띄움 (blogauto/keyzard_tool.py).
         # 대시보드 로그인을 그대로 쓴다 — 화면 자체 비밀번호 없음. 버튼(POST·DELETE)은 같은 사이트에서 온 것만.
-        web.route_tunnel(KEYZARD_PREFIX, lambda: KEYZARD_PORT, methods=("GET", "POST", "DELETE"))
+        # '모두 등록'·'지금 수집'은 몇 분 걸림 → 답을 15분까지 기다림 (11/12 대시보드 안 키자드 칸 — kz.js)
+        web.route_tunnel(KEYZARD_PREFIX, lambda: KEYZARD_PORT, methods=("GET", "POST", "DELETE"), wait_s=900)
         web.route_prefix("/dashboard/connect/", self.connect, with_headers=True)
         web.route(SW_PATH, self.sw)
         for name in APP_FILES:
