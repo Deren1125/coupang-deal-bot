@@ -135,7 +135,7 @@ function render() {
   const a = D.activeElement, m = $('main');
   if (a && m.contains(a) && a.matches('input,textarea') && !SH.length) { DIRTY = true; head(); return; }
   DIRTY = false;
-  const v = {todo: vTodo, deal: vDeal, blog: vBlog, sns: vSns, stats: vStats, connect: vConnect}[R.tab]();
+  let v; try { v = {todo: vTodo, deal: vDeal, blog: vBlog, sns: vSns, stats: vStats, connect: vConnect}[R.tab](); } catch (e) { v = [el('p', {class: 'empty'}, '화면 오류 · ' + e.message)]; }
   m.replaceChildren(...v.flat(9).filter(x => x != null && x !== false));
   m.dataset.tab = R.tab;
   head();
@@ -157,7 +157,7 @@ function route() {
   if (p[0] === 'share') { SHR = p[1]; location.hash = '#/blog/hotdeal'; return; }
   if (p[0] === 'i' && p[1]) { history.replaceState(null, '', '#/todo'); R = {tab: 'todo', sub: ''}; render(); openItem(decodeURIComponent(p[1])); return; }
   R = {tab: TABS[p[0]] ? p[0] : 'todo', sub: p[1] || '', j};
-  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = LS.g('blog') || 'finance'; LS.s('blog', R.sub); }
+  if (R.tab === 'blog' && !/^(pics|search|trial|ptrial|sched)$/.test(R.sub)) { if (!BLOGS.some(b => b[0] === R.sub)) R.sub = (BLOGS.find(b => b[0] === LS.g('blog')) || BLOGS[0])[0]; LS.s('blog', R.sub); }
   const L = SUBS[R.tab]; if (L) { if (!L.includes(R.sub)) R.sub = L.includes(LS.g(R.tab)) ? LS.g(R.tab) : L[0]; LS.s(R.tab, R.sub); }
   while (SH.length) closeTop();
   render();
@@ -638,7 +638,7 @@ function panel(it, a, key, ctx) {
 }
 
 const pm = (a, t) => a.pm ? (t.match(RegExp(a.pm)) || [''])[0] : t;
-function paste(f, key, a) {
+function paste(f, key, a = {}) {
   return btn('lnk', '붙여넣기', async () => {
     try { const t = pm(a, ((await N.clipboard.readText()) || '').trim()); if (t) { f.value = t; VAL[key] = t; } else throw 0; } catch (e) { f.focus(); toast(a.pm ? '토스 앱에서 만든 링크를 복사해 주세요' : '길게 눌러 붙여넣기'); }
   }, a.pm ? {'data-pm': 1} : null);
