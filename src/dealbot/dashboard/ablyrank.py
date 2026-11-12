@@ -4,8 +4,8 @@ static/ablyrank.js: 주인 브라우저(아이패드 사파리·갤럭시 크롬
   (순위·상품명·쇼핑몰·가격·할인·리뷰·별점·찜·상품 주소·사진 주소)·코디 카드(제목·좋아요·든 상품)·주소·제목·고른 탭·보이는 글을
   POST /dashboard/api/ably_rank_capture (폼 — 쿠키 없음) 로 보낸다. 열쇠 k = HMAC(kv ablyrank_secret, "ablyrank") —
   연결 탭 'Ably 랭킹 보내기 버튼 설치'(로그인 아래 GET /dashboard/api/ablyrank)에서만 보임. kv 를 지우면 예전 책갈피는 안 받음.
-save(): 열쇠 · 에이블리 주소만 · 칸마다 크기·모양 확인(주소는 https 만, 상품·코디 주소는 a-bly.com 만) · 상품 100 · 코디 50(코디마다 상품 12) ·
-  기록 60KB → kv "ably_rank_capture:<보낸 날 KST>:<HHMMSS>-<4hex>" = JSON {at, sent, url, title, sel, heads, tab, upd, dbg, items, looks, text}. 30일.
+save(): 열쇠 · 에이블리 주소만 · 칸마다 크기·모양 확인(주소는 https 만, 상품·코디 주소는 a-bly.com 만) · 상품 100 · 코디 100(코디마다 상품 12 · 탭 4개를 돌면 탭마다 30) ·
+  기록 100KB → kv "ably_rank_capture:<보낸 날 KST>:<HHMMSS>-<4hex>" = JSON {at, sent, url, title, sel, heads, tab, upd, dbg, items, looks, text}. 30일.
   코디 랭킹(11/12 — 사진 카드뿐, 상품 없음): looks 만 와도 받음 · 코디마다 rank·chg(변동)·img·nick·tags·quick(바로입기)·url·items(코디 화면에서 읽은 상품) ·
   upd = '12:00 PM 업데이트' 줄 · dbg = 책갈피가 본 화면 모양(그림자 DOM·iframe 수) — 다음에 고칠 때 보려고.
   사진 주소는 적기만 한다 (서버가 받아 오지 않음).
@@ -40,10 +40,10 @@ KEEP_DAYS = 30
 DAY_MAX = 30
 BODY_MAX = 600_000
 JSON_MAX = 200_000  # 받는 j (글자)
-REC_MAX = 60_000  # 저장하는 기록 (UTF-8 바이트)
+REC_MAX = 100_000  # 저장하는 기록 (UTF-8 바이트)
 TEXT_MAX = 15_000
 ITEMS_MAX = 100
-LOOKS_MAX = 50
+LOOKS_MAX = 100
 LOOK_ITEMS_MAX = 12
 ABLY_URL = re.compile(r"https://([a-z0-9-]+\.)*a-bly\.com(/[^\s<>\"']*)?")
 HTTPS_URL = re.compile(r"https://[A-Za-z0-9.\-]+(:\d+)?(/[^\s<>\"'\\]*)?")
@@ -145,6 +145,9 @@ def _look(v: Any) -> dict[str, Any] | None:
         o["like"] = s
     if CHANGE.fullmatch(s := str(v.get("chg") or "")[:8]):
         o["chg"] = s
+    for k in ("tab", "chip"):  # 코디 화면 위 탭 (PICK·추천·랭킹·데일리·오늘 날씨) · 추천 칩 (니트·코트…)
+        if s := clean(v.get(k), 60)[:20]:
+            o[k] = s
     if s := clean(v.get("nick"), 180)[:60]:
         o["nick"] = s
     tags = v.get("tags") if isinstance(v.get("tags"), list) else []
