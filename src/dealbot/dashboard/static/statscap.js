@@ -2,25 +2,31 @@
    보이는 글(열 수 있는 iframe 포함 · 머리·메뉴 줄 뺌)·표(줄마다 칸)·차트 글·주소·제목·고른 탭을 /dashboard/api/stats_capture 로 보낸다.
    쿠키는 대시보드에 보내지 않고 책갈피에 든 열쇠(@@KEY@@)로만. 딜봇 statscap.py 가 주석 줄·들여쓰기를 빼고 javascript: 주소로 만든다 —
    줄마다 문장이 끝나게 쓴다 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음).
-   11/11 덮개('저장 중 잠시만 기다려')가 보이는 동안 기다림 · 11/12 다른 출처 iframe 주소를 f 에, 숫자가 그 안에만 있으면 따로 열지 물음.
-   11/12 주인 '한 번 누르면 다 모아서': 왼쪽 메뉴(같은 출처 링크)에서 필요한 화면을 골라 숨은 iframe 에 하나씩 열고(최대 90초 · 22화면)
-   숫자가 뜰 때까지 기다려 읽고 화면마다 하나씩 보냄(n = 메뉴 이름). 화면 안 '더보기'를 3번까지 펼치고, 안쪽 탭(조회수/방문횟수 …)을
-   눌러 하나씩, 일간 현황·유입분석은 '이전'(전날)도. 차트는 svg 글·숫자 든 data-*·aria 와 billboard·Highcharts 차트 값.
-   화면이 읽어 온 같은 출처 JSON(performance 기록)은 주인 로그인으로 다시 받아 j 에. 메뉴가 없으면 예전처럼 이 화면 하나만. */
+   11/11 덮개('저장 중 잠시만 기다려')가 보이는 동안 기다림.
+   11/12 15:24 주인 아이패드: 관리 화면(admin.blog.naver.com/<id>/stat/…) 18개 화면이 모두 겉 글뿐 — 숫자는 다른 출처 iframe
+   blog.stat.naver.com/blog/user/<…>?blogId= 안. 그래서 두 단계:
+   1단계 관리 화면: 메뉴 화면(AP)을 숨은 같은 출처 iframe 에 하나씩 열어 안쪽 iframe 의 src 속성(다른 출처라도 읽힘)만 모음 →
+     목록을 '주소 목록' 하나로 보내고(주소 배우기) 묻고 첫 통계 화면으로 옮김 (목록 = #sc=base64 {b: blogId, l: [[이름, 경로]]} ·
+     proxyReferer·isIE8·blogId 뺌). 메뉴가 없는 화면에서 숫자가 다른 출처 iframe 에만 있으면 그 하나를 같은 방식으로.
+   2단계 통계 앱(blog.stat.naver.com): 목록 = #sc= → 이 출처 localStorage 'stcap' → 앱 메뉴(/user/ 링크) → 유입분석 하나.
+     목록을 localStorage 에 두니 다음부턴 통계 화면을 바로 열고 한 번. 숨은 iframe 에 하나씩 열고(최대 150초) 숫자가 뜰 때까지 기다려
+     읽고 화면마다 하나씩 보냄(n = 메뉴 이름). '더보기' 3번까지, 안쪽 탭 4개까지, 일간 현황·유입분석은 '이전'(전날)도.
+   차트: svg 글·숫자 든 data-*·aria · billboard 값 · 값 없는 'day-N' 줄은 뺌 · 창 전역(빈 iframe 창에 없는 이름)에서 숫자 7~62개 배열·
+   날짜 키 객체와 script[type*=json] → j · 화면이 읽어 온 같은 출처 JSON(performance 기록)은 주인 로그인으로 다시 받아 j 에. */
 (async function () {
-const U = '@@URL@@', K = '@@KEY@@', W = window, D = document, L = location;
-if (W.__stcap) { alert('통계 보내기: 보내는 중이에요'); return; }
-if (!/(^|\.)naver\.com$/.test(L.hostname)) { alert('통계 보내기: 네이버 블로그 내 통계 화면에서 눌러 주세요'); return; }
+const U = '@@URL@@', K = '@@KEY@@', W = window, D = document, L = location, SB = '통계 보내기: ', OK = '통계 보냄 ✓ ', AG = ' 열린 화면에서 책갈피를 한 번 더 눌러 주세요';
+if (W.__stcap) { alert(SB + '보내는 중'); return; }
+if (!/(^|\.)naver\.com$/.test(L.hostname)) { alert(SB + '네이버 내 통계에서 눌러 주세요'); return; }
 W.__stcap = 1;
 let ov = null;
 try {
 const NAV = 'header,nav,footer,[role=navigation],[role=banner],[role=contentinfo],#gnb,#lnb,.gnb,.lnb,#header,#footer';
 const ROOT = 'main,[role=main],#content,#container,.content';
-const SEL = '[aria-selected=true],[aria-current=page],[aria-current=true],.on,.active,.selected,.is_selected';
+const SEL = '[aria-selected=true],[aria-current=page],.on,.active,.selected';
 const CELL = '[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]';
 const GRID = '[role=grid],[role=table],[role=treegrid]';
 const LOAD = /저장\s*중|잠시만\s*기다려/;
-const STAT = /^https:\/\/([a-z0-9-]+\.)*naver\.com(:\d+)?\/.*(stat|referer|rank|inflow|visit|today)/i;
+const STAT = /^https:\/\/([a-z0-9-]+\.)*(naver\.com(:\d+)?\/.*(stat|referer|rank|inflow|visit|today)|stat\.naver\.com\/)/i;
 const sl = t => new Promise(r => setTimeout(r, t));
 const tx = n => ((n && (n.innerText || n.textContent)) || '').replace(/[\t\x20]+/g, ' ');
 const sq = s => (s || '').replace(/\s+/g, ' ').trim();
@@ -29,35 +35,48 @@ const vis = n => {
   try { const s = (n.ownerDocument.defaultView || W).getComputedStyle(n); if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false; } catch (e) {}
   try { return !n.getClientRects || n.getClientRects().length > 0; } catch (e) { return true; }
 };
-const lines = n => tx(n).split('\n').map(sq).filter(l => l && !ld(l));
+const lines = n => tx(n).split('\n').map(sq).filter(l => l && !ld(l) && !/^day-\d+$/.test(l));
 const cl = x => { const s = sq(tx(x)).slice(0, 200); return ld(s) ? null : s; };
 const real = c => c.indexOf(null) < 0 && c.some(s => s && s !== '-');
 const nz = n => (n.textContent || '').replace(/\s/g, '').length;
 const busy = d => d.body && tx(d.body).split('\n').some(l => ld(l.trim()));
-// 차트 값 (billboard.js bb.instance · Highcharts.charts — 같은 출처 창이면 읽힘)
+// 차트 값 (billboard.js bb.instance — 같은 출처 창이면 읽힘 · 다른 차트는 아래 창 전역 찾기)
 const dt = v => v && v.getDate ? (v.getMonth() + 1) + '.' + v.getDate() : v;
 const cv = w => {
   const o = [];
   try { for (const c of w.bb.instance) for (const s of c.data()) o.push('차트값 ' + s.id + ': ' + s.values.map(v => dt(v.x) + '=' + v.value).join(' ')); } catch (e) {}
-  try { for (const c of w.Highcharts.charts) if (c) for (const s of c.series) o.push('차트값 ' + s.name + ': ' + s.data.map(p => (p.category || dt(new Date(p.x))) + '=' + p.y).join(' ')); } catch (e) {}
+  return o;
+};
+// 창 전역에서 숫자 7~62개 배열·날짜 키 객체 찾기 (빈 iframe 창에 있는 이름은 뺌 · 3겹까지)
+let bk = null;
+const wv = w => {
+  if (!bk) { bk = new Set(); try { const f = D.createElement('iframe'); D.body.appendChild(f); bk = new Set(Object.keys(f.contentWindow)); f.remove(); } catch (e) {} }
+  const o = [];
+  const sc = (v, p, k) => {
+    if (o.length > 5 || k > 3 || !v || typeof v !== 'object' || v.nodeType || v.window === v) return;
+    const ks = Object.keys(v).slice(0, 80);
+    const ok = Array.isArray(v) ? v.every(x => typeof x === 'number' || (x && typeof x === 'object' && /\d/.test(JSON.stringify(x)))) : ks.every(q => /\d/.test(q) && typeof v[q] === 'number');
+    if (ok && ks.length > 6 && ks.length < 63) { o.push(p + '\n' + JSON.stringify(v).slice(0, 4000)); return; }
+    for (const q of ks.slice(0, 40)) { try { sc(v[q], p + '.' + q, k + 1); } catch (e) {} }
+  };
+  for (const q of Object.keys(w)) { if (!bk.has(q)) try { sc(w[q], q, 0); } catch (e) {} }
   return o;
 };
 // 한 화면 읽기 (T = 문서 · w = 덮개가 보이면 null)
 const cap = (T, w) => {
-  const docs = [T], fs = [], xo = [];
+  const docs = [T], fs = [];
   const walk = d => {
     for (const f of d.querySelectorAll('iframe,frame')) {
       let x = null;
       try { x = f.contentDocument; } catch (e) {}
       const s = f.src || '';
       if (/^https?:/.test(s) && fs.indexOf(s) < 0 && fs.length < 12) fs.push(s);
-      if (!x && /^https?:/.test(s) && xo.indexOf(s) < 0) xo.push(s);
       if (x && x.body && docs.indexOf(x) < 0 && docs.length < 12) { docs.push(x); walk(x); }
     }
   };
   try { walk(T); } catch (e) {}
   if (w && docs.some(busy)) return null;
-  const out = [], rows = [], sel = [], ids = [], urls = [], js = [];
+  const out = [], rows = [], sel = [], ids = [], urls = [], js = [], wj = [];
   let rn = 0;
   const add = (l, skip) => { if (l && !skip.has(l) && out.indexOf(l) < 0 && out.length < 3000) out.push(l); };
   for (const d of docs) {
@@ -89,14 +108,13 @@ const cap = (T, w) => {
 // 열린 shadow root 글 (3겹까지)
     const sw = (r, k) => { for (const e of r.querySelectorAll('*')) { if (e.shadowRoot && k < 3) { for (const c of e.shadowRoot.children) lines(c).forEach(l => add(l, skip)); sw(e.shadowRoot, k + 1); } } };
     try { sw(d, 0); } catch (e) {}
-// 차트 글 (svg text·title·desc · 숫자 든 data-* · canvas 만 있으면 그렇다고 적음)
-    for (const g of d.querySelectorAll('svg,canvas')) {
+// 차트 글 (svg text·title·desc · 숫자 든 data-*)
+    for (const g of d.querySelectorAll('svg')) {
       const q = g.querySelectorAll('text,title,desc');
       let s = (q.length ? [...q] : [g]).map(t => (t.textContent || '').trim()).filter(x => x).join(' ');
       for (const e of [g, ...g.querySelectorAll('[data-value],[data-x],[data-y],[data-date],[data-count]')].slice(0, 400)) { for (const t of e.attributes || []) { if (/^data-/.test(t.name) && /\d/.test(t.value)) s += ' ' + t.name.slice(5) + '=' + t.value; } }
-      s = sq(s).slice(0, 3000);
+      s = sq(s.replace(/day-\d+/g, '')).slice(0, 3000);
       if (/\d/.test(s)) add('차트: ' + s, skip);
-      else if (g.tagName === 'CANVAS' && vis(g)) add('차트: canvas (글 없음)', skip);
     }
     try { cv(d.defaultView).forEach(l => add(l.slice(0, 3000), skip)); } catch (e) {}
     for (const n of d.querySelectorAll('[aria-label],[title]')) {
@@ -127,23 +145,22 @@ const cap = (T, w) => {
       rn++;
     }
     for (const tb of gm.values()) rows.push(tb);
-    for (const a of d.querySelectorAll('a[href*="blog.naver.com/"]')) {
-      const m = /blog\.naver\.com\/([A-Za-z0-9_-]{3,30})/.exec(a.href);
-      if (m && ids.length < 10 && ids.indexOf(m[1]) < 0) ids.push(m[1]);
-    }
 // 화면이 읽어 온 같은 출처 fetch·XHR 주소 (나중에 JSON 이면 다시 받음)
-    try { for (const e of d.defaultView.performance.getEntriesByType('resource')) { if (/^(fetch|xmlhttprequest)$/.test(e.initiatorType) && e.name.indexOf(L.origin + '/') === 0 && js.indexOf(e.name) < 0 && js.length < 4) js.push(e.name); } } catch (e) {}
+    try { for (const e of d.defaultView.performance.getEntriesByType('resource')) { if (/^(fetch|xmlhttprequest)$/.test(e.initiatorType) && e.name.indexOf(L.origin + '/') === 0 && js.indexOf(e.name) < 0 && js.length < 6) js.push(e.name); } } catch (e) {}
+// 화면이 들고 있는 날짜별 숫자 (창 전역 · script json)
+    try { wv(d.defaultView).forEach(v => wj.push(v)); } catch (e) {}
+    for (const t of d.querySelectorAll('script[type*=json]')) { const v = t.textContent || ''; if (/\d/.test(v) && wj.length < 8) wj.push('script\n' + v.slice(0, 4000)); }
   }
   for (const u of urls.concat(fs)) { try { const q = new URL(u).searchParams.get('blogId'); if (q && ids.indexOf(q) < 0) ids.unshift(q); } catch (e) {} }
   const x = out.join('\n').slice(0, 40000);
-  return {js, ok: rows.length > 0 || out.filter(l => /\d/.test(l)).length > 2, sf: (!rows.length || !/\d/.test(x)) && xo.find(s => STAT.test(s)),
+  return {js, wj, ok: rows.length > 0 || out.filter(l => /\d/.test(l)).length > 2,
     F: {k: K, u: urls[0] || L.href, t: T.title || '', f: [...new Set(urls.slice(1).concat(fs))].slice(0, 12).join('\n'), b: ids.join(','), s: sel.join('\n'), x, r: JSON.stringify(rows).slice(0, 60000)}};
 };
 // 같은 출처 JSON 다시 받기 (주인 로그인 · 네이버 화면 안에서만)
 const jget = async a => {
   const o = [];
   for (const u of a) { try { const r = await fetch(u, {credentials: 'include'}); if (/json/.test(r.headers.get('content-type') || '')) o.push(u + '\n' + (await r.text()).slice(0, 6000)); } catch (e) {} }
-  return o.join('\n\n');
+  return o;
 };
 const send = async F => {
   try {
@@ -151,34 +168,27 @@ const send = async F => {
     return await r.json();
   } catch (e) { return null; }
 };
-const say = m => { try { if (!ov) { ov = D.createElement('div'); ov.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;background:#222;color:#fff;padding:8px 12px;border-radius:8px;font:15px sans-serif'; D.body.appendChild(ov); } ov.textContent = m; } catch (e) {} };
-const go = (m, sf) => { if (confirm(m + '\n통계 화면만 따로 열까요? 열린 화면에서 책갈피를 한 번 더 눌러 주세요')) L.href = sf; };
-// 모아 보낼 화면 (메뉴 이름 · 공백 뺌 · 먼저 쓴 것부터)
-const WANT = '유입분석,일간현황,유입검색어,검색어,조회수순위,시간대분석,조회수,순방문자수,방문횟수,평균방문횟수,재방문율,평균사용시간,성별·연령별분포,기기별분포,이웃방문현황,이웃증감수,이웃증감분석,공감수순위,댓글수순위,블로그평균데이터'.split(',');
-const YD = ['유입분석', '일간현황'];
-const nk = s => sq(s).replace(/\s/g, '');
+const say = m => { try { if (!ov) { ov = D.createElement('div'); ov.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;background:#222;color:#fff;padding:8px 12px;font:15px sans-serif'; D.body.appendChild(ov); } ov.textContent = m; } catch (e) {} };
+// 모아 보낼 화면 (관리 화면 메뉴 주소 끝 · 먼저 쓴 것부터) · 통계 앱 주소에서 뺄 것
+const AP = 'referer,today,visit_pv,uv,visit,frequency,retention,averageDuration,hour_cv,demo,device,relationDist,relationDelta,relationDemo,rank_pv,rank_like,rank_comment,average_upperGroup'.split(',');
+const NO = /동영상|재생|국가|다운로드/;
 const lk = e => { const h = (e.getAttribute && e.getAttribute('href')) || ''; return h && h[0] !== '#' && !/^javascript:/i.test(h); };
-let tabs = [];
-for (const a of D.querySelectorAll('a[href]')) {
-  const n = sq(a.textContent), h = a.href || '';
-  if (WANT.indexOf(nk(n)) >= 0 && h.indexOf(L.origin + '/') === 0 && h.indexOf('#') < 0 && !tabs.some(t => t[0] === n || t[1] === h)) tabs.push([n, h]);
-}
-const pm = /^\/[\w-]+\/stat\//.exec(L.pathname);
-if (tabs.length < 2 && pm && /조회수순위/.test(nk(tx(D.body)))) tabs = [['일간 현황', 'today'], ['유입분석', 'referer'], ['조회수 순위', 'rank_pv']].map(t => [t[0], L.origin + pm[0] + t[1]]);
-tabs.sort((a, b) => WANT.indexOf(nk(a[0])) - WANT.indexOf(nk(b[0])));
-tabs = tabs.slice(0, 22);
-if (tabs.length > 1) {
-  const t0 = Date.now(), left = () => Date.now() - t0 < 90000, xs = [], seen = new Set();
+const qid = u => { try { return new URL(u, L.href).searchParams.get('blogId') || ''; } catch (e) { return ''; } };
+const sp = x => { for (const k of ['blogId', 'proxyReferer', 'isIE8']) x.searchParams.delete(k); return x.pathname + x.search; };
+const fu = (o, u, b) => o + u + (b ? (u.indexOf('?') < 0 ? '?' : '&') + 'blogId=' + b : '');
+const t0 = Date.now(), left = () => Date.now() - t0 < 150000;
+const mk = () => { const f = D.createElement('iframe'); f.style.cssText = 'position:fixed;left:-5000px;top:0;width:1200px;height:1000px;border:0'; D.body.appendChild(f); return f; };
+const open = (f, h) => new Promise(r => { f.onload = r; f.src = h; setTimeout(r, 12000); });
+const dj = async c => c.wj.concat(await jget(c.js)).join('\n\n');
+// 숨은 iframe 에 하나씩 열어 숫자가 뜰 때까지 기다려 읽고 화면마다 하나씩 보냄 → [보낸 수, 시간 넘음, 연 수]
+const run = async tabs => {
+  const seen = new Set(), fr = mk();
   let n = 0, tried = 0, cut = 0;
-  const fr = D.createElement('iframe');
-  fr.style.cssText = 'position:fixed;left:-5000px;top:0;width:1200px;height:1000px;border:0';
-  D.body.appendChild(fr);
-  const doc = () => { try { return fr.contentDocument; } catch (e) { return null; } };
   const put = async (c, nm) => {
-    if (!c || seen.has(c.F.u + c.F.x) || n >= 40) return;
+    if (!c || seen.has(c.F.u + c.F.x) || n >= 60) return;
     seen.add(c.F.u + c.F.x);
     c.F.n = nm;
-    c.F.j = await jget(c.js);
+    c.F.j = await dj(c);
     const r = await send(c.F);
     if (r && r.ok) n++;
   };
@@ -195,16 +205,15 @@ if (tabs.length > 1) {
     if (!left()) { cut = 1; break; }
     tried++;
     say(tried + '/' + tabs.length + ' ' + nm + '…');
-    await new Promise(r => { fr.onload = r; fr.src = h; setTimeout(r, 12000); });
+    await open(fr, h);
     let c = null, T = null;
     for (let j = 0; j < 14 && left(); j++) {
-      T = doc();
+      T = fr.contentDocument;
       c = T && T.body ? cap(T, 0) : null;
-      if (c && (c.ok || (c.sf && j > 3))) break;
+      if (c && c.ok) break;
       await sl(500);
     }
     if (!c) continue;
-    if (c.sf && !c.ok) { xs.push(c.sf); await put(c, nm); continue; }
 // '더보기' 3번까지 펼침
     for (let k = 0; k < 3 && left(); k++) {
       const m = btns(T).find(e => /^더보기/.test(sq(e.textContent)));
@@ -216,30 +225,94 @@ if (tabs.length > 1) {
     const sub = [], sn = [];
     for (const e of btns(T)) {
       const s = sq(e.textContent), li = e.closest && e.closest('li');
-      if (sub.length < 4 && s.length > 1 && s.length < 16 && !/\d|동영상|다운로드|주간|월간|더보기|이전|다음|로그|삭제|설정|탈퇴|저장|공유|닫기/.test(s) && sn.indexOf(s) < 0 && (e.getAttribute('role') === 'tab' || (li && li.parentNode.children.length < 9))) { sub.push(e); sn.push(s); }
+      if (sub.length < 4 && s.length > 1 && s.length < 16 && !/\d|동영상|다운로드|주간|월간|더보기|이전|다음|로그|삭제|설정|저장/.test(s) && sn.indexOf(s) < 0 && (e.getAttribute('role') === 'tab' || (li && li.parentNode.children.length < 9))) { sub.push(e); sn.push(s); }
     }
-    for (let k = 0; k < sub.length && left(); k++) { say(tried + '/' + tabs.length + ' ' + nm + ' · ' + sn[k] + '…'); await put(await press(T, sub[k], c.F.x), nm + ' · ' + sn[k]); }
+    for (let k = 0; k < sub.length && left(); k++) await put(await press(T, sub[k], c.F.x), nm + ' · ' + sn[k]);
 // 일간 현황·유입분석은 전날도 (날짜 옆 '이전' 단추)
-    if (YD.indexOf(nk(nm)) >= 0 && left()) {
+    if (/유입|일간|referer|today/.test(nm) && left()) {
       const p = btns(T).find(e => /이전|prev/i.test(e.textContent + (e.getAttribute('aria-label') || '') + (e.getAttribute('title') || '') + e.className) && !/페이지|page/i.test(e.className + e.textContent));
-      if (p) { say(tried + '/' + tabs.length + ' ' + nm + ' · 전날…'); await put(await press(T, p, cap(T, 0).F.x), nm + ' · 전날'); }
+      if (p) await put(await press(T, p, cap(T, 0).F.x), nm + ' · 전날');
     }
   }
   fr.remove();
-  if (xs.length && xs.length === tried) { ov.remove(); ov = null; go('통계 보냄 ✓ ' + n + '개 화면 — 숫자는 안쪽 화면에 있어요.', xs[0]); return; }
-  if (n) { say('통계 보냄 ✓ ' + n + '개 화면'); alert('통계 보냄 ✓ ' + n + '개 화면' + (cut ? ' (90초 넘어 ' + (tabs.length - tried) + '개 못 봄)' : '')); return; }
+  return [n, cut, tried];
+};
+const done = (r, len, tip) => { alert(r[0] ? OK + r[0] + '개 화면' + (r[1] ? ' (시간 넘어 ' + (len - r[2]) + '개 못 봄)' : '') + tip : SB + '숫자를 못 읽었어요'); };
+// 2단계 — 통계 앱(blog.stat.naver.com): 주소 #sc= → 이 출처에 저장해 둔 목록 → 앱 메뉴 → 아는 것
+let P = null, first = 0, fb = 0;
+const hm = /[#&]sc=([^&]+)/.exec(L.hash || '');
+try { if (hm) { P = JSON.parse(decodeURIComponent(escape(atob(hm[1])))); first = 1; } } catch (e) {}
+try { P = P || JSON.parse(W.localStorage.getItem('stcap')); } catch (e) {}
+if (P || /(^|\.)stat\.naver\.com$/.test(L.hostname)) {
+  let l = (P && P.l) || [];
+  if (!l.length) {
+    for (const a of D.querySelectorAll('a[href]')) {
+      const n = sq(a.textContent), u = a.origin === L.origin && /\/user\//.test(a.pathname) && sp(new URL(a.href));
+      if (u && n && n.length < 20 && !NO.test(n) && !l.some(e => e[1] === u)) l.push([n, u]);
+    }
+    if (l.length < 2) { fb = 1; l = [['유입분석', '/blog/user/referer/total']]; }
+  }
+  P = {b: qid(L.href) || (P && P.b) || '', l: l.slice(0, 30)};
+  try { if (!fb) W.localStorage.setItem('stcap', JSON.stringify(P)); } catch (e) {}
+  done(await run(P.l.map(e => [e[0], fu(L.origin, e[1], P.b)])), P.l.length, first ? '\n다음엔 이 화면을 열고 한 번' : '');
+  return;
+}
+// 1단계 — 관리 화면(admin.blog.naver.com): 메뉴 화면마다 안쪽 통계 iframe 의 src 속성(다른 출처라도 읽힘)을 모아 목록
+let tabs = [];
+for (const a of D.querySelectorAll('a[href]')) {
+  const m = a.origin === L.origin && lk(a) && /\/stat\/(\w+)$/.exec(a.pathname);
+  if (m && AP.indexOf(m[1]) >= 0 && !tabs.some(t => t[2] === m[1])) tabs.push([sq(a.textContent) || m[1], a.href, m[1]]);
+}
+const pm = /^\/([\w-]+)\/stat\//.exec(L.pathname);
+if (tabs.length < 2 && pm) tabs = AP.map(k => [k, L.origin + pm[0] + k, k]);
+tabs.sort((a, b) => AP.indexOf(a[2]) - AP.indexOf(b[2]));
+const sx = T => {
+  for (const f of T.querySelectorAll('iframe,frame')) {
+    let x = null, y = null;
+    try { x = new URL(f.getAttribute('src') || '', T.baseURI); } catch (e) {}
+    if (x && x.origin !== L.origin && STAT.test(x.href)) return x;
+    try { y = f.contentDocument && sx(f.contentDocument); } catch (e) {}
+    if (y) return y;
+  }
+  return null;
+};
+// 찾은 목록을 한 번 보내고(주소 배우기) 첫 통계 화면으로 옮김 (iframe 이 쓰던 주소 그대로 · 목록은 #sc= 에)
+const hop = async (l, o, b, fs) => {
+  await send({k: K, u: L.href, t: D.title, n: '주소 목록', b, f: fs.join('\n'), x: l.map(e => e[0] + ' ' + o + e[1]).join('\n')});
+  if (ov) { ov.remove(); ov = null; }
+  if (confirm(l.length + '개 찾음 ✓\n통계 화면으로 옮겨서 모을까요?' + AG)) L.href = fs[0].split('#')[0] + '#sc=' + btoa(unescape(encodeURIComponent(JSON.stringify({b, l}))));
+};
+if (tabs.length > 1) {
+  const fr = mk(), l = [], fs = [];
+  let o = '', b = '', i = 0;
+  for (const [nm, h] of tabs) {
+    if (!left()) break;
+    say((++i) + '/' + tabs.length + ' ' + nm + '…');
+    await open(fr, h);
+    let x = null;
+    for (let j = 0; j < 25 && !x && left(); j++) { try { x = sx(fr.contentDocument); } catch (e) {} if (!x) await sl(200); }
+    if (!x || (o && x.origin !== o)) continue;
+    o = x.origin;
+    b = b || qid(x.href) || (pm && pm[1]) || '';
+    fs.push(x.href);
+    const u = sp(x);
+    if (!l.some(e => e[1] === u)) l.push([nm, u]);
+  }
+  fr.remove();
+  if (l.length) { await hop(l, o, b, fs); return; }
   if (ov) { ov.remove(); ov = null; }
 }
 let c = null;
 for (let i = 0; i < 10 && !(c = cap(D, 1)); i++) await sl(500);
 c = c || cap(D, 0);
-const F = c.F, sf = c.sf;
-F.j = await jget(c.js);
+const F = c.F, x = !c.ok && sx(D);
+F.j = await dj(c);
 const res = await send(F);
-if (sf) { go(res && res.ok ? '통계 보냄 ✓ (' + res.label + ') — 숫자는 안쪽 화면에 있어요.' : '통계 보내기: 이 화면에는 숫자가 없어요.', sf); return; }
-if (res && res.ok) { alert('통계 보냄 ✓ (' + res.label + ')'); return; }
-if (res) { alert('통계 보내기: ' + (res.text || '받지 않았어요')); return; }
-if (!confirm('통계 보내기: 이 화면에서 바로 보내지 못했어요. 이 창에서 보낼까요? (보낸 뒤 뒤로 가기로 돌아와요)')) return;
+// 숫자가 다른 출처 iframe 안에만 있으면 그 화면으로 옮길지 물음
+if (x) { const b = qid(x.href), h = x.href; await hop([[D.title || '통계', sp(x)]], x.origin, b, [h]); return; }
+if (res && res.ok) { alert(OK + '(' + res.label + ')'); return; }
+if (res) { alert(SB + (res.text || '안 받음')); return; }
+if (!confirm(SB + '바로 못 보냈어요. 이 창에서 보낼까요?')) return;
 const fm = D.createElement('form');
 fm.method = 'POST'; fm.action = U; fm.acceptCharset = 'UTF-8';
 F.via = 'form';
@@ -247,6 +320,6 @@ for (const k in F) { const i = D.createElement('input'); i.type = 'hidden'; i.na
 D.body.appendChild(fm);
 fm.submit();
 } catch (e) {
-  alert('통계 보내기: 보내지 못했어요 (' + ((e && e.message) || e) + ')');
+  alert(SB + '못 보냄 (' + ((e && e.message) || e) + ')');
 } finally { W.__stcap = 0; if (ov) ov.remove(); }
 })();
