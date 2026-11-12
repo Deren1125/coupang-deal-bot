@@ -68,10 +68,12 @@ def test_bookmarklet_has_endpoint_key_and_keeps_file_rules() -> None:
     js = code(db)
     assert "'https://dash.example/dashboard/api/ably_rank_capture'" in js and f"'{ablyrank.key(db)}'" in js and "@@" not in js
     # 사파리 책갈피 주소 칸: 꾸미기 책갈피 28KB 가 아이패드에서 돎 (test_dash_kkumi) · 11/12 코디 랭킹 넣으며 16→22KB · 진행 띠 넣으며 24KB · 탭 돌기·m.a-bly.com 옮기기 넣으며 26KB
-    assert "/*" not in js and "\n//" not in js and len(ablyrank.view(db, "https://dash.example")["code"]) < 26000
+    # · 코디 상세 누르기·화면 데이터 읽기 넣으며 28KB 안 (옛 코디 링크 카드 읽기·글자 굵기로 탭 찾기를 빼고)
+    assert "/*" not in js and "\n//" not in js and len(ablyrank.view(db, "https://dash.example")["code"]) < 28000
     # 대시보드로 쿠키 없이 한 번만 · 코디 화면은 같은 출처만 숨은 iframe 으로 (받아 오기 없음)
-    assert js.count("fetch(") == 1 and "fetch(U,{method:'POST',mode:'cors',credentials:'omit'" in js and "XMLHttpRequest" not in js and "cookie" not in js
-    assert "credentials:'include'" not in js and "origin===location.origin" in js and "allow-top-navigation" not in js
+    assert js.count("fetch(") == 1 and "fetch(U,{method:'POST',mode:'cors',credentials:'omit',keepalive:ka," in js and "XMLHttpRequest" not in js and "cookie" not in js
+    assert "credentials:'include'" not in js and "origin===location.origin" in js and "allow-top-navigation" not in js and "location.href=xf" in js
+    assert len(re.findall(r"location\.href=(?!=)", js)) == 1 and ".submit()" in js  # 상세는 앱 안 이동만 (pushState·back) — 화면을 통째로 옮기는 것은 껍데기→코디 화면 한 번뿐
     assert ablyrank.key(db) != statscap.key(db) and len(ablyrank.INSTALL_STEPS) == 4
     with pytest.raises(ValueError):
         ablyrank.bookmarklet("https://x.example/a'b", "k")
@@ -93,12 +95,6 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>코디 랭킹 
 <h1>랭킹</h1>
 <div role="tablist"><button role="tab" aria-selected="false">상품</button><button role="tab" aria-selected="true">코디</button>
 <button role="tab" aria-selected="false">마켓</button></div>
-<ul id="looks">
- <li><a href="/coordi/7001"><span>1</span><img src="https://img.cdn.example/look/7001.jpg" width="200"><p>데이트룩 니트 코디</p><span>좋아요 1.2만</span></a>
-  <div><a href="/goods/111"><img src="https://img.cdn.example/g/111.jpg" width="80"><span class="market_name">러브마켓</span><span class="goods_name">앙고라 브이넥 니트</span><span>20%</span><b>31,200원</b></a></div>
-  <div><a href="/goods/112"><img src="https://img.cdn.example/g/112.jpg" width="80"><p>러브마켓</p><p>A라인 미니 스커트</p><p>25,900원</p></a></div>
- </li>
-</ul>
 <ol id="goods"></ol>
 <p id="ld">불러오는 중</p>
 <script>
@@ -172,32 +168,28 @@ def test_bookmarklet_on_fake_ably_ranking_collects_cards_and_server_saves() -> N
     res = subprocess.run([NODE, "-e", RUN, code(db), PAGE], capture_output=True, text=True, timeout=120, env=env)
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
-    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 1 · 상품 4) · 다음엔 이 화면에서 바로 누르세요", "Ably 랭킹 보내기: 에이블리 랭킹 화면(a-bly.com)에서 눌러 주세요"]
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 0 · 상품 2)", "에이블리(a-bly.com)에서 눌러 주세요"]
     assert all(u.startswith("https://img.cdn.example/") for u in got["outside"])  # 사진은 화면(브라우저)이 받음 — 책갈피는 대시보드로만 보냄
     assert 900 <= got["waited"] < 6000  # 카드가 늦게 떠서 0.5초씩 기다림
     assert len(got["posts"]) == 1 and got["posts"][0]["url"] == "https://dash.example/dashboard/api/ably_rank_capture"
     assert got["posts"][0]["cookie"] == ""
     sent = dict(parse_qsl(got["posts"][0]["body"], keep_blank_values=True))
     assert sent["k"] == ablyrank.key(db) and sent["u"] == "https://m.a-bly.com/ranking" and sent["t"] == "코디 랭킹 | 에이블리"
-    assert sent["s"].splitlines()[0] == "코디" and "랭킹" in sent["h"].splitlines()
+    assert sent["s"].splitlines()[0] == "코디"
     cards = json.loads(sent["j"])
     it = {i["url"].rsplit("/", 1)[1]: i for i in cards["items"]}
-    assert set(it) == {"201", "202"}  # 숨은 상품 뺌 · 코디 안 상품은 코디 쪽에
+    assert set(it) == {"201", "202"}  # 숨은 상품 뺌
     a, b = it["201"], it["202"]
     assert (a["rank"], a["shop"], a["name"], a["price"], a["orig"], a["disc"], a["star"], a["rev"]) == \
         (1, "무드온", "울 블렌드 롱 코트", 64350, 99000, 35, 4.8, "1,234")
     assert a["img"] == "https://img.cdn.example/g/201.jpg" and a["url"] == "https://m.a-bly.com/goods/201"
     assert (b["rank"], b["shop"], b["name"], b["price"], b["like"]) == (2, "데일리룸", "케이블 가디건 2026 신상", 29900, "532")
     assert "orig" not in b and "disc" not in b
-    (lk,) = cards["looks"]
-    assert (lk["rank"], lk["title"], lk["like"], lk["url"], lk["img"]) == \
-        (1, "데이트룩 니트 코디", "1.2만", "https://m.a-bly.com/coordi/7001", "https://img.cdn.example/look/7001.jpg")
-    assert [(x["shop"], x["name"], x["price"]) for x in lk["items"]] == [("러브마켓", "앙고라 브이넥 니트", 31200), ("러브마켓", "A라인 미니 스커트", 25900)]
-    assert lk["items"][0]["disc"] == 20
+    assert cards["looks"] == []
     out = ablyrank.save(db, sent, now=NOW, tz=TZ)
-    assert out["ok"] and out["label"] == "상품 2 · 코디 1 · 코디" and out["key"].startswith("ably_rank_capture:2026-11-12:")
+    assert out["ok"] and out["label"] == "상품 2 · 코디" and out["key"].startswith("ably_rank_capture:2026-11-12:")
     (rec,) = recs(db)
-    assert rec["tab"] == "코디" and rec["items"][0]["pos"] == 1 and rec["looks"][0]["items"][1]["name"] == "A라인 미니 스커트"
+    assert rec["tab"] == "코디" and rec["items"][0]["pos"] == 1 and rec["items"][1]["name"] == "케이블 가디건 2026 신상"
     assert "울 블렌드 롱 코트" in rec["text"]
 
 
@@ -317,7 +309,8 @@ const {chromium} = require('playwright');
   out.scroll = await p.evaluate(() => PLACE_SCROLL.scrollTop);
   out.frames = await p.evaluate(() => document.querySelectorAll('iframe').length);
   out.tab = await p.evaluate(() => (document.querySelector('.tabs .x') || {}).textContent || '');
-  out.ls = await p.evaluate(() => localStorage.abcap || '');
+  out.log = await p.evaluate(() => window.__log || []);
+  out.at = p.url();
   console.log(JSON.stringify(out));
   await b.close();
 })().catch(e => { console.error(String(e)); process.exit(2); });
@@ -351,20 +344,22 @@ TAB_LOOKS = [("PICK", ""), ("추천", ""), ("추천", "전체"), ("추천", "니
 @pytest.mark.parametrize("mode", ["shadow", "iframe"])  # 카드가 그림자 DOM 안이든 같은 출처 iframe 안이든
 def test_bookmarklet_on_fake_coordi_page_walks_tabs_and_chips(mode: str) -> None:
     got, sent, db = _coordi_run(mode, False)
-    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 84 · 상품 12) · 다음엔 이 화면에서 바로 누르세요"] and got["ls"] == "1"
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 84 · 상품 12)"]
     # 진행 띠 (주인 11/12): 누르자마자 · 탭·칩마다 개수 → 내리기 → 상세 → 보내기 · 끝나면 치움
     ov = got["ov"]
-    assert ov[0].startswith("에이블리 모으는 중… 카드 찾는 중 (") and any(re.search(r"· 랭킹 \d+개 · 아래로 내리는 중 1/6$", m) for m in ov)
+    assert ov[0].startswith("카드 찾는 중 (") and any(re.search(r"· 랭킹 \d+개 · 아래로 내리는 중 1/6$", m) for m in ov)
     assert any("PICK 6개 · 추천 6개 · 추천-전체 6개 · 추천-니트 6개" in m for m in ov)
-    assert "상세 읽는 중 0/4" in ov and got["left"] == 0  # 상세 1~4/4·보내는 중은 순간이라 50ms 보기에 안 잡힐 때도
-    assert got["busy"] == "Ably 랭킹 보내기: 이미 모으는 중이에요"
+    # 상세 40개 차례 (랭킹 1~20위 먼저): 링크 있는 4개는 숨은 iframe · 링크 없는 카드는 눌러 봄 — 이 화면은 눌러도 안 열려서 3번 만에 그만
+    assert "상세 0/40 · 상품 0" in ov and got["left"] == 0 and any(m.startswith("상세 4/40 · 상품 12") for m in ov)
+    assert got["busy"] == "이미 모으는 중이에요"
     assert sorted(got["details"]) == ["https://mobile.a-bly.com/coordi/8001"] + [f"https://mobile.a-bly.com/coordi/{9000 + n}" for n in (1, 2, 3)]
     assert all(u.startswith("https://img.cdn.example/") for u in got["outside"]) and got["scroll"] == 0 and got["frames"] == (mode == "iframe")  # 내린 뒤 제자리 · 숨은 iframe 치움
     assert got["tab"] == "랭킹" and 900 <= got["waited"] < 150000  # 끝나면 랭킹 탭으로
     assert sent["s"].splitlines()[0] == "랭킹"
     cards = json.loads(sent["j"])
     assert cards["items"] == [] and cards["upd"] == "12:00 PM 업데이트" and "roots 2" in cards["dbg"] and "cards 84 urls 4" in cards["dbg"]
-    assert "ready complete" in cards["dbg"] and ("shadow 1" if mode == "shadow" else "iframe 1") in cards["dbg"] and len(cards["dbg"]) < 2000
+    assert "ready complete" in cards["dbg"] and ("iframe 1" if mode == "iframe" else "iframe 0") in cards["dbg"] and len(cards["dbg"]) < 2000
+    assert "det 0/0/4/3/0/0/0/12/ " in cards["dbg"]  # 데이터 0 · iframe 4 · 눌러 봄 3 (안 열림) · 상품 12
     lk = cards["looks"]
     seen = []
     for x in lk:
@@ -402,11 +397,203 @@ def test_bookmarklet_on_fake_coordi_page_walks_tabs_and_chips(mode: str) -> None
 def test_bookmarklet_moves_from_shell_to_cross_origin_coordi_frame_then_collects() -> None:
     """11/12 실제 dbg: mobile.a-bly.com 은 껍데기(img 0 · iframe 1), 화면은 다른 출처 m.a-bly.com iframe 안 → 옮길지 묻고, 거기서 한 번 더."""
     got, sent, _db = _coordi_run("shadow", True)
-    assert got["alerts"][0] == "에이블리 코디 화면으로 옮길까요? 열린 화면에서 책갈피를 한 번 더 눌러 주세요"
+    assert got["alerts"][0] == "코디 화면으로 옮길까요? 옮긴 뒤 한 번 더 눌러 주세요"
     assert got["moved"] == "https://m.a-bly.com/content/style/home?global_layout=app&embed=true"  # 주소 그대로 (물음표 뒤까지)
-    assert got["alerts"][1:] == ["Ably 랭킹 보냄 ✓ (코디 84 · 상품 12) · 다음엔 이 화면에서 바로 누르세요"] and got["ls"] == "1"
+    assert got["alerts"][1:] == ["Ably 랭킹 보냄 ✓ (코디 84 · 상품 12)"]
     assert sorted(got["details"])[0] == "https://m.a-bly.com/coordi/8001" and len(got["details"]) == 4  # m.a-bly.com 에선 코디 화면도 같은 출처
     assert sent["u"].startswith("https://m.a-bly.com/") and len(json.loads(sent["j"])["looks"]) == 84
+
+
+# 11/12 네 번째 실제('코디 100 · 상품 0'): m.a-bly.com 코디 화면은 앱(React Native Web) 화면 — 카드에 링크가 없고, 누르면 앱 안에서
+# /content/style/coordi/<번호> 로 pushState 해 상세(요즘코디)를 그림: 큰 사진 · 하트·댓글 · 가로 상품 줄(작은 이름 · 빨간 할인 · 가격) · 해시태그·댓글.
+# 상품을 누르면 /goods/<번호> (pushState) · 뒤로(popstate)면 코디 화면을 다시 그림 (랭킹은 12개만 — 내려야 더).
+# 흉내: 사진은 배경 사진 div + 투명 img (RN Web 모양) · 첫 상품만 data-goods-sno · 랭킹 2위 상세는 pushState 를 두 번 해서 한 번 뒤로로는 안 돌아옴 ·
+# PICK 1~3 은 __NEXT_DATA__(React Query 캐시 모양)에, 데일리 6개는 카드 React props(__reactFiber)에 상품이 있음 → 누르지 않고 그것을 씀.
+SPA_GOODS = [["빈티지 니트", 63, "6,900"], ["코듀로이 팬츠", 0, "14,800"], ["울 머플러", 54, "17,800"], ["레더 미니백", 27, "32,500"],
+             ["헤어핀 세트", 83, "2,900"], ["울 코트", 20, "22,650"]]
+
+
+def _state_goods(cid: int) -> list[dict]:
+    return [{"sno": cid * 10 + i, "name": f"{n} {cid}", "price": int(p.replace(",", "")), "consumer": int(p.replace(",", "")) * 2,
+             "discount_rate": d, "market_name": "러브마켓", "image": f"https://img.cdn.example/g/{cid * 10 + i}.jpg"}
+            for i, (n, d, p) in enumerate(SPA_GOODS[:3])]
+
+
+SPA = """<!doctype html><html><head><meta charset="utf-8"><title>에이블리</title>
+<script id="__NEXT_DATA__" type="application/json">%NEXT%</script>
+<style>body{margin:0;width:390px}.tabs{display:flex;gap:12px}.tabs span{color:#999}.tabs span.x{color:#000;font-weight:700}
+.ph{position:relative;background-size:cover}.ph img{position:absolute;left:0;top:0;width:100%;height:100%;opacity:0}</style></head><body>
+<div>앱에서 더 많은 상품을 볼 수 있어요! <button>앱에서 보기</button></div>
+<div class="tabs"><span>PICK</span><span>팔로잉</span><span class="x">랭킹</span><span>데일리</span></div>
+<div id="app"></div>
+<script>
+const GOODS = %GOODS%, app = document.getElementById('app'), bar = document.querySelector('.tabs');
+window.__log = [];
+let tab = '랭킹', n = 0;
+const pic = (u, w, h) => '<div class="ph" style="width:' + w + 'px;height:' + h + 'px;background-image:url(' + u + ')"><img src="' + u + '"></div>';
+const rcard = r => '<div class="card" data-k="' + (5000 + r) + '"><div style="position:relative">' + pic('https://img.cdn.example/c/' + (5000 + r) + '.jpg', 180, 240)
+  + '<div style="position:absolute;top:6px;left:6px;display:flex;gap:2px"><span>' + r + '</span><span>–</span></div></div><div><span>nick' + r + '</span></div><p>#겨울코디</p></div>';
+const more = () => { const g = document.getElementById('g'); let h = ''; for (let i = 0; i < 12 && n < 24; i++) h += rcard(++n); g.insertAdjacentHTML('beforeend', h); };
+const grid = () => {
+  bar.style.display = 'flex';
+  if (tab === '랭킹') {
+    app.innerHTML = '<p>12:00 PM 업데이트</p><div id="sc" style="height:700px;overflow-y:auto"><div id="g" style="display:grid;grid-template-columns:180px 180px;gap:8px"></div></div>';
+    n = 0;
+    more();
+    const sc = document.getElementById('sc');
+    sc.onscroll = () => { if (sc.scrollTop + sc.clientHeight > sc.scrollHeight - 300) setTimeout(more, 150); };
+    return;
+  }
+  let h = '';
+  for (let i = 1; i <= 6; i++) {
+    const k = (tab === 'PICK' ? 6000 : 7000) + i;
+    h += '<div class="card" data-k="' + k + '"' + (tab === '데일리' ? ' data-coordi-id="' + k + '"' : '') + '>' + pic('https://img.cdn.example/p/' + (tab === 'PICK' ? 'PICK' : 'DAILY') + '_' + i + '.jpg', 120, 160) + '<p>#' + tab + i + '</p></div>';
+  }
+  app.innerHTML = '<div style="display:grid;grid-template-columns:120px 120px 120px;gap:4px">' + h + '</div>';
+  // 데일리: 카드 React props 에 코디·상품 (진짜 React 처럼 사진 요소에 __reactFiber$… — 위로 올라가면 item)
+  if (tab === '데일리') app.querySelectorAll('.card').forEach(c => { const k = +c.dataset.k; c.querySelector('.ph')['__reactFiber$x1'] = {memoizedProps: {src: 'x'}, return: {memoizedProps: {style: {}}, return: {memoizedProps: {item: {coordi_sno: k, goods_list: GOODS(k)}}, return: null}}}; });
+};
+const detail = id => {
+  bar.style.display = 'none';
+  app.innerHTML = '<p>불러오는 중</p>';
+  setTimeout(() => {
+    if (!new RegExp('/coordi/' + id).test(location.pathname)) return;
+    app.innerHTML = '<h1>요즘코디</h1>' + pic('https://img.cdn.example/d/' + id + '.jpg', 390, 480) + '<div>♡ 120 · 댓글 3</div><div class="strip" style="display:flex;overflow-x:auto;gap:8px;width:390px">'
+      + %STRIP%.map((p, i) => '<div class="gd" data-k="' + (id * 10 + i) + '"' + (i ? '' : ' data-goods-sno="' + id * 10 + '"') + ' style="flex:0 0 100px"><img style="width:100px;height:120px;display:block" src="https://img.cdn.example/g/' + (id * 10 + i) + '.jpg">'
+        + '<p>' + p[0] + '</p><p>' + (p[1] ? '<b style="color:red">' + p[1] + '%</b> ' : '') + p[2] + '</p></div>').join('') + '</div><p>#빈티지룩 #겨울코디</p><ul><li>예뻐요</li></ul>';
+  }, 250);
+};
+const render = () => {
+  const m = /^\\/content\\/style\\/coordi\\/(\\d+)/.exec(location.pathname), g = /^\\/goods\\/(\\d+)/.exec(location.pathname);
+  if (g) { bar.style.display = 'none'; app.innerHTML = '<h1>상품 ' + g[1] + '</h1>'; return; }
+  if (m) return detail(+m[1]);
+  grid();
+};
+addEventListener('popstate', render);
+bar.querySelectorAll('span').forEach(e => e.onclick = () => { bar.querySelectorAll('span').forEach(x => x.className = ''); e.className = 'x'; tab = e.textContent; setTimeout(grid, 200); });
+// 앱 안 이동 (링크 없음 — 누르면 pushState)
+app.addEventListener('click', e => {
+  const g = e.target.closest('.gd'), c = e.target.closest('.card');
+  if (g) { window.__log.push('g' + g.dataset.k); history.pushState({}, '', '/goods/' + g.dataset.k); render(); }
+  else if (c) {
+    window.__log.push(c.dataset.k);
+    history.pushState({}, '', '/content/style/coordi/' + c.dataset.k);
+    if (c.dataset.k === '5002') history.pushState({}, '', '/content/style/coordi/' + c.dataset.k + '/goods');
+    render();
+  }
+});
+setTimeout(render, 800);
+</script></body></html>"""
+
+
+def test_bookmarklet_taps_linkless_coordi_cards_reads_product_strip_and_goes_back() -> None:
+    """앱 화면 흉내 (껍데기 mobile.a-bly.com → m.a-bly.com): 링크 없는 카드를 눌러 상세 상품 줄을 읽고 뒤로 · 화면 데이터에 있는 코디는 누르지 않음."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    db = FakeDb()
+    nxt = {"props": {"pageProps": {"dehydratedState": {"queries": [{"queryKey": ["style", "pick"], "state": {"data": {"items": [
+        {"coordi_sno": 900 + i, "like_count": 120, "images": [{"url": f"https://img.cdn.example/p/PICK_{i}.jpg"}], "goods_list": _state_goods(6000 + i)}
+        for i in (1, 2, 3)]}}}]}}}}
+    goods = "k => " + json.dumps([{"goods_sno": 0, "goods_name": n, "price": int(p.replace(",", "")), "discount_rate": d,
+                                   "thumbnail": "https://img.cdn.example/g/d.jpg"} for n, d, p in SPA_GOODS[:2]], ensure_ascii=False) \
+        + ".map((x, i) => ({...x, goods_sno: k * 10 + i, goods_name: x.goods_name + ' ' + k}))"
+    page = SPA.replace("%NEXT%", json.dumps(nxt, ensure_ascii=False)).replace("%GOODS%", goods).replace("%STRIP%", json.dumps(SPA_GOODS, ensure_ascii=False))
+    run = RUN_CO.replace("PLACE_SCROLL", "(document.getElementById('sc') || document.body)")
+    res = subprocess.run([NODE, "-e", run, code(db), page, DETAIL, SHELL], capture_output=True, text=True, timeout=400, env=env)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    (post,) = got["posts"]
+    sent = dict(parse_qsl(post["body"], keep_blank_values=True))
+    cards = json.loads(sent["j"])
+    lk = cards["looks"]
+    assert got["moved"] == "https://m.a-bly.com/content/style/home?global_layout=app&embed=true" and got["details"] == []  # 숨은 iframe 없음 (링크 없음)
+    # 누른 차례: 랭킹 1~20위 → PICK 4~6 (1~3 은 화면 데이터) → 랭킹 21~24 · 데일리는 props 에 있어 안 누름 · 상품도 눌러 주소 (합쳐 12번)
+    taps = [x for x in got["log"] if not x.startswith("g")]
+    assert taps == [str(5000 + r) for r in range(1, 21)] + ["6004", "6005", "6006"] + [str(5000 + r) for r in range(21, 25)]
+    assert len([x for x in got["log"] if x.startswith("g")]) == 12
+    assert got["at"] == "https://m.a-bly.com/content/style/home?global_layout=app&embed=true" and got["tab"] == "랭킹"  # 끝나면 코디 화면 랭킹 탭
+    rk = {x["rank"]: x for x in lk if x["tab"] == "랭킹"}
+    assert sorted(rk) == list(range(1, 25)) and all(len(rk[r]["items"]) == 6 for r in rk)  # 2위(뒤로 한 번으론 안 돌아옴)·13위 넘게(다시 내려 찾음)도
+    i1 = rk[1]["items"]
+    assert [(i["name"], i.get("disc"), i["price"]) for i in i1] == [(n, d or None, int(p.replace(",", ""))) for n, d, p in SPA_GOODS]
+    assert [i["url"] for i in i1] == [f"https://m.a-bly.com/goods/{50010 + i}" for i in range(6)]  # 첫째는 data-goods-sno · 나머지는 눌러서
+    assert i1[0]["img"] == "https://img.cdn.example/g/50010.jpg" and all(i["url"] for i in rk[2]["items"])
+    assert [bool(i["url"]) for i in rk[5]["items"]] == [True] + [False] * 5  # 상품 누르기는 12번까지만 — 그 뒤는 data-goods-sno 하나와 이름·할인·가격·사진만
+    pick = {x["rank"]: x for x in lk if x["tab"] == "PICK"}
+    assert [(i["name"], i["price"], i.get("disc"), i["url"], i["img"]) for i in pick[1]["items"]] == [
+        (f"{n} 6001", int(p.replace(",", "")), d or None, f"https://m.a-bly.com/goods/{60010 + i}", f"https://img.cdn.example/g/{60010 + i}.jpg")
+        for i, (n, d, p) in enumerate(SPA_GOODS[:3])]
+    assert len(pick[4]["items"]) == 6 and pick[4]["items"][0]["name"] == "빈티지 니트"
+    daily = [x for x in lk if x["tab"] == "데일리"]
+    assert len(daily) == 6 and [(i["name"], i["url"]) for i in daily[0]["items"]] == [("빈티지 니트 7001", "https://m.a-bly.com/goods/70010"), ("코듀로이 팬츠 7001", "https://m.a-bly.com/goods/70011")]
+    assert daily[0]["id"] == "7001"
+    # 진행 띠 '상세 7/27 · 상품 N' (화면 데이터 9개 코디 = 상품 21 부터)
+    assert any(re.fullmatch(r"상세 7/27 · 상품 \d+", m) for m in got["ov"]) and "상세 0/27 · 상품 21" in got["ov"]
+    assert "det 9/" in cards["dbg"] and "/12/" in cards["dbg"] and " /content/style/coordi/5001" in cards["dbg"]
+    total = sum(len(x["items"]) for x in lk)
+    assert got["alerts"][1:] == [f"Ably 랭킹 보냄 ✓ (코디 36 · 상품 {total})"] and total == 21 + 27 * 6
+    out = ablyrank.save(db, sent, now=NOW, tz=TZ)
+    assert out["looks"] == 36
+    (rec,) = recs(db)
+    r1 = next(x for x in rec["looks"] if x["tab"] == "랭킹" and x["rank"] == 1)
+    assert [(i["name"], i["price"], i.get("disc"), i["url"]) for i in r1["items"]][:2] == [
+        ("빈티지 니트", 6900, 63, "https://m.a-bly.com/goods/50010"), ("코듀로이 팬츠", 14800, None, "https://m.a-bly.com/goods/50011")]
+    assert sum(len(x["items"]) for x in rec["looks"]) == total and next(x for x in rec["looks"] if x["tab"] == "데일리")["id"] == "7001"
+
+
+# keepalive 요청은 page.route 로 못 가로챔 → 진짜 작은 서버 (모든 이름을 127.0.0.1 로 · 바깥으로 안 나감)
+RUN_HIDE = r"""
+const {chromium} = require('playwright');
+const http = require('http');
+(async () => {
+  const [code, page] = process.argv.slice(1), out = {posts: [], gone: []};
+  const srv = http.createServer((q, s) => {
+    let d = '';
+    q.on('data', c => d += c);
+    q.on('end', () => {
+      const u = q.headers.host + q.url;
+      if (q.url.startsWith('/dash')) { out.posts.push({body: d, cookie: q.headers.cookie || ''}); s.writeHead(200, {'Access-Control-Allow-Origin': '*'}); return s.end('{"ok":true}'); }
+      if (q.url.startsWith('/content/style/home')) { s.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'}); return s.end(page); }
+      if (u.startsWith('m.a-bly.com')) out.gone.push(q.url);
+      s.writeHead(404);
+      s.end('');
+    });
+  }).listen(0, '127.0.0.1');
+  await new Promise(r => srv.on('listening', r));
+  const port = srv.address().port;
+  const b = await chromium.launch({args: ['--host-resolver-rules=MAP * 127.0.0.1']});
+  const p = await b.newPage({viewport: {width: 390, height: 844}});
+  p.on('dialog', d => d.accept());
+  await p.goto('http://m.a-bly.com:' + port + '/content/style/home?global_layout=app&embed=true');
+  await p.evaluate(code.replace('https://dash.example/dashboard/api/ably_rank_capture', 'http://127.0.0.1:' + port + '/dash')).catch(() => {});
+  await p.waitForTimeout(1500);
+  console.log(JSON.stringify(out));
+  await b.close();
+  srv.close();
+})().catch(e => { console.error(String(e)); process.exit(2); });
+"""
+
+
+def test_bookmarklet_sends_what_it_has_when_a_tap_leaves_the_page() -> None:
+    """카드를 눌렀더니 앱 안 이동이 아니라 화면이 통째로 넘어가면(pagehide) 그때까지 모은 코디를 keepalive 로 보냄 (쿠키 없음 · 60KB 안)."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    db = FakeDb()
+    page = SPA.replace("%NEXT%", "{}").replace("%GOODS%", "k => []").replace("%STRIP%", "[]").replace(
+        "history.pushState({}, '', '/content/style/coordi/' + c.dataset.k);", "location.href = '/content/style/coordi/' + c.dataset.k;")
+    res = subprocess.run([NODE, "-e", RUN_HIDE, code(db), page], capture_output=True, text=True, timeout=200, env=env)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    assert got["gone"] == ["/content/style/coordi/5001"]
+    (post,) = got["posts"]
+    sent = dict(parse_qsl(post["body"], keep_blank_values=True))
+    assert post["cookie"] == "" and len(post["body"]) < 60000 and sent["x"] == ""
+    cards = json.loads(sent["j"])
+    assert len(cards["looks"]) == 36 and "/H " in cards["dbg"]
+    assert sent["u"].startswith("http://m.a-bly.com:")  # 시험 서버 (진짜는 https)
+    assert ablyrank.save(db, {**sent, "u": "https://m.a-bly.com/content/style/home"}, now=NOW, tz=TZ)["looks"] == 36
 
 
 def test_bookmarklet_on_empty_looking_page_sends_dbg_and_says_so() -> None:
@@ -419,10 +606,10 @@ def test_bookmarklet_on_empty_looking_page_sends_dbg_and_says_so() -> None:
     res = subprocess.run([NODE, "-e", run, code(FakeDb()), page, DETAIL], capture_output=True, text=True, timeout=120, env=env)
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
-    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 0 · 상품 0) · dbg 보냄 — 메인에게 알려 주세요"] and 7500 <= got["waited"] < 15000
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 0 · 상품 0) · 메인에게 알려 주세요"] and 7500 <= got["waited"] < 15000
     sent = dict(parse_qsl(got["posts"][0]["body"], keep_blank_values=True))
     dbg = json.loads(sent["j"])["dbg"]
-    assert "ready complete" in dbg and "custom 1" in dbg and "cls Banner_top" in dbg and "text 28 앱에서 더 많은" in dbg
+    assert "ready complete" in dbg and "cls  Banner_top__a1" in dbg and "text 28 앱에서 더 많은" in dbg
 
 
 def test_save_takes_coordi_cards_alone_and_checks_their_fields() -> None:

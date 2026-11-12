@@ -6,7 +6,8 @@ static/ablyrank.js: 주인 브라우저(아이패드 사파리·갤럭시 크롬
   연결 탭 'Ably 랭킹 보내기 버튼 설치'(로그인 아래 GET /dashboard/api/ablyrank)에서만 보임. kv 를 지우면 예전 책갈피는 안 받음.
 save(): 열쇠 · 에이블리 주소만 · 칸마다 크기·모양 확인(주소는 https 만, 상품·코디 주소는 a-bly.com 만) · 상품 100 · 코디 100(코디마다 상품 12 · 탭 4개를 돌면 탭마다 30) ·
   기록 100KB → kv "ably_rank_capture:<보낸 날 KST>:<HHMMSS>-<4hex>" = JSON {at, sent, url, title, sel, heads, tab, upd, dbg, items, looks, text}. 30일.
-  코디 랭킹(11/12 — 사진 카드뿐, 상품 없음): looks 만 와도 받음 · 코디마다 rank·chg(변동)·img·nick·tags·quick(바로입기)·url·items(코디 화면에서 읽은 상품) ·
+  코디 랭킹(11/12 — 사진 카드뿐, 상품 없음): looks 만 와도 받음 · 코디마다 rank·chg(변동)·img·nick·tags·quick(바로입기)·url·id(코디 번호)·
+  items(코디 상세에서 읽은 상품 — 화면 데이터·숨은 iframe·카드를 눌러 뜬 상세의 가로 상품 줄: 이름·할인·가격·사진·상품 주소) ·
   upd = '12:00 PM 업데이트' 줄 · dbg = 책갈피가 본 화면 모양(그림자 DOM·iframe 수) — 다음에 고칠 때 보려고.
   사진 주소는 적기만 한다 (서버가 받아 오지 않음).
 넘기기: Blog-Auto 가 상태 파일 actions 에 'ably_rank_capture' 를 알리면 같은 룩북 감독 길로 일 하나
@@ -55,7 +56,7 @@ INSTALL_STEPS = (
     "브라우저에서 아무 페이지나 연 뒤 책갈피(북마크) 추가 → 이름을 'Ably 랭킹 보내기'로 저장해요.",
     "책갈피 목록 → '편집' → 'Ably 랭킹 보내기'의 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'.",
     "쓰는 법: 브라우저에서 에이블리(a-bly.com) 상품 랭킹 화면이나 코디 화면의 '랭킹' 탭을 열고 책갈피 'Ably 랭킹 보내기' → "
-    "'Ably 랭킹 보냄 ✓' 알림이면 끝 (코디는 스스로 몇 화면 내려 모아요 · 20초쯤 걸릴 수 있어요 · 캡처 올리기는 그대로 써도 돼요).",
+    "'Ably 랭킹 보냄 ✓' 알림이면 끝 (코디는 스스로 탭을 돌고 코디를 하나씩 열어 상품까지 모아요 · 2분쯤 걸려요 — 그동안 화면을 만지지 마세요).",
 )
 
 
@@ -150,6 +151,8 @@ def _look(v: Any) -> dict[str, Any] | None:
             o[k] = s
     if s := clean(v.get("nick"), 180)[:60]:
         o["nick"] = s
+    if re.fullmatch(r"[\w-]{1,40}", s := str(v.get("id") or "")):
+        o["id"] = s  # 코디 번호 (링크·data-* 에서 — 화면 데이터와 맞춘 것)
     tags = v.get("tags") if isinstance(v.get("tags"), list) else []
     if tg := [t for t in (str(x)[:31] for x in tags[:20]) if TAG.fullmatch(t) and clean(t, 100) == t][:10]:
         o["tags"] = tg
