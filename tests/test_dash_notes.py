@@ -133,7 +133,7 @@ def test_app_js_viewer_review_and_trend_tap() -> None:
     start = js.index("async function trendGo")
     go = js[start: js.index("\n}", start)]
     assert "confirmSheet" not in go and "글 쓰기 시작했어요" in go and "{keyword: x.keyword}" in go
-    assert "p.args.keyword === x.keyword" in js
+    assert "(p.args || {}).keyword === x.keyword" in js
     # 내 후기 쓰기: 글 칸 + 사진(답하기 사진과 같은 uploadAll) · 제품 고르기는 제품 이름 칸
     assert "a.product" in js and "extra.product" in js and "'제품 이름을 적어 주세요'" in js
     assert "blog\\.(write|post_notes)" in js
