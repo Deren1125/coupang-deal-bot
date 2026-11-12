@@ -417,12 +417,15 @@ TODAY = SPAGE.format(
     "document.querySelector('.btn_prev').onclick=()=>{day='11.11';draw();};"
     "window.bb={instance:[{data:()=>[{id:'조회수',values:[{x:new Date(2026,10,11),value:178},{x:new Date(2026,10,12),value:22}]}]}]};"
     "window.__stat={opt:{w:3},list:Array.from({length:30},(_,i)=>({date:'2026-10-'+(i+14),pv:i*3}))};"
+    "window.gNTM={d:{initConfig:{tags:Array.from({length:8},(_,i)=>({id:i,ev:'nlog-click-custom'}))}}};"
+    "window.cfg={tags:Array.from({length:8},(_,i)=>({id:i,name:'nlog-click-custom'})),ver:[1,2,3]};"
     "window.hourly={'2026-11-01':5,'2026-11-02':6,'2026-11-03':7,'2026-11-04':8,'2026-11-05':9,'2026-11-06':1,'2026-11-07':2};</script>")
 # 유입분석: 표가 안쪽 같은 출처 iframe 안 · 1초 뒤 뜸 · '더보기' 두 번 · '이전'
 REFERER = SPAGE.format("<iframe src='/blog/user/referer/in' style='width:800px;height:600px'></iframe>", "")
 REFERER_IN = (
     "<!doctype html><html><head><meta charset='utf-8'></head><body><p id='d'>2026.11.12.</p><button class='prev' title='이전'>‹</button>"
-    "<table id='t'></table><button id='more'>더보기</button><script>let n=3,day='11.12';"
+    "<table id='t'></table><button id='more'>더보기</button>" + "".join(f"<span aria-label='day-{i}' title='day-{i}'>·</span>" for i in range(1, 31))
+    + "<script>let n=3,day='11.12';"
     "const R=[['네이버 통합검색_모바일',82.1],['블로그 홈',25],['검색',20],['통합검색 겨울 패딩',9],['통합검색 에이티즈 대상',7],['구글',3],['다음',2]];"
     "const draw=()=>{document.getElementById('d').textContent='2026.'+day+'.';document.getElementById('t').innerHTML='<tr><th>유입경로</th><th>비율</th></tr>'"
     "+R.slice(0,n).map(r=>'<tr><td>'+r[0]+'</td><td>'+(day==='11.12'?r[1]:r[1]+1)+'%</td></tr>').join('');};setTimeout(draw,1000);"
@@ -434,7 +437,13 @@ RANK = SPAGE.format(
     "<script>fetch('/blog/api/rank.json').then(r=>r.json()).then(()=>{document.getElementById('g').innerHTML=\"<div role='grid'><div role='row'>"
     "<span role='columnheader'>순위</span><span role='columnheader'>제목</span><span role='columnheader'>조회수</span></div>"
     "<div role='row'><span role='cell'>1</span><span role='cell'>에이티즈, 3년 연속 대상</span><span role='cell'>10</span></div></div>\";});</script>")
-HOUR = SPAGE.format("<p>0시 12</p><p>1시 3</p><p>2시 1</p>", "")
+# 11/12 16:0x 실사용: 불러오기 전('불러오고 있습니다' · '기준 · 0건') 화면이 먼저 감 · 주간 보기가 기본 → 다 뜰 때까지 기다리고 일간을 먼저 누름
+HOUR = SPAGE.format(
+    "<div id='h'><p>지금 데이터를 불러오고 있습니다.</p></div><div class='tg'><button class='on' id='wk'>주간</button><button id='dy'>일간</button></div>",
+    "<script>let st=0,v='w';const H=document.getElementById('h');const draw=()=>{H.innerHTML=st===1?'<p>2026.11.11. 기준 · 0건</p>':"
+    "v==='w'?'<p>2026.11.02. ~ 11.08. 주간</p><p>0시 90</p><p>1시 30</p><p>2시 10</p>':'<p>2026.11.11.</p><p>0시 12</p><p>1시 3</p><p>2시 1</p>';};"
+    "setTimeout(()=>{st=1;draw();},800);setTimeout(()=>{st=2;draw();},1600);"
+    "document.getElementById('dy').onclick=()=>{if(st<2)return;v='d';H.innerHTML='<p>지금 데이터를 불러오고 있습니다.</p>';setTimeout(draw,700);};</script>")
 STATS = {S + "today": TODAY, S + "referer/total": REFERER, S + "referer/in": REFERER_IN, S + "rank/pv": RANK, S + "hour": HOUR}
 PW_ALL = r"""
 const {chromium} = require('playwright');
@@ -504,6 +513,7 @@ def test_bookmarklet_two_steps_admin_frame_srcs_then_stat_app_then_one_tap() -> 
     assert json.loads(got["ls"]) == {"b": "derenpick", "l": want}
     by = dict(zip(names, step[1]))
     rows = json.loads(by["유입분석"]["r"])[0]
+    assert "day-" not in by["유입분석"]["x"] and "day-" not in by["유입분석 · 전날"]["x"]
     assert rows[0] == ["유입경로", "비율"] and ["네이버 통합검색_모바일", "82.1%"] in rows and ["통합검색 에이티즈 대상", "7%"] in rows and len(rows) == 8
     assert "2026.11.11." in by["유입분석 · 전날"]["x"] and ["블로그 홈", "26%"] in json.loads(by["유입분석 · 전날"]["r"])[0]
     assert json.loads(by["일간 현황"]["r"]) == [[["조회수", "22"], ["공감수", "5"]]]
@@ -511,10 +521,12 @@ def test_bookmarklet_two_steps_admin_frame_srcs_then_stat_app_then_one_tap() -> 
     assert "차트값 조회수: 11.11=178 11.12=22" in tx.splitlines() and "day-" not in tx  # 값 없는 day-N 글은 뺌
     j = by["일간 현황"]["j"]
     assert '__stat.list\n[{"date":"2026-10-14","pv":0}' in j and 'hourly\n{"2026-11-01":5' in j and "opt" not in j
+    assert "nlog" not in j and "gNTM" not in j and "cfg" not in j  # 태그·분석 전역 · 날짜 없는 객체 배열은 뺌
     assert "방문횟수 11.12 31" in by["일간 현황 · 방문횟수"]["x"] and "2026.11.11." in by["일간 현황 · 전날"]["x"]
     assert json.loads(by["조회수 순위"]["r"])[0][1] == ["1", "에이티즈, 3년 연속 대상", "10"]
     assert by["조회수 순위"]["j"] == 'https://blog.stat.naver.com/blog/api/rank.json\n{"rank":[{"title":"에이티즈","pv":10}]}'
-    assert "0시 12" in by["시간대 분석"]["x"].splitlines()
+    hx = by["시간대 분석"]["x"].splitlines()
+    assert "0시 12" in hx and "0시 90" not in hx and not any("불러오고" in ln or "0건" in ln for ln in hx), hx  # 다 뜬 뒤 · 일간
     for s in step[1]:
         assert s["k"] == statscap.key(db) and s["u"].startswith(S) and "blogId=derenpick" in s["u"] and "동영상" not in s["x"]
     for i, s in enumerate(step[1]):

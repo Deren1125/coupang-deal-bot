@@ -12,7 +12,10 @@
      목록을 localStorage 에 두니 다음부턴 통계 화면을 바로 열고 한 번. 숨은 iframe 에 하나씩 열고(최대 150초) 숫자가 뜰 때까지 기다려
      읽고 화면마다 하나씩 보냄(n = 메뉴 이름). '더보기' 3번까지, 안쪽 탭 4개까지, 일간 현황·유입분석은 '이전'(전날)도.
    차트: svg 글·숫자 든 data-*·aria · billboard 값 · 값 없는 'day-N' 줄은 뺌 · 창 전역(빈 iframe 창에 없는 이름)에서 숫자 7~62개 배열·
-   날짜 키 객체와 script[type*=json] → j · 화면이 읽어 온 같은 출처 JSON(performance 기록)은 주인 로그인으로 다시 받아 j 에. */
+   날짜 키 객체와 script[type*=json] → j · 화면이 읽어 온 같은 출처 JSON(performance 기록)은 주인 로그인으로 다시 받아 j 에.
+   11/12 16:0x 실사용 고침: '불러오고 있습니다'가 사라지고 숫자(날짜·'0건' 말고)가 두 번 같을 때 읽음 · 못 읽은 첫 화면은 안 보냄(다른 게
+   하나도 없을 때만) · '일간' 단추가 있으면 먼저 누름 · day-N 은 aria·title 에서도 뺌 · j 는 날짜·번호 키 숫자 5개 넘는 것만, 분석·태그 전역 뺌.
+   (20KB 안에 들게 '이 창에서 폼으로 보내기'와 메뉴 없는 관리 화면의 짐작 목록을 뺌 — 두 출처 모두 fetch 가 됨.) */
 (async function () {
 const U = '@@URL@@', K = '@@KEY@@', W = window, D = document, L = location, SB = '통계 보내기: ', OK = '통계 보냄 ✓ ', AG = ' 열린 화면에서 책갈피를 한 번 더 눌러 주세요';
 if (W.__stcap) { alert(SB + '보내는 중'); return; }
@@ -25,17 +28,17 @@ const ROOT = 'main,[role=main],#content,#container,.content';
 const SEL = '[aria-selected=true],[aria-current=page],.on,.active,.selected';
 const CELL = '[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]';
 const GRID = '[role=grid],[role=table],[role=treegrid]';
-const LOAD = /저장\s*중|잠시만\s*기다려/;
+const LOAD = /저장\s*중|잠시만\s*기다려|불러오고\s*있습니다/;
 const STAT = /^https:\/\/([a-z0-9-]+\.)*(naver\.com(:\d+)?\/.*(stat|referer|rank|inflow|visit|today)|stat\.naver\.com\/)/i;
 const sl = t => new Promise(r => setTimeout(r, t));
-const tx = n => ((n && (n.innerText || n.textContent)) || '').replace(/[\t\x20]+/g, ' ');
+const tx = n => ((n && (n.innerText || n.textContent)) || '').replace(/day-\d+/g, '').replace(/[\t\x20]+/g, ' ');
 const sq = s => (s || '').replace(/\s+/g, ' ').trim();
 const ld = l => l.length < 40 && LOAD.test(l);
 const vis = n => {
-  try { const s = (n.ownerDocument.defaultView || W).getComputedStyle(n); if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false; } catch (e) {}
+  try { const s = (n.ownerDocument.defaultView || W).getComputedStyle(n); if (s.display === 'none' || s.visibility === 'hidden') return false; } catch (e) {}
   try { return !n.getClientRects || n.getClientRects().length > 0; } catch (e) { return true; }
 };
-const lines = n => tx(n).split('\n').map(sq).filter(l => l && !ld(l) && !/^day-\d+$/.test(l));
+const lines = n => tx(n).split('\n').map(sq).filter(l => l && !ld(l));
 const cl = x => { const s = sq(tx(x)).slice(0, 200); return ld(s) ? null : s; };
 const real = c => c.indexOf(null) < 0 && c.some(s => s && s !== '-');
 const nz = n => (n.textContent || '').replace(/\s/g, '').length;
@@ -55,11 +58,11 @@ const wv = w => {
   const sc = (v, p, k) => {
     if (o.length > 5 || k > 3 || !v || typeof v !== 'object' || v.nodeType || v.window === v) return;
     const ks = Object.keys(v).slice(0, 80);
-    const ok = Array.isArray(v) ? v.every(x => typeof x === 'number' || (x && typeof x === 'object' && /\d/.test(JSON.stringify(x)))) : ks.every(q => /\d/.test(q) && typeof v[q] === 'number');
-    if (ok && ks.length > 6 && ks.length < 63) { o.push(p + '\n' + JSON.stringify(v).slice(0, 4000)); return; }
+    const ok = Array.isArray(v) ? v.every(x => typeof x === 'number' || (x && typeof x === 'object' && Object.values(x).some(y => typeof y === 'number') && /20\d\d\D?\d\d\D?\d\d/.test(JSON.stringify(x)))) : ks.every(q => /^\d+$|20\d\d\D?\d\d\D?\d\d|^\d\d?\.\d\d?$/.test(q) && typeof v[q] === 'number');
+    if (ok && ks.length > 4 && ks.length < 63) { o.push(p + '\n' + JSON.stringify(v).slice(0, 4000)); return; }
     for (const q of ks.slice(0, 40)) { try { sc(v[q], p + '.' + q, k + 1); } catch (e) {} }
   };
-  for (const q of Object.keys(w)) { if (!bk.has(q)) try { sc(w[q], q, 0); } catch (e) {} }
+  for (const q of Object.keys(w)) { if (!bk.has(q) && !/^(_?ga|gtag|gNTM|NTM|nlog|lcs|wcs|dataLayer|google|_gaq|__ntm|ntm)/i.test(q)) try { sc(w[q], q, 0); } catch (e) {} }
   return o;
 };
 // 한 화면 읽기 (T = 문서 · w = 덮개가 보이면 null)
@@ -78,7 +81,7 @@ const cap = (T, w) => {
   if (w && docs.some(busy)) return null;
   const out = [], rows = [], sel = [], ids = [], urls = [], js = [], wj = [];
   let rn = 0;
-  const add = (l, skip) => { if (l && !skip.has(l) && out.indexOf(l) < 0 && out.length < 3000) out.push(l); };
+  const add = (l, skip) => { l = sq(l.replace(/day-\d+/g, '')); if (l && !skip.has(l) && out.indexOf(l) < 0 && out.length < 3000) out.push(l); };
   for (const d of docs) {
     const b = d.body;
     if (!b) continue;
@@ -112,7 +115,7 @@ const cap = (T, w) => {
     for (const g of d.querySelectorAll('svg')) {
       const q = g.querySelectorAll('text,title,desc');
       let s = (q.length ? [...q] : [g]).map(t => (t.textContent || '').trim()).filter(x => x).join(' ');
-      for (const e of [g, ...g.querySelectorAll('[data-value],[data-x],[data-y],[data-date],[data-count]')].slice(0, 400)) { for (const t of e.attributes || []) { if (/^data-/.test(t.name) && /\d/.test(t.value)) s += ' ' + t.name.slice(5) + '=' + t.value; } }
+      for (const e of [g, ...g.querySelectorAll('*')].slice(0, 400)) { for (const t of e.attributes || []) { if (/^data-/.test(t.name) && /\d/.test(t.value)) s += ' ' + t.name.slice(5) + '=' + t.value; } }
       s = sq(s.replace(/day-\d+/g, '')).slice(0, 3000);
       if (/\d/.test(s)) add('차트: ' + s, skip);
     }
@@ -153,7 +156,7 @@ const cap = (T, w) => {
   }
   for (const u of urls.concat(fs)) { try { const q = new URL(u).searchParams.get('blogId'); if (q && ids.indexOf(q) < 0) ids.unshift(q); } catch (e) {} }
   const x = out.join('\n').slice(0, 40000);
-  return {js, wj, ok: rows.length > 0 || out.filter(l => /\d/.test(l)).length > 2,
+  return {js, wj, ok: rows.length > 0 || out.filter(l => /\d/.test(l.replace(/20\d\d\.\d+\.\d+\.?|(^|\D)0건/g, ''))).length > 2,
     F: {k: K, u: urls[0] || L.href, t: T.title || '', f: [...new Set(urls.slice(1).concat(fs))].slice(0, 12).join('\n'), b: ids.join(','), s: sel.join('\n'), x, r: JSON.stringify(rows).slice(0, 60000)}};
 };
 // 같은 출처 JSON 다시 받기 (주인 로그인 · 네이버 화면 안에서만)
@@ -168,14 +171,14 @@ const send = async F => {
     return await r.json();
   } catch (e) { return null; }
 };
-const say = m => { try { if (!ov) { ov = D.createElement('div'); ov.style.cssText = 'position:fixed;top:8px;left:8px;z-index:2147483647;background:#222;color:#fff;padding:8px 12px;font:15px sans-serif'; D.body.appendChild(ov); } ov.textContent = m; } catch (e) {} };
+const say = m => { try { if (!ov) { ov = D.createElement('div'); ov.style.cssText = 'position:fixed;top:0;z-index:2147483647;background:#222;color:#fff;padding:8px;font:15px sans-serif'; D.body.appendChild(ov); } ov.textContent = m; } catch (e) {} };
 // 모아 보낼 화면 (관리 화면 메뉴 주소 끝 · 먼저 쓴 것부터) · 통계 앱 주소에서 뺄 것
 const AP = 'referer,today,visit_pv,uv,visit,frequency,retention,averageDuration,hour_cv,demo,device,relationDist,relationDelta,relationDemo,rank_pv,rank_like,rank_comment,average_upperGroup'.split(',');
 const NO = /동영상|재생|국가|다운로드/;
 const lk = e => { const h = (e.getAttribute && e.getAttribute('href')) || ''; return h && h[0] !== '#' && !/^javascript:/i.test(h); };
 const qid = u => { try { return new URL(u, L.href).searchParams.get('blogId') || ''; } catch (e) { return ''; } };
 const sp = x => { for (const k of ['blogId', 'proxyReferer', 'isIE8']) x.searchParams.delete(k); return x.pathname + x.search; };
-const fu = (o, u, b) => o + u + (b ? (u.indexOf('?') < 0 ? '?' : '&') + 'blogId=' + b : '');
+const fu = (u, b) => L.origin + u + (b ? (u.indexOf('?') < 0 ? '?' : '&') + 'blogId=' + b : '');
 const t0 = Date.now(), left = () => Date.now() - t0 < 150000;
 const mk = () => { const f = D.createElement('iframe'); f.style.cssText = 'position:fixed;left:-5000px;top:0;width:1200px;height:1000px;border:0'; D.body.appendChild(f); return f; };
 const open = (f, h) => new Promise(r => { f.onload = r; f.src = h; setTimeout(r, 12000); });
@@ -192,11 +195,11 @@ const run = async tabs => {
     const r = await send(c.F);
     if (r && r.ok) n++;
   };
-// 누르고 글이 바뀌고 숫자가 뜰 때까지 (4초까지)
+// 누르고 글이 바뀌고 '불러오고 있습니다' 가 사라지고 숫자가 두 번 같을 때까지 (6초까지)
   const press = async (T, e, p) => {
     try { e.click(); } catch (x) {}
     let c = null;
-    for (let j = 0; j < 10 && left(); j++) { await sl(400); c = cap(T, 0); if (c.F.x !== p && c.ok) return c; }
+    for (let j = 0, v = ''; j < 16 && left(); j++) { await sl(400); c = cap(T, 1); if (c && c.ok && c.F.x !== p && c.F.x === v) return c; v = c ? c.F.x : ''; }
     return null;
   };
 // 누를 것 (메뉴·진짜 링크 빼고 · 안쪽 같은 출처 iframe 도)
@@ -206,26 +209,31 @@ const run = async tabs => {
     tried++;
     say(tried + '/' + tabs.length + ' ' + nm + '…');
     await open(fr, h);
-    let c = null, T = null;
-    for (let j = 0; j < 14 && left(); j++) {
+    let c = null, T = null, v = '', m0 = n;
+    for (let j = 0; j < 30 && left(); j++) {
       T = fr.contentDocument;
-      c = T && T.body ? cap(T, 0) : null;
-      if (c && c.ok) break;
+      c = T && T.body ? cap(T, 1) : null;
+      if (c && c.ok && c.F.x === v) break;
+      v = c ? c.F.x : '';
       await sl(500);
     }
-    if (!c) continue;
+    if (!T || !T.body) continue;
+    c = c || cap(T, 0);
+// 일간·주간 단추가 있으면 일간 먼저 (이미 골랐으면 그대로)
+    const dy = btns(T).find(e => sq(e.textContent) === '일간' && !(e.matches(SEL) || e.parentNode.matches(SEL)));
+    if (dy) c = (await press(T, dy, c.F.x)) || c;
 // '더보기' 3번까지 펼침
     for (let k = 0; k < 3 && left(); k++) {
       const m = btns(T).find(e => /^더보기/.test(sq(e.textContent)));
       if (!m) break;
       c = (await press(T, m, c.F.x)) || cap(T, 0);
     }
-    await put(c, nm);
+    if (c.ok) await put(c, nm);
 // 안쪽 탭 (li 안 링크·단추 · role=tab — 숫자·동영상·다운로드·주간·월간·로그아웃·삭제·설정 등 빼고 4개까지)
     const sub = [], sn = [];
     for (const e of btns(T)) {
       const s = sq(e.textContent), li = e.closest && e.closest('li');
-      if (sub.length < 4 && s.length > 1 && s.length < 16 && !/\d|동영상|다운로드|주간|월간|더보기|이전|다음|로그|삭제|설정|저장/.test(s) && sn.indexOf(s) < 0 && (e.getAttribute('role') === 'tab' || (li && li.parentNode.children.length < 9))) { sub.push(e); sn.push(s); }
+      if (sub.length < 4 && s.length > 1 && s.length < 16 && !NO.test(s) && !/\d|일간|주간|월간|더보기|이전|다음|로그|삭제|설정/.test(s) && sn.indexOf(s) < 0 && (e.getAttribute('role') === 'tab' || (li && li.parentNode.children.length < 9))) { sub.push(e); sn.push(s); }
     }
     for (let k = 0; k < sub.length && left(); k++) await put(await press(T, sub[k], c.F.x), nm + ' · ' + sn[k]);
 // 일간 현황·유입분석은 전날도 (날짜 옆 '이전' 단추)
@@ -233,11 +241,13 @@ const run = async tabs => {
       const p = btns(T).find(e => /이전|prev/i.test(e.textContent + (e.getAttribute('aria-label') || '') + (e.getAttribute('title') || '') + e.className) && !/페이지|page/i.test(e.className + e.textContent));
       if (p) await put(await press(T, p, cap(T, 0).F.x), nm + ' · 전날');
     }
+// 다 못 읽었으면 마지막 화면이라도
+    if (n === m0) await put(cap(T, 0), nm);
   }
   fr.remove();
   return [n, cut, tried];
 };
-const done = (r, len, tip) => { alert(r[0] ? OK + r[0] + '개 화면' + (r[1] ? ' (시간 넘어 ' + (len - r[2]) + '개 못 봄)' : '') + tip : SB + '숫자를 못 읽었어요'); };
+const done = (r, len, tip) => { alert(r[0] ? OK + r[0] + '개 화면' + (r[1] ? ' (시간 넘음 · ' + (len - r[2]) + '개 남음)' : '') + tip : SB + '숫자를 못 읽었어요'); };
 // 2단계 — 통계 앱(blog.stat.naver.com): 주소 #sc= → 이 출처에 저장해 둔 목록 → 앱 메뉴 → 아는 것
 let P = null, first = 0, fb = 0;
 const hm = /[#&]sc=([^&]+)/.exec(L.hash || '');
@@ -254,7 +264,7 @@ if (P || /(^|\.)stat\.naver\.com$/.test(L.hostname)) {
   }
   P = {b: qid(L.href) || (P && P.b) || '', l: l.slice(0, 30)};
   try { if (!fb) W.localStorage.setItem('stcap', JSON.stringify(P)); } catch (e) {}
-  done(await run(P.l.map(e => [e[0], fu(L.origin, e[1], P.b)])), P.l.length, first ? '\n다음엔 이 화면을 열고 한 번' : '');
+  done(await run(P.l.map(e => [e[0], fu(e[1], P.b)])), P.l.length, first ? '\n다음엔 이 화면을 열고 한 번' : '');
   return;
 }
 // 1단계 — 관리 화면(admin.blog.naver.com): 메뉴 화면마다 안쪽 통계 iframe 의 src 속성(다른 출처라도 읽힘)을 모아 목록
@@ -264,7 +274,6 @@ for (const a of D.querySelectorAll('a[href]')) {
   if (m && AP.indexOf(m[1]) >= 0 && !tabs.some(t => t[2] === m[1])) tabs.push([sq(a.textContent) || m[1], a.href, m[1]]);
 }
 const pm = /^\/([\w-]+)\/stat\//.exec(L.pathname);
-if (tabs.length < 2 && pm) tabs = AP.map(k => [k, L.origin + pm[0] + k, k]);
 tabs.sort((a, b) => AP.indexOf(a[2]) - AP.indexOf(b[2]));
 const sx = T => {
   for (const f of T.querySelectorAll('iframe,frame')) {
@@ -311,14 +320,7 @@ const res = await send(F);
 // 숫자가 다른 출처 iframe 안에만 있으면 그 화면으로 옮길지 물음
 if (x) { const b = qid(x.href), h = x.href; await hop([[D.title || '통계', sp(x)]], x.origin, b, [h]); return; }
 if (res && res.ok) { alert(OK + '(' + res.label + ')'); return; }
-if (res) { alert(SB + (res.text || '안 받음')); return; }
-if (!confirm(SB + '바로 못 보냈어요. 이 창에서 보낼까요?')) return;
-const fm = D.createElement('form');
-fm.method = 'POST'; fm.action = U; fm.acceptCharset = 'UTF-8';
-F.via = 'form';
-for (const k in F) { const i = D.createElement('input'); i.type = 'hidden'; i.name = k; i.value = F[k]; fm.appendChild(i); }
-D.body.appendChild(fm);
-fm.submit();
+alert(SB + ((res && res.text) || '못 보냄'));
 } catch (e) {
   alert(SB + '못 보냄 (' + ((e && e.message) || e) + ')');
 } finally { W.__stcap = 0; if (ov) ov.remove(); }
