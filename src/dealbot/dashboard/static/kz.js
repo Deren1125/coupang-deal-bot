@@ -151,7 +151,7 @@ function loginBox() {
   const rows = (ST.d.blogs || []).map(b => {
     const k = keyOf(b), mine = open === b.id, bad = !mine && (b.need_login || (b.active && !b.logged_in_before));
     const txt = mine ? '원격 화면 열림 — 로그인한 뒤 닫기' : b.need_login ? '로그인 필요' + (b.message ? ' — ' + String(b.message).slice(0, 80) : '')
-      : !b.active ? '꺼짐 (RSS 주소 없음)' : b.logged_in_before ? '로그인돼 있어요 (마지막 등록 때 기준)' : '아직 로그인한 적 없어요';
+      : !b.active ? '꺼짐 (RSS 주소 없음)' : b.logged_in_before ? '로그인 확인 전 — 첫 등록 때 확인돼요' : '아직 로그인한 적 없어요';
     return el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, `${(k && NAME[k]) || b.name || b.id} 키자드`), el('span', {class: 's' + (bad ? ' bad' : '')}, txt)),
       mine ? [el('a', {class: 'sm ac', href: OLD, target: '_blank', rel: 'noopener'}, '원격 화면 열기'),
         btn('sm', '닫기', () => act('login', '닫는 중…', 'login/done', {}, () => ({text: '원격 화면을 닫았어요'})))]
