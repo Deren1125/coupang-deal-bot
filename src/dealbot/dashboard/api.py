@@ -152,7 +152,7 @@ class DashApi:
         self.today_rate = RateWindow(30, 60.0)
         self.upload_rate = RateWindow(60, 600.0)
         self.sub_rate = RateWindow(10, 3600.0)
-        self.statscap_rate = RateWindow(30, 600.0)  # 통계 보내기 (손님마다 10분에 30번)
+        self.statscap_rate = RateWindow(120, 600.0)  # 통계 보내기 (손님마다 10분에 120번 — 11/12 한 번 누르면 40개까지)
         self.ablyrank_rate = RateWindow(20, 600.0)  # Ably 랭킹 보내기 (손님마다 10분에 20번)
         self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
         self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,

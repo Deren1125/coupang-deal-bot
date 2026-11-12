@@ -5,7 +5,8 @@ static/statscap.js: 이미 로그인된 네이버 내 통계 화면(blog.stat.na
   key(db) = HMAC(kv statscap_secret, "statscap") — 열쇠는 연결 탭 '통계 보내기 버튼 설치'(로그인 아래 GET /dashboard/api/statscap)에서만 보임.
   kv statscap_secret 을 지우면 예전 책갈피는 더는 안 받음 (다시 설치).
 save(): 크기 제한(글 60KB · 표 300줄 · 칸 200자) · 꺾쇠 태그·제어 글자 빼기 · 이메일·전화번호 가리기 → kv
-  "stats_capture:<보낸 날 KST>:<HHMMSS>-<4hex>" = JSON {at, sent, day, blog, blog_id, blog_name, kind, url, title, sel, text, rows}. 30일 지나면 지움.
+  "stats_capture:<보낸 날 KST>:<HHMMSS>-<4hex>" = JSON {at, sent, day, blog, blog_id, blog_name, kind, url, title, sel, text, rows, frames, json}.
+  30일 지나면 지움. 11/12 '한 번에 모두': 책갈피가 메뉴 화면마다 하나씩 보내며 n = 메뉴 이름(→ kind 그대로) · j = 화면이 읽은 같은 출처 JSON.
   하루 DAY_MAX 개까지. Blog-Auto ops_report 'stats_capture' 칸이 읽기 전용으로 최근 7일을 읽는다 (클라우드 세션이 status.md 로 봄).
 nudge(): 할 일 탭 '오늘 통계 보내기' 한 줄 — 오늘 보낸 것이 있으면 None.
 """
@@ -31,7 +32,9 @@ SRC = Path(__file__).resolve().parent / "static" / "statscap.js"
 KV_SECRET = "statscap_secret"
 PREFIX = "stats_capture:"
 KEEP_DAYS = 30
-DAY_MAX = 60
+DAY_MAX = 120  # 11/12 한 번 누르면 40개까지 (메뉴 화면 · 안쪽 탭 · 전날)
+KIND_MAX = 40
+JSON_MAX = 30_000
 BODY_MAX = 1_500_000  # 폼으로 한 번 (글 4만 자 · 표 6만 자를 %XX 로 — 한글은 9바이트)
 TEXT_MAX = 60_000  # 저장하는 글 (UTF-8 바이트)
 ROWS_MAX = 300
@@ -59,7 +62,8 @@ SENDING_STEPS = (
     "사파리에서 아무 페이지나 연 뒤 공유 단추 → '책갈피 추가' → 이름을 '통계 보내기'로 저장해요.",
     "책갈피 목록 → '편집' → '통계 보내기'를 눌러 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'.",
     "쓰는 법: 사파리에서 네이버 블로그 '내 통계'(일간 현황·조회수 순위·유입 분석·검색어·방문 분석 등)를 열고 책갈피 '통계 보내기' → "
-    "'통계 보냄 ✓' 알림이면 끝. 보고 싶은 화면마다 한 번씩 눌러요 (하루 한 번이면 충분).",
+    "한 번 누르면 메뉴 화면(일간 현황·유입분석·순위 …)을 차례로 열어 모두 보내요 — 왼쪽 위 '3/18 유입분석…' 이 끝나고 "
+    "'통계 보냄 ✓ N개 화면' 알림이면 끝 (1분 남짓 · 하루 한 번이면 충분).",
 )
 
 _TAG = re.compile(r"<[^<>]{0,500}>")
@@ -224,11 +228,14 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
     if not text and not rows and not frames:  # 11/12: 메뉴만 읽힌 화면도 iframe 주소(f)는 남김
         raise CaptureError(400, "empty", "화면 글을 못 읽었어요 — 통계가 다 뜬 뒤 다시 눌러 주세요")
     blog, bid = guess_blog(url, frames, str(form.get("b") or "")[:400], text)
-    kind = guess_kind(url, sel, title, text)
+    tab = clean(form.get("n"), KIND_MAX * 3)[:KIND_MAX]
+    kind = tab or guess_kind(url, sel, title, text)
     day = guess_date(url, sel, text, sent)
     name = BLOG_NAMES.get(blog or "", bid or "블로그 모름")
     rec = {"at": int(now), "sent": sent, "day": day, "blog": blog, "blog_id": bid, "blog_name": name, "kind": kind,
            "url": url, "frames": frames, "title": title, "sel": sel, "text": text, "rows": rows}
+    if js := clean(form.get("j"), JSON_MAX):
+        rec["json"] = js
     k = f"{PREFIX}{sent}:{datetime.fromtimestamp(now, tz).strftime('%H%M%S')}-{secrets.token_hex(2)}"
     db.kv_set(k, json.dumps(rec, ensure_ascii=False, separators=(",", ":")))
     prune(db, now, tz)

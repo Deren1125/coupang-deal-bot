@@ -69,8 +69,11 @@ def test_bookmarklet_has_endpoint_and_key_and_fits_safari() -> None:
     db = FakeDb()
     js = code(db)
     assert "'https://dash.example/dashboard/api/stats_capture'" in js and f"'{statscap.key(db)}'" in js and "@@" not in js
-    assert "/*" not in js and "\n//" not in js and len(statscap.view(db, "https://dash.example")["code"]) < 12000
-    assert js.count("fetch(") == 1 and "credentials:'omit'" in js and "XMLHttpRequest" not in js and "cookie" not in js
+    # 11/12 '한 번에 모두' 로 커짐 — 같은 방식(전부 %인코딩) 꾸미기 책갈피가 아이패드 사파리에서 25.9KB 돎
+    assert "/*" not in js and "\n//" not in js and len(statscap.view(db, "https://dash.example")["code"]) < 20000
+    # 대시보드엔 쿠키 없이 · 주인 로그인(include)은 화면이 읽은 같은 출처 JSON 다시 받기에만
+    assert js.count("fetch(") == 2 and js.count("credentials:'omit'") == 1 and js.count("credentials:'include'") == 1
+    assert "L.origin+'/')===0" in js and "XMLHttpRequest" not in js and "cookie" not in js
     assert len(statscap.SENDING_STEPS) == 4
     with pytest.raises(ValueError):
         statscap.bookmarklet("https://x.example/a'b", "k")
@@ -295,18 +298,18 @@ const {chromium} = require('playwright');
     if (u.startsWith('https://dash.example/')) { out.bodies.push(r.request().postData() || '');
       return r.fulfill({status: 200, contentType: 'application/json', headers: {'Access-Control-Allow-Origin': '*'}, body: JSON.stringify({ok: true, label: '데런픽 · 일간 현황 · 11/12'})}); }
     if (u.startsWith('https://admin.blog.naver.com:8443/')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: inner});
-    if (u.startsWith('https://admin.blog.naver.com/derenpick/stat/visit')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: chart});
+    if (u.startsWith('https://m.blog.naver.com/stat/visit')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: chart});
     if (u.startsWith('https://admin.blog.naver.com/')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: top});
     return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: '<p>광고</p>'});
   });
   p.on('dialog', async d => { out.dialogs.push(d.type() + ':' + d.message()); await d.accept(); });
-  const run = async () => { const n = out.dialogs.length; p.evaluate(code).catch(() => {}); for (let i = 0; i < 100 && out.dialogs.length === n; i++) await p.waitForTimeout(100); };
+  const run = async () => { const n = out.dialogs.length; p.evaluate(code).catch(() => {}); for (let i = 0; i < 400 && out.dialogs.length === n; i++) await p.waitForTimeout(100); };
   await p.goto('https://admin.blog.naver.com/derenpick/stat/today');
   await run();
   await p.waitForURL('https://admin.blog.naver.com:8443/**');
   out.urls.push(p.url());
   await run();
-  await p.goto('https://admin.blog.naver.com/derenpick/stat/visit');
+  await p.goto('https://m.blog.naver.com/stat/visit?blogId=derenpick');
   await run();
   console.log(JSON.stringify(out));
   await b.close();
@@ -325,11 +328,15 @@ def test_bookmarklet_in_chrome_sends_iframe_src_opens_it_and_reads_charts() -> N
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
     d = got["dialogs"]
-    assert len(d) == 3 and d[0].startswith("confirm:통계 보냄 ✓") and "통계 화면만 따로 열까요? 열린 화면에서 책갈피를 한 번 더 눌러 주세요" in d[0]
+    # 메뉴가 '#' 링크뿐 → 알려진 주소 셋(today·referer·rank_pv)을 숨은 iframe 으로 · 셋 다 숫자가 다른 출처 iframe 안 → 따로 열지 물음
+    assert len(d) == 3 and d[0].startswith("confirm:통계 보냄 ✓ 3개 화면") and "통계 화면만 따로 열까요? 열린 화면에서 책갈피를 한 번 더 눌러 주세요" in d[0]
     assert d[1] == "alert:통계 보냄 ✓ (데런픽 · 일간 현황 · 11/12)" and d[2].startswith("alert:통계 보냄 ✓")
     assert got["urls"] == ["https://admin.blog.naver.com:8443/stat/today?blogId=derenpick"]  # OK → 그 화면만 열림
-    first, second, third = (dict(parse_qsl(x, keep_blank_values=True)) for x in got["bodies"])
-    # 1) 메뉴뿐인 바깥 화면: 메뉴 줄은 빠지고 iframe 주소(다른 출처 · 광고도)는 f 에
+    bodies = [dict(parse_qsl(x, keep_blank_values=True)) for x in got["bodies"]]
+    assert len(bodies) == 5 and [b.get("n") for b in bodies[:3]] == ["유입분석", "일간 현황", "조회수 순위"]
+    assert bodies[0]["u"] == "https://admin.blog.naver.com/derenpick/stat/referer"
+    first, second, third = bodies[1], bodies[3], bodies[4]
+    # 1) 메뉴뿐인 화면: 메뉴 줄은 빠지고 iframe 주소(다른 출처 · 광고도)는 f 에
     for m in ("메뉴 바로가기", "본문 바로가기", "오늘", "일간 현황", "조회수", "순방문자수", "블로그 스마트봇"):
         assert m not in first["x"].splitlines(), first["x"]
     assert first["f"].splitlines() == ["https://admin.blog.naver.com:8443/stat/today?blogId=derenpick", "https://ad.example/banner"]
@@ -344,10 +351,129 @@ def test_bookmarklet_in_chrome_sends_iframe_src_opens_it_and_reads_charts() -> N
     x = third["x"].splitlines()
     assert any(ln.startswith("차트: ") and "11.12 152" in ln and "11.11 98" in ln for ln in x), x
     assert "순방문자수 11.12 87명" in x and "평균 사용 시간 2분 31초" in x and "블로그 스마트봇" not in x and "방문 분석" not in x
-    assert statscap.save(db, third, now=NOW + 2, tz=TZ)["ok"]
+    assert "n" not in third and statscap.save(db, third, now=NOW + 2, tz=TZ)["ok"]  # 메뉴 링크가 없으니 이 화면 하나만
+
+
+def test_save_takes_tab_name_as_kind_and_keeps_json() -> None:
+    db = FakeDb()
+    out = statscap.save(db, form(db, n="시간대 분석", j='https://admin.blog.naver.com/a.json\n{"h":[1,2]}'), now=NOW, tz=TZ)
+    assert out["kind"] == "시간대 분석" and out["label"] == "데런픽 · 시간대 분석 · 11/10"
+    rec = json.loads(next(v for k, v in db.kv.items() if k.startswith(statscap.PREFIX)))
+    assert rec["kind"] == "시간대 분석" and rec["json"].endswith('{"h":[1,2]}')
+    assert statscap.save(db, form(db, n="공감수 순위 " + "가" * 80), now=NOW + 1, tz=TZ)["kind"] == ("공감수 순위 " + "가" * 80)[:statscap.KIND_MAX]
+    assert statscap.save(db, form(db), now=NOW + 2, tz=TZ)["kind"] == "유입 분석"  # n 없으면 예전처럼 짐작
 
 
 def test_save_keeps_menu_only_capture_with_frames() -> None:
     db = FakeDb()
     out = statscap.save(db, form(db, x="", r="[]", f="https://admin.blog.naver.com:8443/stat/today"), now=NOW, tz=TZ)
     assert out["ok"]
+
+
+# 11/12 주인 '한 번 누르면 다 모아서' — 메뉴(같은 출처 링크)가 있는 가짜 통계 사이트
+B = "https://admin.blog.naver.com/derenpick/stat/"
+ALL_MENU = ("<div id='lnb'><ul>" + "".join(
+    f"<li><a href='/derenpick/stat/{h}'>{m}</a></li>" for h, m in (
+        ("today", "일간 현황"), ("referer", "유입분석"), ("rank_pv", "조회수 순위"), ("hour", "시간대 분석"),
+        ("country", "국가별 분포"), ("video", "재생수분석")))
+    + "<li><a href='#'>지표 다운로드</a></li></ul></div>")
+PAGE = "<!doctype html><html><head><meta charset='utf-8'><title>블로그 통계</title></head><body>" + ALL_MENU + "<div id='c'>{}</div>{}</body></html>"
+# 일간 현황: 1초 뒤 숫자 · 안쪽 탭(조회수/방문횟수/성별,연령별 분포) · '이전' 날짜 · billboard 차트 값
+TODAY = PAGE.format(
+    "<p id='d'>2026.11.12.</p><button class='btn_prev' aria-label='이전 날짜'>‹</button>"
+    "<ul class='tab'><li><a href='#' role='tab' data-t='pv'>조회수</a></li><li><a href='#' data-t='cnt'>방문횟수</a></li>"
+    "<li><a href='#' data-t='age'>성별,연령별 분포</a></li></ul><div id='box'>저장 중</div>",
+    "<script>let day='11.12',t='pv';const draw=()=>{document.getElementById('d').textContent='2026.'+day+'.';"
+    "document.getElementById('box').innerHTML=t==='pv'?'<table><tr><th>조회수</th><td>'+(day==='11.12'?22:180)+'</td></tr>"
+    "<tr><th>공감수</th><td>5</td></tr></table>':t==='cnt'?'<p>방문횟수 '+day+' 31</p><p>평균 1.2</p><p>재방문 4</p>':'<p>여성 30대 41%</p><p>남성 40대 12%</p><p>여성 20대 9%</p>';};"
+    "setTimeout(draw,1000);document.querySelectorAll('[data-t]').forEach(a=>a.onclick=e=>{e.preventDefault();t=a.dataset.t;draw();});"
+    "document.querySelector('.btn_prev').onclick=()=>{day='11.11';draw();};"
+    "window.bb={instance:[{data:()=>[{id:'조회수',values:[{x:new Date(2026,10,11),value:178},{x:new Date(2026,10,12),value:22}]}]}]};</script>")
+# 유입분석: 표가 안쪽 같은 출처 iframe 안 · 1초 뒤 뜸 · '더보기' 두 번 · '이전'
+REFERER = PAGE.format("<iframe src='/derenpick/stat/referer_in' style='width:800px;height:600px'></iframe>", "")
+REFERER_IN = (
+    "<!doctype html><html><head><meta charset='utf-8'></head><body><p id='d'>2026.11.12.</p><button class='prev' title='이전'>‹</button>"
+    "<table id='t'></table><button id='more'>더보기</button><script>let n=3,day='11.12';"
+    "const R=[['네이버 메인',40],['블로그 홈',25],['검색',20],['통합검색 겨울 패딩',9],['통합검색 에이티즈 대상',7],['구글',3],['다음',2]];"
+    "const draw=()=>{document.getElementById('d').textContent='2026.'+day+'.';document.getElementById('t').innerHTML='<tr><th>유입경로</th><th>비율</th></tr>'"
+    "+R.slice(0,n).map(r=>'<tr><td>'+r[0]+'</td><td>'+(day==='11.12'?r[1]:r[1]+1)+'%</td></tr>').join('');};setTimeout(draw,1000);"
+    "document.getElementById('more').onclick=()=>{n+=2;draw();if(n>=7)document.getElementById('more').remove();};"
+    "document.querySelector('.prev').onclick=()=>{day='11.11';draw();};</script></body></html>")
+# 조회수 순위: 화면이 같은 출처 JSON 을 읽어 온 뒤 div 표를 그림
+RANK = PAGE.format(
+    "<div id='g'></div>",
+    "<script>fetch('/derenpick/api/rank.json').then(r=>r.json()).then(()=>{document.getElementById('g').innerHTML=\"<div role='grid'><div role='row'>"
+    "<span role='columnheader'>순위</span><span role='columnheader'>제목</span><span role='columnheader'>조회수</span></div>"
+    "<div role='row'><span role='cell'>1</span><span role='cell'>에이티즈, 3년 연속 대상</span><span role='cell'>10</span></div></div>\";});</script>")
+# 시간대 분석: 숫자는 다른 출처 iframe 안
+HOUR = PAGE.format("<iframe src='https://admin.blog.naver.com:8443/stat/hour?blogId=derenpick' style='width:600px;height:300px'></iframe>", "")
+PW_ALL = r"""
+const {chromium} = require('playwright');
+(async () => {
+  const [code, pages] = process.argv.slice(1), P = JSON.parse(pages), out = {dialogs: [], bodies: [], ov: []};
+  const b = await chromium.launch();
+  const p = await b.newPage();
+  await p.route('**/*', async r => {
+    const u = r.request().url();
+    if (u.startsWith('https://dash.example/')) { out.bodies.push(r.request().postData() || '');
+      out.ov.push(await p.evaluate(() => { const d = [...document.body.children].find(e => e.style && e.style.zIndex === '2147483647'); return d ? d.textContent : ''; }));
+      return r.fulfill({status: 200, contentType: 'application/json', headers: {'Access-Control-Allow-Origin': '*'}, body: JSON.stringify({ok: true, label: 'x'})}); }
+    if (u.endsWith('/api/rank.json')) return r.fulfill({status: 200, contentType: 'application/json', body: '{"rank":[{"title":"에이티즈","pv":10}]}'});
+    for (const k of Object.keys(P)) if (u === k) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: P[k]});
+    return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: '<p>다른 출처</p>'});
+  });
+  p.on('dialog', async d => { out.dialogs.push(d.type() + ':' + d.message()); await d.accept(); });
+  await p.goto('https://admin.blog.naver.com/derenpick/stat/today');
+  const t = Date.now();
+  p.evaluate(code).catch(() => {});
+  for (let i = 0; i < 900 && !out.dialogs.length; i++) await p.waitForTimeout(100);
+  out.took = Date.now() - t;
+  out.left = await p.evaluate(() => document.querySelectorAll('iframe').length + [...document.body.children].filter(e => e.style && e.style.zIndex === '2147483647').length);
+  console.log(JSON.stringify(out));
+  await b.close();
+})().catch(e => { console.error(String(e)); process.exit(2); });
+"""
+
+
+def test_bookmarklet_collects_all_menu_tabs_subtabs_yesterday_and_json() -> None:
+    from test_dash_kkumi import _playwright_env
+
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    db = FakeDb()
+    pages = {B + "today": TODAY, B + "referer": REFERER, B + "referer_in": REFERER_IN, B + "rank_pv": RANK, B + "hour": HOUR}
+    res = subprocess.run([NODE, "-e", PW_ALL, code(db), json.dumps(pages)], capture_output=True, text=True, timeout=150, env=env)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    sent = [dict(parse_qsl(x, keep_blank_values=True)) for x in got["bodies"]]
+    names = [s["n"] for s in sent]
+    # 유입분석 먼저 · 국가별 분포·재생수분석·지표 다운로드는 안 엶 · '조회수' 탭은 이미 고른 것이라 그대로(안 보냄)
+    assert names == ["유입분석", "유입분석 · 전날", "일간 현황", "일간 현황 · 방문횟수", "일간 현황 · 성별,연령별 분포", "일간 현황 · 전날",
+                     "조회수 순위", "시간대 분석"], names
+    assert got["dialogs"] == ["alert:통계 보냄 ✓ 8개 화면"] and got["left"] == 0 and got["took"] < 60000
+    assert got["ov"][0] == "1/4 유입분석…" and got["ov"][2] == "2/4 일간 현황…" and got["ov"][-1] == "4/4 시간대 분석…"
+    by = dict(zip(names, sent))
+    # 유입분석: 안쪽 iframe 표 · 더보기 두 번 펼친 7줄 (네이버 메인·블로그 홈·검색·검색어) · 전날
+    rows = json.loads(by["유입분석"]["r"])[0]
+    assert rows[0] == ["유입경로", "비율"] and ["네이버 메인", "40%"] in rows and ["통합검색 에이티즈 대상", "7%"] in rows and len(rows) == 8
+    assert "2026.11.11." in by["유입분석 · 전날"]["x"] and ["네이버 메인", "41%"] in json.loads(by["유입분석 · 전날"]["r"])[0]
+    assert "referer_in" in by["유입분석"]["f"]
+    # 일간 현황: 1초 뒤 뜬 표 · 차트 값 · 안쪽 탭 · 전날
+    assert json.loads(by["일간 현황"]["r"]) == [[["조회수", "22"], ["공감수", "5"]]]
+    assert "차트값 조회수: 11.11=178 11.12=22" in by["일간 현황"]["x"].splitlines()
+    assert "방문횟수 11.12 31" in by["일간 현황 · 방문횟수"]["x"] and "여성 30대 41%" in by["일간 현황 · 성별,연령별 분포"]["x"]
+    assert "2026.11.11." in by["일간 현황 · 전날"]["x"]
+    # 조회수 순위: div 표 + 같은 출처 JSON
+    assert json.loads(by["조회수 순위"]["r"])[0][1] == ["1", "에이티즈, 3년 연속 대상", "10"]
+    assert by["조회수 순위"]["j"] == 'https://admin.blog.naver.com/derenpick/api/rank.json\n{"rank":[{"title":"에이티즈","pv":10}]}'
+    # 시간대 분석: 다른 출처 iframe 주소만 (모두가 다른 출처는 아니니 따로 열지 묻지 않음)
+    assert "admin.blog.naver.com:8443/stat/hour" in by["시간대 분석"]["f"]
+    for s in sent:
+        assert s["k"] == statscap.key(db) and "/derenpick/" in s["u"]
+        assert "국가별 분포" not in s["x"] and "지표 다운로드" not in s["x"]
+    for i, s in enumerate(sent):
+        out = statscap.save(db, s, now=NOW + i, tz=TZ)
+        assert out["kind"] == s["n"] and out["blog"] == "issue"
+    recs = [json.loads(v) for k, v in sorted(db.kv.items()) if k.startswith(statscap.PREFIX)]
+    assert len(recs) == 8 and {r["kind"] for r in recs} == set(names) and any(r.get("json") for r in recs)
