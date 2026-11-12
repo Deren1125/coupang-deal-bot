@@ -60,3 +60,8 @@
 ## 2026-11-12 — 블로그 탭 무반응 (주인 아이패드 사파리 '블로그 탭을 눌러도 아무 반응 없음')
 - 원인: 블로그 화면을 그리다 자바스크립트 오류가 나면 render() 가 중간에 멈춰 탭·제목이 안 바뀌고, 주소가 이미 #/blog 라 다시 눌러도 hashchange 가 없음 → '아무 반응 없음'. 재현된 오류: '링크에서 사진 뽑기'(#/blog/pics)·카카오 연결 칸이 paste(f, key) 를 a 없이 불러 `a.pm` 에서 TypeError (Cannot read properties of undefined (reading 'pm')). 기억한 블로그(localStorage 'blog')가 pics 면 블로그 탭이 늘 그 화면으로 가서 매번 멈춤.
 - 고침: paste 의 a 기본값 {} · 기억한 블로그는 세 블로그 중 하나일 때만 · render() 가 화면 오류를 잡아 '화면 오류 · …' 한 줄을 그리고 탭은 바뀌게 (다른 데이터 오류가 나도 탭이 멈추지 않음).
+
+## 2026-11-12 — 'Ably 랭킹 보내기' 책갈피 (주인: 코디 랭킹 캡처 올리기 대신 책갈피 한 번 · 서버는 에이블리를 열지 않음 10/28)
+- 연결 탭 'Ably 랭킹 보내기 버튼 설치' (통계 보내기와 같은 칸 · GET /dashboard/api/ablyrank). a-bly.com·*.a-bly.com 화면에서만 — 카드가 뜰 때까지 0.5초씩 5초 기다리고, 순위·상품명·쇼핑몰·가격·원래 가격·할인·리뷰·별점·찜·상품 주소·사진 주소, 코디 카드(제목·좋아요·든 상품 12개), 주소·제목·고른 탭·제목 줄·보이는 글(1.5만 자)을 POST /dashboard/api/ably_rank_capture 로 (쿠키 없음).
+- 받기: 열쇠 kv ablyrank_secret HMAC · CORS 는 https://*.a-bly.com 만 · 손님마다 10분 20번 · 하루 30개 · 상품 100·코디 50 · 기록 60KB → kv ably_rank_capture:<날>:<시각> 30일. 상품·코디 주소는 a-bly.com 만, 사진 주소는 적기만 (서버가 받아 오지 않음).
+- 넘기기: Blog-Auto 상태 파일 actions 에 'ably_rank_capture' 가 생기면 일 ably_rank_capture {captures: [kv 키]} (계약 action_ably_rank_capture.json) — 그 전에는 kv 에만. 캡처 올리기(LB-15)는 그대로.

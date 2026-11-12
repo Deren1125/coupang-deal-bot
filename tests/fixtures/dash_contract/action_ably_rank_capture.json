@@ -1,0 +1,20 @@
+{
+ "v": 1,
+ "id": "a_01jc3w1v9e8k4m2n6p7q8r9c15",
+ "ts": 1760772000.12,
+ "expires_at": 1760772600.12,
+ "action": "ably_rank_capture",
+ "blog": null,
+ "args": {
+  "captures": [
+   "ably_rank_capture:2026-11-12:214503-9f0e"
+  ]
+ },
+ "target": "ably-rank:2026-11-12:214503-9f0e",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "bookmarklet",
+  "cid": ""
+ }
+}
