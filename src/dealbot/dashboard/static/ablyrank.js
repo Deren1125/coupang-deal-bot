@@ -6,7 +6,7 @@
    줄마다 문장이 끝나게 쓴다 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음). 카드가 아직 안 떴으면 0.5초마다 최대 8초 기다린다.
    11/12 코디 랭킹(mobile.a-bly.com/content/style/home 랭킹 탭 — 링크·가격 없는 사진 카드)이 0개로 와서: 사진 왼쪽 위 순위 딱지('1 –'·'3 9↑')에서
    카드까지 올라가 순위·변동·사진·닉네임·해시태그·바로입기·카드 링크를 코디(looks)로, 몇 화면 내려 더 모은 뒤 제자리로. 그림자 DOM·같은 출처 iframe 도 본다.
-   카드 링크가 같은 출처면 그 화면을 이 브라우저가 받아(쿠키 포함 · 최대 10개 · 20초) 든 상품을 읽는다 — 서버는 그대로 에이블리를 열지 않음. */
+   카드 링크가 같은 출처면 그 화면을 이 브라우저가 받아(쿠키 포함 · 최대 40개 · 90초 — 주인 11/12 "10개로 제한 안해도 돼") 든 상품을 읽는다 — 서버는 그대로 에이블리를 열지 않음. */
 (async function () {
 const U = '@@URL@@', K = '@@KEY@@', W = window, D = document;
 if (W.__abcap) { alert('Ably 랭킹 보내기: 보내는 중이에요'); return; }
@@ -174,7 +174,7 @@ if (first) {
   }
   go(y0);
 }
-// 코디 안 상품: 같은 출처 코디 화면을 주인 브라우저가 받아 (최대 10개 · 20초) 화면 속 JSON·상품 주소에서
+// 코디 안 상품: 같은 출처 코디 화면을 주인 브라우저가 받아 (최대 40개 · 90초) 화면 속 JSON·상품 주소에서
 const t0 = Date.now();
 let nd = 0, ng = 0;
 const walk = (o, its, d) => {
@@ -188,11 +188,11 @@ const walk = (o, its, d) => {
   }
   for (const k in o) walk(o[k], its, d + 1);
 };
-for (const lk of [...LK.values()].filter(l => l.url && new URL(l.url).origin === location.origin).slice(0, 10)) {
-  if (Date.now() - t0 > 18000) break;
+for (const lk of [...LK.values()].filter(l => l.url && new URL(l.url).origin === location.origin).slice(0, 40)) {
+  if (Date.now() - t0 > 88000) break;
   nd++;
   try {
-    const ac = W.AbortController ? new AbortController() : null, tm = setTimeout(() => ac && ac.abort(), Math.max(1000, 20000 - (Date.now() - t0)));
+    const ac = W.AbortController ? new AbortController() : null, tm = setTimeout(() => ac && ac.abort(), Math.max(1000, 90000 - (Date.now() - t0)));
     const h = await (await fetch(lk.url, {credentials: 'include', signal: ac ? ac.signal : undefined})).text();
     clearTimeout(tm);
     for (const m of h.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) {
