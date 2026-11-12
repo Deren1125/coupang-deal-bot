@@ -67,8 +67,11 @@ def test_bookmarklet_has_endpoint_key_and_keeps_file_rules() -> None:
     db = FakeDb()
     js = code(db)
     assert "'https://dash.example/dashboard/api/ably_rank_capture'" in js and f"'{ablyrank.key(db)}'" in js and "@@" not in js
-    assert "/*" not in js and "\n//" not in js and len(ablyrank.view(db, "https://dash.example")["code"]) < 16000
-    assert js.count("fetch(") == 1 and "credentials:'omit'" in js and "XMLHttpRequest" not in js and "cookie" not in js
+    # 사파리 책갈피 주소 칸: 꾸미기 책갈피 28KB 가 아이패드에서 돎 (test_dash_kkumi) · 11/12 코디 랭킹 넣으며 16→22KB
+    assert "/*" not in js and "\n//" not in js and len(ablyrank.view(db, "https://dash.example")["code"]) < 22000
+    # 대시보드로는 쿠키 없이 한 번 · 쿠키 포함(include)은 같은 출처 코디 화면 받기에만
+    assert js.count("fetch(") == 2 and "fetch(U,{method:'POST',mode:'cors',credentials:'omit'" in js and "XMLHttpRequest" not in js and "cookie" not in js
+    assert js.count("credentials:'include'") == 1 and "origin===location.origin" in js
     assert ablyrank.key(db) != statscap.key(db) and len(ablyrank.INSTALL_STEPS) == 4
     with pytest.raises(ValueError):
         ablyrank.bookmarklet("https://x.example/a'b", "k")
@@ -195,6 +198,129 @@ def test_bookmarklet_on_fake_ably_ranking_collects_cards_and_server_saves() -> N
     (rec,) = recs(db)
     assert rec["tab"] == "코디" and rec["items"][0]["pos"] == 1 and rec["looks"][0]["items"][1]["name"] == "A라인 미니 스커트"
     assert "울 블렌드 롱 코트" in rec["text"]
+
+
+# 11/12 아이패드 사파리 mobile.a-bly.com/content/style/home '랭킹' 탭 — 0개로 왔던 화면 흉내:
+# 링크·가격 없는 사진 카드 2줄 · 사진 왼쪽 위 순위 딱지('1 –'·'3 9↑'·'5 NEW') · 닉네임·해시태그·바로입기 · 그림자 DOM 안 스크롤 칸 ·
+# 1초 뒤에 뜨고 내리면 12개씩 더 (36개까지) · 1~3위만 같은 출처 코디 화면 링크 (상품은 그 화면 __NEXT_DATA__ 에)
+COORDI = """<!doctype html><html><head><meta charset="utf-8"><title>에이블리</title>
+<style>body{margin:0;width:390px}.tabs{display:flex;gap:12px}.tabs span{color:#999;font-weight:400}.tabs span.x{color:#000;font-weight:700;border-bottom:2px solid #000}</style></head><body>
+<div class="top">앱에서 더 많은 상품을 볼 수 있어요! <button>앱에서 보기</button></div>
+<div>코디</div>
+<div class="tabs"><span>PICK</span><span>팔로잉</span><span>추천</span><span class="x">랭킹</span><span>데일리</span><span>찜한 상품</span><span>오늘 날씨</span></div>
+<div id="host"></div>
+<script>
+const NICK = ['llilililii', '읍스읍스', 'mori_girl', '겨울곰'];
+const CHG = n => n % 5 === 0 ? '<span>NEW</span>' : n % 3 === 0 ? '<svg class="ic_up" width="8" height="8"></svg><span style="color:rgb(255,40,40)">9</span>'
+  : n % 7 === 0 ? '<svg class="ic_down" width="8" height="8"></svg><span>2</span>' : '<span>–</span>';
+const card = n => {
+  const pic = n % 4 === 2 ? '<div class="ph" style="width:180px;height:240px;background-image:url(https://img.cdn.example/c/' + n + '_bg.jpg)"></div>'
+    : '<img style="width:180px;height:240px;display:block" src="https://img.cdn.example/c/' + n + '_s.jpg" srcset="https://img.cdn.example/c/' + n + '_320.jpg 320w, https://img.cdn.example/c/' + n + '_640.jpg 640w">';
+  const photo = '<div style="position:relative">' + (n <= 3 ? '<a href="/coordi/' + (9000 + n) + '">' + pic + '</a>' : pic)
+    + '<div class="rk" style="position:absolute;top:6px;left:6px;display:flex;gap:2px"><span>' + n + '</span>' + CHG(n) + '</div>'
+    + (n % 2 ? '<span class="chip" style="position:absolute;bottom:6px;left:6px">바로입기</span>' : '') + '</div>';
+  return '<div class="card" onclick="void 0">' + photo + '<div class="prof"><img width="20" height="20" src="https://img.cdn.example/av/' + n + '.jpg">'
+    + '<span>' + NICK[n % 4] + '</span></div><p>#겨울코디 #빈티지 #모리걸</p></div>';
+};
+setTimeout(() => {
+  const root = document.getElementById('host').attachShadow({mode: 'open'});
+  root.innerHTML = '<div><b>랭킹순위 ?</b><p>12:00 PM 업데이트</p></div><div id="sc" style="height:700px;overflow-y:auto">'
+    + '<div id="grid" style="display:grid;grid-template-columns:180px 180px;gap:8px"></div></div>';
+  const g = root.getElementById('grid'), sc = root.getElementById('sc');
+  let n = 0;
+  const more = () => { let h = ''; for (let i = 0; i < 12 && n < 36; i++) h += card(++n); g.insertAdjacentHTML('beforeend', h); };
+  more();
+  sc.addEventListener('scroll', () => { if (sc.scrollTop + sc.clientHeight > sc.scrollHeight - 400) setTimeout(more, 150); });
+}, 1000);
+</script></body></html>"""
+
+DETAIL = """<!doctype html><html><head><title>코디</title></head><body><div id="__next"></div>
+<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"coordi":{"sno":%d,"goods":[
+ {"sno":%d1,"name":"앙고라 브이넥 니트","price":31200,"market_name":"러브마켓","image":"https://img.cdn.example/g/a.jpg"},
+ {"sno":%d2,"name":"A라인 미니 스커트","price":25900,"market":{"name":"데일리룸"},"image":"https://img.cdn.example/g/b.jpg"}]}}}}</script>
+</body></html>"""
+
+RUN_CO = r"""
+const {chromium} = require('playwright');
+(async () => {
+  const [code, page, detail] = process.argv.slice(1), out = {alerts: [], posts: [], details: [], outside: []};
+  const b = await chromium.launch();
+  const p = await b.newPage({viewport: {width: 390, height: 844}});
+  p.on('dialog', async d => { out.alerts.push(d.message()); await d.accept(); });
+  await p.route('**/*', async r => {
+    const u = r.request().url();
+    if (u.startsWith('https://dash.example/')) {
+      out.posts.push({body: r.request().postData() || '', cookie: r.request().headers()['cookie'] || ''});
+      return r.fulfill({status: 200, contentType: 'application/json', headers: {'Access-Control-Allow-Origin': 'https://mobile.a-bly.com'},
+        body: JSON.stringify({ok: true, label: '코디 36 · 랭킹'})});
+    }
+    if (u === 'https://mobile.a-bly.com/content/style/home') return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: page});
+    const m = /^https:\/\/mobile\.a-bly\.com\/coordi\/(\d+)$/.exec(u);
+    if (m) { out.details.push(u); return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: detail.split('%d').join(m[1])}); }
+    out.outside.push(u);
+    return r.fulfill({status: 204, body: ''});
+  });
+  await p.goto('https://mobile.a-bly.com/content/style/home');
+  const t = Date.now();
+  await p.evaluate(code);
+  out.waited = Date.now() - t;
+  out.scroll = await p.evaluate(() => document.getElementById('host').shadowRoot.getElementById('sc').scrollTop);
+  console.log(JSON.stringify(out));
+  await b.close();
+})().catch(e => { console.error(String(e)); process.exit(2); });
+"""
+
+
+def test_bookmarklet_on_fake_coordi_ranking_tab_collects_looks_without_items() -> None:
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    db = FakeDb()
+    res = subprocess.run([NODE, "-e", RUN_CO, code(db), COORDI, DETAIL], capture_output=True, text=True, timeout=120, env=env)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 36 · 랭킹) · 코디 3개 열어 상품 6개"]
+    assert got["details"] == [f"https://mobile.a-bly.com/coordi/{9000 + n}" for n in (1, 2, 3)]  # 같은 출처 코디 화면만 (주인 브라우저)
+    assert all(u.startswith("https://img.cdn.example/") for u in got["outside"]) and got["scroll"] == 0  # 내린 뒤 제자리
+    assert 900 <= got["waited"] < 25000
+    (post,) = got["posts"]
+    assert post["cookie"] == ""
+    sent = dict(parse_qsl(post["body"], keep_blank_values=True))
+    assert sent["s"].splitlines()[0] == "랭킹"
+    cards = json.loads(sent["j"])
+    assert cards["items"] == [] and cards["upd"] == "12:00 PM 업데이트" and "roots 2" in cards["dbg"]
+    lk = cards["looks"]
+    assert [x["rank"] for x in lk] == list(range(1, 37))  # 내리며 더 뜬 카드까지
+    by = {x["rank"]: x for x in lk}
+    assert (by[1]["chg"], by[3]["chg"], by[5]["chg"], by[7]["chg"], by[6]["chg"]) == ("–", "9↑", "NEW", "2↓", "9↑")
+    assert by[1]["img"] == "https://img.cdn.example/c/1_640.jpg" and by[2]["img"] == "https://img.cdn.example/c/2_bg.jpg"
+    assert (by[1]["nick"], by[2]["nick"]) == ("읍스읍스", "mori_girl") and by[4]["nick"] == "llilililii"
+    assert by[1]["tags"] == ["#겨울코디", "#빈티지", "#모리걸"] and by[1]["quick"] is True and by[2]["quick"] is False
+    assert by[1]["url"] == "https://mobile.a-bly.com/coordi/9001" and by[4]["url"] == ""
+    assert [(i["name"], i.get("shop"), i.get("price"), i["url"]) for i in by[1]["items"]] == [
+        ("앙고라 브이넥 니트", "러브마켓", 31200, "https://mobile.a-bly.com/goods/90011"),
+        ("A라인 미니 스커트", "데일리룸", 25900, "https://mobile.a-bly.com/goods/90012")]
+    assert "읍스읍스" in sent["x"] and "#겨울코디" in sent["x"]  # 그림자 DOM 안 글도
+    out = ablyrank.save(db, sent, now=NOW, tz=TZ)
+    assert out["label"] == "코디 36 · 랭킹" and out["items"] == 0
+    (rec,) = recs(db)
+    r1 = rec["looks"][0]
+    assert (rec["tab"], rec["upd"]) == ("랭킹", "12:00 PM 업데이트")
+    assert (r1["rank"], r1["chg"], r1["nick"], r1["quick"], r1["tags"][0], r1["items"][0]["price"]) == (1, "–", "읍스읍스", True, "#겨울코디", 31200)
+
+
+def test_save_takes_coordi_cards_alone_and_checks_their_fields() -> None:
+    db = FakeDb()
+    looks = [{"rank": 1, "chg": "9↑", "img": "https://img.cdn.example/c/1.jpg", "nick": "읍스읍스", "tags": ["#겨울코디", "#<b>", "nope", "#" + "가" * 40],
+              "quick": True, "url": "", "items": []},
+             {"rank": 2, "chg": "<script>", "nick": "llilililii", "quick": "yes"}, {"rank": 3}]
+    out = ablyrank.save(db, form(db, j=json.dumps({"items": [], "looks": looks, "upd": "12:00 PM 업데이트", "dbg": "roots 2"}), s="랭킹"), now=NOW, tz=TZ)
+    assert out["label"] == "코디 2 · 랭킹"
+    (rec,) = recs(db)
+    a, b = rec["looks"]
+    assert (a["chg"], a["nick"], a["tags"], a["quick"]) == ("9↑", "읍스읍스", ["#겨울코디", "#" + "가" * 30], True)  # 긴 태그는 30자로
+    assert "chg" not in b and "quick" not in b and b["nick"] == "llilililii"
+    assert (rec["upd"], rec["dbg"]) == ("12:00 PM 업데이트", "roots 2")
 
 
 # ---------------------------------------------------------------- 3) 받기

@@ -5,7 +5,9 @@ static/ablyrank.js: 주인 브라우저(아이패드 사파리·갤럭시 크롬
   POST /dashboard/api/ably_rank_capture (폼 — 쿠키 없음) 로 보낸다. 열쇠 k = HMAC(kv ablyrank_secret, "ablyrank") —
   연결 탭 'Ably 랭킹 보내기 버튼 설치'(로그인 아래 GET /dashboard/api/ablyrank)에서만 보임. kv 를 지우면 예전 책갈피는 안 받음.
 save(): 열쇠 · 에이블리 주소만 · 칸마다 크기·모양 확인(주소는 https 만, 상품·코디 주소는 a-bly.com 만) · 상품 100 · 코디 50(코디마다 상품 12) ·
-  기록 60KB → kv "ably_rank_capture:<보낸 날 KST>:<HHMMSS>-<4hex>" = JSON {at, sent, url, title, sel, heads, tab, items, looks, text}. 30일.
+  기록 60KB → kv "ably_rank_capture:<보낸 날 KST>:<HHMMSS>-<4hex>" = JSON {at, sent, url, title, sel, heads, tab, upd, dbg, items, looks, text}. 30일.
+  코디 랭킹(11/12 — 사진 카드뿐, 상품 없음): looks 만 와도 받음 · 코디마다 rank·chg(변동)·img·nick·tags·quick(바로입기)·url·items(코디 화면에서 읽은 상품) ·
+  upd = '12:00 PM 업데이트' 줄 · dbg = 책갈피가 본 화면 모양(그림자 DOM·iframe 수) — 다음에 고칠 때 보려고.
   사진 주소는 적기만 한다 (서버가 받아 오지 않음).
 넘기기: Blog-Auto 가 상태 파일 actions 에 'ably_rank_capture' 를 알리면 같은 룩북 감독 길로 일 하나
   (계약 action_ably_rank_capture.json — {captures: [kv 키]}, Blog-Auto 가 딜봇 DB 에서 읽음). 알리기 전에는 kv 에만 둔다.
@@ -46,12 +48,14 @@ LOOK_ITEMS_MAX = 12
 ABLY_URL = re.compile(r"https://([a-z0-9-]+\.)*a-bly\.com(/[^\s<>\"']*)?")
 HTTPS_URL = re.compile(r"https://[A-Za-z0-9.\-]+(:\d+)?(/[^\s<>\"'\\]*)?")
 COUNT = re.compile(r"[\d,.]{1,10}[만천kK]?\+?")
+CHANGE = re.compile(r"–|-|—|NEW|N|신규|[↑↓▲▼]?\d{1,3}[↑↓▲▼]?", re.I)  # 순위 변동 ('9↑' · '–' · 'NEW')
+TAG = re.compile(r"#[^\s#<>]{1,30}")
 INSTALL_STEPS = (
     "아래 '코드 복사'를 눌러요.",
     "브라우저에서 아무 페이지나 연 뒤 책갈피(북마크) 추가 → 이름을 'Ably 랭킹 보내기'로 저장해요.",
     "책갈피 목록 → '편집' → 'Ably 랭킹 보내기'의 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'.",
-    "쓰는 법: 브라우저에서 에이블리(a-bly.com) 랭킹·코디 랭킹 화면을 열고 책갈피 'Ably 랭킹 보내기' → 'Ably 랭킹 보냄 ✓' 알림이면 끝. "
-    "더 보고 싶으면 아래로 내린 뒤 한 번 더 (캡처 올리기는 그대로 써도 돼요).",
+    "쓰는 법: 브라우저에서 에이블리(a-bly.com) 상품 랭킹 화면이나 코디 화면의 '랭킹' 탭을 열고 책갈피 'Ably 랭킹 보내기' → "
+    "'Ably 랭킹 보냄 ✓' 알림이면 끝 (코디는 스스로 몇 화면 내려 모아요 · 20초쯤 걸릴 수 있어요 · 캡처 올리기는 그대로 써도 돼요).",
 )
 
 
@@ -139,22 +143,34 @@ def _look(v: Any) -> dict[str, Any] | None:
         o["rank"] = n
     if COUNT.fullmatch(s := str(v.get("like") or "")[:12]):
         o["like"] = s
+    if CHANGE.fullmatch(s := str(v.get("chg") or "")[:8]):
+        o["chg"] = s
+    if s := clean(v.get("nick"), 180)[:60]:
+        o["nick"] = s
+    tags = v.get("tags") if isinstance(v.get("tags"), list) else []
+    if tg := [t for t in (str(x)[:31] for x in tags[:20]) if TAG.fullmatch(t) and clean(t, 100) == t][:10]:
+        o["tags"] = tg
+    if v.get("quick") is True:
+        o["quick"] = True  # '바로입기' (코디 속 상품 바로 입어 보기)
     if u := _url(v.get("url"), True):
         o["url"] = u
     if u := _url(v.get("img"), False):
         o["img"] = u
     raw = v.get("items") if isinstance(v.get("items"), list) else []
     o["items"] = [x for x in (_item(i) for i in raw[:LOOK_ITEMS_MAX * 2]) if x][:LOOK_ITEMS_MAX]
-    return o if (o.get("title") or o.get("url") or o["items"]) else None
+    return o if (o.get("title") or o.get("url") or o["items"] or o.get("img") or o.get("nick")) else None
 
 
-def parse_cards(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _data(raw: str) -> dict[str, Any]:
     try:
         data = json.loads(raw) if raw else {}
     except ValueError:
-        return [], []
-    if not isinstance(data, dict):
-        return [], []
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def parse_cards(raw: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    data = _data(raw)
     items = data.get("items") if isinstance(data.get("items"), list) else []
     looks = data.get("looks") if isinstance(data.get("looks"), list) else []
     its = [x for x in (_item(i) for i in items[:ITEMS_MAX * 2]) if x][:ITEMS_MAX]
@@ -200,19 +216,23 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
     url = _url(form.get("u"), True)
     if not url:
         raise CaptureError(400, "where", "에이블리(a-bly.com) 화면에서 보낸 것만 받아요")
-    items, looks = parse_cards(str(form.get("j") or "")[:JSON_MAX])
+    raw = str(form.get("j") or "")[:JSON_MAX]
+    items, looks = parse_cards(raw)
+    extra = _data(raw)
     text = clean(form.get("x"), TEXT_MAX)
     if not items and not looks and not text:
         raise CaptureError(400, "empty", "화면을 못 읽었어요 — 랭킹이 다 뜬 뒤 다시 눌러 주세요")
     sel = [s for s in clean(form.get("s"), 1000).splitlines() if s][:12]
     heads = [s for s in clean(form.get("h"), 1000).splitlines() if s][:8]
     rec = {"at": int(now), "sent": sent, "url": url, "title": clean(form.get("t"), 300), "sel": sel, "heads": heads,
-           "tab": sel[0] if sel else "", "items": items, "looks": looks, "text": text}
+           "tab": sel[0] if sel else "", "upd": clean(extra.get("upd"), 90)[:30], "dbg": clean(extra.get("dbg"), 400),
+           "items": items, "looks": looks, "text": text}
     body = _fit(rec)
     k = f"{PREFIX}{sent}:{datetime.fromtimestamp(now, tz).strftime('%H%M%S')}-{secrets.token_hex(2)}"
     db.kv_set(k, body)
     prune(db, now, tz)
-    parts = [f"상품 {len(rec['items'])}"] + ([f"코디 {len(rec['looks'])}"] if rec["looks"] else [])
+    # 코디 랭킹 화면(상품 없음)은 '코디 N' 만
+    parts = ([f"상품 {len(rec['items'])}"] if rec["items"] or not rec["looks"] else []) + ([f"코디 {len(rec['looks'])}"] if rec["looks"] else [])
     if rec["tab"]:
         parts.append(rec["tab"][:20])
     return {"ok": True, "label": " · ".join(parts), "key": k, "items": len(rec["items"]), "looks": len(rec["looks"])}
