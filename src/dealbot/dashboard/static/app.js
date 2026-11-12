@@ -1033,7 +1033,7 @@ function trendBox(t) {
   return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '인기 검색어'), el('span', {class: 'note'}, ago(t.at))),
     el('div', {class: 'box'}, t.items.slice(0, all ? 20 : 10).map(x => el('div', {class: 'row tr'}, el('b', {}, x.rank), mv(x),
       btn('grow tw', [el('span', {class: 't'}, x.keyword), el('span', {class: 's'}, [x.sources.map(k => TSRC[k]).join('·'), TTAG[x.tag]].filter(Boolean).join(' · '))],
-        e => trendGo(t, x, e), {disabled: !t.write || Object.values(POLL).some(p => p.args.keyword === x.keyword && p.action === t.write.action) || null}), x.badge ? el('span', {class: 'cp hot'}, x.badge) : null, x.written ? el('span', {class: 'cp ok'}, '이미 쓴 글 있음') : null)),
+        e => trendGo(t, x, e), {disabled: !t.write || Object.values(POLL).some(p => (p.args || {}).keyword === x.keyword && p.action === t.write.action) || null}), x.badge ? el('span', {class: 'cp hot'}, x.badge) : null, x.written ? el('span', {class: 'cp ok'}, '이미 쓴 글 있음') : null)),
     t.items.length > 10 ? btn('fold', all ? '10위까지만' : `20위까지 보기`, () => { OPEN.trends = !all; render(); }) : null)];
 }
 // 누르면 바로 쓰기
@@ -1050,7 +1050,7 @@ function vBlog() {
   if (key === 'sched') return out.concat(vSC());
   if (!b) return out;
   const acts = b.actions || [], pseudo = {iid: 'blog-' + key, title: b.label};
-  const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && a.args.what === 'trends'));
+  const idea = acts.filter(a => IDEA.includes(a.action) || (a.action === 'blog.info' && (a.args || {}).what === 'trends'));
   const write = acts.find(a => /^blog\.(write|post_notes)$/.test(a.action)), seed = acts.find(a => a.action === 'blog.topic_seed');
   const more = acts.filter(a => !idea.includes(a) && a !== write && a !== seed);
   out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, (b.head || `${b.mode === 'publish' ? '발행 모드' : '초안 모드'} · 오늘 ${b.today}편`) + (b.paused ? ' · 멈춤' : '')),
