@@ -195,7 +195,7 @@ def test_bookmarklet_on_fake_ably_ranking_collects_cards_and_server_saves() -> N
 
 # 11/12 아이패드 사파리 mobile.a-bly.com/content/style/home '랭킹' 탭 — 0개로 왔던 화면 흉내:
 # 링크·가격 없는 사진 카드 2줄 · 사진 왼쪽 위 순위 딱지('1 –'·'3 9↑'·'5 NEW') · 닉네임·해시태그·바로입기 · 그림자 DOM 안 스크롤 칸 ·
-# 1초 뒤에 뜨고 내리면 12개씩 더 (36개까지) · 1~3위만 같은 출처 코디 화면 링크 (상품은 그 화면 __NEXT_DATA__ 에)
+# 1초 뒤에 뜨고 내리면 12개씩 더 (48개까지 — 책갈피는 랭킹 40개까지) · 1~3위만 같은 출처 코디 화면 링크 (상품은 그 화면 __NEXT_DATA__ 에)
 COORDI = """<!doctype html><html><head><meta charset="utf-8"><title>에이블리</title>
 <style>body{margin:0;width:390px}.tabs{display:flex;gap:12px}.tabs span{color:#999;font-weight:400}.tabs span.x{color:#000;font-weight:700;border-bottom:2px solid #000}</style></head><body>
 <div class="top">앱에서 더 많은 상품을 볼 수 있어요! <button>앱에서 보기</button></div>
@@ -231,7 +231,7 @@ setTimeout(() => {
     + '<div id="grid" style="display:grid;grid-template-columns:180px 180px;gap:8px"></div></div>';
   const g = root.getElementById('grid'), sc = root.getElementById('sc');
   let n = 0;
-  const more = () => { let h = ''; for (let i = 0; i < 12 && n < 36; i++) h += card(++n); g.insertAdjacentHTML('beforeend', h); };
+  const more = () => { let h = ''; for (let i = 0; i < 12 && n < 48; i++) h += card(++n); g.insertAdjacentHTML('beforeend', h); };
   more();
   sc.addEventListener('scroll', () => { if (sc.scrollTop + sc.clientHeight > sc.scrollHeight - 400) setTimeout(more, 150); });
   // 다른 탭: 순위 없는 3열 사진 (탭마다 6장 · 추천은 칩마다) · 0.3초 뒤에 바뀜 · PICK 첫 카드만 코디 화면 링크
@@ -337,17 +337,17 @@ def _coordi_run(mode: str, two: bool) -> tuple[dict, dict, FakeDb]:
     return got, dict(parse_qsl(post["body"], keep_blank_values=True)), db
 
 
-# 탭: PICK 6 · 추천 6 + 칩 4×6 · 랭킹 36 · 데일리 6 · 오늘 날씨 6 = 84 (팔로잉·찜한 상품은 안 누름) · 상세는 랭킹 1~3위 + PICK 1 = 4
-TAB_LOOKS = [("PICK", ""), ("추천", ""), ("추천", "전체"), ("추천", "니트"), ("추천", "코트"), ("추천", "데님"), ("랭킹", ""), ("데일리", ""), ("오늘 날씨", "")]
+# 탭 (랭킹 먼저): 랭킹 40(48 중 한도) · 데일리 6 · PICK 6 · 추천 6 + 칩 4×6 · 오늘 날씨 6 = 88 (팔로잉·찜한 상품은 안 누름) · 상세는 랭킹 1~3위 + PICK 1 = 4
+TAB_LOOKS = [("랭킹", ""), ("데일리", ""), ("PICK", ""), ("추천", ""), ("추천", "전체"), ("추천", "니트"), ("추천", "코트"), ("추천", "데님"), ("오늘 날씨", "")]
 
 
 @pytest.mark.parametrize("mode", ["shadow", "iframe"])  # 카드가 그림자 DOM 안이든 같은 출처 iframe 안이든
 def test_bookmarklet_on_fake_coordi_page_walks_tabs_and_chips(mode: str) -> None:
     got, sent, db = _coordi_run(mode, False)
-    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 84 · 상품 12)"]
+    assert got["alerts"] == ["Ably 랭킹 보냄 ✓ (코디 88 · 상품 12)"]
     # 진행 띠 (주인 11/12): 누르자마자 · 탭·칩마다 개수 → 내리기 → 상세 → 보내기 · 끝나면 치움
     ov = got["ov"]
-    assert ov[0].startswith("카드 찾는 중 (") and any(re.search(r"· 랭킹 \d+개 · 아래로 내리는 중 1/6$", m) for m in ov)
+    assert ov[0].startswith("카드 찾는 중 (") and any(re.search(r"^랭킹 \d+개 · 아래로 내리는 중 1/10$", m) for m in ov)
     assert any("PICK 6개 · 추천 6개 · 추천-전체 6개 · 추천-니트 6개" in m for m in ov)
     # 상세 40개 차례 (랭킹 1~20위 먼저): 링크 있는 4개는 숨은 iframe · 링크 없는 카드는 눌러 봄 — 이 화면은 눌러도 안 열려서 3번 만에 그만
     assert "상세 0/40 · 상품 0" in ov and got["left"] == 0 and any(m.startswith("상세 4/40 · 상품 12") for m in ov)
@@ -357,7 +357,7 @@ def test_bookmarklet_on_fake_coordi_page_walks_tabs_and_chips(mode: str) -> None
     assert got["tab"] == "랭킹" and 900 <= got["waited"] < 150000  # 끝나면 랭킹 탭으로
     assert sent["s"].splitlines()[0] == "랭킹"
     cards = json.loads(sent["j"])
-    assert cards["items"] == [] and cards["upd"] == "12:00 PM 업데이트" and "roots 2" in cards["dbg"] and "cards 84 urls 4" in cards["dbg"]
+    assert cards["items"] == [] and cards["upd"] == "12:00 PM 업데이트" and "roots 2" in cards["dbg"] and "cards 88 urls 4" in cards["dbg"]
     assert "ready complete" in cards["dbg"] and ("iframe 1" if mode == "iframe" else "iframe 0") in cards["dbg"] and len(cards["dbg"]) < 2000
     assert "det 0/0/4/3/0/0/0/12/ " in cards["dbg"]  # 데이터 0 · iframe 4 · 눌러 봄 3 (안 열림) · 상품 12
     lk = cards["looks"]
@@ -365,14 +365,15 @@ def test_bookmarklet_on_fake_coordi_page_walks_tabs_and_chips(mode: str) -> None
     for x in lk:
         if (x["tab"], x["chip"]) not in seen:
             seen.append((x["tab"], x["chip"]))
-    assert seen == TAB_LOOKS and len(lk) == 84
+    assert seen == TAB_LOOKS and len(lk) == 88
     nit = [x for x in lk if x["chip"] == "니트"]
     assert [x["rank"] for x in nit] == list(range(1, 7)) and nit[0]["img"] == "https://img.cdn.example/p/%EC%B6%94%EC%B2%9C%EB%8B%88%ED%8A%B8_1.jpg"
     assert nit[0]["tags"] == ["#추천1"] and nit[0]["quick"] is True and nit[0]["chg"] == ""
     pick = next(x for x in lk if x["tab"] == "PICK")
     assert pick["url"] == "https://mobile.a-bly.com/coordi/8001" and len(pick["items"]) == 3
     rk = [x for x in lk if x["tab"] == "랭킹"]
-    assert [x["rank"] for x in rk] == list(range(1, 37))  # 내리며 더 뜬 카드까지
+    assert [x["rank"] for x in rk] == list(range(1, 41))  # 랭킹 40개 한도 (48개 중) · 맨 앞에 와서 코디 100개 한도에도 안 잘림
+    assert lk[:40] == rk and len([x for x in lk if x["chip"]]) == 24  # 내리며 더 뜬 카드까지
     by = {x["rank"]: x for x in rk}
     assert (by[1]["chg"], by[3]["chg"], by[5]["chg"], by[7]["chg"], by[6]["chg"]) == ("–", "9↑", "NEW", "2↓", "9↑")
     assert by[1]["img"] == "https://img.cdn.example/c/1_640.jpg" and by[2]["img"] == "https://img.cdn.example/c/2_bg.jpg"
@@ -385,13 +386,13 @@ def test_bookmarklet_on_fake_coordi_page_walks_tabs_and_chips(mode: str) -> None
         ("울 머플러", 54, 17800, "https://mobile.a-bly.com/goods/90012", "https://img.cdn.example/g/90012.jpg")]
     assert "읍스읍스" in sent["x"] and "#겨울코디" in sent["x"]  # 그림자 DOM 안 글도
     out = ablyrank.save(db, sent, now=NOW, tz=TZ)
-    assert out["label"] == "코디 84 · 랭킹" and out["items"] == 0
+    assert out["label"] == "코디 88 · 랭킹" and out["items"] == 0
     (rec,) = recs(db)
     r1 = next(x for x in rec["looks"] if x["tab"] == "랭킹")
-    assert (rec["tab"], rec["upd"], len(rec["looks"])) == ("랭킹", "12:00 PM 업데이트", 84)
+    assert (rec["tab"], rec["upd"], len(rec["looks"])) == ("랭킹", "12:00 PM 업데이트", 88)
     assert (r1["rank"], r1["chg"], r1["nick"], r1["quick"], r1["tags"][0], r1["items"][0]["price"]) == (1, "–", "읍스읍스", True, "#겨울코디", 6900)
     assert any(x.get("chip") == "니트" for x in rec["looks"])
-    assert "cards 84" in rec["dbg"]
+    assert "cards 88" in rec["dbg"]
 
 
 def test_bookmarklet_moves_from_shell_to_cross_origin_coordi_frame_then_collects() -> None:
@@ -399,9 +400,9 @@ def test_bookmarklet_moves_from_shell_to_cross_origin_coordi_frame_then_collects
     got, sent, _db = _coordi_run("shadow", True)
     assert got["alerts"][0] == "코디 화면으로 옮길까요? 옮긴 뒤 한 번 더 눌러 주세요"
     assert got["moved"] == "https://m.a-bly.com/content/style/home?global_layout=app&embed=true"  # 주소 그대로 (물음표 뒤까지)
-    assert got["alerts"][1:] == ["Ably 랭킹 보냄 ✓ (코디 84 · 상품 12)"]
+    assert got["alerts"][1:] == ["Ably 랭킹 보냄 ✓ (코디 88 · 상품 12)"]
     assert sorted(got["details"])[0] == "https://m.a-bly.com/coordi/8001" and len(got["details"]) == 4  # m.a-bly.com 에선 코디 화면도 같은 출처
-    assert sent["u"].startswith("https://m.a-bly.com/") and len(json.loads(sent["j"])["looks"]) == 84
+    assert sent["u"].startswith("https://m.a-bly.com/") and len(json.loads(sent["j"])["looks"]) == 88
 
 
 # 11/12 네 번째 실제('코디 100 · 상품 0'): m.a-bly.com 코디 화면은 앱(React Native Web) 화면 — 카드에 링크가 없고, 누르면 앱 안에서
@@ -508,7 +509,7 @@ def test_bookmarklet_taps_linkless_coordi_cards_reads_product_strip_and_goes_bac
     cards = json.loads(sent["j"])
     lk = cards["looks"]
     assert got["moved"] == "https://m.a-bly.com/content/style/home?global_layout=app&embed=true" and got["details"] == []  # 숨은 iframe 없음 (링크 없음)
-    # 누른 차례: 랭킹 1~20위 → PICK 4~6 (1~3 은 화면 데이터) → 랭킹 21~24 · 데일리는 props 에 있어 안 누름 · 상품도 눌러 주소 (합쳐 12번)
+    # 누른 차례: 랭킹 1~20위 → 다른 탭 PICK 4~6 (1~3 은 화면 데이터) → 랭킹 21~24 · 데일리는 props 에 있어 안 누름 · 상품도 눌러 주소 (합쳐 12번)
     taps = [x for x in got["log"] if not x.startswith("g")]
     assert taps == [str(5000 + r) for r in range(1, 21)] + ["6004", "6005", "6006"] + [str(5000 + r) for r in range(21, 25)]
     assert len([x for x in got["log"] if x.startswith("g")]) == 12

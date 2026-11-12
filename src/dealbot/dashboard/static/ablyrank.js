@@ -130,6 +130,8 @@ const late = (n) => Date.now() - T0 > (n || 150000);
 const hide = (o, k, v) => Object.defineProperty(o, k, {value: v, writable: true});
 // 카드·상품의 data-*id·sno·no 숫자 (코디 번호·상품 번호)
 const dat = c => (/\sdata-[\w-]*(id|sno|no)=.(\d{2,14})\W/i.exec(c.outerHTML.slice(0, 4000)) || [])[2] || '';
+// 탭마다 코디 수 (주인 11/12 '랭킹 0' — 칩이 100개 한도를 먼저 채움): 랭킹 40 · 다른 탭 15 · 칩마다 8
+const cap = () => (cc ? 8 : cur == '랭킹' ? 40 : 15);
 const inTab = () => [...LK.values()].filter(l => l.k == cur).length;
 const mk = (c, im, n, ch, bl) => {
   const t = tx(c);
@@ -137,7 +139,7 @@ const mk = (c, im, n, ch, bl) => {
   const ls = lines(c).filter(l => bl.indexOf(l) < 0 && l[0] != '#' && /[가-힣A-Za-z]/.test(l) && !/^바로\s?입기$/.test(l) && !BG.test(l.replace(/\s+/g, '')) && !LIKE.test(l));
   const a = im.e.closest('a[href]') || (c.closest && c.closest('a[href]')) || c.querySelector('a[href]'), u = a ? href(a) : '', k = cur + '|' + n + '|' + im.s;
   first = first || im.e;
-  if (LK.has(k)) return;
+  if (LK.has(k) || inTab() >= cap()) return;
   const l = {k: cur, tab: ct, chip: cc, rank: n || inTab() + 1, chg: ch.slice(0, 8), img: im.s, nick: (ls[0] || '').slice(0, 60), title: (ls[1] || '').slice(0, 200), tags: (t.match(/#[^\s#]{1,30}/g) || []).slice(0, 10), quick: /바로\s?입기/.test(t), url: /^https?:/.test(u) ? u : '', id: idOf(u, LOOK) || dat(c), items: []};
   hide(l, 'e', im.e);
   hide(l, 'y', box(im.e).scrollTop);
@@ -186,7 +188,7 @@ for (let i = 0; i < 16 && (busy() || (!gl() && (Q('img').length <= 6 || (coordi(
 const roll = async m => {
   if (!first) return;
   const bx = box(first), y0 = bx.scrollTop;
-  for (let i = 1; i <= m && inTab() < (cc ? 10 : 30); i++) {
+  for (let i = 1; i <= m && inTab() < cap(); i++) {
     const was = bx.scrollTop;
     say(sum() + ' · 아래로 내리는 중 ' + i + '/' + m);
     bx.scrollTop = y0 + bx.clientHeight * 0.9 * i;
@@ -196,8 +198,8 @@ const roll = async m => {
   }
   bx.scrollTop = y0;
 };
-// 코디 화면 위 탭(팔로잉·찜은 내 것이라 뺌)을 차례로 눌러 탭마다 · 추천은 칩(니트·코트…) 8개까지 칩마다 10개 (주인 11/12) · 끝나면 랭킹 탭으로
-const TABS = ['PICK', '추천', '랭킹', '데일리', '오늘 날씨'];
+// 코디 화면 위 탭(팔로잉·찜은 내 것이라 뺌)을 차례로 눌러 탭마다 · 랭킹 먼저 (11/12 실제: PICK 26 · 추천 74 · 랭킹 0) · 추천은 칩(니트·코트…) 8개까지 · 끝나면 랭킹 탭으로
+const TABS = ['랭킹', '데일리', 'PICK', '추천', '오늘 날씨'];
 const tabEl = t => Q('*').find(e => own(e) == t && e.getBoundingClientRect().width);
 const press = t => { const e = tabEl(t); if (e) (e.closest('button,a,[role=tab]') || e).click(); return !!e; };
 const sum = () => { const m = {}; for (const l of LK.values()) m[l.k] = (m[l.k] || 0) + 1; return Object.keys(m).map(k => (k || '카드') + ' ' + m[k] + '개').join(' · '); };
@@ -215,7 +217,7 @@ if (tb) {
   for (const t of TABS) {
     cur = ct = t;
     cc = '';
-    if (!(await visit(t, t == '랭킹' ? 6 : 2)) || t != '추천' || late(60000)) continue;
+    if (!(await visit(t, t == '랭킹' ? 10 : 2)) || t != '추천' || late(60000)) continue;
     const row = Q('*').find(e => e.children.length >= 4 && e.getBoundingClientRect().width && [...e.children].every(c => { const x = tx(c).trim(); return x && x.length <= 8 && x[0] != '#' && TABS.indexOf(x) < 0; }));
     for (const c of row ? [...row.children].map(c => tx(c).trim()).slice(0, 8) : []) {
       cc = c;
@@ -308,9 +310,9 @@ const one = lk => new Promise(res => {
   }, 500);
   D.body.appendChild(f);
 });
-// 상세 순서: 랭킹 1~20위 먼저, 그다음 탭 차례 · 데이터에서 찾은 코디는 빼고 · 탭 합쳐 40개
+// 상세 순서: 랭킹 1~20위 먼저, 그다음 다른 탭 차례, 랭킹 21위~ 는 끝 · 데이터에서 찾은 코디는 빼고 · 탭 합쳐 40개
 const ks = [...new Set([...LK.values()].map(l => l.k))];
-const pri = l => (l.tab == '랭킹' && l.rank <= 20 ? 0 : 1);
+const pri = l => (l.tab != '랭킹' ? 1 : l.rank <= 20 ? 0 : 2);
 const tq = [...LK.values()].filter(l => !l.items.length).sort((a, b) => pri(a) - pri(b) || ks.indexOf(a.k) - ks.indexOf(b.k) || a.rank - b.rank).slice(0, 40);
 const nq = tq.length, qa = tq.filter(l => l.url && new URL(l.url).origin === location.origin);
 let nd = 0, np = [...LK.values()].reduce((a, l) => a + l.items.length, 0), nA = 0, nB = 0, nu = 0, nf = 0, nb = 0, pc = 12, at = cur, du = '';
