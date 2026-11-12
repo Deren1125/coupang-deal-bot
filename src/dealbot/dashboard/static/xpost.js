@@ -1,5 +1,5 @@
 /* X(트위터) 화면 (주인 10/25 — 'X 는 유료 구독만, API 는 안 써'). SNS 탭 'X(트위터)' 칸을 처음 열 때만 app.js 가 불러와 '직접 올리는 글' 아래에 그린다 (meta sb-xpost — 스레드 화면의 X 봇 x.js 와는 다른 파일). 값은 state.x (xview.py).
-   데런픽 초안함 맨 위(10/26 · Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 링크 답글 · 올렸어요 · 버리기 · 다시 쓰기) · 진행률(주인이 주마다 넣는 숫자 x.stats) · 수익 계정 2주 계획(/dashboard/api/xplan — 열 때만) · 수익 계정 글감 카드.
+   화제 원글 카드(11/12 · Blog-Auto x_hot — 복사 · 'X에 올리기' · 출처 답글 · 숨기기는 이 폰에만) · 데런픽 초안함(10/26 · Blog-Auto x_drafts — 복사 · 'X에 올리기' 링크 · 링크 답글 · 올렸어요 · 버리기 · 다시 쓰기) · 진행률(주인이 주마다 넣는 숫자 x.stats) · 수익 계정 2주 계획(/dashboard/api/xplan — 열 때만) · 수익 계정 글감 카드.
    'X에 올리기'는 X 글쓰기 화면을 여는 링크일 뿐 (주소는 state.x.intent) — 자동 게시·자동 좋아요·답글 없음. 라이브러리 없음. */
 'use strict';
 (() => {
@@ -96,19 +96,25 @@ function reply(x, d) {
     row(btn('pb soft', '답글 복사', () => copy(d.reply)), go));
 }
 
-function draft(x, d) {
-  const {el, btn} = H, l = loc(d.pid);
-  if (l && l.s === 'redo' && l.text !== d.text) { delete LOC[d.pid]; delete ED[d.pid]; }
-  const busy = loc(d.pid) && loc(d.pid).s === 'redo';
-  const ta = el('textarea', {'aria-label': `#${d.pid} X 글`, rows: 6}), n = el('span', {class: 'xpn'}), go = el('a', NW, 'X에 올리기');
-  ta.value = ED[d.pid] != null ? ED[d.pid] : d.text;
+// 글 칸 + X 글자 수 + 'X에 올리기' 링크 (고치던 글은 ED[k] 에 남음)
+function editor(x, k, text, label) {
+  const ta = H.el('textarea', {'aria-label': label, rows: 6}), n = H.el('span', {class: 'xpn'}), go = H.el('a', NW, 'X에 올리기');
+  ta.value = ED[k] != null ? ED[k] : text;
   const up = () => {
     const c = xlen(ta.value, x.url_len);
     n.textContent = `${c}/${x.limit}`; n.className = 'xpn' + (c > x.limit ? ' x' : '');
     go.href = x.intent + encodeURIComponent(ta.value.trim());
   };
-  ta.oninput = () => { ED[d.pid] = ta.value; up(); };
+  ta.oninput = () => { ED[k] = ta.value; up(); };
   up();
+  return {ta, n, go};
+}
+
+function draft(x, d) {
+  const {el, btn} = H, l = loc(d.pid);
+  if (l && l.s === 'redo' && l.text !== d.text) { delete LOC[d.pid]; delete ED[d.pid]; }
+  const busy = loc(d.pid) && loc(d.pid).s === 'redo';
+  const {ta, n, go} = editor(x, d.pid, d.text, `#${d.pid} X 글`);
   if (busy) ta.disabled = true;
   return el('div', {class: 'xpd'},
     el('p', {}, `#${d.pid} · `, d.url ? el('a', {class: 't', href: d.url, ...NW}, d.title || '블로그 글') : d.title,
@@ -121,6 +127,24 @@ function draft(x, d) {
     row(btn('pb soft', '버리기', e => send(d.drop, e.currentTarget, 'dropped', '버렸어요')),
       btn('pb soft', '다시 쓰기', e => send(d.redo, e.currentTarget, 'redo', '다시 쓰는 중이에요 — 1분쯤 걸려요', d.text),
         {disabled: busy})));
+}
+
+// 화제 원글 (주인 11/12 — Blog-Auto x_hot): 숨기기는 이 폰에만
+const HK = id => 'xhot:' + id;
+const hidden = id => { try { return localStorage.getItem(HK(id)) === '1'; } catch (e) { return false; } };
+const hide = id => { try { localStorage.setItem(HK(id), '1'); } catch (e) { /* 저장 안 됨 */ } };
+function hot(x, d) {
+  const {el, btn} = H;
+  const {ta, n, go} = editor(x, 'h' + d.id, d.text, `화제 ${d.keyword} X 글`);
+  const tags = [d.breaking ? '속보' : '', d.confirmed ? '확인된 사실' : '의혹·보도 단계 — 단정 금지', `댓글 점수 ${d.score}`,
+    d.lag_min != null ? `감지 ${d.lag_min}분 뒤` : ''].filter(Boolean);
+  return el('div', {class: 'xpd'}, el('p', {}, `⚡ ${d.keyword} · ${tags.join(' · ')}`), ta, row(n),
+    row(btn('pb soft', '복사', () => copy(ta.value.trim())), go),
+    d.reply ? el('div', {class: 'xpi'}, el('em', {}, '첫 답글 (출처 기사)'), el('span', {}, d.reply),
+      row(btn('pb soft', '답글 복사', () => copy(d.reply)))) : null,
+    d.sources.length ? el('details', {}, el('summary', {}, `기사 ${d.sources.length}개`),
+      d.sources.map(s => el('p', {}, el('a', {class: 't', href: s.link, ...NW}, s.title || '기사')))) : null,
+    row(btn('pb soft', '다 했어요 · 숨기기', () => { hide(d.id); draw(); })));
 }
 
 // 수익 계정 2주 계획 (주인 10/26): 날마다 첫 줄 초안 — 복사 · X에 쓰기(글쓰기 화면만 열림) · 올렸어요 표시는 이 폰에만 (localStorage)
@@ -168,8 +192,11 @@ function draw() {
   const hp = el('input', {value: hd.pick || '', placeholder: '데런픽 계정 (@ 없이)', 'aria-label': '데런픽 계정'});
   const hr = el('input', {value: hd.revenue || '', placeholder: '수익 계정 (@ 없이)', 'aria-label': '수익 계정'});
   const st = (H.S.todo || []).some(i => i.iid === 'x-stats');  // 할 일 'X 숫자 넣기'가 있으면 숫자 칸이 맨 위
+  const hl = (x.hot || []).filter(d => !hidden(d.id));
   B.replaceChildren(el('div', {class: 'xpw'},
     el('p', {class: 'note', style: 'margin:0'}, x.rules, names.length ? ' · ' + names.join(' · ') : ''), st ? progress(x) : null,
+    hl.length ? card(`⚡ 화제 원글 ${hl.length}개`, note('막 뜬 뉴스로 쓴 원글이에요 — 내 말투로 조금 고쳐 올려 주세요 · 기사에 없는 말은 넣지 않기'),
+      hl.map(d => hot(x, d))) : null,
     card(`데런픽 초안함 ${live.length ? live.length + '개' : ''}`,
       note('고쳐서 복사하거나 ‘X에 올리기’로 X 앱을 연 뒤, 올렸으면 ‘올렸어요’를 눌러 주세요'),
       x.posted_line ? note(x.posted_line) : null,

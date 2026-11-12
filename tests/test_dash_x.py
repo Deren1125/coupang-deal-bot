@@ -206,7 +206,7 @@ def test_export_parsing_tolerates_missing_and_bad_rows() -> None:
     bad = got["drafts"][2]
     assert bad["url"] == "" and bad["shop"] is False and "\x00" not in bad["text"]  # 글 주소는 네이버 블로그만
     assert [c["title"] for c in got["ideas"]] == ["카드"] and got["ideas"][0]["facts"] == ["a"] and got["ideas"][0]["prompt"] == ""
-    assert _x({"drafts": []}) == {"per_day": 0, "limit": 280, "url_len": 23, "drafts": [], "ideas": [], "plan": None}
+    assert _x({"drafts": []}) == {"per_day": 0, "limit": 280, "url_len": 23, "drafts": [], "ideas": [], "plan": None, "hot": []}
 
 
 def test_reply_is_parsed_strictly() -> None:

@@ -92,7 +92,7 @@ def build(xv: dict[str, Any] | None, rows: list[dict[str, Any]], handles: dict[s
         drafts.append(row)
     return {
         "progress": progress, "save": act("x.stats", "저장", {}), "handles": handles, "save_handles": act("x.handles", "저장", {}),
-        "drafts": drafts, "posted": posted, "ideas": (xv or {}).get("ideas") or [], "idea_note": IDEA_NOTE, "plan_n": plan_n(xv),
+        "drafts": drafts, "posted": posted, "hot": (xv or {}).get("hot") or [], "ideas": (xv or {}).get("ideas") or [], "idea_note": IDEA_NOTE, "plan_n": plan_n(xv),
         "limit": (xv or {}).get("limit") or 280, "url_len": (xv or {}).get("url_len") or 23, "intent": INTENT, "reply_intent": REPLY_INTENT,
         "rules": RULES, "ready": xv is not None, "bridge_ok": bridge_ok, "posted_line": posted_line(post_counts, tz, now),
         "empty": "블로그 프로그램이 아직 X 초안을 안 보내요 — 업데이트를 기다리는 중이에요" if xv is None

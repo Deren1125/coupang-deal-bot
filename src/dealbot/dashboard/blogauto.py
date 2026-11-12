@@ -1555,7 +1555,38 @@ def _x(v: Any) -> dict[str, Any] | None:
             ideas.append({"id": _one_line(c.get("id"), 20) or "", "title": title, "prompt": _one_line(c.get("prompt"), 200) or "",
                           "facts": _str_list(c.get("facts"), X_FACTS_MAX, 120)})
     return {"per_day": _count(v.get("per_day"), top=50) or 0, "limit": _count(v.get("limit"), top=25_000) or 280,
-            "url_len": _count(v.get("url_len"), top=100) or 23, "drafts": drafts, "ideas": ideas, "plan": _x_plan(v.get("plan"))}
+            "url_len": _count(v.get("url_len"), top=100) or 23, "drafts": drafts, "ideas": ideas, "plan": _x_plan(v.get("plan")),
+            "hot": _x_hot(v.get("hot"))}
+
+
+X_HOT_MAX, X_HOT_SRC = 6, 3  # 화제 원글 (주인 11/12 — Blog-Auto x_hot · X 글 세션) — 카드 수 · 출처 기사 수
+X_HOT_ID_RE = re.compile(r"^[0-9a-f]{6,40}$")
+
+
+def _web_link(v: Any) -> str | None:
+    """출처 기사 주소 — http(s) 만, 공백·따옴표 없이."""
+    return v if isinstance(v, str) and len(v) <= 500 and re.match(r"^https?://[^\s\"'<>]+$", v) else None
+
+
+def _x_hot(v: Any) -> list[dict[str, Any]]:
+    """[{id, keyword, text, reply, sources: [{title, link}], score, confirmed, breaking, created_at, lag_min}] — 이상한 줄만 빠짐."""
+    out = []
+    for x in (v if isinstance(v, list) else [])[:X_HOT_MAX]:
+        if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not X_HOT_ID_RE.match(x["id"]):
+            continue
+        text = _th_text(x.get("text"), X_TEXT_MAX)
+        if not text:
+            continue
+        srcs = [{"title": _one_line(s.get("title"), 160) or "", "link": link}
+                for s in (x.get("sources") if isinstance(x.get("sources"), list) else [])[:X_HOT_SRC]
+                if isinstance(s, dict) and (link := _web_link(s.get("link")))]
+        lag = x.get("lag_min")
+        out.append({"id": x["id"], "keyword": _one_line(x.get("keyword"), 40) or "", "text": text,
+                    "reply": _th_text(x.get("reply"), X_REPLY_MAX), "sources": srcs,
+                    "score": _count(x.get("score"), top=10) or 0, "confirmed": x.get("confirmed") is True,
+                    "breaking": x.get("breaking") is True, "created_at": _one_line(x.get("created_at"), 40) or "",
+                    "lag_min": lag if isinstance(lag, int) and not isinstance(lag, bool) and 0 <= lag < 10_000 else None})
+    return out
 
 
 def _plan_line(v: Any, limit: int) -> str | None:
