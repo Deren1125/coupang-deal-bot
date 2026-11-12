@@ -9,7 +9,7 @@
      목록을 '주소 목록' 하나로 보내고(주소 배우기) 묻고 첫 통계 화면으로 옮김 (목록 = #sc=base64 {b: blogId, l: [[이름, 경로]]} ·
      proxyReferer·isIE8·blogId 뺌). 메뉴가 없는 화면에서 숫자가 다른 출처 iframe 에만 있으면 그 하나를 같은 방식으로.
    2단계 통계 앱(blog.stat.naver.com): 목록 = #sc= → 이 출처 localStorage 'stcap' → 앱 메뉴(/user/ 링크) → 유입분석 하나.
-     목록을 localStorage 에 두니 다음부턴 통계 화면을 바로 열고 한 번. 숨은 iframe 에 하나씩 열고(최대 150초) 숫자가 뜰 때까지 기다려
+     목록을 localStorage 에 두니 다음부턴 통계 화면을 바로 열고 한 번. 숨은 iframe 에 하나씩 열고(최대 8분) 숫자가 뜰 때까지 기다려
      읽고 화면마다 하나씩 보냄(n = 메뉴 이름). '더보기' 3번까지, 안쪽 탭 4개까지, 일간 현황·유입분석은 '이전'(전날)도.
    차트: svg 글·숫자 든 data-*·aria · billboard 값 · 값 없는 'day-N' 줄은 뺌 · 창 전역(빈 iframe 창에 없는 이름)에서 숫자 7~62개 배열·
    날짜 키 객체와 script[type*=json] → j · 화면이 읽어 온 같은 출처 JSON(performance 기록)은 주인 로그인으로 다시 받아 j 에.
@@ -179,8 +179,9 @@ const lk = e => { const h = (e.getAttribute && e.getAttribute('href')) || ''; re
 const qid = u => { try { return new URL(u, L.href).searchParams.get('blogId') || ''; } catch (e) { return ''; } };
 const sp = x => { for (const k of ['blogId', 'proxyReferer', 'isIE8']) x.searchParams.delete(k); return x.pathname + x.search; };
 const fu = (u, b) => L.origin + u + (b ? (u.indexOf('?') < 0 ? '?' : '&') + 'blogId=' + b : '');
-const t0 = Date.now(), left = () => Date.now() - t0 < 150000;
-const mk = () => { const f = D.createElement('iframe'); f.style.cssText = 'position:fixed;left:-5000px;top:0;width:1200px;height:1000px;border:0'; D.body.appendChild(f); return f; };
+// 11/12 주인 아이패드 8개 화면에서 시간 넘음 — 150초에서 8분으로 · 숨은 창은 sandbox 로 안내 팝업을 막음
+const t0 = Date.now(), left = () => Date.now() - t0 < 480000;
+const mk = () => { const f = D.createElement('iframe'); f.style.cssText = 'position:fixed;left:-5000px;top:0;width:1200px;height:1000px;border:0'; f.sandbox = 'allow-scripts allow-same-origin'; D.body.appendChild(f); return f; };
 const open = (f, h) => new Promise(r => { f.onload = r; f.src = h; setTimeout(r, 12000); });
 const dj = async c => c.wj.concat(await jget(c.js)).join('\n\n');
 // 숨은 iframe 에 하나씩 열어 숫자가 뜰 때까지 기다려 읽고 화면마다 하나씩 보냄 → [보낸 수, 시간 넘음, 연 수]
