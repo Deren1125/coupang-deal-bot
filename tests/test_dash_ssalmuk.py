@@ -394,7 +394,9 @@ const text = n => n.textContent;
   const srcb = find(main.children[0], n => n.tagName === 'BUTTON' && text(n).startsWith('수집 출처'));
   if (srcb) { srcb.listeners.click({currentTarget: srcb}); out.src = text(main.children[0]); }
   out.posts = posts;
-  out.after = text(find(main.children[0], n => n.tagName === 'DIV' && n.attrs.role === 'group'));
+  const sg = find(main.children[0], n => n.tagName === 'DIV' && n.attrs.role === 'group'); out.after = sg ? text(sg) : null;
+  const pf = find(main.children[0], n => n.tagName === 'BUTTON' && text(n) === '내 정보');
+  pf.listeners.click({currentTarget: pf}); out.prof = text(main.children[0]);
   console.log(JSON.stringify(out));
 })();
 """
@@ -459,3 +461,33 @@ def test_ssalmuk_js_rss_only_state_empty_links_zero_auto(tmp_path: Path) -> None
     assert "아직 자동 응모한 이벤트가 없어요" not in got["scr"]  # 접힌 칸은 열 때만
     assert "커피 · 마감 11/14 · 돈좀요" in got["scr"] and "네이버폼 — 폰에서" in got["scr"] and "수집 출처 2" in got["scr"]
     assert "돈좀요12개 · 확인" in got["src"] and "정상" in got["src"] and "다른 곳0개 · 403 · " in got["src"] and "막힘" in got["src"]
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_auto_apply_first_layout() -> None:
+    """11/14 '자동화 되는 애들만': todayApplied·weekApplied·notAutomated 가 오면 카드·화면이 자동 응모 중심 (없으면 예전 화면 — 위 시험들)."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    iso = lambda d: d.strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+    st = sample(counts={"auto": 2, "left": 1, "today": 0, "applied": 3, "todayApplied": 2, "weekApplied": 9}, notAutomated=41,
+                applied=[{"url": "https://suto.example/e/1", "title": "커피 쿠폰 응모", "at": iso(now), "status": "success", "detail": "제출 완료", "source": "슈퍼투데이"},
+                         {"url": "https://suto.example/e/2", "title": "샴푸 체험", "at": iso(now - timedelta(minutes=5)), "status": "success", "detail": "", "source": "슈퍼투데이"},
+                         {"url": "https://suto.example/e/0", "title": "지난주 응모", "at": iso(now - timedelta(days=3)), "status": "success", "detail": "", "source": "다른 곳"}])
+    st["todo"] = [dict(st["todo"][1], title="퀴즈 정답 못 찾음", url="https://suto.example/e/9", status="fail", group="check",
+                       chip={"text": "자동 실패", "tone": "stop"}, detail="정답 칸을 못 찾았어요")]
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(st)
+    out = subprocess.run([NODE, "-e", SHIM, str(STATIC / "ssalmuk.js"), json.dumps(s.view(), ensure_ascii=False)],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    card = got["card"]
+    assert "오늘 자동 응모 2 · 이번 주 9 · 확인 필요 1" in card and "커피 쿠폰 응모" in card and "샴푸 체험" in card
+    assert "지난주 응모" not in card and "확인 필요 · 퀴즈 정답 못 찾음" in card and "이벤트 열기" in card and "남은 할 일" not in card
+    scr = got["scr"]
+    for t in ("오늘 자동 응모2", "이번 주9", "확인 필요1", "자동 안 되는 이벤트 41건은 건너뜀", "오늘 응모한 이벤트 2", "슈퍼투데이",
+              "확인 필요 1", "정답 칸을 못 찾았어요", "자동 응모 내역 3", "내 정보", "연결"):
+        assert t in scr, t
+    assert "지난주 응모" not in scr and "이름 복사" not in scr and "남은 할 일" not in scr and got["after"] is None
+    assert "이름 복사" in got["prof"] and "숫자만 복사" in got["prof"]  # 복사 단추는 내 정보 안으로

@@ -75,6 +75,14 @@ const kst = s => {
 };
 const md = s => { const m = /(\d{1,2})월\s*(\d{1,2})일/.exec(s || ''); return m ? `${m[1]}/${m[2]}` : (s || '-'); };
 const st = () => (data && data.state) || null;
+// 11/14 '자동화 되는 애들만': 새 숫자(todayApplied·weekApplied)가 오면 자동 응모 중심 화면 · 없으면 예전 화면 그대로
+const isNew = () => !!st() && typeof ((st().counts || {}).todayApplied) === 'number';
+const kday = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleDateString('en-CA', {timeZone: 'Asia/Seoul'}) : ''; };
+const applied = () => ((st() || {}).applied || []).filter(h => h && typeof h === 'object');
+const todayApplied = () => applied().filter(h => kday(h.at) === kday(Date.now()));
+const skipped = () => { const s = st() || {}, n = s.notAutomated != null ? s.notAutomated : (s.counts || {}).notAutomated; return Number(n) || 0; };
+const openLabel = u => /^https:\/\/([a-z0-9-]+\.)*donzomyo\.kr\//.test(u) ? '돈좀요에서 열기' : '이벤트 열기';
+const hm = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : ''; };
 const todos = () => ((st() || {}).todo || []).filter(t => t && typeof t === 'object');
 const cnt = () => Object.assign({auto: 0, left: 0, today: 0, applied: 0}, (st() || {}).counts || {});
 function recount() {
@@ -149,6 +157,7 @@ async function rotate() {
 // -- 할 일 탭 카드 (맨 위 묶음)
 function drawCard() {
   if (!card) return;
+  if (isNew()) return drawCard2();
   const s = st(), c = cnt(), today = todos().filter(t => t.today && !t.done);
   const chips = !s ? [el('span', {class: 'cp info'}, '연결 전')] : [data.stale ? el('span', {class: 'cp stop'}, '연결 끊김') : null,
     el('span', {class: 'cp info'}, `남은 할 일 ${c.left}`), c.today ? el('span', {class: 'cp hot'}, `오늘 마감 ${c.today}`) : null,
@@ -161,7 +170,26 @@ function drawCard() {
       https(t.url) ? el('a', {class: 'sm', href: t.url, target: '_blank', rel: 'noopener noreferrer'}, '돈좀요에서 열기') : null))].flat(9).filter(Boolean));
 }
 
+function drawCard2() {
+  const s = st(), c = cnt(), ta = todayApplied(), chk = todos().filter(t => !t.done);
+  const ext = (u, l) => https(u) ? el('a', {class: 'sm', href: u, target: '_blank', rel: 'noopener noreferrer'}, l) : null;
+  card.replaceChildren(...[el('div', {class: 'ih'}, el('span', {class: 'ti'}, '이벤트 참여'), el('a', {class: 'lnk', href: '#/todo/ev'}, '열기 ›')),
+    data.stale || s.running ? el('div', {class: 'chips'}, data.stale ? el('span', {class: 'cp stop'}, '연결 끊김') : null, s.running ? el('span', {class: 'cp ok'}, '확인 중') : null) : null,
+    el('p', {class: 'st'}, `오늘 자동 응모 ${c.todayApplied} · 이번 주 ${c.weekApplied != null ? c.weekApplied : '-'} · 확인 필요 ${c.left}`),
+    data.stale ? el('p', {class: 'st warn'}, `이벤트 참여 서버 연결 끊김 · 마지막 받음 ${kst(data.receivedAt)}`) : null,
+    ta.slice(0, 3).map(h => el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, h.title || ''),
+      el('span', {class: 's'}, [hm(h.at), h.source].filter(Boolean).join(' · '))), el('span', {class: 'cp ok'}, h.status === 'duplicate' ? '이미 응모' : '응모 완료'))),
+    chk.slice(0, 3).map(t => el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, `확인 필요 · ${t.title || ''}`),
+      t.detail ? el('span', {class: 's'}, t.detail) : null), ext(t.url, openLabel(t.url))))].flat(9).filter(Boolean));
+}
+
 // -- 이벤트 참여 화면 (#/todo/ev)
+function arow(h) {
+  const u = https(h.url);
+  return el(u ? 'a' : 'div', {class: 'row', href: u ? h.url : null, target: u ? '_blank' : null, rel: u ? 'noopener noreferrer' : null,
+    style: 'text-decoration:none;color:inherit'}, el('span', {class: 'grow'}, el('span', {class: 't'}, h.title || ''),
+    el('span', {class: 's'}, [kst(h.at), h.source, h.detail].filter(Boolean).join(' · '))), el('span', {class: 'cp ok'}, h.status === 'duplicate' ? '이미 응모' : '응모 완료'));
+}
 function item(t) {
   const links = (t.links || []).filter(l => l && https(l.href)).slice(0, 3);
   const chip = t.chip && t.chip.text ? el('span', {class: 'cp ' + (TONE.test(t.chip.tone) ? t.chip.tone : 'info')}, t.chip.text) : null;
@@ -175,7 +203,7 @@ function item(t) {
       o ? el('ol', {}, ss.map(x => el('li', {}, x))) : null] : null,
     t.comment ? el('div', {class: 'cpy'}, el('div', {class: 'dr'}, t.comment), btn('sm', '복사', () => copy(t.comment, '댓글 초안'))) : null,
     el('div', {class: 'dl'}, links.map(l => el('a', {class: 'sm', href: l.href, target: '_blank', rel: 'noopener noreferrer'}, String(l.label || '열기').slice(0, 14))),
-      https(t.url) ? el('a', {class: 'sm', href: t.url, target: '_blank', rel: 'noopener noreferrer'}, '돈좀요에서 열기') : null,  // 링크가 비어도 늘 (RSS 만 읽음 — 11/14)
+      https(t.url) ? el('a', {class: 'sm', href: t.url, target: '_blank', rel: 'noopener noreferrer'}, openLabel(t.url)) : null,  // 링크가 비어도 늘 (RSS 만 읽음 — 11/14)
       btn('sm done', t.done ? '완료함' : '완료', () => done(t), {'aria-pressed': t.done ? 'true' : 'false'})));
 }
 function fold(k, label, body, onOpen) {
@@ -193,6 +221,7 @@ function pval(p, k) {
   if (k === 'agreeOptional') return !!v;
   return v == null ? '' : String(v);
 }
+const copies = p => [['이름', p.name], ['전화번호', p.phone], ['숫자만', String(p.phone || '').replace(/\D/g, '')], ['이메일', p.email]].filter(([, v]) => v);
 function profileBox() {
   const p = (st() || {}).profile || {}, cur = k => (k in draft ? draft[k] : pval(p, k)), set = k => e => { draft[k] = e.currentTarget.type === 'checkbox' ? e.currentTarget.checked : e.currentTarget.value; };
   const field = ([k, label, kind]) => [el('label', {class: 'lab', for: 'ev_' + k}, label), Array.isArray(kind)
@@ -200,7 +229,9 @@ function profileBox() {
     : (i => { i.value = cur(k); return i; })(el('input', {class: 'fl', id: 'ev_' + k, type: kind === 'email' ? 'email' : kind === 'tel' ? 'tel' : kind === 'url' ? 'url' : 'text',
       autocomplete: 'off', oninput: set(k)}))];
   const areas = AREAS.map(([k, label]) => [el('label', {class: 'lab', for: 'ev_' + k}, label), (a => { a.value = cur(k); return a; })(el('textarea', {class: 'fl', id: 'ev_' + k, oninput: set(k)}))]);
+  const cs = copies(p);
   return [!(st() || {}).profileSet ? el('p', {class: 'note'}, '아직 내 정보가 없어요 — 채워서 저장하면 이벤트 참여 서버에 들어가요') : null,
+    cs.length ? el('div', {class: 'opts'}, cs.map(([k, v]) => btn('tg', `${k} 복사`, () => copy(v, k)))) : null,
     FIELDS.map(([g, fs]) => [el('p', {class: 'h3'}, g), fs.map(field)]),
     el('p', {class: 'h3'}, '응모 방식'),
     el('label', {class: 'ck'}, (c => { c.checked = !!cur('agreeOptional'); return c; })(el('input', {type: 'checkbox', onchange: set('agreeOptional')})), '선택(마케팅) 동의도 체크'),
@@ -234,8 +265,7 @@ function drawScr() {
   if (!scr) return;
   const s = st(), c = cnt(), ts = todos(), left = ts.filter(t => !t.done), dn = ts.filter(t => t.done), p = (s || {}).profile || {};
   const pend = !!(data && data.pending), running = !!(s && s.running);
-  const digits = String(p.phone || '').replace(/\D/g, '');
-  const copies = [['이름', p.name], ['전화번호', p.phone], ['숫자만', digits], ['이메일', p.email]].filter(([, v]) => v);
+  const cps = copies(p), nw = isNew();
   const out = [el('div', {class: 'top'}, el('a', {class: 'lnk', href: '#/todo'}, '‹ 할 일'), el('span', {class: 'sub'}, s && s.nextRun ? `다음 ${s.nextRun}` : ''),
     btn('lnk', '다시 보기', load))];
   if (!s) out.push(el('div', {class: 'bn'}, el('span', {}, "아직 연결 전이에요 — 아래 '연결'에서 주소와 키를 복사해 이벤트 참여 예비 대시보드 '내 정보 → Sns-board 연결'에 붙여 넣어 주세요")));
@@ -243,12 +273,22 @@ function drawScr() {
   if (s) {
     const lr = s.lastRun || {};
     out.push(el('section', {class: 'box'},
-      el('div', {class: 'kpi'}, el('div', {class: c.auto ? null : 'z'}, el('span', {}, '자동 응모'), el('b', {}, String(c.auto))), el('div', {}, el('span', {}, '남은 할 일'), el('b', {}, String(c.left))),
+      nw ? el('div', {class: 'kpi'}, el('div', {}, el('span', {}, '오늘 자동 응모'), el('b', {}, String(c.todayApplied))),
+        el('div', {}, el('span', {}, '이번 주'), el('b', {}, String(c.weekApplied != null ? c.weekApplied : '-'))),
+        el('div', {}, el('span', {}, '확인 필요'), el('b', {class: c.left ? 'urg' : null}, String(c.left))))
+        : el('div', {class: 'kpi'}, el('div', {class: c.auto ? null : 'z'}, el('span', {}, '자동 응모'), el('b', {}, String(c.auto))), el('div', {}, el('span', {}, '남은 할 일'), el('b', {}, String(c.left))),
         el('div', {}, el('span', {}, '오늘 마감'), el('b', {class: c.today ? 'urg' : null}, String(c.today)))),
       btn('pb', running ? `확인 중 · ${s.running.label || ''}` : pend ? '보낸 명령 처리 기다리는 중…' : '지금 확인하기', e => run(e.currentTarget), {disabled: running || null}),
       el('p', {class: 'note'}, [`마지막 확인 ${kst(s.checkedAt || lr.finished)}`, lr.finished && lr.ok === false ? '실패' : '',
-        (s.runTimes || []).length ? `매일 ${s.runTimes.join(', ')} 자동` : '', pend ? `명령 ${data.pending}개 기다리는 중` : ''].filter(Boolean).join(' · '))));
-    if (copies.length) out.push(el('div', {class: 'opts'}, copies.map(([k, v]) => btn('tg', `${k} 복사`, () => copy(v, k)))));
+        (s.runTimes || []).length ? `매일 ${s.runTimes.join(', ')} 자동` : '', pend ? `명령 ${data.pending}개 기다리는 중` : ''].filter(Boolean).join(' · ')),
+      nw && skipped() ? el('p', {class: 'note'}, `자동 안 되는 이벤트 ${skipped()}건은 건너뜀`) : null));
+    if (nw) {
+      const ta = todayApplied();
+      out.push(el('p', {class: 'grp'}, `오늘 응모한 이벤트 ${ta.length}`), ta.length ? el('div', {class: 'box'}, ta.map(arow)) : el('p', {class: 'empty'}, '오늘은 아직 자동 응모한 이벤트가 없어요'),
+        el('p', {class: 'grp'}, `확인 필요 ${left.length}`), left.length ? left.map(item) : el('p', {class: 'empty'}, '확인할 것 없어요'),
+        dn.length ? [el('p', {class: 'grp'}, `완료 표시 ${dn.length}`), dn.map(item)] : null);
+    } else {
+    if (cps.length) out.push(el('div', {class: 'opts'}, cps.map(([k, v]) => btn('tg', `${k} 복사`, () => copy(v, k)))));
     out.push(el('div', {class: 'seg', role: 'group'}, [['todo', `남은 할 일 ${left.length}`], ['done', `완료 ${dn.length}`]].map(([k, l]) =>
       btn('', l, () => { seg = k; draw(); }, {'aria-pressed': seg === k ? 'true' : 'false'}))));
     if (seg === 'done') out.push(dn.length ? dn.map(item) : el('p', {class: 'empty'}, '완료한 일이 없어요'));
@@ -256,10 +296,8 @@ function drawScr() {
       const gs = GROUPS.map(([g, l]) => [l, left.filter(t => (GROUPS.some(x => x[0] === t.group) ? t.group : 'sns') === g)]).filter(([, xs]) => xs.length);
       out.push(gs.length ? gs.map(([l, xs]) => [el('p', {class: 'grp'}, `${l} ${xs.length}`), xs.map(item)]) : el('p', {class: 'empty'}, '남은 할 일이 없어요'));
     }
-    out.push(el('p', {class: 'grp'}, '더 보기'), fold('applied', `자동 응모 내역 ${(s.applied || []).length}`, () => (s.applied || []).length ? (s.applied || []).map(h =>
-      el(https(h.url) ? 'a' : 'div', {class: 'row', href: https(h.url) ? h.url : null, target: https(h.url) ? '_blank' : null, rel: https(h.url) ? 'noopener noreferrer' : null,
-        style: 'text-decoration:none;color:inherit'}, el('span', {class: 'grow'}, el('span', {class: 't'}, h.title || ''),
-        el('span', {class: 's'}, [kst(h.at), h.detail].filter(Boolean).join(' · '))), el('span', {class: 'cp ok'}, h.status === 'duplicate' ? '이미 응모' : '응모 완료')))
+    }
+    out.push(el('p', {class: 'grp'}, '더 보기'), fold('applied', `자동 응모 내역 ${applied().length}`, () => applied().length ? el('div', {}, applied().map(arow))
       : el('p', {class: 'note'}, '아직 자동 응모한 이벤트가 없어요')),
       Array.isArray(s.sources) && s.sources.length ? fold('src', `수집 출처 ${s.sources.length}`, () => s.sources.filter(x => x && typeof x === 'object').map(x =>
         el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, x.name || x.id || ''),
