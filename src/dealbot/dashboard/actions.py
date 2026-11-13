@@ -54,7 +54,7 @@ from dealbot.utils.text import truncate
 log = logging.getLogger(__name__)
 
 BLOGS = ("finance", "issue", "hotdeal")
-BLOG_NAMES = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
+BLOG_NAMES = {"finance": "드라마", "issue": "Pick", "hotdeal": "라커룸"}
 CTOKEN_S = 300
 CID_S = 600
 CID_RE = re.compile(r"^c_[A-Za-z0-9_-]{6,40}$")

@@ -135,7 +135,7 @@ def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Pa
     assert [s["key"] for s in v["slots"]] == ["s1", "s2", "s3", "s4", "s5"]
     assert [s["key"] for s in v["slots"] if s["current"]] == ["s2"]  # 12:30 이 지난 마지막 칸
     s1 = v["slots"][0]
-    assert s1["total"] == 2 and s1["min_left"] == 9 and s1["items"][0]["tag"] == "발행 · 아카이브"
+    assert s1["total"] == 2 and s1["min_left"] == 9 and s1["items"][0]["tag"] == "발행 · 드라마"
     assert s1["items"][1]["tag"] == "이웃 · 데런픽" and v["slots"][2]["items"][0]["tag"] == "SNS"
     assert s1["items"][0]["copy"][0]["text"] == "제목 한 줄\n둘째 줄"
     assert [s["key"] for s in routine.view(bot, now=at(bot, day, "07:00"))["slots"] if s["current"]] == ["s1"]  # 09:00 전 → 첫 칸
@@ -390,7 +390,7 @@ def test_todo_tab_groups_by_blog() -> None:
     assert "W.SBRoutine = {load, mount, ids, by, part, score}" in rt
     assert "filter(i => (i.blog || '') === k)" in rt and "'이웃': 2" in rt  # 그 블로그 손일 (이웃 신청·공감 포함)
     assert "setBy(by() ? 'slot' : 'blog')" in rt  # 예전 시간대별로 돌아가기
-    assert "W.SBRoutine.part(k, l," in app and "['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜']" in app
+    assert "W.SBRoutine.part(k, l," in app and "['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸']" in app
 
 
 def test_todo_tab_puts_urgent_first() -> None:

@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 WINDOWS = {"am": (7 * 60 + 41, 8 * 60 + 19), "pm": (21 * 60 + 3, 21 * 60 + 52)}
 LATE_S = 2 * 3600
 TITLES = {"am": "☀️ 아침 정리", "pm": "🌙 저녁 정리"}
-BLOG_LABELS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜 블로그"}
+BLOG_LABELS = {"finance": "다시 보는 드라마", "issue": "Pick", "hotdeal": "오늘의 라커룸"}
 NEWS_MAX = 8
 # 기다리는 일 이름 (종류 → 문장 앞부분)
 WAIT_LABELS = (

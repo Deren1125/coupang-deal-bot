@@ -78,8 +78,8 @@ def test_three_blogs_merge_into_one_chronological_list_grouped_by_day() -> None:
     assert [d["label"] for d in s["days"]] == ["오늘", "내일", "10/24 (토)", "10/30 (금)", "멈춘 글 · 시간이 없어요"]
     assert [d["day"] for d in s["days"]] == ["2026-10-21", "2026-10-22", "2026-10-24", "2026-10-30", None]
     flat = [(r["time"] if r["state"] != "blocked" else None, r["chip"], r["title"]) for d in s["days"] for r in d["items"]]
-    assert flat == [("11:00", "아카이브", "청년 지원금 정리"), ("12:10", "Pick", "차은우 가을 니트 코디"), ("14:40", "Pick", "수지 공항패션"),
-                    ("08:47", "핫딜", "오늘의 핫딜 5선"), ("09:00", "아카이브", "연말정산 체크"), ("08:47", "Pick", "카리나 화보"),
+    assert flat == [("11:00", "드라마", "청년 지원금 정리"), ("12:10", "Pick", "차은우 가을 니트 코디"), ("14:40", "Pick", "수지 공항패션"),
+                    ("08:47", "라커룸", "오늘의 핫딜 5선"), ("09:00", "드라마", "연말정산 체크"), ("08:47", "Pick", "카리나 화보"),
                     (None, "Pick", "아이유 콘서트룩")]
     ats = [r["at"] for d in s["days"][:-1] for r in d["items"]]
     assert ats == sorted(ats)  # 블로그가 섞여도 시간순
@@ -90,7 +90,7 @@ def test_three_blogs_merge_into_one_chronological_list_grouped_by_day() -> None:
 def test_summary_counts_the_next_seven_days_and_names_stopped_posts() -> None:
     s = build(*three_blogs())
     assert s["counts"] == {"finance": 2, "issue": 2, "hotdeal": 1}  # 10/30 Pick 는 7일 밖
-    assert s["text"] == "앞으로 7일 · 아카이브 2 · Pick 2 · 핫딜 1 · 멈춤 1"
+    assert s["text"] == "앞으로 7일 · 드라마 2 · Pick 2 · 라커룸 1 · 멈춤 1"
     blogs, v2 = three_blogs()
     for b in blogs.values():
         b["schedule"]["items"], b["waiting"] = [], []
@@ -132,7 +132,7 @@ def test_filter_chips_follow_the_rows() -> None:
     for key in ("finance", "issue", "hotdeal"):
         n = sum(1 for d in s["days"] for r in d["items"] if r["blog"] == key)
         assert next(b for b in s["blogs"] if b["key"] == key)["n"] == n
-    assert [(b["key"], b["label"]) for b in s["blogs"]] == [("finance", "아카이브"), ("issue", "Pick"), ("hotdeal", "핫딜")]
+    assert [(b["key"], b["label"]) for b in s["blogs"]] == [("finance", "드라마"), ("issue", "Pick"), ("hotdeal", "라커룸")]
 
 
 # ---------------------------------------------------------------- 전체 (기록 파일 → state)
@@ -168,7 +168,7 @@ async def test_state_has_the_schedule_page_with_the_existing_actions(bot: DealBo
     assert pick["remove"]["action"] == "blog.unschedule" and pick["now"] is None
     assert rows["post-finance-60"]["now"]["action"] == "blog.publish" and rows["post-finance-60"]["now"]["confirm"] is True
     assert rows["post-issue-48"]["state"] == "blocked" and "사진이 아직 없어요" in rows["post-issue-48"]["status"]
-    assert s["total"] == 3 and s["text"].startswith("앞으로 7일 · 아카이브 1 · Pick 1 · 핫딜 0")
+    assert s["total"] == 3 and s["text"].startswith("앞으로 7일 · 드라마 1 · Pick 1 · 라커룸 0")
 
 
 async def test_old_blogauto_without_schedule_has_no_page(bot: DealBot, settings: Settings, tmp_path: Path) -> None:

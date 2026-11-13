@@ -92,3 +92,4 @@
 - 연결 탭 'Ably 랭킹 보내기 버튼 설치' (통계 보내기와 같은 칸 · GET /dashboard/api/ablyrank). a-bly.com·*.a-bly.com 화면에서만 — 카드가 뜰 때까지 0.5초씩 5초 기다리고, 순위·상품명·쇼핑몰·가격·원래 가격·할인·리뷰·별점·찜·상품 주소·사진 주소, 코디 카드(제목·좋아요·든 상품 12개), 주소·제목·고른 탭·제목 줄·보이는 글(1.5만 자)을 POST /dashboard/api/ably_rank_capture 로 (쿠키 없음).
 - 받기: 열쇠 kv ablyrank_secret HMAC · CORS 는 https://*.a-bly.com 만 · 손님마다 10분 20번 · 하루 30개 · 상품 100·코디 50 · 기록 60KB → kv ably_rank_capture:<날>:<시각> 30일. 상품·코디 주소는 a-bly.com 만, 사진 주소는 적기만 (서버가 받아 오지 않음).
 - 넘기기: Blog-Auto 상태 파일 actions 에 'ably_rank_capture' 가 생기면 일 ably_rank_capture {captures: [kv 키]} (계약 action_ably_rank_capture.json) — 그 전에는 kv 에만. 캡처 올리기(LB-15)는 그대로.
+- 11/14 대시보드 이름 바꿈: 블로그 탭·할 일·통계·로그인·정리 글의 hotdeal 블로그는 '오늘의 라커룸'(칩 라커룸), finance 블로그는 '다시 보는 드라마'(칩 드라마) — Blog-Auto status.blogs 의 name·short 를 따르고 없으면 기본 이름. 새 채널이 켜진 블로그는 핫딜 글 단추(지금 한 편·내 후기)와 아카이브 스캔 단추(다시 찾기·새 글·정리본·소재)를 숨김 (딜봇 채널은 그대로)

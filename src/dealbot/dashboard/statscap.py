@@ -45,7 +45,7 @@ SEL_MAX = 12
 PATH = "/dashboard/api/stats_capture"
 # 블로그 주소 → Blog-Auto 블로그 (config/<blog>.yaml blog_id)
 BLOG_IDS = {"derenlog": "finance", "derenpick": "issue", "demiyum": "hotdeal"}
-BLOG_NAMES = {"finance": "아카이브", "issue": "데런픽", "hotdeal": "핫딜"}
+BLOG_NAMES = {"finance": "드라마", "issue": "데런픽", "hotdeal": "라커룸"}
 # 화면 종류 (고른 탭 → 주소 → 제목 → 글 머리 차례로 먼저 맞는 것)
 KINDS = (
     ("유입 분석", re.compile(r"유입|referer|inflow", re.I)),

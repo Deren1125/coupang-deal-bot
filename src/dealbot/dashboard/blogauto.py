@@ -1190,7 +1190,7 @@ def _logins(v: Any) -> list[dict[str, Any]] | None:
     return out
 
 
-NV_BLOGS = {"finance": "아카이브", "issue": "데런픽", "hotdeal": "핫딜"}
+NV_BLOGS = {"finance": "드라마", "issue": "데런픽", "hotdeal": "라커룸"}
 
 
 def _naver_visits(v: Any) -> dict[str, Any] | None:
@@ -1903,6 +1903,9 @@ def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, A
                 "blog_id": b.get("blog_id") if isinstance(b.get("blog_id"), str) and re.fullmatch(r"[a-z0-9_-]{2,40}", b.get("blog_id")) else None,
                 "neighbors": _neighbors(b.get("neighbors")),
                 "paste": b.get("paste") is True,  # 붙여넣기 방식 (주인 10/29) — 서버 발행·예약·고치기 단추를 숨김
+                # 새 채널 (주인 11/13 — hotdeal=오늘의 라커룸 · finance=다시 보는 드라마): 이름·짧은 이름·종류·핫딜 블로그 글 끔. 없으면(예전 Blog-Auto) 딜봇 기본 이름
+                "name": _one_line(b.get("name"), 30), "short": _one_line(b.get("short"), 12),
+                "channel": b.get("channel") if b.get("channel") in ("sports", "drama") else "", "blog_off": b.get("blog_off") is True,
             }
     k = st.get("kakao") if isinstance(st.get("kakao"), dict) else {}
     out["status"]["kakao"] = {"state": k.get("state") if k.get("state") in ("ok", "down", "expiring", "unknown") else "unknown",

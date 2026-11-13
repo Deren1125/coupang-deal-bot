@@ -14,7 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 BLOGS = ("finance", "issue", "hotdeal")
-LABELS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
+LABELS = {"finance": "드라마", "issue": "Pick", "hotdeal": "라커룸"}
 WEEK = "월화수목금토일"
 AHEAD_DAYS = 7  # 맨 위 한 줄 '앞으로 7일'
 ACTS = {"blog.schedule_move": "move", "blog.publish": "now", "blog.unschedule": "remove"}

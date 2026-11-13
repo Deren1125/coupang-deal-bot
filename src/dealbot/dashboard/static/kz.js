@@ -9,7 +9,7 @@ const CSS = '.kz .row{flex-wrap:wrap;row-gap:6px}.kz .row .grow{flex:1 1 60%}.kz
   '.kz .msg{margin:8px 0 0;font-size:14px;white-space:pre-line}.kz .msg.bad{color:var(--red)}.kz .top{margin:0 0 4px;min-height:36px}.kz .top b{flex:1;font-size:15px}' +
   '.kz .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}.kz ol{margin:4px 0 0;padding-left:20px;font-size:14px;line-height:1.7}.kz .pb{margin-top:10px}';
 // 대시보드 블로그 ↔ 도구 블로그(b1~b3): 도구가 알려 주는 블로그 주소(blog_home = RSS 주소에서)의 네이버 아이디로 — Blog-Auto config/<블로그>.yaml blog_id
-const NID = {derenlog: 'finance', derenpick: 'issue', demiyum: 'hotdeal'}, NAME = {finance: '아카이브', issue: '데런픽', hotdeal: '핫딜'};
+const NID = {derenlog: 'finance', derenpick: 'issue', demiyum: 'hotdeal'}, NAME = {finance: '드라마', issue: '데런픽', hotdeal: '라커룸'};
 const OTHER = /^(pics|search|trial|ptrial|sched)$/, SNS = ['threads', 'x', 'lookbook', 'shorts'];
 const RES = {ok: '✅ 등록됐어요', failed: '❌ 등록이 안 됐어요 (대기 목록에 남겨 둠)', limit: '⏸ 오늘 한도에 걸렸어요 — 내일 다시', skipped: '이미 등록된 글이라 끝으로 표시했어요',
   need_login: '🔑 키자드 로그인이 필요해요 — 연결 탭 키자드 로그인', unknown: '키자드 반응을 읽지 못했어요 — 아래에서 결과를 골라 주세요'};
@@ -106,7 +106,7 @@ function keyOf(b) {
   const m = /blog\.naver\.com\/([\w-]+)/i.exec(String(b.blog_home || ''));
   if (m && NID[m[1].toLowerCase()]) return NID[m[1].toLowerCase()];
   const n = String(b.name || '');
-  return n.includes('아카이브') ? 'finance' : n.includes('데런픽') || /pick/i.test(n) ? 'issue' : n.includes('핫딜') ? 'hotdeal' : null;
+  return n.includes('드라마') || n.includes('아카이브') ? 'finance' : n.includes('데런픽') || /pick/i.test(n) ? 'issue' : n.includes('라커룸') || n.includes('핫딜') ? 'hotdeal' : null;
 }
 const blogOf = key => ((ST.d && ST.d.blogs) || []).find(b => keyOf(b) === key) || null;
 const msgEl = slot => MSG[slot] ? el('p', {class: 'msg' + (MSG[slot].bad ? ' bad' : '')}, MSG[slot].text) : null;

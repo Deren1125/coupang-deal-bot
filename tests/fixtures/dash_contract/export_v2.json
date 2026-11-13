@@ -340,7 +340,7 @@
   "logins": [
    {
     "id": "finance",
-    "label": "아카이브 블로그(쇼핑커넥트도)",
+    "label": "다시 보는 드라마 블로그(쇼핑커넥트도)",
     "state": "ok",
     "note": "",
     "checked_at": "2026-10-18T09:00:00+09:00",
@@ -370,7 +370,7 @@
    },
    {
     "id": "hotdeal",
-    "label": "핫딜 블로그",
+    "label": "오늘의 라커룸 블로그",
     "state": "unknown",
     "note": "아직 확인 전",
     "checked_at": null,

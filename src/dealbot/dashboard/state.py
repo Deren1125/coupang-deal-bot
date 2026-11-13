@@ -44,8 +44,9 @@ from dealbot.utils.text import clean_name, truncate
 log = logging.getLogger(__name__)
 
 STATE_V = 1
-BLOG_LABELS = {"finance": "Deren의 아카이브", "issue": "Deren's Pick", "hotdeal": "데미얌의 쇼핑일기"}
-CHIPS = {"finance": "아카이브", "issue": "Pick", "hotdeal": "핫딜"}
+# 주인 11/13: hotdeal 블로그 = 오늘의 라커룸 · finance 블로그 = 다시 보는 드라마 (Blog-Auto 가 status.blogs.<블로그>.name·short 로 알려 주면 그 이름 — blogs())
+BLOG_LABELS = {"finance": "다시 보는 드라마", "issue": "Deren's Pick", "hotdeal": "오늘의 라커룸"}
+CHIPS = {"finance": "드라마", "issue": "Pick", "hotdeal": "라커룸"}
 VISITS_IID = "visits"  # 할 일 '오늘 들를 이웃 글' 한 줄
 SEARCH_IID = "search"  # 할 일 '구글 검색 등록 N개' 한 줄 (주인 10/18 22:20)
 SEV_ORDER = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
@@ -170,7 +171,9 @@ class StateBuilder:
         self._sctx = {"ok": ok, "spaced": {b: bool((x or {}).get("spaced_only")) for b, x in ((sch or {}).get("blogs") or {}).items()}
                       if ok else {}, "sup": supported,
                       # 서버가 그 블로그로 네이버를 여는가 (주인 10/29 붙여넣기 · 10/30 네이버 접속 끔 — 아니면 발행·예약·다시 올리기·고치기 단추 없음)
-                      "off": bool(st.get("naver_off")), "paste": {b: bool((x or {}).get("paste")) for b, x in (st.get("blogs") or {}).items()}}
+                      "off": bool(st.get("naver_off")), "paste": {b: bool((x or {}).get("paste")) for b, x in (st.get("blogs") or {}).items()},
+                      # 새 채널 블로그 (주인 11/13): 핫딜 글 전용 칸(내 후기·지금 한 편)은 숨김
+                      "chan": {b for b, x in (st.get("blogs") or {}).items() if (x or {}).get("channel") or (x or {}).get("blog_off")}}
 
     def _srv(self, blog: str) -> bool:
         """서버가 이 블로그 계정으로 네이버에 글을 올리는가 (붙여넣기 방식·네이버 접속 끔이면 False)."""
@@ -382,7 +385,7 @@ class StateBuilder:
         """내 후기 쓰기 (주인 10/20 — 텔레그램을 안 써서): 핫딜 글에 메모 + 사진(선택) → Blog-Auto 가 가이드·제품 소개 글을
         그 메모로만 1인칭 후기로 다시 씀. pid 없으면 '후기 쓸 제품 고르기' (제품 이름 칸 + 메모 → 새 제품 소개 글)."""
         sup = self._sctx.get("sup")
-        if blog != "hotdeal" or (sup is not None and "post_notes" not in sup):
+        if blog != "hotdeal" or blog in (self._sctx.get("chan") or ()) or (sup is not None and "post_notes" not in sup):
             return None
         a = {"blog": blog, "pid": pid} if pid else {"blog": blog}
         return act("blog.post_notes", "내 후기 쓰기" if pid else "후기 쓸 제품 고르기", a, input="text",
@@ -1033,14 +1036,15 @@ class StateBuilder:
             waiting = [dict(w, status=f"{w['status']} · {w['sc']}" if w.get("status") else w["sc"])
                        if w.get("sc") and w["sc"] not in str(w.get("status") or "") else w for w in waiting]
             acts: list[dict[str, Any]] = []
-            if blog == "finance":
+            chan = bool(st.get("channel"))  # 새 채널 (주인 11/13): 아카이브 스캔·핫딜 블로그 글 단추는 숨김 (코드는 그대로 — 채널이 꺼지면 다시 보임)
+            if blog == "finance" and not chan:
                 acts += [act("blog.scan", "다시 찾기"), act("blog.write", "새 글 쓰기", input="text", placeholder="어떤 글을 쓸지",
                                                              photos_optional=True, accept="image/*", multiple=True)]
             if blog == "issue":
                 acts += [act("blog.issue", "키워드로 쓰기", input="text", optional=True, placeholder="키워드 (비우면 알아서)"),
                          act("blog.info", "키워드 보기", {"what": "trends"}), act("blog.info", "일정 보기", {"what": "plan"}),
                          act("blog.restyle", "Pick 전체 스타일 다시", {"blog": "issue", "pids": "all"})]
-            if blog == "hotdeal":
+            if blog == "hotdeal" and not st.get("blog_off") and not chan:
                 acts.append(act("blog.hotdeal_now", "지금 한 편 쓰기"))
                 if (na := self._notes_act(blog)):
                     acts.append(na)
@@ -1052,23 +1056,24 @@ class StateBuilder:
             acts.append(act("blog.resume", "다시 시작", {"blog": blog}) if st.get("paused") else act("blog.pause", "멈추기", {"blog": blog}))
             if srv:
                 acts.append(act("blog.drafts_cleanup", "임시저장 정리", {"blog": blog}))
-            if blog == "finance":
+            if blog == "finance" and not chan:
                 acts.append(act("blog.ledger", "정리본 올리기", input="file", accept=".md,.txt,text/markdown,text/plain"))
             if srv:
                 acts.append(act("blog.info", "크리에이터 키워드", {"what": "creator"}))
             # 소재 넣기 (주인 10/21): 카페 인기글 주제·아이디어를 붙여 넣으면 다음 글감 고르기의 첫 후보 (Blog-Auto 는 카페를 열지 않음)
-            acts.append(act("blog.topic_seed", "소재 넣기", {"blog": blog}, input="text",
-                            placeholder="카페 인기글 주제나 아이디어 한두 줄 — 사실은 뉴스·공식 자료로만 확인해요"))
-            scan = v2.get("scan") if blog == "finance" else None
+            if not chan:  # 새 채널 글은 소재를 스스로 고름 (아카이브 스캔의 주인 소재 칸은 쉼)
+                acts.append(act("blog.topic_seed", "소재 넣기", {"blog": blog}, input="text",
+                                placeholder="카페 인기글 주제나 아이디어 한두 줄 — 사실은 뉴스·공식 자료로만 확인해요"))
+            scan = v2.get("scan") if blog == "finance" and not chan else None
             n_paste = sum(1 for w in waiting if w.get("kind") == "paste")
             # 블로그 탭은 붙여넣기 글을 한 줄로만 (주인 11/09 '좋다' — 대시보드 줄이기 ③): '붙여넣기 N편 → 할 일' · 글은 할 일 탭에서
             hide = [w["iid"] for w in waiting if w.get("kind") == "paste"]
             if hide:
                 waiting = [{"iid": f"paste-{blog}", "src": "blog", "blog": blog, "kind": "paste_sum", "sev": "todo",
-                            "title": f"붙여넣기 {len(hide)}편 → 할 일", "chip": CHIPS[blog],
+                            "title": f"붙여넣기 {len(hide)}편 → 할 일", "chip": st.get("short") or CHIPS[blog],
                             "status": "할 일 탭 '오늘 할 일'에서 복사해 붙여넣기", "primary": goto("할 일로 가기", "#/todo")}] + \
                     [w for w in waiting if w.get("kind") != "paste"]
-            out[blog] = {"label": BLOG_LABELS[blog], "chip": CHIPS[blog], "mode": mode, "paused": bool(st.get("paused")),
+            out[blog] = {"label": st.get("name") or BLOG_LABELS[blog], "chip": st.get("short") or CHIPS[blog], "mode": mode, "paused": bool(st.get("paused")),
                          "today": st.get("today") or 0, "login": "off" if self._sctx.get("off") else st.get("login") or "unknown",
                          # 머리 한 줄 (주인 10/30): 서버가 안 올리는 블로그는 '붙여넣기 대기 N · 오늘 발행 N' (발행/초안 모드 말 대신)
                          "head": None if srv else f"붙여넣기 대기 {n_paste} · 오늘 발행 {st.get('today') or 0}편",
@@ -1205,10 +1210,10 @@ class StateBuilder:
 
         links = stored_links(self.bot.db)
         where = {"ig_bio": "인스타 프로필 링크", "threads_bio": "스레드 프로필 링크", "deals_page": "핫딜 페이지 버튼",
-                 "demiyum": "핫딜 블로그 서명", "qr": "QR 코드"}
+                 "demiyum": "블로그(라커룸) 서명", "qr": "QR 코드"}
         return [{"name": n, "label": LABELS.get(n, n), "where": where.get(n, ""), "url": links[n]} for n in INVITE_NAMES if n in links]
 
-    SC_REASONS = {"login": "아카이브 계정 로그인 필요", "blocked": "네이버가 잠깐 막음", "owner": "직접 멈춤"}
+    SC_REASONS = {"login": "쇼핑커넥트 계정(다시 보는 드라마 블로그) 로그인 필요", "blocked": "네이버가 잠깐 막음", "owner": "직접 멈춤"}
 
     def _sc_row(self, sc: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
         """연결 탭 '쇼핑커넥트' 한 줄 (주인 10/24 — 실시간 연결 상태): {text, bad, action?}. 상태를 모르면 None (줄 숨김)."""

@@ -214,12 +214,12 @@ def test_waiting_card_without_key_or_file_says_unknown_not_an_error(db: Database
     # 블로그 카드가 없으면 기본 세 줄
     dash2 = make_dash(db, tmp_path, [{"key": "w", "type": "blog_waiting"}])
     write_export(tmp_path, WAITING)
-    assert [g.title for g in next(x for x in dash2.views()).groups] == ["아카이브", "픽", "핫딜"]
+    assert [g.title for g in next(x for x in dash2.views()).groups] == ["드라마", "픽", "라커룸"]
     # options.blogs 로 줄을 정할 수 있고, 비었거나 이상하면 기본으로
     dash3 = make_dash(db, tmp_path, [{"key": "w", "type": "blog_waiting", "options": {"blogs": [{"blog": "Issue", "title": "픽"}]}}])
     assert [(g.title, g.summary) for g in next(x for x in dash3.views()).groups] == [("픽", "대기 글 없음")]
     dash4 = make_dash(db, tmp_path, [{"key": "w", "type": "blog_waiting", "options": {"blogs": [{"title": "x"}]}}])
-    assert [g.title for g in next(x for x in dash4.views()).groups] == ["아카이브", "픽", "핫딜"]
+    assert [g.title for g in next(x for x in dash4.views()).groups] == ["드라마", "픽", "라커룸"]
 
 
 def test_waiting_titles_are_escaped(db: Database, tmp_path: Path) -> None:

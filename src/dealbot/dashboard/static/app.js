@@ -21,7 +21,7 @@ const ext = (cls, label, url) => el('a', {class: cls, href: url, target: '_blank
 const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
 
 const TABS = {todo: '할 일', deal: '딜', blog: '블로그', sns: 'SNS', stats: '통계', connect: '연결'}, SUBS = {sns: ['threads', 'x', 'lookbook', 'shorts']};
-const BLOGS = [['finance', '아카이브'], ['issue', 'Pick'], ['hotdeal', '핫딜']];
+const BLOGS = [['finance', '드라마'], ['issue', 'Pick'], ['hotdeal', '라커룸']];
 const seg = (xs, base) => el('div', {class: 'seg', role: 'group'}, xs.map(([k, l, n]) => btn('', [l, n ? el('span', {class: 'cp hot', 'aria-label': `할 일 ${n}개`}, n) : null],
   () => { location.hash = base + k; }, {'aria-pressed': k === R.sub ? 'true' : 'false'})));
 const SEV = {stop: ['⛔', '멈춤'], hot: ['🔥', '핫'], info: ['ℹ️', '참고'], todo: ['', '할 일']};
@@ -970,7 +970,7 @@ function vTodo() {
   const RB = R.sub !== 'deal' && W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by(), bk = i => /^(lookbook|ably_rank)$/.test(i.kind) ? 'shorts' : /^(issue|finance|hotdeal)$/.test(i.blog) ? i.blog : '';  // 룩북·코디 랭킹은 영상 칸 (11/09)
   // 급한 순 (주인 11/09 '중요도 순'): 급한 카드(멈춤·핫·급해요) 있는 블로그 → 올리기 많은 블로그(핫딜 두 배) → 확인할 것 → 이웃만 남은 블로그
   const hu = i => i.sev === 'stop' || i.sev === 'hot' || i.cue === '급해요' || (i.expires_at && i.expires_at - now() < 3 * 3600);
-  if (RB) [['issue', '데런픽'], ['finance', '아카이브'], ['hotdeal', '핫딜'], ['shorts', '숏폼·릴스·룩북'], ['', '딜·SNS·그 밖']].map(([k, l]) => {
+  if (RB) [['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸'], ['shorts', '숏폼·릴스·룩북'], ['', '딜·SNS·그 밖']].map(([k, l]) => {
     const xs = items.filter(i => bk(i) === k && i.kind !== 'uploads'), h = xs.filter(hu);
     return [k, l, xs, h, h.length * 1000 + (W.SBRoutine.score ? W.SBRoutine.score(k) : 0) + (xs.length - h.length) * 10];
   }).sort((a, b) => b[4] - a[4]).forEach(([k, l, xs, h], n) => out.push(...W.SBRoutine.part(k, l,

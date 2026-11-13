@@ -86,7 +86,7 @@ def test_only_five_per_blog_a_day_hottest_first_and_done_ones_count() -> None:
     view = reg.view({"recent": {"issue": posts, "hotdeal": [row(20, NOW - 60, "hotdeal", score=5)]}})
     titles = [x["title"] for g in view["days"] for x in g["items"] if x["chip"] == "Pick"]
     assert sorted(titles) == sorted(["글 2", "글 4", "글 6", "글 7", "글 3"]) and view["left"] == 6  # Pick 5 + 핫딜 1
-    assert view["per_blog"] == {"Pick": 5, "핫딜": 1}
+    assert view["per_blog"] == {"Pick": 5, "라커룸": 1}
     reg.check(["https://blog.naver.com/derenpick/224000000002", "https://blog.naver.com/derenpick/224000000004"], True)
     view = reg.view({})
     pick = [x for g in view["days"] for x in g["items"] if x["chip"] == "Pick"]
@@ -152,12 +152,12 @@ async def test_todo_row_blog_view_check_and_undo(bot: DealBot, settings: Setting
     by = {it["iid"]: it for it in todo}
     s = by["search"]
     assert s["title"] == "키자드 등록 3개" and s["sev"] == "todo" and s["kind"] == "search_reg" and s["urgent"] is False
-    assert "블로그마다 하루 5개" in s["status"] and "Pick 2" in s["status"] and "핫딜 1" in s["status"]
+    assert "블로그마다 하루 5개" in s["status"] and "Pick 2" in s["status"] and "라커룸 1" in s["status"]
     assert s["primary"]["input"] == "goto" and s["primary"]["goto"] == "#/blog/search"
     assert rank.rank(dict(s), time.time()) == 950.0 and todo.index(s) < todo.index(by["post-issue-31"])  # 주인 10/25 '맨날 놓쳐' — 맨 위 쪽
     sr = body["search"]
     assert sr["left"] == 3 and [g["label"] for g in sr["days"]] == ["오늘", "어제"]
-    assert [x["chip"] for x in sr["days"][0]["items"]] == ["핫딜", "Pick"]
+    assert [x["chip"] for x in sr["days"][0]["items"]] == ["라커룸", "Pick"]
     # 확인 창 없이 바로 · 딜봇 kv 에 · Blog-Auto 로 보내지 않음
     urls = [x["url"] for x in sr["days"][0]["items"]]
     status, r, _ = await post_json(bot, "/dashboard/api/action", {"action": "search.check", "args": {"urls": urls, "done": True},
@@ -213,7 +213,7 @@ def test_checklist_is_grouped_by_blog_hottest_first() -> None:
     reg = SearchReg(db, tz="Asia/Seoul", now=lambda: NOW)
     view = reg.view({"recent": {"issue": [row(1, NOW - 60, score=10), row(2, NOW - 86400, score=90)],
                                 "hotdeal": [row(5, NOW - 120, "hotdeal")], "finance": [row(7, NOW - 30, "finance")]}})
-    assert [g["label"] for g in view["blogs"]] == ["아카이브", "Pick", "핫딜"]
+    assert [g["label"] for g in view["blogs"]] == ["드라마", "Pick", "라커룸"]
     pick = view["blogs"][1]
     assert [x["title"] for x in pick["items"]] == ["글 2", "글 1"] and pick["left"] == 2
     assert {x["day"] for x in pick["items"]} == {"오늘", "어제"}

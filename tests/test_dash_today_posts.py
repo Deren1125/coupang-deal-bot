@@ -64,7 +64,7 @@ def test_blogs_today_only_kst_and_naver_links(bot: DealBot) -> None:
         "issue": [{"title": "Pick 글", "url": "https://evil.example/x", "at": "2026-10-23T00:00:00"}],
         "hotdeal": []}}
     g = {x["key"]: x for x in build(bot, v2)["groups"]}
-    assert list(g) == ["finance", "issue"] and g["finance"]["label"] == "아카이브 (derenlog)" and g["issue"]["label"] == "Pick (derenpick)"
+    assert list(g) == ["finance", "issue"] and g["finance"]["label"] == "다시 보는 드라마 (derenlog)" and g["issue"]["label"] == "Pick (derenpick)"
     assert g["finance"]["rows"] == [{"title": "세금 정리", "when": "09:05", "link": {"label": "글", "url": "https://m.blog.naver.com/derenlog/1"}}]
     assert g["issue"]["rows"] == [{"title": "Pick 글", "when": "00:00"}]  # 네이버 아닌 주소는 뺌
 

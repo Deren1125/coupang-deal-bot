@@ -182,7 +182,7 @@ def test_connect_tab_shopconnect_row(bot: DealBot) -> None:
     sc = _shopconnect(raw)
     assert sc is not None and "link" not in sc and sc["queued"] == 2
     row = bot.dash_state._sc_row(sc, now)
-    assert row["bad"] and row["text"].startswith("멈춤 — 아카이브 계정 로그인 필요 · ") and "오늘 링크 1/8 · 검색 3/16" in row["text"]
+    assert row["bad"] and row["text"].startswith("멈춤 — 쇼핑커넥트 계정(다시 보는 드라마 블로그) 로그인 필요 · ") and "오늘 링크 1/8 · 검색 3/16" in row["text"]
     assert "대기 2" in row["text"] and "마지막 성공" in row["text"]
     assert row["action"]["action"] == "login.remote" and row["action"]["args"] == {"target": "finance"}
     ok = bot.dash_state._sc_row(_shopconnect(dict(raw, state="ok", reason="", until=None, queued=0)), now)

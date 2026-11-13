@@ -130,7 +130,7 @@ async def test_titles_come_from_queue_and_export_with_safe_fallbacks(bot: DealBo
     assert [x["title"] for x in r["발행·예약"]] == ["안효섭 준지 26FW 공항패션 외 2편", "SUNGOD 헤어 드라이기 29,900원", "올리기",
                                                   "필립스 전동칫솔 소닉케어"]
     assert r["답함·고침"][0]["title"] == "안효섭 준지 26FW 공항패션" and r["답함·고침"][0]["blog"] == "Pick"
-    assert r["버림·안 올림"][0]["title"] == "버리기" and r["버림·안 올림"][0]["blog"] == "아카이브"
+    assert r["버림·안 올림"][0]["title"] == "버리기" and r["버림·안 올림"][0]["blog"] == "드라마"
     assert [x["title"] for x in r["기타"]] == ["가을 트렌치코트 코디 세 가지", "차은우 가을 니트 코디"]
 
 

@@ -688,7 +688,7 @@ dashboard:
       goals: { followers: 1000 }
     - key: blog_finance
       type: naver_blog
-      title: Deren의 아카이브
+      title: 다시 보는 드라마
       goals: { open_days: 90, posts: 50, avg_visitors: 100 }   # 네이버 애드포스트 권장 기준 (개설 90일·글 50개·일평균 방문자 100명)
       options:
         blog: finance                       # Blog-Auto 블로그 이름
@@ -706,7 +706,7 @@ dashboard:
         open_date: null
     - key: blog_hotdeal
       type: naver_blog
-      title: 데미얌의 쇼핑일기 블로그
+      title: 오늘의 라커룸
       goals: { open_days: 90, posts: 50, avg_visitors: 100 }
       options:
         blog: hotdeal

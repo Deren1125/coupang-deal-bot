@@ -5,7 +5,7 @@
 Blog-Auto 는 자기 DB 만 보고 센다 (네이버에 요청하지 않음). 딜봇은 파일만 읽고, 임시저장 글은 읽지도 고치지도 않는다.
 
 options:
-  blogs  [{blog: finance, title: 아카이브}, ...] — 없으면 config 의 naver_blog 카드(options.blog·카드 제목)를 그 순서대로
+  blogs  [{blog: finance, title: 드라마}, ...] — 없으면 config 의 naver_blog 카드(options.blog·카드 제목)를 그 순서대로
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ EMPTY_TEXT = "대기 글 없음"
 SHOW_TOP = 3
 DEFAULT_THRESHOLD = 70  # 파일에 threshold 가 없을 때 알약 강조 기준 (Blog-Auto 기본값과 같음)
 # naver_blog 카드가 하나도 없을 때의 줄 (Blog-Auto 블로그 이름, 줄 이름)
-DEFAULT_BLOGS = (("finance", "아카이브"), ("issue", "픽"), ("hotdeal", "핫딜"))
+DEFAULT_BLOGS = (("finance", "드라마"), ("issue", "픽"), ("hotdeal", "라커룸"))
 NO_WAITING = "no_waiting"  # 기록 파일은 있는데 "waiting" 이 없음 (예전 Blog-Auto) — 오류가 아니라 회색 안내 한 줄
 
 

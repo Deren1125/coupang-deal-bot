@@ -195,7 +195,7 @@ def test_real_browser_three_places_and_buttons_only_on_tap() -> None:
     assert "룩북" not in got["blog"]  # 블로그 화면에 '룩북' 글자 없음 (test_dash_sns 와 같은 원칙)
     assert "✅ 등록됐어요" in got["afterRender"] and "앱 칸" in got["afterRender"]
     assert "1/2개 등록됐어요" in got["all"] and "오늘 한도에 걸렸어요" in got["all"] and "5회 초과" in got["all"]
-    for word in ("키자드 로그인", "아카이브 키자드", "데런픽 키자드", "핫딜 키자드", "로그인 필요 — 로그인이 풀렸습니다", "원격 로그인"):
+    for word in ("키자드 로그인", "드라마 키자드", "데런픽 키자드", "라커룸 키자드", "로그인 필요 — 로그인이 풀렸습니다", "원격 로그인"):
         assert word in got["connect"], word
     assert "지금 자동 작업 중입니다" in got["connect2"]
     for word in ("룩북 수집", "29CM 룩북", "11-12 02:24 · 룩북 10 · 상품 0 · 24시간마다", "멈춤: 봇 확인 화면", "지금 수집", "코디 레시피", "데이트 룩 1",

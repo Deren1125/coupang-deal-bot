@@ -605,8 +605,8 @@ def test_naver_visits_section_shows_opens_per_blog(bot: DealBot, tmp_path: Path)
     write_export(tmp_path / "blogauto.json", status={**st, "naver_visits": nv})
     v = logins.view(bot)["visits"]
     fin, hot = v["rows"]
-    assert fin["name"] == "아카이브" and fin["text"] == "오늘 12번 · 24시간 42/50번 · 막힘 3" and fin["jobs"] == "많이 연 일: 내 통계 3, neighbors 4"
-    assert hot["name"] == "핫딜" and "적응 기간 · 곁일 쉼" in hot["text"] and hot["bad"] is True and hot["jobs"] == ""
+    assert fin["name"] == "드라마" and fin["text"] == "오늘 12번 · 24시간 42/50번 · 막힘 3" and fin["jobs"] == "많이 연 일: 내 통계 3, neighbors 4"
+    assert hot["name"] == "라커룸" and "적응 기간 · 곁일 쉼" in hot["text"] and hot["bad"] is True and hot["jobs"] == ""
     assert v["total"] == "서버 전체 24시간 94/160번" and len(v["rows"]) == 2  # 모르는 블로그는 뺌
 
 
