@@ -31,6 +31,8 @@
   GET  /dashboard/api/ablyrank          'Ably 랭킹 보내기' 책갈피 {code, len, steps} (ablyrank.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
   POST /dashboard/api/ably_rank_capture 책갈피가 에이블리 랭킹 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 · 열쇠 k · CORS 는 https://*.a-bly.com 만)
                                         → ablyrank.save (kv) → Blog-Auto 가 알리면 일 ably_rank_capture 로 넘김 · 서버는 에이블리를 열지 않음
+  POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/commands   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
+  GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
@@ -100,7 +102,8 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "routine.js": "text/javascript; charset=utf-8",  # routine.js: 할 일 탭 '오늘 할 일' 칸 (10/27, 셸이 defer 로 — app.js 는 예산 끝)
              "shorts.js": "text/javascript; charset=utf-8",  # shorts.js: SNS 탭 '올리기' 칸 (11/08, 처음 열 때만 — sns.js 가 meta sb-shorts 로)
              "kz.js": "text/javascript; charset=utf-8",  # kz.js: 키자드 칸 셋 (11/12, 셸이 defer 로 — /dashboard/keyzard/api/… 를 부름)
-             "kkumi.js": "text/javascript; charset=utf-8"}  # kkumi.js: '꾸미기' 책갈피 원본 (10/27 — 화면은 받지 않음, kkumi.py 가 javascript: 주소로)
+             "kkumi.js": "text/javascript; charset=utf-8",  # kkumi.js: '꾸미기' 책갈피 원본 (10/27 — 화면은 받지 않음, kkumi.py 가 javascript: 주소로)
+             "ssalmuk.js": "text/javascript; charset=utf-8"}  # ssalmuk.js: 할 일 탭 '이벤트 참여' 카드·화면 (11/14, 셸이 defer 로)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096
@@ -247,7 +250,10 @@ class DashApi:
         web.route(f"{API}/deal/find", self.deal_find)
         web.route(f"{API}/stats.html", self.stats_html)
         web.route_prefix("/dashboard/go/", self.go)
-        from dealbot.dashboard import remote_login
+        from dealbot.dashboard import remote_login, ssalmuk
+
+        # 이벤트 참여 (쌀먹, 주인 11/14) — push·commands·ack 는 로그인 없이 X-Ssalmuk-Key 로만 · state·act·key·rotate 는 로그인 아래
+        self.ssalmuk = ssalmuk.register(web, self)
 
         # 원격 로그인 화면 (주인 10/23): 대시보드 로그인 뒤, 세션이 살아 있을 때만 127.0.0.1:6080(websockify)로 잇는다
         web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))
@@ -263,8 +269,11 @@ class DashApi:
     @staticmethod
     def public_paths() -> list[str]:
         """로그인 없이 여는 앱 파일 (데이터 없음)."""
+        from dealbot.dashboard.ssalmuk import PUBLIC_PATHS as SSALMUK_PUBLIC
+
         return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture",
-                f"{API}/ably_rank_capture"]  # stats_capture·ably_rank_capture: 열쇠로 직접 확인
+                f"{API}/ably_rank_capture",  # stats_capture·ably_rank_capture: 열쇠로 직접 확인
+                *SSALMUK_PUBLIC]  # 이벤트 참여 push·commands·ack: X-Ssalmuk-Key 로 직접 확인
 
     # ---------------------------------------------------------- 화면
     def state_body(self, headers: dict[str, str]) -> dict[str, Any]:
