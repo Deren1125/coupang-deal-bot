@@ -46,6 +46,7 @@ URGENT_DEALBOT = ("link_request", "review_auth", "review_info", "publish_unsure"
 URGENT_BLOGAUTO = ("login", "upload_fail", "draft_ready", "ask", "pick_photos", "hot", "owner_edit", "share_confirm",
                    "channel_ask", "channel_review", "double_pub", "link_cards", "own_stats_blocked", "kakao_expiring",
                    "sched_blocked",  # sched_blocked: 간격 두고 발행 차례에 올리지 못함 (주인 10/18) — 예약대로 발행된 것은 정리에만
+                   "ably_rank", "kz_rss",  # 정해진 시각 알림 (주인 11/14 — 에이블리 랭킹 보내기 · 월요일 키자드 RSS): 바로 푸시, 할 일 줄 없음
                    "neighbors_protect")  # 서로이웃 신청에 네이버 보호조치·비정상 활동 문구 (주인 10/18) — 멈추고 줄였다고 바로
 DIGEST_DEALBOT = ("collector_stuck", "linkprice", "sns_zero", "sns_scope", "domain_dns", "ig_ffmpeg", "threads_replies",
                   "published", "link_done", "held", "day", "waiting")

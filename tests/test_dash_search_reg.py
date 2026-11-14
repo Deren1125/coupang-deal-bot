@@ -16,7 +16,6 @@ import pytest
 from dash_helpers import blogauto_status, get_json, post_json, push_settings, session_headers
 from dealbot.app import DealBot
 from dealbot.config import Settings
-from dealbot.dashboard import rank
 from dealbot.dashboard.actions import ActionError, clean_args
 from dealbot.dashboard.blogauto import parse_v2
 from dealbot.dashboard.searchreg import KV, SearchReg, day_label
@@ -150,11 +149,7 @@ async def test_todo_row_blog_view_check_and_undo(bot: DealBot, settings: Setting
     _, body, _ = await get_json(bot, "/dashboard/api/state", h)
     todo = body["todo"]
     by = {it["iid"]: it for it in todo}
-    s = by["search"]
-    assert s["title"] == "키자드 등록 3개" and s["sev"] == "todo" and s["kind"] == "search_reg" and s["urgent"] is False
-    assert "블로그마다 하루 5개" in s["status"] and "Pick 2" in s["status"] and "라커룸 1" in s["status"]
-    assert s["primary"]["input"] == "goto" and s["primary"]["goto"] == "#/blog/search"
-    assert rank.rank(dict(s), time.time()) == 950.0 and todo.index(s) < todo.index(by["post-issue-31"])  # 주인 10/25 '맨날 놓쳐' — 맨 위 쪽
+    assert "search" not in by  # 키자드 등록 줄은 할 일에서 뺌 (주인 11/14 — 월요일 RSS 알림만) · 화면 데이터는 그대로
     sr = body["search"]
     assert sr["left"] == 3 and [g["label"] for g in sr["days"]] == ["오늘", "어제"]
     assert [x["chip"] for x in sr["days"][0]["items"]] == ["라커룸", "Pick"]
@@ -165,7 +160,7 @@ async def test_todo_row_blog_view_check_and_undo(bot: DealBot, settings: Setting
     assert status == 200 and r["status"] == "ok" and "등록함" in r["text"]
     assert all(json.loads(bot.db.kv_get(KV) or "{}")[u]["done"] for u in urls)
     _, body, _ = await get_json(bot, "/dashboard/api/state", h)
-    assert {it["iid"]: it for it in body["todo"]}["search"]["title"] == "키자드 등록 1개" and body["search"]["days"][0]["left"] == 0
+    assert "search" not in {it["iid"] for it in body["todo"]} and body["search"]["days"][0]["left"] == 0
     # 되돌리기
     status, r, _ = await post_json(bot, "/dashboard/api/action", {"action": "search.check", "args": {"url": urls[0], "done": False}}, h)
     assert status == 200 and r["status"] == "ok"
@@ -188,9 +183,7 @@ async def test_digest_gets_one_search_line(bot: DealBot, settings: Settings, tmp
     write_export(tmp_path / "blogauto.json", recent=recent_now())
     blogauto_status(settings)
     brief = bot._todo_brief()
-    assert {"kind": "search_reg", "title": "키자드 등록 3개", "iid": "search", "n": 3} in brief
-    lines = waiting_sentences(brief)
-    assert lines[-1] == "키자드에 등록할 글 3개가 있어요." and not any("그 밖의" in x and "키자드" in x for x in lines)
+    assert not any(x.get("kind") == "search_reg" for x in brief)  # 할 일에서 뺌 (주인 11/14)
     assert waiting_sentences([{"kind": "search_reg", "title": "구글 검색 등록 0개", "n": 0}]) == []
 
 

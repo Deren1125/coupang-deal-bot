@@ -4,7 +4,7 @@
    (보이는 글 · 메뉴 줄 뺌 · 표 줄 · 고른 탭 · blogId) → 서버 save 까지 이어서.
 2) save(): 열쇠 · 네이버 주소만 · 태그·스크립트 빼기 · 이메일·전화 가리기 · 크기 제한 · 블로그·화면 종류·날짜 짐작 · 30일 지우기 · 하루 개수.
 3) GET /dashboard/api/statscap (로그인 아래) · POST /dashboard/api/stats_capture (로그인 없이 · 교차 사이트 · CORS 는 네이버만 · 폼이면 HTML) ·
-   할 일 탭 '오늘 통계 보내기' (오늘 보낸 것이 있으면 사라짐).
+   (11/14: 할 일 줄은 뺌 — 알림은 tests/test_stats_remind.py).
 4) 11/11 밤 실사용에서 '저장 중 잠시만 기다려 주세요.' 덮개 글만 옴 → 덮개 사라질 때까지 기다림 · 덮개·안 보이는 요소 뺌 ·
    ROOT 가 덮개면 body 전체(메뉴 뺌) · div 표([role=row]) 도 읽음.
 """
@@ -210,14 +210,13 @@ def test_guesses_blog_kind_and_date() -> None:
     assert statscap.guess_date("", "", "1999.01.01 그리고 2026년 13월 40일", "2026-11-11") == "2026-11-11"
 
 
-def test_keeps_30_days_and_caps_a_day_and_nudges() -> None:
+def test_keeps_30_days_and_caps_a_day() -> None:
     db = FakeDb()
     db.kv[statscap.PREFIX + "2026-10-01:120000-aaaa"] = "{}"
     db.kv[statscap.PREFIX + "2026-10-20:120000-aaaa"] = "{}"
-    assert statscap.nudge(db, NOW, TZ) and statscap.nudge(db, NOW, TZ).startswith("오늘 통계 보내기")
     statscap.save(db, form(db), now=NOW, tz=TZ)
     assert statscap.PREFIX + "2026-10-01:120000-aaaa" not in db.kv and statscap.PREFIX + "2026-10-20:120000-aaaa" in db.kv
-    assert statscap.nudge(db, NOW, TZ) is None and statscap.nudge(db, NOW + 86400, TZ) is not None
+    assert statscap.today_count(db, NOW, TZ) == 1 and statscap.today_count(db, NOW + 86400, TZ) == 0
     for i in range(statscap.DAY_MAX - 1):
         statscap.save(db, form(db), now=NOW + i, tz=TZ)
     with pytest.raises(statscap.CaptureError) as e:
@@ -266,11 +265,11 @@ async def test_api_code_needs_login_and_capture_takes_key_only(bot: DealBot) -> 
     res = await _post(bot, {**good, "via": "form"}, origin="null")
     assert res[0] == 200 and res[2].startswith("text/html") and "통계 보냄 ✓ (데런픽 · 조회수 순위" in res[1]
     assert (await bot.web.dispatch("GET", statscap.PATH, anon))[0] == 405
-    assert routine.view(bot)["stats"] is None  # 오늘 보냈으니 할 일 줄 없음
+    assert routine.view(bot)["stats"] is None  # 할 일 줄은 없음 (주인 11/14 — 알림으로: tests/test_stats_remind.py)
 
 
-async def test_routine_has_stats_line_until_today_capture(bot: DealBot) -> None:
-    assert routine.view(bot)["stats"].startswith("오늘 통계 보내기")
+async def test_routine_has_no_stats_line(bot: DealBot) -> None:
+    assert routine.view(bot)["stats"] is None
 
 
 # ---------------------------------------------------------------- 4) 진짜 크롬 (playwright 가 있을 때만)

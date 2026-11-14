@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -29,7 +28,7 @@ from dash_helpers import (
 from dealbot.app import DealBot
 from dealbot.bridge import spool
 from dealbot.config import Settings
-from dealbot.dashboard import routine, statscap
+from dealbot.dashboard import routine
 from dealbot.dashboard.actions import BLOG_ACTIONS, clean_args
 from dealbot.dashboard.blogauto import _routine, parse_export
 from test_dash_state import write_export
@@ -127,7 +126,7 @@ def test_parse_export_puts_routine_next_to_naver_visits(tmp_path: Path) -> None:
 def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Path) -> None:
     assert routine.view(bot) == {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0,
                                  "ably": None, "rising": [], "rests": [],
-                                 "stats": statscap.nudge(bot.db, time.time(), ZoneInfo(bot.settings.app.timezone))}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
+                                 "stats": None}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))
     v = routine.view(bot, now=at(bot, day, "13:10"))

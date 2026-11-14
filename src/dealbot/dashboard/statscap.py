@@ -248,9 +248,3 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
 def today_count(db: Any, now: float, tz: ZoneInfo) -> int:
     return len(db.kv_items(f"{PREFIX}{_day(now, tz)}:"))
 
-
-def nudge(db: Any, now: float, tz: ZoneInfo) -> str | None:
-    """할 일 탭 한 줄 — 오늘 보낸 통계가 없으면."""
-    if today_count(db, now, tz):
-        return None
-    return "오늘 통계 보내기 — 사파리 네이버 '내 통계'에서 책갈피 '통계 보내기' (설치: 연결 탭)"

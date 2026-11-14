@@ -374,6 +374,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
             await openchat_watch.check(bot)
         except Exception as e:  # noqa: BLE001
             log.warning("open chat watch failed: %s", type(e).__name__)
+        try:  # '통계 보내기' 책갈피 알림 — 21:30 뒤 안 보낸 블로그가 있으면 하루 한 번 (주인 11/14 — notify/stats_remind)
+            from dealbot.notify import stats_remind
+
+            await stats_remind.check(bot)
+        except Exception as e:  # noqa: BLE001
+            log.warning("stats reminder failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 
