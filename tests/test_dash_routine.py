@@ -373,7 +373,7 @@ def test_best_times_pass_through_and_bad_rows_drop(bot: DealBot, tmp_path: Path)
     with_routine(tmp_path, {**sample(day), "times": times})
     assert [t["blog"] for t in routine.view(bot)["times"]] == ["hotdeal", "finance"]
     js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/routine.js").read_text(encoding="utf-8")
-    assert "블로그별 예약 추천 시각" in js and "data.times" in js
+    assert "블로그별 예약 추천 시각" not in js and "data.times" not in js  # 칸은 뺐고 데이터만 둠 (주인 11/14)
 
 
 def test_rising_keywords_start_a_pick_post() -> None:

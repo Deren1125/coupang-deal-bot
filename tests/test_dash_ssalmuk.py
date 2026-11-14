@@ -381,7 +381,7 @@ eval(fs.readFileSync(src, 'utf8'));
 const text = n => n.textContent;
 (async () => {
   await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r));
-  const out = {order: main.children.map(c => c.attrs.id || c.id || c.className), card: text(main.children[2])};
+  const out = {order: main.children.map(c => c.attrs.id || c.id || c.className), card: text(main.children[3])};
   location.hash = '#/todo/ev'; window.SBEvent.mount();
   await new Promise(r => setImmediate(r));
   const scr = main.children[0];
@@ -413,8 +413,8 @@ def test_ssalmuk_js_card_and_screen(tmp_path: Path) -> None:
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    # 급한 알림 → 오늘 할 일 칸 → 이벤트 참여 카드 (맨 위 묶음) → 할 일 카드
-    assert got["order"] == ["bn bad", "rtp", "evc", "itm"]
+    # 급한 알림 → 오늘 할 일 칸 → 할 일 카드 → 이벤트 참여 카드 (맨 아래 — 주인 11/14)
+    assert got["order"] == ["bn bad", "rtp", "itm", "evc"]
     assert got["card"].startswith("이벤트 참여열기 ›") and "남은 할 일 2" in got["card"] and "오늘 마감 1" in got["card"]
     assert "오늘 마감 · 오늘 마감 퀴즈돈좀요에서 열기" in got["card"] and "연결 끊김" not in got["card"]
     # 링크가 빈 할 일(RSS 만 읽음 — 11/14)도 '돈좀요에서 열기' · 자동 응모가 0 이면 흐리게

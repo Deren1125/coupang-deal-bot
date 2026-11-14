@@ -230,14 +230,6 @@ function pasteBox() {
     el('a', {class: 'lnk', href: '#/connect'}, '꾸미기 설치')), el('div', {class: 'box'}, ps.map(item))] : [];
 }
 
-function times() {  // 블로그별 예약 추천 시각 (주인 10/29) — 눌러서 펼침
-  const ts = data && data.times || [];
-  return ts.length ? el('div', {class: 'box'}, el('button', {class: 'sl', type: 'button', 'aria-expanded': open.tm ? 'true' : 'false',
-    onclick: () => { open.tm = !open.tm; draw(); }}, el('b', {}, `${open.tm ? '▾' : '▸'} 블로그별 예약 추천 시각`)),
-    open.tm ? ts.map(t => el('div', {class: 'it'}, el('div', {class: 'grow', style: 'padding-top:0'},
-      el('span', {class: 't'}, `${t.name} · ${t.times.join(' · ')}`), t.note ? el('span', {class: 's'}, t.note) : null))) : null) : null;
-}
-
 // ⚡ 막 뜨는 중 (주인 10/30) — 키워드마다 단추: 누르면 그 키워드로 Pick 글 쓰기 (blog.issue · 11/09 '눌러도 연결이 안 돼' — 예전엔 화면만 옮김)
 function rising() {
   const xs = data && data.rising || [];
@@ -248,13 +240,6 @@ async function write(k, e) {
   const [s, d] = await send({action: 'blog.issue', args: {keyword: k}, cid: rid(), ctoken: null});
   toast(s === 202 || s === 200 ? `'${k}' Pick 글 쓰기 시작 — 몇 분 뒤 발행 대기에 떠요` : why(s, d, '시작하지 못했어요 — 잠시 뒤 다시'));
 }
-function rests() {
-  const rs = data && data.rests || [];
-  return rs.length ? el('div', {class: 'box'}, el('button', {class: 'sl', type: 'button', 'aria-expanded': open.rs ? 'true' : 'false',
-    onclick: () => { open.rs = !open.rs; draw(); }}, el('b', {}, `${open.rs ? '▾' : '▸'} 쉬는 중 ${rs.length}가지 — 그래서 없는 단추가 있어요`)),
-    open.rs ? rs.map(t => el('p', {class: 'note', style: 'margin:0 0 10px'}, t)) : null) : null;
-}
-
 // 블로그별 (주인 11/09) — 할 일 탭(app.js)이 블로그마다 part(블로그, 이름, 그 블로그 할 일 카드) 를 붙임: 손일 체크(붙여넣기·발행·예약·이웃) + 카드
 const by = () => { try { return W.localStorage.getItem('rt-by') !== 'slot'; } catch (e) { return true; } };
 function setBy(v) { try { W.localStorage.setItem('rt-by', v); } catch (e) { /* 이번만 */ } draw(); bump(); }
@@ -290,6 +275,7 @@ function vid(x) {
         x.gate && d ? el('button', {class: 'sm', type: 'button', onclick: () => copy(d)}, '설명·태그 복사') : null)));
 }
 const uscore = () => urows().reduce((a, x) => a + (x.done || !x.gate ? 0 : x.g === 'past' ? 1000 : x.g === 'today' ? 30 : 2), 0);
+const TOP = new Set(['issue', 'finance', 'hotdeal']);  // 블로그 셋 — 할 일 맨 위 (주인 11/14)
 function part(k, label, extra, hot, first) {
   hot = hot || [];
   const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done);
@@ -305,7 +291,7 @@ function part(k, label, extra, hot, first) {
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
     SEC.slice(1).forEach(x => sec(...x));
   }
-  return [el('div', {class: 'box rt bk' + (o ? ' on' : '')}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
+  return [el('div', {class: 'box rt bk' + (o ? ' on' : '') + (TOP.has(k) ? ' tpb' : '')}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
     onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),
     el('span', {class: 'bn2'}, el('b', {}, label, hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length ? el('em', {class: 'hu'}, `급함 ${hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
     el('span', {class: 'cv'}, o ? '접기' : '열기')), el('div', {class: 'bar'}, bar), body)];
@@ -313,8 +299,8 @@ function part(k, label, extra, hot, first) {
 
 function draw() {
   if (!box) return;
-  const ok = !!(data && data.slots && data.total), ab = ably(), top = rising(), rs = rests(), st = data && data.stats && el('p', {class: 'note'}, '📊 ' + data.stats);
-  box.hidden = !ok && !ab.length && !top && !rs && !st;
+  const ok = !!(data && data.slots && data.total), ab = ably(), top = rising(), st = data && data.stats && el('p', {class: 'note'}, '📊 ' + data.stats);
+  box.hidden = !ok && !ab.length && !top && !st;
   if (box.hidden) { box.replaceChildren(); return; }
   const bar = el('i');
   if (ok) bar.style.width = Math.round(100 * data.done / data.total) + '%';
@@ -325,8 +311,7 @@ function draw() {
     el('div', {class: 'bar'}, bar),
     data.today ? null : el('p', {class: 'note'}, `${data.day} 목록이에요 — 오늘 목록이 아직 안 왔어요`),
     by() ? null : el('div', {class: 'box'}, data.slots.map(slot)),
-    times(),
-    data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab, rs].flat().filter(Boolean));
+    data.overflow ? el('p', {class: 'note', style: 'margin:-6px 0 12px'}, `오늘은 여기까지 — 나머지 ${data.overflow}개는 다음에`) : null] : [], ab].flat().filter(Boolean));
 }
 
 function mount() {
@@ -340,7 +325,8 @@ function mount() {
     draw();
   }
   const f = m.firstChild, u = f && f !== box && f.className === 'bn bad' ? f : null;  // 급한 알림(app.js) 바로 아래
-  if ((u ? u.nextSibling : f) !== box) u ? u.after(box) : m.prepend(box);
+  const tp = [...m.children].filter(c => / tpb/.test(c.className)), a = tp.length ? tp[tp.length - 1] : u;  // 블로그 셋이 맨 위 (11/14) — 오늘 손일 칸은 그 아래
+  if (a ? a.nextSibling !== box : f !== box) a ? a.after(box) : m.prepend(box);
   if (!data || Date.now() - at > 30000) load();
 }
 

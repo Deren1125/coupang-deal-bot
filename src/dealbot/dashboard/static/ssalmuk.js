@@ -343,9 +343,7 @@ function mount() {
   }
   if (onTodo()) {
     if (!card) { card = el('article', {id: 'evc', class: 'itm evc', 'aria-label': '이벤트 참여'}); drawCard(); }
-    const rt = D.getElementById('rtp'), f = m.firstChild, u = f && f !== card && f.className === 'bn bad' ? f : null;
-    const after = rt && rt.parentNode === m ? rt : u;  // 급한 알림 · 오늘 할 일 칸 바로 아래 (맨 위 묶음)
-    if (after ? after.nextSibling !== card : m.firstChild !== card) after ? after.after(card) : m.prepend(card);
+    if (m.children[m.children.length - 1] !== card) m.append(card);  // 할 일 맨 아래 (주인 11/14)
   } else if (card && card.parentNode) card.remove();
   if ((onScr() || onTodo()) && (!data || Date.now() - at > 30000)) load();
 }

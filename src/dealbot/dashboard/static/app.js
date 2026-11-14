@@ -972,7 +972,7 @@ function vTodo() {
   const hu = i => i.sev === 'stop' || i.sev === 'hot' || i.cue === '급해요' || (i.expires_at && i.expires_at - now() < 3 * 3600);
   if (RB) [['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸'], ['shorts', '숏폼·릴스·룩북'], ['', '딜·SNS·그 밖']].map(([k, l]) => {
     const xs = items.filter(i => bk(i) === k && i.kind !== 'uploads'), h = xs.filter(hu);
-    return [k, l, xs, h, h.length * 1000 + (W.SBRoutine.score ? W.SBRoutine.score(k) : 0) + (xs.length - h.length) * 10];
+    return [k, l, xs, h, (/^[a-z]+$/.test(k) && k !== 'shorts') * 1e6 + h.length * 1000 + (W.SBRoutine.score ? W.SBRoutine.score(k) : 0) + (xs.length - h.length) * 10];
   }).sort((a, b) => b[4] - a[4]).forEach(([k, l, xs, h], n) => out.push(...W.SBRoutine.part(k, l,
     xs.filter(i => !hu(i)).map(x => item(x)).concat(k || !rest ? [] : el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`)), h.map(x => item(x)), !n)));
   if (!items.length && !RB) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
