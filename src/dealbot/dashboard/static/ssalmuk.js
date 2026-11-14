@@ -94,6 +94,18 @@ function skipNote() {
 }
 const openLabel = u => /^https:\/\/([a-z0-9-]+\.)*donzomyo\.kr\//.test(u) ? '돈좀요에서 열기' : '이벤트 열기';
 const hm = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : ''; };
+// 11/14 네이버 검색 상태 한 줄 (state.search + 응답 search_proxy) — 글자로만, 없으면 null
+const searchLine = () => {
+  let q = (st() || {}).search; const p = data && data.search_proxy, n = v => Number.isFinite(Number(v)) ? Number(v) : null;
+  q && typeof q === 'object' || (q = null);
+  const ks = p && p.keysrc, cnt = p && n(p.today_count) ? n(p.today_count) : q ? n(q.count) : null;
+  if (!q && !ks && !(p && n(p.today_count))) return null;
+  const d = q && q.lastAt ? new Date(q.lastAt) : null, hm = d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : '';
+  const err = q && q.lastError ? String(q.lastError).slice(0, 40) : '';
+  return ['네이버 검색', cnt != null ? `오늘 ${cnt}회${q && n(q.ok) != null ? ` (성공 ${n(q.ok)} · 실패 ${n(q.fail) || 0})` : ''}` : '',
+    ks ? `키: ${ks === 'blog' ? '블로그 서버' : ks === 'dealbot' ? '딜봇' : String(ks).slice(0, 10)}` : '',
+    q && q.lastStatus ? `마지막 ${String(q.lastStatus).slice(0, 10)}${hm ? ' ' + hm : ''}` : '', err ? `오류: ${err}` : ''].filter(Boolean).join(' · ');
+};
 const todos = () => ((st() || {}).todo || []).filter(t => t && typeof t === 'object');
 const cnt = () => Object.assign({auto: 0, left: 0, today: 0, applied: 0}, (st() || {}).counts || {});
 function recount() {
@@ -310,10 +322,10 @@ function drawScr() {
     }
     out.push(el('p', {class: 'grp'}, '더 보기'), fold('applied', `자동 응모 내역 ${applied().length}`, () => applied().length ? el('div', {}, applied().map(arow))
       : el('p', {class: 'note'}, '아직 자동 응모한 이벤트가 없어요')),
-      Array.isArray(s.sources) && s.sources.length ? fold('src', `수집 출처 ${s.sources.length}`, () => s.sources.filter(x => x && typeof x === 'object').map(x =>
+      (Array.isArray(s.sources) && s.sources.length) || searchLine() ? fold('src', `수집 출처 ${(s.sources || []).length}`, () => [searchLine() && el('p', {class: 'note', style: 'font-size:12px;opacity:.7'}, searchLine()), ...(s.sources || []).filter(x => x && typeof x === 'object').map(x =>
         el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, x.name || x.id || ''),
           el('span', {class: 's'}, [x.items != null ? `${x.items}개` : '', x.why, x.until ? `${kst(x.until)}까지` : '', x.at ? `확인 ${kst(x.at)}` : ''].filter(Boolean).join(' · '))),
-          el('span', {class: 'cp ' + (SRC[x.status] || SRC.error)[0]}, (SRC[x.status] || ['', x.status || '?'])[1])))) : null,
+          el('span', {class: 'cp ' + (SRC[x.status] || SRC.error)[0]}, (SRC[x.status] || ['', x.status || '?'])[1])))]) : null,
       fold('profile', '내 정보', profileBox));
   }
   out.push(fold('conn', '연결', connBox, keyLoad));

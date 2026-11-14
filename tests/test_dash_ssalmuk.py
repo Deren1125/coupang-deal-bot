@@ -468,6 +468,31 @@ def test_ssalmuk_js_rss_only_state_empty_links_zero_auto(tmp_path: Path) -> None
 
 
 @pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_shows_naver_search_line() -> None:
+    """11/14 수집 출처 칸 맨 위 회색 한 줄: 네이버 검색 횟수·성공·어느 키·마지막 — 둘 다 없으면 줄 없음."""
+    def run(search, proxy) -> str:
+        s = ssalmuk.Ssalmuk(FakeDb())
+        st = sample()
+        st["sources"] = [{"id": "donzomyo", "name": "돈좀요", "status": "ok", "items": 12}]
+        if search is not None:
+            st["search"] = search
+        s.push(st)
+        v = s.view()
+        v["search_proxy"] = proxy
+        out = subprocess.run([NODE, "-e", SHIM, str(STATIC / "ssalmuk.js"), json.dumps(v, ensure_ascii=False)],
+                             capture_output=True, text=True, timeout=30)
+        assert out.returncode == 0, out.stderr
+        return json.loads(out.stdout)["src"]
+    q = {"date": "2026-11-14", "mode": "proxy", "count": 12, "ok": 11, "fail": 1, "lastStatus": 200, "lastAt": "2026-11-14T01:24:00Z"}
+    got = run(q, {"keysrc": "blog", "today_count": 12})
+    assert "네이버 검색 · 오늘 12회 (성공 11 · 실패 1) · 키: 블로그 서버 · 마지막 200 10:24" in got and "오류" not in got
+    assert "돈좀요12개" in got
+    assert "· 오류: 네이버 401" in run({**q, "lastError": "네이버 401"}, {"keysrc": "dealbot", "today_count": 12})
+    assert "네이버 검색" not in run(None, {"keysrc": None, "today_count": 0})
+    assert "네이버 검색 · 오늘 3회 · 키: 딜봇" in run(None, {"keysrc": "dealbot", "today_count": 3})
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
 def test_ssalmuk_js_auto_apply_first_layout() -> None:
     """11/14 '자동화 되는 애들만': todayApplied·weekApplied·notAutomated 가 오면 카드·화면이 자동 응모 중심 (없으면 예전 화면 — 위 시험들)."""
     from datetime import UTC, datetime, timedelta
