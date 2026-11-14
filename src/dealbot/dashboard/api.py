@@ -32,7 +32,7 @@
   POST /dashboard/api/ably_rank_capture 책갈피가 에이블리 랭킹 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 · 열쇠 k · CORS 는 https://*.a-bly.com 만)
                                         → ablyrank.save (kv) → Blog-Auto 가 알리면 일 ably_rank_capture 로 넘김 · 서버는 에이블리를 열지 않음
   GET  /dashboard/api/seoi              '이웃 관리' 책갈피 {code, len, steps, note, today} (seoi.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/14)
-  POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.naver.com 만)
+  POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
   POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
@@ -115,6 +115,7 @@ TEST_BODY_MAX = 1024
 STATSCAP_BODY_MAX = 1_500_000  # statscap.BODY_MAX 와 같게
 NAVER_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*naver\.com$")
 ABLY_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*a-bly\.com$")
+SEOI_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*blog\.naver\.com$")  # 이웃 관리 책갈피가 도는 화면만 (seoi.js 의 hostname 확인과 같게)
 ABLYRANK_BODY_MAX = 600_000  # ablyrank.BODY_MAX 와 같게
 SEOI_BODY_MAX = 60_000  # seoi.BODY_MAX 와 같게
 LABELS = ("Galaxy", "iPhone", "iPad", "컴퓨터", "휴대폰")
@@ -700,18 +701,18 @@ class DashApi:
 
     async def seoi_act(self, form: dict[str, str], headers: dict[str, str]) -> Any:
         """책갈피가 누르기 전에 묻는 곳 (주인 11/14 서이추·이웃 들르기). 열쇠 → 간격·상한 → (이웃 글이면) 댓글 초안. 안 되면 알릴 글과 함께 거절 —
-        책갈피는 그 글만 보이고 아무것도 하지 않는다. 서버는 네이버를 열지 않고, 남의 글 본문은 기록하지 않는다. 응답 CORS 는 네이버 화면에만."""
+        책갈피는 그 글만 보이고 아무것도 하지 않는다. 서버는 네이버를 열지 않고, 남의 글 본문은 기록하지 않는다. 응답 CORS 는 네이버 블로그 화면에만."""
         from zoneinfo import ZoneInfo
 
         from dealbot.dashboard import seoi
 
         origin = (headers.get("origin") or "").strip().rstrip("/")
-        cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if NAVER_ORIGIN_RE.match(origin) else {"Vary": "Origin"}
+        cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if SEOI_ORIGIN_RE.fullmatch(origin) else {"Vary": "Origin"}
         cors["Cache-Control"] = "no-store"
         if not self.seoi_rate.hit(client_key(headers)):
             return jresp(429, {"ok": False, "code": "rate", "text": "너무 자주 눌렀어요 — 잠시 뒤 다시"}, cors)
         rows = None
-        if form.get("a") == "add":  # 서이추: 오늘 할 일 줄에서 그 블로그의 멘트 (읽기만)
+        if form.get("a") == "add" and seoi.key_ok(self.bot.db, form.get("k")):  # 서이추: 오늘 할 일 줄에서 그 블로그의 멘트 (읽기만 · 열쇠가 맞을 때만)
             try:
                 from dealbot.dashboard import routine
 

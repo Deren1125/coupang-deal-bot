@@ -10,7 +10,8 @@ act(): a=add(서이추 한 단계) · a=visit(이웃 글 — 제목·본문 → 
 사람 속도 (주인 11/14 '너무 빠르면 봇으로 볼까' — 속이는 장치 없이 진짜로 천천히):
   간격 = 한 번 받을 때마다 다음 허용 시각을 무작위로 (서이추 60~120초 · 들르기 45~90초 · 블로그를 바꿔도 같은 종류면 같이) → 이르면 '조금 쉬었다가 — n초 뒤에'
   (기다렸다 저절로 하지 않음 · 거절은 세지 않음) · 한 시간 15번 넘으면 그 한 시간이 지날 때까지 · 하루 서이추 블로그마다 30 · 들르기 모두 합쳐 40.
-  같은 대상(블로그 아이디 · 글 주소)을 10분 안에 다시 누르면 이어 하기 (서이추 ①→② 두 번 누름 · 댓글 칸이 안 열려 다시) — 다시 세지 않고 초안도 그대로.
+  같은 대상(블로그 아이디 · 글 주소)을 10분 안에 다시 누르면 이어 하기 (서이추 ①→② 두 번 누름 · 댓글 칸이 안 열려 다시) — 다시 세지 않고 초안도 그대로
+  (이어 하기는 본문·읽은 시간을 다시 보지 않음 — 댓글 단추가 본문 없는 댓글 화면으로 옮겨 가도 거기서 그 초안을 넣게).
   글 화면은 연 지 20초(가운데까지 내려 봤으면 8초) 뒤부터 (책갈피도 보고 여기서도 봄).
 kv: "seoi:day:<날 KST>" = {add: {블로그: n}, visit: {블로그: n}, stop: {add|visit: [블로그]}} (30일) · "seoi:pace:<add|visit>" = {next, recent, tickets} ·
   "seoi:recent:<블로그>" = 최근 초안 12개 (비슷한 댓글 막기). 남의 글 본문은 저장·기록하지 않는다 (기록엔 글 주소 해시·글자 수뿐).
@@ -412,18 +413,22 @@ async def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None 
         raise CaptureError(400, "where", "네이버 블로그 글 화면에서 보낸 것만 받아요")
     if m.group(1) in {nid for nid, _b, _n in BLOGS}:
         raise CaptureError(400, "own", "우리 블로그 글이에요")
-    title = statscap.clean(form.get("t"), TITLE_MAX * 3)[:TITLE_MAX]
-    text = statscap.clean(form.get("x"), TEXT_MAX * 3)[:TEXT_MAX]
-    if len(text) < TEXT_MIN:
-        raise CaptureError(400, "empty", "글 본문을 못 읽었어요 — 글이 다 뜬 뒤 다시 눌러 주세요")
-    try:
-        rd = int(float(form.get("rd") or 0))
-    except ValueError:
-        rd = 0
-    need = READ_SCROLL_S if str(form.get("sc") or "") == "1" else READ_S
-    if rd < need:
-        raise CaptureError(429, "read", f"글을 조금 더 읽고 눌러 주세요 — {need - max(rd, 0)}초 뒤에 다시")
     target = hashlib.sha256(m.group(0).encode()).hexdigest()[:16]
+    held = _pace(db, "visit", now)["tickets"].get(target)
+    # 방금(10분 안) 받은 그 글이면 본문·읽은 시간을 다시 보지 않는다 — 댓글 단추가 본문 없는 댓글 화면으로 옮겨 간 뒤 다시 눌러도 그 초안 (이어 하기)
+    title = text = ""
+    if not (held and held.get("blog") == blog):
+        title = statscap.clean(form.get("t"), TITLE_MAX * 3)[:TITLE_MAX]
+        text = statscap.clean(form.get("x"), TEXT_MAX * 3)[:TEXT_MAX]
+        if len(text) < TEXT_MIN:
+            raise CaptureError(400, "empty", "글 본문을 못 읽었어요 — 글이 다 뜬 뒤 다시 눌러 주세요")
+        try:
+            rd = int(float(form.get("rd") or 0))
+        except (ValueError, OverflowError):  # 'x' · 'nan' · 'inf' — 읽은 시간을 모르면 0초
+            rd = 0
+        need = READ_SCROLL_S if str(form.get("sc") or "") == "1" else READ_S
+        if rd < need:
+            raise CaptureError(429, "read", f"글을 조금 더 읽고 눌러 주세요 — {need - max(rd, 0)}초 뒤에 다시")
     g = gate(db, "visit", blog, target, now=now, tz=tz, rng=rng)
     tail = f"오늘 이웃 들르기 {g['total']}/{VISIT_DAY_CAP} · {NAMES[blog]} {g['n']}"
     base = {"ok": True, "blog": blog, "again": g["again"], "n": g["n"], "total": g["total"], "cap": VISIT_DAY_CAP, "text": tail}

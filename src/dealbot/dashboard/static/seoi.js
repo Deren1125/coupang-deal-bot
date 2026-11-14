@@ -3,6 +3,7 @@
      ① 블로그 화면 (글 화면이라도 주소에 #bmmsg= 가 있으면 여기)  → '이웃추가' 단추 한 번
      ② 이웃추가 화면 (BuddyAdd… · 서로이웃 고르는 칸이 보이는 화면)  → '서로이웃' 고르고 멘트 칸 채움 (그룹은 그대로)
      ③ 이웃 글 화면                                              → 공감 한 번(이미 눌렀으면 그대로) + 댓글 초안을 댓글 칸에
+        (댓글 단추가 본문 없는 댓글 화면으로 옮겨 가면 거기서 한 번 더 → 방금 받은 그 초안만 넣음)
    확인·등록·신청·다음 단추는 절대 누르지 않는다 — press() 가 그런 글자·submit 단추를 거절하고, 누르기(.click())는 press() 한 곳뿐.
    사람 속도 지키기(주인 11/14 '너무 빠르면 봇으로 볼까 걱정'): 누르기 전에 대시보드(@@URL@@ · 열쇠 @@KEY@@ · 쿠키 없음)에 물어
    간격(서이추 60~120초 · 들르기 45~90초)·하루·한 시간 상한을 넘으면 아무것도 하지 않고 알림만 (나중에 저절로 하지 않음).
@@ -36,9 +37,10 @@ const vis = n => {
   try { return !n.getClientRects || n.getClientRects().length > 0; } catch (e) { return true; }
 };
 // 누르기는 여기 한 곳뿐 — 확인·등록·신청 같은 마지막 단추와 submit 단추는 누르지 않는다
+// (type 을 안 적은 button 도 폼 안에 있으면 submit 이라 거절 — 폼 밖의 그런 단추는 그냥 단추)
 const press = n => {
-  const t = sq(tx(n) + ' ' + (n.value || '') + ' ' + (n.getAttribute('aria-label') || ''));
-  if ((n.getAttribute('type') || '').toLowerCase() === 'submit' || NO.test(t)) return false;
+  const t = sq(tx(n) + ' ' + (n.value || '') + ' ' + (n.getAttribute('aria-label') || '')), ty = String(n.getAttribute('type') || (n.form && n.type) || '').toLowerCase();
+  if (ty === 'submit' || ty === 'image' || NO.test(t)) return false;
   n.click();
   return true;
 };
@@ -201,24 +203,28 @@ const visit = async () => {
   const tn = qa('.se-title-text,.pcol1 .itemSubjectBoldfont,h3.se_textarea,.tit_h3').filter(vis)[0];
   const bn = qa('.se-main-container,#postViewArea,.post_ct,#viewTypeSelector').filter(vis)[0];
   const title = sq(tx(tn)).slice(0, 200) || sq(D.title).slice(0, 200), text = sq(tx(bn)).slice(0, 3000);
-  if (!bn || text.length < 30) { alert(SB + '글 본문을 못 읽었어요 (제목 ' + (tn ? '있음' : '없음') + ' · 본문 ' + text.length + '자) — 글이 다 뜬 뒤 다시'); return; }
+  // 본문 없이 댓글 칸만 있는 화면 (댓글 단추가 댓글 화면으로 옮겨 간 뒤): 방금(10분 안) 이 글에서 받은 초안을 이어서 넣음 — 새로 세지도 쓰지도 않음
+  const BOX = '#naverComment__write_textarea,.u_cbox_write_wrap [contenteditable=true],.u_cbox_write_wrap textarea';
+  const cont = (!bn || text.length < 30) && qa(BOX).filter(vis).length > 0;
+  if (!cont && (!bn || text.length < 30)) { alert(SB + '글 본문을 못 읽었어요 (제목 ' + (tn ? '있음' : '없음') + ' · 본문 ' + text.length + '자) — 글이 다 뜬 뒤 다시'); return; }
   const rd = Math.floor((W.performance && W.performance.now ? W.performance.now() : 99000) / 1000);
   let sc = 0;
   try { const f = bn.ownerDocument.defaultView, fe = f !== W && f.frameElement, r = bn.getBoundingClientRect(); sc = (W.scrollY > 0 || f.scrollY > 0) && (fe ? fe.getBoundingClientRect().top : 0) + r.top + r.height / 2 <= W.innerHeight ? 1 : 0; } catch (e) {}
-  if (rd < (sc ? 8 : 20)) { alert(SB + '글을 조금 더 읽고 눌러 주세요 — ' + ((sc ? 8 : 20) - rd) + '초 뒤에 다시 (가운데까지 내려 봤으면 8초, 아니면 20초)'); return; }
+  if (!cont && rd < (sc ? 8 : 20)) { alert(SB + '글을 조금 더 읽고 눌러 주세요 — ' + ((sc ? 8 : 20) - rd) + '초 뒤에 다시 (가운데까지 내려 봤으면 8초, 아니면 20초)'); return; }
   const w = await who(H.get('bmb'));
   if (!w.b) return;
-  ov = card('댓글 초안을 쓰는 중이에요 — 30초쯤 걸려요 · 화면은 그대로 두세요');
-  const g = await ask({a: 'visit', b: w.b, u: 'https://blog.naver.com/' + P.id + '/' + P.no, t: title, x: text, rd: rd, sc: sc});
-  ov.remove();
+  if (!cont) ov = card('댓글 초안을 쓰는 중이에요 — 30초쯤 걸려요 · 화면은 그대로 두세요');
+  const g = await ask({a: 'visit', b: w.b, u: 'https://blog.naver.com/' + P.id + '/' + P.no, t: title, x: cont ? '' : text, rd: rd, sc: sc});
+  if (ov) ov.remove();
   ov = null;
   if (!g) { alert(SB + DOWN); return; }
-  if (!g.ok) { alert(SB + g.text); return; }
+  if (!g.ok) { alert(SB + (cont && g.code === 'empty' ? '이 화면에서는 글 본문을 못 읽었어요 (제목 ' + (tn ? '있음' : '없음') + ' · 본문 ' + text.length + '자) — 글 화면에서 책갈피를 눌러 주세요' : g.text)); return; }
   const did = [];
   // 공감: 글 끝 단추 하나 (떠 있는 단추는 다른 게 없을 때만) · 이미 눌렸으면 그대로 · 여러 개면 누르지 않음
   const on = n => n.getAttribute('aria-pressed') === 'true' || /(^|\s)on(\s|$)/.test(n.className);
   const lk = qa('a.u_likeit_button._face').filter(vis), fx = n => !!n.closest('[class*=Interact__is_floating],.floating_bottom'), end = lk.filter(n => !fx(n)), ls = end.length ? end : lk;
   if (g.like === false) did.push('공감은 누르지 않았어요');
+  else if (cont) did.push('공감은 글 화면에서');
   else if (!ls.length) did.push('공감 단추를 못 찾았어요');
   else if (ls.some(on)) did.push('공감은 이미 눌러져 있어요');
   else if (ls.length > 1) did.push('공감 단추가 ' + ls.length + '개라 누르지 않았어요');
@@ -228,7 +234,6 @@ const visit = async () => {
     did.push(on(ls[0]) ? '공감 ✓' : '공감을 눌렀는데 표시가 안 바뀌었어요 — 화면을 봐 주세요');
   }
   // 댓글: 칸이 없으면 댓글 단추로 열고 기다림 · 칸에 글이 있으면 건드리지 않음 · 등록은 주인이
-  const BOX = '#naverComment__write_textarea,.u_cbox_write_wrap [contenteditable=true],.u_cbox_write_wrap textarea';
   const cm = g.comment || '';
   if (!cm) did.push(g.note || '댓글 초안은 없어요');
   else {

@@ -76,7 +76,8 @@ def test_bookmarklet_never_submits_and_has_no_tricks() -> None:
     # 누르기는 press() 한 곳 — 마지막 단추(확인·등록·신청·다음)와 submit 은 거기서 거절
     assert js.count(".click()") == 1 and "n.click();" in js
     assert "const NO=/확인|등록|신청|보내기|완료|다음|취소|삭제|차단|submit/i;" in js
-    assert "==='submit'||NO.test(t))return false;" in js
+    assert "if(ty==='submit'||ty==='image'||NO.test(t))return false;" in js
+    assert "ty=String(n.getAttribute('type')||(n.form&&n.type)||'').toLowerCase();" in js  # type 없는 button 도 폼 안이면 submit
     for bad in (".submit(", "requestSubmit", "KeyboardEvent", "MouseEvent", "PointerEvent", "TouchEvent", "keydown", "keypress", "keyup",
                 "mousedown", "mousemove", "touchstart", "userAgent", "navigator", "webdriver", "cookie", "XMLHttpRequest", "sendBeacon",
                 "setInterval"):
@@ -125,11 +126,13 @@ class El {
     this.value = ''; this.checked = false; this.disabled = false; this.hidden = false; this._t = '';
     for (const k in a || {}) { const v = a[k];
       if (k === 'text') this._t = v; else if (k === 'on' || k === 'rect') this[k] = v; else if (k === 'name') { this.nm = v; named[v] = this; }
-      else if (['value', 'checked', 'disabled', 'hidden'].includes(k)) this[k] = v; else this.attrs[k] = String(v); }
+      else if (['value', 'checked', 'disabled', 'hidden', 'form'].includes(k)) this[k] = v; else this.attrs[k] = String(v); }
     for (const c of kids || []) this.appendChild(c);
   }
   get id() { return this.attrs.id || ''; }
   get className() { return this.attrs.class || ''; }
+  get type() { return this.attrs.type || (this.tagName === 'BUTTON' ? 'submit' : ''); }  // 브라우저처럼: type 없는 button = submit
+  set type(v) { this.attrs.type = String(v); }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   appendChild(c) { c.parentNode = this; this.children.push(c); return c; }
@@ -313,6 +316,12 @@ def test_form_reports_what_it_found_when_it_cannot_do_it() -> None:
     got = run({"url": "https://m.blog.naver.com/BuddyAddForm.naver?blogId=neighbor1", "win": {"userId": "derenlog"}, "ls": stored("finance"), "body": body,
                "replies": [{"ok": True, "text": "t"}]})
     assert got["clicks"] == ["both"] and got["els"]["msg"]["value"] == MSG and got["els"]["ok"]["clicks"] == 0 and "서로이웃을 눌렀어요" in got["alerts"][0]
+    # 그 단추가 폼 안의 type 없는 button (= submit, 누르면 폼이 넘어감) 이면 누르지 않고 직접 고르라고 알림 — 멘트만 넣음
+    body = [["button", {"name": "one", "text": "이웃", "form": True}], ["button", {"name": "both", "text": "서로이웃", "form": True, "on": "submit"}],
+            ["textarea", {"name": "msg"}], ["button", {"name": "ok", "text": "확인", "form": True, "on": "submit"}]]
+    got = run({"url": "https://m.blog.naver.com/BuddyAddForm.naver?blogId=neighbor1", "win": {"userId": "derenlog"}, "ls": stored("finance"), "body": body,
+               "replies": [{"ok": True, "text": "t"}]})
+    assert got["clicks"] == [] and "submitted" not in got and got["els"]["msg"]["value"] == MSG and "서로이웃은 직접 골라 주세요" in got["alerts"][0]
 
 
 def blog_home(nid: str) -> dict[str, Any]:
@@ -360,6 +369,11 @@ def test_blog_page_in_pc_frame_and_refusals_do_nothing() -> None:
     assert got["alerts"] == ["이웃 관리: 이웃추가 단추를 못 찾았어요 — 보이는 단추: 서로이웃 (이미 이웃일 수 있어요) · 아무것도 하지 않았어요"] and got["clicks"] == []
     got = run({"url": "https://www.naver.com/", "body": []})
     assert got["alerts"] == ["이웃 관리: 네이버 블로그 화면에서 눌러 주세요"]
+    # 이웃추가 단추가 폼 안의 submit 단추(type 없는 button · input type=image)면 누르지 않음 — 직접 누르라고 알림
+    for btn in (["button", {"data-click-area": "ebc.add", "name": "add", "text": "이웃추가", "form": True, "on": "submit"}],
+                ["input", {"type": "image", "id": "btn_add_nb", "name": "add", "value": "이웃추가", "aria-label": "이웃추가", "text": "이웃추가", "on": "submit"}]):
+        got = run({"url": "https://m.blog.naver.com/neighbor1", "win": {"userId": "derenpick"}, "body": [btn], "replies": [{"ok": True, "text": "t"}]})
+        assert got["clicks"] == [] and "submitted" not in got and got["alerts"][-1] == "이웃 관리: 이웃추가 단추를 누르지 못했어요 — 직접 눌러 주세요", btn
 
 
 def post_page(pressed: str = "false", open_box: bool = False, typed: str = "") -> list[Any]:
@@ -435,6 +449,35 @@ def test_post_page_waits_until_the_post_was_read_and_refusals_do_nothing() -> No
     assert got["alerts"] == ["이웃 관리: 네이버에 로그인돼 있지 않아요 — 로그인한 뒤 다시"] and got["asks"] == []
     got = run({"url": url, "win": win, "body": [["div", {"class": "se-title-text", "text": "제목"}]]})
     assert got["alerts"][0].startswith("이웃 관리: 글 본문을 못 읽었어요 (제목 있음 · 본문 0자)") and got["asks"] == []
+
+
+@needs_node
+async def test_comment_only_screen_continues_with_the_draft_it_just_got() -> None:
+    """댓글 단추가 본문 없는 댓글 화면으로 옮겨 가면(모바일): 거기서 한 번 더 누르면 방금 받은 그 초안만 넣음 — 새로 세지도 쓰지도 않고, 등록은 주인이."""
+    db, d = FakeDb(), FakeDrafter()
+    win = {"userId": "demiyum", "bLoginUser": True}
+    sent = run({"url": "https://m.blog.naver.com/neighbor1/223456789012", "body": post_page(), "win": win, "replies": [{"ok": False, "text": "x"}]}, db)["asks"][0]
+    first = await seoi.act(db, sent, tz=TZ, now=NOW, drafter=d)
+    assert first["comment"] == DRAFT and first["again"] is False
+    cpage = {"url": "https://m.blog.naver.com/CommentList.naver?blogId=neighbor1&logNo=223456789012", "win": win, "open_ms": 900,
+             "body": [["div", {"class": "u_cbox_write_wrap"}, [["div", {"id": "naverComment__write_textarea", "contenteditable": "true", "name": "box"}],
+                                                                ["button", {"class": "u_cbox_btn_upload", "name": "send", "text": "등록", "on": "submit"}]]]]}
+    ask = run({**cpage, "replies": [{"ok": False, "text": "x"}]}, db)["asks"][0]
+    assert ask["u"] == sent["u"] and ask["x"] == "" and ask["b"] == "hotdeal"  # 같은 글 주소 · 본문 없이
+    reply = await seoi.act(db, ask, tz=TZ, now=NOW + 40, drafter=d)  # 간격(45초) 안이어도 같은 글이라 이어 하기
+    assert reply["again"] is True and reply["comment"] == DRAFT and reply["n"] == 1 and len(d.calls) == 1
+    got = run({**cpage, "replies": [reply]}, db)
+    assert got["els"]["box"]["text"] == DRAFT and got["clicks"] == [] and got["els"]["send"]["clicks"] == 0 and "submitted" not in got and got["left"] == 0
+    assert got["alerts"] == ["이웃 관리: 라커룸 · 공감은 글 화면에서 · 댓글 초안 넣음 ✓ — 내 말로 고친 뒤 '등록'은 직접 (오늘 이웃 들르기 1/40 · 라커룸 1)"]
+    # 받은 적 없는 글(또는 10분이 지난 글)의 댓글 화면: 서버가 본문 없다고 거절 → 글 화면에서 누르라고만 알림
+    e = await refused(db, ask, NOW + seoi.TICKET_S + 1, drafter=d)
+    assert (e.status, e.code) == (400, "empty") and len(d.calls) == 1 and seoi.today(db, NOW + 700, TZ)["visit"] == 1
+    got = run({**cpage, "replies": [{"ok": False, "code": "empty", "text": e.text}]}, db)
+    assert got["alerts"] == ["이웃 관리: 이 화면에서는 글 본문을 못 읽었어요 (제목 없음 · 본문 0자) — 글 화면에서 책갈피를 눌러 주세요"] and got["els"]["box"]["text"] == ""
+    assert got["clicks"] == []
+    # 다른 블로그로 받은 초안은 이어 주지 않음
+    other = {**ask, "b": "issue"}
+    assert (await refused(db, other, NOW + 50, drafter=d)).code == "empty"
 
 
 @needs_node
@@ -564,6 +607,29 @@ async def test_add_day_cap_is_per_blog(nid: str, blog: str, name: str) -> None:
     assert (await seoi.act(db, add_form(db, blog, "tomorrow"), tz=TZ, now=late + 86400))["n"] == 1  # 다음 날은 다시
 
 
+async def test_day_turns_over_at_kst_midnight_but_gap_and_hour_carry_over() -> None:
+    """하루 상한은 한국 시각 자정에 새로 (UTC 자정 아님) · 간격·한 시간 상한은 자정을 넘어도 이어짐 (자정 직후에 몰아 하지 못하게)."""
+    db, mid = FakeDb(), NOW + (5 * 3600 + 400)  # 11/15 00:00:00 KST = 11/14 15:00 UTC
+    assert seoi._day(mid - 1, TZ) == "2026-11-14" and seoi._day(mid, TZ) == "2026-11-15"
+    c = seoi._counts(db, "2026-11-14")
+    c["add"]["issue"], c["visit"]["issue"] = seoi.ADD_DAY_CAP, seoi.VISIT_DAY_CAP
+    seoi._put(db, "seoi:day:2026-11-14", c)
+    assert (await refused(db, add_form(db), mid - 30)).code == "day"
+    assert (await refused(db, visit_form(db), mid - 30, drafter=FakeDrafter())).code == "day"
+    assert (await seoi.act(db, add_form(db), tz=TZ, now=mid + 1, rng=Rng("hi")))["text"] == "오늘 데런픽 서이추 1/30"  # 자정이 지나면 다시 1부터
+    assert (await seoi.act(db, visit_form(db), tz=TZ, now=mid + 1, drafter=FakeDrafter()))["total"] == 1
+    assert seoi.today(db, mid - 1, TZ)["by"]["issue"]["add"] == 30 and seoi.today(db, mid + 2, TZ)["by"]["issue"]["add"] == 1
+    # 자정 앞에서 한 것의 간격·한 시간 상한은 자정 뒤에도 그대로
+    db = FakeDb()
+    for i in range(seoi.HOUR_CAP):
+        await seoi.act(db, add_form(db, "issue", f"neighbor{i}"), tz=TZ, now=mid - 1900 + i * 125, rng=Rng("hi"))
+    last = mid - 1900 + (seoi.HOUR_CAP - 1) * 125  # 23:57:30
+    assert (await refused(db, add_form(db, "issue", "late"), last + 119)).code == "gap"
+    e = await refused(db, add_form(db, "finance", "late"), mid + 60)  # 날이 바뀌고 블로그를 바꿔도 한 시간 15번은 그대로
+    assert e.code == "hour" and seoi.today(db, mid + 60, TZ)["by"]["finance"]["add"] == 0
+    assert (await seoi.act(db, add_form(db, "finance", "late"), tz=TZ, now=mid - 1900 + 3600))["n"] == 1
+
+
 def nb_row(blog: str, target: str, msg: str) -> dict[str, Any]:
     """오늘 할 일의 서로이웃 줄 (Blog-Auto routine — 대시보드가 거른 모양)."""
     return {"id": f"nb-add:{blog}:{target}", "slot": "s4", "group": "이웃", "blog": blog, "title": f"서로이웃 신청 · {target}", "note": "최근 글 이유", "min": 2,
@@ -644,6 +710,8 @@ async def test_visit_checks_read_time_place_and_size() -> None:
     assert (e.status, e.code, e.text) == (429, "read", "글을 조금 더 읽고 눌러 주세요 — 15초 뒤에 다시")
     assert (await refused(db, visit_form(db, rd="7", sc="1"), NOW, drafter=d)).code == "read"
     assert (await refused(db, visit_form(db, rd="x"), NOW, drafter=d)).code == "read"
+    for odd in ("inf", "1e999", "nan", "-inf"):  # 셀 수 없는 값도 '모름 = 0초' (오류로 끝나지 않게)
+        assert (await refused(db, visit_form(db, rd=odd), NOW, drafter=d)).code == "read", odd
     assert (await refused(db, visit_form(db, u="https://evil.example/blog.naver.com/a/123456"), NOW, drafter=d)).code == "where"
     assert (await refused(db, visit_form(db, u="https://blog.naver.com/derenpick/223456789012"), NOW, drafter=d)).code == "own"
     assert (await refused(db, visit_form(db, x="짧은 글"), NOW, drafter=d)).code == "empty"
@@ -795,6 +863,9 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, monkeyp
     assert res[0] == 403 and json.loads(res[1])["code"] == "key"
     res = await _post(bot, add_form(bot.db, "issue", "neighbor7"), origin="https://evil.example")
     assert "Access-Control-Allow-Origin" not in res[3]  # 남의 화면은 답을 못 읽음
+    for o in ("https://cafe.naver.com", "https://naver.com", "https://blog.naver.com.evil.example", "https://evilblog.naver.com", "http://blog.naver.com", "null"):
+        res = await _post(bot, {**add_form(bot.db), "k": "wrong"}, origin=o)  # 네이버라도 블로그 화면이 아니면 못 읽음 (책갈피는 블로그 화면에서만 돎)
+        assert res[0] == 403 and "Access-Control-Allow-Origin" not in res[3] and res[3]["Vary"] == "Origin", o
     assert (await bot.web.dispatch("GET", seoi.PATH, anon))[0] == 405
     big = {**visit_form(bot.db), "x": "가" * 20000}
     assert (await _post(bot, big, origin="https://m.blog.naver.com"))[0] == 413  # 너무 큰 본문은 받지도 않음
@@ -829,10 +900,12 @@ async def test_api_add_reads_todays_row(bot: DealBot, tmp_path: Path) -> None:
     assert seoi.today(bot.db, tz_now(bot).timestamp(), TZ)["by"]["issue"]["add"] == 0
 
 
-async def test_api_limits_requests_per_client(bot: DealBot) -> None:
+async def test_api_limits_requests_per_client(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    reads: list[int] = []
+    monkeypatch.setattr(routine, "blog_routine", lambda b: reads.append(1))
     bad = {**add_form(bot.db), "k": "wrong"}
     codes = [(await _post(bot, bad, origin="https://m.blog.naver.com"))[0] for _ in range(41)]
-    assert codes[:40] == [403] * 40 and codes[40] == 429
+    assert codes[:40] == [403] * 40 and codes[40] == 429 and reads == []  # 열쇠가 틀리면 오늘 할 일 줄도 읽지 않음
     res = await _post(bot, add_form(bot.db), origin="https://m.blog.naver.com")
     assert res[0] == 429 and json.loads(res[1])["code"] == "rate" and seoi.today(bot.db, NOW, TZ)["by"]["issue"]["add"] == 0
 
