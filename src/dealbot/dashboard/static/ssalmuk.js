@@ -97,7 +97,7 @@ const hm = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.to
 // 11/14 키마다 마지막 네이버 답 (401 원인 찾기) — '딜봇 키 401 · 블로그 키 파일 없음'
 const keyDiag = k => {
   if (!k || typeof k !== 'object') return '';
-  const one = (name, v) => v === 'none' ? `${name} 키 없음` : v === 'no_file' ? `${name} 키 파일 못 읽음` : v === '-' || v == null ? '' : `${name} 키 ${String(v).slice(0, 6)}`;
+  const one = (name, v) => v === 'none' ? `${name} 키 없음` : v === 'no_file' ? `${name} 키 파일 못 읽음` : v === '-' || v == null ? '' : `${name} 키 ${String(v).slice(0, 12)}`;
   return [one('딜봇', k.dealbot), one('블로그', k.blog)].filter(Boolean).join(' · ');
 };
 // 11/14 네이버 검색 상태 한 줄 (state.search + 응답 search_proxy) — 글자로만, 없으면 null

@@ -784,6 +784,9 @@ async def test_search_records_each_key_status(bot: DealBot, tmp_path: Path) -> N
     status, _b = await mget(bot, f"{SEARCH}?q=x", d.key())
     assert status == 502
     keys = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
-    assert keys["dealbot"] == 401 and keys["blog"] == "no_file"
+    assert keys["dealbot"] == "401 키틀림" and keys["blog"] == "no_file"
+    naver(bot, lambda req: httpx.Response(401, json={"errorMessage": "Scope Status Invalid : Authentication failed. (인증에 실패했습니다.)", "errorCode": "024"}))
+    await mget(bot, f"{SEARCH}?q=x", d.key())
+    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["dealbot"] == "401 검색미등록"
     js = (Path(ssalmuk.__file__).parent / "static" / "ssalmuk.js").read_text(encoding="utf-8")
     assert "키 파일 못 읽음" in js and "keyDiag(p && p.keys)" in js

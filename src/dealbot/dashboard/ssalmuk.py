@@ -142,6 +142,15 @@ def _clean_profile(p: Any) -> dict[str, Any] | None:
     return out
 
 
+def _why_401(resp: Any) -> str:
+    """네이버 401 까닭 낱말만 (값·본문은 안 남김): 검색 API 가 앱에 없으면 'Scope Status Invalid' → 검색미등록, 그 밖은 키틀림."""
+    try:
+        msg = str((resp.json() or {}).get("errorMessage") or "")
+    except ValueError:
+        msg = ""
+    return "검색미등록" if "scope" in msg.lower() else "키틀림"
+
+
 class BlogKeyFile:
     """Blog-Auto .env 에서 NAVER_CLIENT_ID/SECRET 두 줄만 읽음. 처음 쓸 때 읽고 메모리에 두며 파일 수정 시각이 바뀌면 다시 읽음."""
 
@@ -429,7 +438,7 @@ def register(web: Any, api: Any) -> Ssalmuk:
                     SEARCH_URL.format(type=typ), params={"query": q, "display": display, "sort": sort},
                     headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=SEARCH_TIMEOUT)
                 status = resp.status_code
-                seen[src] = status
+                seen[src] = status if status != 401 else f"401 {_why_401(resp)}"
                 data = resp.json() if status == 200 else None
             except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
                 log.info("ssalmuk search: %s (%s key)", type(e).__name__, src)
