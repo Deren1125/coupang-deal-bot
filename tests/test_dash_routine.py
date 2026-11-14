@@ -421,18 +421,22 @@ def test_todo_tab_groups_by_blog() -> None:
     """11/09 주인 '한 블로그 로그인하면 그 블로그 작업 싹 몰아서 — 할 일 탭 블로그별로, 이웃추가도 거기에'."""
     rt = (STATIC / "routine.js").read_text(encoding="utf-8")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "W.SBRoutine = {load, mount, ids, by, part, score}" in rt
-    assert "filter(i => (i.blog || '') === k)" in rt and "'이웃': 2" in rt  # 그 블로그 손일 (이웃 신청·공감 포함)
+    assert "W.SBRoutine = {load, mount, ids, by, part, cnt}" in rt
+    assert "filter(i => (i.blog || (i.group === 'SNS' ? 'sns' : '')) === k)" in rt and "'이웃': 2" in rt  # 그 블로그 손일 (이웃 신청·공감 포함) · SNS 손일은 SNS 칸
     assert "setBy(by() ? 'slot' : 'blog')" in rt  # 예전 시간대별로 돌아가기
-    assert "W.SBRoutine.part(k, l," in app and "['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸']" in app
+    # 11/14 주인 '할 일 첫 화면은 종류별 목록만': 블로그 셋 → 딜 → SNS → 숏폼 → 기타 (이벤트는 ssalmuk.js) — 칸마다 data-k
+    assert "W.SBRoutine.part(k, l," in app and ("[['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸'], ['deals', '딜'], ['sns', 'SNS'], "
+                                                "['shorts', '숏폼·릴스·룩북'], ['', '기타']]") in app
+    assert "'data-k': k" in rt and "cnt[k] = {n, m, u: hn}" in rt
 
 
 def test_todo_tab_puts_urgent_first() -> None:
-    """11/09 주인 '할 일 탭 급한 순으로 — 중요도 순': 급한 카드 블로그 먼저, 칸 안에서도 '급한 것' 맨 위, 맨 위 칸은 펼쳐 둠."""
+    """11/09 주인 '할 일 탭 급한 순으로 — 중요도 순': 칸 안에서 '급한 것' 맨 위 · 급한 수는 종류 목록(todohub.js)의 빨간 점.
+    11/14 부터 칸 순서는 고정 (종류 목록) — 종류 화면에선 칸을 늘 펼침."""
     rt = (STATIC / "routine.js").read_text(encoding="utf-8")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "if (hot.length) body.push(sh('급한 것', hot.length), hot);" in rt and "bo[k] == null ? !!first : bo[k]" in rt
-    assert ".sort((a, b) => b[4] - a[4])" in app and "i.sev === 'stop' || i.sev === 'hot'" in app
+    assert "if (hot.length) body.push(sh('급한 것', hot.length), hot);" in rt and "W.SBHub || (bo[k] == null ? k === 'issue' : bo[k])" in rt
+    assert ".sort((a, b) => b[4] - a[4])" not in app and "i.sev === 'stop' || i.sev === 'hot'" in app
 
 
 def test_todo_tab_has_video_box() -> None:

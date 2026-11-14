@@ -37,7 +37,7 @@
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kz.js,kkumi.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -103,7 +103,8 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "shorts.js": "text/javascript; charset=utf-8",  # shorts.js: SNS 탭 '올리기' 칸 (11/08, 처음 열 때만 — sns.js 가 meta sb-shorts 로)
              "kz.js": "text/javascript; charset=utf-8",  # kz.js: 키자드 칸 셋 (11/12, 셸이 defer 로 — /dashboard/keyzard/api/… 를 부름)
              "kkumi.js": "text/javascript; charset=utf-8",  # kkumi.js: '꾸미기' 책갈피 원본 (10/27 — 화면은 받지 않음, kkumi.py 가 javascript: 주소로)
-             "ssalmuk.js": "text/javascript; charset=utf-8"}  # ssalmuk.js: 할 일 탭 '이벤트 참여' 카드·화면 (11/14, 셸이 defer 로)
+             "ssalmuk.js": "text/javascript; charset=utf-8",  # ssalmuk.js: 할 일 탭 '이벤트 참여' 카드·화면 (11/14, 셸이 defer 로)
+             "todohub.js": "text/javascript; charset=utf-8"}  # todohub.js: 할 일 종류 목록·종류별 화면 (11/14, 셸이 defer 로)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096

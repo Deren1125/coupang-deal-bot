@@ -960,21 +960,20 @@ function glance(all) {
 const tuck = (k, t, f) => { const o = OPEN[k]; return [el('div', {class: 'box', style: 'padding:0 14px;margin-top:12px'}, btn('fold', t, () => { OPEN[k] = !o; render(); }, {'aria-expanded': o ? 'true' : 'false'})), ...(o ? f() : [])]; };
 function vTodo() {
   const rt = rtIds(), all = (W.SBPh = {}, S.todo).flatMap(i => /^(publish|paste|app|photos)$/.test(i.kind) && rt.has(i.iid) ? (W.SBPh[i.iid] = i, []) : i.kind !== 'visits' ? [i] : (n => n ? [Object.assign({}, i, {title: `오늘 들를 이웃 글 ${n}개`})] : [])(vis(i.detail.visits).length)), out = [];
+  // 할 일 첫 화면은 종류별 목록 (주인 11/14 — todohub.js) · 종류마다 routine.js part() 한 칸 (#/todo/<종류> 에서 그 칸만)
+  const RB = R.sub !== 'deal' && W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by(), bk = i => /^(lookbook|ably_rank)$/.test(i.kind) ? 'shorts' : /^(issue|finance|hotdeal)$/.test(i.blog) ? i.blog
+    : i.src === 'deal' ? 'deals' : /thread|^x_|insta/.test(i.kind) || /\/(threads|x)$/.test((i.primary || {}).goto) ? 'sns' : '';
   let items = R.sub === 'deal' ? all.filter(i => i.src === 'deal') : all, k = 0, rest = 0;
-  if (R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
+  if (!RB && R.sub !== 'deal' && !ALL) items = items.filter(i => i.kind !== 'link_request' || ++k <= 3 || !++rest);
   const b = banner(), urg = b && b.classList.contains('bad');
-  if (urg) out.push(b);  // 급한 알림만 맨 위 — 그 아래 '오늘 할 일' 칸(routine.js)
+  if (urg) out.push(b);  // 급한 알림만 맨 위
   if (R.sub === 'deal') out.push(el('div', {class: 'top'}, el('span', {class: 'sub'}, `딜만 보는 중 · ${items.length}개`), el('a', {class: 'lnk', href: '#/todo'}, '전체 보기')));
-  else if (S.todo.length && !(W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by())) out.push(glance(S.todo));  // 블로그별이면 칸마다 수가 보여 '한눈에'는 뺌 (11/09 숫자 세 곳 헷갈림)
-  // 블로그별 (주인 11/09 '한 블로그 로그인하면 그 블로그 일 몰아서') — 블로그마다 손일 체크(routine.js) + 할 일 카드
-  const RB = R.sub !== 'deal' && W.SBRoutine && W.SBRoutine.by && W.SBRoutine.by(), bk = i => /^(lookbook|ably_rank)$/.test(i.kind) ? 'shorts' : /^(issue|finance|hotdeal)$/.test(i.blog) ? i.blog : '';  // 룩북·코디 랭킹은 영상 칸 (11/09)
-  // 급한 순 (주인 11/09 '중요도 순'): 급한 카드(멈춤·핫·급해요) 있는 블로그 → 올리기 많은 블로그(핫딜 두 배) → 확인할 것 → 이웃만 남은 블로그
+  else if (S.todo.length && !RB) out.push(glance(S.todo));
   const hu = i => i.sev === 'stop' || i.sev === 'hot' || i.cue === '급해요' || (i.expires_at && i.expires_at - now() < 3 * 3600);
-  if (RB) [['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸'], ['shorts', '숏폼·릴스·룩북'], ['', '딜·SNS·그 밖']].map(([k, l]) => {
-    const xs = items.filter(i => bk(i) === k && i.kind !== 'uploads'), h = xs.filter(hu);
-    return [k, l, xs, h, (/^[a-z]+$/.test(k) && k !== 'shorts') * 1e6 + h.length * 1000 + (W.SBRoutine.score ? W.SBRoutine.score(k) : 0) + (xs.length - h.length) * 10];
-  }).sort((a, b) => b[4] - a[4]).forEach(([k, l, xs, h], n) => out.push(...W.SBRoutine.part(k, l,
-    xs.filter(i => !hu(i)).map(x => item(x)).concat(k || !rest ? [] : el('a', {class: 'bn', href: '#/todo/deal'}, `링크 기다리는 딜 ${rest}개 더 →`)), h.map(x => item(x)), !n)));
+  if (RB) [['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸'], ['deals', '딜'], ['sns', 'SNS'], ['shorts', '숏폼·릴스·룩북'], ['', '기타']].forEach(([k, l]) => {
+    const xs = items.filter(i => bk(i) === k && i.kind !== 'uploads');
+    out.push(...W.SBRoutine.part(k, l, xs.filter(i => !hu(i)).map(x => item(x)), xs.filter(hu).map(x => item(x))));
+  });
   if (!items.length && !RB) out.push(el('p', {class: 'empty'}, '할 일 없어요'));
   const n = RB ? 0 : ALL ? items.length : 10;
   const shown = items.slice(0, n), last = shown.map(i => i.kind).lastIndexOf('link_request');

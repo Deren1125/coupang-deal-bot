@@ -42,7 +42,7 @@ function el(t, a, ...kids) {
   for (const c of kids.flat(9)) if (c != null && c !== false) e.append(c.nodeType ? c : String(c));
   return e;
 }
-const on = () => /^(#\/?(todo\/?)?)?$/.test(location.hash);  // #/todo · 주소 없음 (딜만 보기 #/todo/deal 은 아님)
+const on = () => /^(#\/?(todo(\/\w*)?\/?)?)?$/.test(location.hash) && !/\/(deal|ev)\/?$/.test(location.hash);  // #/todo · #/todo/<종류> (딜만 보기 #/todo/deal · 이벤트 #/todo/ev 는 아님)
 function toast(text) {
   const t = D.getElementById('toast');
   if (!t) return;
@@ -152,6 +152,7 @@ function req(r) {
 }
 function ably() {
   const rs = data && data.ably && data.ably.rows ? data.ably.rows.filter(r => !sent[r.rid]) : [];
+  cnt.ab = rs.length;
   return rs.length ? [el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `에이블리 링크 부탁 (${rs.length})`)),
     data.ably.note ? el('p', {class: 'note', style: 'margin:0 0 10px'}, data.ably.note) : null, el('div', {class: 'box'}, rs.map(req))] : [];
 }
@@ -247,16 +248,14 @@ const by = () => { try { return W.localStorage.getItem('rt-by') !== 'slot'; } ca
 function setBy(v) { try { W.localStorage.setItem('rt-by', v); } catch (e) { /* 이번만 */ } draw(); bump(); }
 const bump = () => by() && W.dispatchEvent && W.dispatchEvent(new Event('sb-routine'));
 const ORD = {'발행': 0, '예약': 1, '이웃': 2, 'SNS': 3};
-const mine = k => data && data.slots ? data.slots.flatMap(s => s.items).filter(i => (i.blog || '') === k)
+const mine = k => data && data.slots ? data.slots.flatMap(s => s.items).filter(i => (i.blog || (i.group === 'SNS' ? 'sns' : '')) === k)
   .sort((a, b) => a.done - b.done || (b.sco + 1 || 0) - (a.sco + 1 || 0) || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
 // 블로그 칸 (주인 11/09 '직관적으로') — 색 점·남은 일·막대 · 펼치면 올리기 / 이웃 글 들르기 / 서로이웃 신청 / 확인할 것 순서로 작은 제목
-const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', shorts: '#A855F7', '': '#94A3B8'};
+const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', deals: '#F97316', sns: '#10B981', shorts: '#A855F7', '': '#94A3B8'};
 const SEC = [['올리기', i => i.group === '발행' || i.group === '예약'], ['이웃 글 들르기 (공감·댓글)', i => i.id.startsWith('nb-visit')],
   ['서로이웃 신청', i => i.id.startsWith('nb-add')], ['그 밖', i => true]];
 const sh = (t, n) => el('p', {class: 'sg'}, t, n ? el('i', {}, n) : null);
-// 급한 순 (주인 11/09 '중요도 순') — 칸 안: 급한 것 → 올리기 → 확인할 것 → 이웃 글 들르기 → 서로이웃 신청 → 그 밖
-// 칸 순서는 app.js 가 score(): 급한 카드 > 올리기(핫딜 두 배) > 확인할 것 > 이웃. 맨 위 칸은 처음에 펼쳐 둠
-const score = k => (k === 'shorts' ? uscore() : 0) + mine(k).filter(i => !i.done).reduce((a, i) => a + (i.group === '이웃' ? 1 : i.group === 'SNS' ? 2 : k === 'hotdeal' ? 40 : 20), 0);
+// 칸 안 (주인 11/09 '중요도 순'): 급한 것 → 올리기 → 확인할 것 → 이웃 글 들르기 → 서로이웃 신청 → 그 밖
 // 영상 올리기 줄: 밀린 것·오늘·내일 (룩북 칸과 같은 편은 그 카드로) · 체크 = uploads.done
 const UG = {past: '밀린 영상', today: '오늘 올릴 영상', tomorrow: '내일 올릴 영상'};
 const urows = () => up && up.groups ? up.groups.filter(g => UG[g.key]).flatMap(g => g.items.filter(x => !x.lb && !(g.key === 'past' && x.done)).map(x => Object.assign(x, {g: g.key}))) : [];
@@ -276,14 +275,17 @@ function vid(x) {
         x.gate && x.title ? el('button', {class: 'sm', type: 'button', onclick: () => copy(x.title)}, '제목 복사') : null,
         x.gate && d ? el('button', {class: 'sm', type: 'button', onclick: () => copy(d)}, '설명·태그 복사') : null)));
 }
-const uscore = () => urows().reduce((a, x) => a + (x.done || !x.gate ? 0 : x.g === 'past' ? 1000 : x.g === 'today' ? 30 : 2), 0);
 const TOP = new Set(['issue', 'finance', 'hotdeal']);  // 블로그 셋 — 할 일 맨 위 (주인 11/14)
-function part(k, label, extra, hot, first) {
+// 종류마다 남은 일·급한 수 (todohub.js 의 종류 목록이 읽음 — 주인 11/14 '할 일 첫 화면은 종류별 목록만')
+const cnt = {};
+function part(k, label, extra, hot) {
   hot = hot || [];
   const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done);
   const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length + hot.length + ul.length, m = left.reduce((a, i) => a + i.min, 0) + ul.length * 3;
+  const hn = hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length;
+  cnt[k] = {n, m, u: hn};
   if (!xs.length && !extra.length && !hot.length && !ur.length) return [];
-  const o = bo[k] == null ? !!first : bo[k], bar = el('i'), all = xs.length + extra.length + hot.length + ur.filter(x => x.gate).length || 1, body = [];
+  const o = W.SBHub || (bo[k] == null ? k === 'issue' : bo[k]), bar = el('i'), all = xs.length + extra.length + hot.length + ur.filter(x => x.gate).length || 1, body = [];
   bar.style.width = Math.round(100 * (all - n) / all) + '%';
   if (o) {
     const used = new Set(), sec = (t, f) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); if (g.length) body.push(sh(t, g.filter(i => !i.done).length || '끝'), g.map(item)); };
@@ -293,9 +295,9 @@ function part(k, label, extra, hot, first) {
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
     SEC.slice(1).forEach(x => sec(...x));
   }
-  return [el('div', {class: 'box rt bk' + (o ? ' on' : '') + (TOP.has(k) ? ' tpb' : '')}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
+  return [el('div', {class: 'box rt bk' + (o ? ' on' : '') + (TOP.has(k) ? ' tpb' : ''), 'data-k': k}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
     onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),
-    el('span', {class: 'bn2'}, el('b', {}, label, hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length ? el('em', {class: 'hu'}, `급함 ${hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
+    el('span', {class: 'bn2'}, el('b', {}, label, hn ? el('em', {class: 'hu'}, `급함 ${hn}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
     el('span', {class: 'cv'}, o ? '접기' : '열기')), el('div', {class: 'bar'}, bar), body)];
 }
 
@@ -326,7 +328,8 @@ function mount() {
     box.hidden = true;
     draw();
   }
-  const f = m.firstChild, u = f && f !== box && f.className === 'bn bad' ? f : null;  // 급한 알림(app.js) 바로 아래
+  const h = m.firstChild && m.firstChild.id === 'tdh' ? m.firstChild : null, f = h ? h.nextSibling : m.firstChild,  // 종류 목록(todohub.js) 다음
+    u = f && f !== box && f.className === 'bn bad' ? f : h;  // 급한 알림(app.js) 바로 아래
   const tp = [...m.children].filter(c => / tpb/.test(c.className)), a = tp.length ? tp[tp.length - 1] : u;  // 블로그 셋이 맨 위 (11/14) — 오늘 손일 칸은 그 아래
   if (a ? a.nextSibling !== box : f !== box) a ? a.after(box) : m.prepend(box);
   if (!data || Date.now() - at > 30000) load();
@@ -342,6 +345,6 @@ function start() {
   if (rf) rf.addEventListener('click', () => { if (on() && !busy) setTimeout(load, 300); });
   mount();
 }
-W.SBRoutine = {load, mount, ids, by, part, score};
+W.SBRoutine = {load, mount, ids, by, part, cnt};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

@@ -19,7 +19,7 @@ const CSS = '.ev .kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))
   '.ev textarea.fl{min-height:96px;resize:vertical;line-height:1.5}.ev .fl{margin:0 0 10px;font-size:16px}' +
   '.ev .ck{display:flex;align-items:center;gap:10px;min-height:48px;font-size:15px}.ev .ck input{width:20px;height:20px}' +
   '.evc .st{white-space:normal}.evc .chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0}' +
-  'main[data-ev]>:not(#evs){display:none!important}';
+  'main[data-ev]>:not(#evs):not(#tdh){display:none!important}';
 const GROUPS = [['today', '오늘 마감'], ['assist', '폼 + SNS'], ['check', '확인 필요'], ['sns', 'SNS 직접 참여']];
 const TONE = /^(ok|hot|stop|info)$/;
 const SRC = {ok: ['ok', '정상'], blocked: ['stop', '막힘'], skip: ['info', '건너뜀'], error: ['stop', '오류']};  // 수집 출처 상태 (11/14)
@@ -334,6 +334,7 @@ function drawScr() {
 }
 function draw() {
   drawCard();
+  if (W.dispatchEvent) W.dispatchEvent(new Event('sb-hub'));  // 할 일 종류 목록의 '이벤트' 수
   const a = D.activeElement;
   if (scr && a && scr.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;  // 입력 중이면 다음에
   drawScr();
@@ -346,7 +347,8 @@ function mount() {
   if (!D.getElementById('ev-css')) D.head.append(el('style', {id: 'ev-css', text: CSS}));
   if (onScr()) {
     if (!scr) { scr = el('section', {id: 'evs', class: 'ev', 'aria-label': '이벤트 참여'}); drawScr(); }
-    if (m.firstChild !== scr) m.prepend(scr);
+    const h = m.firstChild && m.firstChild.id === 'tdh' ? m.firstChild : null;  // 할 일 종류 목록(todohub.js) 바로 아래
+    if ((h ? h.nextSibling : m.firstChild) !== scr) h ? h.after(scr) : m.prepend(scr);
     if (!m.hasAttribute('data-ev')) m.setAttribute('data-ev', '');
     title();
   } else {
@@ -357,7 +359,7 @@ function mount() {
     if (!card) { card = el('article', {id: 'evc', class: 'itm evc', 'aria-label': '이벤트 참여'}); drawCard(); }
     if (m.children[m.children.length - 1] !== card) m.append(card);  // 할 일 맨 아래 (주인 11/14)
   } else if (card && card.parentNode) card.remove();
-  if ((onScr() || onTodo()) && (!data || Date.now() - at > 30000)) load();
+  if ((onScr() || onTodo() || /^#\/?todo\/\w+\/?$/.test(location.hash)) && (!data || Date.now() - at > 30000)) load();  // 할 일 종류 화면도 — '이벤트' 수
 }
 function title() {
   const t = D.getElementById('ttl');
@@ -373,6 +375,7 @@ function start() {
   D.addEventListener('visibilitychange', () => { if (D.visibilityState === 'visible' && (onScr() || onTodo())) load(); });
   mount();
 }
-W.SBEvent = {load, mount};
+// 할 일 종류 목록(todohub.js)의 '이벤트' 칸: 확인 필요 수 · 오늘 마감·연결 끊김이면 급함
+W.SBEvent = {load, mount, n: () => st() ? {n: cnt().left, u: (isNew() ? 0 : cnt().today) + (data.stale ? 1 : 0)} : null};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();
