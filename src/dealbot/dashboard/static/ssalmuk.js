@@ -81,6 +81,17 @@ const kday = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.
 const applied = () => ((st() || {}).applied || []).filter(h => h && typeof h === 'object');
 const todayApplied = () => applied().filter(h => kday(h.at) === kday(Date.now()));
 const skipped = () => { const s = st() || {}, n = s.notAutomated != null ? s.notAutomated : (s.counts || {}).notAutomated; return Number(n) || 0; };
+// 11/14 자동 안 되는 이유별 개수 (counts.skipReasons = {라벨: 건수}) — 많은 순 · 라벨은 글자로만
+const skipWhy = () => { const r = (st() || {}).counts && st().counts.skipReasons; return r && typeof r === 'object' ? Object.entries(r).map(([k, v]) => [String(k).slice(0, 30), Number(v) || 0]).filter(x => x[0] && x[1] > 0).sort((a, b) => b[1] - a[1]) : []; };
+const skipEx = k => { const s = st() || {}, e = s.skipExamples || (s.counts || {}).skipExamples, a = e && typeof e === 'object' ? e[k] : null; return Array.isArray(a) ? a.filter(x => typeof x === 'string' && x).slice(0, 3).map(x => x.slice(0, 40)) : []; };
+function skipNote() {
+  const n = skipped(), why = skipWhy(), base = `자동 안 되는 이벤트 ${n}건은 건너뜀`;
+  if (!why.length) return el('p', {class: 'note'}, base);
+  const o = !!open.skip;
+  return el('div', {class: 'note'}, btn('note', `${base}${o ? '' : why.slice(0, 2).map(x => ` · ${x[0]} ${x[1]}`).join('')} ${o ? '▴' : '▾'}`,
+    () => { open.skip = !o; draw(); }, {'aria-expanded': o ? 'true' : 'false', style: 'background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer'}),
+    o ? el('ul', {class: 'note', style: 'margin:4px 0 0;padding-left:18px'}, why.map(x => el('li', {}, `${x[0]} · ${x[1]}건`, skipEx(x[0]).length ? el('div', {style: 'font-size:12px;opacity:.7'}, skipEx(x[0]).join(' · ')) : null))) : null);
+}
 const openLabel = u => /^https:\/\/([a-z0-9-]+\.)*donzomyo\.kr\//.test(u) ? '돈좀요에서 열기' : '이벤트 열기';
 const hm = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : ''; };
 const todos = () => ((st() || {}).todo || []).filter(t => t && typeof t === 'object');
@@ -281,7 +292,7 @@ function drawScr() {
       btn('pb', running ? `확인 중 · ${s.running.label || ''}` : pend ? '보낸 명령 처리 기다리는 중…' : '지금 확인하기', e => run(e.currentTarget), {disabled: running || null}),
       el('p', {class: 'note'}, [`마지막 확인 ${kst(s.checkedAt || lr.finished)}`, lr.finished && lr.ok === false ? '실패' : '',
         (s.runTimes || []).length ? `매일 ${s.runTimes.join(', ')} 자동` : '', pend ? `명령 ${data.pending}개 기다리는 중` : ''].filter(Boolean).join(' · ')),
-      nw && skipped() ? el('p', {class: 'note'}, `자동 안 되는 이벤트 ${skipped()}건은 건너뜀`) : null));
+      nw && skipped() ? skipNote() : null));
     if (nw) {
       const ta = todayApplied();
       out.push(el('p', {class: 'grp'}, `오늘 응모한 이벤트 ${ta.length}`), ta.length ? el('div', {class: 'box'}, ta.map(arow)) : el('p', {class: 'empty'}, '오늘은 아직 자동 응모한 이벤트가 없어요'),

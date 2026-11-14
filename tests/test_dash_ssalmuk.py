@@ -393,6 +393,8 @@ const text = n => n.textContent;
   await doneb.listeners.click({currentTarget: doneb});
   const srcb = find(main.children[0], n => n.tagName === 'BUTTON' && text(n).startsWith('수집 출처'));
   if (srcb) { srcb.listeners.click({currentTarget: srcb}); out.src = text(main.children[0]); }
+  const skb = find(main.children[0], n => n.tagName === 'BUTTON' && text(n).startsWith('자동 안 되는'));
+  if (skb) { out.skipBtn = text(skb); skb.listeners.click({currentTarget: skb}); out.skipOpen = text(main.children[0]); }
   out.posts = posts;
   const sg = find(main.children[0], n => n.tagName === 'DIV' && n.attrs.role === 'group'); out.after = sg ? text(sg) : null;
   const pf = find(main.children[0], n => n.tagName === 'BUTTON' && text(n) === '내 정보');
@@ -491,6 +493,27 @@ def test_ssalmuk_js_auto_apply_first_layout() -> None:
         assert t in scr, t
     assert "지난주 응모" not in scr and "이름 복사" not in scr and "남은 할 일" not in scr and got["after"] is None
     assert "이름 복사" in got["prof"] and "숫자만 복사" in got["prof"]  # 복사 단추는 내 정보 안으로
+    assert "skipBtn" not in got  # skipReasons 없으면 단추 없이 한 줄
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_skip_reasons_breakdown() -> None:
+    """counts.skipReasons: 접힌 줄에 위 2개, 누르면 많은 순 목록 · 라벨은 글자로만 (태그 문자열 그대로)."""
+    why = {"로그인 필요": 40, "SNS 참여 필요": 60, "마감 지남": 3, "<b>x</b>": 5, "빈것": 0}
+    st = sample(counts={"auto": 2, "left": 1, "today": 0, "applied": 3, "todayApplied": 2, "weekApplied": 9, "skipReasons": why}, notAutomated=146,
+                skipExamples={"SNS 참여 필요": ["예시 하나", "<i>둘</i>", "셋", "넷은 안 보임"]})
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(st)
+    out = subprocess.run([NODE, "-e", SHIM, str(STATIC / "ssalmuk.js"), json.dumps(s.view(), ensure_ascii=False)],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["skipBtn"].startswith("자동 안 되는 이벤트 146건은 건너뜀 · SNS 참여 필요 60 · 로그인 필요 40")
+    assert "마감 지남" not in got["skipBtn"]
+    o = got["skipOpen"]
+    assert "SNS 참여 필요 · 60건" in o and "<b>x</b> · 5건" in o and "마감 지남 · 3건" in o and "빈것" not in o
+    assert "예시 하나 · <i>둘</i> · 셋" in o and "넷은" not in o
+    assert o.index("SNS 참여 필요 · 60건") < o.index("로그인 필요 · 40건") < o.index("<b>x</b> · 5건") < o.index("마감 지남 · 3건")
 
 
 # ---------------------------------------------------------------- 7) 네이버 검색 대신 해 주기 (딜봇 키 — 쌀먹 서버엔 키를 옮기지 않음)

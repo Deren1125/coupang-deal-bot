@@ -98,3 +98,4 @@
 - 11/14 이벤트 참여의 네이버 검색 대신 해 주기: GET /dashboard/api/ssalmuk/search?type=blog|news|webkr&q=&display=1-20&sort=sim|date (X-Ssalmuk-Key 만 · 딜봇 네이버 키로 호출, 키는 쌀먹 서버로 안 옮김 · 키당 1분 60·하루 300(KST, kv ssalmuk_search_day) 넘으면 429 limit · 네이버 오류 502 naver_error · 딜봇 키 없으면 503 no_key · 태그 제거)
 - 11/14 할 일에서 에이블리 랭킹 캡처 칸(올리기 단추)과 키자드 등록·키자드 로그인 줄을 뺐어요 (책갈피·월요일 RSS 로 바뀜) — 알림 ably_rank:·kz_rss: 은 푸시만 (Blog-Auto 가 매일 10시·월요일 10시), 책갈피 설치·받기·키자드 화면은 그대로.
 - 11/14 '오늘 통계 보내기' 할 일 줄을 뺐어요 — 대신 매일 21:30 뒤 그날 통계가 안 온 블로그가 있으면 앱 알림 한 번(notify/stats_remind.py, 일부만 왔으면 '아직: 라커룸·드라마'). 책갈피 설치·받기는 그대로.
+- 11/14 이벤트 참여 화면 '자동 안 되는 이벤트 N건은 건너뜀' 줄을 누르면 이유별 개수(counts.skipReasons, 많은 순) 펼침 · 접힌 상태엔 위 2개 · 이유마다 예시 제목 3개(skipExamples) · 없으면 예전 한 줄 그대로 (static/ssalmuk.js)
