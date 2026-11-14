@@ -167,6 +167,17 @@ async function done(t) {
   if (await act('done', {url: t.url, done: v})) return;
   t.done = !v; recount(); draw();
 }
+// 11/14 이벤트 참여 서버 5469c7b: '이 사이트 허용' (처음 보는 사이트로 막힌 카드) · '검색 다시 시도' (오늘 키 문제로 멈춘 검색)
+async function trust(h) {
+  h = String(h || '').slice(0, 253);
+  if (!h || !confirm(`${h} 를 믿을 수 있는 사이트로 허용할까요?\n위험 문구·민감정보·하루 상한 검사는 그대로 해요.`)) return;
+  if (await act('trust_host', {host: h})) toast('허용했어요 — 다음 확인 때 다시 시도해요');
+}
+async function retrySearch(b) {
+  b.disabled = true;
+  if (await act('search_retry', {})) toast('검색을 다시 켜요 — 다음 확인 때 시도해요');
+  else b.disabled = false;
+}
 async function keyLoad() {
   if (kbusy) return;
   kbusy = true;
@@ -233,6 +244,7 @@ function item(t) {
     t.comment ? el('div', {class: 'cpy'}, el('div', {class: 'dr'}, t.comment), btn('sm', '복사', () => copy(t.comment, '댓글 초안'))) : null,
     el('div', {class: 'dl'}, links.map(l => el('a', {class: 'sm', href: l.href, target: '_blank', rel: 'noopener noreferrer'}, String(l.label || '열기').slice(0, 14))),
       https(t.url) ? el('a', {class: 'sm', href: t.url, target: '_blank', rel: 'noopener noreferrer'}, openLabel(t.url)) : null,  // 링크가 비어도 늘 (RSS 만 읽음 — 11/14)
+      t.trustHost && !t.done ? btn('sm', '이 사이트 허용', () => trust(t.trustHost)) : null,
       btn('sm done', t.done ? '완료함' : '완료', () => done(t), {'aria-pressed': t.done ? 'true' : 'false'})));
 }
 function fold(k, label, body, onOpen) {
@@ -328,7 +340,9 @@ function drawScr() {
     }
     out.push(el('p', {class: 'grp'}, '더 보기'), fold('applied', `자동 응모 내역 ${applied().length}`, () => applied().length ? el('div', {}, applied().map(arow))
       : el('p', {class: 'note'}, '아직 자동 응모한 이벤트가 없어요')),
-      (Array.isArray(s.sources) && s.sources.length) || searchLine() ? fold('src', `수집 출처 ${(s.sources || []).length}`, () => [searchLine() && el('p', {class: 'note', style: 'font-size:12px;opacity:.7'}, searchLine()), ...(s.sources || []).filter(x => x && typeof x === 'object').map(x =>
+      (Array.isArray(s.sources) && s.sources.length) || searchLine() || (s.search || {}).blockedToday ? fold('src', `수집 출처 ${(s.sources || []).length}`, () => [searchLine() && el('p', {class: 'note', style: 'font-size:12px;opacity:.7'}, searchLine()),
+        (s.search || {}).blockedToday ? btn('sm', '검색 다시 시도', b => retrySearch(b.currentTarget || b)) : null,
+        Array.isArray(s.trustedHosts) && s.trustedHosts.length ? el('p', {class: 'note', style: 'font-size:12px;opacity:.7'}, '허용한 사이트: ' + s.trustedHosts.slice(0, 20).map(h => String(h).slice(0, 60)).join(', ')) : null, ...(s.sources || []).filter(x => x && typeof x === 'object').map(x =>
         el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, x.name || x.id || ''),
           el('span', {class: 's'}, [x.items != null ? `${x.items}개` : '', x.why, x.until ? `${kst(x.until)}까지` : '', x.at ? `확인 ${kst(x.at)}` : ''].filter(Boolean).join(' · '))),
           el('span', {class: 'cp ' + (SRC[x.status] || SRC.error)[0]}, (SRC[x.status] || ['', x.status || '?'])[1])))]) : null,

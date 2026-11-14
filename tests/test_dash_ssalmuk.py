@@ -790,3 +790,19 @@ async def test_search_records_each_key_status(bot: DealBot, tmp_path: Path) -> N
     assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["dealbot"] == "401 검색미등록"
     js = (Path(ssalmuk.__file__).parent / "static" / "ssalmuk.js").read_text(encoding="utf-8")
     assert "키 파일 못 읽음" in js and "keyDiag(p && p.keys)" in js
+
+
+def test_act_search_retry_and_trust_host(bot: DealBot) -> None:
+    """쌀먹 5469c7b (11/14): '검색 다시 시도' · '이 사이트 허용' 명령 — 모양만 확인 (쌀먹이 http·IP·포트·위험 문구를 다시 거름)."""
+    d = desk(bot)
+    assert d.act({"op": "search_retry", "args": {"x": 1}})[0] == 200
+    s2, b2 = d.act({"op": "search_retry"})
+    assert s2 == 200 and b2.get("dup")
+    for bad in ("", "1.2.3.4", "m.sum37.com:8080", "http://m.sum37.com", "localhost", "a b.com", "x" * 300 + ".com"):
+        assert d.act({"op": "trust_host", "args": {"host": bad}})[0] == 400, bad
+    assert d.act({"op": "trust_host", "args": {"host": "M.Sum37.com."}})[0] == 200
+    assert d.act({"op": "trust_host", "args": {"host": "m.sum37.com"}})[0] == 200
+    cmds = [c for c in json.loads(bot.db.kv_get(ssalmuk.KV_CMDS)) if c["op"] == "trust_host"]
+    assert [c["args"] for c in cmds] == [{"host": "m.sum37.com"}]
+    js = (Path(ssalmuk.__file__).parent / "static" / "ssalmuk.js").read_text(encoding="utf-8")
+    assert "'이 사이트 허용'" in js and "'검색 다시 시도'" in js and "blockedToday" in js

@@ -61,7 +61,8 @@ CMD_KEEP = 86400  # 명령 보관은 하루
 CMD_MAX = 200
 CMD_LIST = 50
 RESULTS_KEEP = 30
-OPS = ("run", "done", "profile")
+OPS = ("run", "done", "profile", "search_retry", "trust_host")  # 11/14 쌀먹 5469c7b: 검색 다시 시도 · 이 사이트 허용
+HOST_RE = re.compile(r"^(?=.{4,253}$)(?!-)[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})*\.[a-z]{2,24}$")
 # 쌀먹 sync.js PROFILE_KEYS 와 같게 (점 키 그대로)
 PROFILE_KEYS = ("name", "phone", "email", "birth", "gender", "zipcode", "address", "addressDetail", "shareUrl", "surveyMode",
                 "watchVideoSeconds", "agreeOptional", "sns.nickname", "sns.instagram", "sns.instagramUrl", "sns.youtube", "sns.blog",
@@ -308,9 +309,9 @@ class Ssalmuk:
         if op not in OPS:
             return 400, {"status": "error", "code": "bad_op", "text": "모르는 명령이에요"}
         cmds = self._cmds()
-        if op == "run":
+        if op in ("run", "search_retry"):
             args = {}
-            same = next((c for c in cmds if c["op"] == "run"), None)
+            same = next((c for c in cmds if c["op"] == op), None)
             if same is not None:  # 겹치면 하나만
                 return 200, {"status": "ok", "ok": True, "id": same["id"], "dup": True}
         elif op == "done":
@@ -319,6 +320,12 @@ class Ssalmuk:
                 return 400, {"status": "error", "code": "bad_args", "text": "이벤트 주소가 이상해요"}
             args = {"url": url, "done": bool(args.get("done"))}
             cmds = [c for c in cmds if not (c["op"] == "done" and c["args"].get("url") == url)]  # 같은 이벤트는 마지막 것만
+        elif op == "trust_host":  # 쌀먹이 http·IP·포트를 다시 거르고 위험 문구·민감정보·하루 상한도 그대로 봄 — 여기선 모양만
+            host = str(args.get("host") or "").strip().lower().rstrip(".")
+            if not HOST_RE.match(host):
+                return 400, {"status": "error", "code": "bad_args", "text": "사이트 주소가 이상해요"}
+            args = {"host": host}
+            cmds = [c for c in cmds if not (c["op"] == "trust_host" and c["args"].get("host") == host)]
         else:
             prof = _clean_profile(args.get("profile"))
             if not prof:
