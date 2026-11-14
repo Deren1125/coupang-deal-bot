@@ -42,7 +42,7 @@ YT_KINDS = ("ok", "login", "runtime", "other")
 YT_EVERY = 1800  # 평소 30분마다 (주인 11/14 점검 14)
 YT_EVERY_FAST = 300  # 쇼츠 서버가 갱신하는 아침 창(08:50~09:30)엔 5분마다
 YT_FAST = ((8, 50), (9, 30))
-YT_KEY = "uploads:yt"  # {"yt", "tried", "ok_at", "fails", "alert_day", "alerted"} — 일정 캐시(uploads:cache)와 따로
+YT_KEY = "uploads:yt"  # {"yt", "tried", "ok_at", "fails", "alert_day", "alerted", "want"} — 일정 캐시(uploads:cache)와 따로
 YT_STALE = 36 * 3600  # 이보다 묵은 값은 'ok' 로 보이지 않음
 YT_FAILS_STALE = 12  # 읽기가 이만큼 잇달아 실패하면 (30분마다 ≈ 6시간) 확인 안 됨으로
 YT_PUSH_TAG = "yt-alive"
@@ -241,7 +241,7 @@ async def _yt_push(bot: Any, yt: dict[str, Any]) -> int:
     router = getattr(bot, "router", None)
     if router is None:
         return 0
-    why = f" ({yt.get('why')})" if yt.get("why") else ""
+    why = f" ({str(yt.get('why'))[:30]})" if yt.get("why") else ""  # 알림 본문은 120자까지 (router.push_event) — 할 일이 잘리지 않게
     return int(await router.push_event("유튜브 받기 계정 로그인 풀림",
                                        f"쇼츠 서버 유튜브 받기 계정이 로그아웃됐어요{why} — SNS 숏폼 칸 '다시 로그인' 단추 (주인이 눌러야 해요)",
                                        url=YT_PUSH_URL, tag=YT_PUSH_TAG) or 0)
@@ -264,19 +264,32 @@ async def tick_yt(bot: Any, now: float | None = None) -> str | None:
         s["fails"], s["ok_at"] = 0, now
     if st == "ok" and yt is not None:
         s["yt"] = yt
+        day = datetime.fromtimestamp(now, tz).strftime("%Y-%m-%d")
         if yt.get("kind") == "ok":
             s.pop("alerted", None)  # 다시 살아남 — 다음에 풀리면 또 알림 (하루 한 번까지는 그대로)
-        elif yt.get("kind") == "login" and prev is not None and prev.get("kind") == "ok":
-            day = datetime.fromtimestamp(now, tz).strftime("%Y-%m-%d")
-            if s.get("alert_day") != day and not s.get("alerted"):
+            s.pop("want", None)
+        elif yt.get("kind") == "login":
+            if prev is not None and prev.get("kind") == "ok" and s.get("alert_day") != day and not s.get("alerted"):
+                s["want"] = day  # ok → login: 보낼 알림이 생김
+            if s.get("want") == day:
+                # 기기에 한 대라도 간 뒤에만 끝 (통계 알림과 같은 원칙, 주인 11/14 점검 13) — 0대·오류면 같은 날 안에서 다음 읽기 때 다시.
+                # 날이 바뀌면 그만 (밤중에 묵은 알림이 울리지 않게 — 카드는 그대로 '다시 로그인 필요')
                 try:
                     n = await _yt_push(bot, yt)
-                    s["alert_day"], s["alerted"] = day, True
-                    log.info("yt_alive: ok → login — pushed to %d device(s)", n)
                 except Exception as e:  # noqa: BLE001 — 알림이 안 가도 카드는 그대로
+                    n = 0
                     log.info("yt_alive push failed: %s", type(e).__name__)
+                if n >= 1:
+                    s["alert_day"], s["alerted"] = day, True
+                    s.pop("want", None)
+                    log.info("yt_alive: ok → login — pushed to %d device(s)", n)
+            else:
+                s.pop("want", None)
+        else:
+            s.pop("want", None)
     elif st == "none":
         s.pop("yt", None)
+        s.pop("want", None)
     bot.db.kv_set(YT_KEY, json.dumps(s, ensure_ascii=False, separators=(",", ":")))
     return st
 

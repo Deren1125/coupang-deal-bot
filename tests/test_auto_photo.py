@@ -302,6 +302,16 @@ async def test_too_small_photo_is_remembered_for_a_day(bot) -> None:  # type: ig
     assert bot.db.kv_get("photo_miss:9024167552") and not bot.db.kv_get("photo_hit:9024167552")  # 하루 안 된 기록은 남음
 
 
+async def test_broken_hit_record_is_ignored(bot) -> None:  # type: ignore[no-untyped-def]
+    # 마지막 검토 11/14: 깨진 photo_hit 기록이 사진 찾기(→ 발행)를 터뜨리지 않음 — 없는 것으로 보고 다시 검색
+    bot.photo_search.client = FakeSearch([{"productId": 9024167552, "productImage": ADS_IMG}])
+    bot.images[ADS_IMG] = _jpeg()
+    for broken in ('{"url": "' + ADS_IMG + '", "at": "어제"}', '{"url": "' + ADS_IMG + '", "at": [1]}', "[1]", "{"):
+        bot.db.kv_set("photo_hit:9024167552", broken)
+        assert await bot.photo_search.find(_board_deal().product) == (ADS_IMG, "found"), broken
+    assert len(bot.photo_search.client.calls) == 4
+
+
 # ---------------------------------------------------------------- 6. 점검 15 — 한 딜의 오류가 다른 딜·스레드 차례를 막지 않음
 async def test_one_failing_deal_does_not_stop_the_others(bot) -> None:  # type: ignore[no-untyped-def]
     bot.photo_search.client = FakeSearch(exc=CoupangRateLimited("budget"))

@@ -249,6 +249,17 @@ def test_lint_drops_slurs_and_too_much_swearing() -> None:
     assert xs.lint_post("금리가 시장에 영향을 미친다\n개미 투자자는 대충 버팀\n기생충 같은 말은 아님", set(), True, "auto")[0] == []
 
 
+def test_lint_slur_list_spares_ordinary_words() -> None:
+    """마지막 검토 11/14: 숫자 글에 흔한 말이 욕 목록에 걸려 멀쩡한 초안이 버려지지 않게 (욕은 그대로 버림)."""
+    for fine in ("최근 5개년 매출 3배\n끝", "정부 3 개년 계획 발표\n끝", "다개년 계약 총액 700억\n끝", "무지개색 한정판 12만 원\n끝",
+                 "반등의 시발점은 금리\n끝", "5번가 애비뉴 매장 철수\n끝", "판다 새끼 2마리 공개\n끝", "새끼 호랑이 몸무게 1.2kg\n끝",
+                 "새끼손가락만 한 SSD가 2TB\n끝", "어미가 새끼를 낳은 지 100일\n끝"):
+        assert xs.lint_post(fine, set(), True, "auto")[0] == [], fine
+    for slur in ("이 개년 또 시작\n끝", "개색기들 또 올림\n끝", "판다 새끼 보러 간 저 새끼\n끝", "돼지새끼 같은 CEO\n끝", "시발 또 올랐네\n끝",
+                 "니 애비 뭐하시노\n끝", "개새들 답 없음\n끝"):
+        assert xs.lint_post(slur, set(), True, "auto")[0] == ["사람을 향한 욕·혐오·성적 욕설"], slur
+
+
 async def test_draft_guard_drops_a_slur_draft_and_keeps_the_rest() -> None:
     ok1 = GOOD.replace("증발함", "증발함 미쳤네")
     slur = GOOD.replace("사임은", "병신같이 사임은")

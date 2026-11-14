@@ -25,7 +25,12 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.media.imagecheck import COUPANG_IMAGE_SIDE, coupang_image_url, is_board_thumb, is_generic_image
+from dealbot.media.imagecheck import (
+    COUPANG_IMAGE_SIDE,
+    coupang_image_url,
+    is_board_thumb,
+    is_generic_image,
+)
 from dealbot.pricing.market import build_keyword
 from dealbot.utils.text import clean_name
 from dealbot.utils.urls import extract_product_id
@@ -152,9 +157,10 @@ class CoupangPhotoSearch:
     def _hit(self, num: str) -> str | None:
         try:
             info = json.loads(self.db.kv_get(f"{HIT_KV}{num}") or "null")
-        except ValueError:
+            fresh = isinstance(info, dict) and time.time() - float(info.get("at") or 0) < HIT_TTL
+        except (TypeError, ValueError):  # 깨진 기록은 없는 것으로 (사진 찾기가 터지지 않게)
             return None
-        if not isinstance(info, dict) or time.time() - float(info.get("at") or 0) >= HIT_TTL:
+        if not fresh:
             return None
         url = str(info.get("url") or "")
         return url if usable_url(url) else None

@@ -452,6 +452,63 @@ async def test_yt_first_value_login_does_not_push(bot: DealBot, monkeypatch: pyt
     assert await uploadplan.tick_yt(bot, now=_kst(5, 10)) == "ok" and pushes == []  # 바뀐 게 아님 (처음 본 값)
 
 
+async def test_yt_login_push_is_done_only_after_a_device_got_it(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 마지막 검토 11/14: 기기 0대·오류로 못 간 알림을 '보냄'으로 적으면 그대로 잃음 (점검 13 과 같은 원칙) — 같은 날 안에서 다음 읽기 때 다시
+    results: list[object] = [0, RuntimeError("push down"), 1]
+    pushes: list[str] = []
+
+    class Router:
+        async def push_event(self, title: str, body: str, *, url: str, tag: str) -> int:
+            pushes.append(body)
+            r = results.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return int(r)  # type: ignore[call-overload]
+
+    bot.router = Router()  # type: ignore[assignment]
+    kinds = iter(["ok"] + ["login"] * 6)
+
+    async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        return "ok", {"kind": next(kinds), "why": "쿠" * 200, "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", fake)
+    t = _kst(5, 10)
+    for i in range(3):  # ok → login(0대) → login(오류)
+        await uploadplan.tick_yt(bot, now=t + i * 1800)
+    assert len(pushes) == 2 and not uploadplan.yt_state(bot.db).get("alerted")
+    await uploadplan.tick_yt(bot, now=t + 3 * 1800)  # 이번엔 한 대
+    st = uploadplan.yt_state(bot.db)
+    assert len(pushes) == 3 and st["alerted"] is True and st["alert_day"] == "2031-03-05" and "want" not in st
+    await uploadplan.tick_yt(bot, now=t + 4 * 1800)
+    assert len(pushes) == 3  # 간 뒤엔 다시 안 보냄
+    assert all(len(b) <= 120 and b.endswith("(주인이 눌러야 해요)") for b in pushes)  # 긴 까닭이 할 일을 밀어내지 않음 (본문 120자)
+
+
+async def test_yt_login_push_not_retried_after_midnight(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    pushes: list[str] = []
+
+    class Router:
+        async def push_event(self, title: str, body: str, *, url: str, tag: str) -> int:
+            pushes.append(tag)
+            return 0  # 기기 없음
+
+    bot.router = Router()  # type: ignore[assignment]
+    kinds = iter(["ok"] + ["login"] * 5)
+
+    async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        return "ok", {"kind": next(kinds), "why": "", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", fake)
+    t = _kst(5, 23)
+    for i in range(2):  # 23:00 ok → 23:30 login (0대)
+        await uploadplan.tick_yt(bot, now=t + i * 1800)
+    assert len(pushes) == 1 and uploadplan.yt_state(bot.db)["want"] == "2031-03-05"
+    for i in range(2, 4):  # 00:00 · 00:30 — 날이 바뀌면 그만
+        await uploadplan.tick_yt(bot, now=t + i * 1800)
+    assert len(pushes) == 1 and "want" not in uploadplan.yt_state(bot.db)
+    assert uploadplan.view(bot, now=t + 4 * 1800)["yt"]["kind"] == "login"  # 카드는 그대로
+
+
 def test_yt_stale_value_is_not_shown_as_ok(bot: DealBot) -> None:
     ts = _kst(5, 8, 50)
     bot.db.kv_set(uploadplan.YT_KEY, json.dumps({"yt": {"kind": "ok", "why": "", "ts": ts, "page": "/ytlogin.html"}, "tried": ts, "fails": 0}))
