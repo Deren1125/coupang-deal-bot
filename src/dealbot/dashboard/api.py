@@ -31,6 +31,9 @@
   GET  /dashboard/api/ablyrank          'Ably 랭킹 보내기' 책갈피 {code, len, steps} (ablyrank.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
   POST /dashboard/api/ably_rank_capture 책갈피가 에이블리 랭킹 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 · 열쇠 k · CORS 는 https://*.a-bly.com 만)
                                         → ablyrank.save (kv) → Blog-Auto 가 알리면 일 ably_rank_capture 로 넘김 · 서버는 에이블리를 열지 않음
+  GET  /dashboard/api/seoi              '이웃 관리' 책갈피 {code, len, steps, note, today} (seoi.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/14)
+  POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.naver.com 만)
+                                        → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
   POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
@@ -113,6 +116,7 @@ STATSCAP_BODY_MAX = 1_500_000  # statscap.BODY_MAX 와 같게
 NAVER_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*naver\.com$")
 ABLY_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*a-bly\.com$")
 ABLYRANK_BODY_MAX = 600_000  # ablyrank.BODY_MAX 와 같게
+SEOI_BODY_MAX = 60_000  # seoi.BODY_MAX 와 같게
 LABELS = ("Galaxy", "iPhone", "iPad", "컴퓨터", "휴대폰")
 
 
@@ -158,6 +162,7 @@ class DashApi:
         self.sub_rate = RateWindow(10, 3600.0)
         self.statscap_rate = RateWindow(120, 600.0)  # 통계 보내기 (손님마다 10분에 120번 — 11/12 한 번 누르면 40개까지)
         self.ablyrank_rate = RateWindow(20, 600.0)  # Ably 랭킹 보내기 (손님마다 10분에 20번)
+        self.seoi_rate = RateWindow(40, 600.0)  # 이웃 관리 책갈피 (손님마다 10분에 40번 — 진짜 간격·상한은 seoi.gate 가 kv 로)
         self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
         self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,
                                facts=self._facts, test_rate=self.test_rate)
@@ -246,6 +251,8 @@ class DashApi:
         web.route_post(f"{API}/stats_capture", self.stats_capture, max_body=STATSCAP_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/ablyrank", self.ablyrank)
         web.route_post(f"{API}/ably_rank_capture", self.ably_rank_capture, max_body=ABLYRANK_BODY_MAX, with_headers=True, cross_site=True)
+        web.route(f"{API}/seoi", self.seoi)
+        web.route_post(f"{API}/seoi_act", self.seoi_act, max_body=SEOI_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/naver_qr.png", self.naver_qr)
         web.route(f"{API}/deal/hot", self.deal_hot)
         web.route(f"{API}/deal/find", self.deal_find)
@@ -273,7 +280,7 @@ class DashApi:
         from dealbot.dashboard.ssalmuk import PUBLIC_PATHS as SSALMUK_PUBLIC
 
         return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture",
-                f"{API}/ably_rank_capture",  # stats_capture·ably_rank_capture: 열쇠로 직접 확인
+                f"{API}/ably_rank_capture", f"{API}/seoi_act",  # stats_capture·ably_rank_capture·seoi_act: 열쇠로 직접 확인
                 *SSALMUK_PUBLIC]  # 이벤트 참여 push·commands·ack: X-Ssalmuk-Key 로 직접 확인
 
     # ---------------------------------------------------------- 화면
@@ -678,6 +685,46 @@ class DashApi:
         aid = ablyrank.hand_off(getattr(self.bot, "actions_out", None), got["key"])
         log.info("ably_rank_capture saved: %s (handed=%s)", got["label"], bool(aid))
         return answer(200, {"ok": True, "label": got["label"], "handed": bool(aid)})
+
+    async def seoi(self, query: dict[str, str]) -> Any:
+        """'이웃 관리' 책갈피 코드 + 오늘 수 (주인 11/14 — 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import seoi
+
+        try:
+            return jresp(200, seoi.view(self.bot.db, self.bot.settings.dashboard.public_url, tz=ZoneInfo(self.bot.settings.app.timezone)),
+                         {"Cache-Control": "no-store"})
+        except ValueError:
+            return err(503, "failed", "대시보드 공개 주소가 이상해요")
+
+    async def seoi_act(self, form: dict[str, str], headers: dict[str, str]) -> Any:
+        """책갈피가 누르기 전에 묻는 곳 (주인 11/14 서이추·이웃 들르기). 열쇠 → 간격·상한 → (이웃 글이면) 댓글 초안. 안 되면 알릴 글과 함께 거절 —
+        책갈피는 그 글만 보이고 아무것도 하지 않는다. 서버는 네이버를 열지 않고, 남의 글 본문은 기록하지 않는다. 응답 CORS 는 네이버 화면에만."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import seoi
+
+        origin = (headers.get("origin") or "").strip().rstrip("/")
+        cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if NAVER_ORIGIN_RE.match(origin) else {"Vary": "Origin"}
+        cors["Cache-Control"] = "no-store"
+        if not self.seoi_rate.hit(client_key(headers)):
+            return jresp(429, {"ok": False, "code": "rate", "text": "너무 자주 눌렀어요 — 잠시 뒤 다시"}, cors)
+        rows = None
+        if form.get("a") == "add":  # 서이추: 오늘 할 일 줄에서 그 블로그의 멘트 (읽기만)
+            try:
+                from dealbot.dashboard import routine
+
+                rows = (routine.blog_routine(self.bot) or {}).get("items")
+            except Exception as e:  # noqa: BLE001 — 줄을 못 읽어도 책갈피는 되게 (멘트는 주소·물어보기로)
+                log.warning("seoi_act: routine rows failed: %s", type(e).__name__)
+        try:
+            got = await seoi.act(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone), rows=rows)
+        except seoi.CaptureError as e:
+            if e.code == "key":
+                log.info("seoi_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
+            return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
+        return jresp(200, got, cors)
 
     async def naver_qr(self, query: dict[str, str]) -> Any:
         from dealbot.dashboard import logins

@@ -4,8 +4,9 @@
 GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 밖, 그리기는 static/routine.js) → view():
     {"day", "today": bool, "slots": [{key, at, label, items: [{…item, done, tag}], done, total, min_left, current}],
      "overflow", "done", "total", "ably": {n, note, rows: [{rid, pid, title, piece, name, price, shop, url, due, due_text}]} | None,
-     "times", "rising": [키워드], "rests": [한 줄], "stats": 한 줄 | None} — rising·rests 는 extras() (주인 10/30) ·
-     stats = 늘 None ('오늘 통계 보내기' 할 일 줄은 11/14 에 뺌 — 알림: notify/stats_remind)
+     "times", "rising": [키워드], "rests": [한 줄], "stats": 한 줄 | None, "seoi": {…} | None (목록이 있을 때만)} — rising·rests 는 extras() (주인 10/30) ·
+     stats = 늘 None ('오늘 통계 보내기' 할 일 줄은 11/14 에 뺌 — 알림: notify/stats_remind) ·
+     seoi = '이웃 관리' 책갈피의 오늘 수 (seoi.today — {visit, visit_cap, add_cap, how, feed, note, by: {블로그: {name, add, add_cap, visit, line}}} · 주인 11/14)
   목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
 에이블리 링크 부탁 (주인 10/28): Blog-Auto 칸 ably_requests (blogauto._ably_requests) — 서버는 에이블리를 열지 않고 주인이 폰 앱에서
   링크를 만들어 붙여 넣음 → 대시보드 일 blog.similar_links {blog: issue, pid, links: [붙여 넣은 글], rid}. 없거나 0개면 None.
@@ -243,6 +244,13 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001 — 점수를 못 읽어도 할 일은 원래 차례로
         log.warning("routine scores failed: %s", type(e).__name__)
         scores = {}
+    try:  # '이웃 관리' 책갈피로 한 오늘 서이추·이웃 들르기 수 (주인 11/14 — 블로그 칸 한 줄 · 목록이 있을 때만)
+        from dealbot.dashboard import seoi
+
+        ex["seoi"] = seoi.today(bot.db, now, _tz(bot))
+    except Exception as e:  # noqa: BLE001 — 수를 못 읽어도 할 일은 보이게
+        log.warning("routine seoi failed: %s", type(e).__name__)
+        ex["seoi"] = None
     slots = []
     for s in r["slots"]:
         its = by_score([with_score({**i, "done": i["id"] in done, "tag": " · ".join(x for x in (i["group"], NV_BLOGS.get(i["blog"], "")) if x)}, scores)

@@ -150,6 +150,9 @@ LOGINS_JS_MAX = 10 * 1024 + 512
 LOGINS_JS_GZIP_MAX = 4 * 1024 + 448
 # 11/11: 책갈피 설치 칸을 둘로 ('꾸미기' + '통계 보내기' — 같은 함수, 코드는 펼칠 때 /dashboard/api/<api>) → 10.6 KB (10870 B / 4514 B)
 LOGINS_JS_MAX = 10 * 1024 + 768
+# 11/14: 책갈피 설치 칸 넷째 '이웃 관리'(서이추·이웃 들르기) + 칸 위 오늘 수 한 줄(note) → 10.8 KB (11035 B / 4593 B)
+LOGINS_JS_MAX = 10 * 1024 + 896
+LOGINS_JS_GZIP_MAX = 4 * 1024 + 512
 # 10/27: 오늘 할 일 칸(할 일 탭 맨 위 — 하루 5칸 중 지금 칸만 펼침 · 줄마다 체크 · 복사 단추 · 3/8 진행) — logins.js 처럼 셸이 defer 로 받는
 # routine.js (CSS 도 여기서). 목록은 /dashboard/api/routine 으로 열 때만
 ROUTINE_JS_MAX = 8 * 1024

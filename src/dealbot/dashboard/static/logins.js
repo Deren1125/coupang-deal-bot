@@ -98,14 +98,14 @@ function row(r) {
     right(r.check), right(r.button, r.bad));  // check: 몰 '지금 확인'
 }
 
-// 책갈피 설치 칸 — '꾸미기'(10/27 링크 카드) · '통계 보내기'(11/11 네이버 내 통계 → 대시보드) · 코드는 펼칠 때 /dashboard/api/<api> 로
+// 책갈피 설치 칸 (꾸미기 10/27 · 통계 11/11 · 이웃 관리 11/14 — note = 오늘 수) · 코드는 펼칠 때 /dashboard/api/<api>
 const BM = [{api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드)'}, {api: 'statscap', t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'},
-  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}];
+  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'seoi', t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}];
 function kkDraw() {
   const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
   kk.replaceChildren(...BM.flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
-    b.o = !b.o; if (b.o && !b.d) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o ? [] : b.d ? [el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
+    b.o = !b.o; if (b.o && !b.d) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
     el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사')] : [el('p', {class: 'note'}, '불러오는 중…')])]));
 }
 async function kkLoad(b) {
