@@ -86,6 +86,7 @@ MAY_PUBLISH = frozenset({"blog.retry", "blog.fix", "blog.photos", "blog.photos_b
                          "blog.similar_links"})
 FIXED_BLOG = {"blog.write": "finance", "blog.pick": "finance", "blog.issue": "issue", "blog.hotdeal_now": "hotdeal",
               "blog.fixpic": "finance", "blog.similar_links": "issue", "blog.photo_feedback": "issue"}
+CHANNEL_TOPIC_BLOGS = ("finance", "hotdeal")  # 드라마·라커룸 인기 키워드 (주인 11/14)
 HHMM = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")  # 예약 시간 바꾸기 (주인 10/19)
 LEARN_ID = re.compile(r"^l[pr]-[0-9a-f]{8}$")  # Blog-Auto learn.py 개선안(lp-)·규칙(lr-) id
 FEEDBACK_REASON_MAX = 80  # Blog-Auto learn.x_post_feedback 과 같은 한도
@@ -121,6 +122,7 @@ BLOG_ACTIONS = ("publish", "drop", "retry", "fix", "fixpic", "rewrite", "restyle
                 "lookbook_posted", "lookbook_drop", "lookbook_redo",  # 룩북 릴스 (주인 10/25 — 올렸어요 {id, url} · 버리기 · 다시 만들기 · 올리기는 주인이 인스타 앱에서)
                 "lookbook_trial", "lookbook_style",  # 사진 시험 (주인 10/26 — 시험 새로 만들기 {base?} · 이 양식으로 정하기 {style})
                 "lookbook_cands_pick",  # 룩북 상품 후보 고르기 (주인 11/03 — '이 5개로 정하기' {ids} 1~5개)
+                "channel_topic",  # 드라마·라커룸 인기 키워드로 한 편 (주인 11/14 — {blog: finance|hotdeal, keyword} · 붙여넣기 글이라 확인 없음)
                 "ably_rank")  # 에이블리 코디 랭킹 캡처 올리기 (LB-15 주인 11/07 — {uploads} 1~12장, 서버는 에이블리 접속 없음)
 DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal.ok", "deal.ok_text", "deal.posted", "deal.repost", "deal.late_photo", "deal.post",
                 "bot.pause", "bot.resume", "bot.run", "sns.token", "sns.code", "sns.test", "sns.invites", "push.test",
@@ -765,6 +767,10 @@ def _clean_blog(name: str, a: dict[str, Any], blog_ids: dict[str, str]) -> dict[
         return {"text": _str(g("text"), 4000), "uploads": _uploads(g("uploads"), 0, 20)}
     if name == "issue":
         return {"keyword": _str(g("keyword"), 40, required=False)}
+    if name == "channel_topic":  # 새 채널 블로그만 (Blog-Auto channel.CHANNEL_BLOGS)
+        if g("blog") not in CHANNEL_TOPIC_BLOGS:
+            raise ActionError("bad_args")
+        return {"blog": g("blog"), "keyword": " ".join(_str(g("keyword"), 40).split())}
     if name == "mode":
         if g("mode") not in ("draft", "publish"):
             raise ActionError("bad_args")
@@ -1037,6 +1043,8 @@ def target_of(action: str, args: dict[str, Any]) -> str:
         return "thpost-p" + hashlib.sha256(key.encode()).hexdigest()[:8]
     if action == "search.check":
         return "search"
+    if action == "blog.channel_topic":  # 키워드마다 따로 (다른 키워드는 앞 글이 끝나기 전에도 · 같은 키워드 두 번은 한 번)
+        return f"chkw-{blog}-" + hashlib.sha256(str(args.get("keyword") or "").encode()).hexdigest()[:8]
     if action in ("blog.x_posted", "blog.x_drop", "blog.x_redo"):  # X 초안마다 따로 (글 줄과 겹치지 않게)
         return f"xdraft-{args.get('pid')}"
     if action in ("x.stats", "x.handles"):

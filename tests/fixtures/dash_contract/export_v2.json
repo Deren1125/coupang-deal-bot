@@ -712,6 +712,7 @@
    }
   ]
  },
+ "channel_trends": {"finance": {"at": "2026-11-14T10:30:00+09:00", "kind": "drama", "items": [{"keyword": "정년이", "rank": 1, "sources": ["topic", "google", "onair"], "change": 1, "new": false, "written": true, "tag": "회차·결말 정리"}, {"keyword": "나는 솔로", "rank": 2, "sources": ["onair", "news"], "change": null, "new": true, "written": false, "tag": "연애·관찰 예능"}, {"keyword": "폭싹 속았수다", "rank": 3, "sources": ["google"], "change": -1, "new": false, "written": false, "tag": null}]}, "hotdeal": {"at": "2026-11-14T10:30:00+09:00", "kind": "sports", "items": [{"keyword": "김현수", "rank": 1, "sources": ["topic", "roster"], "change": 0, "new": false, "written": true, "tag": "야구 스토브리그"}, {"keyword": "LG 트윈스", "rank": 2, "sources": ["roster", "news"], "change": null, "new": true, "written": false, "tag": "야구 스토브리그"}]}},
  "learn": {
   "week": "2026-W42",
   "at": "2026-10-18T21:07:00+09:00",

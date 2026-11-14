@@ -770,6 +770,40 @@ def _trends(v: Any) -> dict[str, Any] | None:
     return {"at": _one_line(v.get("at"), 40), "items": out[:TRENDS_MAX]}
 
 
+# 드라마·라커룸 '인기 키워드' (주인 11/14 — Blog-Auto channel_board: 채널 글감 후보 · 구글 트렌드(그 분야) · 방영/계약 뉴스 · 카테고리 뉴스)
+CHANNEL_TREND_SOURCES = ("topic", "google", "onair", "roster", "news")
+CHANNEL_TREND_BLOGS = ("finance", "hotdeal")
+CHANNEL_TAG_MAX = 20  # tag = 그 채널 카테고리 이름 (한 줄)
+
+
+def _channel_trends(v: Any) -> dict[str, Any]:
+    """{블로그: {at, kind, items}} — 블로그마다 trends 와 같은 줄 모양 (sources 는 채널 소스 이름 · tag 는 카테고리 이름 한 줄).
+    칸이 없거나(예전 Blog-Auto) 모양이 다르면 그 블로그는 빠짐 → {} (카드 없음)."""
+    out: dict[str, Any] = {}
+    if not isinstance(v, dict):
+        return out
+    for blog in CHANNEL_TREND_BLOGS:
+        b = v.get(blog)
+        if not isinstance(b, dict) or not isinstance(b.get("items"), list):
+            continue
+        items, seen = [], set()
+        for x in b["items"][:TRENDS_MAX * 2]:
+            if not isinstance(x, dict) or not (kw := _one_line(x.get("keyword"), 40)) or kw in seen:
+                continue
+            seen.add(kw)
+            ch = x.get("change")
+            items.append({"keyword": kw, "rank": _count(x.get("rank"), top=100) or len(items) + 1,
+                          "sources": [s for s in CHANNEL_TREND_SOURCES if isinstance(x.get("sources"), list) and s in x["sources"]],
+                          "change": ch if isinstance(ch, int) and not isinstance(ch, bool) and -100 <= ch <= 100 else None,
+                          "new": x.get("new") is True, "written": x.get("written") is True,
+                          "tag": _one_line(x.get("tag"), CHANNEL_TAG_MAX) or None})
+        items.sort(key=lambda x: x["rank"])
+        if items:
+            out[blog] = {"at": _one_line(b.get("at"), 40), "kind": b.get("kind") if b.get("kind") in ("drama", "sports") else "",
+                         "items": items[:TRENDS_MAX]}
+    return out
+
+
 LEARN_AREAS = ("style", "title", "photo", "tags", "topic", "schedule")  # Blog-Auto learn.AREAS
 LEARN_STATES = ("open", "applied", "rejected", "expired")
 LEARN_PROP_ID, LEARN_RULE_ID = re.compile(r"^lp-[0-9a-f]{8}$"), re.compile(r"^lr-[0-9a-f]{8}$")
@@ -1850,6 +1884,7 @@ def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, A
     out: dict[str, Any] = {"posts": {}, "recent": {}, "scan": None, "status": {"blogs": {}, "kakao": {}}, "digest": {},
                            "schedule": _sched(data.get("schedule")), "visits": _visits(data.get("visits")),
                            "pics_jobs": _pic_jobs(data.get("pics_jobs")), "trends": _trends(data.get("trends")),
+                           "channel_trends": _channel_trends(data.get("channel_trends")),
                            "learn": _learn(data.get("learn")), "photo_trial": _photo_trial(data.get("photo_trial")),
                            "product_trial": _product_trial(data.get("product_trial")),
                            "threads": _threads(data.get("threads")), "devlog": _devlog(data.get("devlog")),

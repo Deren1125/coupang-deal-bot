@@ -47,6 +47,7 @@ STATE_V = 1
 # 주인 11/13: hotdeal 블로그 = 오늘의 라커룸 · finance 블로그 = 다시 보는 드라마 (Blog-Auto 가 status.blogs.<블로그>.name·short 로 알려 주면 그 이름 — blogs())
 BLOG_LABELS = {"finance": "다시 보는 드라마", "issue": "Deren's Pick", "hotdeal": "오늘의 라커룸"}
 CHIPS = {"finance": "드라마", "issue": "Pick", "hotdeal": "라커룸"}
+CHANNEL_TREND_LABELS = {"topic": "후보", "google": "구글", "onair": "방영", "roster": "계약·이적", "news": "뉴스"}  # 드라마·라커룸 인기 키워드 출처 (11/14)
 VISITS_IID = "visits"  # 할 일 '오늘 들를 이웃 글' 한 줄
 SEARCH_IID = "search"  # 할 일 '구글 검색 등록 N개' 한 줄 (주인 10/18 22:20)
 SEV_ORDER = {"stop": 0, "hot": 1, "todo": 2, "info": 3}
@@ -1070,6 +1071,8 @@ class StateBuilder:
                          "schedule": self._sched_blog(blog, v2, planned) if self._sctx["ok"] and srv else None}
             if blog == "issue":  # 인기 검색어 (10/20) — 누르면 '키워드로 쓰기'(blog.issue) 그대로 · 그 일이 없으면(예전 Blog-Auto) 보기만
                 out[blog]["trends"] = self._trends(v2.get("trends"), out[blog]["actions"])
+            elif chan:  # 드라마·라커룸 인기 키워드 (주인 11/14 — Blog-Auto channel_board) · 누르면 blog.channel_topic {blog, keyword}
+                out[blog]["trends"] = self._chan_trends(blog, (v2.get("channel_trends") or {}).get(blog), st, supported)
             out[blog]["learn"] = self._learn(v2.get("learn"), blog, supported)  # 이번 주 개선안·적용 규칙 (10/20)
             for r in out[blog]["recent"]:
                 r.update(self._submit_links(r))
@@ -1105,6 +1108,18 @@ class StateBuilder:
                 rules.append(dict(r, remove=act("blog.learn_decide", "지우기", {"id": r["id"], "decision": "remove"}) if ok else None))
         return {"week": lr["week"], "lessons_week": lr["lessons_week"], "auto_apply_days": lr["auto_apply_days"],
                 "proposals": props, "rules": rules}
+
+    def _chan_trends(self, blog: str, tr: dict[str, Any] | None, st: dict[str, Any],
+                     supported: set[str] | None) -> dict[str, Any] | None:
+        """드라마·라커룸 블로그 화면 '인기 키워드' 카드 (주인 11/14): Pick 카드와 같은 모양 · 누르기 = blog.channel_topic {blog, keyword}
+        (다음 빈 예약 자리에 한 편 · 붙여넣기 글이라 확인 없음). Blog-Auto 가 칸·일을 모르면 보기만 / 칸이 없으면 None."""
+        if not tr:
+            return None
+        ok = supported is None or "channel_topic" in supported
+        name = st.get("short") or CHIPS[blog]
+        return {"at": _iso_ts(tr.get("at"), self.tz), "items": tr["items"], "title": "인기 키워드", "kind": tr.get("kind") or "",
+                "src": CHANNEL_TREND_LABELS,  # 출처 이름 (app.js 크기 한도라 화면 대신 여기서)
+                "write": act("blog.channel_topic", f"이 키워드로 {name} 쓰기", {"blog": blog}) if ok else None}
 
     def _trends(self, tr: dict[str, Any] | None, acts: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Pick 블로그 화면 '인기 검색어' 카드 (주인 10/20): 순위 · 출처 · ▲▼ · 이미 쓴 글 · 패션/연예. 누르기 = blog.issue {keyword}

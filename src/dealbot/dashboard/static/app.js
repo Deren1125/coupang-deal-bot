@@ -1030,9 +1030,9 @@ const todoN = k => S.todo.filter(i => mineT(i, k)).length;
 const TSRC = {advisor: '데이터랩', google: '구글', pick: 'Pick', news: '뉴스', early: '급상승'}, TTAG = {fashion: '패션', ent: '연예'};
 function trendBox(t) {
   const all = OPEN.trends, mv = x => x.new ? el('i', {class: 'up'}, 'NEW') : x.change ? el('i', {class: x.change > 0 ? 'up' : 'dn'}, (x.change > 0 ? '▲' : '▼') + Math.abs(x.change)) : el('i', {}, '–');
-  return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, '인기 검색어'), el('span', {class: 'note'}, ago(t.at))),
+  return [el('div', {class: 'top hs'}, el('p', {class: 'h3'}, t.title || '인기 검색어'), el('span', {class: 'note'}, ago(t.at))),
     el('div', {class: 'box'}, t.items.slice(0, all ? 20 : 10).map(x => el('div', {class: 'row tr'}, el('b', {}, x.rank), mv(x),
-      btn('grow tw', [el('span', {class: 't'}, x.keyword), el('span', {class: 's'}, [x.sources.map(k => TSRC[k]).join('·'), TTAG[x.tag]].filter(Boolean).join(' · '))],
+      btn('grow tw', [el('span', {class: 't'}, x.keyword), el('span', {class: 's'}, [x.sources.map(k => (t.src || TSRC)[k]).join('·'), TTAG[x.tag] || x.tag].filter(Boolean).join(' · '))],
         e => trendGo(t, x, e), {disabled: !t.write || Object.values(POLL).some(p => (p.args || {}).keyword === x.keyword && p.action === t.write.action) || null}), x.badge ? el('span', {class: 'cp hot'}, x.badge) : null, x.written ? el('span', {class: 'cp ok'}, '이미 쓴 글 있음') : null)),
     t.items.length > 10 ? btn('fold', all ? '10위까지만' : `20위까지 보기`, () => { OPEN.trends = !all; render(); }) : null)];
 }

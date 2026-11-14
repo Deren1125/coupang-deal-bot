@@ -1,0 +1,19 @@
+{
+ "v": 1,
+ "id": "a_01jc5p7r2t4v6x8z0b2d4f6h9m",
+ "ts": 1761030000.25,
+ "expires_at": 1761030600.25,
+ "action": "channel_topic",
+ "blog": "finance",
+ "args": {
+  "blog": "finance",
+  "keyword": "정년이"
+ },
+ "target": "chkw-finance-d32447c7",
+ "confirmed": false,
+ "origin": {
+  "via": "dashboard",
+  "session": "3fa9c2d1",
+  "cid": "c_8e4b6c"
+ }
+}
