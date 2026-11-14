@@ -65,7 +65,9 @@ const setSel = p => {
   g.removeAllRanges();
   g.addRange(r);
 };
-const count = s => { const a = content().textContent || ''; let n = 0, i = 0; if (!s) return 0; while ((i = a.indexOf(s, i)) >= 0) { n++; i += s.length; } return n; };
+// 글자 비교는 빈칸을 하나로 (11/14 라커룸 '글 안 들어감' — 에디터가 꾸민 숫자 앞 빈칸을 &nbsp; 로 바꿔 '타율 0.322' 를 못 찾음)
+const sp=t=>(t||'').replace(/\s+/g,' ');
+const count = s_ => { const a=sp(content().textContent),s=sp(s_); let n = 0, i = 0; if (!s.trim()) return 0; while ((i = a.indexOf(s, i)) >= 0) { n++; i += s.length; } return n; };
 const pasteIn = async (html, plain, probe) => {
   const ps = body_(), before = count(probe), imgs = D.querySelectorAll('.se-component.se-image').length;
   setSel(ps[ps.length - 1]);
