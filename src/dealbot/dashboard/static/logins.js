@@ -100,7 +100,8 @@ function row(r) {
 
 // 책갈피 설치 칸 (꾸미기 10/27 · 통계 11/11 · 이웃 관리 11/14 — note = 오늘 수) · 코드는 펼칠 때 /dashboard/api/<api>
 const BM = [{api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드)'}, {api: 'statscap', t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'},
-  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'seoi', t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}];
+  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'seoi', t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'},
+  {api: 'xhelper', t: 'X 도우미 버튼 설치'}];
 function kkDraw() {
   const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));

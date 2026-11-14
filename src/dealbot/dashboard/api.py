@@ -36,11 +36,14 @@
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
   POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
+  GET  /dashboard/api/xstudio/state · POST /dashboard/api/xstudio/{draft,reply,posted,reply_go,targets,handoff}   X 글쓰기·답글 도구 (xstudio.py — 주인 11/14)
+  GET  /dashboard/api/xhelper · GET /dashboard/share · GET /dashboard/x   'X 도우미' 책갈피 코드 · 안드로이드 공유 시트 · 바로 가기 디딤돌 (xstudio.py —
+                                        뒤 둘은 로그인 없이: 주소만 넘김)
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,xstudio.js,xgo.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -107,7 +110,9 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "kz.js": "text/javascript; charset=utf-8",  # kz.js: 키자드 칸 셋 (11/12, 셸이 defer 로 — /dashboard/keyzard/api/… 를 부름)
              "kkumi.js": "text/javascript; charset=utf-8",  # kkumi.js: '꾸미기' 책갈피 원본 (10/27 — 화면은 받지 않음, kkumi.py 가 javascript: 주소로)
              "ssalmuk.js": "text/javascript; charset=utf-8",  # ssalmuk.js: 할 일 탭 '이벤트 참여' 카드·화면 (11/14, 셸이 defer 로)
-             "todohub.js": "text/javascript; charset=utf-8"}  # todohub.js: 할 일 종류 목록·종류별 화면 (11/14, 셸이 defer 로)
+             "todohub.js": "text/javascript; charset=utf-8",  # todohub.js: 할 일 종류 목록·종류별 화면 (11/14, 셸이 defer 로)
+             "xstudio.js": "text/javascript; charset=utf-8",  # xstudio.js: X 글쓰기·답글 도구 (11/14, 셸이 defer 로 — #/sns/xs)
+             "xgo.js": "text/javascript; charset=utf-8"}  # xgo.js: X 도구 바로 가기 디딤돌 (/dashboard/x — 같은 사이트 안 이동으로 한 번 넘김)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096
@@ -259,10 +264,12 @@ class DashApi:
         web.route(f"{API}/deal/find", self.deal_find)
         web.route(f"{API}/stats.html", self.stats_html)
         web.route_prefix("/dashboard/go/", self.go)
-        from dealbot.dashboard import remote_login, ssalmuk
+        from dealbot.dashboard import remote_login, ssalmuk, xstudio
 
         # 이벤트 참여 (쌀먹, 주인 11/14) — push·commands·ack 는 로그인 없이 X-Ssalmuk-Key 로만 · state·act·key·rotate 는 로그인 아래
         self.ssalmuk = ssalmuk.register(web, self)
+        # X 글쓰기·답글 도구 (주인 11/14) — 모두 로그인 아래 · POST 는 guard (같은 사이트 + X-Dash-Token) · 서버는 초안만, 올리기는 주인 손
+        self.xstudio = xstudio.register(web, self)
 
         # 원격 로그인 화면 (주인 10/23): 대시보드 로그인 뒤, 세션이 살아 있을 때만 127.0.0.1:6080(websockify)로 잇는다
         web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))
@@ -279,10 +286,12 @@ class DashApi:
     def public_paths() -> list[str]:
         """로그인 없이 여는 앱 파일 (데이터 없음)."""
         from dealbot.dashboard.ssalmuk import PUBLIC_PATHS as SSALMUK_PUBLIC
+        from dealbot.dashboard.xstudio import PUBLIC_PATHS as XSTUDIO_PUBLIC
 
         return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture",
                 f"{API}/ably_rank_capture", f"{API}/seoi_act",  # stats_capture·ably_rank_capture·seoi_act: 열쇠로 직접 확인
-                *SSALMUK_PUBLIC]  # 이벤트 참여 push·commands·ack: X-Ssalmuk-Key 로 직접 확인
+                *SSALMUK_PUBLIC,  # 이벤트 참여 push·commands·ack: X-Ssalmuk-Key 로 직접 확인
+                *XSTUDIO_PUBLIC]  # X 도구 바로 가기 디딤돌·공유 시트: 주소만 넘김 (데이터 없음 — 그다음 화면은 로그인 아래)
 
     # ---------------------------------------------------------- 화면
     def state_body(self, headers: dict[str, str]) -> dict[str, Any]:

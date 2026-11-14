@@ -25,6 +25,7 @@ APP_ID = "/dashboard"  # 바꾸면 휴대폰에 이미 깐 앱과 다른 앱이 
 START_URL = "/dashboard/"
 SCOPE = "/dashboard"
 MANIFEST_PATH = "/dashboard/manifest.webmanifest"
+SHARE_ACTION = "/dashboard/share"  # xstudio.py 가 받아 /dashboard/x#/x/… 로 넘김
 STATIC_PREFIX = "/dashboard/static/"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 # 화면 바탕(render.CSS · app.css 의 --bg, 무채색 옅은 회색)과 어두운 모드 바탕(app.css 어두운 --bg). 매니페스트는 밝은 색,
@@ -102,6 +103,8 @@ def manifest() -> dict[str, Any]:
             {"src": icon_url("icon-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "any"},
             {"src": icon_url("icon-maskable-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
         ],
+        # 안드로이드 공유 시트 (주인 11/14 — X 앱·기사에서 '공유 → Sns-board' 로 바로 초안): xstudio.share_target 이 #/x/… 로 넘김
+        "share_target": {"action": SHARE_ACTION, "method": "GET", "params": {"title": "title", "text": "text", "url": "url"}},
     }
 
 
