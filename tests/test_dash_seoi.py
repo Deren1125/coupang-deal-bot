@@ -945,6 +945,6 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    assert got["folds"][3] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)" and len(got["folds"]) == 4
+    assert got["folds"][3] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)" and got["folds"][4] == "X 도우미 버튼 설치" and len(got["folds"]) == 5  # 다섯째 = X 도우미 (11/14)
     assert sv["note"] in got["notes"] and got["steps"][-len(seoi.STEPS):] == list(seoi.STEPS)
     assert got["clip"] == [sv["code"]] and got["toast"].startswith("복사했어요") and "null" not in got["text"] and "undefined" not in got["text"]

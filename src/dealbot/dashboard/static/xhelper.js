@@ -1,5 +1,5 @@
 /* X 도우미 책갈피 (주인 11/14 20:3x 'X도 책갈피처럼 효율 올릴 방법'). 주인 브라우저(사파리·크롬)의 x.com 에서 누르면 지금 보이는 화면만 읽어 대시보드 X 도구를 새 탭으로 연다:
-   글 화면(/아이디/status/숫자) → 글·글쓴이·인증 표시·숫자 → 답글 초안 (#/x/reply) · 수익 조건·크리에이터 스튜디오 화면 → '30 / 500', '0 / 50만' 꼴 숫자 → 기록 (#/x/stats)
+   글 화면(/아이디/status/숫자) → 글·글쓴이·인증 표시·숫자 → 답글 초안 (#/x/reply — 열쇠가 맞아야 바로 만듦, 아니면 칸만 채움) · 수익 조건·크리에이터 스튜디오 화면 → '30 / 500', '0 / 50만' 꼴 숫자 → 기록 (#/x/stats)
    · 프로필 → 자주 보는 계정에 넣기 (#/x/target). x.com 은 다른 곳으로 보내기(fetch·폼)를 막아(CSP) 값은 대시보드 주소(디딤돌 /dashboard/x)의 # 뒤에 싣는다.
    X 에서는 아무것도 누르지 않는다 (읽기 + 새 탭 열기만 · 바깥 요청 없음). 무엇을 읽었는지 확인 창에 먼저 보여 준다.
    xstudio.py 가 주석 줄·들여쓰기를 빼고 @@URL@@·@@KEY@@ 를 넣어 javascript: 주소로 만든다 — 줄마다 문장이 끝나게 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음). */
@@ -48,7 +48,7 @@ if (pm) {
   const names = ['답글', '재게시', '마음', '조회'];
   const line = c.map((v, i) => (v == null ? '' : names[i] + ' ' + v.toLocaleString())).filter(Boolean).join(' · ');
   const msg = '@' + pm[1] + (ver ? ' (인증 계정)' : '') + ' 글 ' + (text ? text.length + '자\n「' + text.slice(0, 90) + (text.length > 90 ? '…' : '') + '」' : '— 내용은 못 읽었어요 (주소만 보내요)') + (line ? '\n' + line : '') + '\n\n→ 답글 초안 3개 (인용 글 쓰기도 그 화면에서)';
-  open_('reply', {u: L.origin + '/' + pm[1] + '/status/' + pm[2], t: text, h: pm[1], v: ver ? 1 : '', c: c.some(v => v != null) ? c.map(v => (v == null ? '' : v)).join(',') : ''}, msg);
+  open_('reply', {k: K, u: L.origin + '/' + pm[1] + '/status/' + pm[2], t: text, h: pm[1], v: ver ? 1 : '', c: c.some(v => v != null) ? c.map(v => (v == null ? '' : v)).join(',') : ''}, msg);
   return;
 }
 // 2) 수익 조건 · 크리에이터 스튜디오 · 애널리틱스 — 보이는 글에서 'A / B' 꼴과 이름표 옆 숫자

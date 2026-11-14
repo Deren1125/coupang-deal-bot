@@ -1,7 +1,8 @@
 /* X 글쓰기 · 답글 도구 (주인 11/14 20:2x '글 쓰는 툴, 댓글 다는 툴 … 완성된 퀄리티 높은 툴'). 셸이 defer 로 받음 (app.js 는 예산 끝) — xstudio.py.
    SNS 탭 X 칸 맨 위에 '오늘 할 X 일' 카드 · 화면은 #/sns/xs (SNS 탭 안 — 다른 칸은 숨김) · 글쓰기 / 답글 / 계정 / 도우미.
    서버는 초안만 (Opus 까지) — '내 한마디'를 직접 써야 'X에서 올리기'가 켜지고, 올리기·답글은 X 글쓰기 화면에서 내가 누른다.
-   바로 가기: #/x/reply?u=<X 글 주소> · #/x/write?u=<주소>&q=<글> (공유 시트 단축어 · 'X 도우미' 책갈피 static/xhelper.js) → 바로 초안.
+   바로 가기: #/x/reply?u=<X 글 주소> · #/x/write?u=<주소>&q=<글> (공유 시트 단축어 · 'X 도우미' 책갈피 static/xhelper.js) → 바로 초안
+   (디딤돌 xgo.js 가 '직접 연 것'이라고 표시했거나 책갈피 열쇠가 맞을 때만 — 남의 링크로 왔으면 칸만 채우고 단추는 내가).
    링크 앞부분은 서버 값(state.links) — 이 파일에 바깥 주소·innerHTML 없음. 고치던 글은 이 기기에만 (localStorage xs1 · 36시간). */
 'use strict';
 (() => {
@@ -37,6 +38,7 @@ const ONE = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
 const SID = /^(?:https?:\/\/)?(?:(?:www|mobile|m)\.)?(?:x|twitter)\.com\/(?:i\/(?:web\/)?|(?:#!\/)?\w{1,15}\/)status(?:es)?\/(\d{5,20})(?:[/?#].*)?$/i;
 const NUM = /\d[\d,]*(?:\.\d+)?/g;
 const BAD = /https?:\/\/|www\.|[#@]/i;
+const UNIT1 = /(?:^|[^\d.,])(\d)(?=\s?(?:%|％|퍼센트|배|조|억|만|천))/g;
 
 let ST = null, at = 0, loading = false, scr = null, card = null, tt = null, tick = null, okAt = 0, dirty = false, DL = null, HP = null;
 const busy = {};
@@ -106,7 +108,7 @@ function cut(t, lim) {
 }
 const norm = s => { const [w, f] = s.replace(/,/g, '').split('.'), g = (f || '').replace(/0+$/, ''), h = w.replace(/^0+/, '') || '0'; return g ? h + '.' + g : h; };
 const numsOf = t => [...new Set((String(t || '').match(NUM) || []).map(norm))];
-const missing = (t, src) => numsOf(t).filter(n => n.replace('.', '').length >= 2 && !src.includes(n));
+const missing = (t, src) => { const u = [...String(t || '').matchAll(UNIT1)].map(m => m[1]); return numsOf(t).filter(n => (n.replace('.', '').length >= 2 || u.includes(n)) && !src.includes(n)); };
 const firstUrl = s => { const m = /https?:\/\/[^\s"'<>]+/.exec(String(s || '')); return m ? m[0] : String(s || '').trim(); };
 const sid = u => { const s = String(u || '').trim(); return /^\d{10,20}$/.test(s) ? s : (SID.exec(firstUrl(s)) || [])[1] || ''; };
 // 빨간 경고 (주인이 확인해야 올림) — 고칠 때마다 다시 봄
@@ -171,16 +173,23 @@ async function makeReply() {
 async function runDeep() {
   const d = DL;
   DL = null;
+  // 바로 초안은 직접 연 것(디딤돌 표시)이나 책갈피 열쇠가 맞을 때만 — 남의 링크로 왔으면 칸만 채우고 앞서 받은 초안은 그대로 둠
+  const auto = d.a !== 'reply' && d.a !== 'write' ? true : d.dr || (!!d.k && (await call('handoff', {k: d.k, a: 'ping'})).s === 200);
+  const wait = () => { toast("받은 글을 칸에 넣었어요 — 아래 '초안 만들기'를 눌러 주세요"); keep(); draw(true); };
   if (d.a === 'reply') {
     setTab('reply');
-    V.r = {url: firstUrl(d.u), text: d.t, tone: V.r.tone, res: null, ed: {}, meta: d.h || d.c ? {h: d.h, v: d.v === '1', c: d.c} : null};
+    const meta = d.h || d.c ? {h: d.h, v: d.v === '1', c: d.c} : null;
+    if (!auto) { Object.assign(V.r, {url: firstUrl(d.u), text: d.t, meta}); return wait(); }
+    V.r = {url: firstUrl(d.u), text: d.t, tone: V.r.tone, res: null, ed: {}, meta};
     return makeReply();
   }
   if (d.a === 'write') {
-    setTab('write'); V.res = null;
+    setTab('write');
+    if (auto) V.res = null;
     if (d.hot && ST.hot.some(h => h.id === d.hot)) { V.kind = 'hot'; V.hot = d.hot; }
     else { V.kind = 'paste'; V.url = firstUrl(d.u); V.text = d.t; }
     V.fmt = ST.formats.some(f => f[0] === d.f) ? d.f : sid(V.url) && V.kind === 'paste' ? 'quote' : V.fmt;
+    if (!auto) return wait();
     if (V.kind === 'hot' || V.url || V.text.trim().length >= 30) return makePost();
     return draw(true);
   }
@@ -281,7 +290,7 @@ function draftCard(d, i) {
     d.angle ? el('p', {class: 'an'}, `관점 · ${d.angle}`) : null,
     d.long ? seg([['s', '짧게'], ['l', `길게 ${d.long.length.toLocaleString('ko-KR')}자`]], lg ? 'l' : 's', k => { V.lg[i] = k === 'l'; keep(); draw(true); }) : null, box, body, pv,
     (d.hints || []).length ? el('p', {class: 'sf'}, '내 한마디 방향 · ' + d.hints.join(' / ')) : null, mine, ckl, why,
-    el('div', {class: 'rw'}, post, btn('pb soft', '글 복사', () => copy(full(), '글'))),
+    el('div', {class: 'rw'}, post, btn('pb soft', '글 복사', () => (post.dataset.no ? toast(post.dataset.no) : copy(full(), '글')))),
     el('div', {class: 'rw'}, R.first_reply ? btn('pb soft', '첫 답글 복사', () => copy(R.first_reply, '첫 답글(출처)')) : null,
       q ? el('a', Object.assign({class: 'pb soft', href: q}, NW), '원글 열기') : null, btn('pb soft', done ? '올렸어요 취소' : '올렸어요', mark)),
     sch);
@@ -455,6 +464,7 @@ function deep() {
   if (!m) return;
   const q = new URLSearchParams(m[2] || ''), g = (k, n) => (q.get(k) || '').slice(0, n);
   DL = {a: m[1], k: g('k', 80), u: g('u', 600), t: g('t', 1500) || g('q', 6000), h: g('h', 15), v: g('v', 1), c: g('c', 60), f: g('f', 12), hot: g('hot', 40)};
+  try { DL.dr = Date.now() - Number(W.sessionStorage.getItem('xsgo')) < 60000; W.sessionStorage.removeItem('xsgo'); } catch (e) { /* 표시 없음 = 칸만 채움 */ }
   for (const k of ['vf', 'im', 'fo', 'ai', 'ae']) if (/^\d{1,13}$/.test(q.get(k) || '')) DL[k] = Number(q.get(k));
   try { W.opener = null; } catch (e) { /* 연 창을 건드리지 않음 */ }
   location.replace('#/sns/xs/' + (m[1] === 'reply' ? 'reply' : m[1] === 'target' ? 'list' : 'write'));

@@ -14,19 +14,24 @@ X 수익(오리지널 콘텐츠 보상)은 '자동으로 만들거나 올린 글
   POST /dashboard/api/xstudio/posted    {op: add|undo, text, format, mine} → '올렸어요' 기록 (kv dash_x_posts — 글은 저장하지 않고 해시만)
   POST /dashboard/api/xstudio/reply_go  {op: go|undo, sid} → 답글 한 번 기록 + 쉬는 시간 (60~120초 · 1시간 15개 · 하루 40개)
   POST /dashboard/api/xstudio/targets   {op: add|del, handle, memo} → 자주 보는 계정 (프로필 링크만 — 그 계정 글을 긁지 않는다)
-  POST /dashboard/api/xstudio/handoff   {k, a: stats|target, …} → 'X 도우미' 책갈피가 넘긴 값 (열쇠 k 가 맞을 때만 저절로 저장·초안)
+  POST /dashboard/api/xstudio/handoff   {k, a: stats|target|ping, …} → 'X 도우미' 책갈피가 넘긴 값 (열쇠 k 가 맞을 때만 저절로 저장 · ping = 열쇠 확인만)
   GET  /dashboard/api/xhelper           'X 도우미' 책갈피 {code, len, steps} (열쇠가 든 코드 — 연결 탭 설치 칸을 펼칠 때만 · no-store)
 'X 도우미' 책갈피 (주인 11/14 20:3x "X도 책갈피처럼 효율 올릴 방법 아낌없이" — static/xhelper.js): 주인 브라우저의 x.com 에서 누르면 보이는 화면만 읽어
   글 화면 → 답글 초안(한 번에) · 인용 글 쓰기 / 수익 조건 화면 → 인증 팔로워·90일 노출을 dash_x_stats 에 (손으로 안 넣음) / 프로필 → 자주 보는 계정.
   x.com CSP(connect-src·form-action — 11/14 공개 응답 머리로 확인)가 다른 곳으로 보내기를 막아서, 값은 대시보드 주소의 # 뒤에 실어 새 탭으로 연다.
   책갈피는 X 에서 아무것도 누르지 않는다 (읽기 + 대시보드 열기만). 주소로 온 값은 믿지 않는다 — 숫자 기록·계정 추가는 열쇠가 맞을 때만.
-바로 가기 주소 (주인 11/14 "꼭 책갈피가 아니어도 돼" — X 앱 공유 시트 → 단축어·안드로이드 공유 → 대시보드, 열쇠 없음 · 초안만 만듦):
-  /dashboard/#/x/reply?u=<X 글 주소>[&t=<글>]   답글 초안을 바로 (글이 없으면 서버가 공개 oEmbed 로 읽음)
-  /dashboard/#/x/write?u=<기사·X 글 주소>[&q=<글>][&f=<형식>]   글 초안을 바로 (X 글이면 인용 글)
-  /dashboard/#/x/stats?k=…&vf=&im=&fo=   ·   /dashboard/#/x/target?k=…&h=   책갈피만 (열쇠)
+바로 가기 주소 (주인 11/14 "꼭 책갈피가 아니어도 돼" — X 앱 공유 시트 → 단축어·안드로이드 공유 → 대시보드, 초안만 만듦):
+  /dashboard/x#/x/reply?u=<X 글 주소>[&t=<글>][&k=…]   답글 초안 (글이 없으면 서버가 공개 oEmbed 로 읽음)
+  /dashboard/x#/x/write?u=<기사·X 글 주소>[&q=<글>][&f=<형식>]   글 초안 (X 글이면 인용 글)
+  /dashboard/x#/x/stats?k=…&vf=&im=&fo=   ·   /dashboard/x#/x/target?k=…&h=   책갈피만 (열쇠)
   GET /dashboard/share?title=&text=&url=   안드로이드 공유 시트 (매니페스트 share_target) → 아래 디딤돌 주소로 302 (로그인 없이 — 넘기기만)
-  GET /dashboard/x#/x/…                    디딤돌 (로그인 없이 열리는 빈 화면 + static/xgo.js): 세션 쿠키가 SameSite=Strict 라 x.com·다른 앱에서 바로
-                                           /dashboard/ 를 열면 로그인 화면이 뜬다 → 여기서 같은 사이트 안 이동으로 /dashboard/#/x/… 로 넘김
+  GET /dashboard/x#/x/…                    디딤돌 (로그인 없이 열리는 빈 화면 + static/xgo.js) → /dashboard/#/x/… 로 넘김.
+  '바로 초안'은 믿을 수 있게 온 것만 (마지막 검토 11/14): 세션 쿠키가 SameSite=Lax 라 아무 웹 페이지나 링크 하나로 로그인된 대시보드의
+  #/x/… 를 열 수 있다 → 주소만 보고 초안을 쓰면 남이 AI·하루 몫·서버의 주소 읽기를 대신 누르게 됨. 그래서 저절로 쓰는 것은
+    ① 디딤돌이 '직접 연 것'이라고 본 때 (Sec-Fetch-Site: none — 공유 시트·단축어·주소창. 다른 사이트의 링크는 cross-site) → xgo.js 가
+       sessionStorage 에 표시, xstudio.js 가 한 번 읽고 지움
+    ② 책갈피 열쇠 k 가 맞을 때 (x.com 에서 여는 책갈피는 cross-site 라 열쇠로 — handoff a=ping)
+  둘 다 아니면 칸만 채우고 '초안 만들기'는 주인이 누른다.
 모두 로그인(guard_prefix) 아래, POST 는 같은 사이트 + X-Dash-Token (DashApi.guard). 초안은 1분 4번 · 하루 글 40번·답글 80번.
 하지 않는 것: X 로그인 · X API · 자동 게시·자동 답글·자동 좋아요 · 남의 타임라인 긁기 · 글 전체를 로그·DB 에 남기기 (해시·길이만).
 """
@@ -47,6 +52,7 @@ import re
 import secrets
 import socket
 import time
+import zlib
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
@@ -62,10 +68,18 @@ POSTED_PATH, REPLY_GO_PATH, TARGETS_PATH = f"{BASE}/posted", f"{BASE}/reply_go",
 HANDOFF_PATH, HELPER_PATH, SHARE_PATH, GO_PATH = f"{BASE}/handoff", "/dashboard/api/xhelper", "/dashboard/share", "/dashboard/x"
 PUBLIC_PATHS = (SHARE_PATH, GO_PATH)  # 로그인 없이 — 둘 다 데이터 없음 (주소를 바꿔 넘기기만)
 GO_PAGE = ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-           '<meta name="robots" content="noindex"><title>Sns-board</title><script src="/dashboard/static/xgo.js" defer></script></head>'
+           '<meta name="robots" content="noindex"><title>Sns-board</title><script src="/dashboard/static/xgo.js" defer@@D@@></script></head>'
            '<body><p>여는 중… <a href="/dashboard/">대시보드 열기</a></p></body></html>')
+GO_DIRECT = ("none",)  # Sec-Fetch-Site 가 이 값일 때만 '직접 연 것' (머리글이 없거나 cross-site·same-site·same-origin 이면 아님)
+# 답이 Sec-Fetch-Site 에 따라 달라서 저장해 두고 다시 쓰면 안 됨 (no-store)
 GO_HEADERS = {"Content-Security-Policy": "default-src 'none'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-              "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-cache"}
+              "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store", "Vary": "Sec-Fetch-Site"}
+
+
+def go_page(headers: dict[str, str]) -> str:
+    """디딤돌 화면. 직접 연 것(공유 시트·단축어·주소창)이면 스크립트 태그에 data-d — xgo.js 가 '바로 초안' 표시를 남긴다."""
+    direct = (headers.get("sec-fetch-site") or "").strip().lower() in GO_DIRECT
+    return GO_PAGE.replace("@@D@@", ' data-d="1"' if direct else "")
 JT = "application/json; charset=utf-8"
 NO_STORE = {"Cache-Control": "no-store"}
 KST = timezone(timedelta(hours=9))
@@ -80,6 +94,7 @@ ENV_MODEL = "DEALBOT_MODEL_XSTUDIO"  # 서버 .env (없으면 MODEL_DEFAULT) —
 ENV_OEMBED = "DEALBOT_XSTUDIO_OEMBED"  # '0' 이면 답글 원글을 서버가 읽지 않음 (주인이 붙여넣기만)
 ENV_FETCH = "DEALBOT_XSTUDIO_FETCH"  # '0' 이면 기사 주소를 서버가 열지 않음 (붙여넣기만)
 BANNED_MODEL_RE = re.compile(r"fable|mythos", re.I)
+ALIAS_ENV_RE = re.compile(r"^ANTHROPIC_DEFAULT_[A-Z0-9_]*MODEL$")  # claude CLI 가 별칭을 푸는 환경 변수 (…_OPUS_MODEL·…_SONNET_MODEL·…_HAIKU_MODEL)
 CLI_TIMEOUT = 90.0
 RETRY_WITHIN = 40.0  # 첫 답이 이 안에 왔고 쓸 초안이 하나도 없을 때만 한 번 더 묻는다
 
@@ -108,6 +123,14 @@ def assert_writer_model(model: Any) -> str:
     if not model_ok(model):
         raise ValueError(f"xstudio: 글 쓰는 모델로 쓸 수 없음: {str(model)[:40]!r}")
     return model
+
+
+def alias_env_problem(env: Any = None) -> str:
+    """claude CLI 의 별칭(opus·sonnet·haiku)을 Fable(·Mythos)로 돌려놓는 환경 변수 이름 (없으면 '').
+    --model opus 로 불러도 ANTHROPIC_DEFAULT_OPUS_MODEL 같은 값이 그 별칭을 다른 모델로 바꿀 수 있다 → 있으면 글을 쓰지 않는다.
+    (ANTHROPIC_MODEL 은 --model 이 이겨서 안 봄.)"""
+    env = os.environ if env is None else env
+    return next((k for k, v in env.items() if ALIAS_ENV_RE.match(k) and BANNED_MODEL_RE.search(str(v))), "")
 
 
 def model_label(model: str) -> str:
@@ -140,7 +163,7 @@ VERIFIED_GOAL, IMPR_GOAL = 500, 500_000  # 수익 조건 (xview 와 같은 값)
 ETA_BASE_DAYS, ETA_MIN_GAP, ETA_MAX_DAYS = 3, 20 * 3600, 3 * 365
 TARGETS_MAX, MEMO_MAX = 40, 40
 KV_POSTS = "dash_x_posts"  # [{acct, kind, frame, slot, draft_id, url, posted_at, edited}] 400줄 (ops-board x_monetization_spec D '올린 글 기록')
-KV_REPLIES = "xstudio_replies"  # {"rows": [[시각, 글 번호], …], "next_ok": 시각}
+KV_REPLIES = "xstudio_replies"  # {"rows": [[시각, 글 번호], …], "next_ok": 시각, "last": 방금 기록한 줄의 시각 (취소는 그 줄만)}
 KV_TARGETS = "xstudio_targets"  # [{"h": 아이디, "memo": 메모}]
 KV_DAY = "xstudio_day"  # {"day": "2026-11-14", "draft": n, "reply": n, "fetch": n}
 POSTS_KEEP, REPLIES_KEEP = 400, 600
@@ -221,6 +244,7 @@ def reply_intent(sid: str, text: str) -> str:
 _ONE = ((0, 4351), (8192, 8205), (8208, 8223), (8242, 8247))  # twitter-text: 이 범위는 1, 그 밖(한글·이모지)은 2
 URL_RE = re.compile(r"https?://\S+|\bwww\.\S+", re.I)
 NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+UNIT1_RE = re.compile(r"(?<![\d.,])(\d)(?=\s?(?:%|％|퍼센트|배|조|억|만|천))")  # '5%', '3배', '9조' — 한 자리여도 수치 (xstudio.js UNIT1 과 같게)
 EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF☀-➿⬀-⯿]")
 PREFIX_RE = re.compile(r"^\s*(?:[\[【(<]\s*(?:속보|단독|긴급)\s*[\]】)>]|(?:속보|단독|긴급)\s*[:：|!]|BREAKING\b)|🚨", re.I)
 BEG_RE = re.compile(r"(?<![A-Za-z])RT(?![A-Za-z])|리트윗|알티\s*(?:부탁|해)|리포스트\s*(?:부탁|해\s*주)|좋아요\s*(?:눌러|부탁|한\s*번)|"
@@ -270,10 +294,12 @@ def nums(text: str) -> list[str]:
     return out
 
 
-def missing_nums(text: str, src_nums: set[str] | list[str]) -> list[str]:
-    """원문에 없는 숫자 (두 자리 넘는 것만 — 한 자리는 '3줄', '1위' 같은 말이라 안 봄). 환산·반올림한 숫자도 여기 걸린다."""
+def missing_nums(text: str, src_nums: set[str] | list[str], *, unit1: bool = True) -> list[str]:
+    """원문에 없는 숫자 (두 자리 넘는 것 + 단위(%·배·조·억·만·천)가 붙은 한 자리 — '3줄', '1위' 같은 말은 안 봄).
+    환산·반올림한 숫자도 여기 걸린다. unit1=False 면 한 자리는 모두 안 봄 (답글 — 원글 숫자로 한 셈 '하루 6천원꼴'을 보태는 글이라)."""
     have = set(src_nums)
-    return [n for n in nums(text) if len(n.replace(".", "")) >= 2 and n not in have]
+    unit1 = set(UNIT1_RE.findall(text or "")) if unit1 else set()
+    return [n for n in nums(text) if (len(n.replace(".", "")) >= 2 or n in unit1) and n not in have]
 
 
 def clean(v: Any, limit: int | None = None) -> str:
@@ -370,7 +396,7 @@ def lint_reply(text: str, post_nums: set[str]) -> tuple[list[str], list[str]]:
         drop.append("이모지")
     if REPLY_TELL.search(t):
         warn.append("무난한 칭찬·참여 유도처럼 읽혀요 — 원글의 한 지점을 짚게 고쳐 주세요")
-    miss = missing_nums(t, post_nums)
+    miss = missing_nums(t, post_nums, unit1=False)
     if miss:
         warn.append(f"원글에 없는 숫자: {', '.join(miss[:4])} — 직접 확인해 주세요")
     if not drop and not REPLY_LO <= len(t) <= REPLY_HI:
@@ -484,26 +510,32 @@ def reply_system(tone: str) -> str:
     return REPLY_SYSTEM.replace("{tone}", f"{lab} — {guide}")
 
 
+def _fence(text: str) -> str:
+    """원문 안의 '<<<'·'>>>' 를 다른 글자로 (원문이 묶음을 닫고 지시문인 척하지 못하게 — AI 에게 가는 글에서만)."""
+    return text.replace("<<<", "‹‹‹").replace(">>>", "›››")
+
+
 def post_prompt(kind: str, source: str, title: str = "", problems: list[str] | None = None) -> str:
     head = {"hot": "지금 화제 (기사 제목과 앞서 확인된 요약)", "paste": "주인이 붙여넣은 기사·글", "topic": "주인이 준 주제 한 줄 (원문 없음)"}[kind]
     lines = [f"[재료] {head}"]
     if title:
-        lines.append(f"[제목] {title}")
+        lines.append(f"[제목] {_fence(title)}")
     if kind == "topic":
         lines.append("원문이 없으니 숫자·사실을 지어내지 말고, 주인이 채울 자리는 [확인 필요] 로 남긴다. 틀과 관점만 잡는다.")
-    lines += ["[원문]", "<<<", source, ">>>"]
+    lines += ["[원문]", "<<<", _fence(source), ">>>"]
     if problems:
         lines += ["", "앞서 쓴 초안은 아래 문제로 쓸 수 없었다. 고쳐서 다시 3개를 쓴다:", *[f"- {p}" for p in problems[:8]]]
     return "\n".join(lines)
 
 
 def reply_prompt(text: str, author: str = "") -> str:
-    return "\n".join([f"[원글{' @' + author if author else ''}]", "<<<", text, ">>>"])
+    return "\n".join([f"[원글{' @' + author if author else ''}]", "<<<", _fence(text), ">>>"])
 
 
 # ── 바깥 글 읽기 (주인이 주소를 넣고 초안을 누를 때만 한 번 · 로그인·쿠키 없음 · 다시 시도 없음) ──────────────────────────
-FETCH_TIMEOUT = 8.0
-FETCH_CAP = 700_000
+FETCH_TIMEOUT = 8.0  # 연결·읽기 한 번마다
+FETCH_TOTAL = 20.0  # 넘겨주기까지 다 합쳐서 (조금씩 흘려 보내며 붙잡아 두지 못하게)
+FETCH_CAP = 700_000  # 받는 바이트 · 푼 바이트 모두 여기까지
 REDIRECTS = 2
 Resolver = Callable[[str], Awaitable[list[str]]]
 
@@ -511,6 +543,21 @@ Resolver = Callable[[str], Awaitable[list[str]]]
 async def _resolve(host: str) -> list[str]:
     infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     return [i[4][0] for i in infos]
+
+
+def inflate(raw: bytes, encoding: str) -> bytes | None:
+    """받은 몸을 FETCH_CAP 까지만 푼다 (작게 눌러 보낸 아주 큰 몸으로 메모리를 채우지 못하게). 모르는 누름 방식이면 None."""
+    kind = (encoding or "").strip().lower()
+    if kind in ("", "identity"):
+        return raw[:FETCH_CAP]
+    if kind not in ("gzip", "x-gzip", "deflate"):
+        return None
+    for wbits in (47, -15):  # gzip·zlib 머리 자동 → 머리 없는 deflate
+        try:
+            return zlib.decompressobj(wbits).decompress(raw, FETCH_CAP)
+        except zlib.error:
+            continue
+    return None
 
 
 def url_problem(url: str) -> str | None:
@@ -603,7 +650,8 @@ class Fetcher:
         import httpx
 
         kw: dict[str, Any] = {"timeout": FETCH_TIMEOUT, "follow_redirects": False,
-                              "headers": {"User-Agent": self.user_agent, "Accept": accept, "Accept-Language": "ko-KR,ko;q=0.9"}}
+                              "headers": {"User-Agent": self.user_agent, "Accept": accept, "Accept-Language": "ko-KR,ko;q=0.9",
+                                          "Accept-Encoding": "gzip, deflate"}}
         if self.transport is not None:
             kw["transport"] = self.transport
         async with httpx.AsyncClient(**kw) as http:
@@ -619,19 +667,24 @@ class Fetcher:
                     if r.status_code != 200:
                         return r.status_code, "", b""
                     got = bytearray()
-                    async for chunk in r.aiter_bytes():
+                    async for chunk in r.aiter_raw():  # 눌린 그대로 받아 상한까지만 푼다 (inflate)
                         got += chunk
                         if len(got) > FETCH_CAP:
                             break
-                    return 200, r.headers.get("content-type", ""), bytes(got[:FETCH_CAP])
+                    body = inflate(bytes(got[:FETCH_CAP]), r.headers.get("content-encoding", ""))
+                    return (200, r.headers.get("content-type", ""), body) if body is not None else (0, "", b"")
         return 0, "", b""
+
+    async def _get_within(self, url: str, accept: str, *, check_host: bool = True) -> tuple[int, str, bytes]:
+        """_get 을 FETCH_TOTAL 안에 (넘으면 TimeoutError — OSError 라 부르는 쪽이 '못 읽음'으로)."""
+        return await asyncio.wait_for(self._get(url, accept, check_host=check_host), FETCH_TOTAL)
 
     async def article(self, url: str) -> tuple[str, str]:
         """(제목, 본문). 못 읽으면 ('', '')."""
         import httpx
 
         try:
-            status, ctype, raw = await self._get(url, "text/html,application/xhtml+xml")
+            status, ctype, raw = await self._get_within(url, "text/html,application/xhtml+xml")
         except (httpx.HTTPError, OSError, ValueError) as e:
             log.info("xstudio fetch: %s", type(e).__name__)
             return "", ""
@@ -653,7 +706,7 @@ class Fetcher:
 
         url = f"{OEMBED}?url={enc(f'{PROFILE}x/status/{sid}')}&omit_script=1&dnt=1&hide_thread=1&lang=ko"
         try:
-            status, _ctype, raw = await self._get(url, "application/json", check_host=False)  # 주소가 정해져 있음 (넘겨주면 다시 확인)
+            status, _ctype, raw = await self._get_within(url, "application/json", check_host=False)  # 주소가 정해져 있음 (넘겨주면 다시 확인)
             return oembed_post(json.loads(raw.decode("utf-8", "replace"))) if status == 200 else ("", "")
         except (httpx.HTTPError, OSError, ValueError) as e:
             log.info("xstudio oembed: %s", type(e).__name__)
@@ -842,8 +895,14 @@ class Studio:
     def _replies(self) -> dict[str, Any]:
         st = self._load(KV_REPLIES, {})
         rows = [r for r in st.get("rows") or [] if isinstance(r, list) and len(r) == 2 and isinstance(r[0], (int, float))]
-        nxt = st.get("next_ok")
-        return {"rows": rows, "next_ok": float(nxt) if isinstance(nxt, (int, float)) else 0.0}
+        nxt, last = st.get("next_ok"), st.get("last")
+        return {"rows": rows, "next_ok": float(nxt) if isinstance(nxt, (int, float)) else 0.0,
+                "last": float(last) if isinstance(last, (int, float)) else 0.0}
+
+    @staticmethod
+    def _can_undo(st: dict[str, Any], now: float) -> bool:
+        """'방금 건 안 달았어요'는 마지막으로 기록한 그 한 줄만 (10분 안) — 거듭 눌러 앞서 단 답글 기록까지 지우지 못하게."""
+        return bool(st["rows"]) and st["rows"][-1][0] == st["last"] and 0 <= now - st["last"] <= UNDO_WITHIN
 
     def pace(self) -> dict[str, Any]:
         """지금 답글을 달아도 되는지. wait_s > 0 이면 그만큼 쉼 (why: gap 사이 쉬기 · hour 한 시간 15개 · day 하루 40개)."""
@@ -859,20 +918,19 @@ class Studio:
             wait, why = sorted(r[0] for r in hour)[len(hour) - HOUR_CAP] + 3600 - now, "hour"
         elif st["next_ok"] > now:
             wait, why = st["next_ok"] - now, "gap"
-        last = st["rows"][-1] if st["rows"] else None
         text = {"day": f"오늘은 답글 {DAY_CAP}개를 다 달았어요 — 내일 다시", "hour": f"한 시간에 {HOUR_CAP}개까지 — {_wait_text(wait)} 뒤에",
                 "gap": f"{_wait_text(wait)} 뒤에 달 수 있어요 (답글 사이 1~2분 쉬기)"}.get(why, "")
         return {"today": len(today), "hour": len(hour), "day_cap": DAY_CAP, "hour_cap": HOUR_CAP, "wait_s": int(wait + 0.999) if wait > 0 else 0,
                 "why": why, "text": text, "sids": [str(r[1]) for r in today][-DAY_CAP:],
-                "undo": bool(last and now - last[0] <= UNDO_WITHIN), "gap": [int(GAP_MIN), int(GAP_MAX)]}
+                "undo": self._can_undo(st, now), "gap": [int(GAP_MIN), int(GAP_MAX)]}
 
     def reply_go(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """답글 쓰기 화면을 열 때 한 번 기록. 아직 쉬는 중이면 429 (기다릴 시간), 오늘 이미 단 글이면 409."""
         now, st = self.clock(), self._replies()
         if body.get("op") == "undo":  # 방금 건 안 달았어요 (10분 안)
-            if st["rows"] and now - st["rows"][-1][0] <= UNDO_WITHIN:
+            if self._can_undo(st, now):
                 st["rows"].pop()
-                st["next_ok"] = 0.0
+                st["next_ok"], st["last"] = 0.0, 0.0
                 self._save(KV_REPLIES, st)
             return 200, {"status": "ok", "replies": self.pace()}
         sid = status_id(body.get("sid"))
@@ -884,7 +942,7 @@ class Studio:
         if sid in p["sids"]:
             return 409, {"status": "error", "code": "dup", "text": "이 글에는 오늘 이미 답글을 달았어요", "replies": p}
         st["rows"] = (st["rows"] + [[now, sid]])[-REPLIES_KEEP:]
-        st["next_ok"] = now + self.rng.uniform(GAP_MIN, GAP_MAX)
+        st["next_ok"], st["last"] = now + self.rng.uniform(GAP_MIN, GAP_MAX), now
         self._save(KV_REPLIES, st)
         return 200, {"status": "ok", "replies": self.pace()}
 
@@ -964,6 +1022,8 @@ class Studio:
         if not helper_key_ok(self.db, body.get("k")):
             return 403, {"status": "error", "code": "bad_key", "text": "책갈피가 예전 것이에요 — 연결 탭에서 'X 도우미'를 다시 설치해 주세요"}
         a = body.get("a")
+        if a == "ping":  # 책갈피가 연 답글·글쓰기 바로 가기: 열쇠가 맞는지만 (맞으면 화면이 초안을 바로 만듦)
+            return 200, {"status": "ok"}
         if a == "stats":
             from dealbot.dashboard.actions import X_STATS_MAX
 
@@ -1016,6 +1076,10 @@ class Studio:
             return await self._ask_fn(system, user, schema)
         from dealbot.llm_json import JsonAsker, LLMError
 
+        bad_env = alias_env_problem()
+        if bad_env:  # 별칭이 Fable 로 돌려져 있으면 부르지 않는다 (값은 로그에 안 남김 — 이름만)
+            log.error("xstudio: %s 가 글 쓰는 모델을 Fable 쪽으로 돌려놓음 → 초안을 쓰지 않음", bad_env)
+            raise StudioError(503, "ai_off", "서버 AI 설정이 글 쓰는 모델 규칙과 달라요 — 메인 세션에 알려 주세요")
         if self._asker is None:  # 서버에 로그인된 claude CLI 로만 (한줄평과 같은 실행 파일) — 모델은 늘 이름으로 넘긴다
             self._asker = JsonAsker(None, cli_model=self.model, timeout=CLI_TIMEOUT)
         assert_writer_model(self._asker.cli_model)
@@ -1264,7 +1328,7 @@ def register(web: Any, api: Any) -> Studio:
         return 302, share_target(query), None, {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
     async def bounce(query: dict[str, str], headers: dict[str, str]) -> Any:
-        return 200, GO_PAGE, "text/html; charset=utf-8", dict(GO_HEADERS)
+        return 200, go_page(headers), "text/html; charset=utf-8", dict(GO_HEADERS)
 
     web.route(GO_PATH, bounce, with_headers=True)
     web.route(SHARE_PATH, share, with_headers=True)
