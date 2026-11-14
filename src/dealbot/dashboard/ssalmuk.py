@@ -5,7 +5,7 @@
   POST /dashboard/api/ssalmuk/push      상태 전체 (덮어쓰기 + 받은 시각) · v==1, app=="ssalmuk" 아니면 400
   GET  /dashboard/api/ssalmuk/commands  아직 ack 안 된 명령 (오래된 순, 50개까지)
   POST /dashboard/api/ssalmuk/ack       {"ids": [...], "results": {id: "ok" | 오류 글}} → 그 명령을 지움
-  GET  /dashboard/api/ssalmuk/search    ?type=blog|news|webkr&q=&display=1-20&sort=sim|date → 네이버 검색 Open API 를 딜봇 키로 대신 (주인 11/14 —
+  GET  /dashboard/api/ssalmuk/search    ?type=blog|news|webkr&q=&display=1-20&sort=sim|date → 네이버 검색 Open API 를 딜봇 키로 대신 (딜봇 키가 401/403 이면 Blog-Auto .env 키로 이어서 · state 의 search_proxy.keysrc) (주인 11/14 —
                                         쌀먹 서버에 키를 옮기지 않음). {"items":[{title,link,description,postdate|pubDate,bloggername}],"total"}
                                         키 1개당 1분 60번 · 하루 300번 (KST, kv ssalmuk_search_day) · 넘으면 429 {"code":"limit"} ·
                                         네이버가 401/429/5xx 등을 주면 502 {"code":"naver_error","status"} · 딜봇에 키가 없으면 503 {"code":"no_key"}
@@ -26,10 +26,12 @@ import html
 import hmac
 import json
 import logging
+import os
 import re
 import secrets
 import time
 from collections.abc import Callable
+from pathlib import Path
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
@@ -71,6 +73,8 @@ SEARCH_PER_MIN = 60
 SEARCH_PER_DAY = 300
 SEARCH_Q_MAX = 100
 KV_SEARCH_DAY = "ssalmuk_search_day"
+KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' — 어느 키가 통했는지 (값만, 비밀 아님)
+KEY_RECHECK = 86400.0  # 블로그 키로 넘어간 뒤에도 딜봇 키를 하루 한 번 다시 봄
 _TAG_RE = re.compile(r"<[^>]*>")
 OP_LABEL = {"run": "지금 확인하기", "done": "완료 표시", "profile": "내 정보 저장"}
 
@@ -135,6 +139,48 @@ def _clean_profile(p: Any) -> dict[str, Any] | None:
         else:
             out[k] = str(v if v is not None else "").strip()[:300]
     return out
+
+
+class BlogKeyFile:
+    """Blog-Auto .env 에서 NAVER_CLIENT_ID/SECRET 두 줄만 읽음. 처음 쓸 때 읽고 메모리에 두며 파일 수정 시각이 바뀌면 다시 읽음."""
+
+    def __init__(self, path: Callable[[], str]) -> None:
+        self._path = path
+        self._sig: tuple[str, int] | None = None
+        self._pair: tuple[str, str] | None = None
+
+    def get(self) -> tuple[str, str] | None:
+        try:
+            p = Path(self._path()).expanduser()
+            sig = (str(p), os.stat(p).st_mtime_ns)
+        except (OSError, ValueError):
+            self._sig = self._pair = None
+            return None
+        if sig != self._sig:
+            self._sig, self._pair = sig, self._parse(p)
+        return self._pair
+
+    @staticmethod
+    def _parse(p: Path) -> tuple[str, str] | None:
+        vals: dict[str, str] = {}
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            name, eq, v = line.partition("=")
+            name = name.strip()
+            if eq and name in ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"):
+                v = v.strip()
+                if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                    v = v[1:-1]
+                if v:
+                    vals[name] = v
+        i, s = vals.get("NAVER_CLIENT_ID"), vals.get("NAVER_CLIENT_SECRET")
+        return (i, s) if i and s else None
 
 
 class Ssalmuk:
@@ -218,6 +264,19 @@ class Ssalmuk:
         self.db.kv_set(KV_SEARCH_DAY, json.dumps({"d": day, "n": n + 1}))
         return True
 
+    def search_keysrc(self) -> str | None:
+        v = self.db.kv_get(KV_SEARCH_KEYSRC)
+        return v if v in ("dealbot", "blog") else None
+
+    def set_search_keysrc(self, src: str) -> None:
+        if self.search_keysrc() != src:
+            self.db.kv_set(KV_SEARCH_KEYSRC, src)
+
+    def search_today(self) -> int:
+        day = datetime.fromtimestamp(self.clock(), KST).strftime("%Y-%m-%d")
+        saved = self._load(KV_SEARCH_DAY, {})
+        return int(saved.get("n") or 0) if isinstance(saved, dict) and saved.get("d") == day else 0
+
     def view(self) -> dict[str, Any]:
         """화면용 (로그인 아래에서만): 받아 둔 상태 · 받은 시각 · 안 끝난 명령 수 · 끊김 여부 · 최근 처리 결과."""
         saved = self._load(KV_STATE, {})
@@ -225,7 +284,8 @@ class Ssalmuk:
         return {"state": saved.get("state") if isinstance(saved, dict) else None,
                 "receivedAt": saved.get("receivedAt") if isinstance(saved, dict) else None,
                 "pending": len(self._cmds()), "stale": stale(ts, self.clock()),
-                "results": self._load(KV_RESULTS, [])[-10:]}
+                "results": self._load(KV_RESULTS, [])[-10:],
+                "search_proxy": {"keysrc": self.search_keysrc(), "today_count": self.search_today()}}
 
     # ------------------------------------------------------------ 명령
     def act(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -319,6 +379,8 @@ def register(web: Any, api: Any) -> Ssalmuk:
         return machine(headers) or _j(*desk.ack(body))
 
     search_rate = RateWindow(SEARCH_PER_MIN, 60.0)  # 키 하나당 (손님 주소와 상관없이)
+    blog_keys = BlogKeyFile(lambda: api.bot.settings.dashboard.ssalmuk_search_env_file)
+    state_rt = {"dealbot_try": 0.0}  # 딜봇 키를 마지막으로 써 본 때 (메모리 — 재시작하면 한 번 다시 봄)
 
     async def search(query: dict[str, str], headers: dict[str, str]) -> Any:
         import httpx
@@ -336,20 +398,39 @@ def register(web: Any, api: Any) -> Ssalmuk:
         except ValueError:
             display = 10
         sec = api.bot.settings.secrets
-        if not (sec.naver_client_id and sec.naver_client_secret):
+        keys: dict[str, tuple[str, str]] = {}
+        if sec.naver_client_id and sec.naver_client_secret:
+            keys["dealbot"] = (sec.naver_client_id, sec.naver_client_secret)
+        blog = blog_keys.get()
+        if blog:
+            keys["blog"] = blog
+        if not keys:
             return _j(503, {"code": "no_key", "text": "딜봇에 네이버 검색 키가 없어요"})
         if not search_rate.hit("key") or not desk.search_day_hit():
             return _j(429, {"code": "limit", "text": "검색 한도(1분 60번·하루 300번)를 넘었어요"})
-        try:
-            resp = await api.bot.http.get(
-                SEARCH_URL.format(type=typ), params={"query": q, "display": display, "sort": sort},
-                headers={"X-Naver-Client-Id": sec.naver_client_id, "X-Naver-Client-Secret": sec.naver_client_secret},
-                timeout=SEARCH_TIMEOUT)
-            status = resp.status_code
-            data = resp.json() if status == 200 else None
-        except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
-            log.info("ssalmuk search: %s", type(e).__name__)
-            return _j(502, {"code": "naver_error", "status": 0, "text": "네이버 검색이 답하지 않아요"})
+        now = desk.clock()
+        recheck = now - state_rt["dealbot_try"] >= KEY_RECHECK
+        order = ["blog", "dealbot"] if desk.search_keysrc() == "blog" and not recheck else ["dealbot", "blog"]
+        status, data = 0, None
+        for src in (o for o in order if o in keys):
+            if src == "dealbot":
+                state_rt["dealbot_try"] = now
+            cid, csec = keys[src]
+            try:
+                resp = await api.bot.http.get(
+                    SEARCH_URL.format(type=typ), params={"query": q, "display": display, "sort": sort},
+                    headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=SEARCH_TIMEOUT)
+                status = resp.status_code
+                data = resp.json() if status == 200 else None
+            except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
+                log.info("ssalmuk search: %s (%s key)", type(e).__name__, src)
+                return _j(502, {"code": "naver_error", "status": 0, "text": "네이버 검색이 답하지 않아요"})
+            if status in (401, 403):  # 이 키는 막힘 — 다른 키로
+                log.info("ssalmuk search: naver HTTP %s (%s key)", status, src)
+                continue
+            if status == 200:
+                desk.set_search_keysrc(src)
+            break
         if status != 200:
             log.info("ssalmuk search: naver HTTP %s", status)
             return _j(502, {"code": "naver_error", "status": status, "text": "네이버 검색이 오류를 줬어요"})

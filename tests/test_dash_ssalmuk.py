@@ -33,6 +33,7 @@ B = ssalmuk.BASE
 @pytest.fixture
 def bot(settings: Settings, tmp_path: Path):  # type: ignore[no-untyped-def]
     settings.dashboard.blogauto_metrics_path = str(tmp_path / "blogauto.json")
+    settings.dashboard.ssalmuk_search_env_file = str(tmp_path / "no-such.env")
     b = DealBot(push_settings(settings))
     yield b
     b.db.close()
@@ -165,7 +166,8 @@ async def test_screen_needs_csrf_and_same_site(bot: DealBot) -> None:
     assert (await post_json(bot, ssalmuk.ACT_PATH, {"op": "profile", "args": {"profile": {"evil": 1}}}, h))[0] == 400
     status, v, headers = await get_json(bot, ssalmuk.STATE_PATH, h)
     assert status == 200 and headers["Cache-Control"] == "no-store"
-    assert v == {"state": None, "receivedAt": None, "pending": 0, "stale": True, "results": []}
+    assert v == {"state": None, "receivedAt": None, "pending": 0, "stale": True, "results": [],
+                 "search_proxy": {"keysrc": None, "today_count": 0}}
 
 
 async def test_key_shown_only_logged_in_and_rotate(bot: DealBot) -> None:
@@ -642,3 +644,105 @@ async def test_search_naver_errors_map_to_502(bot: DealBot) -> None:
     naver(bot, boom)
     status, body = await mget(bot, f"{SEARCH}?q=x", key)
     assert (status, body["code"], body["status"]) == (502, "naver_error", 0)
+
+
+BLOG_ID, BLOG_SECRET = "blog-naver-id-qqq", "blog-naver-secret-zzz"
+
+
+def blog_env(bot: DealBot, tmp_path: Path, text: str | None = None) -> Path:
+    p = tmp_path / "blog.env"
+    p.write_text(text if text is not None else f"OTHER=1\nNAVER_CLIENT_ID={BLOG_ID}\nexport NAVER_CLIENT_SECRET=\"{BLOG_SECRET}\"\nTG_TOKEN=do-not-read\n")
+    bot.settings.dashboard.ssalmuk_search_env_file = str(p)
+    return p
+
+
+def by_key(req: Any) -> Any:
+    import httpx
+
+    if req.headers["x-naver-client-id"] == BLOG_ID:
+        return ok_blog(req)
+    return httpx.Response(401, json={"errorMessage": NAVER_SECRET})
+
+
+async def test_search_falls_back_to_blog_key_and_remembers(bot: DealBot, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    blog_env(bot, tmp_path)
+    seen = naver(bot, by_key)
+    d = desk(bot)
+    now = [1_800_000_000.0]
+    d.clock = lambda: now[0]
+    key = d.key()
+    status, body = await mget(bot, f"{SEARCH}?q=x", key)
+    assert status == 200 and body["total"] == 42
+    assert [r.headers["x-naver-client-id"] for r in seen] == [NAVER_ID, BLOG_ID]
+    assert bot.db.kv_get(ssalmuk.KV_SEARCH_KEYSRC) == "blog"
+    # 다음 호출은 곧장 블로그 키로
+    await mget(bot, f"{SEARCH}?q=x", key)
+    assert [r.headers["x-naver-client-id"] for r in seen][2:] == [BLOG_ID]
+    # 화면용 state: 값 없이 keysrc·오늘 횟수만
+    _s, st, _h = await get_json(bot, f"{B}/state", session_headers(bot))
+    assert st["search_proxy"] == {"keysrc": "blog", "today_count": 2}
+    # 하루 뒤엔 딜봇 키를 다시 봄 — 살아났으면 되돌아감
+    now[0] += 86401
+    naver(bot, ok_blog)
+    blog_env(bot, tmp_path)
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[0] == 200
+    assert bot.db.kv_get(ssalmuk.KV_SEARCH_KEYSRC) == "dealbot"
+    for secret in (NAVER_ID, NAVER_SECRET, BLOG_ID, BLOG_SECRET, "do-not-read"):
+        assert secret not in caplog.text and secret not in json.dumps(st)
+        assert secret not in json.dumps(body)
+
+
+async def test_search_blog_key_only_when_dealbot_key_missing(bot: DealBot, tmp_path: Path) -> None:
+    blog_env(bot, tmp_path)
+    seen = naver(bot, by_key, keyed=False)
+    assert (await mget(bot, f"{SEARCH}?q=x", desk(bot).key()))[0] == 200
+    assert [r.headers["x-naver-client-id"] for r in seen] == [BLOG_ID]
+    assert bot.db.kv_get(ssalmuk.KV_SEARCH_KEYSRC) == "blog"
+
+
+async def test_search_both_keys_dead_is_502(bot: DealBot, tmp_path: Path) -> None:
+    import httpx
+
+    blog_env(bot, tmp_path)
+    for st in (401, 403):
+        seen = naver(bot, lambda r, st=st: httpx.Response(st, json={"errorMessage": BLOG_SECRET}))
+        status, body = await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+        assert (status, body["code"], body["status"]) == (502, "naver_error", st) and len(seen) == 2
+        assert BLOG_SECRET not in json.dumps(body) and BLOG_ID not in json.dumps(body)
+    assert bot.db.kv_get(ssalmuk.KV_SEARCH_KEYSRC) is None
+    # 429 같은 다른 오류는 키를 바꿔 보지 않음
+    seen = naver(bot, lambda r: httpx.Response(429))
+    assert (await mget(bot, f"{SEARCH}?q=x", desk(bot).key()))[1]["status"] == 429 and len(seen) == 1
+
+
+async def test_search_blog_key_file_mtime_reload_and_missing(bot: DealBot, tmp_path: Path) -> None:
+    import os
+
+    p = blog_env(bot, tmp_path)
+    seen = naver(bot, by_key, keyed=False)
+    key = desk(bot).key()
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[0] == 200
+    # 파일이 같으면 다시 읽지 않음 (메모리)
+    reads: list[Any] = []
+    orig = ssalmuk.BlogKeyFile._parse
+    ssalmuk.BlogKeyFile._parse = staticmethod(lambda q: reads.append(q) or orig(q))  # type: ignore[assignment]
+    try:
+        await mget(bot, f"{SEARCH}?q=x", key)
+        assert reads == []
+        # 키가 바뀌고 수정 시각이 달라지면 다시 읽음
+        p.write_text("NAVER_CLIENT_ID=other-id\nNAVER_CLIENT_SECRET=other-secret\n")
+        st = p.stat()
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+        status, body = await mget(bot, f"{SEARCH}?q=x", key)
+        assert len(reads) == 1 and (status, body["status"]) == (502, 401)
+        assert seen[-1].headers["x-naver-client-id"] == "other-id"
+    finally:
+        ssalmuk.BlogKeyFile._parse = staticmethod(orig)  # type: ignore[assignment]
+    # 파일이 없어지면 키 없음 → 503, 두 줄이 다 없는 파일도 마찬가지
+    p.unlink()
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[1]["code"] == "no_key"
+    blog_env(bot, tmp_path, "NAVER_CLIENT_ID=only-id\n")
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[1]["code"] == "no_key"

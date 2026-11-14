@@ -847,6 +847,7 @@ class DashboardConfig(BaseModel):
     spark_days: int = Field(28, ge=7, le=90)  # 작은 추이 그래프의 기간
     manual_max_days_back: int = Field(60, ge=1, le=400)  # 직접 입력 날짜는 오늘부터 이만큼 전까지
     blogauto_metrics_path: str = "/home/ubuntu/Blog-Auto/var/metrics/blogauto.json"  # Blog-Auto 가 한 시간마다 쓰는 활동 기록
+    ssalmuk_search_env_file: str = "~/Blog-Auto/.env"  # 딜봇 네이버 키가 막히면 이 파일의 NAVER_CLIENT_ID/SECRET 두 줄만 읽어 이벤트 참여 검색에 씀 (주인 11/14)
     blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
     cards: list[DashboardCardConfig] = Field(default_factory=list)
     # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
