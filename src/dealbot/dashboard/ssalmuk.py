@@ -89,6 +89,38 @@ def _plain(v: Any) -> str:
     return html.unescape(_TAG_RE.sub("", str(v or ""))).strip()
 
 
+ALERT_LEVELS = ("bad", "warn")
+ALERT_MAX = 10
+ALERT_TEXT = 200
+_WS_RE = re.compile(r"\s+")
+
+
+def _line(v: Any, n: int) -> str:
+    """한 줄 글 (태그·글자 표현 풀고 공백 하나로, n 자까지). 글이 아니면 ''."""
+    if not isinstance(v, str):
+        return ""
+    return _WS_RE.sub(" ", _plain(v))[:n].strip()
+
+
+def clean_alerts(state: Any) -> list[dict[str, Any]]:
+    """받아 둔 push 의 alerts[] → 화면용 (주인 11/14 — 쌀먹 오류 검수 칸, docs/SNSBOARD.md '오류 검수 칸').
+    dict 항목만 · level 은 bad/warn 만 · msg·todo 는 글로만 200 자까지 · bad 먼저 · 10 개까지. 칸이 없거나 이상하면 []."""
+    raw = state.get("alerts") if isinstance(state, dict) else None
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for x in raw[:100]:
+        if not isinstance(x, dict) or x.get("level") not in ALERT_LEVELS:
+            continue
+        msg = _line(x.get("msg"), ALERT_TEXT)
+        if not msg:
+            continue
+        out.append({"id": _line(x.get("id"), 64), "level": x["level"], "msg": msg, "since": _line(x.get("since"), 40),
+                    "todo": _line(x.get("todo"), ALERT_TEXT), "new": x.get("new") is True})
+    out.sort(key=lambda a: ALERT_LEVELS.index(a["level"]))  # bad 먼저 (같은 단계는 받은 순서 그대로)
+    return out[:ALERT_MAX]
+
+
 def search_items(data: Any) -> tuple[list[dict[str, str]], int]:
     raw = data.get("items") if isinstance(data, dict) else None
     items: list[dict[str, str]] = []
@@ -316,7 +348,9 @@ class Ssalmuk:
                 "pending": len(self._cmds()), "stale": stale(ts, self.clock()),
                 "results": self._load(KV_RESULTS, [])[-10:],
                 "search_proxy": {"keysrc": self.search_keysrc(), "today_count": self.search_today(),
-                                 "keys": self._load(KV_SEARCH_KEYS, {})}}
+                                 "keys": self._load(KV_SEARCH_KEYS, {})},
+                # 오류 검수 경고 한 줄 (주인 11/14) — 거른 목록만 · 칸이 없으면 [] (화면은 그대로)
+                "alerts": clean_alerts(saved.get("state") if isinstance(saved, dict) else None)}
 
     # ------------------------------------------------------------ 명령
     def act(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:

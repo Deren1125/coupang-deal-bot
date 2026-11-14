@@ -167,7 +167,7 @@ async def test_screen_needs_csrf_and_same_site(bot: DealBot) -> None:
     status, v, headers = await get_json(bot, ssalmuk.STATE_PATH, h)
     assert status == 200 and headers["Cache-Control"] == "no-store"
     assert v == {"state": None, "receivedAt": None, "pending": 0, "stale": True, "results": [],
-                 "search_proxy": {"keysrc": None, "today_count": 0, "keys": {}}}
+                 "search_proxy": {"keysrc": None, "today_count": 0, "keys": {}}, "alerts": []}  # alerts: 주인 11/14 오류 검수 (없으면 [])
 
 
 async def test_key_shown_only_logged_in_and_rotate(bot: DealBot) -> None:
@@ -828,3 +828,75 @@ def test_act_search_retry_and_trust_host(bot: DealBot) -> None:
     assert [c["args"] for c in cmds] == [{"host": "m.sum37.com"}]
     js = (Path(ssalmuk.__file__).parent / "static" / "ssalmuk.js").read_text(encoding="utf-8")
     assert "'이 사이트 허용'" in js and "'검색 다시 시도'" in js and "blockedToday" in js
+
+
+# ---------------------------------------------------------------- 오류 검수 경고 한 줄 (주인 11/14 — 쌀먹 alerts[], SNSBOARD.md '오류 검수 칸')
+VIEW_KEYS = {"state", "receivedAt", "pending", "stale", "results", "search_proxy"}
+
+
+def test_alerts_absent_is_empty_and_view_keys_unchanged() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    assert s.view()["alerts"] == [] and set(s.view()) == VIEW_KEYS | {"alerts"}  # 받은 적 없음
+    s.push(sample())
+    v = s.view()
+    assert v["alerts"] == [] and set(v) == VIEW_KEYS | {"alerts"} and "alerts" not in v["state"]
+    for bad in ("경고", {"id": "x"}, None, 3):
+        s.push(sample(alerts=bad))
+        assert s.view()["alerts"] == []
+
+
+def test_alerts_malformed_entries_dropped_and_text_only() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(sample(alerts=[
+        "글 하나", None, ["x"], {"level": "ok", "msg": "정상"}, {"level": "info", "msg": "?"}, {"level": "bad"}, {"level": "bad", "msg": 3},
+        {"id": "search", "level": "warn", "msg": "<b>네이버 검색</b> &quot;쉼&quot;\n오늘", "todo": "블로그 메인 6 에 부탁", "since": "2026-11-14T01:00:00Z", "new": True,
+         "extra": "버림"},
+        {"id": "x" * 200, "level": "bad", "msg": "가" * 500, "todo": ["목록"], "new": "yes"},
+    ]))
+    a = s.view()["alerts"]
+    assert len(a) == 2
+    assert a[0] == {"id": "x" * 64, "level": "bad", "msg": "가" * 200, "since": "", "todo": "", "new": False}
+    assert a[1] == {"id": "search", "level": "warn", "msg": '네이버 검색 "쉼" 오늘', "since": "2026-11-14T01:00:00Z", "todo": "블로그 메인 6 에 부탁", "new": True}
+
+
+def test_alerts_bad_first_and_at_most_ten() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    raw = [{"id": f"w{i}", "level": "warn", "msg": f"경고 {i}"} for i in range(8)] + [{"id": f"b{i}", "level": "bad", "msg": f"오류 {i}"} for i in range(5)]
+    s.push(sample(alerts=raw))
+    a = s.view()["alerts"]
+    assert [x["id"] for x in a] == ["b0", "b1", "b2", "b3", "b4", "w0", "w1", "w2", "w3", "w4"]
+
+
+SHIM_KIDS = SHIM.replace("out.scr = text(scr);", "out.scr = text(scr); out.kids = scr.children.map(c => c.className);")
+
+
+def _render(view: dict[str, Any]) -> dict[str, Any]:
+    out = subprocess.run([NODE, "-e", SHIM_KIDS, str(STATIC / "ssalmuk.js"), json.dumps(view, ensure_ascii=False)],
+                         capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_alert_line_on_top_text_only() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(sample())
+    plain = s.view()
+    base = _render(plain)
+    old = dict(plain)
+    old.pop("alerts")
+    assert _render(old) == base  # 칸이 없으면 화면은 그대로
+    assert "bn warn" not in base["kids"] and "bn bad" not in base["kids"]
+    s.push(sample(alerts=[{"id": "w", "level": "warn", "msg": "메모리 최고 650MB", "todo": ""},
+                          {"id": "s", "level": "bad", "msg": "네이버 검색 오늘 쉼", "todo": "블로그 메인 6 에 부탁", "new": True},
+                          {"id": "d", "level": "warn", "msg": "디스크 400MB"}]))
+    got = _render(s.view())
+    assert got["kids"][:3] == ["top", "bn bad", "box"]  # 맨 위(KPI 칸 위) 한 줄
+    assert "네이버 검색 오늘 쉼 · 할 일: 블로그 메인 6 에 부탁 외 2건" in got["scr"]
+    assert got["scr"].replace("네이버 검색 오늘 쉼 · 할 일: 블로그 메인 6 에 부탁 외 2건", "") == base["scr"]
+    s.push(sample(alerts=[{"id": "w", "level": "warn", "msg": "<a href='x'>메모리</a> 650MB"}]))
+    got = _render(s.view())
+    assert got["kids"][1] == "bn warn" and "메모리 650MB" in got["scr"] and "할 일:" not in got["scr"] and " 외 " not in got["scr"]
+    code = (STATIC / "ssalmuk.js").read_text(encoding="utf-8")
+    fn = code[code.index("function alertLine()"):code.index("function drawScr()")]
+    assert "innerHTML" not in fn and "'a'" not in fn and "href" not in fn  # 글 노드만

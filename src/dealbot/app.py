@@ -3431,7 +3431,9 @@ class DealBot:
             retry = self._photo_retry.pop(deal.product.product_id, None)
             if retry and self.settings.publish.late_photo_auto_minutes > 0:
                 # 자동으로 다시 찾을 길이 남음 (쿠팡 검색 몫 소진 등) — 주인에게 묻기 전에 잠깐 다시 찾아 본다 (late_photo.tick)
-                self.late_photo.hold(queue_id, deal, posted, retry)
+                if self.late_photo.hold(queue_id, deal, posted, retry):
+                    # 발행 때 deal_photo 가 'none' 으로 셌음 — 이 딜은 tick 이 'late_auto' 또는 'asked' 로 한 번만 센다 (주인 11/14 점검 15)
+                    self.photo_stats.unrecord("none")
                 return
             await self.late_photo.ask(queue_id, deal, posted)
         except Exception as e:  # noqa: BLE001 — 사진 부탁이 실패해도 발행은 그대로
@@ -3685,13 +3687,18 @@ class DealBot:
         cc = self.settings.publish
         referer = p.url if p.url and p.url.startswith("http") else None
         tried: set[str] = set()
+        too_small: set[str] = set()  # 받았지만 검사(짧은 변·비율)에서 떨어진 주소 — 받기 실패와 나눠 봄 (주인 11/14 점검 11)
         retry: str | None = None
 
         async def _try(url: str | None) -> bytes | None:
             if not url or url in tried or is_board_thumb(url) or is_generic_image(url):
                 return None
             tried.add(url)
-            return clean_image(await self._fetch_image(url, referer=referer), min_side=cc.photo_min_side)
+            raw = await self._fetch_image(url, referer=referer)
+            got = clean_image(raw, min_side=cc.photo_min_side)
+            if raw and got is None:
+                too_small.add(url)
+            return got
 
         def _sizes(url: str | None) -> list[str | None]:
             # 쿠팡·네이버 CDN 축소본이면 큰 주소부터, 그다음 원래 주소
@@ -3738,12 +3745,18 @@ class DealBot:
                 if photo is not None:
                     return photo, src, "browser", None
         if p.shop == "coupang":
+            # 찾은 같은 상품 사진 주소는 photo_search 가 기억함 (photo_hit) — 'coupang_api:fetch' 로 다시 찾을 땐 검색 없이 그 주소를 다시 받음
             url, status = await self.photo_search.find(p)
             if url:
-                photo, src = await _first(_sizes(url))
+                cands = [u for u in _sizes(url) if u]
+                photo, src = await _first(cands)
                 if photo is not None:
                     return photo, src, "coupang_api", None
-                retry = retry or "coupang_api:fetch"  # 사진 받기만 실패 — 나중에 다시
+                if cands and all(u in too_small for u in cands):
+                    # 받았는데 검사에서 떨어짐 (작은 사진) — 다시 받아도 같음: 하루 동안 다시 안 찾고(no_match 처럼) 주인에게
+                    self.photo_search.reject(p)
+                else:
+                    retry = retry or "coupang_api:fetch"  # 사진 받기만 실패 — 나중에 같은 주소로 다시 (검색 몫 안 씀)
             elif status in ("budget", "error"):
                 retry = f"coupang_api:{status}"
         return None, None, "none", retry

@@ -70,7 +70,8 @@ class LatePhoto:
         return True
 
     async def tick(self, now: datetime | None = None) -> int:
-        """hold 한 딜을 다시 찾아 본다 (발행 루프마다 — 때가 된 것만). 찾았거나 주인에게 물은 딜 수."""
+        """hold 한 딜을 다시 찾아 본다 (발행 루프마다 — 때가 된 것만). 찾았거나 주인에게 물은 딜 수.
+        한 딜에서 오류가 나도 다른 딜·발행 루프(스레드 차례)는 이어 간다 — 그 딜은 RETRY_EVERY 뒤에 다시 (주인 11/14 점검 15)."""
         bot = self.bot
         now = now or bot.clock()
         done = 0
@@ -85,33 +86,56 @@ class LatePhoto:
             nxt = from_iso(info.get("auto_next"))
             if nxt is not None and now < nxt:
                 continue
-            item = bot.db.get_queue_item(qid)
-            if item is None or item.status != "published":
-                bot.db.kv_set(key, "")
-                continue
             try:
-                jpeg, src, retry = await bot.find_late_photo(item.deal)
-            except Exception as e:  # noqa: BLE001 — 다시 찾기가 터지면 주인에게 묻는 쪽으로
-                log.warning("late auto photo failed for #%d: %s", qid, e)
-                jpeg, src, retry = None, None, None
-            if self._info(qid) != info:  # 찾는 사이 주인 사진이 왔거나 기록이 바뀜
-                continue
-            if jpeg is not None:
-                await self._attach_auto(qid, item, jpeg, src, info)
-                done += 1
-                continue
-            ask_at = from_iso(info.get("auto_until"))
-            if retry and ask_at is not None and now + RETRY_EVERY <= ask_at:
-                info["auto_next"] = to_iso(now + RETRY_EVERY)
-                info["auto_why"] = retry
-                bot.db.kv_set(key, json.dumps(info))
-                continue
-            posted_at = from_iso(info.get("posted_at")) or now
-            until = from_iso(info.get("until")) or self.wait_until(posted_at)
-            left = max(0.5, round((until - now).total_seconds() / 1800) / 2)  # 남은 시간 (30분 단위)
-            await self.ask(qid, item.deal, posted_at, hours_left=left)
-            done += 1
+                done += await self._tick_one(key, qid, info, now)
+            except Exception as e:  # noqa: BLE001 — 이 딜만 10분 뒤로 미루고 다음 딜로
+                log.warning("late photo tick failed for #%d: %s", qid, e)
+                try:
+                    cur = self._info(qid)
+                    if cur is not None and cur.get("auto_until"):
+                        cur["auto_next"] = to_iso(now + RETRY_EVERY)
+                        bot.db.kv_set(key, json.dumps(cur))
+                    bot.db.log_event("WARNING", "late_photo", f"#{qid} 사진 자동 다시 찾기 오류 — 10분 뒤 다시: {type(e).__name__}: {str(e)[:120]}")
+                except Exception as e2:  # noqa: BLE001
+                    log.warning("late photo tick: could not push #%d back: %s", qid, e2)
         return done
+
+    async def _tick_one(self, key: str, qid: int, info: dict[str, Any], now: datetime) -> int:
+        bot = self.bot
+        item = bot.db.get_queue_item(qid)
+        if item is None or item.status != "published":
+            bot.db.kv_set(key, "")
+            return 0
+        try:
+            jpeg, src, retry = await bot.find_late_photo(item.deal)
+        except Exception as e:  # noqa: BLE001 — 다시 찾기가 터지면 주인에게 묻는 쪽으로
+            log.warning("late auto photo failed for #%d: %s", qid, e)
+            jpeg, src, retry = None, None, None
+        if self._info(qid) != info:  # 찾는 사이 주인 사진이 왔거나 기록이 바뀜
+            return 0
+        if jpeg is not None:
+            await self._attach_auto(qid, item, jpeg, src, info)
+            return 1
+        ask_at = from_iso(info.get("auto_until"))
+        if retry and ask_at is not None and now + RETRY_EVERY <= ask_at:
+            info["auto_next"] = to_iso(now + RETRY_EVERY)
+            info["auto_why"] = retry
+            bot.db.kv_set(key, json.dumps(info))
+            return 0
+        posted_at = from_iso(info.get("posted_at")) or now
+        until = from_iso(info.get("until")) or self.wait_until(posted_at)
+        if not self.enabled() or item.deal.product.deal_kind == "info":  # 그 사이 사진 받기를 껐음
+            bot.db.kv_set(key, "")
+            return 0
+        if now >= until - CLOSE_EARLY:  # 묻기도 전에 받는 창이 닫힘 (보내기 실패가 이어짐 등) — 자동 다시 찾기도 끝
+            info.pop("auto_until", None)
+            info.pop("auto_next", None)
+            bot.db.kv_set(key, json.dumps(info))
+            return 0
+        left = max(0.5, round((until - now).total_seconds() / 1800) / 2)  # 남은 시간 (30분 단위)
+        if not await self.ask(qid, item.deal, posted_at, hours_left=left):
+            raise RuntimeError("photo ask not sent")  # 기록(auto_until)은 그대로 — tick 이 10분 뒤 다시
+        return 1
 
     async def _attach_auto(self, queue_id: int, item: Any, jpeg: bytes, src: str | None, info: dict[str, Any]) -> None:
         bot = self.bot
@@ -127,29 +151,45 @@ class LatePhoto:
 
     async def ask(self, queue_id: int, deal: Any, posted_at: datetime, *, hours_left: float | None = None) -> bool:
         """사진 없이 올라간 딜: 관리자 챗 한 통(소리 없이, 답장 자리) + 주인 할 일. 보냈으면 True.
-        hours_left: 자동으로 다시 찾다가 묻는 거면 남은 시간 (메시지의 '4시간' 대신)."""
+        hours_left: 자동으로 다시 찾다가 묻는 거면 남은 시간 (메시지의 '4시간' 대신).
+        자동으로 다시 찾던(hold) 딜은 보내기가 끝난 뒤에야 기록을 바꾼다 (auto_until 이 빠짐) — 보내기가 실패하면
+        기록이 그대로라 tick 이 10분 뒤 다시 찾고 다시 묻는다 (주인 11/14 점검 15)."""
         bot = self.bot
         if not self.enabled() or deal.product.deal_kind == "info":
             return False
         until = self.wait_until(posted_at)
-        bot.db.kv_set(f"{KV}{queue_id}", json.dumps(
-            {"until": to_iso(until), "posted_at": to_iso(posted_at), "product_id": deal.product.product_id}))
-        stats = getattr(bot, "photo_stats", None)
-        if stats is not None:
-            stats.record("asked")
+        record = json.dumps({"until": to_iso(until), "posted_at": to_iso(posted_at), "product_id": deal.product.product_id})
+        held = self._info(queue_id)
+        held = held if held and held.get("auto_until") else None
+        if held is None:
+            # 처음 묻는 딜: 보내기 전에 기다림 기록부터 (인스타 시간표가 그 사이 글자 카드로 먼저 올리지 않게)
+            bot.db.kv_set(f"{KV}{queue_id}", record)
         hours = self.hours if hours_left is None else hours_left
         text = ask_text(queue_id, deal.product.name, hours)
-        mid = await bot.notifier.send_with_id(text, silent=True, kind=MSG_KIND, queue_id=queue_id)
+        notifier = bot.notifier
+        mid = await notifier.send_with_id(text, silent=True, kind=MSG_KIND, queue_id=queue_id)
+        # 관리자 챗 알림을 끈 것(주인 10/18 — 할 일은 대시보드)·봇 토큰 없음은 실패가 아님: 그땐 아래 할 일이 주인에게 가는 길
+        tg_off = bool(getattr(notifier, "tg_quiet", False)) or not bool(getattr(notifier, "enabled", True))
+        if held is not None and mid is None and not tg_off:
+            log.warning("late photo ask for #%d not sent — keeping the automatic retry", queue_id)
+            return False
         hhmm = until.astimezone(ZoneInfo(bot.settings.app.timezone)).strftime("%H:%M")
-        await bot.notifier.alert(
+        await notifier.alert(
             "photo_need", None,
             kakao_fit(f"🔔[할 일] 사진 필요 #{queue_id} {truncate(clean_name(deal.product.name), 50)}",
                       f"→ {hhmm} 까지 텔레그램 핫딜봇 📷 메시지에 사진 답장 (없으면 블로그는 글자 카드)"),
             key=f"photo:{queue_id}", short=f"딜 사진 #{queue_id}", group="photo_need", ttl_h=hours,
             links=product_links(deal.product),  # 상품 페이지 — 알림에서 바로 열어 사진을 받게 (주인 10/18)
         )
+        if held is not None:
+            if self._info(queue_id) != held:  # 보내는 사이 주인 사진이 왔음 — 기록을 되살리지 않음
+                return True
+            bot.db.kv_set(f"{KV}{queue_id}", record)  # 보낸 뒤에 (auto_until 이 빠짐 — 이제 주인 사진을 기다림)
+        stats = getattr(bot, "photo_stats", None)
+        if stats is not None:
+            stats.record("asked")
         bot.db.log_event("INFO", "late_photo", f"#{queue_id} 사진 요청 (until {to_iso(until)})")
-        return mid is not None
+        return mid is not None or tg_off
 
     def waiting(self, queue_id: int, now: datetime | None = None) -> dict[str, Any] | None:
         """이 딜이 지금 사진을 받는 중이면 그 기록, 아니면 None (시간이 지났거나 받은 뒤). 창은 until 보다 CLOSE_EARLY 일찍 닫힘."""

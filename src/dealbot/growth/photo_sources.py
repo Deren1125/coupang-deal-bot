@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.media.imagecheck import coupang_image_url, is_board_thumb, is_generic_image
+from dealbot.media.imagecheck import COUPANG_IMAGE_SIDE, coupang_image_url, is_board_thumb, is_generic_image
 from dealbot.pricing.market import build_keyword
 from dealbot.utils.text import clean_name
 from dealbot.utils.urls import extract_product_id
@@ -36,6 +36,12 @@ STATS_KEY = "photo_stats"
 STATS_KEEP_DAYS = 14
 MISS_KV = "photo_miss:"  # photo_miss:{쿠팡 상품번호} → 마지막으로 검색했는데 같은 상품이 없던 시각 (epoch)
 MISS_TTL = 86400
+# 주인 11/14 (점검 11): 같은 상품을 찾았으면 사진 주소를 기억 — 사진 받기만 실패해 다시 찾을 때 검색 몫을 또 쓰지 않게
+HIT_KV = "photo_hit:"  # photo_hit:{쿠팡 상품번호} → {"url", "at"}
+HIT_TTL = 86400
+# 검색 결과 사진 크기 — 골드박스·카테고리 베스트 수집기(config.yaml image_size "1000x1000")와 같은 값.
+# 크기를 안 주면 작은 기본 사진이 와서 짧은 변 600px 검사에서 떨어진다 (주인 11/14 점검 11)
+PHOTO_IMAGE_SIZE = f"{COUPANG_IMAGE_SIDE}x{COUPANG_IMAGE_SIDE}"
 PHOTO_KIND = "photo"  # 쿠팡 API 예산의 종류 이름 (ApiBudget caps)
 # 게시판 제목의 가격·할인 표기 ('479,000원부터~', '30%', '(카드 할인)') — 검색어에 넣으면 쿠팡 검색이 엉뚱해짐
 _PRICE_RE = re.compile(r"\d[\d,.]*\s*(?:만\s*)?원\S*|\d+\s*%|\([^)]*\)")
@@ -74,11 +80,21 @@ class PhotoStats:
         return data if isinstance(data, dict) else {}
 
     def record(self, source: str, now: datetime | None = None) -> None:
+        self._add(source, 1, now)
+
+    def unrecord(self, source: str, now: datetime | None = None) -> None:
+        """방금 센 것을 되돌린다 (0 아래로는 안 내려감). 주인 11/14 점검 15: 발행 때 'none' 으로 셌던 딜이 late_photo.hold 로
+        넘어가면 나중에 'asked'·'late_auto' 로 한 번만 세게."""
+        self._add(source, -1, now)
+
+    def _add(self, source: str, n: int, now: datetime | None) -> None:
         try:
             day = (now or datetime.now(self.tz)).astimezone(self.tz).strftime("%Y-%m-%d")
             data = self._load()
             row = data.setdefault(day, {})
-            row[source] = int(row.get(source, 0)) + 1
+            row[source] = max(0, int(row.get(source, 0)) + n)
+            if row[source] <= 0:
+                row.pop(source, None)
             for old in sorted(data)[:-STATS_KEEP_DAYS]:
                 data.pop(old, None)
             self.db.kv_set(STATS_KEY, json.dumps(data, ensure_ascii=False, sort_keys=True))
@@ -133,6 +149,25 @@ class CoupangPhotoSearch:
             return False
         return time.time() - at < MISS_TTL
 
+    def _hit(self, num: str) -> str | None:
+        try:
+            info = json.loads(self.db.kv_get(f"{HIT_KV}{num}") or "null")
+        except ValueError:
+            return None
+        if not isinstance(info, dict) or time.time() - float(info.get("at") or 0) >= HIT_TTL:
+            return None
+        url = str(info.get("url") or "")
+        return url if usable_url(url) else None
+
+    def reject(self, p: Any) -> None:
+        """찾은 사진이 검사(짧은 변 600px·비율)에서 떨어짐 — no_match 처럼 하루 동안 다시 안 찾는다 (주인 11/14 점검 11)."""
+        num = coupang_number(p)
+        if not num:
+            return
+        self.db.kv_set(f"{HIT_KV}{num}", "")
+        self.db.kv_set(f"{MISS_KV}{num}", str(time.time()))
+        log.info("coupang photo search: product %s photo failed the size check — not searching again for a day", num)
+
     async def find(self, p: Any) -> tuple[str | None, str]:
         """(사진 주소, 상태). 상태: found · no_match(검색했는데 같은 상품 없음 — 하루 기억) · budget(이번 시간 몫 다 씀 — 나중에 다시)
         · error(일시 오류 — 나중에 다시) · skip(쿠팡 딜이 아님·꺼짐·이름 없음)."""
@@ -143,11 +178,15 @@ class CoupangPhotoSearch:
             return None, "skip"
         if self._missed_recently(num):
             return None, "no_match"
+        hit = self._hit(num)
+        if hit:  # 전에 찾은 같은 상품 사진 (받기만 실패했던 것) — 검색 몫을 다시 쓰지 않음
+            return hit, "found"
         keyword = search_keyword(str(getattr(p, "name", "") or ""))
         if not keyword.strip():
             return None, "skip"
         try:
-            raw = await self.client.search(keyword, limit=10, kind=PHOTO_KIND)
+            # 한 번만 부름 (주인 11/14 점검 11): 429 를 다시 부르면 시간당 photo 몫 밖에서 호출이 늘어난다 — 실패는 hold 가 나중에 다시
+            raw = await self.client.search(keyword, limit=10, image_size=PHOTO_IMAGE_SIZE, kind=PHOTO_KIND, attempts=1)
         except CoupangRateLimited:
             return None, "budget"
         except Exception as e:  # noqa: BLE001
@@ -159,6 +198,7 @@ class CoupangPhotoSearch:
             img = coupang_image_url(str(x.get("productImage") or "") or None)
             if usable_url(img):
                 log.info("coupang photo search: same product %s found for '%s'", num, keyword[:40])
+                self.db.kv_set(f"{HIT_KV}{num}", json.dumps({"url": img, "at": time.time()}))
                 return img, "found"
         self.db.kv_set(f"{MISS_KV}{num}", str(time.time()))
         log.info("coupang photo search: product %s not in %d results for '%s'", num, len(raw or []), keyword[:40])
@@ -173,4 +213,11 @@ class CoupangPhotoSearch:
             except ValueError:
                 return False
 
-        return int(self.db.kv_delete_prefix(MISS_KV, keep=keep))
+        def keep_hit(_key: str, value: str | None) -> bool:
+            try:
+                info = json.loads(value or "null")
+                return isinstance(info, dict) and now - float(info.get("at") or 0) < HIT_TTL
+            except (TypeError, ValueError):
+                return False
+
+        return int(self.db.kv_delete_prefix(MISS_KV, keep=keep)) + int(self.db.kv_delete_prefix(HIT_KV, keep=keep_hit))

@@ -207,9 +207,14 @@ async def publisher_loop(bot: DealBot, stop: asyncio.Event) -> None:
                 else:
                     await bot.process_queue_once()
                     # 사진 없이 올라간 딜 중 자동으로 다시 찾는 딜 (주인 11/14) — 때가 된 것만, 끝내 없으면 주인에게 📷
+                    # 따로 감쌈 (주인 11/14 점검 15): 사진 다시 찾기 오류가 아래 스레드 차례를 건너뛰거나 'publisher' 오류를 되풀이하지 않게
                     late = getattr(bot, "late_photo", None)
                     if late is not None:
-                        await late.tick()
+                        try:
+                            await late.tick()
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("late photo tick error: %s", e)
+                            bot.db.log_event("WARNING", "late_photo", f"사진 자동 다시 찾기 오류: {type(e).__name__}: {str(e)[:150]}")
                     # 스레드 대기열: 리듬(07~24시·45분 간격·하루 딜 10개)이 허락하면 한 글 (발행 루프라 재시작 때 마칠 시간을 받음)
                     flow = getattr(bot, "threads_flow", None)
                     if flow is not None:

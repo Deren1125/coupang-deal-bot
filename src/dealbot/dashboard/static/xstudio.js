@@ -300,7 +300,7 @@ function writeTab() {
   out.push(el('section', {class: 'box'},
     el('div', {class: 'kpi'}, el('div', {}, el('span', {}, '오늘 올린 글'), el('b', {}, `${p.today}/${p.target.join('~')}`)),
       el('div', {}, el('span', {}, '최근 7일'), el('b', {}, String(p.d7))), el('div', {}, el('span', {}, '다음 추천'), el('b', {}, p.next || '내일'))),
-    el('p', {class: 'note'}, `추천 시간 ${p.times.join(' · ')} · 하루 ${p.target.join('~')}개`),
+    el('p', {class: 'note'}, `추천 시간 ${p.times.join(' · ')} · 하루 ${p.target.join('~')}개 · 화제 글 위주`),
     g ? el('p', {class: 'note'}, g.join(' · ')) : el('p', {class: 'note'}, "수익 조건 숫자는 '도우미'의 X 도우미로 한 번에 기록돼요")));
   out.push(el('p', {class: 'grp'}, '재료'), seg(KINDS, V.kind, k => { V.kind = k; keep(); draw(true); }));
   if (V.kind === 'hot') {
@@ -405,7 +405,7 @@ function helpTab() {
       HP ? [el('ol', {}, HP.steps.map(x => el('li', {text: x}))), btn('sm ac', '코드 복사', () => copy(HP.code, '책갈피 코드'))] : btn('pb soft', '설치 방법 보기', hp)),
     el('p', {class: 'grp'}, '하루치 한 번에 — X 예약 게시'),
     el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0 0 8px'}, "x.com 웹 글쓰기 창의 달력 단추로 예약할 수 있어요 (X 앱에는 없음). 초안 카드의 'x.com 웹에서 예약하기'를 사파리에서 열거나, " +
-      "'글 복사' 후 아래 웹 글쓰기에 붙여넣고 12:00 · 18:30 · 21:30 으로 예약해요. 예약해도 '내 한마디'는 꼭 직접 써요."),
+      `'글 복사' 후 아래 웹 글쓰기에 붙여넣고 ${ST.posts.times.join(' · ')} 으로 예약해요. 예약해도 '내 한마디'는 꼭 직접 써요.`),
       el('a', Object.assign({class: 'sm', href: ST.links.compose}, NW), 'x.com 웹 글쓰기 열기')),
     el('p', {class: 'note'}, sub())];
 }

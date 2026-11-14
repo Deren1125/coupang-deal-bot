@@ -155,7 +155,7 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot) -> None:
     assert desk(bot)._ask_fn.calls == []  # 막힌 요청은 AI 까지 가지 않음
     status, got, head = await get_json(bot, xs.STATE_PATH, session_headers(bot))
     assert status == 200 and head["Cache-Control"] == "no-store"
-    assert got["posts"]["target"] == [2, 3] and got["posts"]["times"] == ["12:00", "18:30", "21:30"] and got["model"] == "Opus"
+    assert got["posts"]["target"] == [4, 5] and got["posts"]["times"] == ["08:30", "12:00", "15:30", "18:30", "21:30"] and got["model"] == "Opus"  # 주인 11/14 하루 4~5개
     assert got["links"] == {"post": "https://x.com/intent/post?text=", "reply": "https://x.com/intent/post?in_reply_to=",
                             "profile": "https://x.com/", "compose": "https://x.com/compose/post"}
     assert [f[1] for f in got["formats"]] == ["알아서", "숫자 대비", "증발·폭락·폭등", "알려드림 분석", "역대 기록", "반전", "저장형 정리", "인용+관점"]
@@ -224,6 +224,38 @@ def test_post_prompt_carries_the_benchmark_rules() -> None:
     u = xs.post_prompt("topic", "수능 응시자 수 변화")
     assert "지어내지 말고" in u and "[확인 필요]" in u and "<<<\n수능 응시자 수 변화\n>>>" in u
     assert "고쳐서 다시 3개" in xs.post_prompt("paste", SRC, "제목", ["본문에 링크"])
+
+
+def test_post_prompt_allows_light_swearing_but_never_insults() -> None:
+    """주인 11/14 22:1x: 빚갚는미친개처럼 가벼운 욕은 초안에 (맞을 때만 1~2곳) · 사람을 향한 욕·혐오·성적 욕설은 그대로 금지 · 답글은 비속어 없음."""
+    p = xs.post_system("auto")
+    assert "가벼운 비속어(예: 존나, 개-, 미쳤네 같은 강조 말)는 글 분위기에 맞을 때만 초안 하나에 1~2곳까지" in p
+    assert "초안 3개 중 적어도 하나는 비속어 없이" in p
+    assert "사람·집단을 향한 욕, 혐오·비하·차별 표현, 성적 욕설은 여전히 금지" in p
+    assert "혐오·성적 표현, 욕설," not in p  # 예전 한꺼번에 막던 줄에서 '욕설'만 뺌
+    r = xs.reply_system("agree")
+    assert "비속어·외모 평가·정치 편들기" in r and "가벼운 비속어" not in r  # 답글은 그대로 (모르는 사람에게)
+
+
+def test_lint_drops_slurs_and_too_much_swearing() -> None:
+    one = "엔비디아 시총 이틀 만에 4,270억 달러 증발함\n이거 존나 웃긴 게 실적이 아님"
+    assert xs.lint_post(one, {"4270"}, True, "auto")[0] == []  # 한 곳은 그대로
+    assert xs.lint_post("시총 증발 미쳤네\n개빡치는 건 이유가 CEO임", set(), True, "auto")[0] == []  # 두 곳까지
+    three = "시총 증발 존나 미쳤네\n개빡치는 건 이유가 CEO임"
+    assert xs.lint_post(three, set(), True, "auto")[0] == ["비속어 2곳 넘음"]
+    for slur in ("CEO 병신 같은 짓함\n끝", "틀딱들 또 몰려옴\n끝", "이 새끼 또 사고침\n끝", "씨발 시총 증발\n끝"):
+        assert xs.lint_post(slur, set(), True, "auto")[0] == ["사람을 향한 욕·혐오·성적 욕설"], slur
+    # 평범한 말은 셈 안 함 ('영향을 미친다' · 개미 투자자 · 대충)
+    assert xs.lint_post("금리가 시장에 영향을 미친다\n개미 투자자는 대충 버팀\n기생충 같은 말은 아님", set(), True, "auto")[0] == []
+
+
+async def test_draft_guard_drops_a_slur_draft_and_keeps_the_rest() -> None:
+    ok1 = GOOD.replace("증발함", "증발함 미쳤네")
+    slur = GOOD.replace("사임은", "병신같이 사임은")
+    swears = GOOD.replace("증발함", "증발함 존나 미쳤네 개빡침")
+    s = studio(FakeAsk(drafts(ok1, slur, swears, GOOD)))
+    res = await s.draft_posts({"kind": "paste", "text": SRC, "url": "https://news.example/a/1"})
+    assert [d["text"] for d in res["drafts"]] == [ok1, GOOD]
 
 
 def test_source_cannot_close_the_fence_in_prompts() -> None:
@@ -582,14 +614,14 @@ def test_posted_log_counts_today_and_week_without_storing_text() -> None:
     assert "엔비디아" not in json.dumps(s.db.kv, ensure_ascii=False)
     now[0] += 3 * 86400
     assert s.posted({"op": "add", "text": "다른 글\n\n내 말", "format": "x"})[1]["posts"] == {
-        "today": 1, "d7": 2, "target": [2, 3], "times": ["12:00", "18:30", "21:30"], "next": s.post_stats()["next"]}
+        "today": 1, "d7": 2, "target": [4, 5], "times": ["08:30", "12:00", "15:30", "18:30", "21:30"], "next": s.post_stats()["next"]}
     now[0] += 5 * 86400
     assert s.post_stats()["today"] == 0 and s.post_stats()["d7"] == 1
     assert s.posted({"op": "undo", "text": "다른 글\n\n내 말"})[1]["posts"]["d7"] == 1  # 다른 날 줄은 그대로 (그날 것만 지움)
     with pytest.raises(xs.StudioError):
         s.posted({"op": "add", "text": ""})
     # 다음 추천 시간
-    for hm, nxt in (((11, 0), "12:00"), ((12, 0), "18:30"), ((20, 59), "21:30"), ((22, 0), "")):
+    for hm, nxt in (((7, 0), "08:30"), ((11, 0), "12:00"), ((12, 0), "15:30"), ((16, 0), "18:30"), ((20, 59), "21:30"), ((22, 0), "")):
         from datetime import datetime
 
         s.clock = lambda hm=hm: datetime(2026, 11, 14, *hm, tzinfo=xs.KST).timestamp()
@@ -1169,11 +1201,11 @@ def run_shim(scenario: str, state: str, extra: dict[str, Any] | None = None) -> 
 def test_js_card_on_x_section_and_screen_takes_over_sns_tab() -> None:
     got = run_shim("card", view_json())
     assert got["order"] == ["snt", "xsc", "DIV"]  # SNS 탭 칸 고르기 바로 아래 · X 칸 위
-    for t in ("오늘 할 X 일", "글 1/2~3개", "답글 0/10개", "글쓰기", "답글 달기", "@mad_dogdebt"):
+    for t in ("오늘 할 X 일", "글 1/4~5개", "답글 0/10개", "글쓰기", "답글 달기", "@mad_dogdebt"):
         assert t in got["card"], t
     assert got["links"] == ["#/sns/xs", "https://x.com/mad_dogdebt"]
     assert got["scr"] == "xss" and got["hidden"] and got["title"] == "X 글쓰기·답글" and got["kids"][0] == "xss"
-    for t in ("글쓰기답글계정도우미", "오늘 올린 글1/2~3", "추천 시간 12:00 · 18:30 · 21:30", "초안 3개 만들기", "초안 Opus · 마지막 한마디와 올리기는 내가"):
+    for t in ("글쓰기답글계정도우미", "오늘 올린 글1/4~5", "추천 시간 08:30 · 12:00 · 15:30 · 18:30 · 21:30 · 하루 4~5개 · 화제 글 위주", "초안 3개 만들기", "초안 Opus · 마지막 한마디와 올리기는 내가"):
         assert t in got["screen"], t
     assert got["back"] == [False, ["snt", "DIV"]]  # 다른 칸으로 가면 화면·카드 모두 빠짐
 

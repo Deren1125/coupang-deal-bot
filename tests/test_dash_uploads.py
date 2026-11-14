@@ -319,11 +319,12 @@ global.fetch = async url => {
 
 
 def _yt_view(bot: DealBot, raw: dict | None) -> dict:
-    db_c = uploadplan.cache(bot.db)
+    # 11/14 점검 14: yt 는 따로 작은 kv uploads:yt 에
+    st = uploadplan.yt_state(bot.db)
     if raw is not None:
-        db_c["yt"] = uploadplan.yt_clean(raw, TZ)
-    bot.db.kv_set(uploadplan.CACHE_KEY, json.dumps(db_c))
-    return uploadplan.view(bot)
+        st["yt"] = uploadplan.yt_clean(raw, TZ)
+    bot.db.kv_set(uploadplan.YT_KEY, json.dumps(st))
+    return uploadplan.view(bot, now=datetime(2031, 3, 4, 15, 0, tzinfo=TZ).timestamp())  # 값(3/5)보다 앞 — 날짜로 보임·묵지 않음
 
 
 def test_yt_clean_kinds_and_time() -> None:
@@ -342,8 +343,12 @@ def test_yt_clean_kinds_and_time() -> None:
         uploadplan.yt_clean([1], TZ)
 
 
+def _kst(d: int, h: int, m: int = 0) -> float:
+    return datetime(2031, 3, d, h, m, tzinfo=TZ).timestamp()
+
+
 async def test_tick_yt_absent_failure_keeps_last(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
-    replies = [("ok", {"kind": "login", "why": "x", "ts": 1.0, "page": "/ytlogin.html"}), ("down", None), ("none", None)]
+    replies = [("ok", {"kind": "login", "why": "x", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}), ("down", None), ("none", None)]
     n = []
 
     async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
@@ -351,12 +356,136 @@ async def test_tick_yt_absent_failure_keeps_last(bot: DealBot, monkeypatch: pyte
         return replies[len(n) - 1]
 
     monkeypatch.setattr(uploadplan, "fetch_yt", fake)
-    assert uploadplan.view(bot)["yt"] is None  # 아직 없음 = 조용히 아무것도 없음
-    assert await uploadplan.tick_yt(bot, now=1000.0) == "ok"
-    assert await uploadplan.tick_yt(bot, now=1100.0) is None and len(n) == 1  # 5분 안엔 다시 안 읽음
-    assert uploadplan.view(bot)["yt"]["kind"] == "login" and uploadplan.view(bot)["yt"]["login_url"].endswith("/ytlogin.html")
-    assert await uploadplan.tick_yt(bot, now=1300.0) == "down" and uploadplan.view(bot)["yt"]["kind"] == "login"  # 실패 = 지난 값
-    assert await uploadplan.tick_yt(bot, now=1700.0) == "none" and uploadplan.view(bot)["yt"] is None
+    t0 = _kst(5, 9, 0)  # 아침 갱신 창(08:50~09:30) — 5분마다
+    assert uploadplan.view(bot, now=t0)["yt"] is None  # 아직 없음 = 조용히 아무것도 없음
+    assert await uploadplan.tick_yt(bot, now=t0) == "ok"
+    assert await uploadplan.tick_yt(bot, now=t0 + 100) is None and len(n) == 1  # 5분 안엔 다시 안 읽음
+    v = uploadplan.view(bot, now=t0 + 100)["yt"]
+    assert v["kind"] == "login" and v["login_url"].endswith("/ytlogin.html")
+    assert await uploadplan.tick_yt(bot, now=t0 + 300) == "down" and uploadplan.view(bot, now=t0 + 300)["yt"]["kind"] == "login"  # 실패 = 지난 값
+    assert await uploadplan.tick_yt(bot, now=t0 + 600) == "none" and uploadplan.view(bot, now=t0 + 600)["yt"] is None
+
+
+async def test_tick_yt_every_30_minutes_outside_the_morning_window(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    n = []
+
+    async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        n.append(1)
+        return "ok", {"kind": "ok", "why": "", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", fake)
+    t0 = _kst(5, 14, 0)
+    assert await uploadplan.tick_yt(bot, now=t0) == "ok"
+    assert await uploadplan.tick_yt(bot, now=t0 + 600) is None  # 낮엔 10분 뒤에도 안 읽음
+    assert await uploadplan.tick_yt(bot, now=t0 + 1800) == "ok" and len(n) == 2
+    assert uploadplan.yt_every(_kst(6, 8, 49), TZ) == 1800 and uploadplan.yt_every(_kst(6, 8, 50), TZ) == 300
+    assert uploadplan.yt_every(_kst(6, 9, 29), TZ) == 300 and uploadplan.yt_every(_kst(6, 9, 30), TZ) == 1800
+
+
+async def test_tick_yt_does_not_rewrite_the_uploads_cache(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    put(bot, [{"id": "a", "when": "2031-03-05T19:00:00+09:00"}], tried=123.0)
+    before = bot.db.kv_get(uploadplan.CACHE_KEY)
+
+    async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        return "ok", {"kind": "ok", "why": "", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", fake)
+    writes: list[str] = []
+    real = bot.db.kv_set
+
+    def spy(k: str, v: str) -> None:
+        writes.append(k)
+        real(k, v)
+
+    monkeypatch.setattr(bot.db, "kv_set", spy)
+    for i in range(3):
+        assert await uploadplan.tick_yt(bot, now=_kst(5, 9, 0) + i * 300) == "ok"
+    assert writes == [uploadplan.YT_KEY] * 3 and bot.db.kv_get(uploadplan.CACHE_KEY) == before
+    assert "yt" not in uploadplan.cache(bot.db)
+
+
+async def test_tick_yt_reads_the_old_cache_spot_once(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 배포 전 값(일정 캐시 안 yt)도 카드에 보임 — 첫 읽기 뒤엔 uploads:yt 로
+    bot.db.kv_set(uploadplan.CACHE_KEY, json.dumps({"yt": {"kind": "ok", "why": "", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}, "yt_tried": 1.0}))
+    assert uploadplan.view(bot, now=_kst(5, 12))["yt"]["kind"] == "ok"
+
+
+async def test_yt_ok_to_login_pushes_once_a_day(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    pushes: list[dict] = []
+
+    class Router:
+        async def push_event(self, title: str, body: str, *, url: str, tag: str) -> int:
+            pushes.append({"title": title, "body": body, "url": url, "tag": tag})
+            return 1
+
+    bot.router = Router()  # type: ignore[assignment]
+    kinds = iter(["ok", "login", "login", "ok", "login", "ok", "login"])
+
+    async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        return "ok", {"kind": next(kinds), "why": "쿠키 만료", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", fake)
+    t = _kst(5, 10)
+    for i in range(5):  # ok → login(알림) → login(그대로) → ok → login(같은 날 — 또 안 보냄)
+        assert await uploadplan.tick_yt(bot, now=t + i * 1800) == "ok"
+    assert len(pushes) == 1 and pushes[0]["tag"] == "yt-alive" and pushes[0]["url"] == "/dashboard/#/sns/shorts"
+    assert "다시 로그인" in pushes[0]["body"] and "텔레그램" not in pushes[0]["body"]
+    t2 = _kst(6, 10)  # 다음 날: ok → login 이면 다시 한 통
+    assert await uploadplan.tick_yt(bot, now=t2) == "ok" and await uploadplan.tick_yt(bot, now=t2 + 1800) == "ok"
+    assert len(pushes) == 2
+
+
+async def test_yt_first_value_login_does_not_push(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    pushes: list[str] = []
+
+    class Router:
+        async def push_event(self, title: str, body: str, *, url: str, tag: str) -> int:
+            pushes.append(tag)
+            return 1
+
+    bot.router = Router()  # type: ignore[assignment]
+
+    async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        return "ok", {"kind": "login", "why": "", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", fake)
+    assert await uploadplan.tick_yt(bot, now=_kst(5, 10)) == "ok" and pushes == []  # 바뀐 게 아님 (처음 본 값)
+
+
+def test_yt_stale_value_is_not_shown_as_ok(bot: DealBot) -> None:
+    ts = _kst(5, 8, 50)
+    bot.db.kv_set(uploadplan.YT_KEY, json.dumps({"yt": {"kind": "ok", "why": "", "ts": ts, "page": "/ytlogin.html"}, "tried": ts, "fails": 0}))
+    assert uploadplan.view(bot, now=ts + 35 * 3600)["yt"]["kind"] == "ok"
+    v = uploadplan.view(bot, now=ts + 37 * 3600)["yt"]
+    assert v["kind"] == "other" and v["why"] == "쇼츠 서버 확인이 1일째 안 옴"  # 3/5 값 → 3/6 밤
+    v = uploadplan.view(bot, now=ts + 74 * 3600)["yt"]
+    assert v["why"] == "쇼츠 서버 확인이 3일째 안 옴"
+    # 값은 새것이어도 읽기가 계속 실패하면 확인 안 됨
+    bot.db.kv_set(uploadplan.YT_KEY, json.dumps({"yt": {"kind": "ok", "why": "", "ts": ts, "page": "/ytlogin.html"}, "tried": ts, "fails": 12}))
+    assert uploadplan.view(bot, now=ts + 6 * 3600)["yt"] == {**uploadplan.view(bot, now=ts + 6 * 3600)["yt"], "kind": "other", "why": "쇼츠 서버 확인이 1일째 안 옴"}
+
+
+async def test_yt_fails_counter(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def down(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        return "down", None
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", down)
+    bot.db.kv_set(uploadplan.YT_KEY, json.dumps({"yt": {"kind": "ok", "why": "", "ts": _kst(5, 8, 50), "page": "/ytlogin.html"}}))
+    t = _kst(5, 10)
+    for i in range(12):
+        await uploadplan.tick_yt(bot, now=t + i * 1800)
+    assert uploadplan.yt_state(bot.db)["fails"] == 12 and uploadplan.view(bot, now=t + 12 * 1800)["yt"]["kind"] == "other"
+
+
+def test_yt_urls_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(uploadplan.YT_URL_ENV, raising=False)
+    monkeypatch.delenv(uploadplan.YT_BASE_ENV, raising=False)
+    assert uploadplan.yt_url() == uploadplan.YT_URL and uploadplan.yt_base() == uploadplan.YT_BASE
+    monkeypatch.setenv(uploadplan.YT_URL_ENV, "http://plain.example/yt.json")
+    assert uploadplan.yt_url() == uploadplan.YT_URL  # https 만
+    monkeypatch.setenv(uploadplan.YT_URL_ENV, "https://new.example/sub/yt_alive.json")
+    monkeypatch.setenv(uploadplan.YT_BASE_ENV, "https://new.example/")
+    assert uploadplan.yt_url() == "https://new.example/sub/yt_alive.json" and uploadplan.yt_base() == "https://new.example"
 
 
 async def test_fetch_yt_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:

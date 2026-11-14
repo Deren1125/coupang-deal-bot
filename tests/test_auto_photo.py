@@ -45,9 +45,12 @@ class FakeSearch:
         self.results = results or []
         self.exc = exc
         self.calls: list[tuple[str, str]] = []
+        self.kwargs: list[dict[str, Any]] = []
 
-    async def search(self, keyword: str, *, limit: int = 10, image_size: str | None = None, kind: str = "search") -> list[dict[str, Any]]:
+    async def search(self, keyword: str, *, limit: int = 10, image_size: str | None = None, kind: str = "search",
+                     attempts: int | None = None) -> list[dict[str, Any]]:
         self.calls.append((keyword, kind))
+        self.kwargs.append({"image_size": image_size, "attempts": attempts})
         if self.exc is not None:
             raise self.exc
         return list(self.results)
@@ -238,3 +241,155 @@ def test_photo_stats_keep_two_weeks(bot) -> None:  # type: ignore[no-untyped-def
         stats.record("deal", NOON - timedelta(days=d))
     data = json.loads(bot.db.kv_get("photo_stats"))
     assert len(data) == 14 and stats.totals(7, NOON) == {"deal": 7}
+
+
+# ---------------------------------------------------------------- 5. 점검 11 — 사진 크기·한 번만 검색·찾은 주소 기억 (주인 11/14)
+ADS_IMG = "https://ads-partners.coupang.com/image1/AbCdEf123.jpg"  # '/thumbnails/remote/NxNex/' 가 아닌 파트너스 주소 — 크기를 못 바꿈
+
+
+async def test_photo_search_asks_for_1000px_photos_and_one_attempt(bot) -> None:  # type: ignore[no-untyped-def]
+    bot.photo_search.client = FakeSearch([{"productId": 9024167552, "productImage": ADS_IMG}])
+    bot.images[ADS_IMG] = _jpeg()
+    d = _board_deal()
+    assert await bot.deal_photo(d) is not None and d.product.image_url == ADS_IMG
+    assert bot.photo_search.client.kwargs == [{"image_size": "1000x1000", "attempts": 1}]
+
+
+async def test_search_client_passes_attempts_to_the_request() -> None:
+    from dealbot.coupang.client import CoupangClient
+
+    seen: dict[str, Any] = {}
+
+    class C(CoupangClient):
+        def __init__(self) -> None:
+            self.sub_id = "s"
+
+        async def _request(self, method: str, path: str, *, params: Any = None, json: Any = None,  # type: ignore[override]
+                           kind: str = "other", attempts: int | None = None) -> Any:
+            seen.update(params=params, kind=kind, attempts=attempts)
+            return {"productData": [{"productId": 1}]}
+
+    assert await C().search("hp", image_size="1000x1000", kind="photo", attempts=1) == [{"productId": 1}]
+    assert seen["attempts"] == 1 and seen["params"]["imageSize"] == "1000x1000" and seen["kind"] == "photo"
+
+
+async def test_failed_download_retries_the_remembered_url_without_searching_again(bot) -> None:  # type: ignore[no-untyped-def]
+    bot.photo_search.client = FakeSearch([{"productId": 9024167552, "productImage": ADS_IMG}])
+    d = _board_deal()
+    qid = _publish(bot, d)
+    assert await bot.deal_photo(d) is None  # 사진 받기 실패 (CDN 일시 오류)
+    assert bot._photo_retry == {d.product.product_id: "coupang_api:fetch"}
+    await bot._ask_late_photo(qid, d, None, bot.export_published(d, None))
+    assert bot.sent == []
+    bot.images[ADS_IMG] = _jpeg()  # 이번엔 받힘
+    assert await bot.late_photo.tick(NOON + timedelta(minutes=10)) == 1
+    assert len(bot.photo_search.client.calls) == 1  # 검색은 처음 한 번뿐 — 기억한 주소를 다시 받음
+    assert bot.fetched.count(ADS_IMG) == 2
+    # 한 번만 셈: 'none' 은 hold 로 넘어가며 되돌리고 'late_auto' 하나
+    assert PhotoStats(bot.db).totals(now=NOON) == {"late_auto": 1}
+
+
+async def test_too_small_photo_is_remembered_for_a_day(bot) -> None:  # type: ignore[no-untyped-def]
+    bot.photo_search.client = FakeSearch([{"productId": 9024167552, "productImage": ADS_IMG}])
+    bot.images[ADS_IMG] = _jpeg(400, 400)  # 짧은 변 600px 미만
+    d = _board_deal()
+    assert await bot.deal_photo(d) is None
+    assert bot._photo_retry == {}  # 다시 받아도 같음 → 다시 찾지 않고 주인에게
+    assert bot.db.kv_get("photo_miss:9024167552")
+    assert await bot.deal_photo(_board_deal()) is None
+    assert len(bot.photo_search.client.calls) == 1 and bot.fetched.count(ADS_IMG) == 1  # 하루 동안 검색도 받기도 안 함
+    bot.photo_search.prune()
+    assert bot.db.kv_get("photo_miss:9024167552") and not bot.db.kv_get("photo_hit:9024167552")  # 하루 안 된 기록은 남음
+
+
+# ---------------------------------------------------------------- 6. 점검 15 — 한 딜의 오류가 다른 딜·스레드 차례를 막지 않음
+async def test_one_failing_deal_does_not_stop_the_others(bot) -> None:  # type: ignore[no-untyped-def]
+    bot.photo_search.client = FakeSearch(exc=CoupangRateLimited("budget"))
+    d1, d2 = _board_deal("111"), _board_deal("222")
+    q1, q2 = _publish(bot, d1), _publish(bot, d2)
+    for q, d in ((q1, d1), (q2, d2)):
+        assert await bot.deal_photo(d) is None
+        await bot._ask_late_photo(q, d, None, bot.export_published(d, None))
+    real = bot.save_auto_photo
+
+    def boom(item, jpeg, src):  # type: ignore[no-untyped-def]
+        if item.id == q1:
+            raise OSError("disk full")
+        return real(item, jpeg, src)
+
+    bot.save_auto_photo = boom  # type: ignore[method-assign]
+    bot.photo_search.client = FakeSearch([{"productId": 111, "productImage": API_IMG}, {"productId": 222, "productImage": API_IMG}])
+    t = NOON + timedelta(minutes=10)
+    assert await bot.late_photo.tick(t) == 1  # #q2 는 사진을 받음
+    assert not bot.late_photo_waiting(q2)
+    info = bot.late_photo._info(q1)
+    assert info["auto_until"] and info["auto_next"] == "2026-11-14T03:20:00+00:00"  # 이 딜만 10분 뒤로
+    assert any("오류" in r["message"] and r["level"] == "WARNING" for r in bot.db.recent_events(10) if r["kind"] == "late_photo")
+    # 10분 뒤엔 다시 시도 → 이번엔 받음
+    bot.save_auto_photo = real  # type: ignore[method-assign]
+    assert await bot.late_photo.tick(t) == 0 and await bot.late_photo.tick(t + timedelta(minutes=10)) == 1
+    assert not bot.late_photo_waiting(q1)
+
+
+async def test_failed_ask_keeps_the_automatic_retry(bot, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    bot.photo_search.client = FakeSearch(exc=CoupangRateLimited("budget"))
+    d = _board_deal()
+    qid = _publish(bot, d)
+    assert await bot.deal_photo(d) is None
+    await bot._ask_late_photo(qid, d, None, bot.export_published(d, None))
+
+    async def fail(text: str, **_kw: Any) -> int | None:
+        return None  # 텔레그램 오류 (관리자 챗 알림은 켜져 있음)
+
+    bot.notifier.send_with_id = fail  # type: ignore[method-assign]
+    monkeypatch.setattr(type(bot.notifier), "tg_quiet", property(lambda _s: False))
+    monkeypatch.setattr(type(bot.notifier), "enabled", property(lambda _s: True))
+    assert await bot.late_photo.tick(NOON + timedelta(minutes=30)) == 0
+    info = bot.late_photo._info(qid)
+    assert info["auto_until"] and info["auto_next"]  # 기록이 그대로 — 10분 뒤 다시
+    assert bot.alerts == [] and "asked" not in PhotoStats(bot.db).totals(now=NOON)
+    sent: list[str] = []
+
+    async def ok(text: str, **_kw: Any) -> int:
+        sent.append(text)
+        return 7
+
+    bot.notifier.send_with_id = ok  # type: ignore[method-assign]
+    assert await bot.late_photo.tick(NOON + timedelta(minutes=41)) == 1
+    assert len(sent) == 1 and "auto_until" not in bot.late_photo._info(qid)
+    assert PhotoStats(bot.db).totals(now=NOON) == {"asked": 1}
+
+
+async def test_publisher_loop_runs_threads_even_when_late_photo_fails(bot, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import asyncio
+
+    from dealbot import scheduler
+
+    stop = asyncio.Event()
+    ran: list[str] = []
+    errors: list[str] = []
+
+    async def queue_once() -> None:
+        ran.append("queue")
+
+    class Late:
+        async def tick(self) -> int:
+            raise RuntimeError("late boom")
+
+    class Flow:
+        async def tick(self) -> None:
+            ran.append("threads")
+            stop.set()
+
+    async def notify_error(src: str, msg: str) -> None:
+        errors.append(src)
+
+    bot.process_queue_once = queue_once  # type: ignore[method-assign]
+    bot.late_photo = Late()  # type: ignore[assignment]
+    bot.threads_flow = Flow()  # type: ignore[attr-defined]
+    bot.notifier.notify_error = notify_error  # type: ignore[method-assign]
+    bot.notifier.error_cleared = lambda *_a: None  # type: ignore[method-assign]
+    monkeypatch.setattr(scheduler, "update_in_progress", lambda _s: False)
+    monkeypatch.setattr(scheduler, "VAR_DIR", None)
+    await asyncio.wait_for(scheduler.publisher_loop(bot, stop), 5)
+    assert ran == ["queue", "threads"] and errors == []

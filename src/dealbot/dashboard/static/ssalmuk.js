@@ -19,6 +19,7 @@ const CSS = '.ev .kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))
   '.ev textarea.fl{min-height:96px;resize:vertical;line-height:1.5}.ev .fl{margin:0 0 10px;font-size:16px}' +
   '.ev .ck{display:flex;align-items:center;gap:10px;min-height:48px;font-size:15px}.ev .ck input{width:20px;height:20px}' +
   '.evc .st{white-space:normal}.evc .chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0}' +
+  '.ev .bn.warn{background:var(--or-soft);color:var(--or);border-color:transparent}' +
   'main[data-ev]>:not(#evs):not(#tdh){display:none!important}';
 const GROUPS = [['today', '오늘 마감'], ['assist', '폼 + SNS'], ['check', '확인 필요'], ['sns', 'SNS 직접 참여']];
 const TONE = /^(ok|hot|stop|info)$/;
@@ -307,6 +308,14 @@ function connBox() {
       el('p', {class: 'note'}, `이벤트 참여 예비 대시보드 → 내 정보 → Sns-board 연결 에 주소와 키를 붙여 넣고 '연결 저장'.${k.at ? ` 키 만든 때 ${kst(k.at)}` : ''}`),
       btn('pb soft', '새 키 만들기', rotate)]];
 }
+// 오류 검수 경고 한 줄 (주인 11/14 — alerts, ssalmuk.py clean_alerts 가 거르고 bad 먼저). 글 노드만 (링크 없음)
+function alertLine() {
+  const a = Array.isArray(data && data.alerts) ? data.alerts.filter(x => x && typeof x.msg === 'string' && x.msg) : [];
+  if (!a.length) return null;
+  const x = a[0], more = a.length - 1;
+  const text = x.msg + (typeof x.todo === 'string' && x.todo ? ' · 할 일: ' + x.todo : '') + (more ? ` 외 ${more}건` : '');
+  return el('div', {class: x.level === 'bad' ? 'bn bad' : 'bn warn'}, el('span', {}, text));
+}
 function drawScr() {
   if (!scr) return;
   const s = st(), c = cnt(), ts = todos(), left = ts.filter(t => !t.done), dn = ts.filter(t => t.done), p = (s || {}).profile || {};
@@ -314,6 +323,8 @@ function drawScr() {
   const cps = copies(p), nw = isNew();
   const out = [el('div', {class: 'top'}, el('a', {class: 'lnk', href: '#/todo'}, '‹ 할 일'), el('span', {class: 'sub'}, s && s.nextRun ? `다음 ${s.nextRun}` : ''),
     btn('lnk', '다시 보기', load))];
+  const al = alertLine();
+  if (al) out.push(al);
   if (!s) out.push(el('div', {class: 'bn'}, el('span', {}, "아직 연결 전이에요 — 아래 '연결'에서 주소와 키를 복사해 이벤트 참여 예비 대시보드 '내 정보 → Sns-board 연결'에 붙여 넣어 주세요")));
   else if (data.stale) out.push(el('div', {class: 'bn bad'}, el('span', {}, `이벤트 참여 서버 연결 끊김 — 20분 넘게 소식이 없어요 (마지막 받음 ${kst(data.receivedAt)})`)));
   if (s) {
