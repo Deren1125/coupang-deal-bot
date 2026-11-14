@@ -5,7 +5,11 @@
   POST /dashboard/api/ssalmuk/push      상태 전체 (덮어쓰기 + 받은 시각) · v==1, app=="ssalmuk" 아니면 400
   GET  /dashboard/api/ssalmuk/commands  아직 ack 안 된 명령 (오래된 순, 50개까지)
   POST /dashboard/api/ssalmuk/ack       {"ids": [...], "results": {id: "ok" | 오류 글}} → 그 명령을 지움
-  이 셋은 로그인·CSRF 없이 X-Ssalmuk-Key 로만 (해시끼리 hmac.compare_digest — 상수 시간) · 틀리면 401 {"code":"bad_key"} ·
+  GET  /dashboard/api/ssalmuk/search    ?type=blog|news|webkr&q=&display=1-20&sort=sim|date → 네이버 검색 Open API 를 딜봇 키로 대신 (주인 11/14 —
+                                        쌀먹 서버에 키를 옮기지 않음). {"items":[{title,link,description,postdate|pubDate,bloggername}],"total"}
+                                        키 1개당 1분 60번 · 하루 300번 (KST, kv ssalmuk_search_day) · 넘으면 429 {"code":"limit"} ·
+                                        네이버가 401/429/5xx 등을 주면 502 {"code":"naver_error","status"} · 딜봇에 키가 없으면 503 {"code":"no_key"}
+  이 넷은 로그인·CSRF 없이 X-Ssalmuk-Key 로만 (해시끼리 hmac.compare_digest — 상수 시간) · 틀리면 401 {"code":"bad_key"} ·
   몸 512KB 까지 · 같은 손님 1분 120번.
 화면(로그인 + 같은 사이트 + X-Dash-Token — DashApi.guard):
   GET  /dashboard/api/ssalmuk/state     {"state", "receivedAt", "pending", "stale", "results"} (no-store — 주인 이름·전화가 들어 있음)
@@ -18,13 +22,15 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import hmac
 import json
 import logging
+import re
 import secrets
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -37,8 +43,9 @@ STATE_PATH = f"{BASE}/state"
 ACT_PATH = f"{BASE}/act"
 KEY_PATH = f"{BASE}/key"
 ROTATE_PATH = f"{BASE}/rotate"
-# 로그인 없이 여는 것 — 이 셋뿐 (정확한 경로)
-PUBLIC_PATHS = (PUSH_PATH, COMMANDS_PATH, ACK_PATH)
+# 로그인 없이 여는 것 — 이 넷뿐 (정확한 경로)
+SEARCH_PATH = f"{BASE}/search"
+PUBLIC_PATHS = (PUSH_PATH, COMMANDS_PATH, ACK_PATH, SEARCH_PATH)
 
 BODY_MAX = 512 * 1024
 ACT_BODY_MAX = 64 * 1024
@@ -57,7 +64,38 @@ OPS = ("run", "done", "profile")
 PROFILE_KEYS = ("name", "phone", "email", "birth", "gender", "zipcode", "address", "addressDetail", "shareUrl", "surveyMode",
                 "watchVideoSeconds", "agreeOptional", "sns.nickname", "sns.instagram", "sns.instagramUrl", "sns.youtube", "sns.blog",
                 "demographics.age", "demographics.region", "demographics.job", "commentTemplates", "quizAnswers", "customAnswers")
+SEARCH_TYPES = ("blog", "news", "webkr")
+SEARCH_URL = "https://openapi.naver.com/v1/search/{type}.json"
+SEARCH_TIMEOUT = 8.0
+SEARCH_PER_MIN = 60
+SEARCH_PER_DAY = 300
+SEARCH_Q_MAX = 100
+KV_SEARCH_DAY = "ssalmuk_search_day"
+_TAG_RE = re.compile(r"<[^>]*>")
 OP_LABEL = {"run": "지금 확인하기", "done": "완료 표시", "profile": "내 정보 저장"}
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def _plain(v: Any) -> str:
+    """네이버 검색 글의 <b> 같은 태그를 지우고 &quot; 같은 글자 표현을 되돌림."""
+    return html.unescape(_TAG_RE.sub("", str(v or ""))).strip()
+
+
+def search_items(data: Any) -> tuple[list[dict[str, str]], int]:
+    raw = data.get("items") if isinstance(data, dict) else None
+    items: list[dict[str, str]] = []
+    for x in raw if isinstance(raw, list) else []:
+        if not isinstance(x, dict):
+            continue
+        it = {"title": _plain(x.get("title")), "link": str(x.get("link") or ""), "description": _plain(x.get("description"))}
+        for k in ("postdate", "pubDate", "bloggername"):
+            if x.get(k):
+                it[k] = _plain(x[k])
+        items.append(it)
+    total = data.get("total") if isinstance(data, dict) else None
+    return items, total if isinstance(total, int) else len(items)
 
 
 def _iso(ts: float) -> str:
@@ -170,6 +208,16 @@ class Ssalmuk:
             self.db.kv_set(KV_RESULTS, json.dumps(rs[-RESULTS_KEEP:], ensure_ascii=False))
         return 200, {"ok": True, "removed": len(done)}
 
+    def search_day_hit(self, limit: int = SEARCH_PER_DAY) -> bool:
+        """하루(KST) 300번 — 안 넘었으면 하나 세고 True."""
+        day = datetime.fromtimestamp(self.clock(), KST).strftime("%Y-%m-%d")
+        saved = self._load(KV_SEARCH_DAY, {})
+        n = int(saved.get("n") or 0) if isinstance(saved, dict) and saved.get("d") == day else 0
+        if n >= limit:
+            return False
+        self.db.kv_set(KV_SEARCH_DAY, json.dumps({"d": day, "n": n + 1}))
+        return True
+
     def view(self) -> dict[str, Any]:
         """화면용 (로그인 아래에서만): 받아 둔 상태 · 받은 시각 · 안 끝난 명령 수 · 끊김 여부 · 최근 처리 결과."""
         saved = self._load(KV_STATE, {})
@@ -270,6 +318,44 @@ def register(web: Any, api: Any) -> Ssalmuk:
     async def ack(body: dict[str, Any], headers: dict[str, str]) -> Any:
         return machine(headers) or _j(*desk.ack(body))
 
+    search_rate = RateWindow(SEARCH_PER_MIN, 60.0)  # 키 하나당 (손님 주소와 상관없이)
+
+    async def search(query: dict[str, str], headers: dict[str, str]) -> Any:
+        import httpx
+
+        denied = machine(headers)
+        if denied is not None:
+            return denied
+        typ = (query.get("type") or "blog").strip()
+        q = (query.get("q") or "").strip()
+        sort = (query.get("sort") or "sim").strip()
+        if typ not in SEARCH_TYPES or not 1 <= len(q) <= SEARCH_Q_MAX or sort not in ("sim", "date"):
+            return _j(400, {"code": "bad_query", "text": "type(blog|news|webkr)·q(1~100자)·sort(sim|date) 를 확인해 주세요"})
+        try:
+            display = max(1, min(20, int(query.get("display") or 10)))
+        except ValueError:
+            display = 10
+        sec = api.bot.settings.secrets
+        if not (sec.naver_client_id and sec.naver_client_secret):
+            return _j(503, {"code": "no_key", "text": "딜봇에 네이버 검색 키가 없어요"})
+        if not search_rate.hit("key") or not desk.search_day_hit():
+            return _j(429, {"code": "limit", "text": "검색 한도(1분 60번·하루 300번)를 넘었어요"})
+        try:
+            resp = await api.bot.http.get(
+                SEARCH_URL.format(type=typ), params={"query": q, "display": display, "sort": sort},
+                headers={"X-Naver-Client-Id": sec.naver_client_id, "X-Naver-Client-Secret": sec.naver_client_secret},
+                timeout=SEARCH_TIMEOUT)
+            status = resp.status_code
+            data = resp.json() if status == 200 else None
+        except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
+            log.info("ssalmuk search: %s", type(e).__name__)
+            return _j(502, {"code": "naver_error", "status": 0, "text": "네이버 검색이 답하지 않아요"})
+        if status != 200:
+            log.info("ssalmuk search: naver HTTP %s", status)
+            return _j(502, {"code": "naver_error", "status": status, "text": "네이버 검색이 오류를 줬어요"})
+        items, total = search_items(data)
+        return _j(200, {"items": items, "total": total})
+
     async def state(query: dict[str, str], headers: dict[str, str]) -> Any:
         caller, _i, _t = api.caller(headers)
         if not screen_rate.hit(caller.session):
@@ -306,6 +392,7 @@ def register(web: Any, api: Any) -> Ssalmuk:
     web.route_json(PUSH_PATH, push, max_body=BODY_MAX)
     web.route(COMMANDS_PATH, commands, with_headers=True)
     web.route_json(ACK_PATH, ack, max_body=BODY_MAX)
+    web.route(SEARCH_PATH, search, with_headers=True)
     web.route(STATE_PATH, state, with_headers=True)
     web.route_json(ACT_PATH, act, max_body=ACT_BODY_MAX)
     web.route(KEY_PATH, key, with_headers=True)

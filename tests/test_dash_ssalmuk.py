@@ -133,9 +133,9 @@ async def test_body_cap_512kb(bot: DealBot) -> None:
     assert res[0] == 411
 
 
-async def test_only_three_paths_open_without_login(bot: DealBot) -> None:
+async def test_only_four_paths_open_without_login(bot: DealBot) -> None:
     pub = set(api_mod.DashApi.public_paths())
-    assert {p for p in pub if p.startswith(B)} == {ssalmuk.PUSH_PATH, ssalmuk.COMMANDS_PATH, ssalmuk.ACK_PATH}
+    assert {p for p in pub if p.startswith(B)} == {ssalmuk.PUSH_PATH, ssalmuk.COMMANDS_PATH, ssalmuk.ACK_PATH, ssalmuk.SEARCH_PATH}
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     for path in (ssalmuk.STATE_PATH, ssalmuk.KEY_PATH):
         res = await bot.web.dispatch("GET", path, anon)
@@ -491,3 +491,131 @@ def test_ssalmuk_js_auto_apply_first_layout() -> None:
         assert t in scr, t
     assert "지난주 응모" not in scr and "이름 복사" not in scr and "남은 할 일" not in scr and got["after"] is None
     assert "이름 복사" in got["prof"] and "숫자만 복사" in got["prof"]  # 복사 단추는 내 정보 안으로
+
+
+# ---------------------------------------------------------------- 7) 네이버 검색 대신 해 주기 (딜봇 키 — 쌀먹 서버엔 키를 옮기지 않음)
+SEARCH = ssalmuk.SEARCH_PATH
+NAVER_ID, NAVER_SECRET = "test-naver-id-xyz", "test-naver-secret-abc"
+
+
+def naver(bot: DealBot, handler: Any, *, keyed: bool = True) -> list[Any]:
+    import httpx
+
+    seen: list[Any] = []
+
+    def h(req: Any) -> Any:
+        seen.append(req)
+        return handler(req)
+
+    bot.http = httpx.AsyncClient(transport=httpx.MockTransport(h))
+    s = bot.settings.secrets
+    s.naver_client_id, s.naver_client_secret = (NAVER_ID, NAVER_SECRET) if keyed else (None, None)
+    return seen
+
+
+def ok_blog(req: Any) -> Any:
+    import httpx
+
+    return httpx.Response(200, json={"total": 42, "items": [
+        {"title": "<b>돈좀요</b> 이벤트 &quot;공지&quot;", "link": "https://blog.example/1", "description": "응모 <b>방법</b> &amp; 경품",
+         "bloggername": "주최<b>자</b>", "bloggerlink": "https://blog.example", "postdate": "20261110"},
+        "junk",
+    ]})
+
+
+async def test_search_needs_key(bot: DealBot) -> None:
+    seen = naver(bot, ok_blog)
+    key = desk(bot).key()
+    for k in (None, "", "wrong", key[:-1]):
+        status, body = await mget(bot, f"{SEARCH}?q=abc", k)
+        assert status == 401 and body["code"] == "bad_key", k
+    assert seen == []  # 틀린 키로는 네이버를 부르지 않음
+    anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
+    assert (await bot.web.dispatch("GET", f"{SEARCH}?q=abc", anon))[0] == 401
+
+
+async def test_search_ok_strips_tags_and_sends_deal_bot_key(bot: DealBot) -> None:
+    seen = naver(bot, ok_blog)
+    key = desk(bot).key()
+    status, body = await mget(bot, f"{SEARCH}?q=돈좀요&display=99&sort=date", key)
+    assert status == 200 and body["total"] == 42
+    assert body["items"] == [{"title": '돈좀요 이벤트 "공지"', "link": "https://blog.example/1", "description": "응모 방법 & 경품",
+                              "postdate": "20261110", "bloggername": "주최자"}]
+    assert NAVER_ID not in json.dumps(body) and NAVER_SECRET not in json.dumps(body)
+    req = seen[0]
+    assert req.url.path == "/v1/search/blog.json" and req.headers["x-naver-client-id"] == NAVER_ID
+    assert req.headers["x-naver-client-secret"] == NAVER_SECRET
+    assert req.url.params["display"] == "20" and req.url.params["sort"] == "date" and req.url.params["query"] == "돈좀요"
+    # 기본값: blog · sim · 10 / news 는 pubDate
+    await mget(bot, f"{SEARCH}?q=x&display=0", key)
+    assert seen[1].url.params["display"] == "1" and seen[1].url.params["sort"] == "sim"
+    await mget(bot, f"{SEARCH}?q=x", key)
+    assert seen[2].url.params["display"] == "10"
+    import httpx
+    naver(bot, lambda r: httpx.Response(200, json={"total": 1, "items": [{"title": "<b>a</b>", "link": "l", "description": "d", "pubDate": "Sat, 14 Nov 2026"}]}))
+    status, body = await mget(bot, f"{SEARCH}?type=news&q=x", key)
+    assert body["items"][0] == {"title": "a", "link": "l", "description": "d", "pubDate": "Sat, 14 Nov 2026"}
+
+
+async def test_search_validation(bot: DealBot) -> None:
+    seen = naver(bot, ok_blog)
+    key = desk(bot).key()
+    for qs in ("q=x&type=shop", "q=", "type=blog", f"q={'가' * 101}", "q=x&sort=bad"):
+        status, body = await mget(bot, f"{SEARCH}?{qs}", key)
+        assert status == 400 and body["code"] == "bad_query", qs
+    for t in ("blog", "news", "webkr"):
+        assert (await mget(bot, f"{SEARCH}?type={t}&q={'가' * 100}", key))[0] == 200
+    assert [r.url.path for r in seen] == [f"/v1/search/{t}.json" for t in ("blog", "news", "webkr")]
+    assert (await mget(bot, f"{SEARCH}?q=x&display=abc", key))[0] == 200  # 숫자가 아니면 기본값
+
+
+async def test_search_no_key_configured(bot: DealBot) -> None:
+    seen = naver(bot, ok_blog, keyed=False)
+    status, body = await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+    assert (status, body["code"]) == (503, "no_key") and seen == []
+
+
+async def test_search_limits(bot: DealBot) -> None:
+    from datetime import datetime
+
+    naver(bot, ok_blog)
+    d = desk(bot)
+    key = d.key()
+    now = [1_800_000_000.0]
+    d.clock = lambda: now[0]
+    # 하루 300 (KST 날짜 기준) — 299 까지 쓴 날
+    day = datetime.fromtimestamp(now[0], ssalmuk.KST).strftime("%Y-%m-%d")
+    bot.db.kv_set(ssalmuk.KV_SEARCH_DAY, json.dumps({"d": day, "n": 299}))
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[0] == 200
+    status, body = await mget(bot, f"{SEARCH}?q=x", key)
+    assert status == 429 and body["code"] == "limit"
+    # 다음 날(KST)엔 다시 0부터
+    now[0] += 86400
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[0] == 200
+    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_DAY))["n"] == 1
+
+
+async def test_search_per_minute_limit(bot: DealBot) -> None:
+    naver(bot, ok_blog)
+    key = desk(bot).key()
+    codes = [(await mget(bot, f"{SEARCH}?q=x", key))[0] for _ in range(61)]
+    assert codes[:60] == [200] * 60 and codes[60] == 429
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[1]["code"] == "limit"
+
+
+async def test_search_naver_errors_map_to_502(bot: DealBot) -> None:
+    import httpx
+
+    key = desk(bot).key()
+    for st in (401, 429, 500, 503):
+        naver(bot, lambda r, st=st: httpx.Response(st, json={"errorMessage": NAVER_SECRET}))
+        status, body = await mget(bot, f"{SEARCH}?q=x", key)
+        assert status == 502 and body["code"] == "naver_error" and body["status"] == st
+        assert NAVER_SECRET not in json.dumps(body) and NAVER_ID not in json.dumps(body)
+
+    def boom(req: Any) -> Any:
+        raise httpx.ConnectTimeout("t", request=req)
+
+    naver(bot, boom)
+    status, body = await mget(bot, f"{SEARCH}?q=x", key)
+    assert (status, body["code"], body["status"]) == (502, "naver_error", 0)

@@ -31,7 +31,7 @@
   GET  /dashboard/api/ablyrank          'Ably 랭킹 보내기' 책갈피 {code, len, steps} (ablyrank.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
   POST /dashboard/api/ably_rank_capture 책갈피가 에이블리 랭킹 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 · 열쇠 k · CORS 는 https://*.a-bly.com 만)
                                         → ablyrank.save (kv) → Blog-Auto 가 알리면 일 ably_rank_capture 로 넘김 · 서버는 에이블리를 열지 않음
-  POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/commands   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
+  POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
