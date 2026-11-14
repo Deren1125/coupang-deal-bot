@@ -132,6 +132,7 @@ DEAL_ACTIONS = ("deal.link", "deal.skip", "deal.nolink", "deal.sc_forget", "deal
                 "login.qr",  # 딜봇 네이버 QR 로그인 (주인 10/26 — 대시보드 '로그인 관리' · 텔레그램 /naverlogin 과 같은 길)
                 "routine.done",  # 오늘 할 일 체크 (주인 10/27 — 하루 5번 손으로 하는 블로그·SNS 일, 봇 DB 에만 적음 · routine.py)
                 "uploads.done",  # 올리기 할 일 체크 (주인 11/08 — 쇼츠 서버 일정, 봇 DB 에만 적음 · 쇼츠 서버에 쓰지 않음 · uploadplan.py)
+                "kkumi.installed",  # 꾸미기 책갈피 '설치했어요' (주인 11/14 — {ver} 지금 판 지문 · 봇 DB kv 에만 · kkumi.py)
                 "earn.save", "earn.delete",  # 제휴 수익 직접 넣기 (주인 10/23 — 토스쇼핑·에이블리·지그재그·무신사·29CM·기타)
                 "x.stats", "x.handles")  # X 진행률 숫자·계정 이름 직접 넣기 (주인 10/25 — X API 없음, 크리에이터 스튜디오 숫자를 주인이 주마다)
 # 다 했어요 (todo.dismiss): 밖에서 끝내는 일만. 링크·확인·사진·답·발행·직접 고친 글 같은 진짜 일은 일을 해야 닫힌다
@@ -609,6 +610,11 @@ def clean_args(action: str, args: dict[str, Any], *, blog_ids: dict[str, str] | 
         if not isinstance(rid, str) or not ROUTINE_ID_RE.match(rid) or not isinstance(g("done"), bool):
             raise ActionError("bad_args")
         return {"id": rid, "done": g("done")}
+    if action == "kkumi.installed":  # {ver: 설치한 책갈피 코드의 지문 (sha256 앞 10자)}
+        ver = g("ver")
+        if not isinstance(ver, str) or not re.fullmatch(r"[0-9a-f]{10}", ver):
+            raise ActionError("bad_args")
+        return {"ver": ver}
     if action == "uploads.done":  # {id: 올리기 할 일 id, done: 참/거짓}
         from dealbot.dashboard.uploadplan import ID_RE as UP_ID_RE
 
@@ -1457,32 +1463,50 @@ class ActionDesk:
         self._audit(caller, action, target, args, "queued", aid)
         return 202, {"status": "queued", "id": aid}
 
-    def _pasted(self, rid: str, done: bool, caller: Caller) -> bool:
+    def _pasted(self, rid: str, done: bool, caller: Caller) -> str:
         """오늘 할 일 발행·예약 줄(pub:/rsv:<블로그>:<글 번호>) 체크 → Blog-Auto 에 blog.pasted 를 함께 맡긴다 (주인 11/09 — 붙여넣어 발행한
         글이 할 일·블로그 탭에 그대로 남음): 그 글을 '발행 확인 중'으로 기다리는 글에서 빼고 직접 발행 확인이 주소를 붙인다.
         서로이웃 신청 줄(nb-add:<블로그>:<아이디>) 체크는 blog.nb_requested (주인 11/14 — 신청한 사람을 다음 명단·다른 블로그 명단에서 뺌).
-        맡기지 못하면(블로그 프로그램 꺼짐·예전 판) 체크만 — 예전처럼. 맡겼으면 True."""
+        돌려줌: "sent" 맡김 · "held" 지금은 못 맡겨 적어 둠 (블로그 프로그램이 멈춤·다리 끊김 — routine.relay_tick 이 깨어나면 전함, 주인 11/14
+        '멈춘 동안 누른 체크가 사라져 같은 글이 다시 뜸') · "" 맡길 줄이 아니거나 예전 판이라 모르는 일 (체크만 — 예전처럼).
+        맡긴 것도 적어 둔다 (aid) — 10분 안에 안 가져가 'expired' 가 되면 relay_tick 이 다시 맡김."""
+        from dealbot.dashboard import routine
+
         m = PASTE_ROW_RE.match(rid)
         n = None if m else NB_ADD_ROW_RE.match(rid)  # 서로이웃 신청 줄 (주인 11/14) — 신청했다고 적어 다음 명단에서 뺌
         if not m and not n:
-            return False
+            return ""
         name = "pasted" if m else "nb_requested"
+        args = {"blog": m.group(1), "pid": int(m.group(2)), "done": done} if m else {"blog": n.group(1), "target": n.group(2), "done": done}
+        now = self.clock()
+
+        def hold(aid: str | None = None) -> None:
+            try:
+                routine.relay_add(self.bot.db, name, args, rid, now, aid)
+            except Exception as e:  # noqa: BLE001 — 체크는 그대로 되게
+                log.warning("routine relay note failed: %s", type(e).__name__)
+
         try:
             st = self.outbox.status()
-            if not st.bridge_ok(self.clock()) or (st.actions and not st.supports(name)):
-                return False
+            if st.actions and not st.supports(name):
+                return ""
+            if not st.bridge_ok(now):
+                hold()
+                return "held"
         except Exception as e:  # noqa: BLE001 — 체크는 그대로 되게
             log.warning("routine pasted status failed: %s", type(e).__name__)
-            return False
-        args = {"blog": m.group(1), "pid": int(m.group(2)), "done": done} if m else {"blog": n.group(1), "target": n.group(2), "done": done}
+            hold()
+            return "held"
         try:  # target 없음 — 체크·풀기를 잇달아 눌러도 '하는 중'으로 막지 않게 (Blog-Auto 가 차례대로)
             aid, _ = self.outbox.submit(action=name, blog=args["blog"], args=args, target="", confirmed=False,
                                         session=caller.session, cid=None)
         except (ActionsBusy, OSError, ValueError) as e:
             log.warning("routine %s relay failed: %s", name, type(e).__name__)
-            return False
+            hold()
+            return "held"
+        hold(aid)
         self._audit(caller, f"blog.{name}", iidmod.post_iid(args["blog"], args["pid"]) if m else rid, args, "queued", aid)
-        return True
+        return "sent"
 
     # ---------------------------------------------------------- 딜봇 일 (바로)
     async def _deal(self, action: str, args: dict[str, Any], target: str, caller: Caller, cid: str | None) -> tuple[int, dict[str, Any]]:
@@ -1655,11 +1679,20 @@ class ActionDesk:
             from dealbot.dashboard import routine
 
             routine.set_done(db, routine.day_of(bot, self.clock()), args["id"], args["done"])
-            if self._pasted(args["id"], args["done"], caller):
+            sent = self._pasted(args["id"], args["done"], caller)
+            if sent == "held":  # 블로그 프로그램이 멈춰 있음 — 체크는 남고 깨어나면 전함 (주인 11/14)
+                return "done", "체크했어요 — 블로그 프로그램이 깨어나면 전해요" if args["done"] else "체크를 풀었어요 — 블로그 프로그램이 깨어나면 전해요"
+            if sent:
                 if args["id"].startswith("nb-add:"):
                     return "done", "신청했다고 적었어요 — 다음 명단에서 빼요" if args["done"] else "체크를 풀었어요"
                 return "done", "발행 확인 중 — 기다리는 글에서 뺐어요" if args["done"] else "체크를 풀었어요 — 다시 기다리는 글로"
             return "done", "체크했어요" if args["done"] else "체크를 풀었어요"
+        if action == "kkumi.installed":  # 꾸미기 책갈피를 다시 설치했다고 적음 (주인 11/14 — 봇 DB 만 · '책갈피가 바뀌었어요' 줄이 사라짐)
+            from dealbot.dashboard import kkumi
+
+            if not kkumi.ack(db, args["ver"]):
+                raise ActionError("failed", 409, "그새 책갈피가 또 바뀌었어요 — 설치 칸을 다시 열어 새 코드를 복사해 주세요")
+            return "done", f"적었어요 — 꾸미기 v{kkumi.version()} 설치됨"
         if action == "uploads.done":  # 올리기 할 일 체크 — 봇 DB 만 (쇼츠 서버에 쓰지 않음)
             from dealbot.dashboard import uploadplan
 

@@ -74,11 +74,11 @@ SEARCH_PER_MIN = 60
 SEARCH_PER_DAY = 300
 SEARCH_Q_MAX = 100
 KV_SEARCH_DAY = "ssalmuk_search_day"
-KV_SEARCH_KEYS = "ssalmuk_search_keys"  # 키마다 마지막 네이버 답 {"dealbot": 401, "blog": "no_file", "at": …} (값만 — 키는 안 남김, 주인 11/14 '401 원인')
+KV_SEARCH_KEYS = "ssalmuk_search_keys"  # 키마다 마지막 네이버 답 {"dealbot": {"s": "401 키틀림", "at": …}, "blog": {"s": 200, "at": …}, "at": …} (값만 — 키는 안 남김, 주인 11/14 '401 원인' · note_keys)
 KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' — 어느 키가 통했는지 (값만, 비밀 아님)
 KEY_RECHECK = 86400.0  # 블로그 키로 넘어간 뒤에도 딜봇 키를 하루 한 번 다시 봄
 _TAG_RE = re.compile(r"<[^>]*>")
-OP_LABEL = {"run": "지금 확인하기", "done": "완료 표시", "profile": "내 정보 저장"}
+OP_LABEL = {"run": "지금 확인하기", "done": "완료 표시", "profile": "내 정보 저장", "search_retry": "검색 다시 켜기", "trust_host": "사이트 허용"}
 
 
 KST = timezone(timedelta(hours=9))
@@ -276,7 +276,23 @@ class Ssalmuk:
         return True
 
     def note_keys(self, seen: dict[str, Any]) -> None:
-        self.db.kv_set(KV_SEARCH_KEYS, json.dumps({**seen, "at": int(self.clock())}))
+        """키마다 마지막 네이버 답을 {s: 답, at: 그때} 로 — 이번에 안 써 본 키('-')는 지난 값을 그대로 둔다 (주인 11/14: 블로그 키로 한 번 되면
+        딜봇 키의 '401' 줄이 '-' 로 덮여 원인이 사라졌음). 예전 모양(값만)도 읽는다."""
+        now = int(self.clock())
+        old = self._load(KV_SEARCH_KEYS, {})
+        old = old if isinstance(old, dict) else {}
+        out: dict[str, Any] = {"at": now}
+        for k in ("dealbot", "blog"):
+            v, prev = seen.get(k, "-"), old.get(k)
+            if v not in ("-", None):
+                out[k] = {"s": v, "at": now}
+            elif isinstance(prev, dict) and "s" in prev:
+                out[k] = prev
+            elif prev not in (None, "-"):  # 예전 모양 (값만)
+                out[k] = {"s": prev, "at": old.get("at")}
+            else:
+                out[k] = {"s": "-", "at": None}
+        self.db.kv_set(KV_SEARCH_KEYS, json.dumps(out, ensure_ascii=False))
 
     def search_keysrc(self) -> str | None:
         v = self.db.kv_get(KV_SEARCH_KEYSRC)
@@ -441,14 +457,17 @@ def register(web: Any, api: Any) -> Ssalmuk:
                 state_rt["dealbot_try"] = now
             cid, csec = keys[src]
             try:
+                params = {"query": q, "display": display} if typ == "webkr" else {"query": q, "display": display, "sort": sort}  # 웹문서 검색은 sort 가 없음
                 resp = await api.bot.http.get(
-                    SEARCH_URL.format(type=typ), params={"query": q, "display": display, "sort": sort},
+                    SEARCH_URL.format(type=typ), params=params,
                     headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=SEARCH_TIMEOUT)
                 status = resp.status_code
                 seen[src] = status if status != 401 else f"401 {_why_401(resp)}"
                 data = resp.json() if status == 200 else None
             except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
                 log.info("ssalmuk search: %s (%s key)", type(e).__name__, src)
+                seen[src] = "no_answer"
+                desk.note_keys(seen)  # 여기까지 써 본 키의 답도 남김 (앞 키가 401 이었으면 그 줄이 보이게)
                 return _j(502, {"code": "naver_error", "status": 0, "text": "네이버 검색이 답하지 않아요"})
             if status in (401, 403):  # 이 키는 막힘 — 다른 키로
                 log.info("ssalmuk search: naver HTTP %s (%s key)", status, src)

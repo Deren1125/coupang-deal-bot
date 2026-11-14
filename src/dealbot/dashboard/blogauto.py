@@ -1387,9 +1387,48 @@ def _paste_tag(v: Any) -> str | None:
     return t if 0 < len(t) <= PASTE_TAG_MAX else None
 
 
+PASTE_STALE_NOTE = "꾸밈 새 원고 만드는 중"  # Blog-Auto routine.PASTE_STALE_NOTE 의 앞머리 (11/08 판 — 옛 묶음 html 을 그대로 싣고 note 로만 알림)
+PASTE_WHYS = ("building", "failed")
+PASTE_REASON_MAX = 80
+PASTE_BUILDING = "새 원고로 다시 만드는 중"
+PASTE_FAILED = "묶음을 못 만들어 다시 하는 중"
+# 올리기 전 검사 (Blog-Auto post_gate — 주인 11/14 '예전 오류는 주인이 보기 전에 걸러지게'): 줄마다 {ok, codes} · 목록에 요약 {checked, ok, blocked, at}
+GATE_CODE_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
+GATE_CODES_MAX = 10
+GATE_KO = {"G1": "글에 날것 표시가 보여서", "G3F": "글꼴이 지정돼서", "G4": "같은 사진이 두 번 들어가서", "G5": "사진 파일이 없어서",
+           "G12": "글이 너무 커서", "G14": "글 쓴 모델을 바꾸느라"}  # 막는 코드만 (Blog-Auto post_gate.BLOCK_CODES) — 모르는 코드는 '자동 점검에 걸려서'
+GATE_KO_ELSE = "자동 점검에 걸려서"
+
+
+def _paste_tags(v: Any) -> list[str]:
+    tags: list[str] = []
+    for t in v[:PASTE_TAGS_MAX * 2] if isinstance(v, list) else []:
+        if (t := _paste_tag(t)) and t not in tags and len(tags) < PASTE_TAGS_MAX:
+            tags.append(t)
+    return tags
+
+
+def _paste_stale(title: str, v: dict[str, Any], *, why: str = "", reason: str = "") -> dict[str, Any]:
+    """아직 못 쓰는 묶음 — html·text 는 늘 빈 글 (주인 11/14 '만드는 중인 옛 묶음을 복사하게 두지 않기' · 화면은 누를 수 없는 단추 하나)."""
+    why = why or (v.get("why") if v.get("why") in PASTE_WHYS else "building")
+    reason = reason or _rt_line(v.get("reason"), PASTE_REASON_MAX)
+    if not re.search("[가-힣]", reason):  # 비었거나 영어 오류 이름(KeyError …)뿐 — 주인이 읽는 말로
+        reason = PASTE_BUILDING if why == "building" else PASTE_FAILED
+    tags = _paste_tags(v.get("tags"))
+    return {"title": title, "stale": True, "why": why, "reason": reason, "html": "", "text": "", "tags": tags,
+            "tag_text": " ".join("#" + t for t in tags), "cards": 0, "photos": _count(v.get("photos"), top=PASTE_COUNT_MAX) or 0}
+
+
 def _paste(v: Any, media_base: str | None) -> dict[str, Any] | None:
-    """{title, html, text, tags, tag_text, cards, photos} — 모양이 틀리면 None. media_base = 봇 공개 주소 (https://도메인)."""
-    if not isinstance(v, dict) or not isinstance(v.get("html"), str) or len(v["html"]) > PASTE_HTML_MAX or not media_base:
+    """{title, stale, html, text, tags, tag_text, cards, photos} — 모양이 틀리면 None. media_base = 봇 공개 주소 (https://도메인).
+    stale True (Blog-Auto 내보내기 계약 2판 {title, stale: true, why: building|failed, reason} — html 없음) 이면 html·text 가 빈 글이고
+    why·reason 이 붙는다 (공개 주소가 없어도 됨 — 사진 주소를 만들 일이 없음). 다 만든 묶음은 stale False."""
+    if not isinstance(v, dict):
+        return None
+    if v.get("stale") is True:  # html 이 같이 와도 쓰지 않는다
+        title = _rt_line(v.get("title"), PASTE_TITLE_MAX)
+        return _paste_stale(title, v) if title else None
+    if not isinstance(v.get("html"), str) or len(v["html"]) > PASTE_HTML_MAX or not media_base:
         return None
     title = _rt_line(v.get("title"), PASTE_TITLE_MAX)
     base = media_base.rstrip("/")
@@ -1403,19 +1442,44 @@ def _paste(v: Any, media_base: str | None) -> dict[str, Any] | None:
         return None
     if not text and not p.photos:
         return None
-    tags: list[str] = []
-    for t in v.get("tags")[:PASTE_TAGS_MAX * 2] if isinstance(v.get("tags"), list) else []:
-        if (t := _paste_tag(t)) and t not in tags and len(tags) < PASTE_TAGS_MAX:
-            tags.append(t)
-    return {"title": title, "html": body, "text": text, "tags": tags, "tag_text": " ".join("#" + t for t in tags),
+    tags = _paste_tags(v.get("tags"))
+    return {"title": title, "stale": False, "html": body, "text": text, "tags": tags, "tag_text": " ".join("#" + t for t in tags),
             "cards": _count(v.get("cards"), top=PASTE_COUNT_MAX) or 0, "photos": _count(v.get("photos"), top=PASTE_COUNT_MAX) or 0}
+
+
+def _gate(v: Any) -> dict[str, Any] | None:
+    """줄의 올리기 전 검사 {ok, codes, text} — ok 가 참/거짓이 아니거나 모양이 틀리면 None (없는 것으로 · 줄은 예전처럼 보임).
+    text = 막혔을 때 주인이 읽는 한마디 ('같은 사진이 두 번 들어가서') — 코드 이름은 화면에 내지 않는다."""
+    if not isinstance(v, dict) or not isinstance(v.get("ok"), bool):
+        return None
+    codes = [c for c in (v.get("codes") if isinstance(v.get("codes"), list) else [])[:GATE_CODES_MAX * 2]
+             if isinstance(c, str) and GATE_CODE_RE.match(c)][:GATE_CODES_MAX]
+    text = "" if v["ok"] else next((GATE_KO[c] for c in codes if c in GATE_KO), GATE_KO_ELSE)
+    return {"ok": v["ok"], "codes": codes, "text": text}
+
+
+def _gate_summary(v: Any) -> dict[str, Any] | None:
+    """목록의 검사 요약 {checked, ok, blocked: 막힌 줄 수, at: ISO 시각 | None} — 모양이 틀리면 None."""
+    if not isinstance(v, dict) or not isinstance(v.get("ok"), bool):
+        return None
+    checked = _count(v.get("checked"), top=ROUTINE_ITEMS_MAX) or 0
+    b = v.get("blocked")
+    blocked = len([x for x in b[:ROUTINE_ITEMS_MAX] if isinstance(x, dict)]) if isinstance(b, list) else (_count(b, top=ROUTINE_ITEMS_MAX) or 0)
+    at = v.get("at") if isinstance(v.get("at"), str) and len(v["at"]) <= 40 else None
+    try:
+        at = datetime.fromisoformat(at).isoformat(timespec="seconds") if at else None
+    except ValueError:
+        at = None
+    return {"checked": checked, "ok": v["ok"] and not blocked, "blocked": blocked, "at": at}
 
 
 def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_KEYS, *,
                   media_base: str | None = None) -> dict[str, Any] | None:
     """{id, slot, group, blog, title, note, min, copy: [{label, text}], links: [{label, url}], paste} — 모양이 틀리면 None.
     스레드 세션 몫(나중에 routine.threads_items)도 같은 모양이라 이 함수 하나로 거른다.
-    paste (발행·예약 줄만): _paste 가 거른 붙여 넣기 글 · 없거나 틀리면 None · 공개 주소가 없으면 None 에 note 끝에 PASTE_NO_BASE."""
+    paste (발행·예약 줄만): _paste 가 거른 붙여 넣기 글 · 없거나 틀리면 None · 공개 주소가 없으면 None 에 note 끝에 PASTE_NO_BASE.
+    note 가 '꾸밈 새 원고 만드는 중' 으로 시작하면 (예전 Blog-Auto — 옛 묶음 html 을 그대로 실음) 그 묶음도 stale 로 바꿔 html 을 버린다 (주인 11/14).
+    gate (있을 때만): 올리기 전 검사 {ok, codes, text} — 틀린 모양이면 칸을 뺀다."""
     if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ROUTINE_ID_RE.match(x["id"]):
         return None
     if x.get("slot") not in slot_keys or x.get("group") not in ROUTINE_GROUPS or not (title := _rt_line(x.get("title"), ROUTINE_TITLE_MAX)):
@@ -1434,10 +1498,13 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
     paste = _paste(x.get("paste"), media_base) if x["group"] in PASTE_GROUPS else None
     if paste is None and x["group"] in PASTE_GROUPS and isinstance(x.get("paste"), dict) and not media_base:
         note = " · ".join(t for t in (note, PASTE_NO_BASE) if t)[:ROUTINE_NOTE_MAX]
+    if paste is not None and not paste["stale"] and note.startswith(PASTE_STALE_NOTE):
+        paste = _paste_stale(paste["title"], {"tags": paste["tags"], "photos": paste["photos"]}, why="building", reason=PASTE_BUILDING)
     sc = _count(x.get("score"), top=100) if x["group"] in PASTE_GROUPS else None  # 발행·예약 줄 인기 예상 점수 (주인 11/10 — 선택 칸)
+    gate = _gate(x.get("gate")) if x["group"] in PASTE_GROUPS else None
     return {"id": x["id"], "slot": x["slot"], "group": x["group"], "blog": x.get("blog") if x.get("blog") in ROUTINE_BLOGS else "",
             "title": title, "note": note, "min": mins, "copy": copy, "links": links, "paste": paste,
-            **({"score": sc, "popular": x.get("popular") is True} if sc is not None else {})}
+            **({"score": sc, "popular": x.get("popular") is True} if sc is not None else {}), **({"gate": gate} if gate is not None else {})}
 
 
 def _routine_slots(v: Any) -> list[dict[str, str]]:
@@ -1454,7 +1521,7 @@ def _routine_slots(v: Any) -> list[dict[str, str]]:
 
 
 def _routine(v: Any, media_base: str | None = None) -> dict[str, Any] | None:
-    """오늘 할 일 {day, slots: [{key, at, label}], items: [_routine_item], overflow} — 칸이 없으면(예전 Blog-Auto)·날짜가 틀리면 None.
+    """오늘 할 일 {day, slots: [{key, at, label}], items: [_routine_item], overflow, times, gate: _gate_summary | None} — 칸이 없으면(예전 Blog-Auto)·날짜가 틀리면 None.
     없는 시간대(slot)의 줄은 뺀다 · 같은 id 는 첫 줄만 · 바깥 주소는 https 만."""
     if not isinstance(v, dict) or not isinstance(v.get("items"), list) or not isinstance(v.get("day"), str) \
             or not _ROUTINE_DAY_RE.match(v["day"]):
@@ -1470,7 +1537,7 @@ def _routine(v: Any, media_base: str | None = None) -> dict[str, Any] | None:
         if (it := _routine_item(x, keys, media_base=media_base)) is not None and not any(i["id"] == it["id"] for i in items):
             items.append(it)
     return {"day": v["day"], "slots": slots, "items": items, "overflow": _count(v.get("overflow"), top=1000) or 0,
-            "times": _routine_times(v.get("times"))}
+            "times": _routine_times(v.get("times")), "gate": _gate_summary(v.get("gate"))}
 
 
 _ROUTINE_TIME_RE = re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9]|바로)$")

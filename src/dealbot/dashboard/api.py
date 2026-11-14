@@ -24,7 +24,8 @@
   GET  /dashboard/api/logins            로그인 관리 칸 (logins.view — 연결 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/routine           오늘 할 일 칸 (routine.view — 할 일 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/uploads           올리기 할 일 칸 (uploadplan.view — SNS 탭 '올리기'를 열 때만 · no-store)
-  GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만)
+  GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps, ver, version, ack} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만 ·
+                                        ver = 코드 지문 · ack = 주인이 이 판을 '설치했어요' 했는지 — 대시보드 일 kkumi.installed {ver}, 주인 11/14)
   GET  /dashboard/api/statscap          '통계 보내기' 책갈피 {code, len, steps} (statscap.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
   POST /dashboard/api/stats_capture     책갈피가 네이버 내 통계 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 — 본문 열쇠 k 로만 받음 ·
                                         CORS 는 https://*.naver.com 만 · via=form 이면 HTML 한 장) → statscap.save
@@ -34,6 +35,7 @@
   GET  /dashboard/api/seoi              '이웃 관리' 책갈피 {code, len, steps, note, today} (seoi.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/14)
   POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
+                                        · 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (nbvisit.tick — 응답에 row · 블로그마다 하루 5번)
   POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/xstudio/state · POST /dashboard/api/xstudio/{draft,reply,posted,reply_go,targets,handoff}   X 글쓰기·답글 도구 (xstudio.py — 주인 11/14)
@@ -616,7 +618,7 @@ class DashApi:
         """'꾸미기' 책갈피 코드 (주인 10/27 — 네이버 글쓰기에 붙여 넣은 글의 링크 카드를 주인 아이패드에서 만듦 · 바깥 요청 없는 코드)."""
         from dealbot.dashboard import kkumi
 
-        return jresp(200, kkumi.view(), {"Cache-Control": "no-cache"})
+        return jresp(200, kkumi.view(self.bot.db), {"Cache-Control": "no-cache"})
 
     async def statscap(self, query: dict[str, str]) -> Any:
         """'통계 보내기' 책갈피 코드 (주인 11/11 — 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
@@ -734,6 +736,16 @@ class DashApi:
             if e.code == "key":
                 log.info("seoi_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
             return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
+        if form.get("a") == "visit" and got.get("ok") and got.get("like") is not False:
+            # 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (주인 11/14 — nbvisit.tick · 오늘 목록·그 블로그 줄만 · 하루 5번 · 봇 DB 만)
+            try:
+                from dealbot.dashboard import nbvisit
+
+                t = nbvisit.tick(self.bot, str(got.get("blog") or ""), form.get("u"), time.time())
+                if t.get("ok"):
+                    got = {**got, "row": t["id"], "text": f"{got.get('text') or ''} · 할 일 줄 체크 ✓".strip(" ·")}
+            except Exception as e:  # noqa: BLE001 — 체크가 안 돼도 책갈피 응답은 그대로
+                log.warning("seoi_act: nbvisit tick failed: %s", type(e).__name__)
         return jresp(200, got, cors)
 
     async def naver_qr(self, query: dict[str, str]) -> Any:

@@ -107,7 +107,10 @@ function kkDraw() {
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
   kk.replaceChildren(...BM.flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
     b.o = !b.o; if (b.o && !b.d) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
-    el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사')] : [el('p', {class: 'note'}, '불러오는 중…')])]));
+    el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사'),
+    // 꾸미기 새 판 알림 (11/14): 책갈피에 저장한 뒤 '설치했어요' → 할 일의 '책갈피가 바뀌었어요' 줄이 사라짐
+    b.d.ver ? el('button', {class: 'sm ac', type: 'button', disabled: !!b.d.ack, onclick: async e => { await press({action: 'kkumi.installed', args: {ver: b.d.ver}}, e); b.d = null; kkLoad(b); if (W.SBRoutine) W.SBRoutine.load(); }},
+      b.d.ack ? `v${b.d.version} 설치됨 ✓` : `설치했어요 (v${b.d.version})`) : ''] : [el('p', {class: 'note'}, '불러오는 중…')])]));
 }
 async function kkLoad(b) {
   try { const r = await fetch('/dashboard/api/' + b.api, {credentials: 'same-origin', headers: {Accept: 'application/json'}}); if (r.status === 200) b.d = await r.json(); } catch (e) { /* 다시 펼치면 */ }

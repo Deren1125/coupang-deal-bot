@@ -19,6 +19,7 @@ from typing import Any
 import anthropic
 
 from dealbot import commentary  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+from dealbot.config import posted_api_model, posted_cli_model
 
 log = logging.getLogger(__name__)
 
@@ -159,12 +160,13 @@ class InfoSummarizer:
         cli_timeout: float | None = None,
     ) -> None:
         self.api_key = api_key
-        self.model = model  # API 모델 이름 (서버 .env). 없으면 키가 있어도 API 는 안 씀
+        self.model = posted_api_model(model, where="summarizer")  # API 모델 이름 (서버 .env). 없거나 Fable 이면 키가 있어도 API 는 안 씀
         self.max_chars = max_chars
         self.timeout = timeout
         # 키·모델이 없으면 서버에 로그인된 claude CLI 로 (한줄평 Commentator 와 같은 실행 파일). 요약기를 설정에서 끄면 use_cli=False
         self.cli_bin = commentary.find_claude() if (use_cli and not self._api_ready) else None
-        self.cli_model = cli_model  # None 이면 --model 을 넘기지 않고 CLI 기본 모델을 쓴다
+        # 늘 --model 을 넘긴다 (주인 11/14 — config.posted_cli_model: 비었거나 Fable 이면 CLI 별칭 'sonnet') · 칸은 정해 준 이름 그대로 (없으면 None)
+        self.cli_model = posted_cli_model(cli_model, where="summarizer") if cli_model else None
         self.cli_timeout = cli_timeout if cli_timeout is not None else max(timeout, 120)  # CLI 는 처음 뜰 때 느리다
         self.last_error: str | None = None
         self.disabled_reason: str | None = None  # API 키·모델 오류처럼 다시 해도 안 되는 것은 이 프로세스 동안 끈다
@@ -274,9 +276,7 @@ class InfoSummarizer:
         """서버의 claude CLI 로 묻는다 (한줄평 Commentator 와 같은 인자·환경: 도구 없이 한 번만 답). 글은 표준 입력으로 넘긴다."""
         if not self.cli_bin:
             return None, "서버 claude CLI 없음"
-        args = [self.cli_bin, "-p", "--output-format", "json"]
-        if self.cli_model:
-            args += ["--model", self.cli_model]
+        args = [self.cli_bin, "-p", "--output-format", "json", "--model", posted_cli_model(self.cli_model, where="summarizer")]
         args += ["--system-prompt", system, "--tools", ""]
         proc: asyncio.subprocess.Process | None = None
         try:
@@ -347,7 +347,7 @@ class InfoSummarizer:
         return {
             "configured": self.configured,
             "backend": self.backend,
-            "model": self.model if self.backend == "api" else (self.cli_model or "CLI 기본값"),
+            "model": self.model if self.backend == "api" else posted_cli_model(self.cli_model, where="summarizer"),
             "disabled_reason": self.disabled_reason,
             "last_error": self.last_error,
         }

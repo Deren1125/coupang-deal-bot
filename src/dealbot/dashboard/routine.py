@@ -8,12 +8,25 @@ GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 
      stats = 늘 None ('오늘 통계 보내기' 할 일 줄은 11/14 에 뺌 — 알림: notify/stats_remind) ·
      seoi = '이웃 관리' 책갈피의 오늘 수 (seoi.today — {visit, visit_cap, add_cap, how, feed, note, by: {블로그: {name, add, add_cap, visit, line}}} · 주인 11/14)
   목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
+  주인 11/14 ('오류가 다시 안 나게 · 주인이 보기 전에 걸러지게') — 늘 실리는 칸:
+    age_min = 블로그 프로그램 기록 파일이 쓰인 지 몇 분 (모르면 None) → 30분 넘거나 today 가 거짓이면 화면이 '소식이 N분째 없어요' ·
+    gate = {checked, blocked, ok, hm, line} | None — 올리기 전 자동 점검 요약 ('자동 점검: 8편 모두 통과 (17:40)' · '2편 고치는 중') ·
+    kkumi_new = 꾸미기 책갈피가 '설치했어요' 한 판과 다름 (kkumi.is_new) · relay = 블로그 프로그램에 아직 못 전한 체크 수 ·
+    nb = 이웃 글 들르기 줄 (nbvisit.view — 블로그마다 남은 줄·오늘 책갈피로 체크한 수).
+  줄의 paste.stale (만드는 중·못 만든 묶음 — html 없음)·gate {ok, codes, text} 는 blogauto._routine_item 이 거른 그대로.
 에이블리 링크 부탁 (주인 10/28): Blog-Auto 칸 ably_requests (blogauto._ably_requests) — 서버는 에이블리를 열지 않고 주인이 폰 앱에서
   링크를 만들어 붙여 넣음 → 대시보드 일 blog.similar_links {blog: issue, pid, links: [붙여 넣은 글], rid}. 없거나 0개면 None.
 출처: 블로그 프로그램 기록 파일 status.routine (blogauto._routine) + EXTRA_SOURCES (지금은 스레드 세션 몫 threads_items 하나 — 늘 []).
   두 번째 출처는 같은 줄 모양(blogauto._routine_item)으로 함수 하나만 더하면 된다 — 같은 id 는 먼저 온 줄만, 없는 시간대 줄은 뺀다.
-체크: 봇 DB kv "routine_done:<그 목록의 날짜>" = id 목록 (JSON). 바꾸는 것은 대시보드 일 routine.done {id, done} (actions.py) 하나뿐.
+체크: 봇 DB kv "routine_done:<그 목록의 날짜>" = id 목록 (JSON). 바꾸는 것은 대시보드 일 routine.done {id, done} (actions.py) 하나뿐
+  (+ '이웃 관리' 책갈피가 들른 글의 줄 — nbvisit.tick 이 같은 set_done 으로).
   전날 것까지만 남기고 지운다. 이 칸은 사이트를 열거나 로그인하지 않는다 (읽고 체크만).
+전하지 못한 체크 (주인 11/14 — 블로그 프로그램이 몇 시간 멈춘 동안 '발행했어요'·서로이웃 체크가 사라져 같은 글이 다음 날 다시 뜸):
+  kv "routine_relay_pending" = [{name: pasted|nb_requested, args, rid, ts, aid?, tries?, tried?, ok?}] (200개 · 3일).
+  actions._pasted 가 맡길 때마다 relay_add — 못 맡겼으면 aid 없이, 맡겼으면 aid 와 함께 (10분 안에 안 가져가 'expired' 되면 다시 보내려고).
+  relay_tick (scheduler.dashboard_loop 1분마다): 다리가 살아 있으면 aid 없는 것을 다시 맡기고, 맡긴 것은 결과를 봄 —
+  ok → 2시간 뒤 지움 (그동안 다음 날 목록에서도 체크로) · rejected·error → 지움 · expired → 다시 (10분·20분·40분·…·1시간 간격).
+  carried() = 아직 못 전했거나 방금 전한 '했어요' 줄 id — view 가 그 목록의 done 에 더해 날이 바뀌어도 체크가 남는다.
 """
 
 from __future__ import annotations
@@ -21,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -38,6 +52,15 @@ log = logging.getLogger(__name__)
 
 DONE_KEY = "routine_done:"
 DONE_MAX = 300
+THREADS_TIMEOUT_S = 1.0  # threads-auto 가 느려도 화면 요청을 붙잡지 않게 (주인 11/14 — 예전 3초 · 요청마다)
+THREADS_CACHE_S = 120.0
+RELAY_KEY = "routine_relay_pending"
+RELAY_MAX = 200
+RELAY_KEEP_S = 3 * 86400.0
+RELAY_OK_KEEP_S = 7200.0  # 전한 뒤에도 이만큼은 체크로 (블로그 프로그램이 다음 목록에서 그 줄을 뺄 때까지)
+RELAY_RETRY_S = (600.0, 1200.0, 2400.0, 3600.0)  # 'expired' 뒤 다시 맡기는 간격 (그 뒤로는 1시간마다)
+RELAY_NAMES = ("pasted", "nb_requested")
+STALE_MIN = 30  # 기록이 이보다 오래면 화면이 알림 (todohub.js 와 같게)
 
 
 def _tz(bot: Any) -> ZoneInfo:
@@ -58,10 +81,26 @@ def blog_routine(bot: Any) -> dict[str, Any] | None:
 def threads_items(bot: Any) -> list[dict[str, Any]]:
     """스레드 세션 몫 — threads-auto(127.0.0.1:8710, threads_proxy._call) GET /api/routine 의 items (같은 줄 모양, 주인 10/27 반자동).
     threads-auto 가 하루 한 번 읽기만 해서 만든 스레드·인스타 맞팔·팔로우·좋아요·댓글 초안·답글 초안·글 초안. 꺼져 있거나 오늘 것이 아니면 []."""
+    day = today(bot, time.time())
+    with _TH_LOCK:
+        hit = _TH_CACHE.get("v")
+        if hit is not None and hit[0] == day and time.monotonic() - hit[1] < THREADS_CACHE_S:
+            return list(hit[2])
+    items = _threads_fetch(day)
+    with _TH_LOCK:  # 못 읽은 것([])도 기억 — 꺼진 서비스를 요청마다 1초씩 기다리지 않게
+        _TH_CACHE["v"] = (day, time.monotonic(), items)
+    return list(items)
+
+
+_TH_CACHE: dict[str, tuple[str, float, list[dict[str, Any]]]] = {}
+_TH_LOCK = threading.Lock()
+
+
+def _threads_fetch(day: str) -> list[dict[str, Any]]:
     from dealbot.dashboard import threads_proxy
 
     try:
-        status, raw, _ = threads_proxy._call("/api/routine", None, 3)
+        status, raw, _ = threads_proxy._call("/api/routine", None, THREADS_TIMEOUT_S)
     except (OSError, ConnectionError):
         return []
     if status != 200:
@@ -70,7 +109,7 @@ def threads_items(bot: Any) -> list[dict[str, Any]]:
         got = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         return []
-    if not isinstance(got, dict) or got.get("day") != today(bot, time.time()) or not isinstance(got.get("items"), list):
+    if not isinstance(got, dict) or got.get("day") != day or not isinstance(got.get("items"), list):
         return []
     return got["items"]
 
@@ -104,9 +143,10 @@ def merged(bot: Any, now: float) -> dict[str, Any] | None:
 
 
 def day_of(bot: Any, now: float) -> str:
-    """체크를 적을 날짜 — 지금 보이는 목록의 날짜 (목록이 없으면 오늘)."""
+    """체크를 적을 날짜 — 지금 보이는 목록의 날짜 (목록이 없으면 오늘).
+    블로그 몫만 본다 (다른 출처는 늘 오늘 날짜의 줄만 내므로 날짜가 같음 — 체크 한 번에 threads-auto 를 부르지 않게, 주인 11/14)."""
     try:
-        r = merged(bot, now)
+        r = blog_routine(bot)
     except Exception:  # noqa: BLE001
         r = None
     return r["day"] if r else today(bot, now)
@@ -133,6 +173,107 @@ def set_done(db: Any, day: str, rid: str, done: bool) -> None:
     except ValueError:
         return
     db.kv_delete_prefix(DONE_KEY, keep=lambda k, _v: k in (DONE_KEY + day, DONE_KEY + prev))
+
+
+# ---------------------------------------------------------------- 전하지 못한 체크 (주인 11/14)
+def relay_rows(db: Any) -> list[dict[str, Any]]:
+    try:
+        v = json.loads(db.kv_get(RELAY_KEY) or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [x for x in v if isinstance(x, dict) and x.get("name") in RELAY_NAMES and isinstance(x.get("args"), dict)
+            and isinstance(x.get("rid"), str) and isinstance(x.get("ts"), int | float)] if isinstance(v, list) else []
+
+
+def _relay_put(db: Any, rows: list[dict[str, Any]]) -> None:
+    db.kv_set(RELAY_KEY, json.dumps(rows[-RELAY_MAX:], ensure_ascii=False, separators=(",", ":")))
+
+
+def relay_add(db: Any, name: str, args: dict[str, Any], rid: str, now: float, aid: str | None = None) -> None:
+    """체크 하나를 적어 둔다 — 같은 줄의 앞선 것은 지운다 (마지막에 누른 것만 전함). aid = 이미 맡긴 일 번호 (없으면 다음 tick 이 맡김)."""
+    rows = [x for x in relay_rows(db) if not (x["name"] == name and x["rid"] == rid) and now - x["ts"] < RELAY_KEEP_S]
+    row: dict[str, Any] = {"name": name, "args": args, "rid": rid, "ts": now}
+    if aid:
+        row.update(aid=aid, tries=1, tried=now)
+    _relay_put(db, [*rows, row])
+
+
+def relay_waiting(db: Any) -> int:
+    """아직 블로그 프로그램에 닿지 않은 체크 수 (화면 한 줄)."""
+    return sum(1 for x in relay_rows(db) if not x.get("ok"))
+
+
+def carried(db: Any, now: float) -> set[str]:
+    """아직 못 전했거나 방금 전한 '했어요' 줄 id — 날이 바뀐 목록에서도 체크로 (발행 줄은 pub·rsv 둘 다: 줄 종류가 하루 사이 바뀜)."""
+    out: set[str] = set()
+    for x in relay_rows(db):
+        if x["args"].get("done") is not True or now - x["ts"] >= RELAY_KEEP_S:
+            continue
+        m = POST_ROW.match(x["rid"])
+        out |= {f"pub:{m.group(1)}:{m.group(2)}", f"rsv:{m.group(1)}:{m.group(2)}"} if m else {x["rid"]}
+    return out
+
+
+def relay_tick(bot: Any, now: float | None = None) -> dict[str, int]:
+    """1분마다 (scheduler.dashboard_loop): 못 전한 체크를 다시 맡기고, 맡긴 것의 결과를 본다. 돌려줌 {sent, done, dropped, left}."""
+    now = now or time.time()
+    db = bot.db
+    rows = relay_rows(db)
+    out = {"sent": 0, "done": 0, "dropped": 0, "left": 0}
+    if not rows:
+        return out
+    outbox = getattr(bot, "actions_out", None)
+    try:
+        st = outbox.status() if outbox is not None else None
+        fresh = st is not None and st.bridge_ok(now)
+    except Exception as e:  # noqa: BLE001 — 상태를 못 읽으면 이번엔 보내지 않음
+        log.warning("routine relay status failed: %s", type(e).__name__)
+        st, fresh = None, False
+    keep: list[dict[str, Any]] = []
+    for x in rows:
+        if x.get("ok"):
+            if now - x["ok"] < RELAY_OK_KEEP_S:
+                keep.append(x)
+            continue
+        if now - x["ts"] >= RELAY_KEEP_S:
+            out["dropped"] += 1
+            log.warning("routine relay: 3일 동안 못 전해 버림 (%s %s)", x["name"], x["rid"])
+            continue
+        if x.get("aid") and outbox is not None:
+            row = outbox.store.get(x["aid"])
+            status = row["status"] if row else "expired"  # 기록이 사라졌으면 다시
+            if status == "ok":
+                out["done"] += 1
+                keep.append({**x, "ok": now})
+                continue
+            if status in ("rejected", "error"):  # 블로그 프로그램이 받아서 답함 — 다시 보내도 같은 답
+                out["dropped"] += 1
+                log.info("routine relay: %s %s → %s (다시 보내지 않음)", x["name"], x["rid"], status)
+                continue
+            if status != "expired":  # queued·running — 기다림
+                keep.append(x)
+                continue
+            x = {k: v for k, v in x.items() if k != "aid"}
+        tries = int(x.get("tries") or 0)
+        wait = RELAY_RETRY_S[min(tries, len(RELAY_RETRY_S)) - 1] if tries else 0.0
+        if not fresh or outbox is None or (st.actions and not st.supports(x["name"])) or now - float(x.get("tried") or 0) < wait:
+            keep.append(x)
+            continue
+        try:
+            aid, _ = outbox.submit(action=x["name"], blog=x["args"].get("blog"), args=x["args"], target="", confirmed=False,
+                                   session="routine-relay", cid=None)
+        except Exception as e:  # noqa: BLE001 — 다음 tick 에 다시
+            log.warning("routine relay submit failed: %s", type(e).__name__)
+            keep.append(x)
+            continue
+        out["sent"] += 1
+        keep.append({**x, "aid": aid, "tries": tries + 1, "tried": now})
+    out["left"] = sum(1 for x in keep if not x.get("ok"))
+    if keep != rows:
+        _relay_put(db, keep)
+    if out["sent"] or out["done"] or out["dropped"]:
+        log.info("routine relay: 다시 맡김 %d · 전해짐 %d · 버림 %d · 남음 %d", out["sent"], out["done"], out["dropped"], out["left"])
+    return out
 
 
 def _due_text(due: float | None, now: float, z: ZoneInfo) -> str:
@@ -233,12 +374,17 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
         log.warning("routine extras failed: %s", type(e).__name__)
         ex = {"rising": [], "rests": []}
     ex["stats"] = None  # '오늘 통계 보내기' 할 일 줄은 뺌 (주인 11/14 — 알림으로: notify/stats_remind)
+    ex.update(meta(bot, now))
     if not r:
-        return {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0, "ably": ably, **ex}
+        return {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0, "ably": ably, "gate": None, "nb": None, **ex}
     hm = datetime.fromtimestamp(now, _tz(bot)).strftime("%H:%M")
     by_at = sorted(r["slots"], key=lambda s: s["at"])
     cur = next((s["key"] for s in reversed(by_at) if s["at"] <= hm), by_at[0]["key"])
     done = done_ids(bot.db, r["day"])
+    try:  # 아직 못 전한 '발행했어요'·서로이웃 체크는 날이 바뀐 목록에서도 체크로 (주인 11/14)
+        done |= carried(bot.db, now)
+    except Exception as e:  # noqa: BLE001
+        log.warning("routine carried failed: %s", type(e).__name__)
     try:
         scores = post_scores(bot)
     except Exception as e:  # noqa: BLE001 — 점수를 못 읽어도 할 일은 원래 차례로
@@ -257,6 +403,56 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
                         for i in r["items"] if i["slot"] == s["key"]])
         slots.append({**s, "items": its, "done": sum(i["done"] for i in its), "total": len(its),
                       "min_left": sum(i["min"] for i in its if not i["done"]), "current": s["key"] == cur})
+    try:  # 이웃 글 들르기 줄 ↔ '이웃 관리' 책갈피 (주인 11/14 — 블로그마다 다음에 열 글 · 오늘 책갈피로 체크한 수)
+        from dealbot.dashboard import nbvisit
+
+        nb = nbvisit.view(bot.db, [i for s in slots for i in s["items"]], r["day"])
+    except Exception as e:  # noqa: BLE001 — 못 읽어도 할 일은 보이게
+        log.warning("routine nbvisit failed: %s", type(e).__name__)
+        nb = None
     return {"day": r["day"], "today": r["day"] == today(bot, now), "slots": slots, "overflow": r["overflow"],
             "done": sum(s["done"] for s in slots), "total": sum(s["total"] for s in slots), "ably": ably,
-            "times": list(r.get("times") or []), **ex}
+            "times": list(r.get("times") or []), "gate": gate_view(r, _tz(bot)), "nb": nb, **ex}
+
+
+def gate_view(r: dict[str, Any], z: ZoneInfo) -> dict[str, Any] | None:
+    """올리기 전 자동 점검 요약 — 줄마다의 gate 를 센다 (목록 요약 칸은 시각만 씀 · 줄과 어긋나지 않게). 검사한 줄이 없으면 None."""
+    gated = [i for i in r["items"] if isinstance(i.get("gate"), dict)]
+    if not gated:
+        return None
+    blocked = sum(1 for i in gated if not i["gate"]["ok"])
+    hm = ""
+    at = (r.get("gate") or {}).get("at")
+    if at:
+        try:
+            d = datetime.fromisoformat(at)
+            hm = (d.astimezone(z) if d.tzinfo else d).strftime("%H:%M")
+        except ValueError:
+            hm = ""
+    tail = f" ({hm})" if hm else ""
+    line = (f"자동 점검: {blocked}편 고치는 중 · {len(gated) - blocked}편 통과{tail}" if blocked
+            else f"자동 점검: {len(gated)}편 모두 통과{tail}")
+    return {"checked": len(gated), "blocked": blocked, "ok": not blocked, "hm": hm, "line": line}
+
+
+def meta(bot: Any, now: float) -> dict[str, Any]:
+    """목록이 있든 없든 실리는 칸 (주인 11/14): age_min · kkumi_new · relay."""
+    out: dict[str, Any] = {"age_min": None, "kkumi_new": False, "relay": 0}
+    try:
+        st = getattr(bot, "dash_state", None)
+        w = getattr(st._export() if st is not None else None, "written_at", None)
+        if w is not None:
+            out["age_min"] = max(0, int((now - w.timestamp()) // 60))
+    except Exception as e:  # noqa: BLE001
+        log.warning("routine age failed: %s", type(e).__name__)
+    try:
+        from dealbot.dashboard import kkumi
+
+        out["kkumi_new"] = kkumi.is_new(bot.db)
+    except Exception as e:  # noqa: BLE001
+        log.warning("routine kkumi failed: %s", type(e).__name__)
+    try:
+        out["relay"] = relay_waiting(bot.db)
+    except Exception as e:  # noqa: BLE001
+        log.warning("routine relay count failed: %s", type(e).__name__)
+    return out

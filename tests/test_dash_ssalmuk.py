@@ -616,6 +616,7 @@ async def test_search_validation(bot: DealBot) -> None:
     for t in ("blog", "news", "webkr"):
         assert (await mget(bot, f"{SEARCH}?type={t}&q={'가' * 100}", key))[0] == 200
     assert [r.url.path for r in seen] == [f"/v1/search/{t}.json" for t in ("blog", "news", "webkr")]
+    assert ["sort" in r.url.params for r in seen] == [True, True, False]  # 웹문서 검색에는 sort 가 없음 (11/14)
     assert (await mget(bot, f"{SEARCH}?q=x&display=abc", key))[0] == 200  # 숫자가 아니면 기본값
 
 
@@ -710,7 +711,14 @@ async def test_search_falls_back_to_blog_key_and_remembers(bot: DealBot, tmp_pat
     _s, st, _h = await get_json(bot, f"{B}/state", session_headers(bot))
     keys = st["search_proxy"].pop("keys")
     assert st["search_proxy"] == {"keysrc": "blog", "today_count": 2}
-    assert keys["blog"] == 200 and keys["dealbot"] == "-" and isinstance(keys["at"], int)  # 둘째 호출은 블로그 키만
+    # 둘째 호출은 블로그 키만 — 그래도 딜봇 키의 지난 답(401)과 그때 시각이 남는다 (주인 11/14: 예전엔 '-' 로 덮여 원인이 사라짐)
+    assert keys["blog"] == {"s": 200, "at": 1_800_000_000} and keys["dealbot"] == {"s": "401 키틀림", "at": 1_800_000_000} and isinstance(keys["at"], int)
+    now[0] += 120
+    await mget(bot, f"{SEARCH}?q=x", key)
+    keys = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
+    assert keys["blog"] == {"s": 200, "at": 1_800_000_120} and keys["dealbot"] == {"s": "401 키틀림", "at": 1_800_000_000}
+    _s, st, _h = await get_json(bot, f"{B}/state", session_headers(bot))
+    assert st["search_proxy"]["today_count"] == 3
     # 하루 뒤엔 딜봇 키를 다시 봄 — 살아났으면 되돌아감
     now[0] += 86401
     naver(bot, ok_blog)
@@ -784,12 +792,26 @@ async def test_search_records_each_key_status(bot: DealBot, tmp_path: Path) -> N
     status, _b = await mget(bot, f"{SEARCH}?q=x", d.key())
     assert status == 502
     keys = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
-    assert keys["dealbot"] == "401 키틀림" and keys["blog"] == "no_file"
+    assert keys["dealbot"]["s"] == "401 키틀림" and keys["blog"]["s"] == "no_file" and keys["dealbot"]["at"] == keys["at"]
     naver(bot, lambda req: httpx.Response(401, json={"errorMessage": "Scope Status Invalid : Authentication failed. (인증에 실패했습니다.)", "errorCode": "024"}))
     await mget(bot, f"{SEARCH}?q=x", d.key())
-    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["dealbot"] == "401 검색미등록"
+    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["dealbot"]["s"] == "401 검색미등록"
+    # 네이버가 답하지 않아 502 로 일찍 돌아갈 때도 써 본 키의 답을 남김
+    def boom(req: Any) -> Any:
+        raise httpx.ConnectTimeout("t")
+    naver(bot, boom)
+    status, body = await mget(bot, f"{SEARCH}?q=x", d.key())
+    assert status == 502 and body["status"] == 0
+    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["dealbot"]["s"] == "no_answer"
+    # 예전 모양(값만)으로 저장돼 있던 것도 읽어 이어 씀
+    bot.db.kv_set(ssalmuk.KV_SEARCH_KEYS, json.dumps({"dealbot": "401 키틀림", "blog": "-", "at": 111}))
+    d.note_keys({"dealbot": "-", "blog": 200})
+    got = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
+    assert got["dealbot"] == {"s": "401 키틀림", "at": 111} and got["blog"]["s"] == 200
     js = (Path(ssalmuk.__file__).parent / "static" / "ssalmuk.js").read_text(encoding="utf-8")
-    assert "키 파일 못 읽음" in js and "keyDiag(p && p.keys)" in js
+    assert "키 파일 못 읽음" in js and "keyDiag(p && p.keys)" in js and "x.at ? hm(x.at * 1000)" in js and "키 응답 없음" in js
+    assert "search_retry: '검색 다시 켜기'" in js and "trust_host: '사이트 허용'" in js  # 명령 결과 알림에 이름이 뜨게
+    assert ssalmuk.OP_LABEL["search_retry"] == "검색 다시 켜기" and ssalmuk.OP_LABEL["trust_host"] == "사이트 허용"
 
 
 def test_act_search_retry_and_trust_host(bot: DealBot) -> None:

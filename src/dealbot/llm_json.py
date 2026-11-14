@@ -18,6 +18,7 @@ from typing import Any
 import anthropic
 
 from dealbot import commentary  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+from dealbot.config import posted_api_model, posted_cli_model
 from dealbot.summarize import _CLI_AUTH, CLI_AUTH_RETRY_SECONDS
 
 log = logging.getLogger(__name__)
@@ -40,9 +41,11 @@ class JsonAsker:
         max_tokens: int = 2000,
     ) -> None:
         self.api_key = api_key
-        self.model = model  # API 모델 이름 (서버 .env). 없으면 키가 있어도 API 는 안 씀
+        model = posted_api_model(model, where="llm_json")
+        self.model = model  # API 모델 이름 (서버 .env). 없거나 Fable 이면 키가 있어도 API 는 안 씀
         self.cli_bin = cli_bin if cli_bin is not None else (None if (api_key and model) else commentary.find_claude())
-        self.cli_model = cli_model  # None 이면 --model 을 넘기지 않고 CLI 기본 모델
+        # 늘 --model 을 넘긴다 (주인 11/14 — config.posted_cli_model: 비었거나 Fable 이면 CLI 별칭 'sonnet') · 칸은 정해 준 이름 그대로 (없으면 None)
+        self.cli_model = posted_cli_model(cli_model, where="llm_json") if cli_model else None
         self.timeout = timeout
         self.effort = effort
         self.max_tokens = max_tokens
@@ -116,9 +119,7 @@ class JsonAsker:
         return _loads(text)
 
     async def _ask_cli(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
-        args = [str(self.cli_bin), "-p", "--output-format", "json"]
-        if self.cli_model:
-            args += ["--model", self.cli_model]
+        args = [str(self.cli_bin), "-p", "--output-format", "json", "--model", posted_cli_model(self.cli_model, where="llm_json")]
         args += ["--system-prompt", system, "--json-schema", json.dumps(schema, ensure_ascii=False), "--tools", ""]
         proc: asyncio.subprocess.Process | None = None
         try:

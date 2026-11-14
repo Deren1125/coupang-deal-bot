@@ -169,7 +169,7 @@ async def test_summarize_falls_back_to_claude_cli_without_api_key(tmp_path: Path
     args = (tmp_path / "args.txt").read_text().splitlines()
     assert args[:3] == ["-p", "--output-format", "json"] and "--tools" in args and "--system-prompt" in args
     assert args[args.index("--tools") + 1] == "" and "300자 이내" in "\n".join(args)
-    assert "--json-schema" not in args and "--model" not in args  # 답은 머리줄 붙은 평문, 모델은 CLI 기본값
+    assert "--json-schema" not in args and args[args.index("--model") + 1] == "sonnet"  # 답은 머리줄 붙은 평문 · 모델은 늘 넘김 (없으면 CLI 별칭 sonnet — 주인 11/14)
     stdin = (tmp_path / "stdin.txt").read_text()
     assert "[제목] [LF몰] 라코스테 최대 60%세일" in stdin and "[게시판] 뽐뿌" in stdin
 
@@ -230,7 +230,7 @@ async def test_api_key_without_a_model_name_uses_the_cli(tmp_path: Path, monkeyp
     s = InfoSummarizer("sk-test")
     fm = FakeMessages("쓰이면 안 되는 답")
     s._client = SimpleNamespace(messages=fm)  # type: ignore[assignment]
-    assert s.backend == "cli" and s.describe()["model"] == "CLI 기본값"
+    assert s.backend == "cli" and s.describe()["model"] == "sonnet"
     r = await s.summarize(title="t", source="s", text="본문 " * 10)
     assert r.text and fm.calls == [] and _calls(tmp_path) == 1
     # CLI 도 없으면 꺼진 상태 (죽지 않고 확인 요청으로)
@@ -302,3 +302,43 @@ def test_model_name_warning_only_for_features_that_use_it(settings, caplog: pyte
     settings.publish.commentary.enabled = True
     got = warned()
     assert len(got) == 1 and "DEALBOT_MODEL_COMMENTARY" in got[0]
+
+
+@pytest.mark.parametrize("bad", ["claude-fable-latest", "FABLE", "claude-mythos-preview"])
+async def test_posted_text_never_uses_fable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    """주인 11/14 '올라가는 글은 Opus 까지만 · Fable 은 안 씀': 요약기·말 명령 해석기 모두 늘 --model 을 넘기고,
+    서버 .env 값이 Fable·Mythos 면 API 는 건너뛰고 CLI 별칭 'sonnet' 으로 (한 번만 적음)."""
+    from dealbot import config
+    from dealbot.llm_json import JsonAsker
+
+    assert config.posted_cli_model(bad) == "sonnet" and config.posted_api_model(bad) is None
+    assert config.posted_cli_model(None) == "sonnet" and config.posted_cli_model(" ") == "sonnet" and config.posted_api_model("") is None
+    assert config.posted_cli_model("claude-opus-x") == "claude-opus-x" and config.posted_api_model("some-model") == "some-model"
+    _fake_claude(tmp_path, monkeypatch, {"is_error": False, "result": "할인율: 0\n할인액: 0\n\n라코스테 세일\n- 기간: 9/11~9/14"})
+    s = InfoSummarizer("sk-test", model=bad, cli_model=bad)  # 키가 있어도 그 이름으로는 API 를 안 씀
+    assert s.backend == "cli" and s.model is None and s.describe()["model"] == "sonnet"
+    r = await s.summarize(title="t", source="s", text="본문 " * 10)
+    assert r.error is None
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert args.count("--model") == 1 and args[args.index("--model") + 1] == "sonnet" and bad not in args
+    d = tmp_path / "nl"
+    _fake_claude(d, monkeypatch, {"is_error": False, "structured_output": {"ok": True}})
+    for kw in ({}, {"cli_model": bad}, {"model": bad}, {"cli_model": "my-model"}):
+        a = JsonAsker("sk-test" if "model" in kw else None, **kw)
+        assert a.backend == "cli" and a.model is None
+        assert await a.ask("s", "u", {"type": "object", "properties": {"ok": {"type": "boolean"}}}) == {"ok": True}
+        args = (d / "args.txt").read_text().splitlines()
+        assert args.count("--model") == 1 and args[args.index("--model") + 1] == kw.get("cli_model", "sonnet").replace(bad, "sonnet")
+
+
+def test_refused_model_is_logged_once(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from dealbot import config
+
+    config._posted_warned.clear()
+    with caplog.at_level(logging.WARNING, logger="dealbot.config"):
+        for _ in range(3):
+            assert config.posted_cli_model("claude-fable-next", where="t") == "sonnet"
+        assert config.posted_cli_model(None, where="t") == "sonnet"  # 빈 값은 조용히 기본으로
+    assert len([r for r in caplog.records if "claude-fable-next" in r.getMessage()]) == 1

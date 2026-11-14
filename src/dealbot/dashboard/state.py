@@ -58,6 +58,9 @@ NAME_MAX = 40
 # 알림 종류 → 글의 할 일 (기록 파일 posts[] 가 아직 없을 때)
 KIND_NEED = {"draft_ready": "publish", "ask": "answers", "pick_photos": "photos", "hot": "photos", "upload_fail": "retry",
              "owner_edit": "owner_edit", "share_confirm": "share", "channel_ask": "channel", "channel_review": "channel"}
+STALE_NEED_KINDS = ("pick_photos", "hot", "ask")  # 기록 파일이 '할 일 없음'이면 닫는 알림 (주인 11/14 가짜 '사진 필요')
+ZOMBIE_S = 24 * 3600.0  # 글이 어디에도 없는 '발행 대기' 알림은 이만큼 지나면 숨김
+PUSH_ONLY_KINDS = ("keyzard_login", "keyzard_tool")  # 푸시(알림)만 — 할 일 줄 없음 (주인 11/14 '키자드는 리마인더로')
 NEED_ORDER = ("owner_edit", "answers", "photos", "retry", "paste", "app", "publish", "share", "channel")  # 하나만 고를 때 앞의 것
 NEED_STATUS = {"owner_edit": "직접 고친 글 · 건드리지 않음", "answers": "질문에 답해 주세요", "photos": "사진 필요",
                "retry": "업로드 실패", "publish": "발행 대기", "share": "직접 발행 · 채널·카톡 보낼까요",
@@ -457,8 +460,11 @@ class StateBuilder:
         return primary, more
 
     def _post_item(self, blog: str, post: dict[str, Any] | None, *, pid: int, title: str = "", needs: list[str] | None = None,
-                   long: bool = False) -> dict[str, Any]:
-        needs = self._owner_needs(blog, post, list((post or {}).get("needs") or needs or []))
+                   long: bool = False, known: bool = False) -> dict[str, Any]:
+        # known = 기록 파일이 이 글을 알고, 알림보다 나중에 쓰였다 → 기록 파일의 needs 만 (비어 있어도 — 알림에서 온 needs 는 글이 기록 파일에
+        # 없을 때만. 주인 11/14 Pick #340: 본문을 고쳐 사진 자리가 다 찼는데 예전 '사진 골라 주세요' 알림 때문에 '사진 필요'가 남음)
+        base = list(post.get("needs") or []) if known and post is not None else list((post or {}).get("needs") or needs or [])
+        needs = self._owner_needs(blog, post, base)
         primary, more = self._post_actions(blog, pid, needs, post)
         first = next((n for n in NEED_ORDER if n in needs), "")
         status = NEED_STATUS.get(first, "기다리는 글")
@@ -512,6 +518,23 @@ class StateBuilder:
                 "score": (post or {}).get("score"), "popular": bool((post or {}).get("popular")),
                 "sc": score_chip(post),  # 칩 글자 ('🔥 88점' · '62점' · 점수 모르면 '') — app.js 크기 한도라 글자는 여기서
                 "_hot": rank.post_hot(post), "_hot_rank": (post or {}).get("hot_rank")}
+
+    def _log_once(self, key: str, msg: str, *args: Any) -> None:
+        seen = self.__dict__.setdefault("_logged", set())
+        if key not in seen:
+            if len(seen) > 500:
+                seen.clear()
+            seen.add(key)
+            log.info(msg, *args)
+
+    def _drop_stale(self, router: Any, rows: list[Any], now: float, iid: str) -> None:
+        """기록 파일이 '할 일 없음'이라는 글의 사진·답 알림을 닫는다 (이 봇 DB 의 알림 줄만 — 블로그 프로그램에는 아무것도 보내지 않음)."""
+        try:
+            for src in {r.src for r in rows}:
+                router.store.resolve(src, [r.key for r in rows if r.src == src], now)
+            self._log_once(f"stale:{iid}:{len(rows)}", "dashboard state: 기록 파일에 할 일이 없는 글의 알림 %d개를 닫음 %s", len(rows), iid)
+        except Exception as e:  # noqa: BLE001 — 못 닫아도 카드는 안 보임
+            log.warning("dashboard state: 묵은 알림을 못 닫음 %s: %s", iid, type(e).__name__)
 
     def _fail_text(self, status: str, fail: dict[str, Any]) -> str:
         """'업로드 실패 · 이유 — 20분 뒤 한 번 자동으로 다시 해요' (memory·busy 만 자동으로 한 번 다시)."""
@@ -698,10 +721,14 @@ class StateBuilder:
             log.warning("dashboard state: 딜 할 일을 못 읽음: %s", e)
         router = getattr(self.bot, "router", None)
         notices = router.store.open_rows(now) if router is not None else []
+        w = getattr(export, "written_at", None)
+        written = w.timestamp() if w is not None else None  # 기록 파일이 쓰인 시각 — 그 뒤에 온 알림은 기록 파일이 아직 모름
+        routine_posts = {m.group(1) for it in ((v2.get("status") or {}).get("routine") or {}).get("items") or []
+                         if (m := re.match(r"^(?:pub|rsv):((?:finance|issue|hotdeal):\d+)$", str(it.get("id") or "")))}
         by_iid: dict[str, list[Any]] = {}
         for n in notices:
-            if n.src == "blogauto" and (str(n.key).startswith(("ably_rank:", "kz_rss:")) or n.kind == "keyzard_login"):
-                continue  # 에이블리 랭킹·키자드 RSS 알림은 푸시만, 키자드 로그인도 할 일 줄 없음 (주인 11/14)
+            if n.src == "blogauto" and (str(n.key).startswith(("ably_rank:", "kz_rss:")) or n.kind in PUSH_ONLY_KINDS):
+                continue  # 에이블리 랭킹·키자드 RSS 알림은 푸시만, 키자드 로그인·등록 도구도 할 일 줄 없음 (주인 11/14)
             by_iid.setdefault(n.iid, []).append(n)
         for iid, rows in by_iid.items():
             if iid.startswith("deal-"):
@@ -718,8 +745,18 @@ class StateBuilder:
                 if p is not None and p.get("status") == "published" and not (p.get("needs") or []):
                     if not any(r.key.split(":", 1)[0] in ("dup", "cards", "openchat") for r in rows):
                         continue
+                # 기록 파일이 이 글을 알고 알림보다 나중에 쓰였으면 기록 파일이 맞다 (주인 11/14 — 가짜·좀비 할 일)
+                newer = written is not None and all(r.opened_at <= written for r in rows)  # 기록 파일이 이 알림들보다 나중 것
+                knows = p is not None and newer
+                if knows and not (p.get("needs") or []) and all(r.kind in STALE_NEED_KINDS for r in rows):
+                    self._drop_stale(router, rows, now, iid)  # 할 일이 없다는데 '사진·답' 알림만 남음 → 카드 없이 알림을 닫음
+                    continue
+                if p is None and newer and all(r.kind == "draft_ready" for r in rows) and now - max(r.opened_at for r in rows) > ZOMBIE_S \
+                        and f"{blog}:{pid}" not in routine_posts:  # 기록 파일을 못 읽거나 알림보다 옛것이면 숨기지 않음
+                    self._log_once(f"zombie:{iid}", "dashboard state: 좀비 '발행 대기' 알림 숨김 %s (글이 기록 파일·오늘 할 일에 없고 24시간 넘음)", iid)
+                    continue
                 needs = [KIND_NEED[r.kind] for r in rows if r.kind in KIND_NEED]
-                item = self._post_item(blog, p, pid=pid, title=rows[0].title, needs=needs, long=long)
+                item = self._post_item(blog, p, pid=pid, title=rows[0].title, needs=needs, long=long, known=knows)
                 extra = [r for r in rows if r.key.split(":", 1)[0] in ("dup", "cards", "openchat")]
                 if extra and not item["detail"]["needs"]:
                     item["kind"] = extra[0].kind or "double_pub"
@@ -755,7 +792,7 @@ class StateBuilder:
         todo = getattr(export, "todo", None)
         for t in (todo.items if todo is not None else []):
             head = t.key.split(":", 1)[0]
-            if ("blogauto", t.key) in known or head in ("link", "review", "unsure") or t.group == "link_request":
+            if ("blogauto", t.key) in known or head in ("link", "review", "unsure") or t.group == "link_request" or t.kind in PUSH_ONLY_KINDS:
                 continue
             blog = t.blog if t.blog in ("finance", "issue", "hotdeal") else ""
             iid = iidmod.iid_for(t.key, blog, src="blogauto")

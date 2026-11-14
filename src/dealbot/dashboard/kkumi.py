@@ -5,11 +5,16 @@ static/kkumi.js = Blog-Auto blogauto/naver/kkumi_v4.js (10/29 아이패드 시�
 포스트잇 · 발행 설정창 태그까지 넣는다 (아이패드에서는 스크립트로 커서를 옮길 수 없어 맨 끝에 차례로 쌓음 · 바깥 요청 없음).
 
   bookmarklet(): static/kkumi.js 에서 머리 주석·'//' 주석 줄·들여쓰기·빈 줄을 뺀 코드(minified) → "javascript:" + encodeURIComponent.
-  view(): GET /dashboard/api/kkumi 몸 {code, len, steps} — 연결 탭 '꾸미기 버튼 설치' 칸(logins.js)이 열 때 받아 '코드 복사'.
+  view(): GET /dashboard/api/kkumi 몸 {code, len, steps, ver, version, ack} — 연결 탭 '꾸미기 버튼 설치' 칸(logins.js)이 열 때 받아 '코드 복사'.
+설치한 책갈피가 옛 판인지 알리기 (주인 11/14 — 책갈피는 주인이 다시 복사·저장해야 바뀌는데 그동안은 바뀐 줄 몰라 옛 판으로 붙여 넣음):
+  ver() = 지금 코드의 sha256 앞 10자 · version() = kkumi.js 의 'const V = n' (끝 알림 'v<n>' 과 같은 수) ·
+  설치 칸 '설치했어요' 단추 → 대시보드 일 kkumi.installed {ver} → kv "kkumi_ack" = 그 ver (지금 ver 과 같을 때만 받음) ·
+  is_new(db) = ver != ack → routine.view()["kkumi_new"] → 할 일 종류 목록(todohub.js)이 블로그 셋에 '꾸미기 책갈피가 바뀌었어요 — 다시 설치 (1분)'.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +22,7 @@ from typing import Any
 from urllib.parse import quote
 
 SRC = Path(__file__).resolve().parent / "static" / "kkumi.js"
+KV_ACK = "kkumi_ack"  # 주인이 '설치했어요'를 누른 판의 지문
 STEPS = (
     "아래 '코드 복사'를 눌러요.",
     "사파리에서 아무 페이지나 연 뒤 공유 단추 → '책갈피 추가' → 이름을 '꾸미기'로 저장해요. (이미 있으면 건너뛰어요)",
@@ -81,6 +87,39 @@ def bookmarklet() -> str:
     return "javascript:" + encode(minify(SRC.read_text(encoding="utf-8")))
 
 
-def view() -> dict[str, Any]:
+@lru_cache(maxsize=1)
+def ver() -> str:
+    """지금 책갈피 코드의 지문 (sha256 앞 10자) — 코드가 한 글자라도 바뀌면 달라짐."""
+    return hashlib.sha256(bookmarklet().encode("utf-8")).hexdigest()[:10]
+
+
+@lru_cache(maxsize=1)
+def version() -> int:
+    """kkumi.js 의 판 번호 ('const V = 5' → 5 · 끝 알림 'v5'). 못 찾으면 0."""
+    m = re.search(r"^const V = (\d+);", SRC.read_text(encoding="utf-8"), re.M)
+    return int(m.group(1)) if m else 0
+
+
+def acked(db: Any) -> str:
+    return str(db.kv_get(KV_ACK) or "") if db is not None else ""
+
+
+def ack(db: Any, given: str) -> bool:
+    """'설치했어요' — 지금 판의 지문일 때만 적는다 (옛 화면에서 누른 옛 지문은 받지 않음)."""
+    if given != ver():
+        return False
+    db.kv_set(KV_ACK, given)
+    return True
+
+
+def is_new(db: Any) -> bool:
+    """설치했다고 한 판과 지금 판이 다름 (한 번도 안 눌렀어도 참 — 그때는 '다시 설치'가 곧 첫 확인)."""
+    return acked(db) != ver()
+
+
+def view(db: Any = None) -> dict[str, Any]:
     code = bookmarklet()
-    return {"code": code, "len": len(code), "steps": list(STEPS)}
+    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS), "ver": ver(), "version": version()}
+    if db is not None:
+        out["ack"] = acked(db) == ver()
+    return out

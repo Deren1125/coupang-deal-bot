@@ -17,6 +17,8 @@ const D = look(document);
 if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
+// 판 번호 (11/14 — 끝 알림에 'v5' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
+const V = 5;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => D.querySelectorAll(CARD).length;
@@ -273,6 +275,8 @@ const tagsOf = t => {
 // 붙여 넣은 HTML → 조각 [{k: text|rule|card|quote|tags}] (사파리가 감싼 div·span 은 풀어서 문단만)
 const BLOCK = /^(P|BLOCKQUOTE|HR|H[1-6]|UL|OL|TABLE|FIGURE|PRE)$/;
 const esc = s => s.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'})[c]);
+// 인용구 줄은 글자만 다시 쓰되 글자 크기·굵게는 살림 (라커룸 소제목 19 굵게 — 주인 11/14 16:4x 벤치마킹 추천안 · Blog-Auto kkumi_v4.js qline 과 같게)
+const qline = p => { const h = p.outerHTML, z = (h.match(/font-size:\s*(\d+)px/) || [])[1]; let s_ = esc(p.textContent.trim()); if (p.querySelector('b,strong') || /font-weight:\s*(bold|[6-9]00)/.test(h)) s_ = '<b>' + s_ + '</b>'; return '<p>' + (z ? '<span style="font-size:' + z + 'px">' + s_ + '</span>' : s_) + '</p>'; };
 const leaves = (el, out) => {
   for (const n of el.childNodes) {
     if (n.nodeType === 3) { if (n.data.trim()) out.push({tagName: 'P', text: n.data, html: '<p>' + esc(n.data) + '</p>'}); continue; }
@@ -305,9 +309,9 @@ const pieces = (html, plain) => {
     const t = (n.text || '').replace(/[\u200b\ufeff]/g, '').trim();
     if (n.tagName === 'BLOCKQUOTE') {
       flush();
-      const qs = [...n.el.querySelectorAll('p')].map(p => p.textContent.trim()).filter(Boolean);
-      const lines_ = qs.length ? qs : [t];
-      out.push({k: 'quote', html: lines_.map(x => '<p>' + esc(x) + '</p>').join(''), lines: lines_});
+      const qp = [...n.el.querySelectorAll('p')].filter(p => p.textContent.trim());
+      const lines_ = qp.length ? qp.map(p => p.textContent.trim()) : [t];
+      out.push({k: 'quote', html: qp.length ? qp.map(qline).join('') : '<p>' + esc(t) + '</p>', lines: lines_});
     } else if (n.tagName === 'HR' || t === ZL) { flush(); out.push({k: 'rule'}); }
     else if (t.startsWith(ZT)) { flush(); out.push({k: 'tags', ...tagsOf(t)}); }
     else if (!t && n.el && (n.el.tagName === 'IMG' || n.el.querySelector('img'))) { flush(); out.push({k: 'img', u: (n.el.tagName === 'IMG' ? n.el : n.el.querySelector('img')).getAttribute('src')}); }
@@ -355,7 +359,7 @@ const fx = h => [/background-color/gi, /[^-]color\s*:/gi, /<(b|strong)[\s>]|font
 const R = {pieces: 0, done: 0, pics: [0, 0], cards: [0, 0], lines: [0, 0], quotes: [0, 0], tags: [0, 0], q: [], bad: [], notes: []};
 W.__kkumiReport = R;
 try { window.__kkumiReport = R; } catch (e) {}
-if (!empty() && !confirm('꾸미기: 본문에 글이 있어요. 아래에 이어서 넣을까요?')) return;
+if (!empty() && !confirm('꾸미기: 글이 있어요. 아래에 이을까요?')) return;
 const got = await ask();
 if (!got) return;
 const ps = pieces(got.h, got.t);
@@ -370,7 +374,7 @@ try {
       const probe = (p.lines[p.lines.length - 1] || '').slice(0, 20);
       if (!await pasteIn(p.html, p.lines.join('\n'), probe)) { R.bad.push('글 안 들어감: ' + (probe || '사진')); if (!R.done) break; }
       if (!R.done && probe && [...D.querySelectorAll('.se-documentTitle,.se-section-documentTitle')].some(t => (t.textContent || '').includes(probe))) { R.bad.push('제목 칸에 들어감'); break; }
-      if (probe && !await align(p.align)) R.notes.push('가운데 정렬 못 함: ' + probe);
+      if (probe && !await align(p.align)) R.notes.push('가운데 못 함: ' + probe);
     } else if (p.k === 'img') {
       R.pics[1]++;
       const why = await pic(p.u);
@@ -396,7 +400,7 @@ try {
   }
   R.shape = shape();
   R.fx[1] = fx(body_().map(p => p.innerHTML).join(''));
-  if (ps.some(p => p.align === 'center')) { R.title = await titleMid(); if (R.title) R.notes.push('제목 가운데 ' + R.title + ' — 제목 칸 누르고 가운데 단추'); }
+  if (ps.some(p => p.align === 'center')) { R.title = await titleMid(); if (R.title) R.notes.push('제목 가운데 ' + R.title + ' — 직접'); }
   if (R.tagList && R.done === ps.length) {
     const [n, why] = await tagsIn(R.tagList);
     R.tags[0] = n;
@@ -413,9 +417,9 @@ nm(R.quotes, '포스트잇');
 nm(R.tags, '태그');
 if (R.catOk) out.push('카테고리 ' + R.cat);
 const fs = a => `형광펜 ${a[0]}·색 ${a[1]}·굵게 ${a[2]}`;
-if (R.fx[0].some(Boolean)) { out.push('글자 꾸밈 받음 ' + fs(R.fx[0]) + ' → 들어감 ' + fs(R.fx[1])); if (R.fx[0][0] && !R.fx[1][0]) R.notes.push('형광펜 빠짐'); }
-else R.notes.push('받은 글에 꾸밈 없음');
+if (R.fx[0].some(Boolean)) { out.push('꾸밈 ' + fs(R.fx[0]) + ' → ' + fs(R.fx[1])); if (R.fx[0][0] && !R.fx[1][0]) R.notes.push('형광펜 빠짐'); }
+else R.notes.push('꾸밈 없음');
 R.ok = R.shape === R.want && !R.bad.length;
 R.finished = true;
-alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : ''));
+alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
 })().catch(e => alert('꾸미기 오류: ' + e));

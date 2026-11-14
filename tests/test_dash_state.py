@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -189,3 +189,75 @@ def test_connect_tab_shopconnect_row(bot: DealBot) -> None:
     assert ok["text"].startswith("정상 · ") and not ok["bad"] and "action" not in ok
     assert bot.dash_state._sc_row(_shopconnect({"state": "off"}), now) == {"text": "꺼짐", "bad": False}
     assert _shopconnect({"state": "weird"}) is None and bot.dash_state._sc_row(None, now) is None
+
+
+# ---------------------------------------------------------------- 가짜·좀비 할 일 (주인 11/14 — Pick #340 '사진 필요'가 본문을 고친 뒤에도 남음)
+def _notice(bot: DealBot, key: str, kind: str, iid: str, *, ago_s: float = 0, ttl_h: float = 24, **kw: object) -> None:
+    bot.router.store.upsert_open({"src": "blogauto", "key": key, "kind": kind, "iid": iid, "title": f"{kind} {iid}", "ttl_h": ttl_h, **kw},  # type: ignore[union-attr]
+                                 time.time() - ago_s)
+
+
+def _open(bot: DealBot, key: str) -> bool:
+    n = bot.router.store.get("blogauto", key)  # type: ignore[union-attr]
+    return n is not None and n.resolved_at is None
+
+
+async def test_export_needs_win_over_old_need_notices(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """기록 파일이 그 글을 알고 (알림보다 나중에 쓰였고) 할 일이 없다고 하면, 예전 '사진·답' 알림만으로는 카드가 안 생기고 그 알림은 닫힌다.
+    기록 파일보다 나중에 온 알림은 그대로 (기록 파일이 아직 모르는 새 일)."""
+    posts = fixture("export_v2.json")["posts"]
+    for p in posts["issue"]:
+        if p["pid"] == 47:
+            p.pop("schedule", None)  # 예약되지 않은 기다리는 글 (예약된 글은 원래 할 일에 안 나옴)
+    write_export(tmp_path / "blogauto.json", posts=posts)  # issue 47: needs=[] (saved) · issue 46: needs=['photos']
+    blogauto_status(settings)
+    _notice(bot, "pick:issue:47", "pick_photos", "post-issue-47", ago_s=3600)
+    _notice(bot, "hot:issue:47", "hot", "post-issue-47", ago_s=1800, sev="hot")
+    _notice(bot, "pick:issue:46", "pick_photos", "post-issue-46", ago_s=3600)
+    by = {i["iid"]: i for i in (await state(bot))["todo"]}
+    assert "post-issue-47" not in by  # 사진 자리가 다 찬 글 — '사진 필요' 카드 없음
+    assert not _open(bot, "pick:issue:47") and not _open(bot, "hot:issue:47")  # 그 알림은 닫음 (다시 열리면 다시 봄)
+    assert by["post-issue-46"]["detail"]["needs"] == ["photos"] and _open(bot, "pick:issue:46")  # 진짜 사진 필요는 그대로
+    # 발행 대기 알림이 같이 있으면 카드는 남되 할 일은 기록 파일 것만 (사진 필요가 붙지 않음)
+    _notice(bot, "pickb:issue:47", "pick_photos", "post-issue-47", ago_s=3600)
+    _notice(bot, "draft:issue:47", "draft_ready", "post-issue-47", ago_s=3600)
+    by = {i["iid"]: i for i in (await state(bot))["todo"]}
+    assert "photos" not in by["post-issue-47"]["detail"]["needs"] and "사진" not in by["post-issue-47"]["status"]
+    assert _open(bot, "pickb:issue:47")  # 섞여 있으면 닫지 않음
+    # 기록 파일이 쓰인 뒤에 온 알림 — 기록 파일이 아직 모름 → 알림대로 '사진 필요'
+    bot.router.store.resolve("blogauto", ["pickb:issue:47", "draft:issue:47"], time.time())  # type: ignore[union-attr]
+    bot.router.store.upsert_open({"src": "blogauto", "key": "pick2:issue:47", "kind": "pick_photos", "iid": "post-issue-47", "title": "사진 골라 주세요"},  # type: ignore[union-attr]
+                                 time.time() + 5)
+    bot.dash_state._now = lambda: datetime.now(ZoneInfo("Asia/Seoul")) + timedelta(seconds=10)  # type: ignore[method-assign]
+    by = {i["iid"]: i for i in bot.dash_state.items()}
+    assert by["post-issue-47"]["detail"]["needs"] == ["photos"] and by["post-issue-47"]["status"].startswith("사진 필요")
+    # 기록 파일에 없는 글은 예전처럼 알림에서 (posts 가 잘려 못 실린 글)
+    _notice(bot, "pick:issue:900", "pick_photos", "post-issue-900", ago_s=600)
+    by = {i["iid"]: i for i in bot.dash_state.items()}
+    assert by["post-issue-900"]["detail"]["needs"] == ["photos"]
+
+
+async def test_zombie_draft_ready_and_reminder_kinds_make_no_card(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """글이 기록 파일에도 오늘 할 일에도 없는데 24시간 넘게 열려 있는 '발행 대기' 알림은 숨김 (이미 올렸거나 버린 글의 남은 알림) ·
+    키자드 등록 도구 알림은 리마인더만 (할 일 줄 없음)."""
+    st = fixture("export_v2.json")["status"]
+    rt = {"day": datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat(), "slots": [], "items": [
+        {"id": "pub:issue:602", "slot": "s1", "group": "발행", "blog": "issue", "title": "오늘 할 일에 있는 글", "copy": [], "links": []}]}
+    write_export(tmp_path / "blogauto.json", status={**st, "routine": rt})
+    blogauto_status(settings)
+    _notice(bot, "draft:issue:600", "draft_ready", "post-issue-600", ago_s=5 * 86400, ttl_h=240)  # 좀비
+    _notice(bot, "draft:issue:601", "draft_ready", "post-issue-601", ago_s=2 * 3600, ttl_h=240)   # 방금 것 — 기록 파일이 아직 모를 수 있음
+    _notice(bot, "draft:issue:602", "draft_ready", "post-issue-602", ago_s=5 * 86400, ttl_h=240)  # 오래됐어도 오늘 할 일 줄에 있음
+    _notice(bot, "ask:issue:603", "ask", "post-issue-603", ago_s=5 * 86400, ttl_h=240)            # 답을 기다리는 일은 숨기지 않음
+    _notice(bot, "kzt:1", "keyzard_tool", "sys-blogauto", ago_s=60)
+    _notice(bot, "kz:issue", "keyzard_login", "conn-naver-issue", ago_s=60)
+    ids = {i["iid"] for i in (await state(bot))["todo"]}
+    assert "post-issue-600" not in ids and {"post-issue-601", "post-issue-602", "post-issue-603"} <= ids
+    assert "sys-blogauto" not in ids and "conn-naver-issue" not in ids
+    assert _open(bot, "draft:issue:600")  # 숨기기만 (알림 줄은 건드리지 않음 — 글이 다시 실리면 다시 보임)
+    # 기록 파일을 못 읽으면 (블로그 프로그램이 멈춤·파일 없음) 아무것도 숨기지 않음 — 모르는 것을 없다고 하지 않게
+    (tmp_path / "blogauto.json").unlink()
+    assert "post-issue-600" in {i["iid"] for i in bot.dash_state.items()}
+    from dealbot.dashboard import state as state_mod
+
+    assert state_mod.PUSH_ONLY_KINDS == ("keyzard_login", "keyzard_tool") and state_mod.ZOMBIE_S == 86400

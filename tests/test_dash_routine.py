@@ -82,6 +82,7 @@ def _no_live_threads(monkeypatch: pytest.MonkeyPatch) -> None:
     def off(*a: object) -> None:
         raise ConnectionError("test")
     monkeypatch.setattr(threads_proxy, "_call", off)
+    routine._TH_CACHE.clear()  # 2분 기억 (11/14) — 테스트끼리 섞이지 않게
 
 
 # ---------------------------------------------------------------- 1) 거름
@@ -125,8 +126,10 @@ def test_parse_export_puts_routine_next_to_naver_visits(tmp_path: Path) -> None:
 # ---------------------------------------------------------------- 2) 보기
 def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Path) -> None:
     assert routine.view(bot) == {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0,
-                                 "ably": None, "rising": [], "rests": [],
-                                 "stats": None}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
+                                 "ably": None, "rising": [], "rests": [], "stats": None,
+                                 # 11/14: 늘 실리는 칸 — 기록 나이·자동 점검·꾸미기 새 판·못 전한 체크·이웃 글 들르기
+                                 "age_min": None, "gate": None, "kkumi_new": True, "relay": 0,
+                                 "nb": None}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))
     v = routine.view(bot, now=at(bot, day, "13:10"))
@@ -157,10 +160,27 @@ def test_second_source_merges_by_one_function(bot: DealBot, tmp_path: Path, monk
     assert routine.threads_items(bot) == [] and routine.threads_items in routine.EXTRA_SOURCES
     today_ = tz_now(bot).date().isoformat()
     row = {"id": "th:x:thback:0", "slot": "s1", "group": "SNS", "title": "스레드 맞팔 1", "copy": [], "links": []}
-    monkeypatch.setattr(threads_proxy, "_call", lambda *a: (200, json.dumps({"day": today_, "items": [row]}).encode(), "application/json"))
-    assert routine.threads_items(bot) == [row]
+    seen: list[tuple] = []
+
+    def ok(*a: object) -> tuple:
+        seen.append(a)
+        return 200, json.dumps({"day": today_, "items": [row]}).encode(), "application/json"
+    assert routine.threads_items(bot) == []  # 못 읽은 것도 2분 기억 (꺼진 서비스를 요청마다 기다리지 않게 — 주인 11/14 '화면이 굳음')
+    monkeypatch.setattr(threads_proxy, "_call", ok)
+    assert routine.threads_items(bot) == [] and seen == []
+    routine._TH_CACHE.clear()
+    assert routine.threads_items(bot) == [row] and routine.threads_items(bot) == [row]
+    assert seen == [("/api/routine", None, 1.0)]  # 1초만 기다림 · 두 번째는 기억한 것
+    routine._TH_CACHE.clear()
     monkeypatch.setattr(threads_proxy, "_call", lambda *a: (200, json.dumps({"day": "2000-01-01", "items": [row]}).encode(), ""))
     assert routine.threads_items(bot) == []  # 어제 목록은 안 씀
+
+    def never(*a: object) -> None:
+        raise AssertionError("체크 날짜를 정하는 데 다른 출처를 부르면 안 됨")
+    routine._TH_CACHE.clear()
+    monkeypatch.setattr(threads_proxy, "_call", never)
+    assert routine.day_of(bot, tz_now(bot).timestamp()) == today_  # day_of 는 블로그 몫만 봄
+    monkeypatch.setattr(threads_proxy, "_call", off)
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))
 
@@ -218,7 +238,10 @@ async def test_publish_row_check_also_tells_blogauto_it_was_pasted(bot: DealBot,
         return [spool.read(f) for f in sorted(new.glob("*.json"))] if new.exists() else []
 
     status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "rsv:issue:270", "done": True}}, h)
-    assert status == 200 and got["text"] == "체크했어요" and queued() == []  # 블로그 프로그램 신호 없음 → 체크만
+    # 블로그 프로그램 신호 없음 → 체크는 남기고 깨어나면 전함 (주인 11/14 — 예전엔 조용히 체크만 해서 같은 글이 다시 떴음)
+    assert status == 200 and got["status"] == "ok" and got["text"] == "체크했어요 — 블로그 프로그램이 깨어나면 전해요" and queued() == []
+    assert [(x["name"], x["rid"], x["args"]) for x in routine.relay_rows(bot.db)] == [("pasted", "rsv:issue:270", {"blog": "issue", "pid": 270, "done": True})]
+    bot.db.kv_set(routine.RELAY_KEY, "[]")
     blogauto_status(settings, actions=[a for a in fixture("status_blogauto.json")["actions"] if a != "pasted"])
     status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "rsv:issue:270", "done": True}}, h)
     assert status == 200 and got["text"] == "체크했어요" and queued() == []  # 예전 Blog-Auto
@@ -421,13 +444,13 @@ def test_todo_tab_groups_by_blog() -> None:
     """11/09 주인 '한 블로그 로그인하면 그 블로그 작업 싹 몰아서 — 할 일 탭 블로그별로, 이웃추가도 거기에'."""
     rt = (STATIC / "routine.js").read_text(encoding="utf-8")
     app = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "W.SBRoutine = {load, mount, ids, by, part, cnt}" in rt
+    assert "W.SBRoutine = {load, mount, ids, by, part, cnt, meta}" in rt
     assert "filter(i => (i.blog || (i.group === 'SNS' ? 'sns' : '')) === k)" in rt and "'이웃': 2" in rt  # 그 블로그 손일 (이웃 신청·공감 포함) · SNS 손일은 SNS 칸
     assert "setBy(by() ? 'slot' : 'blog')" in rt  # 예전 시간대별로 돌아가기
     # 11/14 주인 '할 일 첫 화면은 종류별 목록만': 블로그 셋 → 딜 → SNS → 숏폼 → 기타 (이벤트는 ssalmuk.js) — 칸마다 data-k
     assert "W.SBRoutine.part(k, l," in app and ("[['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸'], ['deals', '딜'], ['sns', 'SNS'], "
                                                 "['shorts', '숏폼·릴스·룩북'], ['', '기타']]") in app
-    assert "'data-k': k" in rt and "cnt[k] = {n, m, u: hn}" in rt
+    assert "'data-k': k" in rt and "cnt[k] = {n, m, u: hn, w}" in rt  # w = 만드는 중인 글 (남은 일로 안 셈 — 11/14)
 
 
 def test_todo_tab_puts_urgent_first() -> None:
@@ -470,8 +493,8 @@ def test_post_rows_sorted_by_score_with_chip(bot: DealBot, tmp_path: Path) -> No
     assert its[2]["sc"] == "60점" and its[2]["hot"] is False and its[2]["note"] == "사진 5장"
     assert "sco" not in its[3] and "sc" not in its[3] and "sco" not in its[4]
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
-    assert "a.done - b.done || (b.sco + 1 || 0) - (a.sco + 1 || 0)" in js  # 블로그별 칸도 점수 높은 순 (점수 모르는 줄은 뒤)
-    assert "el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null)" in js
+    assert "a.done - b.done || nr(a) - nr(b) || (b.sco + 1 || 0) - (a.sco + 1 || 0)" in js  # 블로그별 칸: 준비된 글 먼저 → 점수 높은 순 (점수 모르는 줄은 뒤)
+    assert "el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null," in js
 
 
 def test_row_own_score_wins_even_if_post_missing_from_v2_posts(bot: DealBot, tmp_path: Path) -> None:
@@ -492,3 +515,210 @@ def test_row_own_score_wins_even_if_post_missing_from_v2_posts(bot: DealBot, tmp
     assert [i["id"] for i in its] == ["rsv:issue:7002", "rsv:issue:7003", "rsv:issue:7001", "nb:issue:a", "rsv:issue:7004"]
     assert its[0]["sc"] == "🔥 91점" and its[0]["hot"] is True and its[1]["sc"] == "55점" and its[2]["sco"] == 12
     assert "sc" not in its[4]
+
+
+# ---------------------------------------------------------------- 5) 못 쓰는 묶음 · 자동 점검 · 못 전한 체크 (주인 11/14)
+BASE = "https://bot.example.com"
+READY = {"title": "준비된 글", "html": "<p>본문이에요</p>", "tags": ["가"], "cards": 0, "photos": 1, "stale": False}
+
+
+def pub(i: str, **kw: object) -> dict:
+    return item(i, "s1", group="발행", blog="hotdeal", **kw)
+
+
+def test_stale_bundle_has_no_html_in_both_export_shapes() -> None:
+    """주인 11/14 '만드는 중인 옛 묶음이 복사됨': 새 모양(paste {title, stale: true, why, reason} — html 없음)과 예전 모양(html 은 있는데
+    note 가 '꾸밈 새 원고 만드는 중…') 둘 다 stale True · html·text 빈 글. 점검에 걸린 줄은 gate.ok False + 쉬운 말 한마디."""
+    from dealbot.dashboard.blogauto import _paste, _routine_item
+
+    new = _routine_item(pub("pub:hotdeal:1", paste={"title": "새 모양", "tags": ["가", "나"], "photos": 4, "stale": True, "why": "building",
+                                                     "reason": "새 원고로 다시 만드는 중"}), media_base=BASE)
+    assert new["paste"] == {"title": "새 모양", "stale": True, "why": "building", "reason": "새 원고로 다시 만드는 중", "html": "", "text": "",
+                            "tags": ["가", "나"], "tag_text": "#가 #나", "cards": 0, "photos": 4}
+    # 공개 주소가 없어도 (사진 주소를 만들 일이 없음) · html 이 딸려 와도 쓰지 않음 · 모르는 why 는 building
+    sneaky = _paste({"title": "t", "stale": True, "why": "???", "html": "<p>옛 본문</p>"}, None)
+    assert sneaky["stale"] is True and sneaky["html"] == "" and sneaky["text"] == "" and sneaky["why"] == "building"
+    failed = _paste({"title": "t", "stale": True, "why": "failed", "reason": "KeyError"}, BASE)
+    assert failed["why"] == "failed" and failed["reason"] == "묶음을 못 만들어 다시 하는 중"  # 영어 오류 이름은 쉬운 말로
+    assert _paste({"title": "t", "stale": True, "why": "failed", "reason": "사진 3장이 없음"}, BASE)["reason"] == "사진 3장이 없음"
+    assert _paste({"stale": True}, BASE) is None and _paste({"title": "t", "stale": "yes"}, BASE) is None  # 제목 없음 · stale 이 참이 아니면 예전 길 (html 없음 → None)
+    old = _routine_item(pub("pub:hotdeal:2", note="꾸밈 새 원고 만드는 중 — 이 말이 없어지면 붙여넣기 (11/08)", paste=dict(READY, title="예전 모양")),
+                        media_base=BASE)
+    assert old["paste"]["stale"] is True and old["paste"]["html"] == "" and old["paste"]["text"] == "" and old["paste"]["why"] == "building"
+    assert old["paste"]["title"] == "예전 모양" and old["paste"]["tags"] == ["가"] and old["paste"]["photos"] == 1
+    ok = _routine_item(pub("pub:hotdeal:3", paste=READY, gate={"ok": True, "codes": []}), media_base=BASE)
+    assert ok["paste"]["stale"] is False and ok["paste"]["html"] == "<p>본문이에요</p>" and ok["gate"] == {"ok": True, "codes": [], "text": ""}
+    bad = _routine_item(pub("pub:hotdeal:4", paste=READY, gate={"ok": False, "codes": ["G4", "G2", "<x>", 7, "G1"]}), media_base=BASE)
+    assert bad["gate"] == {"ok": False, "codes": ["G4", "G2", "G1"], "text": "같은 사진이 두 번 들어가서"}
+    assert _routine_item(pub("pub:hotdeal:5", paste=READY, gate={"ok": False, "codes": ["ZZ9"]}), media_base=BASE)["gate"]["text"] == "자동 점검에 걸려서"
+    for junk in ("ok", {"ok": "true"}, {"codes": ["G1"]}, ["G1"], None, 1):  # 틀린 모양은 칸을 뺌 (줄은 예전처럼)
+        assert "gate" not in _routine_item(pub("pub:hotdeal:6", paste=READY, gate=junk), media_base=BASE)
+    assert "gate" not in _routine_item(item("nb:issue:a", gate={"ok": False, "codes": ["G1"]}), media_base=BASE)  # 글 줄만
+
+
+def test_view_carries_gate_summary_and_export_age(bot: DealBot, tmp_path: Path) -> None:
+    day = tz_now(bot).date().isoformat()
+    rt = {"day": day, "slots": SLOTS, "overflow": 0, "gate": {"checked": 3, "ok": False, "blocked": [{"id": "pub:hotdeal:4", "codes": ["G4"]}],
+                                                              "at": f"{day}T17:40:05"},
+          "items": [pub("pub:hotdeal:3", paste=READY, gate={"ok": True, "codes": []}), pub("pub:hotdeal:4", paste=READY, gate={"ok": False, "codes": ["G4"]}),
+                    pub("pub:hotdeal:5", paste=READY, gate={"ok": True, "codes": ["G8"]}), item("nb:issue:a")]}
+    with_routine(tmp_path, rt)
+    v = routine.view(bot, now=at(bot, day, "18:00"))
+    assert v["gate"] == {"checked": 3, "blocked": 1, "ok": False, "hm": "17:40", "line": "자동 점검: 1편 고치는 중 · 2편 통과 (17:40)"}
+    assert isinstance(v["age_min"], int) and v["today"] is True and v["relay"] == 0
+    rt["items"][1]["gate"] = {"ok": True, "codes": []}
+    rt["gate"] = "깨진 값"
+    with_routine(tmp_path, rt)
+    assert routine.view(bot, now=at(bot, day, "18:00"))["gate"]["line"] == "자동 점검: 3편 모두 통과"  # 시각을 모르면 빼고
+    for it in rt["items"]:
+        it.pop("gate", None)
+    with_routine(tmp_path, rt)
+    assert routine.view(bot, now=at(bot, day, "18:00"))["gate"] is None  # 예전 Blog-Auto — 줄 없음
+    # 기록이 쓰인 지 몇 분 (화면이 30분 넘으면 알림)
+    from datetime import UTC
+
+    wrote = datetime.fromtimestamp(at(bot, day, "12:00"), UTC).astimezone(ZoneInfo(bot.settings.app.timezone)).isoformat(timespec="seconds")
+    write_export(tmp_path / "blogauto.json", status={**fixture("export_v2.json")["status"], "routine": rt}, written_at=wrote)
+    assert routine.view(bot, now=at(bot, day, "12:47"))["age_min"] == 47
+
+
+STALE_FLOW = r"""
+  const box = () => main.children.find(c => c.attrs.id === 'rtp');
+  const rows = () => box().all(c => c.className.startsWith('it')).map(r => ({id: r.attrs['data-id'],
+    btns: r.all(c => c.tagName === 'BUTTON' && c.className === 'sm').map(b => [b.textContent, 'disabled' in b.attrs, !!(b.ls.click || []).length]),
+    chips: r.all(c => c.tagName === 'I' && c.className.startsWith('sc')).map(c => c.textContent)}));
+  out.head = box().all(c => c.tagName === 'H2')[0].textContent;
+  out.rows = rows();
+  const copyBtn = () => box().all(c => c.tagName === 'BUTTON' && c.textContent === '본문 복사');
+  out.copyBtns = copyBtn().length;
+  copyBtn()[0].click(); await tick();
+  out.copied = wrote.length; out.toast1 = toast.textContent;
+  // 받은 지 10분 넘은 목록: 복사하지 않고 먼저 새로 받음
+  const n0 = calls.filter(c => c.url === '/dashboard/api/routine').length, real = Date.now;
+  Date.now = () => real() + 11 * 60000;
+  copyBtn()[0].click(); await tick(); await tick();
+  out.copiedOld = wrote.length; out.reloads = calls.filter(c => c.url === '/dashboard/api/routine').length - n0; out.toast2 = toast.textContent;
+  copyBtn()[0].click(); await tick();  // 새로 받은 뒤 한 번 더 → 복사
+  out.copiedAgain = wrote.length;
+  // 새로 받지 못하면(서버·인터넷 끊김) 복사도 안 하고 그렇게 알림
+  const f = global.fetch;
+  global.fetch = async () => { throw new Error('offline'); };
+  Date.now = () => real() + 23 * 60000;
+  copyBtn()[0].click(); await tick(); await tick();
+  out.copiedOffline = wrote.length; out.toast3 = toast.textContent;
+  global.fetch = f; Date.now = () => real() + 11 * 60000;
+  out.meta = window.SBRoutine.meta();
+  console.log(JSON.stringify(out));
+  process.exit(0);
+})();
+"""
+
+
+def test_not_ready_rows_cannot_be_copied(bot: DealBot, tmp_path: Path) -> None:
+    """화면: 만드는 중·못 만든 묶음·점검에 걸린 글은 누를 수 없는 단추 하나 (본문 복사 없음 · 제목 복사는 그대로) · 준비된 글이 먼저 ·
+    '붙여넣기 대기 (준비 n · 만드는 중 m)' · 통과한 글은 '점검 통과' 칩 · 10분 넘은 목록은 복사 전에 새로 받기."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node 없음")
+    bot.dashboard.ctx.blogauto.media_base = BASE  # 사진 주소를 만들 공개 주소 (없으면 묶음이 안 실림)
+    day = tz_now(bot).date().isoformat()
+    with_routine(tmp_path, {"day": day, "slots": SLOTS, "overflow": 0, "items": [
+        pub("pub:hotdeal:1", paste={"title": "만드는 중", "stale": True, "why": "building", "reason": "새 원고로 다시 만드는 중"}),
+        pub("pub:hotdeal:2", note="꾸밈 새 원고 만드는 중 — 이 말이 없어지면 붙여넣기 (11/08)", paste=dict(READY, title="예전 모양")),
+        pub("pub:hotdeal:3", paste={"title": "못 만든 글", "stale": True, "why": "failed", "reason": "사진 3장이 없음"}),
+        pub("pub:hotdeal:4", paste=dict(READY, title="점검에 걸린 글"), gate={"ok": False, "codes": ["G4"]}),
+        pub("pub:hotdeal:5", paste=dict(READY, title="준비된 글"), gate={"ok": True, "codes": []}),
+        pub("pub:hotdeal:6", paste=dict(READY, title="점검 전 글")),
+    ]})
+    view = routine.view(bot, now=at(bot, day, "10:00"))
+    by_id = {i["id"]: i for s in view["slots"] for i in s["items"]}
+    assert [by_id[f"pub:hotdeal:{n}"]["paste"]["stale"] for n in range(1, 7)] == [True, True, True, False, False, False]
+    assert all(by_id[f"pub:hotdeal:{n}"]["paste"]["html"] == "" for n in (1, 2, 3)) and by_id["pub:hotdeal:5"]["paste"]["html"]
+    shim = DOM_SHIM.replace("navigator: {clipboard: {writeText: async t => { clip.push(t); }}}",
+                            "ClipboardItem: class { constructor(o) { this.o = o; } }, "
+                            "navigator: {clipboard: {writeText: async t => { clip.push(t); }, write: async x => { wrote.push(x); }}}") \
+        .replace("const calls = [], out = {}, clip = [];", "const calls = [], out = {}, clip = [], wrote = [];")
+    assert "ClipboardItem" in shim and "wrote = []" in shim
+    flow = shim.split("  const box = () =>")[0] + STALE_FLOW
+    out = subprocess.run([node, "-e", flow, str(STATIC / "routine.js"), json.dumps(view, ensure_ascii=False)], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["head"] == "붙여넣기 대기 (준비 2 · 만드는 중 4)"
+    rows = {r["id"]: r for r in got["rows"]}
+    assert [r["id"] for r in got["rows"]][:2] == ["pub:hotdeal:5", "pub:hotdeal:6"]  # 준비된 글이 먼저
+    for n, label in ((1, "새 원고 만드는 중 — 잠시 뒤"), (2, "새 원고 만드는 중 — 잠시 뒤"), (3, "고치는 중 · 사진 3장이 없음"),
+                     (4, "고치는 중 · 같은 사진이 두 번 들어가서")):
+        btns = rows[f"pub:hotdeal:{n}"]["btns"]
+        assert btns == [["제목 복사", False, True], [label, True, False]], btns  # 못 누르는 단추 하나 · 누르는 손잡이 없음 · 본문 복사 없음
+    assert rows["pub:hotdeal:5"]["btns"] == [["제목 복사", False, True], ["본문 복사", False, True]] and rows["pub:hotdeal:5"]["chips"] == ["점검 통과"]
+    assert rows["pub:hotdeal:6"]["chips"] == [] and rows["pub:hotdeal:4"]["chips"] == []
+    assert got["copyBtns"] == 2 and got["copied"] == 1 and got["toast1"] == "복사했어요"
+    assert got["copiedOld"] == 1 and got["reloads"] == 1 and got["toast2"] == "목록을 새로 받았어요 — 한 번 더 눌러 주세요"
+    assert got["copiedAgain"] == 2
+    assert got["copiedOffline"] == 2 and got["toast3"] == "목록을 새로 받지 못했어요 — 인터넷 연결을 확인해 주세요"
+    assert got["meta"]["today"] is True and got["meta"]["kkumi_new"] is True and got["meta"]["gate"]["line"] == "자동 점검: 1편 고치는 중 · 1편 통과"
+    js = (STATIC / "routine.js").read_text(encoding="utf-8")
+    assert js.count("rich(p)") == 2 and "big('본문 복사', () => body(p))" in js  # 본문 복사는 body() 한 길로만 (rich 정의 + body 안)
+
+
+async def test_checks_wait_for_blogauto_and_survive_the_night(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """주인 11/14 '블로그 프로그램이 몇 시간 멈춘 동안 누른 발행했어요·서로이웃 체크가 사라짐':
+    다리가 끊긴 때 누른 체크는 적어 뒀다가 깨어나면 전하고 · 맡겼는데 10분 안에 안 가져간(expired) 것은 다시 맡기고 · 날이 바뀌어도 그 줄은 체크로."""
+    day = tz_now(bot).date().isoformat()
+    with_routine(tmp_path, {"day": day, "slots": SLOTS, "overflow": 0, "items": [
+        pub("rsv:hotdeal:289", paste=READY), item("nb-add:hotdeal:fan01", "s4", blog="hotdeal")]})
+    h = session_headers(bot)
+    new = spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new"
+
+    def queued() -> list[tuple]:
+        return [(x["action"], x["args"]) for x in (spool.read(f) for f in sorted(new.glob("*.json")))] if new.exists() else []
+
+    blogauto_status(settings, age=3 * 3600)  # 블로그 프로그램 신호가 3시간 전 — 다리가 끊긴 것으로 봄
+    for rid in ("rsv:hotdeal:289", "nb-add:hotdeal:fan01"):
+        status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": rid, "done": True}}, h)
+        assert status == 200 and got["status"] == "ok" and got["text"] == "체크했어요 — 블로그 프로그램이 깨어나면 전해요"
+    assert queued() == [] and routine.relay_waiting(bot.db) == 2 and routine.view(bot)["relay"] == 2
+    assert routine.relay_tick(bot) == {"sent": 0, "done": 0, "dropped": 0, "left": 2} and queued() == []  # 아직 끊김 — 맡기지 않음
+    blogauto_status(settings)  # 깨어남 → 다음 tick 에 전함
+    assert routine.relay_tick(bot)["sent"] == 2
+    assert queued() == [("pasted", {"blog": "hotdeal", "pid": 289, "done": True}), ("nb_requested", {"blog": "hotdeal", "target": "fan01", "done": True})]
+    assert routine.relay_tick(bot)["sent"] == 0 and len(queued()) == 2  # 맡긴 것은 결과를 기다림 (또 보내지 않음)
+    rows = routine.relay_rows(bot.db)
+    a1, a2 = rows[0]["aid"], rows[1]["aid"]
+    # 첫째는 10분 안에 안 가져감 → expired → 다시 맡김 · 둘째는 됨
+    now = tz_now(bot).timestamp()
+    bot.actions_out.store.update(a1, status="expired", result={"code": "expired", "text": "", "done_at": now}, now=now)
+    bot.actions_out.store.update(a2, status="ok", result={"code": "done", "text": "", "done_at": now}, now=now)
+    for f in new.glob("*.json"):
+        f.unlink()
+    got = routine.relay_tick(bot, now=now + 601)
+    assert got["sent"] == 1 and got["done"] == 1 and queued() == [("pasted", {"blog": "hotdeal", "pid": 289, "done": True})]
+    again = routine.relay_rows(bot.db)
+    assert again[0]["aid"] != a1 and again[0]["tries"] == 2 and again[1].get("ok")
+    # 또 expired — 이번엔 20분 뒤에야 다시 (간격이 늘어남)
+    bot.actions_out.store.update(again[0]["aid"], status="expired", result={"code": "expired", "text": "", "done_at": now}, now=now)
+    blogauto_status(settings, age=-1300)  # (가짜 시각으로 앞서가므로 신호도 그때 것으로)
+    assert routine.relay_tick(bot, now=now + 601 + 700)["sent"] == 0
+    assert routine.relay_tick(bot, now=now + 601 + 1201)["sent"] == 1
+    # 다음 날 목록에 그 줄이 그대로 와도 체크로 (발행 줄은 pub·rsv 어느 쪽이든)
+    tomorrow = (tz_now(bot) + timedelta(days=1)).date().isoformat()
+    with_routine(tmp_path, {"day": tomorrow, "slots": SLOTS, "overflow": 0, "items": [
+        pub("pub:hotdeal:289", paste=READY), pub("pub:hotdeal:300", paste=READY), item("nb-add:hotdeal:fan01", "s4", blog="hotdeal")]})
+    v = routine.view(bot, now=at(bot, tomorrow, "09:10"))
+    done = {i["id"]: i["done"] for s in v["slots"] for i in s["items"]}
+    assert done == {"pub:hotdeal:289": True, "pub:hotdeal:300": False, "nb-add:hotdeal:fan01": True}
+    # 블로그 프로그램이 답함(거절) → 지움 · 전한 것은 2시간 뒤 지움 · 3일 넘게 못 전하면 버림
+    last = routine.relay_rows(bot.db)[0]["aid"]
+    bot.actions_out.store.update(last, status="rejected", result={"code": "rejected", "text": "", "done_at": now}, now=now)
+    assert routine.relay_tick(bot, now=now + 3000)["dropped"] == 1
+    assert [x["rid"] for x in routine.relay_rows(bot.db)] == ["nb-add:hotdeal:fan01"]
+    routine.relay_tick(bot, now=now + 601 + 7201)
+    assert routine.relay_rows(bot.db) == []
+    blogauto_status(settings, age=3 * 3600)
+    await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "rsv:hotdeal:289", "done": True}}, h)
+    await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "rsv:hotdeal:289", "done": False}}, h)
+    assert [(x["rid"], x["args"]["done"]) for x in routine.relay_rows(bot.db)] == [("rsv:hotdeal:289", False)]  # 같은 줄은 마지막에 누른 것만
+    assert routine.carried(bot.db, tz_now(bot).timestamp()) == set()  # 푼 체크는 넘기지 않음
+    assert routine.relay_tick(bot, now=tz_now(bot).timestamp() + 3 * 86400 + 1)["dropped"] == 1 and routine.relay_rows(bot.db) == []
+    src = (Path(routine.__file__).parents[2] / "dealbot" / "scheduler.py").read_text(encoding="utf-8")
+    assert "routine.relay_tick(bot)" in src  # 1분마다 (dashboard_loop)

@@ -154,6 +154,9 @@ LOGINS_JS_MAX = 10 * 1024 + 768
 LOGINS_JS_MAX = 10 * 1024 + 896
 # 11/14: 책갈피 설치 칸 다섯째 'X 도우미' 한 줄 (같은 함수 — 코드는 /dashboard/api/xhelper 로 펼칠 때만) → 10.8 KB (11087 B / gzip 4614 B)
 LOGINS_JS_GZIP_MAX = 4 * 1024 + 576
+# 11/14: 꾸미기 설치 칸 '설치했어요 (v5)' 단추 (새 판 알림을 끄는 곳 — kkumi.installed) → 11.3 KB (11563 B / 4802 B)
+LOGINS_JS_MAX = 11 * 1024 + 384
+LOGINS_JS_GZIP_MAX = 4 * 1024 + 768
 # 10/27: 오늘 할 일 칸(할 일 탭 맨 위 — 하루 5칸 중 지금 칸만 펼침 · 줄마다 체크 · 복사 단추 · 3/8 진행) — logins.js 처럼 셸이 defer 로 받는
 # routine.js (CSS 도 여기서). 목록은 /dashboard/api/routine 으로 열 때만
 ROUTINE_JS_MAX = 8 * 1024
@@ -206,10 +209,17 @@ ROUTINE_JS_GZIP_MAX = 9 * 1024 + 640
 # 11/14: 숏폼 칸 유튜브 받기 계정 카드 (+1.1 KB / gzip +0.3 KB — app.js 는 그대로)
 ROUTINE_JS_MAX = 27 * 1024 + 1280
 ROUTINE_JS_GZIP_MAX = 10 * 1024 + 256
+# 11/14: 못 쓰는 묶음은 누를 수 없는 단추 하나(만드는 중·고치는 중) · 준비/만드는 중 수 · '점검 통과' 칩 · 10분 넘은 목록은 복사 전에 새로 받기 ·
+# '이웃 글 들르기 시작 (n)' · ⚡ 막 뜨는 중을 데런픽 칸으로 · meta() (todohub.js 가 읽음) → 30.6 KB (31360 B / 11338 B) — app.js 는 그대로
+ROUTINE_JS_MAX = 30 * 1024 + 768
+ROUTINE_JS_GZIP_MAX = 11 * 1024 + 128
 # 11/14: 할 일 종류 목록 — 칸마다 data-k · 남은 수(cnt) · 종류 화면에선 늘 펼침 (칸 순서 점수는 뺌) → gzip 9.6 KB 그대로
 # 할 일 종류 목록·종류 화면 (주인 11/14 '첫 화면은 종류별 목록만') — app.js 가 예산 끝이라 셸이 defer 로 받는 todohub.js (CSS 도 여기서)
 TODOHUB_JS_MAX = 8 * 1024 + 512
 TODOHUB_JS_GZIP_MAX = 4 * 1024
+# 11/14: 맨 위 알림 줄 (소식 N분째 없음·오늘 목록 아님 · 자동 점검 한 줄 · 꾸미기 새 판 · 못 전한 체크 · 멈춤/핫 시스템 알림) + 줄 순서 고정 → 10.9 KB (11146 B / 4770 B)
+TODOHUB_JS_MAX = 11 * 1024
+TODOHUB_JS_GZIP_MAX = 4 * 1024 + 768
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

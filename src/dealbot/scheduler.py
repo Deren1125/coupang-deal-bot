@@ -366,6 +366,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
             await uploadplan.tick(bot)
         except Exception as e:  # noqa: BLE001
             log.warning("upload tasks failed: %s", type(e).__name__)
+        try:  # 못 전한 '발행했어요'·서로이웃 체크를 블로그 프로그램이 깨어나면 다시 전함 (주인 11/14 — dashboard/routine.relay_tick, 봇 DB·일 파일만)
+            from dealbot.dashboard import routine
+
+            routine.relay_tick(bot)
+        except Exception as e:  # noqa: BLE001
+            log.warning("routine relay failed: %s", type(e).__name__)
         try:  # 새 제휴 수익 → 앱 알림 (주인 10/24 — notify/earn_watch)
             from dealbot.notify import earn_watch
 

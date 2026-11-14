@@ -11,7 +11,7 @@ const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{di
   '.rt .it+.it{background:linear-gradient(var(--line),var(--line)) 56px 0/100% 1px no-repeat}' +
   '.rt .cb{flex:none;width:44px;height:44px;padding:0;border:2px solid var(--fline);border-radius:12px;background:var(--field);color:var(--gr);font-size:20px}' +
   '.rt .cb[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}.rt .it .grow{flex:1;min-width:0;padding-top:10px}' +
-  '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}.rt .sc{display:inline-block;margin-left:6px;padding:0 7px;border-radius:9px;font-size:12px;font-weight:600;line-height:20px;font-style:normal;color:var(--sub);background:var(--line);white-space:nowrap}.rt .sc.h{color:#E8590C;background:rgba(232,89,12,.14)}' +
+  '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}.rt .sc{display:inline-block;margin-left:6px;padding:0 7px;border-radius:9px;font-size:12px;font-weight:600;line-height:20px;font-style:normal;color:var(--sub);background:var(--line);white-space:nowrap}.rt .sc.h{color:#E8590C;background:rgba(232,89,12,.14)}.rt .sc.ok{color:var(--gr);background:var(--gr-soft)}.rt .pp .sm[disabled]{opacity:.55}' +
   '.rt .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}.rt .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
   '.rt a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
   '.rt .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}.rt .bar i{display:block;height:100%;background:var(--gr)}' +
@@ -72,6 +72,7 @@ async function load() {
   if (!(a && a.tagName === 'INPUT' && box && box.contains(a))) draw();  // 붙여 넣는 중이면 다음에
   const k = ids().join();
   if (k !== sig && W.dispatchEvent) { sig = k; W.dispatchEvent(new Event('sb-routine')); }  // app.js 가 겹친 할 일을 빼고 다시 그림
+  if (W.SBHub && W.SBHub.draw) W.SBHub.draw();  // 종류 목록의 소식·점검 줄 (todohub.js — 새 신호를 만들지 않고 바로 다시 그림)
   clearTimeout(timer);
   if (on() && D.visibilityState === 'visible') timer = setTimeout(load, 300000);
 }
@@ -101,7 +102,7 @@ async function check(it) {
   const v = !it.done;
   it.done = v; recount(); draw(); bump();
   const [s, d] = await send({action: 'routine.done', args: {id: it.id, done: v}, cid: rid(), ctoken: null});
-  if (s === 200 && d.status === 'ok') { if (/^(pub|rsv):/.test(it.id)) toast(d.text); return; }
+  if (s === 200 && d.status === 'ok') { if (/^(pub|rsv):/.test(it.id) || /깨어나면/.test(d.text)) toast(d.text); return; }
   it.done = !v; recount(); draw(); bump();
   toast(why(s, d, '체크하지 못했어요 — 잠시 뒤 다시'));
 }
@@ -185,9 +186,22 @@ function off(p) {
   toast(ok ? '복사했어요' : '복사하지 못했어요 — 잠시 뒤 다시');
 }
 const big = (label, f) => el('button', {class: 'sm', type: 'button', onclick: f}, label);
-function paste(p) {
+// 아직 못 쓰는 묶음 (주인 11/14 '만드는 중인 옛 묶음을 복사하게 두지 않기'): 새 원고 만드는 중·못 만듦(paste.stale) · 자동 점검에 걸림(gate.ok 거짓)
+const nr = it => !!it.paste && (!!it.paste.stale || !!(it.gate && it.gate.ok === false));
+const OLD = 600000;  // 받은 지 10분 넘은 목록으로는 복사하지 않음 — 그새 묶음이 바뀌었을 수 있어 먼저 새로 받음
+async function body(p) {
+  if (Date.now() - at <= OLD) return rich(p);
+  await load();
+  toast(Date.now() - at <= OLD ? '목록을 새로 받았어요 — 한 번 더 눌러 주세요' : '목록을 새로 받지 못했어요 — 인터넷 연결을 확인해 주세요');
+}
+function paste(it) {
+  const p = it.paste, g = it.gate;
+  // 못 쓰는 묶음은 누를 수 없는 단추 하나 (본문 복사 없음) · 제목 복사는 그대로
+  if (nr(it)) return [el('div', {class: 'bt pp'}, big('제목 복사', () => copy(p.title)), el('button', {class: 'sm', type: 'button', disabled: true},
+    p.stale && p.why !== 'failed' ? '새 원고 만드는 중 — 잠시 뒤' : '고치는 중 · ' + (p.stale ? p.reason : g.text))),
+  el('span', {class: 's'}, '다 되면 본문 복사 단추가 다시 떠요 — 그때까지 이 글은 올리지 않아도 돼요')];
   // 태그는 '꾸미기'가 발행 설정창에 넣어 줘서 따로 복사 단추 없음 (주인 11/06 '태그 복사 안 해도 들어가는데')
-  return [el('div', {class: 'bt pp'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => rich(p))),
+  return [el('div', {class: 'bt pp'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => body(p))),
   el('span', {class: 's'}, "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기 (태그도 저절로)")];
 }
 
@@ -201,9 +215,10 @@ function item(it) {
   return el('div', {class: 'it' + (it.done ? ' dn' : ''), 'data-id': it.id},
     el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
-    el('div', {class: 'grow'}, el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null),
+    el('div', {class: 'grow'}, el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null,
+      it.paste && it.gate && it.gate.ok && !nr(it) ? el('i', {class: 'sc ok'}, '점검 통과') : null),
       el('span', {class: 's'}, [by() ? it.group : it.tag, `${it.min}분`, it.note, pk && pk.status.split(' · ')[0]].filter(Boolean).join(' · ')),
-      it.paste && !it.done ? paste(it.paste) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
+      it.paste && !it.done ? paste(it) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
 }
 
 // 이웃 줄은 짧게 (11/09) · 서로이웃은 이유·멘트도 (11/14)
@@ -228,15 +243,15 @@ function slot(s) {
 }
 // 붙여넣기 대기 (주인 10/30) — 시간대 칸과 상관없이 맨 위에 모두 (안 한 것만 · 체크하면 제 칸으로) · 꾸미기 설치는 연결 탭
 function pasteBox() {
-  const ps = data && data.slots ? data.slots.flatMap(s => s.items.filter(i => i.paste && !i.done)) : [];
-  return ps.length ? [el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `붙여넣기 대기 (${ps.length})`),
+  const ps = data && data.slots ? data.slots.flatMap(s => s.items.filter(i => i.paste && !i.done)).sort((a, b) => nr(a) - nr(b)) : [], mk = ps.filter(nr).length;
+  return ps.length ? [el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `붙여넣기 대기 (준비 ${ps.length - mk} · 만드는 중 ${mk})`),
     el('a', {class: 'lnk', href: '#/connect'}, '꾸미기 설치')), el('div', {class: 'box'}, ps.map(item))] : [];
 }
 
 // ⚡ 막 뜨는 중 (주인 10/30) — 키워드마다 단추: 누르면 그 키워드로 Pick 글 쓰기 (blog.issue · 11/09 '눌러도 연결이 안 돼' — 예전엔 화면만 옮김)
 function rising() {
   const xs = data && data.rising || [];
-  return xs.length ? el('div', {class: 'bn', style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center'}, '⚡ 막 뜨는 중 — 누르면 Pick 글 쓰기', xs.map(k => el('button', {class: 'sm', type: 'button', onclick: e => write(k, e)}, k))) : null;
+  return xs.length ? el('div', {class: 'bn rz', style: 'display:flex;flex-wrap:wrap;gap:6px;align-items:center'}, '⚡ 막 뜨는 중 — 누르면 Pick 글 쓰기', xs.map(k => el('button', {class: 'sm', type: 'button', onclick: e => write(k, e)}, k))) : null;
 }
 async function write(k, e) {
   e.currentTarget.disabled = true;
@@ -249,7 +264,7 @@ function setBy(v) { try { W.localStorage.setItem('rt-by', v); } catch (e) { /* �
 const bump = () => by() && W.dispatchEvent && W.dispatchEvent(new Event('sb-routine'));
 const ORD = {'발행': 0, '예약': 1, '이웃': 2, 'SNS': 3};
 const mine = k => data && data.slots ? data.slots.flatMap(s => s.items).filter(i => (i.blog || (i.group === 'SNS' ? 'sns' : '')) === k)
-  .sort((a, b) => a.done - b.done || (b.sco + 1 || 0) - (a.sco + 1 || 0) || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
+  .sort((a, b) => a.done - b.done || nr(a) - nr(b) || (b.sco + 1 || 0) - (a.sco + 1 || 0) || !!b.paste - !!a.paste || ORD[a.group] - ORD[b.group]) : [];
 // 블로그 칸 (주인 11/09 '직관적으로') — 색 점·남은 일·막대 · 펼치면 올리기 / 이웃 글 들르기 / 서로이웃 신청 / 확인할 것 순서로 작은 제목
 const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', deals: '#F97316', sns: '#10B981', shorts: '#A855F7', '': '#94A3B8'};
 const SEC = [['올리기', i => i.group === '발행' || i.group === '예약'], ['이웃 글 들르기 (공감·댓글)', i => i.id.startsWith('nb-visit')],
@@ -284,36 +299,46 @@ function ytcard(y) {
       el('span', {class: 's' + (lg ? ' er' : '')}, (ok ? '✅ 정상' : lg ? '❗다시 로그인 필요' : '⚠ 서버 문제 — 총괄이 보고 있어요' + (y.why ? ` (${y.why})` : '')) + hm),
       lg && /^https:\/\//.test(y.login_url || '') ? el('div', {class: 'bt'}, el('a', {class: 'sm', href: y.login_url, target: '_blank', rel: 'noopener noreferrer'}, '다시 로그인')) : null));
 }
+// 이웃 글 들르기 시작 (주인 11/14 '공감·댓글도 책갈피로'): 아직 안 한 첫 글을 새 탭에 — 거기서 책갈피 '이웃 관리'(공감 + 댓글 초안 · 등록은 직접).
+// 누를 때마다 한 편 · 책갈피가 들른 글의 줄은 대시보드가 체크 (nbvisit.py) → 돌아오면 다음 글
+function nbv(k) {
+  const b = data && data.nb && data.nb.by[k], s = data && data.seoi && data.seoi.by && data.seoi.by[k];
+  return b && b.left ? [b.next ? el('div', {class: 'bt nbv'}, el('a', {class: 'sm ac', href: b.next.url, target: '_blank', rel: 'noopener noreferrer'}, `이웃 글 들르기 시작 (${b.left}) ↗`)) : null,
+    el('span', {class: 's'}, "열린 글을 읽고(20초쯤) 책갈피 '이웃 관리' → 공감 + 댓글 초안 · 등록은 직접 · 줄은 저절로 체크" + (s ? ' · ' + s.line : ''))] : null;
+}
 const TOP = new Set(['issue', 'finance', 'hotdeal']);  // 블로그 셋 — 할 일 맨 위 (주인 11/14)
 // 종류마다 남은 일·급한 수 (todohub.js 의 종류 목록이 읽음 — 주인 11/14 '할 일 첫 화면은 종류별 목록만')
 const cnt = {};
 function part(k, label, extra, hot) {
   hot = hot || [];
   const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done), yt = k === 'shorts' && by() ? ytc() : null, yl = yt && yt.kind === 'login' ? 1 : 0;
-  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length + hot.length + ul.length + yl, m = left.reduce((a, i) => a + i.min, 0) + ul.length * 3;
-  const hn = hot.length + yl + ur.filter(x => x.g === 'past' && x.gate && !x.done).length;
-  cnt[k] = {n, m, u: hn};
-  if (!xs.length && !extra.length && !hot.length && !ur.length && !yt) return [];
+  // 만드는 중인 글은 남은 일로 세지 않음 (주인이 지금 할 수 없는 일 — 11/14) · w = 그 수
+  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done && !nr(i)), w = xs.filter(i => !i.done && nr(i)).length, n = left.length + extra.length + hot.length + ul.length + yl, m = left.reduce((a, i) => a + i.min, 0) + ul.length * 3;
+  const hn = hot.length + yl + ur.filter(x => x.g === 'past' && x.gate && !x.done).length, rz = k === 'issue' && by() ? rising() : null;
+  cnt[k] = {n, m, u: hn, w};
+  if (!xs.length && !extra.length && !hot.length && !ur.length && !yt && !rz) return [];
   const o = W.SBHub || (bo[k] == null ? k === 'issue' : bo[k]), bar = el('i'), all = xs.length + extra.length + hot.length + ur.filter(x => x.gate).length + yl || 1, body = [];
-  bar.style.width = Math.round(100 * (all - n) / all) + '%';
+  bar.style.width = Math.round(100 * Math.max(0, all - n - w) / all) + '%';
   if (o) {
-    const used = new Set(), sec = (t, f) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); if (g.length) body.push(sh(t, g.filter(i => !i.done).length || '끝'), g.map(item)); };
+    const used = new Set(), sec = (t, f, pre) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); const d = g.filter(i => !i.done), q = d.filter(nr).length;
+      if (g.length) body.push(sh(t, q ? `준비 ${d.length - q} · 만드는 중 ${q}` : d.length || '끝'), pre ? pre() : null, g.map(item)); };
+    if (rz) body.push(rz);  // ⚡ 막 뜨는 중은 데런픽 칸 안에 (11/14)
     if (hot.length) body.push(sh('급한 것', hot.length), hot);
     if (yt) body.push(ytcard(yt));
     Object.keys(UG).forEach(g => { const r = ur.filter(x => x.g === g); if (r.length) body.push(sh(UG[g], r.filter(x => x.gate && !x.done).length || '끝'), r.map(vid)); });
     sec(...SEC[0]);
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
-    SEC.slice(1).forEach(x => sec(...x));
+    SEC.slice(1).forEach((x, i) => sec(x[0], x[1], i ? null : () => nbv(k)));
   }
   return [el('div', {class: 'box rt bk' + (o ? ' on' : '') + (TOP.has(k) ? ' tpb' : ''), 'data-k': k}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
     onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),
-    el('span', {class: 'bn2'}, el('b', {}, label, hn ? el('em', {class: 'hu'}, `급함 ${hn}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : '오늘 끝 ✓')),
+    el('span', {class: 'bn2'}, el('b', {}, label, hn ? el('em', {class: 'hu'}, `급함 ${hn}`) : null), el('span', {}, n ? `남은 일 ${n}` + (m ? ` · 약 ${m}분` : '') : w ? `만드는 중 ${w}` : '오늘 끝 ✓')),
     el('span', {class: 'cv'}, o ? '접기' : '열기')), el('div', {class: 'bar'}, bar), body)];
 }
 
 function draw() {
   if (!box) return;
-  const ok = !!(data && data.slots && data.total), ab = ably(), top = rising(), st = data && data.stats && el('p', {class: 'note'}, '📊 ' + data.stats);
+  const ok = !!(data && data.slots && data.total), ab = ably(), top = by() ? null : rising(), st = data && data.stats && el('p', {class: 'note'}, '📊 ' + data.stats);
   box.hidden = !ok && !ab.length && !top && !st;
   if (box.hidden) { box.replaceChildren(); return; }
   const bar = el('i');
@@ -355,6 +380,8 @@ function start() {
   if (rf) rf.addEventListener('click', () => { if (on() && !busy) setTimeout(load, 300); });
   mount();
 }
-W.SBRoutine = {load, mount, ids, by, part, cnt};
+// todohub.js 가 읽는 값 (11/14): 목록 날짜·오늘 것인지·기록이 쓰인 지 몇 분·자동 점검 한 줄·꾸미기 새 판·못 전한 체크 수 · 받기 전이면 null
+const meta = () => data ? {day: data.day, today: !!data.today, age_min: data.age_min, gate: data.gate || null, kkumi_new: !!data.kkumi_new, relay: data.relay || 0, at} : null;
+W.SBRoutine = {load, mount, ids, by, part, cnt, meta};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

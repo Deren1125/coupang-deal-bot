@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from dealbot.config import posted_cli_model
 from dealbot.models import Deal
 from dealbot.utils.text import clean_name
 
@@ -289,7 +290,9 @@ _PROMPT_TAG = hashlib.sha1((SYSTEM + json.dumps(SCHEMA)).encode()).hexdigest()[:
 class Commentator:
     def __init__(self, *, enabled: bool = True, model: str | None = None, timeout: float = 90, db=None) -> None:
         self.enabled = enabled
-        self.model = model  # None 이면 --model 을 넘기지 않고 CLI 기본 모델
+        # 늘 --model 을 넘긴다 (주인 11/14 '올라가는 글은 Opus 까지만 · Fable 안 씀' — config.posted_cli_model: 비었거나 Fable 이면 'sonnet')
+        # 칸은 정해 준 이름 그대로 (없으면 None) — 부를 때 posted_cli_model 이 이름을 채움
+        self.model = posted_cli_model(model, where="commentary") if model else None
         self.timeout = timeout
         self.db = db
         self.bin = find_claude() if enabled else None
@@ -376,7 +379,7 @@ class Commentator:
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                self.bin, "-p", "--output-format", "json", *(["--model", self.model] if self.model else []),
+                self.bin, "-p", "--output-format", "json", "--model", posted_cli_model(self.model, where="commentary"),
                 "--system-prompt", SYSTEM, "--tools", "", "--json-schema", json.dumps(SCHEMA, ensure_ascii=False),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},

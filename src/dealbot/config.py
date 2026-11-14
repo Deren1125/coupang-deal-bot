@@ -353,7 +353,7 @@ class CommentaryConfig(BaseModel):
     """딜 한줄평 (서버에 로그인된 Claude Code CLI 사용). 없거나 실패하면 한줄평 없이 올림."""
 
     enabled: bool = True
-    # CLI 모델 이름은 저장소에 두지 않는다: 서버 .env 의 DEALBOT_MODEL_COMMENTARY. 없으면 --model 없이 (CLI 기본 모델)
+    # CLI 모델 이름은 저장소에 두지 않는다: 서버 .env 의 DEALBOT_MODEL_COMMENTARY. 없으면 CLI 별칭 'sonnet' (늘 --model — posted_cli_model, 11/14)
     model: str | None = None
     timeout_seconds: float = 90
 
@@ -1207,6 +1207,41 @@ class Settings(BaseModel):
 # 모델 이름은 저장소(코드·config.yaml)에 두지 않고 서버 .env 에서 받는다
 ENV_MODEL_COMMENTARY = "DEALBOT_MODEL_COMMENTARY"  # 서버 claude CLI 모델 (한줄평, CLI 로 도는 요약·말 명령)
 ENV_MODEL_SUMMARIZER = "DEALBOT_MODEL_SUMMARIZER"  # Claude API 모델 (정보 글 요약, API 로 도는 말 명령)
+# 올라가는 글을 쓰는 모델 (주인 11/14 '올라가는 글은 Opus 까지만 — Fable 은 안 씀'): 한줄평·정보 글 요약·말 명령이 같은 문지기를 쓴다.
+#   CLI: 늘 --model 을 넘긴다 (CLI 기본 모델에 맡기지 않음 — 기본 모델이 바뀌어도 글 쓰는 모델은 그대로). 서버 .env 값이 비었거나
+#        이름에 fable·mythos 가 들면 CLI 별칭 'sonnet' (짧은 딜 글 · 날짜 붙은 모델 이름은 저장소에 두지 않음).
+#   API: 그런 이름이면 API 를 쓰지 않는다 (→ CLI 로 · 위 규칙).
+POSTED_MODEL_DEFAULT = "sonnet"
+POSTED_MODEL_NO = ("fable", "mythos")
+_posted_warned: set[tuple[str, str]] = set()
+
+
+def _posted_refused(value: str, where: str) -> None:
+    if (where, value) not in _posted_warned:  # 한 번만 적음
+        _posted_warned.add((where, value))
+        logging.getLogger(__name__).warning("posted-text model: '%s' 는 올라가는 글에 쓰지 않음 (%s) → '%s'", value, where or "-", POSTED_MODEL_DEFAULT)
+
+
+def posted_cli_model(value: str | None, *, where: str = "") -> str:
+    """claude CLI 에 넘길 모델 — 늘 이름이 나온다. 비었거나 Fable·Mythos 면 'sonnet'."""
+    v = str(value or "").strip()
+    if not v:
+        return POSTED_MODEL_DEFAULT
+    if any(no in v.lower() for no in POSTED_MODEL_NO):
+        _posted_refused(v, where)
+        return POSTED_MODEL_DEFAULT
+    return v
+
+
+def posted_api_model(value: str | None, *, where: str = "") -> str | None:
+    """Claude API 모델 — 비었으면 None (API 안 씀), Fable·Mythos 여도 None (CLI 로 넘어감)."""
+    v = str(value or "").strip()
+    if not v:
+        return None
+    if any(no in v.lower() for no in POSTED_MODEL_NO):
+        _posted_refused(v, where)
+        return None
+    return v
 
 
 def _env_bool(name: str, default: bool) -> bool:

@@ -23,7 +23,7 @@ const CSS = '.ev .kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))
 const GROUPS = [['today', '오늘 마감'], ['assist', '폼 + SNS'], ['check', '확인 필요'], ['sns', 'SNS 직접 참여']];
 const TONE = /^(ok|hot|stop|info)$/;
 const SRC = {ok: ['ok', '정상'], blocked: ['stop', '막힘'], skip: ['info', '건너뜀'], error: ['stop', '오류']};  // 수집 출처 상태 (11/14)
-const OPL = {run: '지금 확인하기', done: '완료 표시', profile: '내 정보 저장'};
+const OPL = {run: '지금 확인하기', done: '완료 표시', profile: '내 정보 저장', search_retry: '검색 다시 켜기', trust_host: '사이트 허용'};
 // 내 정보 칸 (점 키 그대로 보냄 — 명세 '내 정보')
 const FIELDS = [['기본', [['name', '이름'], ['phone', '휴대폰 번호', 'tel'], ['email', '이메일', 'email'], ['birth', '생년월일 (1995-03-15)'], ['gender', '성별', ['', '여', '남']]]],
   ['주소 (배송 경품용)', [['zipcode', '우편번호'], ['address', '주소'], ['addressDetail', '상세 주소']]],
@@ -97,7 +97,12 @@ const hm = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.to
 // 11/14 키마다 마지막 네이버 답 (401 원인 찾기) — '딜봇 키 401 · 블로그 키 파일 없음'
 const keyDiag = k => {
   if (!k || typeof k !== 'object') return '';
-  const one = (name, v) => v === 'none' ? `${name} 키 없음` : v === 'no_file' ? `${name} 키 파일 못 읽음` : v === '-' || v == null ? '' : `${name} 키 ${String(v).slice(0, 12)}`;
+  // 값은 {s: 답, at: 초} (11/14 — 이번에 안 쓴 키는 지난 답과 그때 시각이 남음) · 예전 모양(값만)도 읽음
+  const one = (name, x) => {
+    const o = x && typeof x === 'object', v = o ? x.s : x, t = o && x.at ? hm(x.at * 1000) : '';
+    const s = v === 'none' ? `${name} 키 없음` : v === 'no_file' ? `${name} 키 파일 못 읽음` : v === 'no_answer' ? `${name} 키 응답 없음` : v === '-' || v == null ? '' : `${name} 키 ${String(v).slice(0, 12)}`;
+    return s && t ? `${s} (${t})` : s;
+  };
   return [one('딜봇', k.dealbot), one('블로그', k.blog)].filter(Boolean).join(' · ');
 };
 // 11/14 네이버 검색 상태 한 줄 (state.search + 응답 search_proxy) — 글자로만, 없으면 null

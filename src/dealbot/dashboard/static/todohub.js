@@ -1,13 +1,17 @@
 /* 할 일 종류 (주인 11/14 '할 일 첫 화면은 종류별 목록만 — 누르면 그 종류 할 일만'). 셸이 defer 로 받음 (app.js 는 예산 끝).
    #/todo = 종류 목록 (폰: 세로 줄 · 600px 넘는 화면: 블로그 탭처럼 가로 단추) · #/todo/<종류> = 그 종류 할 일만 + '‹ 할 일'.
    칸은 app.js 가 routine.js part() 로 종류마다 하나씩 그림 (data-k) — 여기선 고른 종류만 보이게 #main 에 data-hub 를 달 뿐 (다시 그리지 않음).
-   수는 SBRoutine.cnt (남은 일·급함) · 이벤트는 SBEvent.n() (#/todo/ev 화면은 ssalmuk.js). 마지막에 본 종류는 localStorage. */
+   수는 SBRoutine.cnt (남은 일·급함) · 이벤트는 SBEvent.n() (#/todo/ev 화면은 ssalmuk.js). 마지막에 본 종류는 localStorage.
+   종류 목록·종류 화면 맨 위 알림 줄 (주인 11/14 '오류는 주인이 보기 전에 · 멈춘 걸 몰라서 몇 시간') — SBRoutine.meta():
+     블로그 프로그램 소식이 30분 넘게 없거나 오늘 목록이 아니면 한 줄 · 자동 점검 한 줄 · 꾸미기 책갈피 새 판(블로그 셋·목록) ·
+     못 전한 체크 수 · 멈춤·핫 시스템 알림(sys-*)은 목록에서도 보이게 (누르면 기타). 줄 순서는 늘 CATS 그대로 (없는 종류는 흐리게만). */
 'use strict';
 (() => {
 const D = document, W = window;
-// [주소, 이름, part() 칸 이름] — 블로그 셋 → 딜 → SNS → 숏폼 → 이벤트 → 기타 (주인 11/14 순서)
+// [주소, 이름, part() 칸 이름] — 블로그 셋 → 딜 → SNS → 숏폼 → 기타 → 이벤트 (주인 11/14 '블로그가 맨 위 · 이벤트 참여는 맨 아래' — 늘 이 순서)
 const CATS = [['issue', '데런픽', 'issue'], ['finance', '드라마', 'finance'], ['hotdeal', '라커룸', 'hotdeal'], ['deals', '딜', 'deals'],
-  ['sns', 'SNS', 'sns'], ['shorts', '숏폼', 'shorts'], ['ev', '이벤트', null], ['etc', '기타', '']];
+  ['sns', 'SNS', 'sns'], ['shorts', '숏폼', 'shorts'], ['etc', '기타', ''], ['ev', '이벤트', null]];
+const BLOG3 = ['issue', 'finance', 'hotdeal'], STALE_MIN = 30;
 const KEYS = CATS.map(c => c[0]);
 const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', deals: '#F97316', sns: '#10B981', shorts: '#A855F7', ev: '#0EA5E9', etc: '#94A3B8'};
 const only = CATS.filter(c => c[2]).map(c => `main[data-hub="${c[0]}"]>:not(#tdh):not(.bad):not([data-k="${c[2]}"])`);
@@ -21,6 +25,8 @@ const CSS = only.concat('main[data-hub=hub]>:not(#tdh):not(.bad)', 'main[data-hu
   '#tdh .rc{font-style:normal;font-size:12px;font-weight:600;color:var(--ac-ink);margin-left:6px}#tdh .cv2{flex:none;font-size:20px;color:var(--muted)}' +
   '#tdh .row2 .cp{margin:0}#tdh .bk2{display:flex;align-items:center;gap:8px;min-height:44px;margin:0 0 8px}#tdh .bk2 b{font-size:17px}' +
   '#tdh .bk2 .lnk{padding-left:0}#tdh .bk2 span.s{margin-left:auto;font-size:13px;color:var(--sub)}#tdh .em{margin:8px 0 0}main[data-hub] .bk{padding-top:14px}' +
+  '#tdh .hn{display:block;margin:0 0 8px;padding:10px 12px;border-radius:12px;font-size:14px;line-height:1.45;text-decoration:none;color:var(--text);background:var(--line);text-align:left;border:0;width:100%;font-family:inherit}' +
+  '#tdh .hn.w{background:var(--red-soft);color:var(--red)}#tdh .hn.g{background:none;padding:0 2px;color:var(--sub);font-size:13px}' +
   '@media (min-width:600px){#tdh .tl{display:none}#tdh .sg2{display:flex!important;overflow-x:auto;gap:3px;scrollbar-width:none}' +
   '#tdh .sg2 button{flex:1 0 auto;padding:0 6px;white-space:nowrap}#tdh .sg2 .cp{margin-left:3px}#tdh .sg2 .rd{vertical-align:2px}}';
 let box = null, from = '', tt = null;
@@ -53,7 +59,24 @@ function count(c) {
     return e ? [e.n, e.u, e.n ? `확인 필요 ${e.n}` : '할 일 없음'] : [0, 0, '연결 전'];
   }
   const r = (W.SBRoutine && W.SBRoutine.cnt) || {}, x = r[c[2]] || {n: 0, m: 0, u: 0}, n = x.n + (c[0] === 'etc' ? r.ab || 0 : 0);
-  return [n, x.u, n ? `남은 일 ${n}` + (x.m ? ` · 약 ${x.m}분` : '') : '할 일 없음'];
+  return [n, x.u, n ? `남은 일 ${n}` + (x.m ? ` · 약 ${x.m}분` : '') : x.w ? `만드는 중 ${x.w}` : '할 일 없음'];
+}
+// 맨 위 알림 줄 (p = 'hub' 또는 종류)
+function notes(p) {
+  const r = W.SBRoutine, t = r && r.meta && r.meta(), out = [], m = D.getElementById('main');
+  if (p === 'hub' && m) for (const a of m.querySelectorAll('[data-k] .itm[data-iid^="sys-"]')) {  // 멈춤·핫 시스템 알림 — 기타 칸에만 있던 것
+    const c = a.querySelector('.ih .cp.stop,.ih .cp.hot'), x = a.querySelector('.ih .ti'), s = a.querySelector('.st');
+    if (c && x) out.push(el('button', {class: 'hn w sys', type: 'button', 'data-iid': a.getAttribute('data-iid'), onclick: () => go('etc')},
+      [c.textContent, x.textContent, s && s.textContent].filter(Boolean).join(' · ') + ' ›'));
+  }
+  if (!t) return out;
+  const a = t.age_min;
+  if (a > STALE_MIN) out.push(el('p', {class: 'hn w stl'}, `블로그 프로그램 소식이 ${a < 120 ? a + '분' : Math.floor(a / 60) + '시간'}째 없어요 — 목록이 오래됐을 수 있어요`));
+  else if (!t.today) out.push(el('p', {class: 'hn w stl'}, t.day ? '오늘 목록이 아직 안 왔어요 — 보이는 건 지난 목록이에요' : '블로그 프로그램 목록이 아직 안 왔어요'));
+  if (t.relay) out.push(el('p', {class: 'hn rl'}, `체크 ${t.relay}개는 블로그 프로그램이 깨어나면 전해요`));
+  if (t.kkumi_new && (p === 'hub' || BLOG3.includes(p))) out.push(el('a', {class: 'hn kn', href: '#/connect'}, '꾸미기 책갈피가 바뀌었어요 — 다시 설치 (1분) ›'));
+  if (t.gate && (p === 'hub' || BLOG3.includes(p))) out.push(el('p', {class: 'hn g gt'}, t.gate.line));
+  return out;
 }
 function go(k) {
   LS.s(k);
@@ -76,15 +99,15 @@ function draw() {
       el('span', {class: 'dt', style: `background:${DOT[c[0]]}`}),
       el('span', {class: 'nm'}, el('b', {}, c[1], u ? el('i', {class: 'rd', 'aria-label': '급한 것 있음'}) : null, c[0] === last ? el('em', {class: 'rc'}, '최근') : null),
         el('span', {}, s)), badge(n, u), el('span', {class: 'cv2', 'aria-hidden': 'true'}, '›'));
-    // 폰: 세로 줄 (할 일 있는 종류 먼저 · 없는 종류는 흐리게 맨 아래) · 넓은 화면: 가로 단추
-    box.replaceChildren(el('div', {class: 'box tl'}, xs.filter(x => x[1]).map(row), xs.filter(x => !x[1]).map(row)), sg,
+    // 폰: 세로 줄 (늘 CATS 순서 — 블로그 셋이 맨 위 · 없는 종류는 흐리게만, 자리는 그대로 · 주인 11/14) · 넓은 화면: 가로 단추
+    box.replaceChildren(...notes(p), el('div', {class: 'box tl'}, xs.map(row)), sg,
       el('p', {class: 'note em sg2'}, xs.some(x => x[1]) ? '종류를 누르면 그 할 일만 보여요' : '오늘 할 일 없어요 ✓'));
     return;
   }
   const c = CATS.find(x => x[0] === p), [n, u, t] = count(c), m = D.getElementById('main');
   const empty = c[2] != null && c[0] !== 'etc' && m && ![...m.children].some(x => x.getAttribute && x.getAttribute('data-k') === c[2]);
   box.replaceChildren(el('div', {class: 'bk2'}, el('button', {class: 'lnk', type: 'button', onclick: back}, '‹ 할 일'), el('b', {}, c[1]),
-    badge(n, u), c[0] === 'ev' ? null : el('span', {class: 's'}, t)), sg, empty ? el('p', {class: 'empty em'}, '할 일 없어요 ✓') : '');
+    badge(n, u), c[0] === 'ev' ? null : el('span', {class: 's'}, t)), sg, ...notes(p), empty ? el('p', {class: 'empty em'}, '할 일 없어요 ✓') : '');
 }
 
 // #main 을 app.js 가 다시 그리면 맨 위에 다시 붙임 (routine.js·ssalmuk.js 는 이 칸 다음에 붙음)

@@ -51,7 +51,12 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
                  "se-horizontalLine", "se-l-default", "publish_btn", "tag_input", "여기에 붙여넣기", "모두 됐어요", "placeholder"):
         assert word in js, word
     assert "data-value='left'" not in js and "execCommand" not in js  # 왼쪽으로 바꾸지 않음 · 글자 고치기 없음
-    assert kkumi.view() == {"code": kkumi.bookmarklet(), "len": len(kkumi.bookmarklet()), "steps": list(kkumi.STEPS)} and len(kkumi.STEPS) == 4
+    assert kkumi.view() == {"code": kkumi.bookmarklet(), "len": len(kkumi.bookmarklet()), "steps": list(kkumi.STEPS),
+                            "ver": kkumi.ver(), "version": kkumi.version()} and len(kkumi.STEPS) == 4
+    # 판 번호 (주인 11/14 — 끝 알림 'v5' · 지문은 코드가 바뀌면 달라짐) · 글꼴 살피기(나눔명조 — 주인이 취소)는 넣지 않음
+    assert kkumi.version() >= 5 and f"const V={kkumi.version()};" in js and "'\\nv'+V" in js
+    assert len(kkumi.ver()) == 10 and kkumi.ver() == __import__("hashlib").sha256(kkumi.bookmarklet().encode()).hexdigest()[:10]
+    assert "se-ff-" not in js and "글꼴" not in js
 
 
 def test_minify_keeps_strings_and_word_gaps() -> None:
@@ -107,7 +112,7 @@ C.addEventListener('paste', e => {
   if (first && C.children.length === 1 && first.querySelector('.se-placeholder')) first.remove();
   for (const p of ps) {
     const t = p.textContent;
-    if (inPostit) { const q = document.createElement('p'); q.className = 'se-text-paragraph'; q.textContent = t; inPostit.querySelector('.qbox').append(q); }
+    if (inPostit) { const q = document.createElement('p'); q.className = 'se-text-paragraph'; q.innerHTML = p.innerHTML; inPostit.querySelector('.qbox').append(q); }
     else { const lastc = C.lastElementChild; if (lastc && /se-text/.test(lastc.className) && !lastc.textContent) { lastc.querySelector('p').textContent = t; continue; } const c = add(comp('se-text', '<div class="se-section se-section-align-' + align + '"><p class="se-text-paragraph"></p></div>')); c.querySelector('p').textContent = t; }
   }
 });
@@ -220,6 +225,55 @@ def test_bookmarklet_builds_the_post_top_down_on_a_mock_editor() -> None:
     assert got["elsewhere"] == ["꾸미기: 글쓰기 화면이 아니에요"]
 
 
+# 라커룸 소제목 (주인 11/14 16:4x 벤치마킹 — 인용구 안 19px 굵게): 책갈피가 인용구 줄을 다시 쓸 때 글자 크기·굵게를 살림 (Blog-Auto kkumi_v4.js qline)
+HEAD_PASTED = ('<p>첫 문단이에요.</p>'
+               '<blockquote><p style="text-align:center"><span style="font-size:19px"><b>1. 9회말에 뒤집힌 경기</b></span></p></blockquote>'
+               '<p>가운데 문단이에요.</p>'
+               '<blockquote><p><span style="font-size:19px; color:#333"><strong>2. 다음 주 일정</strong></span></p></blockquote>'
+               '<p>표 앞 문단이에요.</p>'
+               '<blockquote><p>순위 | 팀 | 승</p><p>1 | 가 | 80</p></blockquote>'
+               '<p>끝 문단이에요.</p>')
+HEAD_RUN = RUN.replace("out.tags =", "out.quotes = await frame.evaluate(() => [...document.querySelectorAll('.se-quotation .qbox')].map(q => q.innerHTML));out.tags =")
+
+
+def test_quote_lines_keep_size_and_bold_and_a_table_quote_stays_plain() -> None:
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    out = subprocess.run([NODE, "-e", HEAD_RUN, INNER, code(), HEAD_PASTED], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["alert"].startswith("모두 됐어요") and "포스트잇 3/3" in got["alert"], got["alert"]
+    assert got["alert"].rstrip().endswith(f"v{kkumi.version()}")  # 어느 판이 돌았는지 끝 줄에
+    q = got["quotes"]
+    assert len(q) == 3
+    for h, text in zip(q[:2], ("1. 9회말에 뒤집힌 경기", "2. 다음 주 일정"), strict=True):  # 소제목: 19px + 굵게 둘 다 (strong·색은 b 로 다시 씀)
+        assert h.count('<span style="font-size:19px"><b>') == 1 and f"<b>{text}</b></span>" in h, h
+        assert "color" not in h and "strong" not in h
+    assert "font-size" not in q[2] and "<b>" not in q[2] and "순위 | 팀 | 승" in q[2] and "1 | 가 | 80" in q[2]  # 표 인용구는 글자만
+
+
+@needs_node
+def test_pieces_build_quote_html_with_qline() -> None:
+    """크롬 없이도: pieces() 가 만드는 인용구 조각 — 크기·굵게만 남기고 글자를 다시 씀 (다른 꾸밈·태그는 버림 · 글자는 이스케이프)."""
+    src = kkumi.SRC.read_text(encoding="utf-8")
+    m = __import__("re").search(r"^const qline = .*$", src, __import__("re").M)
+    assert m and "const esc = " in src
+    esc = __import__("re").search(r"^const esc = .*$", src, __import__("re").M).group(0)
+    js = esc + "\n" + m.group(0) + r"""
+const P = (html, text, bold) => ({outerHTML: html, textContent: text, querySelector: () => bold ? {} : null});
+console.log(JSON.stringify([
+  qline(P('<p><span style="font-size:19px"><b>1. 소제목</b></span></p>', ' 1. 소제목 ', true)),
+  qline(P('<p style="font-weight:700;font-size: 19px">굵은 줄</p>', '굵은 줄', false)),
+  qline(P('<p>순위 | 팀</p>', '순위 | 팀', false)),
+  qline(P('<p><b>a<c & d</b></p>', 'a<c & d', true)),
+]));"""
+    out = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == ['<p><span style="font-size:19px"><b>1. 소제목</b></span></p>',
+                                      '<p><span style="font-size:19px"><b>굵은 줄</b></span></p>', "<p>순위 | 팀</p>", "<p><b>a&lt;c &amp; d</b></p>"]
+
+
 # ---------------------------------------------------------------- 3) 대시보드
 @pytest.fixture
 def bot(settings: Settings, tmp_path: Path):  # type: ignore[no-untyped-def]
@@ -233,7 +287,7 @@ async def test_kkumi_api_needs_login_and_static_file_is_public(bot: DealBot) -> 
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     assert (await bot.web.dispatch("GET", "/dashboard/api/kkumi", anon))[0] == 401
     status, v, _ = await get_json(bot, "/dashboard/api/kkumi", session_headers(bot))
-    assert status == 200 and v == kkumi.view()
+    assert status == 200 and v == kkumi.view(bot.db) and v["ack"] is False and v["ver"] == kkumi.ver()
     res = await bot.web.dispatch("GET", "/dashboard/static/kkumi.js", {})
     assert res[0] == 200 and res[2].startswith("text/javascript") and res[3]["X-Content-Type-Options"] == "nosniff"
 
@@ -255,6 +309,7 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
   kf().click();
   await tick(); await tick();
   out.steps = box().all(c => c.tagName === 'LI').map(c => c.textContent);
+  out.ack = box().all(c => c.tagName === 'BUTTON' && /^설치했어요|설치됨/.test(c.textContent)).map(c => [c.textContent, 'disabled' in c.attrs]);
   box().all(c => c.tagName === 'BUTTON' && c.textContent === '코드 복사')[0].click();
   await tick();
   out.clip = clip; out.toast = toast.textContent;
@@ -273,6 +328,9 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
     assert got["fold"] == ["꾸미기 버튼 설치 (링크 카드)", "false"] and got["before"] == 0  # 접혀 있고 펼칠 때만 받음
     assert got["steps"] == list(kkumi.STEPS) and got["clip"] == [kkumi.bookmarklet()] and got["toast"].startswith("복사했어요")
     assert got["keep"] == "true" and got["calls"] == 1
+    assert got["ack"] == [[f"설치했어요 (v{kkumi.version()})", False]]  # 새 판 알림을 끄는 단추 (11/14 — kkumi.installed {ver})
+    lg = (STATIC / "logins.js").read_text(encoding="utf-8")
+    assert "action: 'kkumi.installed', args: {ver: b.d.ver}" in lg and "b.d.ack ? `v${b.d.version} 설치됨 ✓`" in lg
 
 
 PHOTO_RUN = RUN.replace("const [inner, code, pasted] = process.argv.slice(1), out = {};",
@@ -330,3 +388,25 @@ def test_bookmarklet_picks_a_sub_category_whose_label_has_a_hidden_prefix() -> N
         assert out.returncode == 0, out.stderr
         got = json.loads(out.stdout)
         assert got["cat"] == cat and f"카테고리 {cat}" in got["alert"] and "목록에 없음" not in got["alert"], got
+
+
+async def test_new_version_banner_until_installed_is_sent(bot: DealBot, tmp_path: Path) -> None:
+    """주인 11/14 — 책갈피는 주인이 다시 복사·저장해야 바뀜: 지금 판을 '설치했어요' 하기 전까지 routine.view()['kkumi_new'] 가 참."""
+    from dash_helpers import post_json
+    from dealbot.dashboard import routine
+
+    write_export(tmp_path / "blogauto.json")
+    h = session_headers(bot)
+    assert kkumi.is_new(bot.db) and routine.view(bot)["kkumi_new"] is True
+    status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "kkumi.installed", "args": {"ver": "0" * 10}, "cid": "c_oldver1", "ctoken": None}, h)
+    assert status == 200 and body["status"] == "error" and "다시" in body["text"] and kkumi.is_new(bot.db)  # 옛 지문은 받지 않음
+    for bad in ({}, {"ver": "zz"}, {"ver": 5}, {"ver": kkumi.ver().upper() + "x"}):
+        status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "kkumi.installed", "args": bad, "cid": None, "ctoken": None}, h)
+        assert status == 400 and body["code"] == "bad_args"
+    status, body, _ = await post_json(bot, "/dashboard/api/action", {"action": "kkumi.installed", "args": {"ver": kkumi.ver()}, "cid": "c_newver1", "ctoken": None}, h)
+    assert status == 200 and body["status"] == "ok" and f"v{kkumi.version()}" in body["text"]
+    assert bot.db.kv_get(kkumi.KV_ACK) == kkumi.ver() and not kkumi.is_new(bot.db) and routine.view(bot)["kkumi_new"] is False
+    _s, v, _ = await get_json(bot, "/dashboard/api/kkumi", h)
+    assert v["ack"] is True and v["version"] == kkumi.version()
+    bot.db.kv_set(kkumi.KV_ACK, "f" * 10)  # 코드가 바뀌면(지문이 달라지면) 다시 알림
+    assert routine.view(bot)["kkumi_new"] is True

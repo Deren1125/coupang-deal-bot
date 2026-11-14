@@ -279,9 +279,11 @@ async def test_add_commentary_survives_writer_crash(settings) -> None:  # noqa: 
 # ---------------------------------------------------------------- 실패가 조용히 묻히지 않는다 (#38, #43)
 
 
-@pytest.mark.parametrize("model", [None, "test-cli-model"])
-async def test_cli_model_is_passed_only_when_set(tmp_path: Path, model: str | None) -> None:
-    """모델 이름(서버 .env 의 DEALBOT_MODEL_COMMENTARY)이 없으면 --model 없이 CLI 기본 모델, 있으면 그대로 --model 로."""
+@pytest.mark.parametrize(("model", "used"), [(None, "sonnet"), ("", "sonnet"), ("test-cli-model", "test-cli-model"),
+                                             ("claude-fable-latest", "sonnet"), ("Mythos-Preview", "sonnet"), ("  FABLE  ", "sonnet")])
+async def test_cli_model_is_always_passed_and_never_fable(tmp_path: Path, model: str | None, used: str) -> None:
+    """주인 11/14 '올라가는 글은 Opus 까지만 · Fable 은 안 씀': 한줄평은 늘 --model 을 넘긴다 (CLI 기본 모델에 맡기지 않음) —
+    서버 .env 의 DEALBOT_MODEL_COMMENTARY 그대로, 비었거나 이름에 fable·mythos 가 들면 CLI 별칭 'sonnet'."""
     (tmp_path / "out").write_text(_ok(**GOOD), encoding="utf-8")
     script = tmp_path / "claude"
     script.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{tmp_path}/args.txt"\ncat > /dev/null\ncat "{tmp_path}/out"\n')
@@ -290,10 +292,8 @@ async def test_cli_model_is_passed_only_when_set(tmp_path: Path, model: str | No
     c.bin = str(script)
     assert await c.write(_deal(), "")
     args = (tmp_path / "args.txt").read_text().splitlines()
-    if model is None:
-        assert "--model" not in args
-    else:
-        assert args[args.index("--model") + 1] == model
+    assert args.count("--model") == 1 and args[args.index("--model") + 1] == used
+    assert not any("fable" in a.lower() or "mythos" in a.lower() for a in args[:6])
 
 
 def test_missing_cli_is_logged(caplog: pytest.LogCaptureFixture) -> None:
