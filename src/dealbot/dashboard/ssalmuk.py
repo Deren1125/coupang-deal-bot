@@ -73,6 +73,7 @@ SEARCH_PER_MIN = 60
 SEARCH_PER_DAY = 300
 SEARCH_Q_MAX = 100
 KV_SEARCH_DAY = "ssalmuk_search_day"
+KV_SEARCH_KEYS = "ssalmuk_search_keys"  # 키마다 마지막 네이버 답 {"dealbot": 401, "blog": "no_file", "at": …} (값만 — 키는 안 남김, 주인 11/14 '401 원인')
 KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' — 어느 키가 통했는지 (값만, 비밀 아님)
 KEY_RECHECK = 86400.0  # 블로그 키로 넘어간 뒤에도 딜봇 키를 하루 한 번 다시 봄
 _TAG_RE = re.compile(r"<[^>]*>")
@@ -264,6 +265,9 @@ class Ssalmuk:
         self.db.kv_set(KV_SEARCH_DAY, json.dumps({"d": day, "n": n + 1}))
         return True
 
+    def note_keys(self, seen: dict[str, Any]) -> None:
+        self.db.kv_set(KV_SEARCH_KEYS, json.dumps({**seen, "at": int(self.clock())}))
+
     def search_keysrc(self) -> str | None:
         v = self.db.kv_get(KV_SEARCH_KEYSRC)
         return v if v in ("dealbot", "blog") else None
@@ -285,7 +289,8 @@ class Ssalmuk:
                 "receivedAt": saved.get("receivedAt") if isinstance(saved, dict) else None,
                 "pending": len(self._cmds()), "stale": stale(ts, self.clock()),
                 "results": self._load(KV_RESULTS, [])[-10:],
-                "search_proxy": {"keysrc": self.search_keysrc(), "today_count": self.search_today()}}
+                "search_proxy": {"keysrc": self.search_keysrc(), "today_count": self.search_today(),
+                                 "keys": self._load(KV_SEARCH_KEYS, {})}}
 
     # ------------------------------------------------------------ 명령
     def act(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -404,7 +409,10 @@ def register(web: Any, api: Any) -> Ssalmuk:
         blog = blog_keys.get()
         if blog:
             keys["blog"] = blog
+        seen: dict[str, Any] = {"dealbot": "none" if "dealbot" not in keys else "-",
+                                "blog": "no_file" if not blog else "-"}
         if not keys:
+            desk.note_keys(seen)
             return _j(503, {"code": "no_key", "text": "딜봇에 네이버 검색 키가 없어요"})
         if not search_rate.hit("key") or not desk.search_day_hit():
             return _j(429, {"code": "limit", "text": "검색 한도(1분 60번·하루 300번)를 넘었어요"})
@@ -421,6 +429,7 @@ def register(web: Any, api: Any) -> Ssalmuk:
                     SEARCH_URL.format(type=typ), params={"query": q, "display": display, "sort": sort},
                     headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=SEARCH_TIMEOUT)
                 status = resp.status_code
+                seen[src] = status
                 data = resp.json() if status == 200 else None
             except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
                 log.info("ssalmuk search: %s (%s key)", type(e).__name__, src)
@@ -431,6 +440,7 @@ def register(web: Any, api: Any) -> Ssalmuk:
             if status == 200:
                 desk.set_search_keysrc(src)
             break
+        desk.note_keys(seen)
         if status != 200:
             log.info("ssalmuk search: naver HTTP %s", status)
             return _j(502, {"code": "naver_error", "status": status, "text": "네이버 검색이 오류를 줬어요"})

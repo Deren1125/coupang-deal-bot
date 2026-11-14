@@ -167,7 +167,7 @@ async def test_screen_needs_csrf_and_same_site(bot: DealBot) -> None:
     status, v, headers = await get_json(bot, ssalmuk.STATE_PATH, h)
     assert status == 200 and headers["Cache-Control"] == "no-store"
     assert v == {"state": None, "receivedAt": None, "pending": 0, "stale": True, "results": [],
-                 "search_proxy": {"keysrc": None, "today_count": 0}}
+                 "search_proxy": {"keysrc": None, "today_count": 0, "keys": {}}}
 
 
 async def test_key_shown_only_logged_in_and_rotate(bot: DealBot) -> None:
@@ -708,7 +708,9 @@ async def test_search_falls_back_to_blog_key_and_remembers(bot: DealBot, tmp_pat
     assert [r.headers["x-naver-client-id"] for r in seen][2:] == [BLOG_ID]
     # 화면용 state: 값 없이 keysrc·오늘 횟수만
     _s, st, _h = await get_json(bot, f"{B}/state", session_headers(bot))
+    keys = st["search_proxy"].pop("keys")
     assert st["search_proxy"] == {"keysrc": "blog", "today_count": 2}
+    assert keys["blog"] == 200 and keys["dealbot"] == "-" and isinstance(keys["at"], int)  # 둘째 호출은 블로그 키만
     # 하루 뒤엔 딜봇 키를 다시 봄 — 살아났으면 되돌아감
     now[0] += 86401
     naver(bot, ok_blog)
@@ -771,3 +773,17 @@ async def test_search_blog_key_file_mtime_reload_and_missing(bot: DealBot, tmp_p
     assert (await mget(bot, f"{SEARCH}?q=x", key))[1]["code"] == "no_key"
     blog_env(bot, tmp_path, "NAVER_CLIENT_ID=only-id\n")
     assert (await mget(bot, f"{SEARCH}?q=x", key))[1]["code"] == "no_key"
+
+
+async def test_search_records_each_key_status(bot: DealBot, tmp_path: Path) -> None:
+    """주인 11/14 '딜봇 502 · 네이버 401' — 어느 키가 막혔는지(또는 블로그 키 파일을 못 읽었는지) 화면에 값만 남긴다."""
+    import httpx
+
+    naver(bot, lambda req: httpx.Response(401, json={"errorCode": "024"}))
+    d = desk(bot)
+    status, _b = await mget(bot, f"{SEARCH}?q=x", d.key())
+    assert status == 502
+    keys = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
+    assert keys["dealbot"] == 401 and keys["blog"] == "no_file"
+    js = (Path(ssalmuk.__file__).parent / "static" / "ssalmuk.js").read_text(encoding="utf-8")
+    assert "키 파일 못 읽음" in js and "keyDiag(p && p.keys)" in js

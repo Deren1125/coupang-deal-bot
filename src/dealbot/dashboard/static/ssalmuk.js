@@ -94,6 +94,12 @@ function skipNote() {
 }
 const openLabel = u => /^https:\/\/([a-z0-9-]+\.)*donzomyo\.kr\//.test(u) ? '돈좀요에서 열기' : '이벤트 열기';
 const hm = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : ''; };
+// 11/14 키마다 마지막 네이버 답 (401 원인 찾기) — '딜봇 키 401 · 블로그 키 파일 없음'
+const keyDiag = k => {
+  if (!k || typeof k !== 'object') return '';
+  const one = (name, v) => v === 'none' ? `${name} 키 없음` : v === 'no_file' ? `${name} 키 파일 못 읽음` : v === '-' || v == null ? '' : `${name} 키 ${String(v).slice(0, 6)}`;
+  return [one('딜봇', k.dealbot), one('블로그', k.blog)].filter(Boolean).join(' · ');
+};
 // 11/14 네이버 검색 상태 한 줄 (state.search + 응답 search_proxy) — 글자로만, 없으면 null
 const searchLine = () => {
   let q = (st() || {}).search; const p = data && data.search_proxy, n = v => Number.isFinite(Number(v)) ? Number(v) : null;
@@ -104,7 +110,7 @@ const searchLine = () => {
   const err = q && q.lastError ? String(q.lastError).slice(0, 40) : '';
   return ['네이버 검색', cnt != null ? `오늘 ${cnt}회${q && n(q.ok) != null ? ` (성공 ${n(q.ok)} · 실패 ${n(q.fail) || 0})` : ''}` : '',
     ks ? `키: ${ks === 'blog' ? '블로그 서버' : ks === 'dealbot' ? '딜봇' : String(ks).slice(0, 10)}` : '',
-    q && q.lastStatus ? `마지막 ${String(q.lastStatus).slice(0, 10)}${hm ? ' ' + hm : ''}` : '', err ? `오류: ${err}` : ''].filter(Boolean).join(' · ');
+    q && q.lastStatus ? `마지막 ${String(q.lastStatus).slice(0, 10)}${hm ? ' ' + hm : ''}` : '', err ? `오류: ${err}` : '', keyDiag(p && p.keys)].filter(Boolean).join(' · ');
 };
 const todos = () => ((st() || {}).todo || []).filter(t => t && typeof t === 'object');
 const cnt = () => Object.assign({auto: 0, left: 0, today: 0, applied: 0}, (st() || {}).counts || {});
