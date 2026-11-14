@@ -104,3 +104,4 @@
 - 11/14 드라마·라커룸 탭 '인기 키워드' 카드 (Pick 카드 그대로 · Blog-Auto export channel_trends {finance, hotdeal}): 출처 후보·구글·방영·계약·이적·뉴스, 이미 쓴 글 표시 · 누르면 blog.channel_topic {blog, keyword} → 다리 일 channel_topic (다음 빈 예약 자리에 한 편 · 확인 없음 · 못 쓰면 이유 알림)
 - 11/14 이벤트 참여 대리 검색(ssalmuk/search): 딜봇 네이버 키가 401/403 이거나 없으면 Blog-Auto .env 의 NAVER_CLIENT_ID/SECRET(dashboard.ssalmuk_search_env_file, 기본 ~/Blog-Auto/.env, 두 줄만·수정 시각 바뀌면 다시 읽음)로 이어서 검색 · 통한 키는 kv ssalmuk_search_keysrc('dealbot'|'blog', 값만) 에 기억해 다음부턴 곧장, 딜봇 키는 하루 한 번 다시 봄 · 둘 다 막히면 502 naver_error · state 응답에 search_proxy{keysrc,today_count} (dashboard/ssalmuk.py)
 - 11/14 이벤트 참여 화면 수집 출처 칸 맨 위에 네이버 검색 상태 회색 한 줄: 오늘 횟수·성공·실패·어느 키(딜봇/블로그 서버)·마지막 상태·시각·오류 (pushed state.search + search_proxy, 글자로만 · 둘 다 없으면 숨김 · static/ssalmuk.js)
+- 11/14 할 일 서로이웃 신청 줄: 이름 밑에 고른 이유(최근 글)·멘트 글 한 줄씩 (routine.js mini) · 체크하면 blog.nb_requested {blog, target, done} 로 Blog-Auto 에 신청 기록 (예전 판이면 체크만) · 오늘 할 일 줄 상한 80→200 (이웃 105줄이 잘리던 것)

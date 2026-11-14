@@ -238,6 +238,40 @@ async def test_publish_row_check_also_tells_blogauto_it_was_pasted(bot: DealBot,
     assert "pasted" in BLOG_ACTIONS and clean_args("blog.pasted", {"blog": "issue", "pid": 3, "done": True}) == {"blog": "issue", "pid": 3, "done": True}
 
 
+async def test_neighbour_request_check_tells_blogauto(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+    """주인 11/14 '서이추 명단 … 블로그마다 30명': 서로이웃 신청 줄(nb-add:) 체크는 blog.nb_requested 도 맡김 — Blog-Auto 가 신청했다고
+    적어 다음 명단·다른 블로그 명단에서 뺌. 예전 Blog-Auto(nb_requested 모름)는 체크만."""
+    day = tz_now(bot).date().isoformat()
+    rows = [item(f"nb-add:hotdeal:fan{i:02d}", "s4", blog="hotdeal", min=1, note=f'최근 "LG 트윈스 직관 일기 {i}" 글 (오늘)',
+                 copy=[{"label": "블로그 아이디", "text": f"fan{i:02d}"}, {"label": "멘트", "text": "LG 트윈스 글 잘 읽었어요."}])
+            for i in range(110)]
+    with_routine(tmp_path, {"day": day, "slots": SLOTS, "overflow": 0, "items": rows})
+    assert len(_routine({"day": day, "slots": SLOTS, "items": rows})["items"]) == 110  # 이웃 105줄 + 글도 다 실림 (예전 80 에서 잘림)
+    h = session_headers(bot)
+    new = spool.root(settings.data_dir, spool.DASH_ACTIONS) / "new"
+
+    def queued() -> list[dict]:
+        return [spool.read(f) for f in sorted(new.glob("*.json"))] if new.exists() else []
+
+    blogauto_status(settings, actions=[a for a in fixture("status_blogauto.json")["actions"] if a != "nb_requested"])
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "nb-add:hotdeal:fan01", "done": True}}, h)
+    assert status == 200 and got["text"] == "체크했어요" and queued() == []  # 예전 Blog-Auto
+    blogauto_status(settings)
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "nb-add:hotdeal:fan02", "done": True}}, h)
+    assert status == 200 and "다음 명단에서 빼요" in got["text"]
+    status, got, _ = await post_json(bot, "/dashboard/api/action", {"action": "routine.done", "args": {"id": "nb-add:hotdeal:fan02", "done": False}}, h)
+    assert status == 200 and got["text"] == "체크를 풀었어요"
+    assert [(x["action"], x["blog"], x["args"]) for x in queued()] == [
+        ("nb_requested", "hotdeal", {"blog": "hotdeal", "target": "fan02", "done": True}),
+        ("nb_requested", "hotdeal", {"blog": "hotdeal", "target": "fan02", "done": False})]
+    assert "nb_requested" in BLOG_ACTIONS
+    assert clean_args("blog.nb_requested", {"blog": "issue", "target": "ab_1", "done": True}) == {"blog": "issue", "target": "ab_1", "done": True}
+    for bad in ({"blog": "issue", "target": "../x", "done": True}, {"blog": "issue", "target": "ab", "done": "y"},
+                {"blog": "nope", "target": "ab", "done": True}):
+        with pytest.raises(Exception):
+            clean_args("blog.nb_requested", bad)
+
+
 async def test_routine_api_needs_login(bot: DealBot) -> None:
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     assert (await bot.web.dispatch("GET", "/dashboard/api/routine", anon))[0] == 401
@@ -252,6 +286,7 @@ def test_routine_js_is_local_safe_and_korean() -> None:
     assert "/dashboard/api/routine" in js and "X-Dash-Token" in js and "MutationObserver" in js and "routine.done" in js
     assert "clipboard" in js and "writeText(" in js and "type: 'checkbox'" not in js  # 체크는 단추 (app.js 그리기를 막지 않게)
     assert js.count("'input'") == 1 and "placeholder: '여기에 링크 붙여넣기'" in js  # 입력 칸은 에이블리 링크 부탁 하나뿐 (10/28)
+    assert "nb-add:" in js and "멘트 · " in js  # 서로이웃 줄: 고른 이유 + 멘트 글 (주인 11/14)
     for word in ("오늘 할 일", "복사했어요", "다시 보기", "지금"):
         assert word in js, word
     node = shutil.which("node")

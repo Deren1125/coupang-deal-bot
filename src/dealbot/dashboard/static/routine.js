@@ -205,13 +205,15 @@ function item(it) {
       it.paste && !it.done ? paste(it.paste) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
 }
 
-// 이웃 줄은 짧게 (블로그마다 하루 15줄 — 주인 11/09): 이름 한 줄 + 단추, 앞말·블로그 이름·분은 빼고
+// 이웃 줄은 짧게 (11/09) · 서로이웃은 이유·멘트도 (11/14)
 function mini(it) {
-  const t = it.title.replace(/^(서로이웃 신청|공감·댓글) · /, '');
+  const t = it.title.replace(/^(서로이웃 신청|공감·댓글) · /, ''), nb = it.id.startsWith('nb-add:'),
+    why = nb && it.note, msg = nb && (it.copy.find(c => c.label == '멘트') || {}).text;
   return el('div', {class: 'it mi' + (it.done ? ' dn' : ''), 'data-id': it.id},
     el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
-    el('div', {class: 'grow'}, el('span', {class: 't'}, t), it.done ? null : el('div', {class: 'bt'},
+    el('div', {class: 'grow'}, el('span', {class: 't'}, t), why ? el('span', {class: 's'}, why) : null,
+      msg && !it.done ? el('span', {class: 's'}, '멘트 · ' + msg) : null, it.done ? null : el('div', {class: 'bt'},
       it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label + ' ↗')),
       it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label + ' 복사')))));
 }

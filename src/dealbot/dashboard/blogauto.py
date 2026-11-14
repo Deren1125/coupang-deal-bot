@@ -1254,7 +1254,7 @@ ROUTINE_BLOGS = ("finance", "issue", "hotdeal", "")
 ROUTINE_ID_RE = re.compile(r"^[a-z0-9:_-]{1,80}$")
 _ROUTINE_DAY_RE = re.compile(r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}$")
 _ROUTINE_AT_RE = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
-ROUTINE_ITEMS_MAX, ROUTINE_COPY_MAX, ROUTINE_LINKS_MAX = 80, 4, 3
+ROUTINE_ITEMS_MAX, ROUTINE_COPY_MAX, ROUTINE_LINKS_MAX = 200, 4, 3  # 줄 수: 이웃만 (공감 5 + 서로이웃 30) × 3 = 105 (주인 11/12·11/14) + 글
 ROUTINE_TITLE_MAX, ROUTINE_NOTE_MAX, ROUTINE_LABEL_MAX, ROUTINE_COPY_TEXT_MAX, ROUTINE_COPY_LINES = 80, 160, 20, 1000, 12
 
 

@@ -47,6 +47,7 @@
   "schedule_move",
   "visit_done",
   "pasted",
+  "nb_requested",
   "pics_fetch",
   "pics_clear",
   "post_feedback",
