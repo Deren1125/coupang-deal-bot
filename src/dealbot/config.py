@@ -83,6 +83,8 @@ class CoupangConfig(BaseModel):
     max_calls_per_hour: int = 10
     deeplink_reserve: int = 3  # 발행용 딥링크 호출을 위해 남겨 둘 몫
     deeplink_max_per_hour: int = 7  # 딥링크가 시간당 예산을 다 쓰지 못하게 (골드박스·시중가 조회 몫을 남김). 넘치는 쿠팡 딜은 기다림
+    # 게시판에서 온 쿠팡 딜의 상품 사진 찾기 (주인 11/14 — 검색 API 로 상품번호가 같은 결과의 사진). 시간당 이만큼까지, 0 = 안 찾음
+    photo_search_per_hour: int = 2
 
 
 class MarketCheckConfig(BaseModel):
@@ -432,6 +434,9 @@ class PublishConfig(BaseModel):
     # 그 사진을 블로그·인스타 사진으로 (Blog-Auto 는 published_deals.jsonl 의 photo_wait_until 까지 기다렸다가 없으면 글자 카드로)
     late_photo: bool = True
     late_photo_hours: float = Field(4.0, gt=0, le=24)
+    # 발행 때 자동으로 못 찾았지만 다시 찾을 길이 남은 딜(쿠팡 검색 몫 소진·일시 오류 등): 이 시간 동안 10분마다 다시 찾아 보고,
+    # 그래도 없을 때만 주인에게 '📷 사진 필요' (주인 11/14 '자동으로 해줘'). 0 = 바로 주인에게
+    late_photo_auto_minutes: float = Field(30.0, ge=0, le=120)
     weekly_top: WeeklyTopConfig = Field(default_factory=WeeklyTopConfig)
 
 

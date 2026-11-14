@@ -52,6 +52,7 @@ from dealbot.enrich import PageEnricher, PageMeta, is_naver_store, page_images
 from dealbot.growth import alerts as growth_alerts
 from dealbot.growth import invites, weekly
 from dealbot.growth.late_photo import LatePhoto
+from dealbot.growth.photo_sources import PHOTO_KIND, CoupangPhotoSearch, PhotoStats, coupang_number
 from dealbot.growth.slots import mark_slot, slot_due
 from dealbot.growth.threads_flow import ThreadsFlow
 from dealbot.infopost import InfoPostBuilder, PostBody
@@ -258,7 +259,7 @@ class DealBot:
         self.budget = ApiBudget(
             settings.coupang.max_calls_per_hour,
             reserve={"deeplink": settings.coupang.deeplink_reserve},
-            caps={"deeplink": settings.coupang.deeplink_max_per_hour},
+            caps={"deeplink": settings.coupang.deeplink_max_per_hour, PHOTO_KIND: settings.coupang.photo_search_per_hour},
         )
         self.market: CoupangMarketReference | None = None
         if settings.secrets.has_coupang:
@@ -276,6 +277,10 @@ class DealBot:
                 self.market = CoupangMarketReference(self.coupang, settings.deal.market)
         else:
             log.warning("COUPANG_ACCESS_KEY/SECRET_KEY not set — coupang collectors & deeplink disabled")
+        # 딜 상품 사진 자동 찾기 (주인 11/14): 게시판 쿠팡 딜은 검색 API 의 같은 상품번호 사진 · 찾은 곳별 수
+        self.photo_search = CoupangPhotoSearch(self.coupang, self.db, settings.coupang.photo_search_per_hour)
+        self.photo_stats = PhotoStats(self.db, settings.app.timezone)
+        self._photo_retry: dict[str, str] = {}  # 상품 → 발행 뒤 다시 찾아 볼 까닭 (deal_photo 가 남기고 _ask_late_photo 가 씀)
 
         # ---- 브라우저 자동화 (네이버 쇼핑커넥트)
         self.browser: Any = None
@@ -3395,16 +3400,16 @@ class DealBot:
             log.warning("text card for the blog export failed: %s", e)
             return ""
 
-    def export_photo_update(self, deal: Deal, photo: bytes, *, posted_at: datetime) -> dict[str, Any] | None:
-        """발행 뒤 주인이 보낸 사진: 같은 product_id·posted_at 으로 사진이 바뀐 줄을 하나 더 쓴다 (photo_kind 'owner').
-        Blog-Auto 는 같은 상품의 가장 나중 줄을 쓰고, 품절 기록과 견주는 posted_at 은 처음 발행 시각 그대로."""
+    def export_photo_update(self, deal: Deal, photo: bytes, *, posted_at: datetime, kind: str = "owner") -> dict[str, Any] | None:
+        """발행 뒤 받은 사진: 같은 product_id·posted_at 으로 사진이 바뀐 줄을 하나 더 쓴다 (photo_kind 'owner' — 주인 사진,
+        'verified' — 발행 뒤 봇이 자동으로 찾은 상품 사진). Blog-Auto 는 같은 상품의 가장 나중 줄을 쓰고, 품절 기록과 견주는 posted_at 은 처음 발행 시각 그대로."""
         try:
             out_dir = self.settings.data_dir / "media" / "export"
             out_dir.mkdir(parents=True, exist_ok=True)
-            stem = f"{re.sub(r'[^A-Za-z0-9_-]+', '_', deal.product.product_id)}_{int(time.time())}_owner"
+            stem = f"{re.sub(r'[^A-Za-z0-9_-]+', '_', deal.product.product_id)}_{int(time.time())}_{'owner' if kind == 'owner' else 'auto'}"
             photo_file = str(out_dir / f"{stem}.jpg")
             Path(photo_file).write_bytes(photo)
-            row = self._export_row(deal, photo_file=photo_file, text_card_file="", posted_at=posted_at, wait=False, kind="owner")
+            row = self._export_row(deal, photo_file=photo_file, text_card_file="", posted_at=posted_at, wait=False, kind=kind)
             row["photo_updated_at"] = utcnow().isoformat(timespec="seconds")
             self._append_export(row)
             return row
@@ -3418,6 +3423,11 @@ class DealBot:
             return
         try:
             posted = from_iso(str(row.get("posted_at"))) or utcnow()
+            retry = self._photo_retry.pop(deal.product.product_id, None)
+            if retry and self.settings.publish.late_photo_auto_minutes > 0:
+                # 자동으로 다시 찾을 길이 남음 (쿠팡 검색 몫 소진 등) — 주인에게 묻기 전에 잠깐 다시 찾아 본다 (late_photo.tick)
+                self.late_photo.hold(queue_id, deal, posted, retry)
+                return
             await self.late_photo.ask(queue_id, deal, posted)
         except Exception as e:  # noqa: BLE001 — 사진 부탁이 실패해도 발행은 그대로
             log.warning("late photo ask failed for #%d: %s", queue_id, e)
@@ -3445,6 +3455,24 @@ class DealBot:
         except Exception as e:  # noqa: BLE001 — 인스타 쪽 문제로 사진 받기가 실패하지 않게
             log.warning("late owner photo not attached to the instagram queue for #%d: %s", item.id, e)
         return True
+
+    async def find_late_photo(self, deal: Deal) -> tuple[bytes | None, str | None, str | None]:
+        """발행 뒤 다시 자동으로 찾기 (late_photo.tick): (JPEG, 쓴 주소, 아직 다시 찾아 볼 까닭)."""
+        photo, src, _how, retry = await self._auto_photo(deal.product, late=True)
+        return photo, src, retry
+
+    def save_auto_photo(self, item: QueueItem, jpeg: bytes, src: str | None) -> None:
+        """발행 뒤 자동으로 찾은 상품 사진을 그 딜 사진으로 (주인 사진이 아님 — owner_photo 표시 없이 image_url 만, 인스타 대기열 사본에도)."""
+        p = item.deal.product
+        p.image_url = src
+        p.extra["photo_kind"] = "verified"
+        self.db.update_queue_item(item.id, status=item.status, error=item.last_error, deal=item.deal)
+        if src:
+            self.db.remember_product_image(p.product_id, src)
+        try:
+            self.ig.attach_photo(item.id, jpeg)
+        except Exception as e:  # noqa: BLE001
+            log.warning("auto photo not attached to the instagram queue for #%d: %s", item.id, e)
 
     def late_photo_waiting(self, queue_id: int) -> bool:
         """이 딜이 지금 주인 사진을 기다리는 중인가 ('/photo N' 을 딜 사진으로 받을지 — 아니면 블로그 명령으로 넘김)."""
@@ -3607,10 +3635,11 @@ class DealBot:
         - 주인 사진이 없으면 모든 몰(네이버 포함 — 주인 10/24 '상품 링크에 들어가면 사진이 무조건 잘 나와 있을 텐데, 직접 넣어'):
           딜의 상품 사진(쿠팡·네이버 CDN 은 큰 주소부터) → 상품 페이지 사진(JSON-LD → og:image, 최종 주소가 상품 페이지일 때만).
           네이버 딜은 수집 때 가격을 확인 못 했으면 가격도 한 번 본다 (_read_unverified_price).
-        사진을 찾으러 검색하지 않는다 (네이버 쇼핑 검색 API 는 2026-07-31 종료). 게시판 목록·글 사진(뽐뿌 등)·로고·기본 배너는
+          자동으로 찾는 차례는 _auto_photo (주인 11/14: 전에 본 같은 상품 사진·쿠팡 검색 API 의 같은 상품번호 사진까지).
+        네이버 쇼핑 검색 API 는 2026-07-31 종료라 네이버에서 이름으로 찾지 않는다. 게시판 목록·글 사진(뽐뿌 등)·로고·기본 배너는
         상품 사진으로 쓰지 않는다. 글자 카드도 상품 사진이 아니라 여기서 만들지 않는다 (카드는 인스타만).
-        쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고(주인 사진은 공개 사본 주소), 못 찾았으면 비운다."""
-        cc = self.settings.publish
+        쓴 사진 주소를 p.image_url 에 남겨 스레드가 확인된 같은 사진을 쓰게 하고(주인 사진은 공개 사본 주소), 못 찾았으면 비운다.
+        찾은 곳은 photo_stats 에 센다 (/status '📷 상품 사진')."""
         p = deal.product
         if p.shop == "naver":
             # 가격 확인 (크롬으로 읽었으면 그 페이지를 아래 사진에도 — 주인 10/25). 주인 사진보다 먼저 — 예전 링크·사진을 다시 쓰는 딜은 주인이 가격을 본 게 아니라서
@@ -3621,9 +3650,37 @@ class DealBot:
         owned = self._owner_photo(p)
         if owned is not None:
             p.image_url = self._public_owner_photo(owned)  # 공개 도메인이 없으면 None (텔레그램은 바이트로, 스레드는 글만)
+            self.photo_stats.record("owner")
             return owned
+        photo, src, how, retry = await self._auto_photo(p, browser_meta=browser_meta)
+        if photo is None:
+            if p.image_url:
+                log.info("no usable product photo — posting without photo: %s", p.image_url[:100])
+            if retry:
+                self._photo_retry[p.product_id] = retry  # 발행 뒤 잠깐 다시 찾아 볼 까닭 (_ask_late_photo → late_photo.hold)
+            else:
+                self._photo_retry.pop(p.product_id, None)
+        else:
+            self._photo_retry.pop(p.product_id, None)
+            if how != "remembered":
+                self.db.remember_product_image(p.product_id, src or "")
+        self.photo_stats.record(how if photo is not None else "none")
+        p.image_url = src
+        return photo
+
+    async def _auto_photo(self, p: Product, *, browser_meta: Any = None,
+                          late: bool = False) -> tuple[bytes | None, str | None, str, str | None]:
+        """주인 사진 말고 자동으로 찾는 상품 사진, 찾는 차례대로 (주인 11/14 '자동으로 해줘'):
+        deal(딜의 사진 주소 — 쿠팡·네이버 CDN 은 큰 주소부터) → remembered(같은 상품을 전에 API·페이지에서 본 사진)
+        → page(상품 페이지 JSON-LD·og:image — 쿠팡처럼 페이지를 읽지 않는 몰 빼고) → browser(429 로 막힌 네이버 스토어는 가격 확인용 크롬)
+        → coupang_api(게시판 쿠팡 딜: 파트너스 검색에서 상품번호가 똑같은 결과의 사진).
+        모두 같은 검사(clean_image · 게시판 썸네일·로고 주소 제외)를 거친다.
+        돌려줌: (JPEG, 쓴 주소, 찾은 곳, 다시 찾아 볼 까닭). 까닭은 못 찾았는데 나중에 될 수도 있을 때만
+        (쿠팡 검색 몫 소진·일시 오류, 페이지 받기 오류). late: 발행 뒤 다시 찾기 — 페이지 가격은 다시 보지 않는다."""
+        cc = self.settings.publish
         referer = p.url if p.url and p.url.startswith("http") else None
         tried: set[str] = set()
+        retry: str | None = None
 
         async def _try(url: str | None) -> bytes | None:
             if not url or url in tried or is_board_thumb(url) or is_generic_image(url):
@@ -3635,25 +3692,35 @@ class DealBot:
             # 쿠팡·네이버 CDN 축소본이면 큰 주소부터, 그다음 원래 주소
             return [u for u in (coupang_image_url(url), naver_image_url(url)) if u != url] + [url]
 
-        photo: bytes | None = None
-        src: str | None = None
-        for url in _sizes(p.image_url):
-            photo = await _try(url)
-            if photo is not None:
-                src = url
-                break
-        if photo is None and p.url and not is_board_thumb(p.url) and p.shop not in self.settings.deal.enrich.exclude_shops:
+        async def _first(urls: list[str | None]) -> tuple[bytes | None, str | None]:
+            for url in urls:
+                got = await _try(url)
+                if got is not None:
+                    return got, url
+            return None, None
+
+        photo, src = await _first(_sizes(p.image_url))
+        if photo is not None:
+            return photo, src, "deal", None
+        try:
+            known = self.db.product_images(p.product_id, coupang_number(p))
+        except Exception:  # noqa: BLE001
+            known = []
+        photo, src = await _first([u for k in known for u in _sizes(k)])
+        if photo is not None:
+            return photo, src, "remembered", None
+        if p.url and not is_board_thumb(p.url) and p.shop not in self.settings.deal.enrich.exclude_shops:
             try:
                 meta = await self.enricher.fetch(p.url)
             except Exception:  # noqa: BLE001
                 meta = None
-            self._recheck_page_price(p, meta)
-            for url in [u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)]:
-                photo = await _try(url)
-                if photo is not None:
-                    src = url
-                    break
-            if photo is None and is_naver_store(p.url):
+                retry = "page"
+            if not late:
+                self._recheck_page_price(p, meta)
+            photo, src = await _first([u for page_url in (page_images(meta) if meta else []) for u in _sizes(page_url)])
+            if photo is not None:
+                return photo, src, "page", None
+            if is_naver_store(p.url):
                 # 일반 요청이 막힌(429) 네이버 스토어 — 가격 확인에 쓰는 그 크롬(위장 없는 빈 창 · 여유 메모리·간격·막히면 쉼은 store_browser)으로
                 # 상품 사진도 (주인 10/24 '직접 넣어' → 10/25 #118 '사진 필요'가 주인에게 감 · 주인 10/25 '응'). 가격 때문에 읽은 페이지면 다시 안 엶
                 bmeta = browser_meta
@@ -3662,15 +3729,19 @@ class DealBot:
                         bmeta = await self.store_browser.page_meta(p.url)
                     except Exception:  # noqa: BLE001
                         bmeta = None
-                for url in [u for page_url in (page_images(bmeta) if bmeta else []) for u in _sizes(page_url)]:
-                    photo = await _try(url)
-                    if photo is not None:
-                        src = url
-                        break
-        if photo is None and p.image_url:
-            log.info("no usable product photo — posting without photo: %s", p.image_url[:100])
-        p.image_url = src
-        return photo
+                photo, src = await _first([u for page_url in (page_images(bmeta) if bmeta else []) for u in _sizes(page_url)])
+                if photo is not None:
+                    return photo, src, "browser", None
+        if p.shop == "coupang":
+            url, status = await self.photo_search.find(p)
+            if url:
+                photo, src = await _first(_sizes(url))
+                if photo is not None:
+                    return photo, src, "coupang_api", None
+                retry = retry or "coupang_api:fetch"  # 사진 받기만 실패 — 나중에 다시
+            elif status in ("budget", "error"):
+                retry = f"coupang_api:{status}"
+        return None, None, "none", retry
 
     async def make_card(self, deal: Deal, photo: bytes | None, *, deal_no: int | None = None, text_card: bool = False,
                         cta: str | None = None) -> str | None:
@@ -4633,6 +4704,7 @@ class DealBot:
         pruned["owner_photos"] = self._prune_owner_photos()
         pruned["sns"] = self.db.prune_sns(utcnow() - timedelta(days=self.settings.app.prune_events_days))
         pruned["late_photo"] = self.late_photo.prune()
+        pruned["photo_miss"] = self.photo_search.prune()
         if self.router is not None:  # 주인 알림·푸시 기록 (14일) · 스레드 답글 (7일)
             now = time.time()
             pruned["owner_notices"] = self.router.store.prune(now - 14 * 86400)

@@ -43,6 +43,9 @@
 {% endif %}
 
 📤 <b>{% if dry_run %}미리보기로 보낸 글{% else %}채널에 올린 글{% endif %}</b> 최근 1시간 {{ rate.posts_hour }}건 (최대 {{ rate.max_hour }}) · 오늘 {{ rate.posts_day }}건 (최대 {{ rate.max_day }}){% if rate.last_post_at %} · 마지막 {{ rate.last_post_at | local }}{% endif +%}
+{% if photo_sources | default('') %}
+📷 <b>상품 사진</b> 최근 7일 — {{ photo_sources }}
+{% endif %}
 {% if threads is defined %}
 🧵 <b>스레드 자동 게시</b> {% if threads.state == 'ok' %}✅ 연결됨{% if threads.username %} @{{ threads.username }}{% endif %}{% if threads.expires %} · 토큰 {{ threads.expires }}까지, 자동 갱신{% endif %}{% elif threads.state == 'unlinked' %}❌ 미연결 → /threadsauth{% elif threads.state == 'noapp' %}꺼짐 (THREADS_APP_ID / SECRET 없음){% else %}꺼짐 (config threads.enabled){% endif +%}
 {% if threads.last_fail %}

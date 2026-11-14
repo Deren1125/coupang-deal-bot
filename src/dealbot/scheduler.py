@@ -206,6 +206,10 @@ async def publisher_loop(bot: DealBot, stop: asyncio.Event) -> None:
                     log.info("자동 업데이트가 새 코드를 받는 중 — 새 글 발행은 재시작 뒤에")
                 else:
                     await bot.process_queue_once()
+                    # 사진 없이 올라간 딜 중 자동으로 다시 찾는 딜 (주인 11/14) — 때가 된 것만, 끝내 없으면 주인에게 📷
+                    late = getattr(bot, "late_photo", None)
+                    if late is not None:
+                        await late.tick()
                     # 스레드 대기열: 리듬(07~24시·45분 간격·하루 딜 10개)이 허락하면 한 글 (발행 루프라 재시작 때 마칠 시간을 받음)
                     flow = getattr(bot, "threads_flow", None)
                     if flow is not None:

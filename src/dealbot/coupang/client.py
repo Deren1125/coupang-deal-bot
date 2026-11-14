@@ -200,12 +200,14 @@ class CoupangClient:
         )
         return list(data or [])
 
-    async def search(self, keyword: str, *, limit: int = 10, image_size: str | None = None) -> list[dict[str, Any]]:
+    async def search(self, keyword: str, *, limit: int = 10, image_size: str | None = None,
+                     kind: str = "search") -> list[dict[str, Any]]:
+        """kind: 예산(ApiBudget)에서 셀 종류 — 시중가 대조는 'search', 딜 사진 찾기는 'photo' (시간당 상한이 따로)."""
         data = await self._request(
             "GET",
             PATH_SEARCH,
             params={"keyword": keyword, "limit": limit, "subId": self.sub_id, "imageSize": image_size},
-            kind="search",
+            kind=kind,
         )
         if isinstance(data, dict):
             return list(data.get("productData") or [])

@@ -24,6 +24,16 @@ MAYBE_POSTED = "maybe posted"
 # 주인의 링크를 기다리는 글 (링크 요청 카톡·텔레그램 링크 요청·고정 공지 /pending·대시보드 '링크 기다리는 딜' 이 모두 이 상태로 셈)
 LINK_WAITING = ("awaiting_link",)
 
+def _kept_image(url: str | None) -> str | None:
+    """products.image_url 에 남길 사진 주소: 게시판 목록 썸네일·로고 같은 주소는 남기지 않는다 (None → 전에 남은 좋은 사진을 지킴).
+    예전엔 뽐뿌 썸네일이 골드박스에서 본 같은 쿠팡 상품의 API 사진을 덮어썼다."""
+    if not url:
+        return None
+    from dealbot.media.imagecheck import is_board_thumb, is_generic_image
+
+    return None if is_board_thumb(url) or is_generic_image(url) else url
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS products (
     product_id     TEXT PRIMARY KEY,
@@ -522,7 +532,7 @@ class Database(SnsStoreMixin):
                     product.product_id,
                     product.name,
                     product.url,
-                    product.image_url,
+                    _kept_image(product.image_url),
                     product.category,
                     ts,
                     ts,
@@ -1138,6 +1148,29 @@ class Database(SnsStoreMixin):
             "SELECT product_id FROM source_items WHERE source = ? AND external_id = ?", (source, external_id)
         )
         return row["product_id"] if row else None
+
+    def product_images(self, product_id: str, coupang_no: str | None = None) -> list[str]:
+        """이 상품을 전에 볼 때 남은 사진 주소 (최근 것부터). 쿠팡은 같은 상품번호의 다른 옵션('coupang:123:옵션')도 —
+        게시판 쿠팡 딜(옵션 없는 키)이 골드박스·카테고리 베스트에서 본 같은 상품의 API 사진을 쓰게 (주인 11/14)."""
+        if coupang_no and coupang_no.isdigit():
+            rows = self._q("SELECT image_url FROM products WHERE (product_id = ? OR product_id = ? OR product_id LIKE ?) "
+                           "AND image_url IS NOT NULL AND image_url != '' ORDER BY last_seen_at DESC LIMIT 5",
+                           (product_id, f"coupang:{coupang_no}", f"coupang:{coupang_no}:%"))
+        else:
+            rows = self._q("SELECT image_url FROM products WHERE product_id = ? AND image_url IS NOT NULL AND image_url != ''",
+                           (product_id,))
+        out: list[str] = []
+        for r in rows:
+            if r["image_url"] not in out:
+                out.append(str(r["image_url"]))
+        return out
+
+    def remember_product_image(self, product_id: str, url: str) -> None:
+        """확인을 마친 상품 사진 주소를 그 상품에 남긴다 (같은 상품이 또 나오면 remembered 로 바로 씀). 상품 줄이 없으면 아무것도 안 함."""
+        if not _kept_image(url):
+            return
+        with self._lock:
+            self._conn.execute("UPDATE products SET image_url = ? WHERE product_id = ?", (url, product_id))
 
     def product_url(self, product_id: str) -> str | None:
         row = self._one("SELECT url FROM products WHERE product_id = ?", (product_id,))

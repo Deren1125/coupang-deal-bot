@@ -1295,7 +1295,17 @@ class StatusReporter:
             "last_error": truncate(last_err.splitlines()[0], 300) if last_err else None,
             "last_error_at": fmt_local(last_err_at, tz) if last_err_at else None,
             "tz": tz,
+            "photo_sources": self._photo_sources(tz),
         }
+
+    def _photo_sources(self, tz: str) -> str:
+        """최근 7일 딜 상품 사진을 어디서 찾았나 (주인 11/14 — 자동으로 찾는 곳이 얼마나 되는지 보이게). 기록이 없으면 ''."""
+        try:
+            from dealbot.growth.photo_sources import PhotoStats
+
+            return PhotoStats(self.db, tz).summary(7)
+        except Exception:  # noqa: BLE001
+            return ""
 
     def status_text(self) -> str:
         return self.renderer.render("status.j2", **self.status_context())

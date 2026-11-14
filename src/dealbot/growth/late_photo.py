@@ -7,6 +7,10 @@ Blog-Auto 가 읽는 published_deals.jsonl 에 사진이 바뀐 줄을 하나 �
 채널 글은 이미 올라갔으니 고치지 않는다.
 인스타: 기다리는 동안 인스타 시간표는 사진 없는 딜 글을 미루고(ig_scheduler — 사진 있는 딜이 먼저), 사진이 오면 그 사진으로 올린다.
 이미 글자 카드로 올라간 뒤면 답장에 그렇게 적는다.
+자동 다시 찾기 (주인 11/14 '사진이 필요한 딜은 왜 있는거야. 자동으로 해줘'): 발행 때 자동으로 못 찾았지만 다시 찾을 길이 남은 딜
+(쿠팡 검색 몫 소진·일시 오류)은 바로 묻지 않고 hold — publish.late_photo_auto_minutes(30분) 동안 RETRY_EVERY 마다 다시 찾아
+찾으면 그 사진을 딜 사진으로(photo_kind 'verified' 줄 + 인스타 대기열 사본), 끝내 없을 때만 주인에게 '📷 사진 필요'.
+기다리는 동안에도 kv 기록(until)은 그대로라 인스타 시간표는 글자 카드로 먼저 올리지 않고, 주인이 대시보드에서 사진을 올려도 받는다.
 받는 창은 photo_wait_until 보다 CLOSE_EARLY 만큼 일찍 닫는다 — Blog-Auto 는 그 시각이 지나면 글자 카드로 쓰므로
 사진 받기(텔레그램 다운로드·검사·내보내기)가 그 뒤에 끝나 '블로그에 써요' 라고 해 놓고 못 쓰는 일이 없게.
 """
@@ -29,6 +33,7 @@ log = logging.getLogger(__name__)
 KV = "late_photo:"  # late_photo:{딜 번호} → {"until", "posted_at", "product_id"}
 CLOSE_EARLY = timedelta(minutes=2)  # 받는 창을 이만큼 일찍 닫음 (Blog-Auto 가 until 에 글자 카드로 넘어가기 전에 다 받게)
 MSG_KIND = "photo_need"
+RETRY_EVERY = timedelta(minutes=10)  # hold 동안 다시 찾는 간격
 ASK = "📷 사진 필요 #{n} {name} — 4시간 안에 이 메시지에 사진을 답장하면 블로그·인스타에 그 사진을 써요"
 
 
@@ -52,22 +57,95 @@ class LatePhoto:
     def wait_until(self, posted_at: datetime) -> datetime:
         return posted_at + timedelta(hours=self.hours)
 
-    async def ask(self, queue_id: int, deal: Any, posted_at: datetime) -> bool:
-        """사진 없이 올라간 딜: 관리자 챗 한 통(소리 없이, 답장 자리) + 주인 할 일. 보냈으면 True."""
+    def hold(self, queue_id: int, deal: Any, posted_at: datetime, why: str) -> bool:
+        """주인에게 묻기 전에 자동으로 다시 찾아 볼 딜: 기다림 기록(until)만 남기고 메시지·할 일은 아직 안 보냄 (tick 이 이어 함)."""
+        if not self.enabled() or deal.product.deal_kind == "info":
+            return False
+        until = self.wait_until(posted_at)
+        ask_at = min(posted_at + timedelta(minutes=float(self.bot.settings.publish.late_photo_auto_minutes)), until - CLOSE_EARLY * 10)
+        self.bot.db.kv_set(f"{KV}{queue_id}", json.dumps(
+            {"until": to_iso(until), "posted_at": to_iso(posted_at), "product_id": deal.product.product_id,
+             "auto_until": to_iso(ask_at), "auto_next": to_iso(posted_at + RETRY_EVERY), "auto_why": why}))
+        self.bot.db.log_event("INFO", "late_photo", f"#{queue_id} 사진 자동으로 다시 찾는 중 ({why}) — {to_iso(ask_at)} 까지 없으면 주인에게")
+        return True
+
+    async def tick(self, now: datetime | None = None) -> int:
+        """hold 한 딜을 다시 찾아 본다 (발행 루프마다 — 때가 된 것만). 찾았거나 주인에게 물은 딜 수."""
+        bot = self.bot
+        now = now or bot.clock()
+        done = 0
+        for key, value in bot.db.kv_items(KV):
+            try:
+                info = json.loads(value or "null")
+                qid = int(key[len(KV):])
+            except ValueError:
+                continue
+            if not isinstance(info, dict) or not info.get("auto_until"):
+                continue
+            nxt = from_iso(info.get("auto_next"))
+            if nxt is not None and now < nxt:
+                continue
+            item = bot.db.get_queue_item(qid)
+            if item is None or item.status != "published":
+                bot.db.kv_set(key, "")
+                continue
+            try:
+                jpeg, src, retry = await bot.find_late_photo(item.deal)
+            except Exception as e:  # noqa: BLE001 — 다시 찾기가 터지면 주인에게 묻는 쪽으로
+                log.warning("late auto photo failed for #%d: %s", qid, e)
+                jpeg, src, retry = None, None, None
+            if self._info(qid) != info:  # 찾는 사이 주인 사진이 왔거나 기록이 바뀜
+                continue
+            if jpeg is not None:
+                await self._attach_auto(qid, item, jpeg, src, info)
+                done += 1
+                continue
+            ask_at = from_iso(info.get("auto_until"))
+            if retry and ask_at is not None and now + RETRY_EVERY <= ask_at:
+                info["auto_next"] = to_iso(now + RETRY_EVERY)
+                info["auto_why"] = retry
+                bot.db.kv_set(key, json.dumps(info))
+                continue
+            posted_at = from_iso(info.get("posted_at")) or now
+            until = from_iso(info.get("until")) or self.wait_until(posted_at)
+            left = max(0.5, round((until - now).total_seconds() / 1800) / 2)  # 남은 시간 (30분 단위)
+            await self.ask(qid, item.deal, posted_at, hours_left=left)
+            done += 1
+        return done
+
+    async def _attach_auto(self, queue_id: int, item: Any, jpeg: bytes, src: str | None, info: dict[str, Any]) -> None:
+        bot = self.bot
+        bot.save_auto_photo(item, jpeg, src)
+        posted_at = from_iso(info.get("posted_at")) or bot.clock()
+        bot.export_photo_update(item.deal, jpeg, posted_at=posted_at, kind="verified")
+        bot.db.kv_set(f"{KV}{queue_id}", "")
+        bot.notifier.resolve(f"photo:{queue_id}")
+        stats = getattr(bot, "photo_stats", None)
+        if stats is not None:
+            stats.record("late_auto")
+        bot.db.log_event("INFO", "late_photo", f"#{queue_id} 상품 사진 자동으로 찾음 (주인에게 안 물음)")
+
+    async def ask(self, queue_id: int, deal: Any, posted_at: datetime, *, hours_left: float | None = None) -> bool:
+        """사진 없이 올라간 딜: 관리자 챗 한 통(소리 없이, 답장 자리) + 주인 할 일. 보냈으면 True.
+        hours_left: 자동으로 다시 찾다가 묻는 거면 남은 시간 (메시지의 '4시간' 대신)."""
         bot = self.bot
         if not self.enabled() or deal.product.deal_kind == "info":
             return False
         until = self.wait_until(posted_at)
         bot.db.kv_set(f"{KV}{queue_id}", json.dumps(
             {"until": to_iso(until), "posted_at": to_iso(posted_at), "product_id": deal.product.product_id}))
-        text = ask_text(queue_id, deal.product.name, self.hours)
+        stats = getattr(bot, "photo_stats", None)
+        if stats is not None:
+            stats.record("asked")
+        hours = self.hours if hours_left is None else hours_left
+        text = ask_text(queue_id, deal.product.name, hours)
         mid = await bot.notifier.send_with_id(text, silent=True, kind=MSG_KIND, queue_id=queue_id)
         hhmm = until.astimezone(ZoneInfo(bot.settings.app.timezone)).strftime("%H:%M")
         await bot.notifier.alert(
             "photo_need", None,
             kakao_fit(f"🔔[할 일] 사진 필요 #{queue_id} {truncate(clean_name(deal.product.name), 50)}",
                       f"→ {hhmm} 까지 텔레그램 핫딜봇 📷 메시지에 사진 답장 (없으면 블로그는 글자 카드)"),
-            key=f"photo:{queue_id}", short=f"딜 사진 #{queue_id}", group="photo_need", ttl_h=self.hours,
+            key=f"photo:{queue_id}", short=f"딜 사진 #{queue_id}", group="photo_need", ttl_h=hours,
             links=product_links(deal.product),  # 상품 페이지 — 알림에서 바로 열어 사진을 받게 (주인 10/18)
         )
         bot.db.log_event("INFO", "late_photo", f"#{queue_id} 사진 요청 (until {to_iso(until)})")
