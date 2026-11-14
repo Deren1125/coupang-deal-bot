@@ -276,3 +276,135 @@ def test_real_browser_renders_clean(bot: DealBot, tmp_path: Path) -> None:
     assert got["wide"] <= 360 and got["btn"] >= 44
     (sent,) = got["posts"]
     assert sent["action"] == "uploads.done" and sent["args"] == {"id": "t1", "done": True}
+
+
+# ---------------------------------------------------------------- 6) 유튜브 받기 계정 카드 (11/14 쇼츠 총괄)
+YT_SHIM = r"""
+const out = {};
+class T { constructor(s) { this.data = s; } get nodeType() { return 3; } get textContent() { return this.data; } }
+class E {
+  constructor(t) { this.tagName = t.toUpperCase(); this.children = []; this.attrs = {}; this.className = ''; this._t = ''; this.style = {}; this.hidden = false; }
+  get nodeType() { return 1; }
+  get firstChild() { return this.children[0] || null; }
+  set textContent(v) { this._t = String(v); this.children = []; }
+  get textContent() { return this._t + this.children.map(c => c.textContent).join(''); }
+  setAttribute(k, v) { this.attrs[k] = v; }
+  addEventListener() {}
+  append(...cs) { cs.forEach(c => this.children.push(c.nodeType ? c : new T(String(c)))); }
+  prepend() {} replaceChildren(...cs) { this.children = []; this.append(...cs); }
+  all(f, a = []) { for (const c of this.children) if (c.nodeType === 1) { if (f(c)) a.push(c); c.all(f, a); } return a; }
+}
+const ids = {main: new E('main'), boot: new E('script'), toast: new E('div')};
+ids.boot.textContent = JSON.stringify({me: {csrf: 't'}});
+ids.main.append(new E('p'));
+global.location = {hash: '#/todo'};
+global.window = {SBHub: {}, addEventListener() {}, dispatchEvent() {}, localStorage: {getItem: () => 'blog'}, navigator: {}};
+global.MutationObserver = class { observe() {} };
+global.document = {readyState: 'complete', visibilityState: 'visible', head: new E('head'), getElementById: i => ids[i] || null, createElement: t => new E(t), addEventListener() {}};
+const UP = JSON.parse(process.argv[2]), fail = process.argv[3] === 'fail';
+global.fetch = async url => {
+  if (fail && url === '/dashboard/api/uploads') throw new Error('net');
+  return url === '/dashboard/api/routine' ? {status: 200, json: async () => ({day: 'd', today: true, slots: [], total: 0, done: 0})} : {status: 200, json: async () => UP};
+};
+(async () => {
+  require(process.argv[1]);
+  await new Promise(r => setTimeout(r, 20));
+  const R = window.SBRoutine, p = R.part('shorts', '숏폼', [], []);
+  out.n = R.cnt.shorts.n; out.card = p.length ? p[0].all(c => c.attrs['data-id'] === 'yt-alive').map(c => c.textContent) : [];
+  out.links = p.length ? p[0].all(c => c.tagName === 'A').map(a => [a.textContent, a.attrs.href, a.attrs.target, a.attrs.rel]) : [];
+  out.hot = p.length ? p[0].all(c => c.className === 'hu').map(c => c.textContent) : [];
+  console.log(JSON.stringify(out)); process.exit(0);
+})();
+"""
+
+
+def _yt_view(bot: DealBot, raw: dict | None) -> dict:
+    db_c = uploadplan.cache(bot.db)
+    if raw is not None:
+        db_c["yt"] = uploadplan.yt_clean(raw, TZ)
+    bot.db.kv_set(uploadplan.CACHE_KEY, json.dumps(db_c))
+    return uploadplan.view(bot)
+
+
+def test_yt_clean_kinds_and_time() -> None:
+    at = datetime(2031, 3, 5, 14, 7, tzinfo=TZ).isoformat()
+    assert uploadplan.yt_clean({"ok": True, "kind": "ok", "why": "", "at": at}, TZ) == {"kind": "ok", "why": "", "ts": datetime(2031, 3, 5, 14, 7, tzinfo=TZ).timestamp(), "page": "/ytlogin.html"}
+    assert uploadplan.yt_clean({"ok": False, "kind": "login", "why": "쿠키 만료", "at": at}, TZ)["kind"] == "login"
+    assert uploadplan.yt_clean({"ok": False, "kind": "weird", "at": 1900000000}, TZ)["kind"] == "other"
+    assert uploadplan.yt_clean({"ok": True}, TZ)["ts"] is None and uploadplan.yt_clean({"ok": True}, TZ)["kind"] == "ok"
+    assert uploadplan.yt_clean({"ok": True, "login_page": "/ytlogin2.html"}, TZ)["page"] == "/ytlogin2.html"
+    for bad in ("https://evil.example/x", "//evil.example/x", "/../x", "x", 5):
+        assert uploadplan.yt_clean({"ok": True, "login_page": bad}, TZ)["page"] == "/ytlogin.html"
+    now = datetime(2031, 3, 5, 10, 0, tzinfo=TZ).timestamp()
+    assert [uploadplan.yt_when(datetime(2031, 3, d, 8, 50, tzinfo=TZ).timestamp(), now, TZ) for d in (5, 4, 2)] == ["오늘 08:50", "어제 08:50", "3/2 08:50"]
+    assert uploadplan.yt_when(None, now, TZ) == ""
+    with pytest.raises(ValueError):
+        uploadplan.yt_clean([1], TZ)
+
+
+async def test_tick_yt_absent_failure_keeps_last(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    replies = [("ok", {"kind": "login", "why": "x", "ts": 1.0, "page": "/ytlogin.html"}), ("down", None), ("none", None)]
+    n = []
+
+    async def fake(tz: ZoneInfo):  # type: ignore[no-untyped-def]
+        n.append(1)
+        return replies[len(n) - 1]
+
+    monkeypatch.setattr(uploadplan, "fetch_yt", fake)
+    assert uploadplan.view(bot)["yt"] is None  # 아직 없음 = 조용히 아무것도 없음
+    assert await uploadplan.tick_yt(bot, now=1000.0) == "ok"
+    assert await uploadplan.tick_yt(bot, now=1100.0) is None and len(n) == 1  # 5분 안엔 다시 안 읽음
+    assert uploadplan.view(bot)["yt"]["kind"] == "login" and uploadplan.view(bot)["yt"]["login_url"].endswith("/ytlogin.html")
+    assert await uploadplan.tick_yt(bot, now=1300.0) == "down" and uploadplan.view(bot)["yt"]["kind"] == "login"  # 실패 = 지난 값
+    assert await uploadplan.tick_yt(bot, now=1700.0) == "none" and uploadplan.view(bot)["yt"] is None
+
+
+async def test_fetch_yt_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    real = httpx.AsyncClient
+
+    def mk(handler):  # type: ignore[no-untyped-def]
+        return lambda **kw: real(transport=httpx.MockTransport(handler), **{k: v for k, v in kw.items() if k != "transport"})
+
+    for code, body, want in ((200, '{"ok": true, "kind": "ok", "at": "2031-03-05T14:07:00+09:00"}', "ok"), (404, "", "none"), (500, "", "down"), (200, "not json", "down")):
+        monkeypatch.setattr(httpx, "AsyncClient", mk(lambda r, c=code, b=body: httpx.Response(c, content=b)))
+        assert (await uploadplan.fetch_yt(TZ))[0] == want
+
+    def boom(r):  # type: ignore[no-untyped-def]
+        raise httpx.ConnectError("x")
+
+    monkeypatch.setattr(httpx, "AsyncClient", mk(boom))
+    assert await uploadplan.fetch_yt(TZ) == ("down", None)
+
+
+@pytest.mark.parametrize("raw,card,n,hot", [
+    ({"ok": True, "kind": "ok", "why": "", "at": "2031-03-05T14:07:00+09:00"}, "유튜브 받기 계정✅ 정상 · 3/5 14:07", 0, []),
+    ({"ok": False, "kind": "login", "why": "로그인 풀림", "at": "2031-03-05T14:07:00+09:00"}, "유튜브 받기 계정❗다시 로그인 필요 · 3/5 14:07다시 로그인", 1, ["급함 1"]),
+    ({"ok": False, "kind": "runtime", "why": "크롬 죽음", "at": "2031-03-05T14:07:00+09:00"}, "유튜브 받기 계정⚠ 서버 문제 — 총괄이 보고 있어요 (크롬 죽음) · 3/5 14:07", 0, []),
+    ({"ok": False, "kind": "other", "why": "", "at": "2031-03-05T14:07:00+09:00"}, "유튜브 받기 계정⚠ 서버 문제 — 총괄이 보고 있어요 · 3/5 14:07", 0, []),
+    (None, None, 0, []),
+])
+def test_yt_card_in_shorts_category(bot: DealBot, raw: dict | None, card: str | None, n: int, hot: list[str]) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node 없음")
+    view = _yt_view(bot, raw)
+    out = subprocess.run([node, "-e", YT_SHIM, str(STATIC / "routine.js"), json.dumps(view, ensure_ascii=False)], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["card"] == ([card] if card else []) and got["n"] == n and got["hot"] == hot
+    if raw and raw["kind"] == "login":  # 주인이 누를 때만 새 탭 (자동으로 열지 않음)
+        assert got["links"] == [["다시 로그인", "https://3-35-144-76.sslip.io/ytlogin.html", "_blank", "noopener noreferrer"]]
+    else:
+        assert got["links"] == []
+    assert "window.open" not in (STATIC / "routine.js").read_text(encoding="utf-8")
+
+
+def test_yt_card_fetch_failure_does_not_break(bot: DealBot) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node 없음")
+    out = subprocess.run([node, "-e", YT_SHIM, str(STATIC / "routine.js"), "{}", "fail"], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout)["card"] == []

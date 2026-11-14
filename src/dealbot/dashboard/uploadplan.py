@@ -29,6 +29,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_URL = "https://3-35-144-76.sslip.io/o-7b0c7fb732a4/upload_tasks.json"
 URL_ENV = "DEALBOT_UPLOAD_TASKS_URL"
+YT_URL = "https://3-35-144-76.sslip.io/o-7b0c7fb732a4/sub/yt_alive.json"  # 유튜브 받기 계정 살아 있나 (11/14 쇼츠 총괄) — 같은 쇼츠 서버, 읽기만
+YT_BASE = "https://3-35-144-76.sslip.io"  # 다시 로그인 주소 = 이 주소 + yt_alive.json 의 login_page (기본 /ytlogin.html) — '다시 로그인' 단추 — 주인이 누를 때만 새 탭 (자동으로 열지 않음)
+YT_KINDS = ("ok", "login", "runtime", "other")
+YT_EVERY = 300
 CACHE_KEY = "uploads:cache"
 DONE_KEY = "uploads_done"
 DONE_MAX = 500
@@ -144,9 +148,72 @@ async def fetch(tz: ZoneInfo) -> tuple[str, list[dict[str, Any]] | None]:
         return "down", None
 
 
+def yt_clean(raw: Any, tz: ZoneInfo) -> dict[str, Any]:
+    """yt_alive.json {ok, kind, why, at} → {kind, why, hm}. 모르는 kind 는 other (kind 없이 ok:true 면 ok) · at 은 ISO 또는 초."""
+    if not isinstance(raw, dict):
+        raise ValueError("no object")
+    kind = raw.get("kind")
+    if kind not in YT_KINDS:
+        kind = "ok" if raw.get("ok") is True and kind in (None, "") else "other"
+    at = raw.get("at")
+    ts = at if isinstance(at, (int, float)) and not isinstance(at, bool) else _when(at, tz)
+    if ts and ts > 1e11:
+        ts /= 1000
+    page = raw.get("login_page")
+    if not (isinstance(page, str) and re.fullmatch(r"/[A-Za-z0-9_./-]{1,100}", page) and "//" not in page and ".." not in page):
+        page = "/ytlogin.html"  # 모르는 값·바깥 주소는 버리고 기본 (주소는 항상 쇼츠 서버 안)
+    return {"kind": kind, "why": _s(raw.get("why"), 200), "ts": ts or None, "page": page}
+
+
+def yt_when(ts: Any, now: float, tz: ZoneInfo) -> str:
+    """'오늘 08:50' · '어제 08:50' · '11/12 08:50' (하루 한 번 08:50 에 갱신되니 나이를 같이 보여 줌)."""
+    try:
+        d = datetime.fromtimestamp(float(ts), tz)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+    days = (_day(now, tz).date() - d.date()).days
+    return f"{'오늘' if days == 0 else '어제' if days == 1 else f'{d.month}/{d.day}'} {d:%H:%M}"
+
+
+async def fetch_yt(tz: ZoneInfo) -> tuple[str, dict[str, Any] | None]:
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as c:
+            r = await c.get(YT_URL, headers={"Accept": "application/json"})
+        if r.status_code == 404:
+            return "none", None
+        if r.status_code != 200 or len(r.content) > 16 * 1024:
+            return "down", None
+        return "ok", yt_clean(json.loads(r.content), tz)
+    except Exception as e:  # noqa: BLE001 — 실패해도 대시보드는 그대로
+        log.info("yt_alive fetch failed: %s", type(e).__name__)
+        return "down", None
+
+
+async def tick_yt(bot: Any, now: float | None = None) -> str | None:
+    """5분마다 (tick 과 따로 — 로그인 풀림은 빨리 알려야 함). 없음(404) = 카드 없음 · 실패 = 지난 값 그대로."""
+    now = now or time.time()
+    if now - float(cache(bot.db).get("yt_tried") or 0) < YT_EVERY:
+        return None
+    st, yt = await fetch_yt(_tz(bot))
+    c = cache(bot.db)
+    c["yt_tried"] = now
+    if st == "ok":
+        c["yt"] = yt
+    elif st == "none":
+        c.pop("yt", None)
+    bot.db.kv_set(CACHE_KEY, json.dumps(c, ensure_ascii=False, separators=(",", ":")))
+    return st
+
+
 async def tick(bot: Any, now: float | None = None) -> str | None:
     """1분마다 불림 (scheduler.dashboard_loop). 10분이 안 지났으면 바로 돌아옴. 한 일을 짧게."""
     now = now or time.time()
+    try:
+        await tick_yt(bot, now)
+    except Exception:  # noqa: BLE001
+        log.info("yt_alive tick failed")
     db = bot.db
     c = cache(db)
     if now - float(c.get("tried") or 0) < EVERY:
@@ -220,7 +287,8 @@ def view(bot: Any, now: float | None = None, lookbook: dict[str, Any] | None = N
         err = "쇼츠 서버 응답 없음" + (f" — {datetime.fromtimestamp(at, tz):%m/%d %H:%M} 목록을 보여 줘요" if at else "")
     elif state == "wait":
         err = "쇼츠 서버 일정을 읽는 중이에요 (10분마다)"
-    return {"ok": state == "ok", "state": state, "err": err, "empty": state == "none" or not rows,
+    yt = c.get("yt") if isinstance(c.get("yt"), dict) else None
+    return {"ok": state == "ok", "state": state, "err": err, "yt": yt and {"kind": yt.get("kind"), "why": yt.get("why") or "", "hm": yt_when(yt.get("ts"), now, tz), "login_url": YT_BASE + (yt.get("page") or "/ytlogin.html")}, "empty": state == "none" or not rows,
             "groups": [{"key": k, "label": lab, "items": groups[k]} for k, lab, _ in edges[1:] + edges[:1] if groups[k]],  # 지난 것은 맨 아래
             "todo": count(bot, now, lookbook)}
 

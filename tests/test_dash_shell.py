@@ -199,6 +199,9 @@ ROUTINE_JS_GZIP_MAX = 9 * 1024 + 512
 # 11/10: 글 줄 제목 옆 인기 예상 점수 칩 (주인 '점수도 할 일 탭에서 글 옆에') — '🔥 88점'·'62점' 알약 + CSS
 ROUTINE_JS_MAX = 27 * 1024
 ROUTINE_JS_GZIP_MAX = 9 * 1024 + 640
+# 11/14: 숏폼 칸 유튜브 받기 계정 카드 (+1.1 KB / gzip +0.3 KB — app.js 는 그대로)
+ROUTINE_JS_MAX = 27 * 1024 + 1280
+ROUTINE_JS_GZIP_MAX = 10 * 1024 + 256
 # 11/14: 할 일 종류 목록 — 칸마다 data-k · 남은 수(cnt) · 종류 화면에선 늘 펼침 (칸 순서 점수는 뺌) → gzip 9.6 KB 그대로
 # 할 일 종류 목록·종류 화면 (주인 11/14 '첫 화면은 종류별 목록만') — app.js 가 예산 끝이라 셸이 defer 로 받는 todohub.js (CSS 도 여기서)
 TODOHUB_JS_MAX = 8 * 1024 + 512

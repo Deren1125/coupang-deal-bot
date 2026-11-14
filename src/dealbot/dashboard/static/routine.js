@@ -275,21 +275,31 @@ function vid(x) {
         x.gate && x.title ? el('button', {class: 'sm', type: 'button', onclick: () => copy(x.title)}, '제목 복사') : null,
         x.gate && d ? el('button', {class: 'sm', type: 'button', onclick: () => copy(d)}, '설명·태그 복사') : null)));
 }
+// 유튜브 받기 계정 (11/14 쇼츠 총괄) — 숏폼 칸 안 작은 카드. 로그인 풀리면 급함 1 · '다시 로그인' 은 주인이 누를 때만 새 탭
+const ytc = () => up && up.yt && up.yt.kind ? up.yt : null;
+function ytcard(y) {
+  const ok = y.kind === 'ok', lg = y.kind === 'login', hm = y.hm ? ` · ${y.hm}` : '';
+  return el('div', {class: 'it mi', 'data-id': 'yt-alive'}, el('span', {class: 'cb', style: 'opacity:.35'}),
+    el('div', {class: 'grow'}, el('span', {class: 't'}, '유튜브 받기 계정'),
+      el('span', {class: 's' + (lg ? ' er' : '')}, (ok ? '✅ 정상' : lg ? '❗다시 로그인 필요' : '⚠ 서버 문제 — 총괄이 보고 있어요' + (y.why ? ` (${y.why})` : '')) + hm),
+      lg && /^https:\/\//.test(y.login_url || '') ? el('div', {class: 'bt'}, el('a', {class: 'sm', href: y.login_url, target: '_blank', rel: 'noopener noreferrer'}, '다시 로그인')) : null));
+}
 const TOP = new Set(['issue', 'finance', 'hotdeal']);  // 블로그 셋 — 할 일 맨 위 (주인 11/14)
 // 종류마다 남은 일·급한 수 (todohub.js 의 종류 목록이 읽음 — 주인 11/14 '할 일 첫 화면은 종류별 목록만')
 const cnt = {};
 function part(k, label, extra, hot) {
   hot = hot || [];
-  const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done);
-  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length + hot.length + ul.length, m = left.reduce((a, i) => a + i.min, 0) + ul.length * 3;
-  const hn = hot.length + ur.filter(x => x.g === 'past' && x.gate && !x.done).length;
+  const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done), yt = k === 'shorts' && by() ? ytc() : null, yl = yt && yt.kind === 'login' ? 1 : 0;
+  const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done), n = left.length + extra.length + hot.length + ul.length + yl, m = left.reduce((a, i) => a + i.min, 0) + ul.length * 3;
+  const hn = hot.length + yl + ur.filter(x => x.g === 'past' && x.gate && !x.done).length;
   cnt[k] = {n, m, u: hn};
-  if (!xs.length && !extra.length && !hot.length && !ur.length) return [];
-  const o = W.SBHub || (bo[k] == null ? k === 'issue' : bo[k]), bar = el('i'), all = xs.length + extra.length + hot.length + ur.filter(x => x.gate).length || 1, body = [];
+  if (!xs.length && !extra.length && !hot.length && !ur.length && !yt) return [];
+  const o = W.SBHub || (bo[k] == null ? k === 'issue' : bo[k]), bar = el('i'), all = xs.length + extra.length + hot.length + ur.filter(x => x.gate).length + yl || 1, body = [];
   bar.style.width = Math.round(100 * (all - n) / all) + '%';
   if (o) {
     const used = new Set(), sec = (t, f) => { const g = xs.filter(i => !used.has(i) && f(i)); g.forEach(i => used.add(i)); if (g.length) body.push(sh(t, g.filter(i => !i.done).length || '끝'), g.map(item)); };
     if (hot.length) body.push(sh('급한 것', hot.length), hot);
+    if (yt) body.push(ytcard(yt));
     Object.keys(UG).forEach(g => { const r = ur.filter(x => x.g === g); if (r.length) body.push(sh(UG[g], r.filter(x => x.gate && !x.done).length || '끝'), r.map(vid)); });
     sec(...SEC[0]);
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
