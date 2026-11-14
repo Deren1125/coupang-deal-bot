@@ -25,7 +25,7 @@ GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 
   kv "routine_relay_pending" = [{name: pasted|nb_requested, args, rid, ts, aid?, tries?, tried?, ok?}] (200개 · 3일).
   actions._pasted 가 맡길 때마다 relay_add — 못 맡겼으면 aid 없이, 맡겼으면 aid 와 함께 (10분 안에 안 가져가 'expired' 되면 다시 보내려고).
   relay_tick (scheduler.dashboard_loop 1분마다): 다리가 살아 있으면 aid 없는 것을 다시 맡기고, 맡긴 것은 결과를 봄 —
-  ok → 2시간 뒤 지움 (그동안 다음 날 목록에서도 체크로) · rejected·error → 지움 · expired → 다시 (10분·20분·40분·…·1시간 간격).
+  ok → 2시간 뒤 지움 (그동안 다음 날 목록에서도 체크로) · rejected·error → 지움 · expired·unknown → 다시 (10분·20분·40분·…·1시간 간격).
   carried() = 아직 못 전했거나 방금 전한 '했어요' 줄 id — view 가 그 목록의 done 에 더해 날이 바뀌어도 체크가 남는다.
 """
 
@@ -250,9 +250,10 @@ def relay_tick(bot: Any, now: float | None = None) -> dict[str, int]:
                 out["dropped"] += 1
                 log.info("routine relay: %s %s → %s (다시 보내지 않음)", x["name"], x["rid"], status)
                 continue
-            if status != "expired":  # queued·running — 기다림
+            if status not in ("expired", "unknown"):  # queued·running — 기다림
                 keep.append(x)
                 continue
+            # expired = 10분 안에 안 가져감 · unknown = 가져갔는데 20분 넘게 답이 없음 (하다가 다시 켜짐 — actions_out.sweep) → 다시 맡김 (같은 표시를 두 번 해도 같음)
             x = {k: v for k, v in x.items() if k != "aid"}
         tries = int(x.get("tries") or 0)
         wait = RELAY_RETRY_S[min(tries, len(RELAY_RETRY_S)) - 1] if tries else 0.0

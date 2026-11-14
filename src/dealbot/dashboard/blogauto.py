@@ -1479,7 +1479,7 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
     스레드 세션 몫(나중에 routine.threads_items)도 같은 모양이라 이 함수 하나로 거른다.
     paste (발행·예약 줄만): _paste 가 거른 붙여 넣기 글 · 없거나 틀리면 None · 공개 주소가 없으면 None 에 note 끝에 PASTE_NO_BASE.
     note 가 '꾸밈 새 원고 만드는 중' 으로 시작하면 (예전 Blog-Auto — 옛 묶음 html 을 그대로 실음) 그 묶음도 stale 로 바꿔 html 을 버린다 (주인 11/14).
-    gate (있을 때만): 올리기 전 검사 {ok, codes, text} — 틀린 모양이면 칸을 뺀다."""
+    gate (있을 때만): 올리기 전 검사 {ok, codes, text} — 틀린 모양이면 칸을 뺀다. ok 가 거짓이면 그 묶음도 stale (why failed · reason = gate.text) 로 바꿔 html 을 버린다."""
     if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ROUTINE_ID_RE.match(x["id"]):
         return None
     if x.get("slot") not in slot_keys or x.get("group") not in ROUTINE_GROUPS or not (title := _rt_line(x.get("title"), ROUTINE_TITLE_MAX)):
@@ -1502,6 +1502,9 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
         paste = _paste_stale(paste["title"], {"tags": paste["tags"], "photos": paste["photos"]}, why="building", reason=PASTE_BUILDING)
     sc = _count(x.get("score"), top=100) if x["group"] in PASTE_GROUPS else None  # 발행·예약 줄 인기 예상 점수 (주인 11/10 — 선택 칸)
     gate = _gate(x.get("gate")) if x["group"] in PASTE_GROUPS else None
+    if gate is not None and not gate["ok"] and paste is not None and not paste["stale"]:
+        # 점검에 걸린 묶음도 html 을 싣지 않는다 (11/14 마지막 검토 — 화면이 단추를 막아도, 열어 둔 옛 화면·캐시된 옛 routine.js 는 그대로 복사함)
+        paste = _paste_stale(paste["title"], {"tags": paste["tags"], "photos": paste["photos"]}, why="failed", reason=gate["text"])
     return {"id": x["id"], "slot": x["slot"], "group": x["group"], "blog": x.get("blog") if x.get("blog") in ROUTINE_BLOGS else "",
             "title": title, "note": note, "min": mins, "copy": copy, "links": links, "paste": paste,
             **({"score": sc, "popular": x.get("popular") is True} if sc is not None else {}), **({"gate": gate} if gate is not None else {})}

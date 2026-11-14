@@ -550,6 +550,9 @@ def test_stale_bundle_has_no_html_in_both_export_shapes() -> None:
     assert ok["paste"]["stale"] is False and ok["paste"]["html"] == "<p>본문이에요</p>" and ok["gate"] == {"ok": True, "codes": [], "text": ""}
     bad = _routine_item(pub("pub:hotdeal:4", paste=READY, gate={"ok": False, "codes": ["G4", "G2", "<x>", 7, "G1"]}), media_base=BASE)
     assert bad["gate"] == {"ok": False, "codes": ["G4", "G2", "G1"], "text": "같은 사진이 두 번 들어가서"}
+    # 점검에 걸린 묶음은 html 도 싣지 않음 (옛 화면이 열려 있어도 복사할 글이 없음) · 제목·태그는 그대로
+    assert bad["paste"]["stale"] is True and bad["paste"]["html"] == "" and bad["paste"]["text"] == "" and bad["paste"]["title"] == ok["paste"]["title"]
+    assert (bad["paste"]["why"], bad["paste"]["reason"]) == ("failed", "같은 사진이 두 번 들어가서")
     assert _routine_item(pub("pub:hotdeal:5", paste=READY, gate={"ok": False, "codes": ["ZZ9"]}), media_base=BASE)["gate"]["text"] == "자동 점검에 걸려서"
     for junk in ("ok", {"ok": "true"}, {"codes": ["G1"]}, ["G1"], None, 1):  # 틀린 모양은 칸을 뺌 (줄은 예전처럼)
         assert "gate" not in _routine_item(pub("pub:hotdeal:6", paste=READY, gate=junk), media_base=BASE)
@@ -632,8 +635,8 @@ def test_not_ready_rows_cannot_be_copied(bot: DealBot, tmp_path: Path) -> None:
     ]})
     view = routine.view(bot, now=at(bot, day, "10:00"))
     by_id = {i["id"]: i for s in view["slots"] for i in s["items"]}
-    assert [by_id[f"pub:hotdeal:{n}"]["paste"]["stale"] for n in range(1, 7)] == [True, True, True, False, False, False]
-    assert all(by_id[f"pub:hotdeal:{n}"]["paste"]["html"] == "" for n in (1, 2, 3)) and by_id["pub:hotdeal:5"]["paste"]["html"]
+    assert [by_id[f"pub:hotdeal:{n}"]["paste"]["stale"] for n in range(1, 7)] == [True, True, True, True, False, False]
+    assert all(by_id[f"pub:hotdeal:{n}"]["paste"]["html"] == "" for n in (1, 2, 3, 4)) and by_id["pub:hotdeal:5"]["paste"]["html"]
     shim = DOM_SHIM.replace("navigator: {clipboard: {writeText: async t => { clip.push(t); }}}",
                             "ClipboardItem: class { constructor(o) { this.o = o; } }, "
                             "navigator: {clipboard: {writeText: async t => { clip.push(t); }, write: async x => { wrote.push(x); }}}") \
@@ -700,6 +703,13 @@ async def test_checks_wait_for_blogauto_and_survive_the_night(bot: DealBot, sett
     blogauto_status(settings, age=-1300)  # (가짜 시각으로 앞서가므로 신호도 그때 것으로)
     assert routine.relay_tick(bot, now=now + 601 + 700)["sent"] == 0
     assert routine.relay_tick(bot, now=now + 601 + 1201)["sent"] == 1
+    # 가져갔는데 20분 넘게 답이 없음(unknown — 하다가 다시 켜짐) 도 기다리기만 하지 않고 다시 맡김 (간격은 40분)
+    third = routine.relay_rows(bot.db)[0]
+    bot.actions_out.store.update(third["aid"], status="unknown", result={}, now=now)
+    blogauto_status(settings, age=-3700)
+    assert routine.relay_tick(bot, now=now + 601 + 1201 + 2000)["sent"] == 0
+    assert routine.relay_tick(bot, now=now + 601 + 1201 + 2401)["sent"] == 1
+    assert routine.relay_rows(bot.db)[0]["aid"] != third["aid"] and routine.relay_rows(bot.db)[0]["tries"] == 4
     # 다음 날 목록에 그 줄이 그대로 와도 체크로 (발행 줄은 pub·rsv 어느 쪽이든)
     tomorrow = (tz_now(bot) + timedelta(days=1)).date().isoformat()
     with_routine(tmp_path, {"day": tomorrow, "slots": SLOTS, "overflow": 0, "items": [

@@ -11,7 +11,7 @@
 | `LINKPRICE_AFFILIATE_ID` | 링크프라이스 어필리에이트 센터 | 11번가/G마켓/옥션/SSG/롯데온/알리 자동화 |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys | 정보 글(상품 링크 없는 게시판 글)을 채널 양식으로 요약해 자동 발행 (없으면 확인 요청으로 옴) |
 | `DEALBOT_MODEL_SUMMARIZER` | 쓸 Claude API 모델 이름 | `ANTHROPIC_API_KEY` 로 요약·말 명령을 할 때 필수. 없으면 API 는 건너뛰고 서버 claude CLI 로 (저장소에는 모델 이름을 두지 않음) |
-| `DEALBOT_MODEL_COMMENTARY` | 쓸 claude CLI 모델 이름 | 한줄평과 CLI 로 도는 요약·말 명령의 `--model` (선택, 없으면 CLI 기본 모델) |
+| `DEALBOT_MODEL_COMMENTARY` | 쓸 claude CLI 모델 이름 | 한줄평과 CLI 로 도는 요약·말 명령의 `--model` (선택, 없거나 Fable·Mythos 이름이면 CLI 별칭 `sonnet` — 늘 `--model` 을 넘김) |
 | `ADPICK_AFFID` | 애드픽 | 애드픽 핫딜 API 수집 |
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | (필요 없음) 네이버 쇼핑 검색 Open API 는 2026-07-31 종료, 대신할 API 없음 (네이버 클라우드 API HUB 에도 쇼핑 검색이 없어 401) | 키 조치 필요 없음. 예전엔 네이버 딜 사진 찾기와 쿠팡 딜 네이버 최저가 비교(`deal.naver_reference`, 운영은 꺼 둠)에 썼음. 네이버 딜 사진은 이제 주인이 링크와 같이 보낸 사진 (`/link 번호 링크` 를 사진 설명 칸에) |
 | `NTFY_TOPIC` 또는 `PUSHOVER_USER_KEY`+`PUSHOVER_APP_TOKEN` | ntfy 앱 / pushover.net | 휴대폰 푸시 알림 (선택) |
