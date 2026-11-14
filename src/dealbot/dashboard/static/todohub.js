@@ -59,7 +59,7 @@ function count(c) {
     return e ? [e.n, e.u, e.n ? `확인 필요 ${e.n}` : '할 일 없음'] : [0, 0, '연결 전'];
   }
   const r = (W.SBRoutine && W.SBRoutine.cnt) || {}, x = r[c[2]] || {n: 0, m: 0, u: 0}, n = x.n + (c[0] === 'etc' ? r.ab || 0 : 0);
-  return [n, x.u, n ? `남은 일 ${n}` + (x.m ? ` · 약 ${x.m}분` : '') : x.w ? `만드는 중 ${x.w}` : '할 일 없음'];
+  return [n, x.u, (n ? `남은 일 ${n}` + (x.m ? ` · 약 ${x.m}분` : '') : x.w ? `만드는 중 ${x.w}` : '할 일 없음') + (x.v ? ` · 들르기 ${x.v}` : '')];  // v = 오늘 이웃 들르기 (책갈피 '이웃 관리' — routine.js)
 }
 // 맨 위 알림 줄 (p = 'hub' 또는 종류)
 function notes(p) {

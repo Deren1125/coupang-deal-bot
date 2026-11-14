@@ -948,3 +948,31 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
     assert got["folds"][3] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)" and got["folds"][4] == "X 도우미 버튼 설치" and len(got["folds"]) == 5  # 다섯째 = X 도우미 (11/14)
     assert sv["note"] in got["notes"] and got["steps"][-len(seoi.STEPS):] == list(seoi.STEPS)
     assert got["clip"] == [sv["code"]] and got["toast"].startswith("복사했어요") and "null" not in got["text"] and "undefined" not in got["text"]
+
+
+# ---------------------------------------------------------------- 5) 할 일 탭 (routine.js · todohub.js)
+@needs_node
+def test_todo_rows_open_the_blog_with_message_and_show_the_visit_line() -> None:
+    """서로이웃 줄 '블로그 열기' 주소에 멘트·블로그(#bmmsg=…&bmb=…)가 붙고 책갈피가 읽는 방식으로 그대로 되돌아옴 · 블로그 칸에 '이웃 들르기' 한 줄."""
+    rt = (STATIC / "routine.js").read_text(encoding="utf-8")
+    assert "href: nbUrl(it, l.url, msg)," in rt and "seoiRow(k, sv, data.seoi)" in rt and "if (sv) cnt[k].v = sv.visit;" in rt
+    assert "'이웃새글 열기 ↗'" in rt and "href: '#/connect'}, '책갈피 설치'" in rt and "https://" not in rt
+    assert "x.v ? ` · 들르기 ${x.v}` : ''" in (STATIC / "todohub.js").read_text(encoding="utf-8")
+    line = next(ln for ln in rt.splitlines() if ln.startswith("const nbUrl = "))
+    chk = line + r"""
+const msg = process.argv[1], out = [];
+for (const b of ['issue', 'finance', 'hotdeal']) {
+  const u = nbUrl({blog: b}, 'https://m.blog.naver.com/neighbor1', msg), h = new URLSearchParams(new URL(u).hash.slice(1));
+  out.push([u.split('#')[0], h.get('bmmsg'), h.get('bmb')]);
+}
+out.push(nbUrl({blog: 'issue'}, 'https://m.blog.naver.com/neighbor1', ''), nbUrl({blog: 'issue'}, 'https://evil.example/x', msg),
+  nbUrl({blog: 'hotdeal'}, 'https://blog.naver.com/neighbor1/223456789012', ''));
+console.log(JSON.stringify(out));
+"""
+    msg = "안녕하세요! 100% 공감 & 소통 + 이웃 #패딩 글 잘 봤어요?"
+    res = subprocess.run([NODE, "-e", chk, msg], capture_output=True, text=True, timeout=30)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
+    assert got[:3] == [["https://m.blog.naver.com/neighbor1", msg, b] for b in ("issue", "finance", "hotdeal")]
+    assert got[3] == "https://m.blog.naver.com/neighbor1#bmb=issue" and got[4] == "https://evil.example/x"  # 네이버 블로그 주소에만 붙임
+    assert got[5] == "https://blog.naver.com/neighbor1/223456789012#bmb=hotdeal"  # 공감·댓글 줄 '글 열기'에는 블로그만

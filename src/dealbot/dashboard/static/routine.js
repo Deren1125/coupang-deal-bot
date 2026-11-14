@@ -221,7 +221,8 @@ function item(it) {
       it.paste && !it.done ? paste(it) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
 }
 
-// 이웃 줄은 짧게 (11/09) · 서로이웃은 이유·멘트도 (11/14)
+// 이웃 줄은 짧게 (11/09) · 서로이웃은 이유·멘트도 (11/14) · 여는 주소 뒤에 멘트·블로그(#bmmsg=…&bmb=…) — 책갈피 '이웃 관리'가 읽음
+const nbUrl = (it, u, msg) => /^https:\/\/(m\.)?blog\.naver\.com\/[\w-]+(\/\d+)?$/.test(u) ? u + '#' + (msg ? 'bmmsg=' + encodeURIComponent(msg) + '&' : '') + 'bmb=' + it.blog : u;
 function mini(it) {
   const t = it.title.replace(/^(서로이웃 신청|공감·댓글) · /, ''), nb = it.id.startsWith('nb-add:'),
     why = nb && it.note, msg = nb && (it.copy.find(c => c.label == '멘트') || {}).text;
@@ -230,7 +231,7 @@ function mini(it) {
       onclick: () => check(it)}, it.done ? '✓' : ''),
     el('div', {class: 'grow'}, el('span', {class: 't'}, t), why ? el('span', {class: 's'}, why) : null,
       msg && !it.done ? el('span', {class: 's'}, '멘트 · ' + msg) : null, it.done ? null : el('div', {class: 'bt'},
-      it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label + ' ↗')),
+      it.links.map(l => el('a', {class: 'sm', href: nbUrl(it, l.url, msg), target: '_blank', rel: 'noopener noreferrer'}, l.label + ' ↗')),
       it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label + ' 복사')))));
 }
 
@@ -302,13 +303,17 @@ function ytcard(y) {
 // 이웃 글 들르기 시작 (주인 11/14 '공감·댓글도 책갈피로'): 아직 안 한 첫 글을 새 탭에 — 거기서 책갈피 '이웃 관리'(공감 + 댓글 초안 · 등록은 직접).
 // 누를 때마다 한 편 · 책갈피가 들른 글의 줄은 대시보드가 체크 (nbvisit.py) → 돌아오면 다음 글
 function nbv(k) {
-  const b = data && data.nb && data.nb.by[k], s = data && data.seoi && data.seoi.by && data.seoi.by[k];
+  const b = data && data.nb && data.nb.by[k];
   return b && b.left ? [b.next ? el('div', {class: 'bt nbv'}, el('a', {class: 'sm ac', href: b.next.url, target: '_blank', rel: 'noopener noreferrer'}, `이웃 글 들르기 시작 (${b.left}) ↗`)) : null,
-    el('span', {class: 's'}, "열린 글을 읽고(20초쯤) 책갈피 '이웃 관리' → 공감 + 댓글 초안 · 등록은 직접 · 줄은 저절로 체크" + (s ? ' · ' + s.line : ''))] : null;
+    el('span', {class: 's'}, "열린 글을 읽고(20초쯤) 책갈피 '이웃 관리' → 공감 + 댓글 초안 · 등록은 직접 · 줄은 저절로 체크")] : null;
 }
 const TOP = new Set(['issue', 'finance', 'hotdeal']);  // 블로그 셋 — 할 일 맨 위 (주인 11/14)
 // 종류마다 남은 일·급한 수 (todohub.js 의 종류 목록이 읽음 — 주인 11/14 '할 일 첫 화면은 종류별 목록만')
 const cnt = {};
+// 이웃 들르기 한 줄 (주인 11/14) — 책갈피 '이웃 관리'로 한 오늘 수 (routine.view seoi · 체크 없음 · 남은 일에 안 셈)
+const seoiRow = (k, sv, v) => el('div', {class: 'it mi', 'data-id': 'seoi:' + k}, el('span', {class: 'cb', style: 'opacity:.35'}),
+  el('div', {class: 'grow'}, el('span', {class: 't'}, sv.line), el('span', {class: 's'}, v.how), el('div', {class: 'bt'},
+    v.feed ? el('a', {class: 'sm', href: v.feed, target: '_blank', rel: 'noopener noreferrer'}, '이웃새글 열기 ↗') : null, el('a', {class: 'sm', href: '#/connect'}, '책갈피 설치'))));
 function part(k, label, extra, hot) {
   hot = hot || [];
   const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done), yt = k === 'shorts' && by() ? ytc() : null, yl = yt && yt.kind === 'login' ? 1 : 0;
@@ -316,6 +321,8 @@ function part(k, label, extra, hot) {
   const xs = by() ? mine(k) : [], left = xs.filter(i => !i.done && !nr(i)), w = xs.filter(i => !i.done && nr(i)).length, n = left.length + extra.length + hot.length + ul.length + yl, m = left.reduce((a, i) => a + i.min, 0) + ul.length * 3;
   const hn = hot.length + yl + ur.filter(x => x.g === 'past' && x.gate && !x.done).length, rz = k === 'issue' && by() ? rising() : null;
   cnt[k] = {n, m, u: hn, w};
+  const sv = data && data.seoi && data.seoi.by && data.seoi.by[k];
+  if (sv) cnt[k].v = sv.visit;
   if (!xs.length && !extra.length && !hot.length && !ur.length && !yt && !rz) return [];
   const o = W.SBHub || (bo[k] == null ? k === 'issue' : bo[k]), bar = el('i'), all = xs.length + extra.length + hot.length + ur.filter(x => x.gate).length + yl || 1, body = [];
   bar.style.width = Math.round(100 * Math.max(0, all - n - w) / all) + '%';
@@ -329,6 +336,7 @@ function part(k, label, extra, hot) {
     sec(...SEC[0]);
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
     SEC.slice(1).forEach((x, i) => sec(x[0], x[1], i ? null : () => nbv(k)));
+    if (sv) body.push(sh('이웃 들르기 (책갈피)', sv.visit), seoiRow(k, sv, data.seoi));
   }
   return [el('div', {class: 'box rt bk' + (o ? ' on' : '') + (TOP.has(k) ? ' tpb' : ''), 'data-k': k}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
     onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),

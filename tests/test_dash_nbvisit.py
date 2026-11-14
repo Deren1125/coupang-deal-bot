@@ -207,7 +207,7 @@ def test_todo_tab_offers_one_post_per_tap(bot: DealBot, tmp_path: Path) -> None:
     got = json.loads(out.stdout)
     # 아직 안 한 첫 글 하나 — 새 탭 · 누를 때마다 한 편 (목록을 저절로 돌지 않음) · 책갈피가 어느 블로그인지 알게 #bmb
     assert got["launch"] == [["이웃 글 들르기 시작 (2) ↗", f"https://m.blog.naver.com/nbr1/{POST_NO + 1}#bmb=issue", "_blank", "noopener noreferrer"]]
-    assert len(got["hint"]) == 1 and "등록은 직접" in got["hint"][0] and "줄은 저절로 체크" in got["hint"][0] and "오늘 이웃 들르기" in got["hint"][0]
+    assert len(got["hint"]) == 2 and "등록은 직접" in got["hint"][0] and "줄은 저절로 체크" in got["hint"][0]  # 둘째 = 칸 맨 아래 '이웃 들르기 (책갈피)' 줄
     assert any(h.startswith("이웃 글 들르기 (공감·댓글)") for h in got["heads"])
     assert got["other"] == 0  # 다 한 블로그에는 단추 없음
     assert all(u.startswith("/dashboard/api/") for u in got["fetches"])  # 대시보드 화면은 네이버를 부르지 않음 (새 탭은 주인이 누를 때)

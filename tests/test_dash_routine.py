@@ -450,7 +450,7 @@ def test_todo_tab_groups_by_blog() -> None:
     # 11/14 주인 '할 일 첫 화면은 종류별 목록만': 블로그 셋 → 딜 → SNS → 숏폼 → 기타 (이벤트는 ssalmuk.js) — 칸마다 data-k
     assert "W.SBRoutine.part(k, l," in app and ("[['issue', '데런픽'], ['finance', '드라마'], ['hotdeal', '라커룸'], ['deals', '딜'], ['sns', 'SNS'], "
                                                 "['shorts', '숏폼·릴스·룩북'], ['', '기타']]") in app
-    assert "'data-k': k" in rt and "cnt[k] = {n, m, u: hn, w}" in rt  # w = 만드는 중인 글 (남은 일로 안 셈 — 11/14)
+    assert "'data-k': k" in rt and "cnt[k] = {n, m, u: hn, w};" in rt  # w = 만드는 중인 글 (남은 일로 안 셈 — 11/14)
 
 
 def test_todo_tab_puts_urgent_first() -> None:
