@@ -1,6 +1,6 @@
 /* Sns-board 서비스 워커 (범위 /dashboard/): 앱 파일은 캐시, 화면·상태는 네트워크 먼저(3초) 그다음 마지막 캐시, 웹 푸시 알림. */
 'use strict';
-const V = 'sb-v30', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
+const V = 'sb-v31', STATIC = 'sb-static-' + V, PAGE = 'sb-page-' + V;
 const PRE = ['/dashboard/static/icon-192.png', '/dashboard/static/badge-72.png'];
 const STATE = '/dashboard/api/state', HOME = '/dashboard/';
 
@@ -68,10 +68,10 @@ self.addEventListener('fetch', e => {
 
 self.addEventListener('push', e => {
   let d = {};
-  try { d = e.data ? e.data.json() : {}; } catch (x) { d = {title: 'Sns-board', body: e.data ? e.data.text() : ''}; }
+  try { d = e.data ? e.data.json() : {}; } catch (x) { d = {title: 'Deren', body: e.data ? e.data.text() : ''}; }
   // 사진 부탁 (type item 만): 버튼 하나 '상품 열기'·'사진 찾기' → 그 주소 바로 (안드로이드 크롬 — iOS 는 버튼 없이 알림 누르면 할 일)
   const o = d.type === 'item' && d.open && /^https?:\/\//.test(d.open.url || '') ? d.open : null;
-  const show = self.registration.showNotification(d.title || 'Sns-board', {
+  const show = self.registration.showNotification(d.title || 'Deren', {
     body: d.body || '', tag: d.tag || 'todo', renotify: !!d.urgent, icon: '/dashboard/static/icon-192.png',
     badge: '/dashboard/static/badge-72.png', data: {url: d.url || HOME, open: o ? o.url : null}, timestamp: (d.ts || Date.now() / 1000) * 1000,
     actions: o ? [{action: 'open', title: String(o.title || '열기').slice(0, 12)}] : [],

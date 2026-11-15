@@ -121,7 +121,7 @@ function after() {
 function head() {
   const t = R.tab === 'todo' && S ? (S.todo.length ? `할 일 ${S.todo.length}개` : '할 일') : TABS[R.tab];
   $('ttl').textContent = t;
-  D.title = `${TABS[R.tab]} · Sns-board`;
+  D.title = `${TABS[R.tab]} · Deren`;
   const o = $('old');
   o.hidden = !(OLD && S && R.tab === 'todo');
   if (!o.hidden) o.textContent = `저장된 정보 · ${ago(S.at)}`;
@@ -1223,8 +1223,8 @@ function statsClick(e) {
 // -- 탭: 연결 (가끔 쓰는 설정)
 function thisOn() { return !!(S && S.connect && S.connect.push.devices.some(d => d.this)); }
 function denyHint() {
-  return IOS ? '알림이 막혀 있어요 — 설정 › 알림 › Sns-board 에서 허용해 주세요'
-    : /Android/.test(N.userAgent) ? '알림이 막혀 있어요 — 휴대폰 설정 › 애플리케이션 › Sns-board(또는 브라우저) › 알림에서 허용해 주세요'
+  return IOS ? '알림이 막혀 있어요 — 설정 › 알림 › Deren 에서 허용해 주세요'
+    : /Android/.test(N.userAgent) ? '알림이 막혀 있어요 — 휴대폰 설정 › 애플리케이션 › Deren(또는 브라우저) › 알림에서 허용해 주세요'
       : '알림이 막혀 있어요 — 주소창 왼쪽 자물쇠 › 알림 › 허용';
 }
 function b64(s) {

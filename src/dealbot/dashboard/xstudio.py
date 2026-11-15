@@ -70,7 +70,7 @@ POSTED_PATH, REPLY_GO_PATH, TARGETS_PATH = f"{BASE}/posted", f"{BASE}/reply_go",
 HANDOFF_PATH, HELPER_PATH, SHARE_PATH, GO_PATH = f"{BASE}/handoff", "/dashboard/api/xhelper", "/dashboard/share", "/dashboard/x"
 PUBLIC_PATHS = (SHARE_PATH, GO_PATH)  # 로그인 없이 — 둘 다 데이터 없음 (주소를 바꿔 넘기기만)
 GO_PAGE = ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-           '<meta name="robots" content="noindex"><title>Sns-board</title><script src="/dashboard/static/xgo.js" defer@@D@@></script></head>'
+           '<meta name="robots" content="noindex"><title>Deren</title><script src="/dashboard/static/xgo.js" defer@@D@@></script></head>'
            '<body><p>여는 중… <a href="/dashboard/">대시보드 열기</a></p></body></html>')
 GO_DIRECT = ("none",)  # Sec-Fetch-Site 가 이 값일 때만 '직접 연 것' (머리글이 없거나 cross-site·same-site·same-origin 이면 아님)
 # 답이 Sec-Fetch-Site 에 따라 달라서 저장해 두고 다시 쓰면 안 됨 (no-store)

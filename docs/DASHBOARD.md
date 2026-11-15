@@ -5,7 +5,7 @@
 카드 중에서는 주인이 할 일이 있는 카드 — `링크 기다리는 딜`(링크를 바로 넣는 칸까지)과 `발행 대기 글`(블로그 세 개) — 이 먼저 온다 (주인 요청 10/15).
 카드마다 상태 칩(조건 충족 / 조건 미충족 / 판단 불가), `다시 읽기`, 읽은 시각, 숫자 칸 두 개(블로그 카드는 자기 통계가 있으면 네 개),
 최근 28일 추이, 목표 줄이 있다.
-휴대폰(아이폰·아이패드·갤럭시) 바탕화면에 `Sns-board` 앱처럼 붙일 수 있다 (주인 요청 10/15, 아래 `휴대폰 바탕화면에 추가`).
+휴대폰(아이폰·아이패드·갤럭시) 바탕화면에 `Deren` 앱처럼 붙일 수 있다 (주인 요청 10/15, 아래 `휴대폰 바탕화면에 추가`).
 
 ## 켜기
 
@@ -55,7 +55,7 @@ sudo systemctl restart dealbot
 
 ## 휴대폰 바탕화면에 추가 (주인 10/15 — "삼성 갤럭시 휴대폰이랑 아이패드, 아이폰에서도 앱처럼 바탕화면에 저 대시보드 추가할 수 있나?")
 
-바탕화면에 `Sns-board` 라는 이름과 아이콘으로 붙고, 누르면 주소창 없이 앱처럼 열린다.
+바탕화면에 `Deren` 라는 이름과 아이콘으로 붙고, 누르면 주소창 없이 앱처럼 열린다.
 바탕화면 앱은 브라우저와 로그인을 따로 기억하므로 **추가한 뒤 처음 열 때 한 번 더 로그인**한다 (그 뒤로 30일 동안 그대로).
 카카오톡·텔레그램 안에서 열린 화면에서는 추가할 수 없으니, 먼저 Safari·삼성 인터넷·Chrome 으로 연다.
 
@@ -63,25 +63,25 @@ sudo systemctl restart dealbot
 1. Safari 로 `https://<공개 도메인>/dashboard` 를 열고 로그인한다.
 2. **공유** 버튼(네모에 위쪽 화살표 — 아이폰은 화면 아래, 아이패드는 주소창 오른쪽)을 누른다.
 3. 목록을 내려 **홈 화면에 추가**를 누른다. 안 보이면 맨 아래 `작업 편집…` 에서 켠다.
-4. 이름이 `Sns-board` 인지 보고 오른쪽 위 **추가**. (`웹 앱으로 열기` 가 보이면 켜 둔 채로)
-5. 바탕화면의 Sns-board 아이콘으로 열고, 처음 한 번 로그인한다.
+4. 이름이 `Deren` 인지 보고 오른쪽 위 **추가**. (`웹 앱으로 열기` 가 보이면 켜 둔 채로)
+5. 바탕화면의 Deren 아이콘으로 열고, 처음 한 번 로그인한다.
 
 **갤럭시 — 삼성 인터넷**
 1. 삼성 인터넷으로 `https://<공개 도메인>/dashboard` 를 열고 로그인한다.
 2. 아래쪽 **메뉴**(가로줄 세 개) → **현재 페이지 추가** → **홈 화면**.
-3. 이름 `Sns-board` 를 확인하고 **추가**. (주소창에 설치 아이콘이 보이면 그걸 눌러 `설치` 해도 같다.)
+3. 이름 `Deren` 를 확인하고 **추가**. (주소창에 설치 아이콘이 보이면 그걸 눌러 `설치` 해도 같다.)
 
 **갤럭시 — Chrome**
 1. Chrome 으로 `https://<공개 도메인>/dashboard` 를 열고 로그인한다.
 2. 오른쪽 위 **⋮** → **홈 화면에 추가** (버전에 따라 **앱 설치**) → **설치**(또는 **추가**).
-3. 바탕화면(앱 목록)에 생긴 Sns-board 아이콘으로 연다.
+3. 바탕화면(앱 목록)에 생긴 Deren 아이콘으로 연다.
 
 알아 둘 것
 - 30일이 지나거나 서버 비밀번호를 바꾸면 앱을 열 때 로그인 화면이 뜬다 — 다시 넣으면 된다.
-- 만든 것: `/dashboard/manifest.webmanifest`(이름 `Sns-board`, 시작 주소·범위 `/dashboard`, `standalone`, 바탕·테마 색 `#f4f5f7`),
+- 만든 것: `/dashboard/manifest.webmanifest`(이름 `Deren`, 시작 주소·범위 `/dashboard`, `standalone`, 바탕·테마 색 `#f4f5f7`),
   아이콘 `src/dealbot/dashboard/static/`(주인이 고른 파일 그대로 — 192·512 모서리 투명, 512 maskable 가장자리까지 꽉 참,
   아이폰용 180, 탭용 64·SVG), `<head>` 의 `apple-touch-icon`·`apple-mobile-web-app-*`·`theme-color`(밝은 모드 `#f4f5f7`, 어두운 모드 `#151a2d`).
-  화면 `<title>` 도 `Sns-board` (화면 맨 위 제목은 설정의 `dashboard.title` 그대로).
+  화면 `<title>` 도 `Deren` (화면 맨 위 제목은 설정의 `dashboard.title` 그대로).
 - 아이콘 주소에는 파일 내용의 짧은 해시(`?v=`)가 붙어 1년 캐시된다. 아이콘을 바꾸면 주소가 바뀌어 새로 받지만,
   이미 바탕화면에 추가한 아이콘은 아이폰에서는 지우고 다시 추가해야 바뀐다 (안드로이드는 며칠 안에 저절로).
 - 보안 헤더(CSP)는 `default-src 'none'` 그대로이고 `img-src 'self'`·`manifest-src 'self'` 만 더했다 (스크립트는 여전히 없음).
@@ -416,3 +416,21 @@ class YouTubeSource(Source):
 
 지킬 것: 공식 API 만 (스크래핑·브라우저 위장 없음), 토큰·비밀값은 화면·JSON·`note` 에 넣지 않기 (`safe_error` 가 토큰 모양을 가림),
 바깥 호출은 `fetch()` 에서만 (정해진 시각·다시 읽기 때), `live()` 는 DB·로컬 파일처럼 싼 것만.
+
+## 파밍 대시보드 (아래 탭 '파밍' — 주인 11/15)
+
+앱 이름은 `Deren` (11/15 — SNS·파밍을 합친 이름. 그 전엔 `Sns-board`; 앱 id·주소는 그대로라 깐 앱이 둘이 되지 않는다).
+아래 탭 일곱째 '파밍'을 누르면 `/dashboard/farm/` — 파밍 허브(perpfarm)가 Tailscale Funnel 로 연 공개 HTTPS 주소의 화면을 딜봇 서버가
+열쇠를 붙여 대신 받아 보여 준다 (`dashboard/farm.py`, `web.route_proxy`). 휴대폰에서 테일스케일을 켜지 않아도 대시보드 로그인 하나로 열린다.
+딜봇 서버에는 테일스케일을 깔지 않는다.
+
+- 서버에서 할 일: `.env` 두 줄만 — `FARM_HUB_URL`(`https://perpfarm.<tailnet>.ts.net`, https 이고 `*.ts.net` 만 받음, 경로 없이) ·
+  `FARM_HUB_TOKEN`(허브 열쇠). 하나라도 없거나 주소 모양이 다르면 허브를 부르지 않고 `/dashboard/farm/` 은 안내 화면.
+  `bash deploy/lightsail/setenv.sh FARM_HUB_URL` · `bash deploy/lightsail/setenv.sh FARM_HUB_TOKEN` (값은 화면에 안 보임) → `sudo systemctl restart dealbot`
+- 로그인 아래에서만 열린다. 브라우저의 쿠키·Authorization·X-Dash-Token 은 허브로 가지 않고, 서버가 `Authorization: Bearer <열쇠>` 와
+  `X-Forwarded-Prefix: /dashboard/farm` 만 붙인다. 허브의 Set-Cookie 는 버리고 Location 은 `/dashboard/farm` 을 앞에 붙인다. 리디렉션은 서버가 따라가지 않고, 허브 밖을 가리키면 막는다.
+- 올리기 15MB(413) · 받기 20MB · 30초(504). GET·HEAD 가 아닌 요청은 같은 사이트에서 온 것만 (X-Dash-Token 은 안 봄 — 파밍 화면은 모름).
+- 허브가 지킬 것: 주소는 상대 경로(또는 X-Forwarded-Prefix 를 앞에) · 바깥 주소(CDN·글꼴) 없음(CSP 가 막음) · 웹소켓·SSE 없음 ·
+  화면에 '← SNS'(`/dashboard/`). 페이지 안 스크립트는 지금은 허용(`'unsafe-inline'` — 허브 화면이 그렇게 돌아서), 파일로 옮기면 뺀다.
+- 허브의 서비스 워커(`/dashboard/farm/sw.js`, 알림용)는 범위가 `/dashboard/farm/` 까지라 대시보드 것(`/dashboard/`)과 따로 돈다.
+- 아이콘(오리 그림, 11/15 — perpfarm/hub_static 의 icon-1024.jpg 에서): `python tools/app_icons.py <그림 폴더>` — static 아이콘 다섯 개와 `tests/fixtures/dash_icons.json` 을 같이 바꾼다.

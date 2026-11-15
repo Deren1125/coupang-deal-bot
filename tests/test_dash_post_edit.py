@@ -148,5 +148,5 @@ def test_sheet_lives_in_edit_js_and_app_js_only_opens_it() -> None:
                  "op: 'replace_photo', index: x.p.n", "op: 'remove_photo', index: x.p.n", "op: 'remove_text'", "h.uploadAll(",
                  "h.exec(r.edit.act, {ops}", "카테고리·태그는 그대로", "W.SBEdit = {batch, editor, photo, fix}"):
         assert word in ed, word
-    assert "const V = 'sb-v30'" in sw  # 10/21 merge post-edit (sb-v30)
+    assert "const V = 'sb-v31'" in sw  # 10/21 merge post-edit (sb-v30)
     assert len(gzip.compress(ed.encode(), 9)) <= 7 * 1024 + 512  # 10/21 (merge post-edit): 사진 테스트 + 고치기 시트 → 7.5 KB (test_dash_shell 과 같게)

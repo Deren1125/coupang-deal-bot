@@ -33,6 +33,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "DEALBOT_MODEL_SUMMARIZER",
         "DASHBOARD_USER",  # 대시보드 기본 인증 (테스트는 필요할 때 직접 넣음)
         "DASHBOARD_PASSWORD",
+        "FARM_HUB_URL",  # 파밍 대시보드 넘기기 (테스트는 가짜 허브만)
+        "FARM_HUB_TOKEN",
     ):
         monkeypatch.delenv(k, raising=False)
 

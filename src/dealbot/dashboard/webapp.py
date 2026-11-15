@@ -19,7 +19,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "Sns-board"  # 매니페스트 name·short_name, apple-mobile-web-app-title, application-name, <title> 모두 이것
+APP_NAME = "Deren"  # 매니페스트 name·short_name, apple-mobile-web-app-title, application-name, <title> 모두 이것 (주인 11/15 — SNS·파밍을 합친 앱 이름. 그 전엔 Sns-board)
 APP_DESCRIPTION = "채널 숫자와 지금 할 일을 한 화면에"
 APP_ID = "/dashboard"  # 바꾸면 휴대폰에 이미 깐 앱과 다른 앱이 된다 — 그대로 둔다
 START_URL = "/dashboard/"
@@ -127,6 +127,6 @@ def head_tags() -> str:
         f'<meta name="theme-color" media="(prefers-color-scheme: light)" content="{PAGE_BG}">'
         f'<meta name="theme-color" media="(prefers-color-scheme: dark)" content="{DARK_BG}">'
         f'<link rel="icon" href="{icon_url("favicon-64.png")}" type="image/png" sizes="64x64">'
-        f'<link rel="icon" href="{icon_url("icon.svg")}" type="image/svg+xml" sizes="any">'
+        # icon.svg(옛 번개 그림) 링크는 뺌 (11/15 오리 그림 — 벡터가 없어 탭 그림도 favicon-64.png 로. 파일·주소는 그대로 열림)
         f'<link rel="apple-touch-icon" href="{icon_url("apple-touch-icon.png")}" sizes="180x180">'
     )

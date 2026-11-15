@@ -82,6 +82,8 @@ TAB_SNS = _tab('<path d="M12 4c4.6 0 8.2 3.1 8.2 7s-3.6 7-8.2 7c-1 0-2-.15-2.9-.
 TAB_STATS = _tab('<path d="M4 20h16"/><rect x="5.5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="6" width="3" height="11" rx="1"/>'
                  '<rect x="15.5" y="9" width="3" height="8" rx="1"/>')
 TAB_CONNECT = _tab('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>')
+# 파밍 (11/15): 새싹 — 누르면 앱 안 화면이 아니라 /dashboard/farm/ (파밍 대시보드, farm.py) 로 간다. TABS 에는 넣지 않음 (shell 이 맨 끝에)
+TAB_FARM = _tab('<path d="M12 20v-8"/><path d="M12 12c0-3.6-2.4-6-6.5-6 0 3.9 2.6 6 6.5 6z"/><path d="M12 14.5c0-3 2.2-5 6.5-5 0 3.3-2.6 5-6.5 5z"/>')
 # 아래 탭 6개 (주인 10/26 '밑에 배너의 탭을 늘리거나') — 390px 에서 한 칸 65px, 글자 한 줄
 TABS = (("todo", "할 일", TAB_TODO), ("deal", "딜", TAB_DEAL), ("blog", "블로그", TAB_BLOG), ("sns", "SNS", TAB_SNS),
         ("stats", "통계", TAB_STATS), ("connect", "연결", TAB_CONNECT))

@@ -923,6 +923,9 @@ class DashboardConfig(BaseModel):
     # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
     public_url: str = "https://52-79-136-64.sslip.io"
     actions_enabled: bool = True  # false 면 대시보드는 보기만 (누르는 일은 모두 텔레그램으로)
+    # 파밍 대시보드 주소 (주인 11/15 — /dashboard/farm/ 이 넘기는 곳, dashboard/farm.py). 보통은 .env 의 FARM_HUB_URL 이 먼저.
+    # 파밍 서버가 Tailscale Funnel 로 연 주소 https://perpfarm.<tailnet>.ts.net 만 (경로 없이). 빈칸이면 안내 화면. 열쇠는 .env FARM_HUB_TOKEN 에만
+    farm_hub_url: str = ""
     x_today: XTodayConfig = Field(default_factory=XTodayConfig)  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15)
 
     @field_validator("public_url")
@@ -931,6 +934,14 @@ class DashboardConfig(BaseModel):
         v = (v or "").strip().rstrip("/")
         if not re.fullmatch(r"https://[a-z0-9.-]+(:[0-9]{1,5})?", v):
             raise ValueError("dashboard.public_url 은 https://호스트 (경로 없이)")
+        return v
+
+    @field_validator("farm_hub_url")
+    @classmethod
+    def _farm_hub_url(cls, v: str) -> str:
+        v = (v or "").strip().rstrip("/").lower()
+        if v and not re.fullmatch(r"https://[a-z0-9.-]+\.ts\.net(:[0-9]{1,5})?", v):
+            raise ValueError("dashboard.farm_hub_url 은 https://이름.ts.net (경로 없이) 또는 빈칸")
         return v
 
     @field_validator("collect_times")
@@ -1123,6 +1134,9 @@ class Secrets(BaseModel):
     gemini_api_key: str | None = None
     dashboard_user: str | None = None  # DASHBOARD_USER / DASHBOARD_PASSWORD — /dashboard 기본 인증 (둘 다 있어야 페이지가 열림)
     dashboard_password: str | None = None
+    # 파밍 대시보드 넘기기 (주인 11/15 — dashboard/farm.py): FARM_HUB_URL(파밍 서버의 Funnel 주소 https://….ts.net) · FARM_HUB_TOKEN(허브 열쇠 — 서버만 앎)
+    farm_hub_url: str | None = None
+    farm_hub_token: str | None = None
 
     @property
     def has_dashboard_auth(self) -> bool:
@@ -1404,6 +1418,8 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         gemini_api_key=_env_str("GEMINI_API_KEY"),
         dashboard_user=_env_str("DASHBOARD_USER"),
         dashboard_password=_env_str("DASHBOARD_PASSWORD"),
+        farm_hub_url=_env_str("FARM_HUB_URL"),
+        farm_hub_token=_env_str("FARM_HUB_TOKEN"),
     )
 
     settings = Settings(

@@ -97,8 +97,8 @@ _NUMBER_RE = re.compile(r"^(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)$")  # 1234 또는
 _DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 # 로그인 없이 열면 401 대신 로그인 화면으로 보내는 경로 (브라우저로 여는 화면들 + 알림 바로가기 /dashboard/go/…).
 # /dashboard/api/… 는 401 JSON {"code":"login"} (앱이 로그인 시트를 띄움), 그 밖의 POST·data.json 은 401
-PAGE_PATHS = frozenset({"/dashboard", "/dashboard/", "/dashboard/refresh", "/dashboard/input"})
-PAGE_PREFIXES = ("/dashboard/go/", "/dashboard/connect/")
+PAGE_PATHS = frozenset({"/dashboard", "/dashboard/", "/dashboard/refresh", "/dashboard/input", "/dashboard/farm"})
+PAGE_PREFIXES = ("/dashboard/go/", "/dashboard/connect/", "/dashboard/farm/")  # farm: 파밍 화면 (11/15, farm.py)
 API_PREFIX = "/dashboard/api/"
 LOGOUT_BODY_MAX = 1024
 CLASSIC = "classic"  # /dashboard/?view=classic — 예전 한 장 화면 (카드·'링크 넣기' 폼)
@@ -608,6 +608,9 @@ class Dashboard:
         if self.api is not None:
             self.api.register(web)
             threads_proxy.register(web, self.api)  # 스레드 화면 (10/21) — threads/ 서비스로 넘김
+            from dealbot.dashboard import farm
+
+            self.farm = farm.register(web, self.api)  # 파밍 대시보드 (11/15) — /dashboard/farm/* 를 파밍 허브(Funnel 주소)로 넘김
         for path, handler in (
             ("/dashboard/refresh", self._refresh),
             ("/dashboard/input", self._input),

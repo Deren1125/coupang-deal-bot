@@ -398,7 +398,7 @@ function helpTab() {
       cp(ru, '답글 주소'), el('p', {class: 'note'}, "글쓰기용은 같은 단축어를 하나 더 ('X 글 초안') — 주소만 아래 것으로. 기사 앱·사파리에서 공유해도 돼요."), cp(wu, '글쓰기 주소'),
       el('p', {class: 'note'}, '단축어에는 비밀번호·키가 없어요 — 사파리가 대시보드에 로그인돼 있으면 열려요.')),
     el('p', {class: 'grp'}, '갤럭시 (안드로이드)'),
-    el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0'}, "크롬에서 Sns-board 를 '앱 설치(홈 화면에 추가)' 해 두면 X 앱 공유 목록에 'Sns-board' 가 나와요 — 누르면 바로 초안. " +
+    el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0'}, "크롬에서 Deren 을 '앱 설치(홈 화면에 추가)' 해 두면 X 앱 공유 목록에 'Sns-board' 가 나와요 — 누르면 바로 초안. " +
       "(설치한 지 하루쯤 지나야 목록에 보여요. 안 보이면 'HTTP Shortcuts' 같은 앱에서 위 주소 뒤에 공유한 글을 붙여 브라우저로 여는 바로가기를 만들어요.)")),
     el('p', {class: 'grp'}, 'X 도우미 책갈피 (사파리 x.com)'),
     el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0 0 8px'}, '글 화면 → 답글 초안 · 수익 조건 화면 → 인증 팔로워·노출 숫자 저절로 기록 · 프로필 → 자주 보는 계정에 넣기. X 에서는 아무것도 누르지 않아요.'),

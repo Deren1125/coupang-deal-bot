@@ -52,7 +52,7 @@ _NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
 
 RENEW_DAYS = 7  # 남은 기간이 이보다 짧으면 다시 30일로
 KV_CSRF = "dash:csrf_key"
-NEXT_RE = re.compile(r"^/dashboard(/(go/[a-z0-9-]{1,64})?)?$")  # 로그인 뒤 돌아갈 곳 (이것만 — 나머지는 /dashboard/)
+NEXT_RE = re.compile(r"^/dashboard(/(go/[a-z0-9-]{1,64}|farm/)?)?$")  # 로그인 뒤 돌아갈 곳 (이것만 — 나머지는 /dashboard/)
 HOME = "/dashboard/"
 
 

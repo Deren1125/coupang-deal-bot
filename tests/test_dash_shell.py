@@ -472,4 +472,4 @@ async def test_state_api_matches_boot_shape(bot: DealBot) -> None:
 def test_manifest_keeps_the_installed_app() -> None:
     m = webapp.manifest()
     assert m["id"] == "/dashboard" and m["start_url"] == "/dashboard/" and m["scope"] == "/dashboard"
-    assert m["name"] == m["short_name"] == "Sns-board" and m["display"] == "standalone"
+    assert m["name"] == m["short_name"] == "Deren" and m["display"] == "standalone"

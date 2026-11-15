@@ -13,6 +13,8 @@
 - route_json: JSON 본문 하나 (application/json, 경로마다 정한 크기까지, 다른 사이트에서 보낸 요청은 403) — 대시보드 앱 API
 - route_stream: 큰 본문(사진 파일 하나)을 정한 임시 파일로 256KB 씩 받아 둔다 (멈춘 채 30초·통째로 300초 넘으면 끊음).
   인증(guard_prefix)을 먼저 통과해야 받기 시작한다 — 로그인 전엔 한 바이트도 디스크에 쓰지 않음
+- route_proxy: 앞부분 아래 전부(PUT·DELETE 까지)를 핸들러 하나로 — 다른 서버로 넘기는 화면 (파밍 대시보드, dashboard/farm.py).
+  로그인·크기 확인을 지난 뒤에만 본문을 읽는다
 """
 
 from __future__ import annotations
@@ -52,9 +54,9 @@ PEER_HEADER = ":peer"
 _STATIC_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".mp4": "video/mp4"}
 
 _STATUS_TEXT = {
-    200: "OK", 202: "Accepted", 206: "Partial Content", 301: "Moved Permanently", 302: "Found", 303: "See Other", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+    200: "OK", 201: "Created", 202: "Accepted", 204: "No Content", 206: "Partial Content", 301: "Moved Permanently", 302: "Found", 303: "See Other", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
     405: "Method Not Allowed", 408: "Request Timeout", 409: "Conflict", 411: "Length Required", 413: "Content Too Large", 415: "Unsupported Media Type", 416: "Range Not Satisfiable",
-    429: "Too Many Requests", 500: "Internal Server Error", 503: "Service Unavailable",
+    429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway", 503: "Service Unavailable", 504: "Gateway Timeout",
 }
 _MAX_HEADER_BYTES = 16 * 1024
 TUNNEL_MAX_S = 40 * 60  # 원격 화면 연결 하나의 최대 시간
@@ -68,6 +70,8 @@ STREAM_TOTAL = 300.0  # 받기 전체 시간 상한
 # route_json 핸들러: (JSON 객체, 요청 헤더) / route_stream 핸들러: (쿼리, 요청 헤더, 받은 임시 파일)
 JsonHandler = Callable[[dict, dict[str, str]], Awaitable[Response]]
 StreamHandler = Callable[[dict[str, str], dict[str, str], Path], Awaitable[Response]]
+# route_proxy 핸들러: (방식, 앞부분을 뗀 경로('/…'), 쿼리 글자, 요청 헤더, 본문) — 다른 서버로 넘기는 화면 (파밍, 주인 11/15)
+ProxyHandler = Callable[[str, str, str, dict[str, str], bytes], Awaitable[Response]]
 
 
 class StreamTimeout(Exception):
@@ -206,6 +210,8 @@ class WebServer:
         self.tunnels: dict[str, Callable[[], int | None]] = {}
         self.tunnel_methods: dict[str, frozenset[str]] = {}
         self.tunnel_wait: dict[str, float] = {}
+        # 앞부분('/dashboard/farm') → (핸들러, 받는 방식, 본문 최대 바이트). 그 아래 모든 방식·경로를 핸들러 하나가 받는다 (route_proxy)
+        self.proxies: dict[str, tuple[ProxyHandler, frozenset[str], int]] = {}
         self.auth_realm = "dashboard"
         self._server: asyncio.AbstractServer | None = None
 
@@ -302,6 +308,53 @@ class WebServer:
         self.tunnels[key] = port
         self.tunnel_methods[key] = frozenset(m.upper() for m in methods)
         self.tunnel_wait[key] = wait_s
+
+    def route_proxy(self, prefix: str, handler: ProxyHandler, *, methods: Iterable[str] = ("GET", "HEAD", "POST"),
+                    max_body: int = 64 * 1024) -> None:
+        """prefix 와 그 아래 전부(methods 의 방식 모두)를 핸들러 하나로 — 다른 서버로 넘기는 화면 (주인 11/15 파밍 대시보드).
+        route_tunnel 과 달리 바이트를 그대로 잇지 않는다: 본문을 max_body 까지 다 읽어(넘으면 읽지 않고 413) 핸들러에 주고,
+        핸들러가 돌려준 응답을 이 서버가 보낸다 (머리글을 핸들러가 고름 — 쿠키·인증을 넘기지 않게). 웹소켓·스트리밍 없음.
+        prefix 는 guard_prefix 로 지키는 경로 아래여야 한다 (아니면 404). 'prefix' 자체는 'prefix/' 로 302."""
+        self.proxies["/" + prefix.strip("/")] = (handler, frozenset(m.upper() for m in methods), max_body)
+
+    def _proxy_for(self, path: str) -> str | None:
+        return next((p for p in self.proxies if path == p or path.startswith(p + "/")), None)
+
+    def _proxy_check(self, prefix: str, method: str, path: str, headers: dict[str, str]) -> Response | None:
+        """넘기기 앞 확인 (본문을 읽기 전): 로그인 → 방식 → 본문 길이. 통과하면 None."""
+        guarded, guard, _gp = self._guard_for(path)
+        if not guarded or guard is None:
+            return 404, page("없는 주소", "이 주소는 쓰지 않습니다.")
+        denied = self._precheck(method, path, headers)
+        if denied is not None:
+            return denied
+        _handler, methods, max_body = self.proxies[prefix]
+        if method not in methods:
+            return 405, page("허용되지 않는 방식", "이 방식은 받지 않습니다.", back=BACK_HOME), "text/html; charset=utf-8", \
+                {"Allow": ", ".join(sorted(methods))}
+        if "transfer-encoding" in headers:  # 길이 없는 본문은 받지 않음 (브라우저는 늘 Content-Length)
+            return 411, page("길이 필요", "요청 길이를 알 수 없습니다.", back=BACK_HOME)
+        if "content-length" in headers:
+            n = content_length(headers)
+            if n is None:
+                return 400, page("잘못된 요청", "요청 길이를 읽을 수 없습니다.", back=BACK_HOME)
+            if n > max_body:
+                return 413, page("너무 커요", f"한 번에 {max_body // (1024 * 1024) or 1}MB 까지만 보낼 수 있어요.", back=BACK_HOME)
+        return None
+
+    async def _proxy_call(self, prefix: str, method: str, target: str, headers: dict[str, str], body: bytes) -> Response:
+        split = urlsplit(target)
+        path = split.path or "/"
+        if path == prefix:  # /dashboard/farm → /dashboard/farm/ (상대 주소가 그 아래로 풀리게)
+            return 302, prefix + "/" + (f"?{split.query}" if split.query else "")
+        handler, _methods, max_body = self.proxies[prefix]
+        if len(body) > max_body:
+            return 413, page("너무 커요", "보낸 내용이 너무 큽니다.", back=BACK_HOME)
+        try:
+            return await handler(method, path[len(prefix):], split.query, headers, body)
+        except Exception as e:  # noqa: BLE001
+            log.exception("web proxy %s failed: %s", prefix, type(e).__name__)
+            return 502, page("열지 못했어요", "잠시 뒤에 다시 열어 주세요.", back=BACK_HOME)
 
     async def _tunnel(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, port: int, head: bytes,
                       prefix: str) -> bool:
@@ -433,6 +486,20 @@ class WebServer:
                 await self._respond(writer, result[0], result[1], result[2] if len(result) >= 3 else None,  # type: ignore[misc]
                                     result[3] if len(result) >= 4 else None)  # type: ignore[misc]
                 return
+            pprefix = self._proxy_for(tpath)
+            if pprefix is not None:
+                result = self._proxy_check(pprefix, method, tpath, headers)
+                if result is None:
+                    n = content_length(headers) or 0
+                    try:  # 로그인·크기 확인을 지난 뒤에만 읽는다 (큰 파일은 휴대폰에서 오래 걸림 — 받기 전체 STREAM_TOTAL 까지)
+                        pbody = await asyncio.wait_for(reader.readexactly(n), timeout=STREAM_TOTAL) if n else b""
+                    except (asyncio.IncompleteReadError, TimeoutError):
+                        result = 408, page("보내다 끊겼어요", "다시 보내 주세요.", back=BACK_HOME)
+                    else:
+                        result = await self._proxy_call(pprefix, method, target, headers, pbody)
+                await self._respond(writer, result[0], result[1], result[2] if len(result) >= 3 else None,  # type: ignore[misc]
+                                    result[3] if len(result) >= 4 else None, head_only=method == "HEAD")  # type: ignore[misc]
+                return
             form_body: bytes | None = None
             body_path: Path | None = None
             early: Response | None = None
@@ -496,6 +563,10 @@ class WebServer:
         path = split.path or "/"
         if path in ("/health", "/healthz"):
             return 200, "ok"
+        pprefix = self._proxy_for(path)
+        if pprefix is not None:  # 넘기는 화면 (route_proxy) — 테스트가 바로 부를 때도 진짜 요청과 같은 확인
+            h = headers or {}
+            return self._proxy_check(pprefix, method, path, h) or await self._proxy_call(pprefix, method, target, h, body or b"")
         post = self.post_routes.get(path)
         jroute = self.json_routes.get(path)
         sroute = self.stream_routes.get(path)
@@ -653,6 +724,8 @@ class WebServer:
         body: str | bytes,
         ctype: str | None = None,
         headers: dict[str, str] | None = None,
+        *,
+        head_only: bool = False,
     ) -> None:
         if isinstance(body, bytes):
             raw = body
@@ -666,13 +739,18 @@ class WebServer:
         # 리디렉션: body 에 목적지 주소 (https://… 또는 같은 서버의 /경로)
         if status in (301, 302, 303, 307) and isinstance(body, str) and redirect_target_ok(body):
             extra = f"Location: {body}\r\n"
+        size = len(raw)
+        if head_only:  # HEAD 를 넘긴 응답: 본문 없이, 길이는 핸들러가 알려 준 값 (':length')
+            given = more.pop(":length", "")
+            size, raw = (int(given) if given.isdigit() else 0), b""
+        more.pop(":length", None)
         for name, value in more.items():
             if _header_safe(name) and _header_safe(value):  # 줄바꿈이 섞인 값으로 헤더를 끼워 넣지 못하게
                 extra += f"{name}: {value}\r\n"
         head = (
             f"HTTP/1.1 {status} {_STATUS_TEXT.get(status, 'OK')}\r\n"
             f"Content-Type: {ctype}\r\n"
-            f"Content-Length: {len(raw)}\r\n"
+            f"Content-Length: {size}\r\n"
             f"Cache-Control: {cache}\r\n"
             f"{extra}"
             "Connection: close\r\n\r\n"

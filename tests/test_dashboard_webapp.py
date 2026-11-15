@@ -30,14 +30,9 @@ from dealbot.web import FORM_TYPE, WebServer
 
 NOW = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
 USER, PASSWORD = "owner", "plum-river-cactus-42"
-APPROVED_ICONS = {  # 주인이 고른 아이콘 파일 그대로 (바꾸면 여기도 같이 — 실수로 다른 그림이 나가지 않게)
-    "apple-touch-icon.png": "0bfc7dbf429268ade42345774e80d115cf165bd4080bc4b64aad34976b057c13",
-    "favicon-64.png": "f8ea7248ea1e0b3cad90305126d123e374d21d303d7196230ef3f287d62646e7",
-    "icon-192.png": "2c1f620f432e0eccc324a880e4e49abf4e09a3065e33f9150011b63793a98de8",
-    "icon-512.png": "689c3d6b9a51da30b0a45022966a7d79ebc2d1db156792d90ca44d6e5557fabc",
-    "icon-maskable-512.png": "520759c2e3ded4b65b184c17641d9be12873102b232720d9e32861edfb640944",
-    "icon.svg": "eb027b384d1239501ce68e3d37deff8d0b2b6470be7e3ea951c3e69204aef87d",
-}
+# 주인이 고른 아이콘 파일 그대로 (실수로 다른 그림이 나가지 않게). 11/15: 표를 tests/fixtures/dash_icons.json 으로 옮김 —
+# 아이콘을 바꿀 때는 tools/app_icons.py <그림 폴더> 한 번이면 static 파일과 이 표가 같이 바뀐다 (오리 그림 — 주인 11/15)
+APPROVED_ICONS: dict[str, str] = json.loads((Path(__file__).parent / "fixtures" / "dash_icons.json").read_text(encoding="utf-8"))
 SESSION_FLAGS = "; Max-Age=2592000; Path=/dashboard; Secure; HttpOnly; SameSite=Lax"  # 10/18: 카톡·알림 링크로 열 때도 실리게
 
 
@@ -142,7 +137,7 @@ async def test_manifest_and_icons_are_public_with_right_types_and_long_cache(db:
             assert r.headers["cache-control"] == "public, max-age=86400" and r.headers["x-content-type-options"] == "nosniff"
             assert "set-cookie" not in r.headers
             m = r.json()
-            assert (m["name"], m["short_name"]) == ("Sns-board", "Sns-board")  # 주인이 고른 표기 그대로
+            assert (m["name"], m["short_name"]) == ("Deren", "Deren")  # 주인이 고른 이름 (11/15 — SNS·파밍을 합친 앱. 그 전엔 Sns-board)
             assert (m["start_url"], m["scope"], m["id"], m["display"]) == ("/dashboard/", "/dashboard", "/dashboard", "standalone")
             assert m["background_color"] == m["theme_color"] == "#f6f7f9" and "--bg:#f6f7f9" in render.CSS  # 화면 바탕과 같은 색
             assert [(i["sizes"], i["purpose"], i["type"]) for i in m["icons"]] == [
@@ -239,10 +234,10 @@ async def test_page_and_login_have_app_head_tags_and_a_minimal_csp(db: Database,
         assert status == 200 and ctype.startswith("text/html") and headers["Content-Security-Policy"] == csp
         assert headers["X-Frame-Options"] == "DENY" and headers["Referrer-Policy"] == "no-referrer"
         head = body.split("</head>", 1)[0]
-        assert head.count("<title>") == 1 and "<title>Sns-board</title>" in head
+        assert head.count("<title>") == 1 and "<title>Deren</title>" in head
         for tag in ('<link rel="manifest" href="/dashboard/manifest.webmanifest" crossorigin="use-credentials">',
-                    '<meta name="application-name" content="Sns-board">',
-                    '<meta name="apple-mobile-web-app-title" content="Sns-board">',
+                    '<meta name="application-name" content="Deren">',
+                    '<meta name="apple-mobile-web-app-title" content="Deren">',
                     '<meta name="apple-mobile-web-app-capable" content="yes">',
                     '<meta name="mobile-web-app-capable" content="yes">',
                     '<meta name="apple-mobile-web-app-status-bar-style" content="default">',
@@ -542,7 +537,7 @@ async def test_full_login_flow_over_real_http(db: Database, tmp_path: Path) -> N
             assert r.headers["set-cookie"] == f"dash_session={token}{SESSION_FLAGS}"
             c.cookies.clear()
             r = await c.get("/dashboard/", headers={"Cookie": f"dash_session={token}"})
-            assert r.status_code == 200 and "<title>Sns-board</title>" in r.text and "로그아웃" in r.text
+            assert r.status_code == 200 and "<title>Deren</title>" in r.text and "로그아웃" in r.text
             r = await c.post("/dashboard/logout", data={"t": dash.form_token}, headers={"Cookie": f"dash_session={token}"})
             assert r.status_code == 303 and r.headers["location"] == "/dashboard/login?msg=out"
             c.cookies.clear()
