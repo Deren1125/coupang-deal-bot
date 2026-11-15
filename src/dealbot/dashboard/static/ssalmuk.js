@@ -1,6 +1,6 @@
 /* 이벤트 참여 (쌀먹 — 돈좀요 이벤트 자동 응모, 주인 11/14 'Sns-board 에 합치자'). 셸이 defer 로 받음 (app.js 는 예산 끝).
    할 일 탭(#/todo) 맨 위 묶음에 카드 한 장 · 화면은 #/todo/ev (할 일 탭 안 — app.js 칸은 숨김).
-   GET /dashboard/api/ssalmuk/state · POST …/act {op: run|done|profile, args} · 연결 칸: GET …/key · POST …/rotate (ssalmuk.py).
+   GET /dashboard/api/ssalmuk/state · POST …/act {op: run|done|profile|search_retry|trust_host|quiz_answer, args} · 연결 칸: GET …/key · POST …/rotate (ssalmuk.py).
    쌀먹 서버가 1분마다 명령을 가져가 처리하고 상태를 다시 보낸다 — 20분 넘게 안 오면 '연결 끊김'. 바깥 주소·innerHTML 없음. */
 'use strict';
 (() => {
@@ -20,11 +20,14 @@ const CSS = '.ev .kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))
   '.ev .ck{display:flex;align-items:center;gap:10px;min-height:48px;font-size:15px}.ev .ck input{width:20px;height:20px}' +
   '.evc .st{white-space:normal}.evc .chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0}' +
   '.ev .bn.warn{background:var(--or-soft);color:var(--or);border-color:transparent}' +
+  '.ev .qz{border-top:1px solid var(--line);margin:10px 0;padding:10px 0 0}.ev .qz .qq{margin:0 0 8px;font-size:15px;font-weight:600;overflow-wrap:anywhere}' +
+  '.ev .qz .opts{margin:0 0 6px}.ev .qz .tg{margin:0;min-height:44px;padding:8px 14px;text-align:left;white-space:normal;overflow-wrap:anywhere}' +
+  '.ev .qz .tg:disabled{opacity:.6}.ev .qz .qe{font-size:12px;margin:2px 0 0;overflow-wrap:anywhere}.ev .hl{margin:8px 0 0}.ev .hl .cp{margin:0 6px 0 0}' +
   'main[data-ev]>:not(#evs):not(#tdh){display:none!important}';
 const GROUPS = [['today', '오늘 마감'], ['assist', '폼 + SNS'], ['check', '확인 필요'], ['sns', 'SNS 직접 참여']];
 const TONE = /^(ok|hot|stop|info)$/;
 const SRC = {ok: ['ok', '정상'], blocked: ['stop', '막힘'], skip: ['info', '건너뜀'], error: ['stop', '오류']};  // 수집 출처 상태 (11/14)
-const OPL = {run: '지금 확인하기', done: '완료 표시', profile: '내 정보 저장', search_retry: '검색 다시 켜기', trust_host: '사이트 허용'};
+const OPL = {run: '지금 확인하기', done: '완료 표시', profile: '내 정보 저장', search_retry: '검색 다시 켜기', trust_host: '사이트 허용', quiz_answer: '퀴즈 답 저장'};
 // 내 정보 칸 (점 키 그대로 보냄 — 명세 '내 정보')
 const FIELDS = [['기본', [['name', '이름'], ['phone', '휴대폰 번호', 'tel'], ['email', '이메일', 'email'], ['birth', '생년월일 (1995-03-15)'], ['gender', '성별', ['', '여', '남']]]],
   ['주소 (배송 경품용)', [['zipcode', '우편번호'], ['address', '주소'], ['addressDetail', '상세 주소']]],
@@ -36,7 +39,7 @@ const AREAS = [['commentTemplates', '기대평·댓글 문구 (한 줄에 하나
 
 let data = null, at = 0, busy = false, timer = null, card = null, scr = null, tt = null, kinfo = null, kbusy = false;
 let seg = 'todo';
-const open = {}, steps = {}, draft = {}, mine = new Set(), seen = new Set();
+const open = {}, steps = {}, draft = {}, mine = new Set(), seen = new Set(), qsent = [];
 
 function el(t, a, ...kids) {
   const e = D.createElement(t);
@@ -133,7 +136,7 @@ async function load() {
   busy = true;
   try {
     const r = await fetch(API + 'state', {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}});
-    if (r.status === 200) { data = await r.json(); at = Date.now(); }
+    if (r.status === 200) { data = await r.json(); at = Date.now(); qsent.length = 0; }  // 방금 누른 퀴즈 답은 이제 서버 값(quiz_pending·results)으로
   } catch (e) { /* 다음에 다시 */ }
   busy = false;
   for (const x of (data && data.results) || []) {
@@ -183,6 +186,55 @@ async function retrySearch(b) {
   b.disabled = true;
   if (await act('search_retry', {})) toast('검색을 다시 켜요 — 다음 확인 때 시도해요');
   else b.disabled = false;
+}
+// 11/14 퀴즈 카드 (이벤트 참여 서버 6663b6c — todo[].quiz[] {q, options, suggest, confidence, evidence, why, key}): 보기 단추 → 확인 창 한 번 →
+// act quiz_answer {question: q 그대로, answer: 보기 글, key: 카드 key 그대로(없으면 null)}. 답은 보기 중 하나만 (직접 입력·되돌리기는 명세에 없음).
+// 상태: 보냄·대기(quiz_pending — 1분 안에 가져감) → 반영됨(results 'ok') / 저장 안 됨(results 이유 글). 모르는 꼴은 버림 · 글 노드만
+const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+const quizzes = t => (Array.isArray(t.quiz) ? t.quiz : []).filter(x => x && typeof x === 'object' && typeof x.q === 'string' && x.q.trim()).slice(0, 3)
+  .map(x => ({q: x.q, key: typeof x.key === 'string' && x.key ? x.key : null,
+    options: (Array.isArray(x.options) ? x.options : []).filter(o => typeof o === 'string' && o.trim()).slice(0, 12),
+    suggest: typeof x.suggest === 'string' ? x.suggest : null,
+    conf: typeof x.confidence === 'number' && x.confidence >= 0 && x.confidence <= 1 ? Math.round(x.confidence * 100) / 100 : null,
+    evidence: str(x.evidence, 200), why: str(x.why, 200)}));
+const qsame = (r, x) => !!r && typeof r === 'object' && r.question === x.q && (r.key || null) === x.key;
+function qstate(x) {
+  const w = qsent.find(r => qsame(r, x)) || (Array.isArray(data && data.quiz_pending) ? data.quiz_pending : []).find(r => qsame(r, x));
+  if (w) return {s: 'wait', answer: w.answer};
+  const rs = (Array.isArray(data && data.results) ? data.results : []).filter(r => r && r.op === 'quiz_answer' && qsame(r.ref, x));
+  const r = rs[rs.length - 1];
+  return r ? {s: r.result === 'ok' ? 'ok' : 'no', answer: r.ref.answer, why: str(r.result, 200)} : null;
+}
+// 안 된 이유를 쉬운 말로: key 없는 예전 카드인데 같은 질문이 여러 카드에 있으면 이벤트 참여 서버가 저장하지 않음 (어느 이벤트 답인지 몰라서)
+function qwhy(x, why) {
+  const twin = !x.key && todos().reduce((n, t) => n + quizzes(t).filter(y => y.q === x.q).length, 0) > 1;
+  const easy = twin ? '같은 질문이 다른 이벤트 카드에도 있어서 어느 이벤트의 답인지 가릴 수 없어요 — 다음 확인 뒤 새로 뜬 카드에서 다시 골라 주세요'
+    : /^모르는 명령/.test(why) ? '이벤트 참여 서버가 아직 퀴즈 답 받기를 몰라요 (예전 판) — 서버가 새 판이 된 뒤 다시 눌러 주세요'
+    : /^오류/.test(why) ? '이벤트 참여 서버에서 오류가 났어요 — 잠시 뒤 다시 눌러 주세요' : '';
+  return '저장 안 됨 — ' + (easy ? easy + (why ? ` (${why})` : '') : why || '이유를 받지 못했어요');
+}
+async function quiz(x, o) {
+  if (W.confirm && !W.confirm(`이 답으로 저장할까요?\n\n${x.q.slice(0, 120)}\n→ ${o}\n\n다음 확인부터 이 질문은 이 답으로 자동 응모해요.`)) return;
+  const r = {question: x.q, answer: o, key: x.key};
+  qsent.push(r); draw();
+  if (await act('quiz_answer', r)) { toast('보냈어요 — 이벤트 참여 서버가 1분 안에 가져가요'); return; }
+  const i = qsent.indexOf(r);
+  if (i >= 0) qsent.splice(i, 1);
+  draw();
+}
+function quizBox(t) {
+  return quizzes(t).map(x => {
+    const s = qstate(x), wait = !!s && s.s === 'wait';
+    return el('div', {class: 'qz'}, el('p', {class: 'qq'}, '퀴즈 · ' + x.q),
+      x.options.length ? el('div', {class: 'opts'}, x.options.map(o => btn('tg', o + (x.suggest === o ? ` · 추천${x.conf != null ? ' ' + x.conf : ''}` : ''), () => quiz(x, o),
+        {disabled: wait || null, 'aria-pressed': s && s.answer === o ? 'true' : 'false'})))
+        : el('p', {class: 'note'}, '보기가 없는 질문이에요 — 이벤트를 열어 직접 확인해 주세요'),
+      x.evidence ? el('p', {class: 'note qe'}, '근거: ' + x.evidence) : null, x.why ? el('p', {class: 'note qe'}, x.why) : null,
+      !s ? (x.options.length ? el('p', {class: 'note qe'}, '보기를 누르면 다음 확인부터 이 질문은 자동으로 답해요') : null)
+        : wait ? el('p', {class: 'st'}, el('span', {class: 'cp info'}, '보냄 · 대기'), `'${str(s.answer, 100)}' — 이벤트 참여 서버가 1분 안에 가져가요`)
+        : s.s === 'ok' ? el('p', {class: 'st'}, el('span', {class: 'cp ok'}, '반영됨'), `'${str(s.answer, 100)}' — 다음 확인부터 자동으로 답해요`)
+        : el('p', {class: 'st warn'}, qwhy(x, s.why)));
+  });
 }
 async function keyLoad() {
   if (kbusy) return;
@@ -245,6 +297,7 @@ function item(t) {
     el('p', {class: 'st'}, [t.prize, `마감 ${md(t.deadline)}`, typeof t.source === 'string' && t.source].filter(Boolean).join(' · ')),
     (t.actions || []).length ? el('div', {class: 'chips'}, t.actions.map(a => el('span', {class: 'cp'}, a))) : null,
     t.detail ? el('p', {class: 'st warn'}, t.detail) : null,
+    quizBox(t),
     ss.length ? [btn('fold', `참여 방법 ${ss.length}단계`, () => { steps[t.id] = !o; draw(); }, {'aria-expanded': o ? 'true' : 'false'}),
       o ? el('ol', {}, ss.map(x => el('li', {}, x))) : null] : null,
     t.comment ? el('div', {class: 'cpy'}, el('div', {class: 'dr'}, t.comment), btn('sm', '복사', () => copy(t.comment, '댓글 초안'))) : null,
@@ -316,6 +369,22 @@ function alertLine() {
   const text = x.msg + (typeof x.todo === 'string' && x.todo ? ' · 할 일: ' + x.todo : '') + (more ? ` 외 ${more}건` : '');
   return el('div', {class: x.level === 'bad' ? 'bn bad' : 'bn warn'}, el('span', {}, text));
 }
+// 마지막 실행 점검 한 줄 + 제미나이 답 한 줄 (ssalmuk.py clean_health — 칸이 없으면 안 그림). 서버 종료 신호로 멈춘 실행은 오류(빨강)가 아니라 노랑
+const HST = {failed: '실행 실패', crashed: '중간에 멈춤', aborted: '강제 종료', refused: '실행 거부', 'no-profile': '내 정보 없음'};
+const HLV = {ok: ['ok', '정상'], warn: ['hot', '주의'], bad: ['stop', '문제 있음']};
+const hl = () => { const h = data && data.health; return h && typeof h === 'object' ? h : null; };
+function healthLines() {
+  const h = hl();
+  if (!h) return null;
+  const c = h.stopped ? ['hot', '중단(서버 종료 신호)'] : HST[h.status] ? ['stop', HST[h.status]] : HLV[h.level] || null;
+  const llm = (Array.isArray(h.llm) ? h.llm : []).filter(x => x && typeof x.msg === 'string' && x.msg && HLV[x.level]);
+  return [c ? el('p', {class: 'st hl'}, el('span', {class: 'cp ' + c[0]}, c[1]), ['마지막 실행 점검', str(h.label, 40), h.at ? kst(h.at) : '',
+    h.stopped ? '다음 정기 확인 때 저절로 다시 해요' : ''].filter(Boolean).join(' · ')) : null,
+    llm.length ? el('p', {class: 'st hl'}, el('span', {class: 'cp ' + HLV[llm[0].level][0]}, HLV[llm[0].level][1]),
+      '제미나이 답 · ' + llm.map(x => x.msg + (typeof x.todo === 'string' && x.todo ? ` (할 일: ${x.todo})` : '')).join(' / ')) : null];
+}
+// 마지막 실행이 '실패'로 적혀도 그 실행이 서버 종료 신호로 멈춘 것이면 '중단' (같은 실행인지 끝난 시각으로 — 2분 안)
+const stoppedRun = lr => { const h = hl(), a = h && h.stopped ? Date.parse(h.at) : NaN, b = Date.parse(lr.finished); return Math.abs(a - b) < 120000; };
 function drawScr() {
   if (!scr) return;
   const s = st(), c = cnt(), ts = todos(), left = ts.filter(t => !t.done), dn = ts.filter(t => t.done), p = (s || {}).profile || {};
@@ -336,9 +405,9 @@ function drawScr() {
         : el('div', {class: 'kpi'}, el('div', {class: c.auto ? null : 'z'}, el('span', {}, '자동 응모'), el('b', {}, String(c.auto))), el('div', {}, el('span', {}, '남은 할 일'), el('b', {}, String(c.left))),
         el('div', {}, el('span', {}, '오늘 마감'), el('b', {class: c.today ? 'urg' : null}, String(c.today)))),
       btn('pb', running ? `확인 중 · ${s.running.label || ''}` : pend ? '보낸 명령 처리 기다리는 중…' : '지금 확인하기', e => run(e.currentTarget), {disabled: running || null}),
-      el('p', {class: 'note'}, [`마지막 확인 ${kst(s.checkedAt || lr.finished)}`, lr.finished && lr.ok === false ? '실패' : '',
+      el('p', {class: 'note'}, [`마지막 확인 ${kst(s.checkedAt || lr.finished)}`, lr.finished && lr.ok === false ? (stoppedRun(lr) ? '중단(서버 종료 신호)' : '실패') : '',
         (s.runTimes || []).length ? `매일 ${s.runTimes.join(', ')} 자동` : '', pend ? `명령 ${data.pending}개 기다리는 중` : ''].filter(Boolean).join(' · ')),
-      nw && skipped() ? skipNote() : null));
+      nw && skipped() ? skipNote() : null, healthLines()));
     if (nw) {
       const ta = todayApplied();
       out.push(el('p', {class: 'grp'}, `오늘 응모한 이벤트 ${ta.length}`), ta.length ? el('div', {class: 'box'}, ta.map(arow)) : el('p', {class: 'empty'}, '오늘은 아직 자동 응모한 이벤트가 없어요'),

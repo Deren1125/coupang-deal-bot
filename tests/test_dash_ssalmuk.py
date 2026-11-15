@@ -900,3 +900,265 @@ def test_ssalmuk_js_alert_line_on_top_text_only() -> None:
     code = (STATIC / "ssalmuk.js").read_text(encoding="utf-8")
     fn = code[code.index("function alertLine()"):code.index("function drawScr()")]
     assert "innerHTML" not in fn and "'a'" not in fn and "href" not in fn  # 글 노드만
+
+
+# ---------------------------------------------------------------- 퀴즈 카드 · 마지막 실행 점검 줄 (11/14 — 쌀먹 6663b6c·35aafbb, docs/SNSBOARD.md 'quiz_answer'·'오류 검수 칸')
+Q1 = {"q": "이번 행사의 주최 기관은 어디일까요?", "options": ["한국전력", "한국수력원자력", "<b>가스공사</b>"], "suggest": "한국수력원자력", "confidence": 0.6,
+      "evidence": "본문: 한국수력원자력이 주최", "why": "글자 비교와 Gemini 답이 다름", "key": "q2:form-abc:1f2e"}
+Q2 = {"q": "정답은 무엇일까요?", "options": ["O", "X"], "suggest": None, "confidence": None, "evidence": "", "why": "", "key": None}
+
+
+def quiz_sample(**kw: Any) -> dict[str, Any]:
+    st = sample(counts={"auto": 0, "left": 2, "today": 0, "applied": 1, "todayApplied": 0, "weekApplied": 1})
+    st["todo"][0].update(group="check", status="manual", today=False, detail="확인 필요: 정답 불확실", quiz=[Q1])
+    st["todo"][1].update(group="check", status="manual", detail="확인 필요: 정답 불확실", quiz=[Q2])
+    st.update(kw)
+    return st
+
+
+def test_act_quiz_answer_shape_key_and_null_key() -> None:
+    """op quiz_answer 는 {question, answer, key} 그대로 쌓임 — key 는 카드 값(글) 또는 null · 질문·답은 다듬지 않음 · 같은 퀴즈는 마지막 답만."""
+    s = ssalmuk.Ssalmuk(FakeDb())
+    assert "quiz_answer" in ssalmuk.OPS
+    for bad in ({}, {"question": "", "answer": "O"}, {"question": "질문", "answer": ""}, {"question": 3, "answer": "O"}, {"question": "질문", "answer": ["O"]},
+                {"question": "가" * 1001, "answer": "O"}, {"question": "질문", "answer": "가" * 301}, {"question": "질문", "answer": "O", "key": 7},
+                {"question": "질문", "answer": "O", "key": "k" * 1001}):
+        assert s.act({"op": "quiz_answer", "args": bad})[0] == 400, bad
+    assert s.commands() == {"commands": []}
+    long_q = "가나다 " * 50  # 카드 질문 200자 — 자르지 않고 그대로 (쌀먹 질문 은행 키)
+    assert s.act({"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"], "extra": "버림"}})[0] == 200
+    assert s.act({"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "O", "key": None}})[0] == 200
+    assert s.act({"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "X"}})[0] == 200  # key 를 안 보내도 null 로 · 같은 퀴즈는 마지막 답만
+    assert s.act({"op": "quiz_answer", "args": {"question": long_q, "answer": " 띄어 쓴 보기 ", "key": ""}})[0] == 200
+    cmds = s.commands()["commands"]
+    assert [c["op"] for c in cmds] == ["quiz_answer"] * 3 and all(set(c) == {"id", "op", "args", "at"} for c in cmds)
+    assert [c["args"] for c in cmds] == [{"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]},
+                                         {"question": Q2["q"], "answer": "X", "key": None},
+                                         {"question": long_q, "answer": " 띄어 쓴 보기 ", "key": None}]
+    # 같은 질문이라도 key 가 다르면 다른 퀴즈 (다른 이벤트)
+    assert s.act({"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "O", "key": "q2:other"}})[0] == 200
+    assert len(s.commands()["commands"]) == 4
+
+
+def test_quiz_pending_and_ack_reason_reach_the_view() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(quiz_sample())
+    assert "quiz_pending" not in s.view()  # 없으면 칸도 없음 (화면 그대로)
+    a = s.act({"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}})[1]["id"]
+    b = s.act({"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "O", "key": None}})[1]["id"]
+    v = s.view()
+    assert v["quiz_pending"] == [{"id": a, "question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}, {"id": b, "question": Q2["q"], "answer": "O", "key": None}]
+    why = "같은 질문 카드가 여럿이라 저장 안 함"
+    assert s.ack({"ids": [a, b], "results": {a: "ok", b: why}})[0] == 200
+    v = s.view()
+    assert "quiz_pending" not in v and v["pending"] == 0
+    assert [(r["op"], r["result"], r["ref"]) for r in v["results"]] == [
+        ("quiz_answer", "ok", {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}),
+        ("quiz_answer", why, {"question": Q2["q"], "answer": "O", "key": None})]
+    s.act({"op": "run"})
+    s.ack({"ids": [s.commands()["commands"][0]["id"]], "results": {}})
+    assert "ref" not in s.view()["results"][-1]  # 다른 명령 결과는 예전 그대로
+
+
+@pytest.mark.asyncio
+async def test_quiz_answer_through_screen_route_and_audit(bot: DealBot) -> None:
+    d = desk(bot)
+    key = d.key()
+    assert (await mpost(bot, ssalmuk.PUSH_PATH, quiz_sample(), key))[0] == 200
+    h = session_headers(bot)
+    status, body = (await post_json(bot, ssalmuk.ACT_PATH, {"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}}, h))[:2]
+    assert status == 200 and body["ok"]
+    status, got = await mget(bot, ssalmuk.COMMANDS_PATH, key)
+    assert status == 200 and [(c["op"], c["args"]) for c in got["commands"]] == [("quiz_answer", {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]})]
+    rows = bot.db._conn.execute("SELECT action, args_redacted FROM dash_audit WHERE action LIKE 'ssalmuk.%'").fetchall()
+    assert [r[0] for r in rows] == ["ssalmuk.quiz_answer"] and "한국전력" not in rows[0][1]
+
+
+QUIZ_SHIM = SHIM.replace("const runb = find(scr,", r"""
+  const all = (n, f, a = []) => { if (f(n)) a.push(n); n.children.forEach(c => all(c, f, a)); return a; };
+  const qz = () => all(main.children[0], n => n.className === 'qz');
+  const btns = n => all(n, x => x.tagName === 'BUTTON').map(b => [text(b), b.attrs['aria-pressed'], 'disabled' in b.attrs]);
+  out.quiz = qz().map(n => ({text: text(n), btns: btns(n), tags: all(n, x => x.tagName === 'A' || x.tagName === 'INPUT' || x.tagName === 'TEXTAREA').length,
+    chips: all(n, x => /^cp /.test(x.className)).map(x => x.className + ':' + text(x)), warn: all(n, x => x.className === 'st warn').map(text)}));
+  out.health = all(scr, n => n.className === 'st hl').map(n => [n.children[0].className, text(n)]);
+  out.note = all(scr, n => n.className === 'note').map(text)[0];
+  const pick = process.env.QUIZ_PICK ? JSON.parse(process.env.QUIZ_PICK) : null;
+  if (pick) {
+    const asked = []; global.confirm = m => { asked.push(m); return process.env.QUIZ_NO ? false : true; };
+    const b = all(qz()[pick[0]], x => x.tagName === 'BUTTON')[pick[1]];
+    await b.listeners.click({currentTarget: b});
+    out.asked = asked; out.picked = qz().map(n => ({text: text(n), btns: btns(n)})); out.posts = posts;
+  }
+  console.log(JSON.stringify(out)); return;
+  const runb = find(scr,""")
+
+
+def _quiz_render(view: dict[str, Any], pick: list[int] | None = None, no: bool = False) -> dict[str, Any]:
+    import os
+
+    env = dict(os.environ)
+    env.pop("QUIZ_PICK", None)
+    env.pop("QUIZ_NO", None)
+    if pick is not None:
+        env["QUIZ_PICK"] = json.dumps(pick)
+    if no:
+        env["QUIZ_NO"] = "1"
+    out = subprocess.run([NODE, "-e", QUIZ_SHIM, str(STATIC / "ssalmuk.js"), json.dumps(view, ensure_ascii=False)],
+                         capture_output=True, text=True, timeout=30, env=env)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_quiz_card_buttons_and_op_shape() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(quiz_sample())
+    got = _quiz_render(s.view())
+    q1, q2 = got["quiz"]
+    # 질문 · 보기마다 단추 (추천 보기에 '추천 0.6') · 근거·까닭은 작은 글 · 링크·입력 칸 없음 (보기 중 하나만) · 태그는 글자로
+    assert q1["text"].startswith("퀴즈 · " + Q1["q"]) and q1["tags"] == 0 and q2["tags"] == 0
+    assert q1["btns"] == [["한국전력", "false", False], ["한국수력원자력 · 추천 0.6", "false", False], ["<b>가스공사</b>", "false", False]]
+    assert "근거: 본문: 한국수력원자력이 주최" in q1["text"] and "글자 비교와 Gemini 답이 다름" in q1["text"]
+    assert q2["btns"] == [["O", "false", False], ["X", "false", False]] and "추천" not in q2["text"] and "근거" not in q2["text"]
+    assert q1["chips"] == [] and q1["warn"] == [] and "되돌리기" not in got["scr"]
+    # 누름 → 확인 창 한 번 → op quiz_answer {question, answer, key: 카드 key} · 카드는 '보냄 · 대기' (단추 잠김, 고른 보기 표시)
+    got = _quiz_render(s.view(), pick=[0, 0])
+    assert len(got["asked"]) == 1 and Q1["q"] in got["asked"][0] and "한국전력" in got["asked"][0]
+    assert got["posts"] == [["/dashboard/api/ssalmuk/act", "tok", {"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}}]]
+    assert "보냄 · 대기" in got["picked"][0]["text"] and got["picked"][0]["btns"][0] == ["한국전력", "true", True]
+    assert all(b[2] for b in got["picked"][0]["btns"]) and not any(b[2] for b in got["picked"][1]["btns"])
+    # key 없는 예전 카드: key 는 null 그대로 · 추천 글이 붙은 단추를 눌러도 답은 보기 글만
+    got = _quiz_render(s.view(), pick=[1, 1])
+    assert got["posts"] == [["/dashboard/api/ssalmuk/act", "tok", {"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "X", "key": None}}]]
+    got = _quiz_render(s.view(), pick=[0, 1])
+    assert got["posts"][0][2]["args"] == {"question": Q1["q"], "answer": "한국수력원자력", "key": Q1["key"]}
+    # 확인 창에서 취소하면 아무것도 안 보냄
+    got = _quiz_render(s.view(), pick=[0, 0], no=True)
+    assert got["posts"] == [] and "보냄 · 대기" not in got["picked"][0]["text"]
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_quiz_card_pending_applied_and_reason() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    twin = quiz_sample()
+    twin["todo"][0]["quiz"] = [Q1, Q2]  # key 없는 같은 질문이 카드 둘에
+    s.push(twin)
+    a = s.act({"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}})[1]["id"]
+    b = s.act({"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "O", "key": None}})[1]["id"]
+    got = _quiz_render(s.view())  # 다시 열어도 '보냄 · 대기' (서버가 기억)
+    assert [("보냄 · 대기" in q["text"], q["chips"]) for q in got["quiz"]] == [(True, ["cp info:보냄 · 대기"])] * 3
+    assert got["quiz"][0]["btns"][0] == ["한국전력", "true", True]
+    why = "같은 질문 카드가 여럿이라 저장 안 함"
+    s.ack({"ids": [a, b], "results": {a: "ok", b: why}})
+    got = _quiz_render(s.view())
+    q1, q2a, q2b = got["quiz"]
+    assert q1["chips"] == ["cp ok:반영됨"] and "'한국전력' — 다음 확인부터 자동으로 답해요" in q1["text"] and q1["warn"] == []
+    assert q1["btns"][0] == ["한국전력", "true", False]  # 다시 고를 수 있음 (되돌리기 단추는 없음)
+    for q in (q2a, q2b):  # 안 된 이유를 쉬운 말 + 받은 글 그대로
+        assert q["chips"] == [] and len(q["warn"]) == 1
+        assert q["warn"][0].startswith("저장 안 됨 — 같은 질문이 다른 이벤트 카드에도 있어서") and q["warn"][0].endswith(f"({why})")
+    # 다른 이유는 받은 글 그대로 · 예전 판 서버('모르는 명령')는 풀어서
+    s2 = ssalmuk.Ssalmuk(FakeDb())
+    s2.push(quiz_sample())
+    for res, want in (("질문이 너무 짧아 저장 안 함 (8자 미만)", "저장 안 됨 — 질문이 너무 짧아 저장 안 함 (8자 미만)"),
+                      ("모르는 명령: quiz_answer", "저장 안 됨 — 이벤트 참여 서버가 아직 퀴즈 답 받기를 몰라요 (예전 판) — 서버가 새 판이 된 뒤 다시 눌러 주세요 (모르는 명령: quiz_answer)")):
+        c = s2.act({"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "O", "key": None}})[1]["id"]
+        s2.ack({"ids": [c], "results": {c: res}})
+        assert _quiz_render(s2.view())["quiz"][1]["warn"] == [want]
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_quiz_unknown_shapes_ignored() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    base_state = quiz_sample()
+    for t in base_state["todo"]:
+        t.pop("quiz")
+    s.push(base_state)
+    base = _quiz_render(s.view())
+    assert base["quiz"] == []
+    for bad in ("퀴즈", {"q": "x"}, [None, "글", 3, {"q": ""}, {"q": 5, "options": ["a"]}, {"options": ["a"]}]):
+        st = quiz_sample()
+        st["todo"][0]["quiz"] = bad
+        st["todo"][1].pop("quiz")
+        s.push(st)
+        got = _quiz_render(s.view())
+        assert got["quiz"] == [] and got["scr"] == base["scr"], bad
+    st = quiz_sample()
+    st["todo"][1].pop("quiz")
+    st["todo"][0]["quiz"] = [{"q": "보기 꼴이 이상한 질문입니다", "options": ["가", 3, None, "", {"x": 1}, "나"], "suggest": 7, "confidence": 4, "evidence": ["x"], "why": None, "key": 9},
+                             {"q": "보기가 아예 없는 질문입니다", "options": "없음", "key": "k1"}, Q1, Q2]
+    s.push(st)
+    got = _quiz_render(s.view(), pick=[0, 1])
+    assert len(got["quiz"]) == 3  # 3개까지
+    assert got["quiz"][0]["btns"] == [["가", "false", False], ["나", "false", False]] and "추천" not in got["quiz"][0]["text"]
+    assert got["quiz"][1]["btns"] == [] and "보기가 없는 질문이에요" in got["quiz"][1]["text"]
+    assert got["posts"][0][2]["args"] == {"question": "보기 꼴이 이상한 질문입니다", "answer": "나", "key": None}  # 글이 아닌 key 는 null
+
+
+HEALTH = {"level": "warn", "at": "2026-11-13T22:30:00Z", "runId": "r1", "label": "07:23 정기", "status": "aborted",
+          "checks": [{"id": "run", "level": "warn", "msg": "중단(서버 종료 신호) — 서버가 다시 시작·업데이트되며 실행을 멈춤 (지금까지 결과는 저장)", "since": "…",
+                      "todo": "할 일 없음 — 다음 정기 실행에 저절로 다시 함"}],
+          "funnel": None, "durationSec": 61, "version": "unknown", "codeHash": "d9dece8b9d"}
+
+
+def test_clean_health_contract_fields_only() -> None:
+    assert ssalmuk.clean_health(None) is None and ssalmuk.clean_health({}) is None
+    for bad in ("정상", [], 3, {"level": "purple", "status": "weird"}, {"checks": []}):
+        assert ssalmuk.clean_health({"health": bad}) is None, bad
+    h = ssalmuk.clean_health({"health": HEALTH})
+    assert h == {"level": "warn", "status": "aborted", "label": "07:23 정기", "at": "2026-11-13T22:30:00Z", "stopped": True, "llm": []}
+    # 강제 종료(aborted + run bad)·run 줄 없음·다른 status 는 '중단' 아님
+    forced = dict(HEALTH, level="bad", checks=[{"id": "run", "level": "bad", "msg": "강제 종료됨 (종료 코드 143) — 50분 넘음 또는 중단 신호"}])
+    assert ssalmuk.clean_health({"health": forced})["stopped"] is False  # type: ignore[index]
+    assert ssalmuk.clean_health({"health": dict(HEALTH, checks="x")})["stopped"] is False  # type: ignore[index]
+    assert ssalmuk.clean_health({"health": dict(HEALTH, status="failed")})["stopped"] is False  # type: ignore[index]
+    # 제미나이 줄 = checks 의 llm·llm-accuracy 만 (급한 것 먼저, 글로만) · health.llm 같은 계약에 없는 칸은 읽지 않음 · 모르는 status 는 None
+    chk = [{"id": "llm-accuracy", "level": "warn", "msg": "퀴즈 정확도 60% (최근 7일 5개 폼, 6/10)", "todo": "확인 필요 카드에서 답 고르기"},
+           {"id": "search", "level": "bad", "msg": "네이버 검색 오늘 쉼"}, "글", {"id": "llm", "level": "purple", "msg": "?"}, {"id": "llm", "level": "bad", "msg": 3},
+           {"id": "llm", "level": "bad", "msg": "<b>Gemini</b> 오늘 쉼 — 키 문제 (401)", "todo": ["x"]}]
+    h = ssalmuk.clean_health({"health": {"level": "bad", "status": "running?", "label": 7, "checks": chk, "llm": {"mode": "direct", "today": {"ok": 3}}}})
+    assert h == {"level": "bad", "status": None, "label": "", "at": "", "stopped": False,
+                 "llm": [{"id": "llm", "level": "bad", "msg": "Gemini 오늘 쉼 — 키 문제 (401)", "todo": ""},
+                         {"id": "llm-accuracy", "level": "warn", "msg": "퀴즈 정확도 60% (최근 7일 5개 폼, 6/10)", "todo": "확인 필요 카드에서 답 고르기"}]}
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(sample())
+    assert "health" not in s.view()  # 칸이 없으면 응답에도 없음
+    s.push(sample(health=HEALTH))
+    assert s.view()["health"]["stopped"] is True
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_health_line_aborted_is_yellow_and_llm_line() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    failed_run = {"label": "07:23 정기", "started": "2026-11-13T22:23:00Z", "finished": "2026-11-13T22:30:20Z", "ok": False, "log": "run-1.log"}
+    s.push(sample(lastRun=failed_run))
+    base = _quiz_render(s.view())
+    assert base["health"] == [] and " · 실패 · " in base["note"]
+    # 서버 종료 신호로 멈춤 → 빨강(stop)이 아니라 노랑(hot) '중단(서버 종료 신호)' · 마지막 확인 줄도 '실패' 대신 '중단'
+    s.push(sample(lastRun=failed_run, health=HEALTH))
+    got = _quiz_render(s.view())
+    assert len(got["health"]) == 1 and got["health"][0][0] == "cp hot"
+    assert got["health"][0][1].startswith("중단(서버 종료 신호)마지막 실행 점검 · 07:23 정기 · ") and "다음 정기 확인 때 저절로 다시 해요" in got["health"][0][1]
+    assert " · 중단(서버 종료 신호) · " in got["note"] and "실패" not in got["note"] and "cp stop" not in json.dumps(got["health"])
+    # 50분 넘어 강제 종료된 aborted 는 그대로 빨강 · '실패'도 그대로
+    s.push(sample(lastRun=failed_run, health=dict(HEALTH, level="bad", checks=[{"id": "run", "level": "bad", "msg": "강제 종료됨 (종료 코드 143)"}])))
+    got = _quiz_render(s.view())
+    assert [h[0] for h in got["health"]] == ["cp stop"] and got["health"][0][1].startswith("강제 종료마지막 실행 점검") and " · 실패 · " in got["note"]
+    # 다른 실행의 '실패'는 '중단'으로 바꾸지 않음 (끝난 시각이 다름)
+    s.push(sample(lastRun=dict(failed_run, finished="2026-11-13T19:30:00Z"), health=HEALTH))
+    assert " · 실패 · " in _quiz_render(s.view())["note"]
+    # 제미나이 답 한 줄 (checks 의 llm 줄이 있을 때만) · 정상 실행은 초록
+    s.push(sample(health=dict(HEALTH, status="done", level="warn", checks=[
+        {"id": "llm", "level": "warn", "msg": "Gemini 오늘 상한(40회)에 닿음 — 남은 퀴즈는 확인 필요로", "todo": ""},
+        {"id": "llm-accuracy", "level": "warn", "msg": "퀴즈 정확도 60% (최근 7일 5개 폼, 6/10)", "todo": "확인 필요 카드에서 답 고르기"}])))
+    got = _quiz_render(s.view())
+    assert [h[0] for h in got["health"]] == ["cp hot", "cp hot"] and got["health"][0][1].startswith("주의마지막 실행 점검")
+    assert got["health"][1][1] == "주의제미나이 답 · Gemini 오늘 상한(40회)에 닿음 — 남은 퀴즈는 확인 필요로 / 퀴즈 정확도 60% (최근 7일 5개 폼, 6/10) (할 일: 확인 필요 카드에서 답 고르기)"
+    s.push(sample(health=dict(HEALTH, status="done", level="ok", checks=[])))
+    got = _quiz_render(s.view())
+    assert [h[0] for h in got["health"]] == ["cp ok"] and "제미나이" not in got["scr"]
+    # 모르는 값은 무시 (줄 없음 · 화면 그대로)
+    s.push(sample(lastRun=failed_run))
+    v = s.view()
+    v["health"] = {"level": "purple", "status": "weird", "llm": "x", "stopped": False}
+    assert _quiz_render(v)["scr"] == base["scr"]

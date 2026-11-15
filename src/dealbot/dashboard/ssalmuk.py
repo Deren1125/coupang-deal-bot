@@ -13,7 +13,9 @@
   몸 512KB 까지 · 같은 손님 1분 120번.
 화면(로그인 + 같은 사이트 + X-Dash-Token — DashApi.guard):
   GET  /dashboard/api/ssalmuk/state     {"state", "receivedAt", "pending", "stale", "results"} (no-store — 주인 이름·전화가 들어 있음)
-  POST /dashboard/api/ssalmuk/act       {"op": "run"|"done"|"profile", "args": {...}} → 명령 쌓기 (done 은 받아 둔 상태에도 먼저)
+                                        있을 때만: "health" (마지막 실행 점검 줄 — clean_health) · "quiz_pending" (보내고 아직 안 가져간 퀴즈 답)
+  POST /dashboard/api/ssalmuk/act       {"op": "run"|"done"|"profile"|"search_retry"|"trust_host"|"quiz_answer", "args": {...}} → 명령 쌓기
+                                        (done 은 받아 둔 상태에도 먼저 · quiz_answer {question, answer, key} — 퀴즈 카드 보기 단추, 쌀먹 6663b6c)
   GET  /dashboard/api/ssalmuk/key       {"key", "url", "at"} — 연결 칸을 펼칠 때만 (no-store)
   POST /dashboard/api/ssalmuk/rotate    새 키 (예전 키는 바로 안 받음 — 쌀먹 예비 대시보드에 다시 붙여넣기)
 저장은 딜봇 DB kv (ssalmuk_key · ssalmuk_state · ssalmuk_cmds · ssalmuk_results). 받은 상태·키는 로그에 남기지 않는다.
@@ -61,7 +63,11 @@ CMD_KEEP = 86400  # 명령 보관은 하루
 CMD_MAX = 200
 CMD_LIST = 50
 RESULTS_KEEP = 30
-OPS = ("run", "done", "profile", "search_retry", "trust_host")  # 11/14 쌀먹 5469c7b: 검색 다시 시도 · 이 사이트 허용
+OPS = ("run", "done", "profile", "search_retry", "trust_host", "quiz_answer")  # 11/14 쌀먹 5469c7b: 검색 다시 시도 · 이 사이트 허용 · 6663b6c: 퀴즈 답
+# 퀴즈 답 (쌀먹 docs/SNSBOARD.md 'quiz_answer'): 질문은 카드 글 그대로 (자르면 쌀먹 질문 은행 키가 달라짐 — 카드는 200자까지) · 길면 자르지 않고 거절
+QUIZ_Q_MAX = 1000
+QUIZ_A_MAX = 300  # 쌀먹이 100자·'카드 보기 중 하나'를 다시 봄 — 여기선 모양만
+QUIZ_KEY_MAX = 1000
 HOST_RE = re.compile(r"^(?=.{4,253}$)(?!-)[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})*\.[a-z]{2,24}$")
 # 쌀먹 sync.js PROFILE_KEYS 와 같게 (점 키 그대로)
 PROFILE_KEYS = ("name", "phone", "email", "birth", "gender", "zipcode", "address", "addressDetail", "shareUrl", "surveyMode",
@@ -78,7 +84,8 @@ KV_SEARCH_KEYS = "ssalmuk_search_keys"  # 키마다 마지막 네이버 답 {"de
 KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' — 어느 키가 통했는지 (값만, 비밀 아님)
 KEY_RECHECK = 86400.0  # 블로그 키로 넘어간 뒤에도 딜봇 키를 하루 한 번 다시 봄
 _TAG_RE = re.compile(r"<[^>]*>")
-OP_LABEL = {"run": "지금 확인하기", "done": "완료 표시", "profile": "내 정보 저장", "search_retry": "검색 다시 켜기", "trust_host": "사이트 허용"}
+OP_LABEL = {"run": "지금 확인하기", "done": "완료 표시", "profile": "내 정보 저장", "search_retry": "검색 다시 켜기", "trust_host": "사이트 허용",
+            "quiz_answer": "퀴즈 답 저장"}
 
 
 KST = timezone(timedelta(hours=9))
@@ -119,6 +126,34 @@ def clean_alerts(state: Any) -> list[dict[str, Any]]:
                     "todo": _line(x.get("todo"), ALERT_TEXT), "new": x.get("new") is True})
     out.sort(key=lambda a: ALERT_LEVELS.index(a["level"]))  # bad 먼저 (같은 단계는 받은 순서 그대로)
     return out[:ALERT_MAX]
+
+
+HEALTH_LEVELS = ("ok", "warn", "bad")
+HEALTH_STATUS = ("done", "aborted", "failed", "crashed", "refused", "no-profile")
+LLM_CHECK_IDS = ("llm", "llm-accuracy")  # 쌀먹 health.js judge 의 Gemini 줄 (push 의 health 에는 llm 칸이 없고 checks[] 로만 옴)
+
+
+def clean_health(state: Any) -> dict[str, Any] | None:
+    """받아 둔 push 의 health → 화면 한 줄용 (쌀먹 docs/SNSBOARD.md '오류 검수 칸' — 계약에 있는 칸만: level·status·label·at·checks[id, level, msg, todo]).
+    - stopped: status 가 'aborted' 이고 checks 의 run 줄이 'warn' = 서버 종료 신호로 멈춘 것 (쌀먹 35aafbb) → 화면은 빨강이 아니라 노랑 '중단(서버 종료 신호)'.
+      run 줄이 bad 인 aborted(50분 넘어 강제 종료)는 그대로 빨강.
+    - llm: checks 중 id 가 llm·llm-accuracy 인 줄 (제미나이 답 상태) — 없으면 [] (화면에서 숨김).
+    칸이 없거나 모르는 값뿐이면 None (화면은 그대로)."""
+    h = state.get("health") if isinstance(state, dict) else None
+    if not isinstance(h, dict):
+        return None
+    level = h.get("level") if h.get("level") in HEALTH_LEVELS else None
+    status = h.get("status") if h.get("status") in HEALTH_STATUS else None
+    if level is None and status is None:
+        return None
+    raw = h.get("checks")
+    checks = [c for c in (raw[:50] if isinstance(raw, list) else []) if isinstance(c, dict) and c.get("level") in HEALTH_LEVELS]
+    run = next((c for c in checks if c.get("id") == "run"), None)
+    llm = [{"id": c["id"], "level": c["level"], "msg": _line(c.get("msg"), ALERT_TEXT), "todo": _line(c.get("todo"), ALERT_TEXT)}
+           for c in checks if c.get("id") in LLM_CHECK_IDS and _line(c.get("msg"), ALERT_TEXT)]
+    llm.sort(key=lambda c: -HEALTH_LEVELS.index(c["level"]))  # 급한 것 먼저
+    return {"level": level, "status": status, "label": _line(h.get("label"), 40), "at": _line(h.get("at"), 40),
+            "stopped": status == "aborted" and run is not None and run["level"] == "warn", "llm": llm[:2]}
 
 
 def search_items(data: Any) -> tuple[list[dict[str, str]], int]:
@@ -293,7 +328,10 @@ class Ssalmuk:
             rs = rs if isinstance(rs, list) else []
             for c in done:
                 r = results.get(c["id"], "ok")
-                rs.append({"id": c["id"], "op": c["op"], "result": str(r)[:200] if r is not None else "ok", "at": _iso(now)})
+                row = {"id": c["id"], "op": c["op"], "result": str(r)[:200] if r is not None else "ok", "at": _iso(now)}
+                if c["op"] == "quiz_answer":  # 어느 퀴즈 카드의 결과인지 (카드에 '반영됨'·안 된 이유) — 질문·보기는 공개 이벤트 글
+                    row["ref"] = {k: c["args"].get(k) for k in ("question", "answer", "key")}
+                rs.append(row)
             self.db.kv_set(KV_RESULTS, json.dumps(rs[-RESULTS_KEEP:], ensure_ascii=False))
         return 200, {"ok": True, "removed": len(done)}
 
@@ -343,14 +381,24 @@ class Ssalmuk:
         """화면용 (로그인 아래에서만): 받아 둔 상태 · 받은 시각 · 안 끝난 명령 수 · 끊김 여부 · 최근 처리 결과."""
         saved = self._load(KV_STATE, {})
         ts = saved.get("ts") if isinstance(saved, dict) else None
-        return {"state": saved.get("state") if isinstance(saved, dict) else None,
-                "receivedAt": saved.get("receivedAt") if isinstance(saved, dict) else None,
-                "pending": len(self._cmds()), "stale": stale(ts, self.clock()),
-                "results": self._load(KV_RESULTS, [])[-10:],
-                "search_proxy": {"keysrc": self.search_keysrc(), "today_count": self.search_today(),
-                                 "keys": self._load(KV_SEARCH_KEYS, {})},
-                # 오류 검수 경고 한 줄 (주인 11/14) — 거른 목록만 · 칸이 없으면 [] (화면은 그대로)
-                "alerts": clean_alerts(saved.get("state") if isinstance(saved, dict) else None)}
+        cmds = self._cmds()
+        out: dict[str, Any] = {
+            "state": saved.get("state") if isinstance(saved, dict) else None,
+            "receivedAt": saved.get("receivedAt") if isinstance(saved, dict) else None,
+            "pending": len(cmds), "stale": stale(ts, self.clock()),
+            "results": self._load(KV_RESULTS, [])[-10:],
+            "search_proxy": {"keysrc": self.search_keysrc(), "today_count": self.search_today(),
+                             "keys": self._load(KV_SEARCH_KEYS, {})},
+            # 오류 검수 경고 한 줄 (주인 11/14) — 거른 목록만 · 칸이 없으면 [] (화면은 그대로)
+            "alerts": clean_alerts(saved.get("state") if isinstance(saved, dict) else None)}
+        # 있을 때만 싣는 칸 (없으면 화면은 그대로): 마지막 실행 점검 한 줄 · 보내고 아직 쌀먹이 안 가져간 퀴즈 답
+        health = clean_health(out["state"])
+        if health is not None:
+            out["health"] = health
+        quiz = [{"id": c["id"], **{k: c["args"].get(k) for k in ("question", "answer", "key")}} for c in cmds if c["op"] == "quiz_answer"]
+        if quiz:
+            out["quiz_pending"] = quiz
+        return out
 
     # ------------------------------------------------------------ 명령
     def act(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -376,6 +424,15 @@ class Ssalmuk:
                 return 400, {"status": "error", "code": "bad_args", "text": "사이트 주소가 이상해요"}
             args = {"host": host}
             cmds = [c for c in cmds if not (c["op"] == "trust_host" and c["args"].get("host") == host)]
+        elif op == "quiz_answer":  # 쌀먹이 '카드 보기 중 하나'·짧은 질문·key 없는 같은 질문 여럿을 다시 거르고 ack 결과에 이유를 줌 — 여기선 모양만
+            q, a, k = args.get("question"), args.get("answer"), args.get("key")
+            if not isinstance(q, str) or not q.strip() or len(q) > QUIZ_Q_MAX or not isinstance(a, str) or not a.strip() or len(a) > QUIZ_A_MAX:
+                return 400, {"status": "error", "code": "bad_args", "text": "퀴즈 질문·답이 이상해요"}
+            if k is not None and (not isinstance(k, str) or len(k) > QUIZ_KEY_MAX):
+                return 400, {"status": "error", "code": "bad_args", "text": "퀴즈 카드 정보가 이상해요 — 새로고침 뒤 다시"}
+            args = {"question": q, "answer": a, "key": k or None}  # 질문·답은 카드 글 그대로 (다듬지 않음) · key 는 카드 값 그대로 (없으면 null)
+            cmds = [c for c in cmds if not (c["op"] == "quiz_answer" and c["args"].get("question") == q
+                                            and c["args"].get("key") == args["key"])]  # 같은 퀴즈는 마지막에 누른 답만
         else:
             prof = _clean_profile(args.get("profile"))
             if not prof:
