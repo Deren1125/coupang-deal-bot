@@ -34,6 +34,7 @@ X_JS = "x.js"  # X (10/25) — SNS 탭 'X(트위터)' 칸을 처음 열 때만 (
 SHORTS_JS = "shorts.js"  # 올리기 할 일 (11/08) — SNS 탭 '올리기' 칸을 처음 열 때만 (주소는 meta sb-shorts — sns.js 가 받음)
 SNS_JS = "sns.js"  # SNS 탭 (10/26) — 스레드·인스타 · X · 룩북 릴스 화면을 담는 상자. SNS 탭을 처음 열 때만 (주소는 meta sb-sns)
 LOGINS_JS = "logins.js"  # 로그인 관리 (10/26) — 연결 탭 맨 위 칸. app.js 가 예산 끝이라 셸이 defer 로 받고, 칸은 스스로 연결 탭에 붙는다
+ACCOUNTS_JS = "accounts.js"  # 계정 정리 (구글·인스타) (11/15) — 연결 탭 접는 칸 (#/connect/accounts). logins.js 가 예산 끝이라 셸이 defer 로 (logins.js 다음 — 그 칸 아래에 붙음)
 KZ_JS = "kz.js"  # 키자드 (11/12) — 블로그 탭 '키자드' 칸·연결 탭 '키자드 로그인'·SNS 룩북 아래 수집·레시피·트렌드. logins.js 처럼 셸이 defer 로, 칸은 스스로 붙는다
 SSALMUK_JS = "ssalmuk.js"  # 이벤트 참여 (11/14) — 할 일 탭 카드·화면 (#/todo/ev). routine.js 처럼 셸이 defer 로, 칸은 스스로 붙는다
 TODOHUB_JS = "todohub.js"  # 할 일 종류 목록 (11/14) — #/todo 는 종류만, #/todo/<종류> 는 그 종류 할 일만. 셸이 defer 로 (ssalmuk.js 다음)
@@ -74,6 +75,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<script src="{asset_url(APP_JS)}" defer></script>'
         f'<script defer src="{asset_url(THPOST_JS)}"></script>'  # "<script src=" 아님 — app.js 하나만 세는 시험과 구분
         f'<script defer src="{asset_url(LOGINS_JS)}"></script>'  # 로그인 관리 칸 (10/26) — 같은 이유로 "<script defer src="
+        f'<script defer src="{asset_url(ACCOUNTS_JS)}"></script>'  # 계정 정리 칸 (11/15) — 같은 이유로 "<script defer src="
         f'<script defer src="{asset_url(ROUTINE_JS)}"></script>'  # 오늘 할 일 칸 (10/27) — 같은 이유로 "<script defer src="
         f'<script defer src="{asset_url(SEOIRES_JS)}"></script>'  # 오늘 자동 결과 표 (11/15) — 같은 이유로 "<script defer src="
         f'<script defer src="{asset_url(KZ_JS)}"></script>'  # 키자드 칸 (11/12) — 같은 이유로 "<script defer src="

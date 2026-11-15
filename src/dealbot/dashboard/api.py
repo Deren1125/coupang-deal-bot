@@ -24,6 +24,7 @@
   GET  /dashboard/api/logins            로그인 관리 칸 (logins.view — 연결 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/routine           오늘 할 일 칸 (routine.view — 할 일 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/uploads           올리기 할 일 칸 (uploadplan.view — SNS 탭 '올리기'를 열 때만 · no-store)
+  GET  /dashboard/api/accounts          계정 정리 표 (accounts_map.view — 연결 탭 '계정 정리 (구글·인스타)'를 펼칠 때만 · 상수 · 쓰임만, 주소·비밀 없음)
   GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps, ver, version, ack} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만 ·
                                         ver = 코드 지문 · ack = 주인이 이 판을 '설치했어요' 했는지 — 대시보드 일 kkumi.installed {ver}, 주인 11/14)
   GET  /dashboard/api/statscap          '통계 보내기' 책갈피 {code, len, steps} (statscap.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
@@ -49,7 +50,7 @@
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,seoires.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,xstudio.js,xtoday.js,xengage.js,xgo.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,accounts.js,sns.js,routine.js,seoires.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,xstudio.js,xtoday.js,xengage.js,xgo.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -111,6 +112,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "xpost.js": "text/javascript; charset=utf-8",  # xpost.js: X(트위터) 초안함·진행률·글감 카드 (10/25, SNS 탭에서 처음 열 때만)
              "lookbook.js": "text/javascript; charset=utf-8",  # lookbook.js: 룩북 릴스 (10/25, SNS 탭에서 처음 열 때만)
              "logins.js": "text/javascript; charset=utf-8",  # logins.js: 연결 탭 '로그인 관리' 칸 (10/26, 셸이 defer 로 — app.js 는 예산 끝)
+             "accounts.js": "text/javascript; charset=utf-8",  # accounts.js: 연결 탭 '계정 정리 (구글·인스타)' 접는 칸 (11/15, 셸이 defer 로 — logins.js 는 예산 끝)
              "sns.js": "text/javascript; charset=utf-8",  # sns.js: SNS 탭 상자 (10/26, SNS 탭을 처음 열 때만)
              "routine.js": "text/javascript; charset=utf-8",  # routine.js: 할 일 탭 '오늘 할 일' 칸 (10/27, 셸이 defer 로 — app.js 는 예산 끝)
              "seoires.js": "text/javascript; charset=utf-8",  # seoires.js: 할 일 탭 블로그 칸 '오늘 자동 결과' 표 (11/15, 셸이 defer 로 — routine.js 는 예산 끝)
@@ -260,6 +262,7 @@ class DashApi:
         web.route(f"{API}/lbtrial", self.lbtrial)
         web.route(f"{API}/lbcands", self.lbcands)
         web.route(f"{API}/logins", self.logins)
+        web.route(f"{API}/accounts", self.accounts)
         web.route(f"{API}/routine", self.routine)
         web.route(f"{API}/uploads", self.uploads_plan)
         web.route(f"{API}/kkumi", self.kkumi)
@@ -619,6 +622,12 @@ class DashApi:
         from dealbot.dashboard import logins
 
         return jresp(200, logins.view(self.bot), {"Cache-Control": "no-store"})  # 할 일 줄(remote_login.item)처럼 같은 흐름에서 (짧게 읽기만)
+
+    async def accounts(self, query: dict[str, str]) -> Any:
+        """계정 정리 표 (주인 11/15) — 어느 계정을 어디에 쓰는지 상수 표 (쓰임만 · 주소·비밀 없음 · 아무것도 읽거나 열지 않음)."""
+        from dealbot.dashboard import accounts_map
+
+        return jresp(200, accounts_map.view(), {"Cache-Control": "no-cache"})
 
     async def routine(self, query: dict[str, str]) -> Any:
         """오늘 할 일 칸 (주인 10/27) — 블로그 프로그램 목록 + 그날 체크 (읽기만, 사이트를 열지 않음)."""

@@ -225,6 +225,10 @@ ROUTINE_JS_GZIP_MAX = 11 * 1024 + 768
 # routine.js 에는 부르는 한 마디뿐 (32987 B / 11923 B — 예산 그대로)
 SEOIRES_JS_MAX = 5 * 1024
 SEOIRES_JS_GZIP_MAX = 2 * 1024 + 512
+# 11/15: 연결 탭 '계정 정리 (구글·인스타)' 접는 칸 (주인 '계정별 사용처를 대시보드에') — logins.js 가 예산 끝이라 셸이 defer 로 받는 accounts.js
+# (CSS 도 여기서 · 표 값은 /dashboard/api/accounts 로 펼칠 때만 · 4.7 KB / 2.3 KB)
+ACCOUNTS_JS_MAX = 5 * 1024 + 512
+ACCOUNTS_JS_GZIP_MAX = 2 * 1024 + 768
 # 11/14: 할 일 종류 목록 — 칸마다 data-k · 남은 수(cnt) · 종류 화면에선 늘 펼침 (칸 순서 점수는 뺌) → gzip 9.6 KB 그대로
 # 할 일 종류 목록·종류 화면 (주인 11/14 '첫 화면은 종류별 목록만') — app.js 가 예산 끝이라 셸이 defer 로 받는 todohub.js (CSS 도 여기서)
 TODOHUB_JS_MAX = 8 * 1024 + 512
@@ -271,8 +275,9 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     # · kz.js (키자드 칸, 11/12) · ssalmuk.js (할 일 탭 '이벤트 참여' 카드·화면, 11/14) · todohub.js (할 일 종류 목록, 11/14)
     # · xstudio.js (X 글쓰기·답글 도구, 11/14) · xtoday.js (오늘 X 글·큰 사건 배너, 11/15)
     # · xengage.js (X 반응 연속 모드, 11/15 — 맨 끝) · seoires.js (오늘 자동 결과 표, 11/15 — routine.js 다음)
-    assert len(scripts) == 13
-    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (rt_attrs, rt_body), (sr_attrs, sr_body), (kz_attrs, kz_body), \
+    # · accounts.js (연결 탭 '계정 정리' 칸, 11/15 — logins.js 다음)
+    assert len(scripts) == 14
+    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (ac_attrs, ac_body), (rt_attrs, rt_body), (sr_attrs, sr_body), (kz_attrs, kz_body), \
         (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (xt_attrs, xt_body), (xe_attrs, xe_body), (boot_attrs, _boot) = scripts
     assert re.fullmatch(r' defer src="/dashboard/static/xengage\.js\?v=[0-9a-f]{10}"', xe_attrs) and xe_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xtoday\.js\?v=[0-9a-f]{10}"', xt_attrs) and xt_body == ""
@@ -285,6 +290,7 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     assert re.fullmatch(r' blocking="render" src="/dashboard/static/theme\.js\?v=[0-9a-f]{10}"', th_attrs) and th_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/thpost\.js\?v=[0-9a-f]{10}"', tp_attrs) and tp_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/logins\.js\?v=[0-9a-f]{10}"', lg_attrs) and lg_body == ""
+    assert re.fullmatch(r' defer src="/dashboard/static/accounts\.js\?v=[0-9a-f]{10}"', ac_attrs) and ac_body == ""
     assert re.fullmatch(r' src="/dashboard/static/app\.js\?v=[0-9a-f]{10}" defer', src_attrs) and src_body == ""
     assert boot_attrs == ' type="application/json" id="boot"'
     outside = re.sub(r'<script type="application/json" id="boot">.*?</script>', "", html, flags=re.S)
@@ -344,7 +350,7 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
                         ("logins.js", "text/javascript"), ("sns.js", "text/javascript"), ("routine.js", "text/javascript"),
                         ("ssalmuk.js", "text/javascript"), ("todohub.js", "text/javascript"), ("xstudio.js", "text/javascript"),
                         ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript"), ("xengage.js", "text/javascript"),
-                        ("seoires.js", "text/javascript")):
+                        ("seoires.js", "text/javascript"), ("accounts.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))
@@ -374,6 +380,8 @@ def test_asset_budgets() -> None:
     assert len(rt) <= ROUTINE_JS_MAX and len(gzip.compress(rt, 9)) <= ROUTINE_JS_GZIP_MAX
     sr = (STATIC / "seoires.js").read_bytes()
     assert len(sr) <= SEOIRES_JS_MAX and len(gzip.compress(sr, 9)) <= SEOIRES_JS_GZIP_MAX
+    ac = (STATIC / "accounts.js").read_bytes()
+    assert len(ac) <= ACCOUNTS_JS_MAX and len(gzip.compress(ac, 9)) <= ACCOUNTS_JS_GZIP_MAX
     th = (STATIC / "todohub.js").read_bytes()
     assert len(th) <= TODOHUB_JS_MAX and len(gzip.compress(th, 9)) <= TODOHUB_JS_GZIP_MAX
     sn = (STATIC / "sns.js").read_bytes()
