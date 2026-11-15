@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ import pytest
 from dash_helpers import get_json, push_settings, session_headers
 from dealbot.app import DealBot
 from dealbot.config import Settings
+from dealbot.dashboard import api as api_mod
 from dealbot.dashboard import logins, routine, seoi
 from test_dash_logins import DOM_SHIM as LG_SHIM
 from test_dash_state import write_export
@@ -584,25 +586,27 @@ async def test_act_needs_the_key_and_a_known_blog() -> None:
 
 @pytest.mark.parametrize(("nid", "blog", "name"), THREE)
 async def test_add_gap_is_random_per_action_and_too_soon_does_nothing(nid: str, blog: str, name: str) -> None:
+    (lo, hi), (vlo, _vhi) = seoi.GAP["add"], seoi.GAP["visit"]
+    assert 20 <= lo < hi and 20 <= vlo  # 사람 속도 — 서이추 사이는 20초 밑으로 내리지 않음
     db, rng = FakeDb(), Rng("lo")
     got = await seoi.act(db, add_form(db, blog), tz=TZ, now=NOW, rng=rng)
-    assert got == {"ok": True, "blog": blog, "again": False, "n": 1, "cap": 30, "msg": "", "text": f"오늘 {name} 서이추 1/30"} and rng.seen == [(60, 120)]
+    assert got == {"ok": True, "blog": blog, "again": False, "n": 1, "cap": 30, "msg": "", "text": f"오늘 {name} 서이추 1/30"} and rng.seen == [(lo, hi)]
     # 같은 블로그(대상)를 10분 안에 다시 = 이어 하기 (① 이웃추가 → ② 신청 화면) — 다시 세지 않고 간격도 그대로
     again = await seoi.act(db, add_form(db, blog), tz=TZ, now=NOW + 20, rng=rng)
-    assert again["again"] is True and again["n"] == 1 and rng.seen == [(60, 120)]
+    assert again["again"] is True and again["n"] == 1 and rng.seen == [(lo, hi)]
     e = await refused(db, add_form(db, blog, "neighbor2"), NOW + 20, rng=rng)
-    assert (e.status, e.code, e.text) == (429, "gap", "조금 쉬었다가 — 40초 뒤에 다시 눌러 주세요 (아무것도 하지 않았어요)")
+    assert (e.status, e.code, e.text) == (429, "gap", f"조금 쉬었다가 — {lo - 20}초 뒤에 다시 눌러 주세요 (아무것도 하지 않았어요)")
     other = next(b for _i, b, _n in THREE if b != blog)
-    assert (await refused(db, add_form(db, other, "neighbor2"), NOW + 59, rng=rng)).code == "gap"  # 계정을 바꿔도 같은 종류면 같이 쉼
-    assert seoi.today(db, NOW + 59, TZ)["by"][blog]["add"] == 1 and seoi.today(db, NOW + 59, TZ)["by"][other]["add"] == 0  # 거절은 안 셈
-    got = await seoi.act(db, add_form(db, blog, "neighbor2"), tz=TZ, now=NOW + 60, rng=Rng("hi"))
-    assert got["n"] == 2 and (await refused(db, add_form(db, blog, "neighbor3"), NOW + 60 + 119)).text.startswith("조금 쉬었다가 — 1초 뒤")
-    assert (await seoi.act(db, add_form(db, blog, "neighbor3"), tz=TZ, now=NOW + 60 + 120))["n"] == 3
-    # 들르기 간격은 서이추와 따로 (45~90초)
+    assert (await refused(db, add_form(db, other, "neighbor2"), NOW + lo - 1, rng=rng)).code == "gap"  # 계정을 바꿔도 같은 종류면 같이 쉼
+    assert seoi.today(db, NOW + lo - 1, TZ)["by"][blog]["add"] == 1 and seoi.today(db, NOW + lo - 1, TZ)["by"][other]["add"] == 0  # 거절은 안 셈
+    got = await seoi.act(db, add_form(db, blog, "neighbor2"), tz=TZ, now=NOW + lo, rng=Rng("hi"))
+    assert got["n"] == 2 and (await refused(db, add_form(db, blog, "neighbor3"), NOW + lo + hi - 1)).text.startswith("조금 쉬었다가 — 1초 뒤")
+    assert (await seoi.act(db, add_form(db, blog, "neighbor3"), tz=TZ, now=NOW + lo + hi))["n"] == 3
+    # 들르기 간격은 서이추와 따로 (GAP['visit'])
     r2 = Rng("lo")
-    await seoi.act(db, visit_form(db, blog), tz=TZ, now=NOW + 61, rng=r2, drafter=FakeDrafter())
-    assert r2.seen == [(45, 90)]
-    assert (await refused(db, visit_form(db, blog, no=223456789013), NOW + 61 + 44, drafter=FakeDrafter())).text.startswith("조금 쉬었다가 — 1초 뒤")
+    await seoi.act(db, visit_form(db, blog), tz=TZ, now=NOW + lo + 1, rng=r2, drafter=FakeDrafter())
+    assert r2.seen == [seoi.GAP["visit"]]
+    assert (await refused(db, visit_form(db, blog, no=223456789013), NOW + lo + 1 + vlo - 1, drafter=FakeDrafter())).text.startswith("조금 쉬었다가 — 1초 뒤")
 
 
 @pytest.mark.parametrize(("nid", "blog", "name"), THREE)
@@ -635,13 +639,16 @@ async def test_day_turns_over_at_kst_midnight_but_gap_and_hour_carry_over() -> N
     assert seoi.today(db, mid - 1, TZ)["by"]["issue"]["add"] == 30 and seoi.today(db, mid + 2, TZ)["by"]["issue"]["add"] == 1
     # 자정 앞에서 한 것의 간격·한 시간 상한은 자정 뒤에도 그대로
     db = FakeDb()
+    hi = seoi.GAP["add"][1]
+    step, start = hi + 5, mid - (seoi.HOUR_CAP - 1) * (hi + 5) - 150  # 한 시간 상한을 다 채우고 마지막이 자정 2분 반 전
+    assert seoi.HOUR_CAP <= 2 * seoi.ADD_DAY_CAP and seoi.HOUR_CAP * step < 3600
     for i in range(seoi.HOUR_CAP):
-        await seoi.act(db, add_form(db, "issue", f"neighbor{i}"), tz=TZ, now=mid - 1900 + i * 125, rng=Rng("hi"))
-    last = mid - 1900 + (seoi.HOUR_CAP - 1) * 125  # 23:57:30
-    assert (await refused(db, add_form(db, "issue", "late"), last + 119)).code == "gap"
-    e = await refused(db, add_form(db, "finance", "late"), mid + 60)  # 날이 바뀌고 블로그를 바꿔도 한 시간 15번은 그대로
+        await seoi.act(db, add_form(db, "issue" if i < seoi.HOUR_CAP // 2 else "hotdeal", f"neighbor{i}"), tz=TZ, now=start + i * step, rng=Rng("hi"))
+    last = start + (seoi.HOUR_CAP - 1) * step  # 23:57:30
+    assert (await refused(db, add_form(db, "issue", "late"), last + hi - 1)).code == "gap"
+    e = await refused(db, add_form(db, "finance", "late"), mid + 60)  # 날이 바뀌고 블로그를 바꿔도 한 시간 HOUR_CAP 번은 그대로
     assert e.code == "hour" and seoi.today(db, mid + 60, TZ)["by"]["finance"]["add"] == 0
-    assert (await seoi.act(db, add_form(db, "finance", "late"), tz=TZ, now=mid - 1900 + 3600))["n"] == 1
+    assert (await seoi.act(db, add_form(db, "finance", "late"), tz=TZ, now=start + 3600))["n"] == 1
 
 
 def nb_row(blog: str, target: str, msg: str) -> dict[str, Any]:
@@ -669,13 +676,18 @@ async def test_add_takes_the_message_from_that_blogs_todo_row(nid: str, blog: st
 
 async def test_hour_cap_makes_a_longer_rest() -> None:
     db = FakeDb()
+    step = seoi.GAP["add"][1] + 5  # 간격은 늘 지나게
+    blogs = [b for _i, b, _n in THREE]
+    assert seoi.HOUR_CAP * step < 3600 and seoi.HOUR_CAP <= 3 * seoi.ADD_DAY_CAP
     for i in range(seoi.HOUR_CAP):
-        await seoi.act(db, add_form(db, "issue", f"neighbor{i}"), tz=TZ, now=NOW + i * 130)
-    t = NOW + seoi.HOUR_CAP * 130  # 32분 30초 뒤 — 간격은 지났지만 한 시간 15번
+        await seoi.act(db, add_form(db, blogs[i % 3], f"neighbor{i}"), tz=TZ, now=NOW + i * step)
+    t = NOW + seoi.HOUR_CAP * step  # 간격은 지났지만 한 시간 HOUR_CAP 번
     e = await refused(db, add_form(db, "issue", "more"), t)
-    assert (e.code, e.text) == ("hour", "한 시간에 15번까지예요 — 28분쯤 쉬었다가 다시 (아무것도 하지 않았어요)")
+    rest = math.ceil((3600 - seoi.HOUR_CAP * step) / 60)
+    assert (e.code, e.text) == ("hour", f"한 시간에 {seoi.HOUR_CAP}번까지예요 — {rest}분쯤 쉬었다가 다시 (아무것도 하지 않았어요)")
     assert (await refused(db, add_form(db, "issue", "more"), NOW + 3599)).code == "hour"
-    assert (await seoi.act(db, add_form(db, "issue", "more"), tz=TZ, now=NOW + 3600))["n"] == 16
+    n0 = seoi.today(db, NOW + 3600, TZ)["by"]["issue"]["add"]
+    assert (await seoi.act(db, add_form(db, "issue", "more"), tz=TZ, now=NOW + 3600))["n"] == n0 + 1
 
 
 async def test_visit_cap_is_shared_and_counted_per_blog() -> None:
@@ -922,8 +934,9 @@ async def test_api_limits_requests_per_client(bot: DealBot, monkeypatch: pytest.
     reads: list[int] = []
     monkeypatch.setattr(routine, "blog_routine", lambda b: reads.append(1))
     bad = {**add_form(bot.db), "k": "wrong"}
-    codes = [(await _post(bot, bad, origin="https://m.blog.naver.com"))[0] for _ in range(41)]
-    assert codes[:40] == [403] * 40 and codes[40] == 429 and reads == []  # 열쇠가 틀리면 오늘 할 일 줄도 읽지 않음
+    n = api_mod.SEOI_RATE_N
+    codes = [(await _post(bot, bad, origin="https://m.blog.naver.com"))[0] for _ in range(n + 1)]
+    assert codes[:n] == [403] * n and codes[n] == 429 and reads == []  # 열쇠가 틀리면 오늘 할 일 줄도 읽지 않음
     res = await _post(bot, add_form(bot.db), origin="https://m.blog.naver.com")
     assert res[0] == 429 and json.loads(res[1])["code"] == "rate" and seoi.today(bot.db, NOW, TZ)["by"]["issue"]["add"] == 0
 

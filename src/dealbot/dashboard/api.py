@@ -92,6 +92,7 @@ KEYZARD_PREFIX = "/dashboard/keyzard/"  # Blog-Auto tools/keyzard_indexer (127.0
 KEYZARD_PORT = 8110
 THUMB_RE = re.compile(r"^[a-z0-9-]{1,64}\.(jpg|webp)$")
 PIC_MAX_BYTES = 8_000_000
+SEOI_RATE_N = 120  # 이웃 관리 책갈피 손님마다 10분에 (자동 한 번 = 묻기 3~4번 · 간격 25~45초 → 10분 70번 안팎 · 주인 11/15 예전 40)
 # 룩북 릴스 (주인 10/25): /dashboard/lookbook/<id>/video.mp4 · cover.jpg — 이름은 번호에서 정해짐 (붙여 넣은 경로를 그대로 쓰지 않음)
 LB_FILE_RE = re.compile(r"^(lb-[0-9]{8}-[0-9]{4})/(video\.mp4|cover\.jpg)$")
 LB_FILES = {"video.mp4": ("reels", "{id}.mp4", "video/mp4"), "cover.jpg": ("thumbs", "{id}-c.jpg", "image/jpeg")}
@@ -176,7 +177,7 @@ class DashApi:
         self.sub_rate = RateWindow(10, 3600.0)
         self.statscap_rate = RateWindow(120, 600.0)  # 통계 보내기 (손님마다 10분에 120번 — 11/12 한 번 누르면 40개까지)
         self.ablyrank_rate = RateWindow(20, 600.0)  # Ably 랭킹 보내기 (손님마다 10분에 20번)
-        self.seoi_rate = RateWindow(40, 600.0)  # 이웃 관리 책갈피 (손님마다 10분에 40번 — 진짜 간격·상한은 seoi.gate 가 kv 로)
+        self.seoi_rate = RateWindow(SEOI_RATE_N, 600.0)  # 이웃 관리 책갈피 (손님마다 10분에 SEOI_RATE_N 번 — 진짜 간격·상한은 seoi.gate 가 kv 로)
         self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
         self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,
                                facts=self._facts, test_rate=self.test_rate)

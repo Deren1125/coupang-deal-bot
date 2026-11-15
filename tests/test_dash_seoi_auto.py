@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 import tempfile
@@ -70,7 +71,7 @@ async def test_queue_gives_this_blogs_rows_in_turn_and_skips_done_and_tried() ->
     db = FakeDb()
     got = await seoi.act(db, q(db), tz=TZ, now=NOW, rows=rows3(), done=set(), day=DAY)
     assert got["ok"] is True and got["next"] == {"id": "nb1", "msg": "멘트 하나"} and (got["add"], got["visit"], got["wait"]) == (2, 1, 0)
-    assert got["text"] == "오늘 이웃 자동 — 데런픽 · 서이추 2명 · 들르기 1편 · 약 5분 · 화면을 켜 둔 채 이 탭에 두세요" and got["min"] == 5
+    assert got["text"] == f"오늘 이웃 자동 — 데런픽 · 서이추 2명 · 들르기 1편 · 약 {seoi._minutes(3)}분 · 화면을 켜 둔 채 이 탭에 두세요" and got["min"] == seoi._minutes(3)
     # 체크된 줄은 빼고 · 다른 블로그 줄·우리 블로그는 처음부터 없음
     got = await seoi.act(db, q(db), tz=TZ, now=NOW, rows=rows3(), done={"nb-add:issue:nb1"}, day=DAY)
     assert got["next"] == {"id": "nb2", "msg": "멘트 둘"} and got["add"] == 1
@@ -82,7 +83,7 @@ async def test_queue_gives_this_blogs_rows_in_turn_and_skips_done_and_tried() ->
     assert rng.seen == [seoi.GAP["add"]]
     await seoi.act(db, done_form(db, "issue", "nb1", "ok"), tz=TZ, now=NOW + 9, rows=rows3(), day=DAY)
     got = await seoi.act(db, q(db), tz=TZ, now=NOW + 10, rows=rows3(), done={"nb-add:issue:nb1"}, day=DAY)
-    assert got["next"] == {"id": "vv1", "no": str(POST_NO)} and got["wait"] == 110
+    assert got["next"] == {"id": "vv1", "no": str(POST_NO)} and got["wait"] == seoi.GAP["add"][1] - 10
     # 해 봤는데 안 된 것(줄은 그대로)도 오늘은 다시 주지 않음
     await seoi.act(db, done_form(db, "issue", "vv1", "fail", "visit", str(POST_NO)), tz=TZ, now=NOW + 200, rows=rows3(), day=DAY)
     got = await seoi.act(db, q(db), tz=TZ, now=NOW + 300, rows=rows3(), done={"nb-add:issue:nb1"}, day=DAY)
@@ -100,29 +101,34 @@ async def test_queue_gives_this_blogs_rows_in_turn_and_skips_done_and_tried() ->
 async def test_auto_pace_counts_add_and_visit_together() -> None:
     db, d = FakeDb(), FakeDrafter()
     au = {"au": "1"}
-    await seoi.act(db, {**add_form(db, "issue", "nb1"), **au}, tz=TZ, now=NOW, rng=Rng("hi"))  # 서이추 → 다음 허용 120초 뒤
+    hi = seoi.GAP["add"][1]
+    assert hi > 30
+    await seoi.act(db, {**add_form(db, "issue", "nb1"), **au}, tz=TZ, now=NOW, rng=Rng("hi"))  # 서이추 → 다음 허용 GAP['add'] 끝 뒤
     e = await refused(db, {**visit_form(db, "issue"), **au}, NOW + 30, drafter=d)  # 자동: 들르기도 그 간격 안에는 안 됨
-    assert (e.status, e.code) == (429, "gap") and e.text.startswith("조금 쉬었다가 — 90초 뒤에") and d.calls == []
-    assert seoi.hold(db, NOW + 30) == 90
+    assert (e.status, e.code) == (429, "gap") and e.text.startswith(f"조금 쉬었다가 — {hi - 30}초 뒤에") and d.calls == []
+    assert seoi.hold(db, NOW + 30) == hi - 30
     got = await seoi.act(db, visit_form(db, "issue"), tz=TZ, now=NOW + 30, drafter=d)  # 손으로 누른 들르기(한 단계)는 예전대로 종류마다
     assert got["comment"] == DRAFT
-    # 한 시간 상한: 서이추 8 + 들르기 7 = 15 → 자동은 그 한 시간이 지날 때까지
-    db = FakeDb()
-    for i in range(15):
+    # 한 시간 상한: 서이추 + 들르기 합쳐 HOUR_CAP → 자동은 그 한 시간이 지날 때까지 (어느 한 종류만으로는 상한에 안 닿음)
+    db, cap = FakeDb(), seoi.HOUR_CAP
+    step = max(hi, seoi.GAP["visit"][1]) + 5
+    adds = (cap + 1) // 2
+    assert cap * step < 3600 and adds < cap and adds <= seoi.ADD_DAY_CAP and cap - adds <= seoi.VISIT_DAY_CAP
+    for i in range(cap):
         f = add_form(db, "issue", f"nb{i}") if i % 2 == 0 else visit_form(db, "issue", POST_NO + i)
-        await seoi.act(db, {**f, **au}, tz=TZ, now=NOW + i * 130, drafter=d, rng=Rng())
-    t = NOW + 15 * 130
-    assert seoi.hold(db, t) == 3600 - 15 * 130
+        await seoi.act(db, {**f, **au}, tz=TZ, now=NOW + i * step, drafter=d, rng=Rng())
+    t = NOW + cap * step
+    assert seoi.hold(db, t) == 3600 - cap * step
     assert (await refused(db, {**add_form(db, "issue", "late"), **au}, t)).code == "gap"
     got = await seoi.act(db, q(db), tz=TZ, now=t, rows=[nb_row("issue", "late", "m")], done=set(), day=DAY)
-    assert got["wait"] == 3600 - 15 * 130 and got["next"]["id"] == "late"
-    assert (await seoi.act(db, {**add_form(db, "issue", "late"), **au}, tz=TZ, now=NOW + 3601))["n"] == 9
+    assert got["wait"] == 3600 - cap * step and got["next"]["id"] == "late"
+    assert (await seoi.act(db, {**add_form(db, "issue", "late"), **au}, tz=TZ, now=NOW + 3601))["n"] == adds + 1
     # 하루 상한을 넘는 차례는 주지 않음 (서이추 블로그마다 30)
     db = FakeDb()
     db.kv_set(f"seoi:day:{DAY}", json.dumps({"add": {"issue": 29}}))
     rows = [nb_row("issue", f"nb{i}", "m") for i in range(5)]
     got = await seoi.act(db, q(db), tz=TZ, now=NOW, rows=rows, done=set(), day=DAY)
-    assert got["add"] == 1 and seoi.today(db, NOW, TZ, rows=rows, done=set())["by"]["issue"]["auto"] == {"add": 1, "visit": 0, "min": 2}
+    assert got["add"] == 1 and seoi.today(db, NOW, TZ, rows=rows, done=set())["by"]["issue"]["auto"] == {"add": 1, "visit": 0, "min": seoi._minutes(1)}
 
 
 async def test_done_ticks_the_row_hands_nb_requested_and_skip_gives_the_count_back() -> None:
@@ -135,12 +141,13 @@ async def test_done_ticks_the_row_hands_nb_requested_and_skip_gives_the_count_ba
     (r,) = routine.relay_rows(db)  # 블로그 프로그램에 '신청했어요' — 손으로 체크할 때와 같은 길 (relay_tick 이 맡김)
     assert (r["name"], r["args"], r["rid"]) == ("nb_requested", {"blog": "issue", "target": "nb1", "done": True}, "nb-add:issue:nb1") and "aid" not in r
     assert seoi.today(db, NOW + 8, TZ)["by"]["issue"]["add"] == 1
-    # '확인'을 누른 뒤 네이버가 신청 중·상대가 제한이라고 함: 줄은 체크하되 하루 센 것만 되돌림 — 실제로 눌렀으니 간격(120초)·한 시간 수는 그대로
+    # '확인'을 누른 뒤 네이버가 신청 중·상대가 제한이라고 함: 줄은 체크하되 하루 센 것만 되돌림 — 실제로 눌렀으니 간격(GAP['add'])·한 시간 수는 그대로
     await seoi.act(db, {**add_form(db, "issue", "nb2"), "au": "1"}, tz=TZ, now=NOW + 200, rows=rows, rng=Rng("hi"))
     assert seoi.today(db, NOW + 200, TZ)["by"]["issue"]["add"] == 2
-    rng = Rng("hi")
+    rng, hi = Rng("lo"), seoi.GAP["add"][1]
+    assert 210 + seoi.SKIP_GAP[0] < 200 + hi  # 건너뜀 쉼이 간격보다 짧아도 간격이 그대로 남는지 보이게
     await seoi.act(db, done_form(db, "issue", "nb2", "skip"), tz=TZ, now=NOW + 210, rows=rows, day=DAY, rng=rng)
-    assert seoi.today(db, NOW + 210, TZ)["by"]["issue"]["add"] == 1 and rng.seen == [seoi.SKIP_GAP] and seoi.hold(db, NOW + 210) == 110
+    assert seoi.today(db, NOW + 210, TZ)["by"]["issue"]["add"] == 1 and rng.seen == [seoi.SKIP_GAP] and seoi.hold(db, NOW + 210) == hi - 10
     assert len(seoi._pace(db, "add", NOW + 210)["recent"]) == 2 and routine.done_ids(db, DAY) == {"nb-add:issue:nb1", "nb-add:issue:nb2"}
     await seoi.act(db, done_form(db, "issue", "nb2", "skip"), tz=TZ, now=NOW + 215, rows=rows, day=DAY)  # 두 번 보내도 한 번만 되돌림
     assert seoi.today(db, NOW + 215, TZ)["by"]["issue"]["add"] == 1
@@ -225,10 +232,13 @@ def test_todo_line_says_how_long_the_auto_run_takes() -> None:
     db = FakeDb()
     rows = [nb_row("hotdeal", f"nb{i}", "m") for i in range(30)] + [visit_row("hotdeal", f"vv{i}", POST_NO + i) for i in range(5)]
     by = seoi.today(db, NOW, TZ, rows=rows, done={"nb-add:hotdeal:nb0"})["by"]
-    assert by["hotdeal"]["auto"] == {"add": 29, "visit": 5, "min": 127}  # 34번 · 한 시간 15번 → 두 시간 남짓
-    assert by["hotdeal"]["line"] == "오늘 이웃 들르기 0 (세 블로그 합쳐 0/40) · 서이추 0/30 · 서이추 자동: 내 블로그에서 책갈피 → 시작 · 탭 켜 두기 · 약 127분"
+    m = seoi._minutes(34)
+    assert by["hotdeal"]["auto"] == {"add": 29, "visit": 5, "min": m}  # 34번
+    assert by["hotdeal"]["line"] == f"오늘 이웃 들르기 0 (세 블로그 합쳐 0/40) · 서이추 0/30 · 서이추 자동: 내 블로그에서 책갈피 → 시작 · 탭 켜 두기 · 약 {m}분"
     assert by["issue"]["line"] == "오늘 이웃 들르기 0 (세 블로그 합쳐 0/40) · 서이추 0/30" and by["issue"]["auto"]["min"] == 0
-    assert [seoi._minutes(n) for n in (0, 1, 15, 16, 30)] == [0, 2, 25, 62, 85]
+    cap, one = seoi.HOUR_CAP, math.ceil(seoi.AUTO_AVG_S / 60)
+    assert [seoi._minutes(n) for n in (0, 1, cap, cap + 1)] == [0, one, math.ceil(cap * seoi.AUTO_AVG_S / 60), 60 + one]  # 한 시간 상한을 넘으면 한 시간 쉼
+    assert 20 <= seoi._minutes(28 + 3) <= 35  # 주인 11/15 — 서이추 28 + 들르기 3 이 30분쯤 (예전 122분)
 
 
 @needs_node
@@ -497,8 +507,8 @@ async def test_api_queue_and_done_read_todays_list_and_tick_the_row(bot: DealBot
     assert [r["rid"] for r in routine.relay_rows(bot.db)] == ["nb-add:hotdeal:nb1"]
     v = routine.view(bot)
     row = next(i for s in v["slots"] for i in s["items"] if i["id"] == "nb-add:hotdeal:nb1")
-    assert row["done"] is True and v["seoi"]["by"]["hotdeal"]["auto"] == {"add": 1, "visit": 1, "min": 4}  # 할 일 탭에서 그 줄이 체크로 보임
-    assert v["seoi"]["by"]["hotdeal"]["line"].endswith("서이추 자동: 내 블로그에서 책갈피 → 시작 · 탭 켜 두기 · 약 4분")
+    assert row["done"] is True and v["seoi"]["by"]["hotdeal"]["auto"] == {"add": 1, "visit": 1, "min": seoi._minutes(2)}  # 할 일 탭에서 그 줄이 체크로 보임
+    assert v["seoi"]["by"]["hotdeal"]["line"].endswith(f"서이추 자동: 내 블로그에서 책갈피 → 시작 · 탭 켜 두기 · 약 {seoi._minutes(2)}분")
     got = json.loads((await _post(bot, q(bot.db, "hotdeal"), origin="https://m.blog.naver.com"))[1])
     assert got["next"] == {"id": "vv1", "no": str(POST_NO)} and got["add"] == 1 and got["wait"] > 0  # 체크된 줄은 빼고 · 방금 서이추를 했으니 들르기 먼저
     # 어제 목록이면 차례를 주지 않고 줄도 체크하지 않음
@@ -523,7 +533,7 @@ async def drive(bot: DealBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, r
     monkeypatch.setattr(api_mod, "time", clock)
     d = drafter or SeqDrafter()
     monkeypatch.setattr(seoi, "get_drafter", lambda: d)
-    bot.dashboard.api.seoi_rate = RateWindow(10**6, 600.0)  # 가짜 시계로 두 시간을 1분에 돌리므로 — 진짜 10분 40번은 아래에서 가짜 시각으로 셈
+    bot.dashboard.api.seoi_rate = RateWindow(10**6, 600.0)  # 가짜 시계로 두 시간을 1분에 돌리므로 — 진짜 10분 상한은 아래에서 가짜 시각으로 셈
     if rows is not None:
         list_for(tmp_path, day, rows)
     code = unquote(seoi.view(bot.db, bot.settings.dashboard.public_url)["code"][len("javascript:"):])
@@ -572,19 +582,24 @@ def max_per_window(times: list[float], span: float) -> int:
 
 
 async def test_auto_sends_thirty_mutual_requests_slowly_and_ticks_every_row(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """정상 30명: 한 명씩 서로이웃 + 그 사람 멘트 + 확인 → '신청 완료' 확인 → 줄 체크. 사이는 60~120초(대시보드가 정함), 한 시간 15명."""
+    """정상 30명: 한 명씩 서로이웃 + 그 사람 멘트 + 확인 → '신청 완료' 확인 → 줄 체크. 사이는 GAP['add'](대시보드가 정함), 한 시간 HOUR_CAP 명."""
     rows = [nb_row("issue", f"nb{i:02d}", f"안녕하세요 nb{i:02d} 님, 글 잘 봤어요. 서로이웃 해요!") for i in range(30)]
     rows += [nb_row("finance", "other1", "드라마 블로그 멘트"), nb_row("issue", "derenlog", "우리 블로그는 빼요")]
     got = await drive(bot, monkeypatch, tmp_path, rows, {})
-    assert got["first"]["title"] == "오늘 이웃 자동 — 데런픽 · 서이추 30명 · 들르기 0편 · 약 85분 · 화면을 켜 둔 채 이 탭에 두세요"
+    assert got["first"]["title"] == f"오늘 이웃 자동 — 데런픽 · 서이추 30명 · 들르기 0편 · 약 {seoi._minutes(30)}분 · 화면을 켜 둔 채 이 탭에 두세요"
     assert got["first"]["buttons"] == ["시작", "멈춤"] and got["first"]["line"].startswith("시작을 누르면")
     subs = ev(got, "submit")
     assert [s["id"] for s in subs] == [f"nb{i:02d}" for i in range(30)]  # 그 블로그 줄만 · 차례대로 · 한 번씩
     assert all(s["rel"] == "1" for s in subs) and [s["msg"] for s in subs] == [f"안녕하세요 nb{i:02d} 님, 글 잘 봤어요. 서로이웃 해요!" for i in range(30)]
     ts = [int(s["t"]) / 1000 for s in subs]
     gaps = [b - a for a, b in zip(ts, ts[1:], strict=False)]
-    assert min(gaps) >= 60 and sorted(gaps)[len(gaps) // 2] <= 135  # 간격은 진짜로 60초 넘게 (보통 60~120초 + 화면 여는 시간)
-    assert max_per_window(ts, 3600) <= seoi.HOUR_CAP and ts[15] - ts[0] >= 3600 and max(gaps) > 1200  # 한 시간 15명 → 16번째는 한 시간 뒤
+    lo, hi = seoi.GAP["add"]
+    assert min(gaps) >= lo and sorted(gaps)[len(gaps) // 2] <= hi + 15  # 간격은 진짜로 GAP 아래로 안 감 (보통 GAP + 화면 여는 시간)
+    assert max_per_window(ts, 3600) <= seoi.HOUR_CAP
+    if len(ts) > seoi.HOUR_CAP:
+        assert ts[seoi.HOUR_CAP] - ts[0] >= 3600 and max(gaps) > 1200  # 한 시간 상한 → 다음은 한 시간 뒤
+    else:
+        assert max(gaps) <= hi + 30 and ts[-1] - ts[0] <= seoi._minutes(len(ts)) * 60  # 상한 안이면 쉼 없이 · '약 n분' 안에 끝남
     assert ev(got, "layer_ok") == [] and got["alerts"] == []  # 네이버 안내 창의 '확인'은 누른 적 없음 · 알림 창 없음
     # 대시보드: 30번 세고, 줄 30개가 저절로 체크, 블로그 프로그램에 맡길 '신청했어요' 30개
     assert seoi.today(bot.db, got["base"] + 9000, TZ)["by"]["issue"]["add"] == 30
@@ -592,7 +607,7 @@ async def test_auto_sends_thirty_mutual_requests_slowly_and_ticks_every_row(bot:
     assert sorted(r["rid"] for r in routine.relay_rows(bot.db)) == sorted(f"nb-add:issue:nb{i:02d}" for i in range(30))
     assert [r["form"]["r"] for r in acts(got, "done")] == ["ok"] * 30 and acts(got, "stop") == []
     assert all(r["form"].get("au") == "1" and r["form"]["v"] == "2" for r in acts(got, "add")) and len(acts(got, "add")) == 30
-    assert max_per_window([r["t"] for r in got["reqs"]], 600) <= 40  # 대시보드의 손님마다 10분 40번 안
+    assert max_per_window([r["t"] for r in got["reqs"]], 600) <= api_mod.SEOI_RATE_N  # 대시보드의 손님마다 10분 SEOI_RATE_N 번 안
     assert got["last"]["line"] == "오늘 할 것을 다 했어요 ✓" and got["last"]["title"] == "오늘 데런픽 자동으로 할 것은 다 했어요 (서이추 30/30 · 들르기 0)"
     assert "서로이웃을 신청하였습니다" in got["frame"] and got["closed"] is True and got["busy"] == 0
     assert not seoi.is_new(bot.db)  # 새 판 책갈피가 물어 왔으니 '다시 깔기' 안내는 사라짐
@@ -671,7 +686,7 @@ async def test_auto_visits_posts_reads_likes_comments_and_registers(bot: DealBot
             visit_row("issue", "vv3", POST_NO + 2), visit_row("issue", "vv4", POST_NO + 3), visit_row("finance", "vv9", POST_NO + 9)]
     posts = {f"vv2/{POST_NO + 1}": "liked", f"vv3/{POST_NO + 2}": "mine slow", f"vv4/{POST_NO + 3}": "moved"}
     got = await drive(bot, monkeypatch, tmp_path, rows, {"posts": posts}, drafter=d)
-    assert got["first"]["title"].startswith("오늘 이웃 자동 — 데런픽 · 서이추 2명 · 들르기 4편 · 약 10분")
+    assert got["first"]["title"].startswith(f"오늘 이웃 자동 — 데런픽 · 서이추 2명 · 들르기 4편 · 약 {seoi._minutes(6)}분")
     order = [(r["form"]["a"], r["form"].get("t") if r["form"]["a"] == "add" else r["form"]["u"].split("/")[-2]) for r in got["reqs"] if r["form"]["a"] in ("add", "visit")]
     assert order == [("add", "nb0"), ("visit", "vv1"), ("add", "nb1"), ("visit", "vv2"), ("visit", "vv3"), ("visit", "vv4")]  # 번갈아 · 그 블로그 것만
     reacts = ev(got, "react")
@@ -685,7 +700,7 @@ async def test_auto_visits_posts_reads_likes_comments_and_registers(bot: DealBot
         path = "/" + "/".join(r["form"]["u"].split("/")[-2:])
         assert 20 <= int(r["form"]["rd"]) <= 75 and r["form"]["sc"] == "1" and got["base"] + r["t"] - opened[path] >= 20, r["form"]
     ts = sorted(got["base"] + r["t"] for r in got["reqs"] if r["form"]["a"] in ("add", "visit"))
-    assert min(b - a for a, b in zip(ts, ts[1:], strict=False)) >= 45  # 서이추·들르기를 섞어도 사이는 45초 넘게
+    assert min(b - a for a, b in zip(ts, ts[1:], strict=False)) >= min(seoi.GAP["add"][0], seoi.GAP["visit"][0])  # 서이추·들르기를 섞어도 사이는 GAP 아래로 안 감
     t = seoi.today(bot.db, got["base"] + 3000, TZ)
     assert t["by"]["issue"]["add"] == 2 and t["by"]["issue"]["visit"] == 4
     assert routine.done_ids(bot.db, got["day"]) == {"nb-add:issue:nb0", "nb-add:issue:nb1", f"nb-visit:issue:vv1:{POST_NO}", f"nb-visit:issue:vv2:{POST_NO + 1}",
@@ -724,7 +739,7 @@ async def test_auto_reads_done_notices_and_other_sides_limit_and_stops_on_flood(
     assert "연속해서 신청할 수 없습니다" in got["last"]["line"] and got["last"]["line"].endswith("· 오늘은 쉬어요")
     assert len([d for d in got["docs"] if "Buddy" in d["u"]]) == 5  # 멈춘 뒤로는 아무 화면도 열지 않음
     ts = [d["t"] / 1000 for d in got["docs"] if "Buddy" in d["u"]]
-    assert ts[3] - ts[2] >= 60  # '확인'을 누른 뒤 건너뛴 사람 다음에도 간격은 그대로 (60초 넘게)
+    assert ts[3] - ts[2] >= seoi.GAP["add"][0]  # '확인'을 누른 뒤 건너뛴 사람 다음에도 간격은 그대로 (GAP 넘게)
 
 
 async def test_auto_never_comments_twice_on_one_post(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
