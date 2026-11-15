@@ -27,7 +27,7 @@ B. 큰 사건 바로 알림 — big.poll_minutes(20분)마다:
   POST /dashboard/api/xtoday/skip    {id} → 카드·큰 사건 안 쓰기 (알림 닫힘)
 모두 로그인 아래 · POST 는 같은 사이트 + X-Dash-Token (DashApi.guard).
 하지 않는 것: X 로그인 · X API · 자동 게시 · 남의 타임라인 긁기 · 기사 페이지 긁기. 초안 글은 화면에 띄우려고 kv xtoday 에 하루만 둔다
-(다음 날 아침에 지움 — 로그에는 종류·길이만).
+(날이 바뀌면 다음 1분 일에서 지움 — 로그에는 종류·길이만).
 """
 
 from __future__ import annotations
@@ -55,12 +55,13 @@ KV = "xtoday"  # {"day", "items": [...], "runs": {이름: 시각}, "ai": n, "err
 KV_USED = "xtoday_used"  # [{"k": 글감 키, "toks": [...], "lead": 이름, "nums": [...], "at": 시각}] — 같은 사건을 다시 쓰지 않게 (7일)
 KV_BIG = "xbig"  # {"day", "api": n, "last": 시각, "dead_until": 시각, "events": [...], "log": [...]}
 USED_KEEP_S, USED_MAX = 7 * 86400, 200
-EVENT_KEEP_S, EVENT_MAX, EVENT_ARTS = 72 * 3600, 20, 6
+EVENT_KEEP_S, EVENT_MAX, EVENT_ARTS = 72 * 3600, 40, 6
 EVENT_SHOW_S = 24 * 3600  # 화면에 보이는 동안
 LEAD_GAP_S = 24 * 3600  # 같은 이름은 하루 한 번
 HELD_MAX_S = 8 * 3600  # 조용한 시간에 미룬 알림은 이만큼 지나면 버림
 NOTICE_TTL_H = 6.0  # 알림 줄이 열려 있는 시간 (뉴스는 금방 식는다)
 KEY_DEAD_S = 6 * 3600  # 키가 막히면 이만큼 쉼
+BLOG_KEY_PER_DAY = 600  # 빌려 쓰는 Blog-Auto 키로는 하루 이만큼만 (그 키 하루 25,000번은 블로그·이벤트 참여 몫 — api_per_day 를 올려도 여기까지)
 HOT_MAX_AGE_S = 18 * 3600  # 이보다 오래된 화제는 오늘 글감으로 안 씀
 SLOT_GRACE_MIN = 30  # 추천 시각이 이만큼 지나기 전까지는 그 시각 카드를 만든다
 FILL_WINDOW_MIN = 90  # 보충 시각 뒤 이 안에 처음 도는 때만
@@ -418,13 +419,15 @@ class XToday:
         api, dead = st["api"], st["dead_until"]
         if self.news is not None and now >= dead:
             for q in cfg.queries:
-                if api >= cfg.api_per_day:
+                if api >= cfg.api_per_day or (getattr(self.news, "src", "") == "blog" and api >= BLOG_KEY_PER_DAY):
                     break
                 api += 1
                 rows = await self.news.search(q)
                 if getattr(self.news, "dead", False):
                     dead = now + KEY_DEAD_S
                     log.warning("xbig: 네이버 검색 키를 쓸 수 없어요 — %d시간 쉼", KEY_DEAD_S // 3600)
+                    break
+                if rows is None:  # 못 읽음 (한도·서버 오류·시간 초과) — 남은 검색어로 더 두드리지 않고 다음 차례에
                     break
                 fresh += [a for a in (article(x, now) for x in rows or []) if a]
         st = self.big(now)  # 뉴스를 기다리는 동안 주인이 누른 것(안 써요·올렸어요)을 덮어쓰지 않게 다시 읽는다 — 아래로는 기다림 없음
@@ -564,8 +567,9 @@ class XToday:
                  "sources": [{"title": str(s.get("title") or "")[:160], "link": web_link(s.get("link"))} for s in srcs[:3] if web_link(s.get("link"))]})
         return out
 
-    async def _draft(self, cand: dict[str, Any], st: dict[str, Any], slot: str, now: float) -> dict[str, Any] | None:
+    async def _draft(self, cand: dict[str, Any], st: dict[str, Any], slot: str, now: float, *, auto: bool = True) -> dict[str, Any] | None:
         """글감 하나 → 카드 (AI 한 번). 쓰지 않기로 한 글감(비극·모델 거절)은 None — 다시 고르지 않게 기억한다.
+        auto=False 는 주인이 누른 것 — 서버 자동 몫(ai)에 세지 않는다 (xstudio 하루 몫에는 늘 셈).
         AI 가 안 되면 StudioError 를 그대로 올린다 (부르는 쪽이 그 차례를 끝냄)."""
         try:  # 글 쓰는 모델은 Opus 까지 — xstudio 와 같은 확인을 여기서도 한 번 (Fable·모르는 이름이면 AI 를 부르지 않는다)
             xs.assert_writer_model(self.studio.model)
@@ -579,7 +583,7 @@ class XToday:
                 src = self._event_src(ev)
             else:
                 src = await self.studio._source({"kind": "hot", "hot_id": cand["hot_id"]})
-            st["ai"] += 1
+            st["ai"] += int(auto)
             self._save(KV, st)  # 부르기 전에 센다 — 오류가 나도 하루 몫은 줄어듦
             res = await self.studio.draft_src(src, "auto", True)
         except xs.StudioError as e:
@@ -647,13 +651,15 @@ class XToday:
                     "sig": sig(str(ev.get("lead") or ""), titles, str(ev.get("lead") or "")),
                     "sources": [{"title": str(a.get("title") or ""), "link": web_link(a.get("link"))} for a in (ev.get("arts") or [])[:3]
                                 if isinstance(a, dict) and web_link(a.get("link"))]}
-            return await self._draft(cand, st, "", now)
+            return await self._draft(cand, st, "", now, auto=not owner)
 
     async def run(self, now: float | None = None) -> dict[str, Any]:
         """1분 일 한 번: 큰 사건 확인 → (새 사건이면 초안 미리) → 아침·보충 차례면 오늘 카드."""
         now = self.clock() if now is None else now
         cfg = self.cfg()
         out: dict[str, Any] = {"big": 0, "made": 0}
+        if self._load(KV).get("day") not in (None, xs._day(now)) and not self.lock.locked():
+            self._save(KV, self.plan(now))  # 날이 바뀜 — 어제 초안 글을 바로 지운다 (꺼져 있어도 · 아침 만들기를 기다리지 않고)
         if not cfg.enabled:
             return out
         sent = await self.poll(now)

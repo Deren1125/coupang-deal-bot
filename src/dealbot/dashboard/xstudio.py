@@ -1120,10 +1120,17 @@ class Studio:
             self._asker = JsonAsker(None, cli_model=self.model, timeout=CLI_TIMEOUT)
         assert_writer_model(self._asker.cli_model)
         try:
-            return await self._asker.ask(system, user, schema)
+            data = await self._asker.ask(system, user, schema)
         except LLMError as e:
             log.warning("xstudio ai: %s", str(e)[:120])
             raise ai_error(e) from e
+        # 답을 실제로 쓴 모델도 본다 (CLI 가 알려 준 modelUsage): 환경 변수 말고 CLI 설정 파일(settings.json env·모델 바꿔치기)이
+        # 별칭을 Fable 쪽으로 돌려놓았으면 그 답은 버린다 — 주인 '올라가는 글은 Opus 까지만'
+        used = [m for m in getattr(self._asker, "last_cli_models", None) or [] if BANNED_MODEL_RE.search(m)]
+        if used:
+            log.error("xstudio: 답을 쓴 모델이 규칙 밖 (%s) → 초안을 버림", ", ".join(used)[:80])
+            raise StudioError(503, "ai_off", "서버 AI 설정이 글 쓰는 모델 규칙과 달라요 — 메인 세션에 알려 주세요")
+        return data
 
     async def job(self, key: str, make: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
         """같은 rid 로 다시 부르면(폰이 화면을 내렸다 올림) 돌던 일·끝난 답을 그대로 — AI 를 두 번 부르지 않는다."""

@@ -50,6 +50,7 @@ class JsonAsker:
         self.effort = effort
         self.max_tokens = max_tokens
         self.last_backend: str | None = None
+        self.last_cli_models: list[str] = []  # 마지막 CLI 답이 실제로 쓴 모델 이름들 (CLI 가 알려 준 modelUsage — 없으면 빈 목록)
         self.disabled_reason: str | None = None  # 키·모델 오류처럼 다시 해도 안 되는 것
         self._cli_down_until = 0.0
         self._client: anthropic.AsyncAnthropic | None = None
@@ -119,6 +120,7 @@ class JsonAsker:
         return _loads(text)
 
     async def _ask_cli(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+        self.last_cli_models = []
         args = [str(self.cli_bin), "-p", "--output-format", "json", "--model", posted_cli_model(self.cli_model, where="llm_json")]
         args += ["--system-prompt", system, "--json-schema", json.dumps(schema, ensure_ascii=False), "--tools", ""]
         proc: asyncio.subprocess.Process | None = None
@@ -148,6 +150,8 @@ class JsonAsker:
         if not isinstance(payload, dict) or not payload:
             log.warning("nl cli: unreadable output (exit %s): %s", proc.returncode if proc else "?", err.decode("utf-8", "replace")[:200])
             raise LLMError("claude CLI 응답을 읽지 못함")
+        usage = payload.get("modelUsage")
+        self.last_cli_models = [str(k)[:80] for k in usage] if isinstance(usage, dict) else []
         if payload.get("is_error"):
             detail = str(payload.get("result") or payload.get("subtype") or "")[:200]
             if _CLI_AUTH.search(detail):

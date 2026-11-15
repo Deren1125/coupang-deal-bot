@@ -393,6 +393,98 @@ async def test_auto_draft_budget_reserve_and_failures_stop_the_run() -> None:
     assert card["nums_ok"] is False and "원문에 없는 숫자: 1628" in card["warn"][0]
 
 
+async def test_owner_taps_do_not_eat_the_auto_budget_and_yesterdays_drafts_are_wiped_at_midnight() -> None:
+    # 주인이 화면에서 누른 '초안 만들기'는 서버 자동 몫에 세지 않는다 (xstudio 하루 몫에는 셈)
+    d, ask, _r, _f, now = desk(rows=jensen(at("09:00")), now=[at("09:00")], hots=[], big={"predraft": False})
+    await d.poll()
+    [ev] = d.view()["big"]
+    await d.make({"id": ev["id"]})
+    v = d.view()
+    assert len(ask.calls) == 1 and v["ai"]["used"] == 0 and v["ai"]["left"] == xs.DRAFT_PER_DAY - 1
+    # 날이 바뀌면 다음 1분 일에서 어제 초안 글이 kv 에서 사라진다 — 기능이 꺼져 있어도 · 아침 만들기를 기다리지 않고
+    for off in (False, True):
+        d, ask, _r, _f, now = desk(big={"enabled": False}, hots=HOTS[:2])
+        await d.run()
+        assert OK_TEXT.split("\n")[0] in d.db.kv[xt.KV] and len(d.view()["items"]) == 2
+        if off:
+            d.cfg = lambda: XTodayConfig(enabled=False)
+        now[0] = at("00:01", "2026-11-16")
+        calls = len(ask.calls)
+        assert (await d.run())["made"] == 0 and len(ask.calls) == calls
+        assert OK_TEXT.split("\n")[0] not in d.db.kv[xt.KV] and json.loads(d.db.kv[xt.KV])["day"] == "2026-11-16" and d.view()["items"] == []
+
+
+async def test_news_api_stops_the_round_on_a_failed_read_and_the_borrowed_key_has_its_own_cap() -> None:
+    class Flaky(FakeNews):
+        async def search(self, query: str) -> list[dict[str, Any]] | None:
+            self.asked.append(query)
+            return None  # 한도·서버 오류·시간 초과 (키는 살아 있음)
+
+    d, _ask, router, _f, now = desk(now=[at("09:00")], hots=[])
+    d.news = feed = Flaky()
+    assert await d.poll() == [] and len(feed.asked) == 1 and d.big()["api"] == 1 and d.big()["dead_until"] == 0  # 남은 검색어로 더 두드리지 않음
+    now[0] += 60
+    assert await d.poll() == [] and len(feed.asked) == 1  # 간격은 그대로 (바로 다시 부르지 않음)
+    now[0] += 20 * 60
+    await d.poll()
+    assert len(feed.asked) == 2
+    # Blog-Auto 키를 빌려 쓰는 동안은 api_per_day 를 올려도 하루 BLOG_KEY_PER_DAY 까지
+    d, _ask, _r, feed, now = desk(now=[at("09:00")], hots=[], big={"api_per_day": 5000})
+    feed.src = "blog"  # type: ignore[attr-defined]
+    st = d.big()
+    st["api"] = xt.BLOG_KEY_PER_DAY - 3
+    d._save(xt.KV_BIG, st)
+    await d.poll()
+    assert len(feed.asked) == 3 and d.big()["api"] == xt.BLOG_KEY_PER_DAY
+    now[0] += 20 * 60
+    await d.poll()
+    assert len(feed.asked) == 3
+    feed.src = "dealbot"  # type: ignore[attr-defined]
+    now[0] += 20 * 60
+    await d.poll()
+    assert len(feed.asked) == 3 + 8  # 딜봇 키면 설정 상한까지
+
+
+async def test_naver_news_uses_keys_only_falls_back_once_and_never_logs_them(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    from types import SimpleNamespace
+
+    import httpx
+
+    env = tmp_path / "blog.env"
+    env.write_text("NAVER_CLIENT_ID=blogid\nNAVER_CLIENT_SECRET=blogsecret\n", encoding="utf-8")
+    seen: list[tuple[str, str, dict[str, Any]]] = []
+    status = {"dealid": 401, "blogid": 200}
+
+    class Http:
+        async def get(self, url: str, *, params: dict[str, Any], headers: dict[str, str], timeout: float) -> httpx.Response:
+            seen.append((url, headers["X-Naver-Client-Id"], params))
+            code = status[headers["X-Naver-Client-Id"]]
+            if code == 0:
+                raise httpx.ConnectTimeout("x")
+            return httpx.Response(code, json={"items": [{"title": "가"}, "x"]} if code == 200 else {"errorCode": "024"})
+
+    bot = SimpleNamespace(http=Http(), settings=SimpleNamespace(secrets=SimpleNamespace(naver_client_id="dealid", naver_client_secret="dealsecret"),
+                                                                dashboard=SimpleNamespace(ssalmuk_search_env_file=str(env))))
+    n = xt.NaverNews(bot)
+    caplog.set_level("DEBUG")
+    assert await n.search("엔비디아") == [{"title": "가"}] and n.src == "blog" and n.dead is False
+    assert [k for _u, k, _p in seen] == ["dealid", "blogid"] and seen[0][0] == xt.NEWS_URL and seen[0][2] == {"query": "엔비디아", "display": 100, "sort": "date"}
+    await n.search("조원")
+    assert [k for _u, k, _p in seen][2:] == ["blogid"]  # 통했던 키부터 — 막힌 딜봇 키를 매번 두드리지 않음
+    status["blogid"] = 429  # 한도 — 키는 살아 있음: 쉬지 않고 이번 것만 못 읽음 (다른 키로 돌려 쓰지 않음)
+    assert await n.search("조원") is None and n.dead is False and [k for _u, k, _p in seen][3:] == ["blogid"]
+    status["blogid"] = 0
+    assert await n.search("조원") is None and n.dead is False
+    status["blogid"] = 403
+    assert await n.search("조원") is None and n.dead is True  # 둘 다 막힘 → 부르는 쪽이 6시간 쉼
+    env.unlink()
+    bot.settings.secrets.naver_client_id = ""
+    seen.clear()
+    assert await xt.NaverNews(bot).search("조원") is None and seen == []  # 키가 없으면 부르지 않음
+    for secret in ("dealsecret", "blogsecret", "dealid", "blogid"):
+        assert secret not in caplog.text
+
+
 # ---------------------------------------------------------------- 4) 글 쓰는 모델
 async def test_cards_are_written_through_xstudio_rules_and_never_by_fable(monkeypatch: pytest.MonkeyPatch) -> None:
     d, ask, _r, _f, now = desk(big={"enabled": False}, hots=HOTS[:1])

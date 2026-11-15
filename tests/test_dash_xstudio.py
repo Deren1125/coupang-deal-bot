@@ -367,6 +367,39 @@ async def test_cli_is_not_called_when_env_points_an_alias_at_fable(monkeypatch: 
     assert e.value.code == "ai_off" and e.value.status == 503 and "fable" not in e.value.text.lower() and seen == []
 
 
+async def test_answer_written_by_fable_is_thrown_away_even_when_called_as_opus(monkeypatch: pytest.MonkeyPatch) -> None:
+    """환경 변수 말고 CLI 설정 파일이 별칭을 바꿔 놓으면 부르기 전에는 알 수 없다 → CLI 가 알려 준 '실제로 쓴 모델'(modelUsage)에
+    Fable·Mythos 가 있으면 그 답은 버린다. Opus 까지의 이름이거나 정보가 없으면 그대로 쓴다."""
+    from dealbot import commentary
+
+    usage: list[Any] = [None]
+
+    class Proc:
+        returncode = 0
+
+        async def communicate(self, data: bytes) -> tuple[bytes, bytes]:
+            out = {"type": "result", "is_error": False, "structured_output": drafts(GOOD)}
+            if usage[0] is not None:
+                out["modelUsage"] = usage[0]
+            return json.dumps(out).encode(), b""
+
+    async def fake_exec(*args: str, **kw: Any) -> Proc:
+        return Proc()
+
+    monkeypatch.setattr(commentary, "find_claude", lambda: "/usr/bin/claude")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    for bad in ({FABLE: {"outputTokens": 9}}, {mid("haiku"): {}, mid("mythos", "5-2").upper(): {}}):
+        usage[0] = bad
+        s = xs.Studio(FakeDb(), clock=lambda: NOW)
+        with pytest.raises(xs.StudioError) as e:
+            await s.draft_posts({"kind": "paste", "text": SRC})
+        assert e.value.code == "ai_off" and e.value.status == 503 and "fable" not in e.value.text.lower()
+    for fine in (None, {}, {mid("opus"): {"outputTokens": 9}, mid("haiku"): {}}, "fable"):
+        usage[0] = fine
+        s = xs.Studio(FakeDb(), clock=lambda: NOW)
+        assert (await s.draft_posts({"kind": "paste", "text": SRC}))["drafts"][0]["text"] == GOOD, fine
+
+
 async def test_ai_errors_become_plain_korean() -> None:
     from dealbot.llm_json import LLMError
 
