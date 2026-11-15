@@ -125,7 +125,9 @@ async def test_claude_ok_cli_args_and_shape(bot: DealBot, monkeypatch: pytest.Mo
     c = calls[0]
     a = c["args"]
     assert a[0] == "/fake/claude" and a[a.index("--model") + 1] == "sonnet" and a[a.index("--system-prompt") + 1] == "퀴즈 풀이"
-    assert a[a.index("--tools") + 1] == "" and c["stdin"] == SECRET_Q and c["timeout"] <= 60
+    assert a[a.index("--tools") + 1] == "" and a[-2:] == ["--tools", ""] and c["stdin"] == SECRET_Q and c["timeout"] <= 60
+    assert {"--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"} <= set(a)
+    assert SECRET_Q not in " ".join(a)  # 질문은 표준 입력으로만 (옵션으로 읽힐 자리가 없음)
     assert c["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "300"
     # messages 꼴 (여러 줄이면 대화 글로)
     msgs = [{"role": "user", "content": "첫 질문"}, {"role": "assistant", "content": "첫 답"}, {"role": "user", "content": "둘째 질문"}]
@@ -162,7 +164,8 @@ async def test_claude_bad_body(bot: DealBot, monkeypatch: pytest.MonkeyPatch) ->
 
 async def test_claude_answer_from_fable_is_dropped(bot: DealBot, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     key = desk(bot).key()
-    for used in ({mid("fable-5-2"): {}}, {mid("haiku-9"): {}, mid("mythos-1"): {}}, {mid("opus-5-5"): {}}):
+    # Fable·Mythos·Opus · 모르는 이름 · 쓴 모델을 알 수 없음(빈 목록) → 모두 버림
+    for used in ({mid("fable-5-2"): {}}, {mid("haiku-9"): {}, mid("mythos-1"): {}}, {mid("opus-5-5"): {}}, {"new-model-1": {}}, {}):
         fake_cli(monkeypatch, usage=used)
         with caplog.at_level(logging.DEBUG):
             status, out = await call(bot, cbody(), key)
@@ -172,6 +175,56 @@ async def test_claude_answer_from_fable_is_dropped(bot: DealBot, monkeypatch: py
     monkeypatch.setenv("ANTHROPIC_DEFAULT_HAIKU_MODEL", mid("fable-5-2"))
     status, out = await call(bot, cbody(), key)
     assert status == 503 and out["code"] == "ai_off" and calls == []
+    # haiku·sonnet 별칭이 Opus 쪽이어도 부르지 않음 (opus 별칭이 Opus 인 건 괜찮음 — X 글쓰기가 씀)
+    monkeypatch.delenv("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+    monkeypatch.setenv("ANTHROPIC_DEFAULT_OPUS_MODEL", mid("opus-5-5"))
+    assert (await call(bot, cbody(), key))[0] == 200
+    monkeypatch.setenv("ANTHROPIC_DEFAULT_SONNET_MODEL", mid("opus-5-5"))
+    status, out = await call(bot, cbody(), key)
+    assert status == 503 and out["code"] == "ai_off" and len(calls) == 1
+
+
+async def test_claude_low_memory_spawns_nothing_and_counts_nothing(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = fake_cli(monkeypatch)
+    key = desk(bot).key()
+    monkeypatch.setattr(ssalmuk_llm, "mem_low", lambda: True)
+    status, out = await call(bot, cbody(), key)
+    assert status == 429 and out["code"] == "busy" and calls == [] and desk(bot).llm_view()["claude"]["today"] == 0
+    monkeypatch.setattr(ssalmuk_llm, "mem_low", lambda: False)
+    assert (await call(bot, cbody(), key))[0] == 200
+
+
+async def test_claude_odd_text_is_refused_or_stays_on_stdin(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = fake_cli(monkeypatch)
+    key = desk(bot).key()
+    for b in (cbody(prompt="짝 없는 \ud800 글자"), cbody(system="널 \x00 글자")):
+        status, out = await call(bot, b, key, raw=json.dumps(b).encode())
+        assert status == 400 and out["code"] == "bad_body"
+    assert calls == []
+    # '-' · '/' 로 시작하는 글도 옵션·명령이 아니라 글로 (표준 입력 · --system-prompt 의 값 자리)
+    status, _ = await call(bot, cbody(prompt="--model opus", system="--dangerously-skip-permissions"), key)
+    a = calls[0]["args"]
+    assert status == 200 and calls[0]["stdin"] == "--model opus" and a[a.index("--system-prompt") + 1] == "--dangerously-skip-permissions"
+    assert a[a.index("--model") + 1] == "haiku" and a.count("--model") == 1
+
+
+async def test_run_cli_kills_on_timeout_and_runs_in_empty_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+    import sys
+
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.setattr(ssalmuk_llm, "workdir", lambda: str(work))
+    code, out, _ = await ssalmuk_llm.run_cli([sys.executable, "-c", "import os,sys;print(os.getcwd(), os.getpid()==os.getsid(0), sys.stdin.read())"],
+                                             b"hi", 20, dict(os.environ))
+    assert code == 0 and out.decode().split() == [str(work), "True", "hi"]
+    pidfile = tmp_path / "pid"
+    slow = f"import os,time;open({str(pidfile)!r},'w').write(str(os.getpid()));time.sleep(60)"
+    with pytest.raises(TimeoutError):
+        await ssalmuk_llm.run_cli([sys.executable, "-c", slow], b"", 1.5, dict(os.environ))
+    pid = int(pidfile.read_text())
+    with pytest.raises(ProcessLookupError):  # 시간 초과 뒤 프로세스가 남지 않음
+        os.kill(pid, 0)
 
 
 async def test_claude_json_mode(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -334,6 +387,7 @@ async def test_body_cap_32kb(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> N
 
 # ---------------------------------------------------------------- 5) 개인정보 · 로그
 @pytest.mark.parametrize("leak", ["010-1234-5678", "01012345678", "010 1234 5678", "011.123.4567", "+82 10-1234-5678", "+821012345678",
+                                  "010 - 1234 - 5678", "010)1234-5678", "+82 (0)10 1234 5678", "０１０－１２３４－５６７８", "010-12\u200b34-5678",
                                   "hong@example.com", "a.b+c@mail.co.kr"])
 async def test_pii_is_refused_everywhere_in_body(bot: DealBot, monkeypatch: pytest.MonkeyPatch, leak: str) -> None:
     calls, seen = fake_cli(monkeypatch), fake_gemini(bot)
@@ -350,7 +404,8 @@ async def test_pii_is_refused_everywhere_in_body(bot: DealBot, monkeypatch: pyte
 
 def test_pii_does_not_trip_on_plain_quiz_text() -> None:
     for ok in ("2026년 11월 15일 20101234 번째 손님", "정답은 3번 (1:23)", "가격 1,010,000원 · 0101 · 제품 010", "@ 기호와 example.com 주소",
-               "https://docs.google.com/forms/d/e/1FAIpQLSc0101234/viewform"):
+               "https://docs.google.com/forms/d/e/1FAIpQLSc0101234/viewform", "점수 +82점 · +820원", "문의 02-123-4567 · 1588-1234",
+               "인스타 팔로우 @event.official 후 응모", "20261115010123456789"):
         assert not ssalmuk_llm.has_pii({"a": [ok]}), ok
     assert ssalmuk_llm.has_pii({"a": [{"b": "x@y.kr"}]}) and ssalmuk_llm.has_pii({"010-1111-2222": 1})
 

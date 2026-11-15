@@ -6,8 +6,10 @@
      몸 {"provider":"claude", "model":"haiku"|"sonnet", "system"?, "messages"?:[{"role":"user"|"assistant","content":"…"}] | "prompt"?:"…",
          "max_tokens"?(1~2000, 기본 1000), "json"?:bool}
      → 200 {"ok":true, "text":"…", "model_used":"…"}   (json:true 면 text 는 JSON 글 — 아니면 502 bad_json)
-     Opus·Fable·Mythos·모르는 이름은 400 bad_model (쌀먹 몫은 Haiku·Sonnet 만). 실제로 쓴 모델(CLI modelUsage)이 Fable·Mythos·Opus 면 답을 버리고 503 ai_off
-     (xstudio 사후 검사와 같게). 시간 초과 60초 (차례 기다림 포함). CLI 는 쌀먹 몫으로 한 번에 1개 — 15초 기다려도 차례가 안 오면 429 busy.
+     Opus·Fable·Mythos·모르는 이름은 400 bad_model (쌀먹 몫은 Haiku·Sonnet 만). 실제로 쓴 모델(CLI modelUsage)이 Haiku·Sonnet 이 아니거나
+     (Fable·Mythos·Opus·모르는 이름) 알 수 없으면 답을 버리고 503 ai_off. 시간 초과 60초 (차례 기다림 포함). CLI 는 쌀먹 몫으로 한 번에 1개 —
+     15초 기다려도 차례가 안 오면 429 busy. 서버 여유 메모리가 300MB 아래면 CLI 를 띄우지 않고 429 busy (횟수는 안 셈).
+     CLI 는 빈 폴더에서 · 도구·MCP·슬래시 명령 없이 · 대화 기록을 남기지 않고 돈다 (글은 표준 입력으로만 — 옵션으로 읽히지 않음).
   ② Gemini — 서버에 GEMINI_API_KEY 가 있을 때만 (딜봇 환경, 없으면 Blog-Auto .env 의 같은 이름 한 줄 — BlogKeyFile):
      몸 {"provider":"gemini"(없어도 됨), "model":"gemini-…"(허용 목록), "request": <generateContent 몸 그대로>}  ("v"·"purpose" 는 받아도 안 봄)
      → 200 {"ok":true, "model":"…", "response": <generateContent 응답 그대로>}
@@ -28,7 +30,11 @@ import json
 import logging
 import os
 import re
+import signal
+import tempfile
 import time
+import unicodedata
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -38,6 +44,11 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 GEMINI_MODEL_RE = re.compile(r"^gemini-[a-z0-9][a-z0-9.\-]{0,48}$")
 CLAUDE_MODELS = ("haiku", "sonnet")  # CLI 별칭으로만 (날짜 붙은 이름은 받지 않음)
 CLAUDE_BANNED_USED_RE = re.compile(r"fable|mythos|opus", re.I)  # 실제로 쓴 모델에 이게 있으면 답을 버림
+CLAUDE_OK_USED_RE = re.compile(r"haiku|sonnet", re.I)  # 실제로 쓴 모델은 전부 이 둘 가운데여야 함 (모르는 이름·빈 목록도 버림)
+ALIAS_ENV_RE = re.compile(r"^ANTHROPIC_(?:DEFAULT_[A-Z0-9_]*(?:HAIKU|SONNET)[A-Z0-9_]*MODEL|SMALL_FAST_MODEL)$")  # haiku·sonnet 별칭을 푸는 환경 변수
+MEM_MIN_MB = 300  # 여유 메모리(MemAvailable)가 이보다 적으면 CLI(노드, 수백 MB)를 띄우지 않음 — 모르면(리눅스 아님) 그냥 진행
+# CLI 가 프로젝트 CLAUDE.md·.mcp.json·명령을 읽지 않게 · 프롬프트가 대화 기록 파일로 남지 않게 (--tools "" 는 맨 끝 — 여러 값 옵션)
+CLI_FLAGS = ("--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence")
 TIMEOUT = 60.0
 BUSY_WAIT = 15.0
 MAX_TOKENS_MAX = 2000
@@ -45,14 +56,18 @@ MAX_TOKENS_DEFAULT = 1000
 MESSAGES_MAX = 40
 DEFAULT_SYSTEM = "질문에 짧고 정확하게 답한다. 도구는 쓰지 않는다."
 JSON_SUFFIX = "\n\n답은 JSON 하나만 낸다 (설명·코드 울타리 없이)."
-# 개인정보 꼴 (쌀먹 assertNoPersonal 과 이중으로): 휴대폰 010-1234-5678 · 01012345678 · +82 · 이메일
-PHONE_RE = re.compile(r"(?<!\d)01[016789][\s.\-]?\d{3,4}[\s.\-]?\d{4}(?!\d)|\+\s?82")
-EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
+# 개인정보 꼴 (쌀먹 assertNoPersonal 과 이중으로): 휴대폰 010-1234-5678 · 01012345678 · 010 - 1234 - 5678 · 010)1234-5678 · +82 10… · 이메일
+# 전각 숫자·기호는 반각으로 바꾸고 폭 없는 글자는 뺀 뒤 봄. 유선 번호(02-…·1588-…)·'+82점' 같은 글은 안 막음 (주최 문의 번호는 쌀먹이 지움).
+_SEP = r"[\s.\-)]{0,3}"
+PHONE_RE = re.compile(rf"(?<!\d)01[016789]{_SEP}\d{{3,4}}{_SEP}\d{{4}}(?!\d)|\+\s?82{_SEP}\(?0?\)?{_SEP}1[016789]{_SEP}\d{{3,4}}")
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")  # 띄어 쓴 '팔로우 @이름.kr' 은 안 막음
+_INVISIBLE_RE = re.compile("[\u00ad\u200b-\u200f\u2060\ufeff]")
 
 
 def has_pii(v: Any, _depth: int = 0) -> bool:
     """몸 안의 모든 글(키 포함)에 전화번호·이메일 꼴이 있는지."""
     if isinstance(v, str):
+        v = _INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", v))
         return bool(PHONE_RE.search(v) or EMAIL_RE.search(v))
     if _depth > 40:
         return True  # 너무 깊은 몸은 보지 못함 → 막음
@@ -103,18 +118,54 @@ def _strip_fence(text: str) -> str:
     return t
 
 
+def alias_problem(env: Any = None) -> str:
+    """haiku·sonnet 별칭을 Opus·Fable·Mythos 로 돌려놓는 환경 변수 이름 (없으면 ''). xstudio.alias_env_problem 은 Fable 쪽만 봄."""
+    env = os.environ if env is None else env
+    return next((k for k, v in env.items() if ALIAS_ENV_RE.match(k) and CLAUDE_BANNED_USED_RE.search(str(v))), "")
+
+
+def mem_low() -> bool:
+    from dealbot.store_browser import mem_available_mb
+
+    avail = mem_available_mb()
+    return avail is not None and avail < MEM_MIN_MB
+
+
+def workdir() -> str | None:
+    """CLI 를 돌릴 빈 폴더 (~/.cache/ssalmuk-llm, 안 되면 임시 폴더) — 딜봇 저장소의 CLAUDE.md·.mcp.json·.claude 를 읽지 않게."""
+    d = Path.home() / ".cache" / "ssalmuk-llm"
+    try:
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if not d.is_symlink() and d.stat().st_uid == os.getuid() and not any(d.iterdir()):
+            return str(d)
+    except OSError:
+        pass
+    try:
+        return tempfile.mkdtemp(prefix="ssalmuk-llm-")
+    except OSError:
+        return None
+
+
+def _kill(proc: Any) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)  # CLI 가 띄운 것까지 (start_new_session — 무리 번호 = pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+
+
 async def run_cli(args: list[str], stdin: bytes, timeout: float, env: dict[str, str]) -> tuple[int | None, bytes, bytes]:
     """claude CLI 한 번 (시험은 이 함수를 갈아 끼움). 시간 초과는 TimeoutError, 실행 실패는 OSError."""
     proc: asyncio.subprocess.Process | None = None
     try:
         proc = await asyncio.create_subprocess_exec(
-            *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
+            *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+            cwd=workdir(), start_new_session=True)
         out, err = await asyncio.wait_for(proc.communicate(stdin), timeout=timeout)
         return proc.returncode, out, err
     finally:
         if proc is not None and proc.returncode is None:  # 시간 초과·취소 때 CLI 가 남지 않게
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
+            _kill(proc)
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(proc.wait(), timeout=5)
 
@@ -183,7 +234,7 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
             return bad("bad_model", "model 은 haiku·sonnet 만 받아요")
         system, want_json, max_tokens = body.get("system"), body.get("json", False), body.get("max_tokens", MAX_TOKENS_DEFAULT)
         prompt = claude_prompt(body)
-        if (prompt is None or (system is not None and not isinstance(system, str)) or not isinstance(want_json, bool)
+        if (prompt is None or (system is not None and (not isinstance(system, str) or "\x00" in system)) or not isinstance(want_json, bool)
                 or not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or not 1 <= max_tokens <= MAX_TOKENS_MAX):
             return bad("bad_body", "messages(마지막이 user) 또는 prompt · system(글) · max_tokens(1~2000) · json(참/거짓) 을 확인해 주세요")
         cli = commentary.find_claude()
@@ -191,10 +242,13 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
             return _j(503, {"code": "no_cli", "text": "서버에 claude CLI 가 없어요"})
         if time.monotonic() < rt["cli_down_until"]:  # 로그인이 풀린 걸 본 뒤 10분은 다시 부르지 않음 (로그인은 주인 몫)
             return _j(503, {"code": "cli_login", "text": "서버 claude CLI 로그인이 풀렸어요"})
-        bad_env = alias_env_problem()
-        if bad_env:  # 별칭이 Fable 쪽으로 돌려져 있으면 부르지 않음 (이름만 적음)
-            log.error("ssalmuk llm: %s 가 모델 별칭을 Fable 쪽으로 돌려놓음 → 부르지 않음", bad_env)
+        bad_env = alias_env_problem() or alias_problem()
+        if bad_env:  # 별칭이 Fable·Opus 쪽으로 돌려져 있으면 부르지 않음 (이름만 적음)
+            log.error("ssalmuk llm: %s 가 모델 별칭을 규칙 밖 모델로 돌려놓음 → 부르지 않음", bad_env)
             return _j(503, {"code": "ai_off", "text": "서버 AI 설정이 모델 규칙과 달라요"})
+        if mem_low():  # 서버 메모리가 바닥이면 CLI 를 더 띄우지 않음 (횟수도 안 셈)
+            log.warning("ssalmuk llm: 여유 메모리 %dMB 아래 → CLI 를 띄우지 않음", MEM_MIN_MB)
+            return _j(429, {"code": "busy", "text": "서버 메모리가 모자라요 — 잠시 뒤 다시"})
         if not minute.hit("key"):
             return limit
         t0 = time.monotonic()
@@ -206,7 +260,7 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
             if not desk.llm_day_hit("claude", sonnet=model == "sonnet"):
                 return limit
             sys_text = (system.strip() if isinstance(system, str) and system.strip() else DEFAULT_SYSTEM) + (JSON_SUFFIX if want_json else "")
-            args = [str(cli), "-p", "--output-format", "json", "--model", model, "--system-prompt", sys_text, "--tools", ""]
+            args = [str(cli), "-p", "--output-format", "json", "--model", model, "--system-prompt", sys_text, *CLI_FLAGS, "--tools", ""]
             env = os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_tokens)}
             left = max(5.0, TIMEOUT - (time.monotonic() - t0))
             try:
@@ -238,9 +292,9 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
                 return _j(503, {"code": "cli_login", "text": "서버 claude CLI 로그인이 풀렸어요"})
             note("claude", model, "is_error", body, 0, t0)  # 오류 글에 프롬프트가 섞일 수 있어 남기지 않음
             return _j(502, {"code": "claude_error", "status": 0, "text": "claude CLI 가 오류를 줬어요"})
-        banned = [m for m in used if CLAUDE_BANNED_USED_RE.search(m)]
-        if banned:  # CLI 설정이 별칭을 다른 모델로 돌려놓았으면 그 답은 버림 (xstudio 와 같게)
-            log.error("ssalmuk llm: 답을 쓴 모델이 규칙 밖 (%s) → 답을 버림", ", ".join(banned)[:80])
+        banned = [m for m in used if CLAUDE_BANNED_USED_RE.search(m) or not CLAUDE_OK_USED_RE.search(m)]
+        if banned or not used:  # CLI 설정이 별칭을 다른 모델로 돌려놓았거나 쓴 모델을 알 수 없으면 그 답은 버림 (Haiku·Sonnet 만)
+            log.error("ssalmuk llm: 답을 쓴 모델이 규칙 밖 (%s) → 답을 버림", ", ".join(banned)[:80] or "모름")
             return _j(503, {"code": "ai_off", "text": "서버 AI 설정이 모델 규칙과 달라요"})
         text = str(payload.get("result") or "")
         if want_json:
@@ -269,6 +323,10 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
             provider = "gemini"  # 쌀먹 제안 꼴 {v, purpose, model, request}
         if provider not in ("claude", "gemini"):
             return bad("bad_body", "provider 는 claude·gemini 만 받아요")
+        try:  # 짝 없는 대리 문자(\\ud800…)는 UTF-8 로 못 보냄 → 부르기 전에 거절
+            json.dumps(body, ensure_ascii=False).encode("utf-8")
+        except (UnicodeEncodeError, ValueError, RecursionError):
+            return bad("bad_body", "보낸 글을 읽을 수 없어요")
         if has_pii(body):
             log.info("ssalmuk llm: %s pii → 부르지 않음 (in=%d)", provider, _chars(body))
             return bad("pii", "전화번호·이메일 꼴이 들어 있어 부르지 않았어요")
