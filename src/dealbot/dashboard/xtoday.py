@@ -46,6 +46,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+from dealbot.dashboard import naverhub
 from dealbot.dashboard import xstudio as xs
 
 log = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ SLOT_GRACE_MIN = 30  # 추천 시각이 이만큼 지나기 전까지는 그 시
 FILL_WINDOW_MIN = 90  # 보충 시각 뒤 이 안에 처음 도는 때만
 FILL_TAP_S = 600.0  # '지금 보충하기'는 10분에 한 번
 LOG_KEEP = 30
-NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
+NEWS_URL = "https://openapi.naver.com/v1/search/news.json"  # 예전 개발자센터 주소 (HUB 먼저 — naverhub.url("news", True))
 NEWS_TIMEOUT = 6.0
 NEWS_DISPLAY = 100
 KAKAO_SIZE = 50  # 카카오 웹문서 검색 한 번에 50개까지
@@ -321,7 +322,7 @@ def kakao_rows(data: Any) -> list[dict[str, Any]]:
 
 
 class NaverNews:
-    """최신 뉴스 제목·요약. 키는 딜봇 것 → 막히면(401·403) Blog-Auto .env 것 (ssalmuk 검색과 같은 길 · 값은 어디에도 안 남김)
+    """최신 뉴스 제목·요약. 네이버 키마다 API HUB 먼저 → 401/403 이면 예전 주소 (11/15 — naverhub). 키는 딜봇 것 → 막히면(401·403) Blog-Auto .env 것 (ssalmuk 검색과 같은 길 · 값은 어디에도 안 남김)
     → 그것도 막히면 카카오(다음) 웹문서 최신순 (11/15 — KAKAO_REST_API_KEY: 딜봇 환경, 없으면 Blog-Auto .env 한 줄).
     카카오로 된 뒤엔 카카오 먼저, 네이버 키는 하루 한 번만 다시 봄.
     search() 는 기사 줄 목록, 못 읽으면 None, 쓸 키가 없으면 dead=True (부르는 쪽이 6시간 쉼)."""
@@ -335,6 +336,7 @@ class NaverNews:
         self.dead = False
         self.clock = clock
         self.naver_try = 0.0  # 네이버 키를 마지막으로 써 본 때 (메모리)
+        self.via = ""  # 네이버로 받았을 때 'hub' (API HUB) | 'old' (예전 개발자센터 주소)
 
     def _kakao(self) -> str | None:
         return (getattr(self.bot.settings.secrets, "kakao_rest_api_key", None) or "").strip() or self.blog_keys.kakao()
@@ -371,8 +373,10 @@ class NaverNews:
                 else:
                     self.naver_try = now
                     cid, csec = keys[src]
-                    r = await self.bot.http.get(NEWS_URL, params={"query": query, "display": NEWS_DISPLAY, "sort": "date"},
-                                                headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=NEWS_TIMEOUT)
+                    # 11/15 주인 키는 네이버 API HUB 키 — HUB 먼저, 401/403 이면 예전 주소로 (naverhub)
+                    r, hub, _hs = await naverhub.get(self.bot.http, "news", cid, csec, timeout=NEWS_TIMEOUT,
+                                                     params={"query": query, "display": NEWS_DISPLAY, "sort": "date"})
+                    self.via = "hub" if hub else "old"
             except httpx.HTTPError as e:  # 키·주소는 로그에 안 남김
                 log.info("xbig news: %s (%s key)", type(e).__name__, src)
                 return None
@@ -497,6 +501,9 @@ class XToday:
                 fresh += [a for a in (article(x, now) for x in rows or []) if a]
         st = self.big(now)  # 뉴스를 기다리는 동안 주인이 누른 것(안 써요·올렸어요)을 덮어쓰지 않게 다시 읽는다 — 아래로는 기다림 없음
         st.update(last=now, api=api, dead_until=dead)
+        src = getattr(self.news, "src", "") if self.news is not None else ""
+        if src:  # 어느 키로 통했나 (값 없이 이름만) — 'dealbot_hub'·'blog_hub' = 네이버 API HUB · 'kakao' (11/15)
+            st["keysrc"] = f"{src}_hub" if src != "kakao" and getattr(self.news, "via", "") == "hub" else src
         window = cfg.window_minutes * 60
         for a in fresh:
             self.pool.setdefault(a["link"], a)

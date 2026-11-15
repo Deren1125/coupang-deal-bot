@@ -109,6 +109,12 @@ const keyDiag = k => {
   };
   return [one('딜봇', k.dealbot), one('블로그', k.blog), one('카카오', k.kakao)].filter(Boolean).join(' · ');  // 11/15 카카오(다음) 검색 키
 };
+// 11/15 '_hub' = 네이버 API HUB 로 통한 키 ('블로그 서버 (네이버 HUB)')
+const keyName = ks => {
+  const hub = /_hub$/.test(String(ks)), k = String(ks).replace(/_hub$/, '');
+  const n = k === 'blog' ? '블로그 서버' : k === 'dealbot' ? '딜봇' : k === 'kakao' ? '카카오(다음)' : String(ks).slice(0, 10);
+  return hub ? `${n} (네이버 HUB)` : n;
+};
 // 11/14 네이버 검색 상태 한 줄 (state.search + 응답 search_proxy) — 글자로만, 없으면 null
 const searchLine = () => {
   let q = (st() || {}).search; const p = data && data.search_proxy, n = v => Number.isFinite(Number(v)) ? Number(v) : null;
@@ -118,7 +124,7 @@ const searchLine = () => {
   const d = q && q.lastAt ? new Date(q.lastAt) : null, hm = d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : '';
   const err = q && q.lastError ? String(q.lastError).slice(0, 40) : '';
   return [ks === 'kakao' ? '검색' : '네이버 검색', cnt != null ? `오늘 ${cnt}회${q && n(q.ok) != null ? ` (성공 ${n(q.ok)} · 실패 ${n(q.fail) || 0})` : ''}` : '',
-    ks ? `키: ${ks === 'blog' ? '블로그 서버' : ks === 'dealbot' ? '딜봇' : ks === 'kakao' ? '카카오(다음)' : String(ks).slice(0, 10)}` : '',
+    ks ? `키: ${keyName(ks)}` : '',
     q && q.lastStatus ? `마지막 ${String(q.lastStatus).slice(0, 10)}${hm ? ' ' + hm : ''}` : '', err ? `오류: ${err}` : '', keyDiag(p && p.keys)].filter(Boolean).join(' · ');
 };
 const todos = () => ((st() || {}).todo || []).filter(t => t && typeof t === 'object');

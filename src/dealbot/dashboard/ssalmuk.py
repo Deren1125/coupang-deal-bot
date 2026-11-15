@@ -11,6 +11,8 @@
                                         같은 모양으로 바꿔 주고 "source":"kakao" 만 더함 (blog→blog · webkr→web · news→web 최신순, 카카오엔 뉴스 검색이 없음).
                                         네이버가 둘 다 막혀 카카오로 된 뒤엔 카카오 먼저 (네이버 키는 하루 한 번만 다시 봄 — KEY_RECHECK).
                                         키 1개당 1분 60번 · 하루 300번 (KST, kv ssalmuk_search_day — 키를 여럿 써 봐도 한 번) · 넘으면 429 {"code":"limit"} ·
+                                        11/15 주인 네이버 키는 API HUB 키 → 키마다 HUB(naverapihub.apigw.ntruss.com) 먼저, 401/403 (webkr 은 404 — HUB 에 없음) 이면 예전 주소로 ·
+                                        HUB 로 받으면 "source":"naver_hub" 더함 (keysrc 'dealbot_hub'·'blog_hub') · webkr HUB 404 를 보면 하루 동안 webkr 은 카카오 먼저 (kv ssalmuk_webkr_hub404).
                                         네이버·카카오가 401/429/5xx 등을 주면 502 {"code":"naver_error","status"} (카카오면 "source":"kakao" 더함) · 키가 하나도 없으면 503 {"code":"no_key"}
   POST /dashboard/api/ssalmuk/llm       LLM 대리 호출 (11/15 — ssalmuk_llm.py: Claude 는 서버 claude CLI 로 haiku·sonnet 만 · Gemini 는 서버 GEMINI_API_KEY 로 generateContent 만 ·
                                         하루 Gemini 40·Claude 150(Sonnet 50)·1분 10회·몸 32KB · 전화·이메일 꼴이 있으면 400 pii · 글은 로그·kv 에 안 남김)
@@ -29,8 +31,8 @@
 from __future__ import annotations
 
 import hashlib
-import html
 import hmac
+import html
 import json
 import logging
 import os
@@ -38,9 +40,11 @@ import re
 import secrets
 import time
 from collections.abc import Callable
-from pathlib import Path
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
+from dealbot.dashboard import naverhub
 
 log = logging.getLogger(__name__)
 
@@ -81,17 +85,20 @@ PROFILE_KEYS = ("name", "phone", "email", "birth", "gender", "zipcode", "address
                 "watchVideoSeconds", "agreeOptional", "sns.nickname", "sns.instagram", "sns.instagramUrl", "sns.youtube", "sns.blog",
                 "demographics.age", "demographics.region", "demographics.job", "commentTemplates", "quizAnswers", "customAnswers")
 SEARCH_TYPES = ("blog", "news", "webkr")
-SEARCH_URL = "https://openapi.naver.com/v1/search/{type}.json"
+SEARCH_URL = "https://openapi.naver.com/v1/search/{type}.json"  # 예전 개발자센터 주소 (HUB 는 naverhub)
 SEARCH_TIMEOUT = 8.0
 SEARCH_PER_MIN = 60
 SEARCH_PER_DAY = 300
 SEARCH_Q_MAX = 100
 KV_SEARCH_DAY = "ssalmuk_search_day"
 KV_SEARCH_KEYS = "ssalmuk_search_keys"  # 키마다 마지막 네이버 답 {"dealbot": {"s": "401 키틀림", "at": …}, "blog": {"s": 200, "at": …}, "at": …} (값만 — 키는 안 남김, 주인 11/14 '401 원인' · note_keys)
-KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' | 'kakao' — 어느 키가 통했는지 (값만, 비밀 아님)
+KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' | 'kakao' (+ '_hub' = 네이버 API HUB 로 통함, 11/15) — 어느 키가 통했는지 (값만, 비밀 아님)
 KEYSRCS = ("dealbot", "blog", "kakao")
 KV_LLM_DAY = "ssalmuk_llm_day"  # LLM 대리 호출 오늘(KST) 횟수만 {"d", "gemini", "claude", "sonnet"} — 글·키는 안 남김
 LLM_CAPS = {"gemini": 40, "claude": 150, "sonnet": 50}  # 기본값 (설정 dashboard.ssalmuk_llm_* 가 덮음 — ssalmuk_llm.register)
+KEYSRC_VALUES = ("dealbot", "dealbot_hub", "blog", "blog_hub", "kakao")
+KV_WEBKR_HUB404 = "ssalmuk_webkr_hub404"  # 웹문서 검색이 HUB 에 없음(404)을 본 뒤 이 시각까지 webkr 은 곧장 카카오 (네이버는 예전 주소만)
+WEBKR_HUB404_S = 86400.0
 KEY_RECHECK = 86400.0  # 블로그 키(또는 카카오)로 넘어간 뒤에도 앞 네이버 키를 하루 한 번 다시 봄
 # 카카오(다음) 검색 (11/15 — 네이버 검색 앱이 지워져 두 키 다 401 · 7/31 부터 새 키 신청 막힘). 공식 문서 developers.kakao.com/docs/latest/ko/daum-search/dev-guide
 KAKAO_URL = "https://dapi.kakao.com/v2/search/{type}"
@@ -433,7 +440,17 @@ class Ssalmuk:
 
     def search_keysrc(self) -> str | None:
         v = self.db.kv_get(KV_SEARCH_KEYSRC)
-        return v if v in KEYSRCS else None
+        return v if v in KEYSRC_VALUES else None
+
+    def webkr_hub_missing(self) -> bool:
+        """웹문서 검색이 HUB 에서 404 였던 걸 하루 동안 기억 (쓸데없는 HUB·예전 주소 호출 줄이기)."""
+        try:
+            return float(self.db.kv_get(KV_WEBKR_HUB404) or 0) > self.clock()
+        except (TypeError, ValueError):
+            return False
+
+    def set_webkr_hub_missing(self) -> None:
+        self.db.kv_set(KV_WEBKR_HUB404, str(int(self.clock() + WEBKR_HUB404_S)))
 
     def set_search_keysrc(self, src: str) -> None:
         if self.search_keysrc() != src:
@@ -639,19 +656,22 @@ def register(web: Any, api: Any) -> Ssalmuk:
         if not search_rate.hit("key") or not desk.search_day_hit():
             return _j(429, {"code": "limit", "text": "검색 한도(1분 60번·하루 300번)를 넘었어요"})
         now = desk.clock()
-        src_now = desk.search_keysrc()
-        if src_now == "kakao" and kakao and now - state_rt["naver_try"] < KEY_RECHECK:
+        src_now = (desk.search_keysrc() or "").removesuffix("_hub") or None
+        webkr_skip = typ == "webkr" and desk.webkr_hub_missing()  # HUB 에 웹문서 검색이 없음 → 카카오 web 먼저, 네이버는 예전 주소만
+        if webkr_skip and kakao:
+            order = ["kakao", "dealbot", "blog"]
+        elif src_now == "kakao" and kakao and now - state_rt["naver_try"] < KEY_RECHECK:
             order = ["kakao", "dealbot", "blog"]  # 네이버 키가 둘 다 막혀 카카오로 된 뒤 — 네이버는 하루 한 번만 다시 봄
         elif src_now == "blog" and now - state_rt["dealbot_try"] < KEY_RECHECK:
             order = ["blog", "dealbot", "kakao"]
         else:
             order = ["dealbot", "blog", "kakao"]
-        status, data, used = 0, None, None
+        status, data, used, via_hub = 0, None, None, False
         for src in (o for o in order if o in keys or (o == "kakao" and kakao)):
-            used = src
-            if src == "dealbot":
+            used, via_hub = src, False
+            if src == "dealbot" and not webkr_skip:
                 state_rt["dealbot_try"] = now
-            if src != "kakao":
+            if src != "kakao" and not webkr_skip:
                 state_rt["naver_try"] = now
             try:
                 if src == "kakao":
@@ -663,11 +683,21 @@ def register(web: Any, api: Any) -> Ssalmuk:
                 else:
                     cid, csec = keys[src]
                     params = {"query": q, "display": display} if typ == "webkr" else {"query": q, "display": display, "sort": sort}  # 웹문서 검색은 sort 가 없음
-                    resp = await api.bot.http.get(
-                        SEARCH_URL.format(type=typ), params=params,
-                        headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=SEARCH_TIMEOUT)
+                    # 11/15 주인 키는 네이버 API HUB 키 — HUB 먼저, 401/403 (webkr 은 404 도) 이면 예전 주소로 (naverhub)
+                    resp, via_hub, hub_status = await naverhub.get(api.bot.http, typ, cid, csec, params=params, timeout=SEARCH_TIMEOUT,
+                                                                   hub=not webkr_skip)
+                    if typ == "webkr" and hub_status == 404:
+                        webkr_skip = True  # 하루 동안 webkr 은 곧장 카카오 · 이번 요청의 다음 키도 HUB 를 건너뜀
+                        desk.set_webkr_hub_missing()
                 status = resp.status_code
-                seen[src] = status if status != 401 or src == "kakao" else f"401 {_why_401(resp)}"
+                if src == "kakao":
+                    seen[src] = status
+                elif via_hub:
+                    seen[src] = f"HUB {status}"
+                elif typ == "webkr" and webkr_skip and status in (401, 403):
+                    pass  # 웹문서만 안 되는 것 — 블로그·뉴스에서 본 이 키의 답을 덮지 않음
+                else:
+                    seen[src] = status if status != 401 else f"401 {_why_401(resp)}"
                 data = resp.json() if status == 200 else None
             except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
                 log.info("ssalmuk search: %s (%s key)", type(e).__name__, src)
@@ -680,8 +710,8 @@ def register(web: Any, api: Any) -> Ssalmuk:
             if status in (401, 403):  # 이 키는 막힘 — 다른 키로 (카카오 401/403 도 — 남은 네이버 키가 있으면)
                 log.info("ssalmuk search: HTTP %s (%s key)", status, src)
                 continue
-            if status == 200:
-                desk.set_search_keysrc(src)
+            if status == 200 and not (typ == "webkr" and src == "kakao"):  # 웹문서만 카카오로 간 건 키 순서를 바꾸지 않음
+                desk.set_search_keysrc(f"{src}_hub" if via_hub else src)
             break
         desk.note_keys(seen)
         if status != 200:
@@ -694,7 +724,10 @@ def register(web: Any, api: Any) -> Ssalmuk:
             items, total = kakao_items(data, typ)
             return _j(200, {"items": items, "total": total, "source": "kakao"})
         items, total = search_items(data)
-        return _j(200, {"items": items, "total": total})
+        out = {"items": items, "total": total}
+        if via_hub:
+            out["source"] = "naver_hub"  # 쌀먹이 네이버 결과를 구분하게 (9/7 네이버 약관: 검색 결과를 AI 입력에 쓰지 말 것 — 막지는 않음)
+        return _j(200, out)
 
     async def state(query: dict[str, str], headers: dict[str, str]) -> Any:
         caller, _i, _t = api.caller(headers)

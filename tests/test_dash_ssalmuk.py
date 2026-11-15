@@ -492,6 +492,9 @@ def test_ssalmuk_js_shows_naver_search_line() -> None:
     assert "· 오류: 네이버 401" in run({**q, "lastError": "네이버 401"}, {"keysrc": "dealbot", "today_count": 12})
     assert "네이버 검색" not in run(None, {"keysrc": None, "today_count": 0})
     assert "네이버 검색 · 오늘 3회 · 키: 딜봇" in run(None, {"keysrc": "dealbot", "today_count": 3})
+    # 11/15 네이버 API HUB 로 통한 키
+    assert "네이버 검색 · 오늘 3회 · 키: 블로그 서버 (네이버 HUB)" in run(None, {"keysrc": "blog_hub", "today_count": 3})
+    assert "키: 딜봇 (네이버 HUB) · 딜봇 키 HUB 200" in run(None, {"keysrc": "dealbot_hub", "today_count": 3, "keys": {"dealbot": {"s": "HUB 200", "at": None}}})
 
 
 @pytest.mark.skipif(NODE is None, reason="node 없음")
@@ -550,12 +553,30 @@ SEARCH = ssalmuk.SEARCH_PATH
 NAVER_ID, NAVER_SECRET = "test-naver-id-xyz", "test-naver-secret-abc"
 
 
-def naver(bot: DealBot, handler: Any, *, keyed: bool = True, kakao: str | None = None) -> list[Any]:
+class Seen(list):  # type: ignore[type-arg]
+    """예전 주소·카카오로 간 요청 (seen) + 네이버 API HUB 로 간 요청 (seen.hub)."""
+
+    hub: list[Any]
+
+
+def hub_401(req: Any) -> Any:
     import httpx
 
-    seen: list[Any] = []
+    return httpx.Response(401, json={"errorMessage": "Authentication Failed"})
+
+
+def naver(bot: DealBot, handler: Any, *, keyed: bool = True, kakao: str | None = None, hub: Any = hub_401) -> Seen:
+    """hub = HUB 주소(naverapihub.apigw.ntruss.com)로 온 요청의 답 — 기본은 401 (예전 개발자센터 키: 예전 주소로 넘어감).
+    hub=None 이면 HUB 요청도 handler 로 (seen 에도 들어감)."""
+    import httpx
+
+    seen = Seen()
+    seen.hub = []
 
     def h(req: Any) -> Any:
+        if hub is not None and req.url.host == "naverapihub.apigw.ntruss.com":
+            seen.hub.append(req)
+            return hub(req)
         seen.append(req)
         return handler(req)
 
@@ -1449,3 +1470,123 @@ def test_ssalmuk_js_health_line_aborted_is_yellow_and_llm_line() -> None:
     v = s.view()
     v["health"] = {"level": "purple", "status": "weird", "llm": "x", "stopped": False}
     assert _quiz_render(v)["scr"] == base["scr"]
+
+
+# ---------------------------------------------------------------- 7c) 네이버 API HUB 먼저 (11/15 — 주인 네이버 키는 개발자센터 키가 아니라 HUB 키)
+HUB_HOST = "naverapihub.apigw.ntruss.com"
+
+
+def never(req: Any) -> Any:
+    raise AssertionError(f"예전 주소를 부르면 안 됨: {req.url}")
+
+
+async def test_search_hub_first_with_ncp_headers_and_source(bot: DealBot, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    seen = naver(bot, never, hub=ok_blog)
+    d = desk(bot)
+    key = d.key()
+    status, body = await mget(bot, f"{SEARCH}?q=돈좀요&display=5&sort=date", key)
+    assert status == 200 and body["total"] == 42 and body["source"] == "naver_hub"
+    assert body["items"][0] == {"title": '돈좀요 이벤트 "공지"', "link": "https://blog.example/1", "description": "응모 방법 & 경품",
+                                "postdate": "20261110", "bloggername": "주최자"}  # 답 모양은 예전과 같음 (필드 source 만 더함)
+    [req] = seen.hub
+    assert seen == [] and (req.url.host, req.url.path) == (HUB_HOST, "/search/v1/blog")
+    assert req.headers["x-ncp-apigw-api-key-id"] == NAVER_ID and req.headers["x-ncp-apigw-api-key"] == NAVER_SECRET
+    assert "x-naver-client-id" not in req.headers and "x-naver-client-secret" not in req.headers
+    assert dict(req.url.params) == {"query": "돈좀요", "display": "5", "sort": "date"}
+    assert d.search_keysrc() == "dealbot_hub"
+    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["dealbot"]["s"] == "HUB 200"
+    await mget(bot, f"{SEARCH}?type=news&q=x", key)
+    assert seen.hub[-1].url.path == "/search/v1/news" and seen == []
+    _s, st, _h = await get_json(bot, f"{B}/state", session_headers(bot))
+    assert st["search_proxy"]["keysrc"] == "dealbot_hub"
+    for secret in (NAVER_ID, NAVER_SECRET):
+        assert secret not in caplog.text and secret not in json.dumps(st) and secret not in json.dumps(body)
+        assert secret not in (bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS) or "")
+
+
+async def test_search_hub_refused_falls_back_to_old_address_then_next_key(bot: DealBot, tmp_path: Path) -> None:
+    import httpx
+
+    # HUB 401/403 → 같은 키로 예전 주소 한 번 (X-Naver 헤더) → 통하면 source 없음 (예전 그대로)
+    for st in (401, 403):
+        seen = naver(bot, ok_blog, hub=lambda r, st=st: httpx.Response(st, json={}))
+        status, body = await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+        assert status == 200 and "source" not in body and len(seen.hub) == 1 and len(seen) == 1
+        assert seen[0].url.host == "openapi.naver.com" and seen[0].headers["x-naver-client-id"] == NAVER_ID
+        assert desk(bot).search_keysrc() == "dealbot"
+    # 딜봇 키는 HUB·예전 둘 다 401 → 블로그 키로 HUB → 통함 (keysrc blog_hub · 다음엔 블로그 키 먼저)
+    blog_env(bot, tmp_path)
+
+    def hub(r: Any) -> Any:
+        return ok_blog(r) if r.headers["x-ncp-apigw-api-key-id"] == BLOG_ID else httpx.Response(401, json={})
+    seen = naver(bot, lambda r: httpx.Response(401, json={"errorMessage": "Not Exist Client ID"}), hub=hub)
+    d = desk(bot)
+    status, body = await mget(bot, f"{SEARCH}?q=x", d.key())
+    assert status == 200 and body["source"] == "naver_hub" and d.search_keysrc() == "blog_hub"
+    assert [r.headers["x-ncp-apigw-api-key-id"] for r in seen.hub] == [NAVER_ID, BLOG_ID] and len(seen) == 1
+    keys = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
+    assert keys["dealbot"]["s"] == "401 키틀림" and keys["blog"]["s"] == "HUB 200"
+    n = len(seen.hub)
+    await mget(bot, f"{SEARCH}?q=x", d.key())
+    assert [r.headers["x-ncp-apigw-api-key-id"] for r in seen.hub[n:]] == [BLOG_ID]  # 블로그 키 먼저 (_hub 떼고 같은 순서)
+    # HUB 429·500·blog 404 같은 다른 오류는 예전 주소로 넘어가지 않고 502 그대로
+    for st in (429, 500, 404):
+        seen = naver(bot, never, keyed=True, hub=lambda r, st=st: httpx.Response(st, json={}))
+        bot.settings.dashboard.ssalmuk_search_env_file = str(tmp_path / "gone.env")
+        status, body = await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+        assert (status, body["code"], body["status"]) == (502, "naver_error", st) and seen == [] and len(seen.hub) == 1
+
+
+async def test_search_webkr_hub_404_goes_to_kakao_for_a_day(bot: DealBot, tmp_path: Path) -> None:
+    import httpx
+
+    blog_env(bot, tmp_path)
+    d = desk(bot)
+    now = [1_800_000_000.0]
+    d.clock = lambda: now[0]
+    key = d.key()
+
+    def hub(r: Any) -> Any:
+        return httpx.Response(404, json={}) if r.url.path.endswith("/webkr") else ok_blog(r)
+    seen = naver(bot, kakao_or_401, kakao=KAKAO_KEY, hub=hub)
+    # 먼저 블로그 검색이 HUB 로 통해 둠
+    assert (await mget(bot, f"{SEARCH}?q=x", key))[1]["source"] == "naver_hub" and d.search_keysrc() == "dealbot_hub"
+    # webkr: 딜봇 키 HUB 404 → 예전 401 → 블로그 키는 HUB 건너뛰고 예전 401 → 카카오 web
+    status, body = await mget(bot, f"{SEARCH}?type=webkr&q=x", key)
+    assert status == 200 and body["source"] == "kakao"
+    assert [r.url.path for r in seen.hub] == ["/search/v1/blog", "/search/v1/webkr"]
+    assert [r.url.host for r in seen] == ["openapi.naver.com", "openapi.naver.com", "dapi.kakao.com"] and seen[-1].url.path == "/v2/search/web"
+    assert float(bot.db.kv_get(ssalmuk.KV_WEBKR_HUB404)) == now[0] + 86400
+    assert d.search_keysrc() == "dealbot_hub"  # 웹문서만 카카오로 간 건 블로그·뉴스 순서를 안 바꿈
+    keys = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
+    assert keys["dealbot"]["s"] == "HUB 200" and keys["kakao"]["s"] == 200  # 웹문서 401 이 블로그·뉴스에서 본 답을 덮지 않음
+    # 하루 동안 webkr 은 곧장 카카오 (네이버 HUB·예전 주소 안 부름) · 블로그·뉴스는 그대로 HUB
+    nh, no = len(seen.hub), len(seen)
+    now[0] += 3600
+    assert (await mget(bot, f"{SEARCH}?type=webkr&q=y", key))[1]["source"] == "kakao"
+    assert len(seen.hub) == nh and [r.url.host for r in seen[no:]] == ["dapi.kakao.com"]
+    assert (await mget(bot, f"{SEARCH}?type=news&q=y", key))[1]["source"] == "naver_hub" and seen.hub[-1].url.path == "/search/v1/news"
+    # 카카오 키가 없으면 webkr 은 예전 주소만 (HUB 를 다시 두드리지 않음)
+    seen = naver(bot, ok_blog, kakao=None, hub=hub)
+    bot.settings.dashboard.ssalmuk_search_env_file = str(tmp_path / "gone.env")
+    status, body = await mget(bot, f"{SEARCH}?type=webkr&q=y", key)
+    assert status == 200 and "source" not in body and seen.hub == [] and seen[0].url.path == "/v1/search/webkr.json"
+    # 하루 지나면 webkr 도 HUB 를 다시 봄
+    now[0] += 86401
+    seen = naver(bot, ok_blog, kakao=None, hub=lambda r: ok_blog(r))
+    assert (await mget(bot, f"{SEARCH}?type=webkr&q=y", key))[1]["source"] == "naver_hub"
+    assert [r.url.path for r in seen.hub] == ["/search/v1/webkr"] and seen == []
+
+
+def test_naverhub_routes_match_blog_auto() -> None:
+    from dealbot.dashboard import naverhub
+
+    assert naverhub.HUB == "https://naverapihub.apigw.ntruss.com" and naverhub.OLD == "https://openapi.naver.com"
+    assert naverhub.url("blog", True) == naverhub.HUB + "/search/v1/blog" and naverhub.url("webkr", False) == naverhub.OLD + "/v1/search/webkr.json"
+    assert naverhub.headers("i", "s", True) == {"X-NCP-APIGW-API-KEY-ID": "i", "X-NCP-APIGW-API-KEY": "s"}
+    assert naverhub.headers("i", "s", False) == {"X-Naver-Client-Id": "i", "X-Naver-Client-Secret": "s"}
+    assert [naverhub.hub_refused(t, c) for t, c in (("blog", 401), ("news", 403), ("webkr", 404), ("blog", 404), ("blog", 429))] == [
+        True, True, True, False, False]

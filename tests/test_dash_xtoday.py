@@ -36,7 +36,7 @@ from dash_helpers import (
 )
 from dealbot.app import DealBot
 from dealbot.config import Settings, XTodayConfig
-from dealbot.dashboard import shell
+from dealbot.dashboard import naverhub, shell
 from dealbot.dashboard import xstudio as xs
 from dealbot.dashboard import xtoday as xt
 from dealbot.notify import router as routermod
@@ -462,6 +462,8 @@ async def test_naver_news_uses_keys_only_falls_back_once_and_never_logs_them(tmp
 
     class Http:
         async def get(self, url: str, *, params: dict[str, Any], headers: dict[str, str], timeout: float) -> httpx.Response:
+            if url.startswith(naverhub.HUB):  # 예전 개발자센터 키 — HUB 는 401 → 예전 주소로 (HUB 먼저는 test_naver_news_hub_first)
+                return httpx.Response(401, json={"errorMessage": "Authentication Failed"})
             seen.append((url, headers["X-Naver-Client-Id"], params))
             code = status[headers["X-Naver-Client-Id"]]
             if code == 0:
@@ -518,6 +520,8 @@ async def test_naver_news_falls_back_to_kakao_web_recency_and_keeps_only_outlets
             if "dapi.kakao.com" in url:
                 seen.append((url, headers["Authorization"], params))
                 return httpx.Response(kakao_code[0], json={"meta": {"total_count": 5}, "documents": docs} if kakao_code[0] == 200 else {})
+            if url.startswith(naverhub.HUB):
+                return httpx.Response(401, json={"errorMessage": "Authentication Failed"})
             seen.append((url, headers["X-Naver-Client-Id"], params))
             return httpx.Response(401, json={"errorMessage": "Not Exist Client ID"})
 
@@ -876,3 +880,45 @@ async def test_js_with_real_studio_screen_needs_my_line_then_posts_by_hand_with_
     [posted] = got["posts"]
     assert posted[0] == "xs:posted" and posted[1] == "tok" and posted[2]["tid"] == v["items"][1]["id"] and posted[2]["op"] == "add" and posted[2]["mine"] is True
     assert got["saved"] == v["items"][1]["id"]
+
+
+async def test_naver_news_calls_api_hub_first_then_old_address(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """11/15 주인 네이버 키는 API HUB 키 — 뉴스도 HUB(/search/v1/news, X-NCP 헤더) 먼저 · 401/403 이면 같은 키로 예전 주소 한 번."""
+    from types import SimpleNamespace
+
+    import httpx
+
+    seen: list[tuple[str, dict[str, str]]] = []
+    hub_code = [200]
+
+    class Http:
+        async def get(self, url: str, *, params: dict[str, Any], headers: dict[str, str], timeout: float) -> httpx.Response:
+            seen.append((url, dict(headers)))
+            code = hub_code[0] if url.startswith(naverhub.HUB) else 200
+            return httpx.Response(code, json={"items": [{"title": "가"}]} if code == 200 else {})
+
+    bot = SimpleNamespace(http=Http(), settings=SimpleNamespace(secrets=SimpleNamespace(naver_client_id="dealid", naver_client_secret="dealsecret"),
+                                                                dashboard=SimpleNamespace(ssalmuk_search_env_file=str(tmp_path / "none.env"))))
+    n = xt.NaverNews(bot)
+    caplog.set_level("DEBUG")
+    assert await n.search("엔비디아") == [{"title": "가"}] and (n.src, n.via) == ("dealbot", "hub")
+    assert seen == [("https://naverapihub.apigw.ntruss.com/search/v1/news", {"X-NCP-APIGW-API-KEY-ID": "dealid", "X-NCP-APIGW-API-KEY": "dealsecret"})]
+    for code in (401, 403):
+        hub_code[0] = code
+        seen.clear()
+        assert await n.search("엔비디아") == [{"title": "가"}] and n.via == "old"
+        assert [u for u, _h in seen] == [naverhub.url("news", True), xt.NEWS_URL] and seen[1][1] == {"X-Naver-Client-Id": "dealid", "X-Naver-Client-Secret": "dealsecret"}
+    hub_code[0] = 500  # 서버 오류는 예전 주소로 넘어가지 않음 — 이번만 못 읽음
+    seen.clear()
+    assert await n.search("엔비디아") is None and len(seen) == 1 and n.dead is False
+    for secret in ("dealid", "dealsecret"):
+        assert secret not in caplog.text
+    # 큰 사건 기록엔 어느 키로 통했는지 이름만 (HUB 면 '_hub')
+    d, _ask, _r, feed, _now = desk(now=[at("09:00")], hots=[])
+    feed.src, feed.via = "blog", "hub"  # type: ignore[attr-defined]
+    await d.poll()
+    assert d.big()["keysrc"] == "blog_hub"
+    feed.src = "kakao"  # type: ignore[attr-defined]
+    _now[0] += 3600
+    await d.poll()
+    assert d.big()["keysrc"] == "kakao"
