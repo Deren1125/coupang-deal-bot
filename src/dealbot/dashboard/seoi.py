@@ -338,12 +338,12 @@ def _res_items(db: Any, day: str) -> list[dict[str, Any]]:
     return [x for x in v if isinstance(x, dict)][-RES_MAX:] if isinstance(v, list) else []
 
 
-def _guess(db: Any, kind: str, target: str, no: str, result: str, now: float) -> tuple[str, str]:
+def _guess(db: Any, blog: str, kind: str, target: str, no: str, result: str, now: float) -> tuple[str, str]:
     """옛 책갈피 (done 에 공감·댓글 칸이 없음): 서버가 아는 것만으로 — 그 글에 허락한 표의 공감 여부·초안 유무 (r=ok 일 때만 믿음)."""
     if kind != "visit":
         return "-", "-"
     tk = _pace(db, "visit", now)["tickets"].get(hashlib.sha256(f"https://blog.naver.com/{target}/{no}".encode()).hexdigest()[:16])
-    if not tk or result == "login":  # 허락받기 전에 끝남 (글을 못 읽음·로그인 화면) — 공감·댓글까지 가지 않음
+    if not tk or tk.get("blog") != blog or result == "login":  # 허락받기 전에 끝남 (글을 못 읽음·로그인 화면) — 공감·댓글까지 가지 않음
         return "-", "-"
     if result != "ok":
         return "?", "?"
@@ -353,7 +353,7 @@ def _guess(db: Any, kind: str, target: str, no: str, result: str, now: float) ->
 def record(db: Any, blog: str, kind: str, target: str, no: str, result: str, like: str | None, cmt: str | None, *, now: float, tz: ZoneInfo) -> None:
     """자동 한 명·한 편의 결과 한 줄 (아이디·글 번호·결과 낱말·시각만 — 글 본문·제목·댓글 글은 적지 않음)."""
     if like is None and cmt is None:
-        like, cmt = _guess(db, kind, target, no, result, now)
+        like, cmt = _guess(db, blog, kind, target, no, result, now)
     if kind != "visit":
         like = cmt = "-"
     row = {"b": blog, "k": kind, "t": target, "n": no if kind == "visit" else "", "r": result,
@@ -386,9 +386,10 @@ def results(db: Any, day: str, tz: ZoneInfo) -> dict[str, dict[str, Any]]:
     """그날 자동 결과 {블로그: {n, bad, rows}} — 문제 있는 줄(❌·❓·실패·확인 필요)이 위, 그 안에서는 새것이 위."""
     out: dict[str, dict[str, Any]] = {b: {"n": 0, "bad": 0, "rows": []} for b in NAMES}
     for x in _res_items(db, day):
-        row = _res_row(x, tz) if x.get("b") in NAMES else None
+        b = x.get("b")
+        row = _res_row(x, tz) if isinstance(b, str) and b in NAMES else None
         if row:
-            out[x["b"]]["rows"].append(row)
+            out[b]["rows"].append(row)
     for v in out.values():
         v["rows"].sort(key=lambda r: (not r["bad"], -r["at"]))
         for r in v["rows"]:

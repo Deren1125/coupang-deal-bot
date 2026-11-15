@@ -132,6 +132,12 @@ async def test_old_bookmarklet_without_the_words_is_filled_from_what_the_server_
     assert cells(got[str(NO + 5)])[2:] == ("–", "–", True) and got[str(NO + 5)]["res"] == "로그인 화면이 나와 멈춤"
     assert cells(got["nb1"]) == ("nb1", "서이추", "–", "–", False)
     assert [r["bad"] for r in table(db)["rows"]] == [True] * 3 + [False] * 4
+    # 다른 블로그가 받은 표는 이 블로그의 줄을 채우지 않음 (그 블로그는 그 글에서 아무것도 안 했음) · 망가진 줄은 버림
+    await seoi.act(db, done_form(db, "hotdeal", "neighbor1", "ok", "visit", str(NO)), tz=TZ, now=NOW + 20, rows=[], day=DAY, rng=Rng())
+    assert cells(table(db, "hotdeal")["rows"][0])[2:] == ("–", "–", False)
+    v = json.loads(db.kv_get(f"seoi:res:{DAY}"))
+    db.kv_set(f"seoi:res:{DAY}", json.dumps({"items": [*v["items"], {"b": ["issue"], "k": "add", "t": "nb2", "r": "ok"}, "x"]}))
+    assert table(db)["n"] == 7 and table(db, "hotdeal")["n"] == 1
 
 
 async def test_same_target_keeps_the_last_row_and_old_days_go_after_thirty() -> None:
