@@ -298,13 +298,14 @@ $('.btn_ok').addEventListener('click', e => {
 });
 </script></body>"""
 
-# 모바일 글 화면 — 공감 묶음은 네이버 reaction.basic.js 대로: 얼굴 단추(a._face)를 스크립트로 누르면(evt.target === 단추) 고르는 칸(._faceLayer)만 열리고
-# 닫히고, 반응은 칸 안의 a._button 을 눌러야 바뀜 (on/off · aria-selected · 얼굴 단추는 on/off · aria-pressed). 댓글은 cbox (등록 = .u_cbox_btn_upload).
+# 글 화면 (옛 모양 · PC 와 같은 한 묶음) — 공감 묶음은 네이버 reaction.basic.js 대로: 얼굴 단추(a._face)를 스크립트로 누르면(evt.target === 단추) 고르는 칸(._faceLayer)만
+# 열리고 닫히고, 반응은 칸 안의 a._button 을 눌러야 바뀜 (on/off · aria-selected · 얼굴 단추는 on/off · aria-pressed). 댓글은 cbox (등록 = .u_cbox_btn_upload).
+# 실제 모바일 화면(하트 두 개)은 아래 MPOST.
 POST = r"""<!doctype html><meta charset="utf-8"><body style="margin:0">
 <script>var userId = '__ME__', bLoginUser = __LOGGED__;</script>
 <div class="se-title-text">수원 직관 후기</div>
 <div class="se-main-container" style="min-height:2400px">__TEXT__</div>
-<div class="area_sympathy"><div class="u_likeit_list_module _reactionModule" data-sid="BLOG">
+<div class="area_sympathy"><div class="u_likeit_list_module _reactionModule" data-sid="BLOG" data-loaded="1">
 <a href="#" role="button" class="u_likeit_button _face off" aria-pressed="false"><span class="u_likeit_icons _icons"><span class="u_likeit_icon"></span></span><span class="u_likeit_text _count">3</span></a>
 <ul class="u_likeit_layer _faceLayer" style="display:none">
 <li class="u_likeit_list like"><a href="#" class="u_likeit_list_button _button off" data-type="like" aria-selected="false"><span class="u_likeit_list_name _label">공감</span></a></li>
@@ -770,10 +771,10 @@ async def step(bot: DealBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, ki
     return await drive(bot, monkeypatch, tmp_path, None, {"mode": "step", "start": f"/neighbor1/{POST_NO}", "posts": {f"neighbor1/{POST_NO}": kind}, "open_ms": 31000, **scn})
 
 
-async def test_like_opens_the_reaction_layer_and_presses_like_inside(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """네이버 공감 단추(a._face)는 스크립트로 누르면 반응 고르는 칸만 열림 (11/15 '눌렀는데 표시가 안 바뀌었어요') → 칸 안의 '공감'을 눌러야 바뀜."""
+async def test_like_presses_like_inside_the_reaction_layer(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """네이버 공감 단추(a._face)는 스크립트로 누르면 반응 고르는 칸만 열림 (11/15 '눌렀는데 표시가 안 바뀌었어요') → 칸 안의 '공감'을 바로 누름 (얼굴 단추는 안 누름)."""
     got = await step(bot, monkeypatch, tmp_path, "ok")
-    assert [(e["k"], e.get("type"), e.get("on")) for e in got["ev"]] == [("face", None, None), ("react", "like", "1")]
+    assert [(e["k"], e.get("type"), e.get("on")) for e in got["ev"]] == [("react", "like", "1")]
     assert "_face on" in got["state"]["face"] and got["state"]["pressed"] == "true" and "on" in got["state"]["like"].split() and got["state"]["layer"] == "none"
     (a,) = got["alerts"]
     assert a.startswith("이웃 관리: 데런픽 · 공감 ✓ · 댓글 초안 넣음 ✓ — 내 말로 고친 뒤 '등록'은 직접") and got["state"]["box"] == DRAFT
@@ -794,6 +795,83 @@ async def test_already_liked_is_never_pressed_even_with_the_comment_sheet_open(b
 @pytest.mark.parametrize("kind", ["slow", "sheet", "slow sheet"])
 async def test_like_waits_for_a_slow_mark_and_works_with_the_comment_sheet_open(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     got = await step(bot, monkeypatch, tmp_path, kind)
-    assert [(e["type"], e["on"]) for e in ev(got, "react")] == [("like", "1")] and len(ev(got, "face")) == 1  # 한 번만 · 다시 눌러 풀지 않음
+    assert [(e["type"], e["on"]) for e in ev(got, "react")] == [("like", "1")] and ev(got, "face") == []  # 한 번만 · 다시 눌러 풀지 않음
     assert got["state"]["pressed"] == "true" and "공감 ✓" in got["alerts"][0] and "표시가 안 바뀌었어요" not in got["alerts"][0]
     assert got["state"]["box"] == DRAFT
+
+
+# ---------------------------------------------------------------- 4) 실제 모바일 공감 모양 (주인 11/15 12:13 아이패드 — 빈 하트 ♡ + 분홍 하트 ❤ 4 + 댓글 2 + 공유)
+# 11/15 공개 m.blog 글(로그인 없이)에서 뽑은 모양 그대로 줄임: Interact__interact_section > Interact__like_area > .blog_mobile_like_area 안에
+#   .my_reaction  > ._reactionModule(data-sid·data-cid·data-loaded=1) > a.u_likeit_button._face(off · aria-pressed · ._icons._longpress · __reaction__zeroface = 빈 하트) + ul._faceLayer
+#   a.other_reaction > ._reactionModule > span.u_likeit_button._face(남들 반응 아이콘 + ._count 숫자) + ul._faceLayer  ← 누르면 반응 목록 창 (누르면 안 됨)
+# 고르는 칸은 CSS(.blog_mobile_like_area .u_likeit_layer{display:none}) 로 늘 숨김 · 같은 구역이 떠 있는 줄(Interact__is_floating--…)에 한 벌 더.
+# 네이버(reaction.basic.js · 모바일 isAllowLongPress): 하트를 톡 = touchend → _runFaceDirectReaction → 칸의 첫 단추(공감)로 _onButtonHandler
+# (document 에 붙은 '._reactionModule_BLOG a._button' click 처리기) · 스크립트로 하트 click = 칸 열기만 — 주인 화면에선 칸이 안 보였고 공감도 안 됨 → 여기서도 그대로.
+MOD = """<div class="u_likeit_list_module _reactionModule _reactionModule_BLOG" data-sid="BLOG" data-cid="__CID__" __LOADED__ data-facetype="1">__FACE__
+<ul class="u_likeit_layer _faceLayer" role="menu" aria-hidden="false">
+<li class="u_likeit_list like"><a class="u_likeit_list_button _button off" data-type="like" href="#ratingbutton-like" role="menuitem" aria-selected="false" aria-pressed="false"><span class="u_ico _icon"></span><span class="u_likeit_list_name _label">공감</span><span class="u_likeit_list_count _count">4</span></a></li>
+<li class="u_likeit_list impressive"><a class="u_likeit_list_button _button off" data-type="impressive" href="#ratingbutton-impressive" role="menuitem" aria-selected="false" aria-pressed="false"><span class="u_ico _icon"></span><span class="u_likeit_list_name _label">칭찬</span><span class="u_likeit_list_count _count">0</span></a></li>
+</ul></div>"""
+MY = ('<a class="u_likeit_button _face off" href="javascript:;" onclick="return false;" role="button" aria-haspopup="true" aria-pressed="false">'
+      '<span class="u_likeit_icons _icons _longpress"><span class="u_likeit_icon __reaction__zeroface"></span></span></a>')
+OTHER = ('<span class="u_likeit_button _face off" role="button" aria-haspopup="true" aria-pressed="false"><span class="u_likeit_icons _icons">'
+         '<span class="u_likeit_icon __reaction__like"></span></span><span class="u_likeit_text _count num">4</span></span>')
+SECT = ('<div class="Interact__interact_section--vWRCb __FL__"><div class="Interact__like_area--b7PEN"><div class="blog_mobile_like_area" style="user-select:none">'
+        '<div class="my_reaction">' + MOD.replace("__FACE__", MY) + '</div><div class="oth">' + MOD.replace("__FACE__", OTHER) + '</div></div></div>'
+        '<button type="button" class="Interact__comment_btn--Wbuoq" data-click-area="pst.re"><i aria-label="댓글"></i><span>2</span></button>'
+        '<a class="naver-splugin Interact__splugin_btn--ajBSC" href="#">공유</a></div>')
+MPOST = (POST.split('<div class="area_sympathy">')[0]
+         + "<style>.u_likeit_layer{display:none}.blog_mobile_like_area .u_likeit_layer{display:none}"
+         + ".Interact__is_floating--LzUQ5{position:fixed;left:0;right:0;bottom:0;background:#fff;pointer-events:none}</style>"
+         + SECT.replace("__FL__", "") + SECT.replace("__FL__", "Interact__is_floating--LzUQ5 Interact__is_not_floating--RmKij")
+         + '<div id="sheet"' + POST.split('<div id="sheet"')[1].split("<script>")[0] + r"""<script>
+const KIND = '__KIND__', ID = location.pathname.slice(1), $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
+const ev = o => fetch('/__ev?' + new URLSearchParams(Object.assign({id: ID, t: Date.now()}, o)));
+// a.other_reaction 은 네이버가 스크립트로 만듦 (a 안에 a — HTML 로 쓰면 브라우저가 쪼갬)
+$$('.oth').forEach(d => { const a = document.createElement('a'); a.className = 'other_reaction'; while (d.firstChild) a.appendChild(d.firstChild); d.replaceWith(a); });
+const sheet = $('#sheet'), set = (b, on, attr) => { b.classList.toggle('on', on); b.classList.toggle('off', !on); b.setAttribute(attr, String(on)); };
+// 네이버가 내 반응을 그림: 모든 묶음의 칸 단추 · 내 하트(aria-pressed · 아이콘)
+const paint = type => { $$('._faceLayer a._button').forEach(x => set(x, x.getAttribute('data-type') === type, 'aria-selected'));
+  $$('.my_reaction a._face').forEach(f => { set(f, !!type, 'aria-pressed'); f.querySelector('.u_likeit_icon').className = 'u_likeit_icon __reaction__' + (type || 'zeroface'); }); };
+if (/liked/.test(KIND)) paint('like');
+if (/otheron/.test(KIND)) $$('.other_reaction a._button[data-type=like]').forEach(x => set(x, true, 'aria-selected'));  // 남들 묶음에만 내 표시가 먼저 뜬 화면
+$$('._reactionModule').forEach(m => m.setAttribute('data-cid', ID.replace('/', '_')));  // 네이버: 블로그아이디_글번호
+if (/feed/.test(KIND)) { const x = $('.my_reaction ._reactionModule').cloneNode(true); x.setAttribute('data-cid', 'other_1'); x.querySelector('a._button').className = 'u_likeit_list_button _button on'; x.style.display = 'none'; document.body.appendChild(x); }  // 아래 다른 글 묶음 (내가 공감한 글)
+if (!/unloaded/.test(KIND)) $$('._reactionModule').forEach(m => m.setAttribute('data-loaded', '1'));
+document.addEventListener('click', e => {
+  const t = e.target, f = t.closest('._reactionModule_BLOG a._face'), b = t.closest('._reactionModule_BLOG a._button');
+  if (t.closest('a.other_reaction')) { e.preventDefault(); ev({k: 'other'}); return; }
+  if (f) { e.preventDefault(); ev({k: 'face'}); return; }  // 스크립트로 하트 = 칸 열기 시도뿐 (주인 화면: 칸도 안 보이고 공감도 안 됨)
+  if (!b) return;
+  e.preventDefault();
+  const on = !b.classList.contains('on');
+  ev({k: 'react', type: b.getAttribute('data-type'), on: on ? 1 : 0});
+  paint(on ? b.getAttribute('data-type') : '');  // 화면에 바로 (네이버도 서버 답 전에 바꿈)
+});
+$('.Interact__comment_btn--Wbuoq').addEventListener('click', () => { sheet.style.display = ''; });
+$('.u_cbox_btn_upload').addEventListener('click', () => { const box = $('#naverComment__write_textarea'), t = box.textContent.trim(), li = document.createElement('li');
+  ev({k: 'comment', text: t}); li.className = 'u_cbox_comment'; li.setAttribute('data-info', 'commentNo:9,mine:true'); li.textContent = t; $('.u_cbox_list').appendChild(li); box.textContent = ''; });
+</script></body>""").replace("__LOADED__", "")
+
+
+@pytest.mark.parametrize("auto", [False, True])
+async def test_mobile_heart_presses_like_in_the_hidden_layer_and_sees_it_filled(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, auto: bool) -> None:
+    """빈 하트 ♡ → 그 묶음 칸 안 '공감'을 바로 눌러 하트가 채워짐 (예전: 하트를 눌러 칸이 뜨기를 기다리다 '표시가 안 바뀌었어요') ·
+    남들 반응(분홍 하트·숫자)·떠 있는 줄은 안 누름. 한 편 모드·자동 둘 다."""
+    if auto:
+        got = await drive(bot, monkeypatch, tmp_path, [visit_row("issue", "neighbor1", POST_NO)], {"post": MPOST})
+        assert [r["form"]["r"] for r in acts(got, "done")] == ["ok"] and [e["text"] for e in ev(got, "comment")] == [DRAFTS[0]]
+    else:
+        got = await step(bot, monkeypatch, tmp_path, "feed", post=MPOST)  # 아래 다른 글(내가 공감한 글) 묶음은 이 글 판단에 안 섞임
+        assert got["alerts"][0].startswith("이웃 관리: 데런픽 · 공감 ✓ · 댓글 초안 넣음 ✓") and got["state"]["box"] == DRAFT
+        assert got["state"]["pressed"] == "true" and "on" in got["state"]["face"].split() and "on" in got["state"]["like"].split()
+    assert [(e["k"], e.get("type"), e.get("on")) for e in got["ev"] if e["k"] != "comment"] == [("react", "like", "1")]  # 하트·남들 묶음은 안 누름 · 한 번만
+
+
+@pytest.mark.parametrize("kind", ["liked", "otheron", "unloaded"])
+async def test_mobile_heart_already_filled_or_not_drawn_is_never_pressed(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    """이미 채워진 하트(어느 묶음이든 눌린 표시) → 절대 안 누름 (누르면 공감 취소) · 네이버가 내 반응을 아직 안 그린 화면도 안 누름."""
+    got = await step(bot, monkeypatch, tmp_path, kind, post=MPOST)
+    assert [e for e in got["ev"] if e["k"] in ("face", "react", "other")] == []
+    (a,) = got["alerts"]
+    assert ("공감이 눌렸는지 알 수 없어 누르지 않았어요" if kind == "unloaded" else "공감은 이미 눌러져 있어요") in a and got["state"]["box"] == DRAFT

@@ -22,9 +22,12 @@
    간격·하루·한 시간 상한을 넘으면 아무것도 하지 않는다. 대시보드에 못 닿으면 아무것도 하지 않는다
    (하나만 빼고: ①에서 방금(10분 안) 허락받은 그 블로그의 ②는 그 허락으로 이어 함). 글 화면은 연 지 20초(가운데까지 내려 봤으면 8초)가 지나야 초안을 부탁한다.
    속이는 장치(가짜 마우스·키 입력, 브라우저 정보 바꾸기)는 없다.
-   공감 (주인 11/15 화면 — '눌렀는데 표시가 안 바뀌었어요'): 네이버 공감 단추(a._face)는 스크립트로 누르면 반응 고르는 칸(._faceLayer)만 열리고,
-   이미 공감한 글에서 잘못 누르면 풀린다 → 먼저 그 묶음(._reactionModule)의 단추 어디든 on·aria-pressed·aria-selected 가 있으면 절대 누르지 않고,
-   고르는 칸이 있으면 열어서 그 안의 '공감'(a._button[data-type=like]) 하나를 누른 뒤 표시가 바뀔 때까지 5초쯤 다시 본다.
+   공감 (주인 11/15 화면 두 번 — '눌렀는데 표시가 안 바뀌었어요'): 실제 m.blog 글 아래는 .blog_mobile_like_area 안에
+   .my_reaction(빈 하트 ♡ = a.u_likeit_button._face · 아이콘 ._longpress) + a.other_reaction(분홍 하트·숫자 = 남들 반응 목록 — 누르지 않음).
+   하트를 톡 누르면 네이버(reaction.basic.js _runFaceDirectReaction)는 고르는 칸(._faceLayer · 모바일은 CSS 로 늘 숨김)의 첫 단추 '공감'을
+   눌러 준다 — 스크립트로 하트(a._face)를 누르면 칸만 열리고 공감은 안 됨. 그래서 그 묶음 칸 안의 a._button[data-type=like] 를 바로 누른다
+   (칸이 없는 화면만 그 단추). 누르기 전: 공감 묶음 어디든(남들 반응 묶음·떠 있는 것까지) on·aria-pressed·aria-selected 가 있으면 절대 안 누름
+   (누르면 풀림 · 이 글 묶음만 = data-cid 블로그아이디_글번호) · 네이버가 내 반응을 아직 안 그렸으면(data-sid 묶음에 data-loaded=1 없음) 안 누름. 누른 뒤 표시가 바뀔 때까지 5초쯤 다시 본다.
    어느 블로그로 하는지: 화면의 로그인 아이디(@@BLOGS@@ = [네이버 아이디, 블로그, 이름]) → 주소의 bmb → 이 탭에서 고른 것 → 고르기 창.
    멘트: 주소 #bmmsg= (대시보드 서이추 줄이 붙임) → 대시보드가 오늘 할 일 줄에서 찾아 준 것(msg) → ①에서 localStorage 'sbnb' 에 15분 맡긴 것
    → 없으면 ②에서 물어봄. 그 블로그가 다른 블로그 할 일 줄이면 대시보드가 거절(code row) — 고른 블로그는 잊고 다음에 다시 물음.
@@ -254,14 +257,17 @@ const blogpage = async () => {
   if (!press(b0)) A('이웃추가 단추를 누르지 못했어요 — 직접 눌러 주세요');
 };
 // ---------------------------------------------------------------- ③ 이웃 글 → 공감 + 댓글 초안
-// 공감 묶음(._reactionModule)의 단추 어디든 눌린 표시(on · aria-pressed · aria-selected)가 있으면 1 · 안 눌린 표시만 있으면 0 · 표시가 없으면 -1
+// 공감 묶음(._reactionModule)의 단추 어디든 눌린 표시(on · aria-pressed · aria-selected)가 있으면 1 · 안 눌린 표시만 있으면 0 · 표시가 없거나 아직 안 그려졌으면 -1
+// LK = 내 공감 단추 (a 만 — 남들 반응 묶음의 하트는 span) · 눌린 표시는 모든 묶음에서 봄
 const LK = 'a.u_likeit_button._face,a.u_likeit_list_btn._button';
 const lmod = n => n.closest('._reactionModule,.u_likeit_list_module,.u_likeit_module') || n;
 const lon = n => {
-  const a = [n].concat(Array.from(lmod(n).querySelectorAll('a'))), f = (x, v) => x.getAttribute('aria-pressed') === v || x.getAttribute('aria-selected') === v;
-  return a.some(x => f(x, 'true') || /(^|\s)on(\s|$)/.test(x.className)) ? 1 : a.some(x => f(x, 'false') || /(^|\s)off(\s|$)/.test(x.className)) ? 0 : -1;
+  const m = lmod(n), a = [n].concat(Array.from(m.querySelectorAll('a'))), f = (x, v) => x.getAttribute('aria-pressed') === v || x.getAttribute('aria-selected') === v;
+  return a.some(x => f(x, 'true') || /(^|\s)on(\s|$)/.test(x.className)) ? 1 : m.getAttribute('data-sid') && m.getAttribute('data-loaded') !== '1' ? -1 : a.some(x => f(x, 'false') || /(^|\s)off(\s|$)/.test(x.className)) ? 0 : -1;
 };
-const liked = () => qa(LK).some(n => lon(n) > 0);
+// 이 글 것만 (묶음의 data-cid = 블로그아이디_글번호 · 글 아래 다른 글 묶음이 섞여도 그 표시로 판단하지 않게)
+const mine = n => { const c = lmod(n).getAttribute('data-cid'); return !c || c === P.id + '_' + P.no; };
+const liked = () => qa(LK + ',._reactionModule').some(n => mine(n) && lon(n) > 0);
 // 자동입력 방지 칸 (공감·댓글·이웃추가 어디든 — 보이고 크기가 있는 것만)
 const caps = () => qa('[class*=captcha]').filter(n => vis(n) && n.offsetHeight > 9);
 const visit = async () => {
@@ -290,7 +296,7 @@ const visit = async () => {
   let bad = 0;
   // 공감: 글 끝 단추 하나 (떠 있는 단추는 다른 게 없을 때만) · 여러 개면 누르지 않음
   // 누르기 전에 글의 공감 단추 모두(가려진 것까지)에서 눌린 표시를 먼저 봄 — 이미 눌렸으면 절대 누르지 않음 (누르면 풀림)
-  const all = qa(LK), lk = all.filter(vis), fl = n => !!n.closest('[class*=Interact__is_floating],.floating_bottom'), end = lk.filter(n => !fl(n)), ls = end.length ? end : lk;
+  const all = qa(LK).filter(mine), lk = all.filter(vis), fl = n => !!n.closest('[class*=Interact__is_floating],.floating_bottom'), end = lk.filter(n => !fl(n)), ls = end.length ? end : lk;
   if (g.like === false) did.push('공감은 누르지 않았어요');
   else if (liked()) did.push('공감은 이미 눌러져 있어요');
   else if (cont) did.push('공감은 글 화면에서');
@@ -298,12 +304,8 @@ const visit = async () => {
   else if (ls.length > 1) { did.push('공감 단추가 ' + ls.length + '개라 누르지 않았어요'); bad = 1; }
   else if (lon(ls[0]) < 0) { did.push('공감이 눌렸는지 알 수 없어 누르지 않았어요 — 직접 눌러 주세요'); bad = 1; }
   else {
-    // 반응 고르는 칸(._faceLayer)이 있으면: 얼굴 단추로 칸을 열고 그 안의 '공감' 하나를 누름 · 없으면 그 단추가 곧 공감
-    const b = ls[0], os = Array.from(lmod(b).querySelectorAll('._faceLayer a._button')), o = os.find(n => n.getAttribute('data-type') === 'like') || (os.length === 1 ? os[0] : null);
-    // 얼굴 단추를 누른 것만으로 공감이 되는 화면이면 그 표시가 뜰 때까지 기다림 (곧바로 칸 안을 또 누르면 풀림)
-    if (!o || !vis(o)) { press(b); await sl(900); }
-    for (let i = 0; o && i < 6 && !vis(o); i++) await sl(400);
-    if (o && vis(o) && !liked()) press(o);
+    // 그 묶음 칸 안의 '공감'을 바로 누름 (하트를 톡 누를 때 네이버가 누르는 그 단추 · 칸이 숨어 있어도) · 칸이 없으면 그 단추가 곧 공감 · 한 번만
+    press(lmod(ls[0]).querySelector('._faceLayer a._button[data-type=like]') || ls[0]);
     // 표시가 늦게 바뀌는 화면이 있어 5초쯤 다시 봄
     for (let i = 0; i < 12 && !liked(); i++) await sl(400);
     if (liked()) did.push('공감 ✓');
