@@ -339,7 +339,7 @@ function part(k, label, extra, hot) {
     sec(...SEC[0]);
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
     SEC.slice(1).forEach((x, i) => sec(x[0], x[1], i ? null : () => nbv(k)));
-    if (sv) body.push(sh('이웃 들르기 (책갈피)', sv.visit), seoiRow(k, sv, data.seoi));
+    if (sv) body.push(sh('이웃 들르기 (책갈피)', sv.visit), seoiRow(k, sv, data.seoi), W.SBSeoiRes && W.SBSeoiRes.fold(k, sv.res, sf));
   }
   return [el('div', {class: 'box rt bk' + (o ? ' on' : '') + (TOP.has(k) ? ' tpb' : ''), 'data-k': k}, el('button', {class: 'bh', type: 'button', 'aria-expanded': o ? 'true' : 'false',
     onclick: () => { bo[k] = !o; W.dispatchEvent(new Event('sb-routine')); }}, el('span', {class: 'dt', style: `background:${DOT[k]}`}),

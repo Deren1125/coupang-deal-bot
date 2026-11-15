@@ -6,7 +6,7 @@ GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 
      "overflow", "done", "total", "ably": {n, note, rows: [{rid, pid, title, piece, name, price, shop, url, due, due_text}]} | None,
      "times", "rising": [키워드], "rests": [한 줄], "stats": 한 줄 | None, "seoi": {…} | None (목록이 있을 때만)} — rising·rests 는 extras() (주인 10/30) ·
      stats = 늘 None ('오늘 통계 보내기' 할 일 줄은 11/14 에 뺌 — 알림: notify/stats_remind) ·
-     seoi = '이웃 관리' 책갈피의 오늘 수 (seoi.today — {visit, visit_cap, add_cap, how, feed, note, by: {블로그: {name, add, add_cap, visit, line, auto?}}} · 주인 11/14 ·
+     seoi = '이웃 관리' 책갈피의 오늘 수 (seoi.today — {visit, visit_cap, add_cap, how, feed, note, by: {블로그: {name, add, add_cap, visit, line, res, auto?}}} · 주인 11/14 ·
        auto = {add, visit, min} 그 블로그에서 자동(11/15)으로 할 수 있는 수 — line 끝에 한 줄 · how 에 책갈피 새 판 안내)
   목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
   주인 11/14 ('오류가 다시 안 나게 · 주인이 보기 전에 걸러지게') — 늘 실리는 칸:

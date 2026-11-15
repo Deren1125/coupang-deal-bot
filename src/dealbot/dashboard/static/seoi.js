@@ -42,7 +42,8 @@ if (W.__sbnb) return;
 if (!/(^|\.)blog\.naver\.com$/.test(L.hostname)) { alert(SB + '네이버 블로그 화면에서 눌러 주세요'); return; }
 W.__sbnb = 1;
 // au = 자동으로 도는 중 (알림은 칸에 · 화면은 작은 창 fr 안만 봄) · fx = 자동의 블로그 · cur = 지금 사람·글 · res = 그 결과 · dl = 작은 창이 띄우려던 알림 글
-let ov = null, au = 0, fr = null, fx = '', cur = {}, res = '', said = '', gc = '', dl = [], t0 = 0;
+// lr·cr = 그 글의 공감·댓글 결과 낱말 (a=done 의 l·c — 대시보드 '오늘 자동 결과' 표 · seoi.py LIKES·CMTS · '-' = 거기까지 안 감)
+let ov = null, au = 0, fr = null, fx = '', cur = {}, res = '', said = '', gc = '', dl = [], t0 = 0, lr = '-', cr = '-';
 try {
 const NO = /확인|등록|신청|보내기|완료|다음|취소|삭제|차단|submit/i;
 const FULL = /하루|초과|비정상|보호조치|일시적|한도|제한|잠시후|스팸|차단|정지|자동입력|연속|도배|나중에|운영/;
@@ -298,23 +299,23 @@ const visit = async () => {
   // 공감: 글 끝 단추 하나 (떠 있는 단추는 다른 게 없을 때만) · 여러 개면 누르지 않음
   // 누르기 전에 글의 공감 단추 모두(가려진 것까지)에서 눌린 표시를 먼저 봄 — 이미 눌렸으면 절대 누르지 않음 (누르면 풀림)
   const all = qa(LK).filter(n => mine(n) && !n.closest('a.other_reaction')), lk = all.filter(vis), fl = n => !!n.closest('[class*=Interact__is_floating],.floating_bottom'), end = lk.filter(n => !fl(n)), ls = end.length ? end : lk;
-  if (g.like === false) did.push('공감은 누르지 않았어요');
-  else if (liked()) did.push('공감은 이미 눌러져 있어요');
+  if (g.like === false) { did.push('공감은 누르지 않았어요'); lr = 'no'; }
+  else if (liked()) { did.push('공감은 이미 눌러져 있어요'); lr = 'had'; }
   else if (cont) did.push('공감은 글 화면에서');
-  else if (!ls.length) { did.push(all.length ? '공감 단추가 가려져 있어요 — 댓글 창을 닫고 글 화면에서 다시' : '공감 단추를 못 찾았어요'); bad = 1; }
-  else if (ls.length > 1) { did.push('공감 단추가 ' + ls.length + '개라 누르지 않았어요'); bad = 1; }
-  else if (lon(ls[0]) < 0) { did.push('공감이 눌렸는지 알 수 없어 누르지 않았어요 — 직접 눌러 주세요'); bad = 1; }
+  else if (!ls.length) { did.push(all.length ? '공감 단추가 가려져 있어요 — 댓글 창을 닫고 글 화면에서 다시' : '공감 단추를 못 찾았어요'); bad = 1; lr = 'miss'; }
+  else if (ls.length > 1) { did.push('공감 단추가 ' + ls.length + '개라 누르지 않았어요'); bad = 1; lr = 'miss'; }
+  else if (lon(ls[0]) < 0) { did.push('공감이 눌렸는지 알 수 없어 누르지 않았어요 — 직접 눌러 주세요'); bad = 1; lr = 'miss'; }
   else {
     // 그 묶음 칸 안의 '공감'을 바로 누름 (하트를 톡 누를 때 네이버가 누르는 그 단추 · 칸이 숨어 있어도) · 칸이 없으면 그 단추가 곧 공감 · 한 번만
     press(lmod(ls[0]).querySelector('._faceLayer a._button[data-type=like]') || ls[0]);
     // 표시가 늦게 바뀌는 화면이 있어 5초쯤 다시 봄
     for (let i = 0; i < 12 && !liked(); i++) await sl(400);
-    if (liked()) did.push('공감 ✓');
-    else { did.push('공감을 눌렀는데 표시가 안 바뀌었어요 — 화면을 봐 주세요'); bad = 1; }
+    if (liked()) { did.push('공감 ✓'); lr = 'ok'; }
+    else { did.push('공감을 눌렀는데 표시가 안 바뀌었어요 — 화면을 봐 주세요'); bad = 1; lr = 'fail'; }
   }
   // 댓글: 칸이 없으면 댓글 단추로 열고 기다림 · 칸에 글이 있으면 건드리지 않음 · 등록은 주인이 (자동만 등록까지)
   const cm = g.comment || '';
-  if (!cm) did.push(g.note || '댓글 초안은 없어요');
+  if (!cm) { did.push(g.note || '댓글 초안은 없어요'); cr = 'none'; }
   else {
     let bx = qa(BOX).filter(vis)[0];
     if (!bx) {
@@ -324,22 +325,22 @@ const visit = async () => {
     // 자동: 댓글 목록이 뜰 시간을 준 뒤 내 댓글·같은 글이 이미 있는지 봄 (같은 글에 두 번 달지 않게)
     const has = () => qa('.u_cbox_comment').some(n => sq(tx(n)).includes(sq(cm).slice(0, 12)));
     if (au) await sl(2500);
-    if (qa('.u_cbox_type_logged_out').filter(vis).length) { did.push('댓글 칸이 로그인을 바라요'); bad = 1; }
-    else if (qa('li.u_cbox_comment[data-info*="mine:true"]').length || (au && has())) did.push('이미 내 댓글이 있는 글이에요 — 초안은 넣지 않았어요');
-    else if (!bx) { did.push('댓글 칸을 못 찾았어요 — 초안을 복사해 쓰세요'); bad = 1; if (!au) prompt('댓글 초안 (복사해서 쓰세요)', cm); }
-    else if (sq(bx.getAttribute('contenteditable') === 'true' ? bx.textContent : bx.value)) { did.push('댓글 칸에 쓰던 글이 있어 그대로 뒀어요'); if (!au) prompt('댓글 초안 (복사해서 쓰세요)', cm); }
+    if (qa('.u_cbox_type_logged_out').filter(vis).length) { did.push('댓글 칸이 로그인을 바라요'); bad = 1; cr = 'login'; }
+    else if (qa('li.u_cbox_comment[data-info*="mine:true"]').length || (au && has())) { did.push('이미 내 댓글이 있는 글이에요 — 초안은 넣지 않았어요'); cr = 'had'; }
+    else if (!bx) { did.push('댓글 칸을 못 찾았어요 — 초안을 복사해 쓰세요'); bad = 1; cr = 'nobox'; if (!au) prompt('댓글 초안 (복사해서 쓰세요)', cm); }
+    else if (sq(bx.getAttribute('contenteditable') === 'true' ? bx.textContent : bx.value)) { did.push('댓글 칸에 쓰던 글이 있어 그대로 뒀어요'); cr = 'kept'; if (!au) prompt('댓글 초안 (복사해서 쓰세요)', cm); }
     else if (!au) { put(bx, cm); did.push("댓글 초안 넣음 ✓ — 내 말로 고친 뒤 '등록'은 직접"); }
     else {
       // 자동: 등록(.u_cbox_btn_upload 하나)까지 누르고, 댓글 목록에 그 글이 실제로 생겼는지 봄
       put(bx, cm);
       await sl(1500);
       const up = qa('.u_cbox_btn_upload').filter(vis);
-      if (up.length !== 1) { did.push('등록 단추가 ' + up.length + '개라 누르지 않았어요'); bad = 1; }
+      if (up.length !== 1) { did.push('등록 단추가 ' + up.length + '개라 누르지 않았어요'); bad = 1; cr = 'nobtn'; }
       else {
         press(up[0], 1);
         for (let i = 0; i < 16 && !has() && !dl.length; i++) await sl(500);
-        if (has()) did.push('댓글 등록 ✓');
-        else { did.push('등록을 눌렀는데 내 댓글이 안 보여요'); bad = 1; }
+        if (has()) { did.push('댓글 등록 ✓'); cr = 'ok'; }
+        else { did.push('등록을 눌렀는데 내 댓글이 안 보여요'); bad = 1; cr = 'fail'; }
       }
     }
   }
@@ -398,6 +399,7 @@ const auto = async () => {
         await rest(q.wait, '다음: ' + cur.id);
         if (!go) break;
         res = 'fail';
+        lr = cr = '-';
         said = '';
         dl = [];
         say(cur.id + (cur.no ? ' 글을 여는 중' : ' 이웃추가 화면을 여는 중'));
@@ -408,7 +410,7 @@ const auto = async () => {
         if (res !== 'stop' && caps().length) { res = 'stop'; said = (said ? said + ' · ' : '') + '자동입력 방지 칸이 떴어요'; }
         if (res === 'srv' && /gap|hour|dup/.test(gc)) continue;
         if (res === 'login' && !said) said = '로그인 화면이 나왔거나 화면을 읽지 못했어요 — 네이버에 로그인한 뒤 책갈피를 다시 눌러 주세요';
-        if (res !== 'srv') await ask({a: 'done', b: fx, w: cur.no ? 'visit' : 'add', t: cur.id, n: cur.no || '', r: res});
+        if (res !== 'srv') await ask({a: 'done', b: fx, w: cur.no ? 'visit' : 'add', t: cur.id, n: cur.no || '', r: res, l: lr, c: cr});
         say(said);
         bad = /ok|skip/.test(res) ? 0 : bad + 1;
         // 바로 멈춤: 한도·제한 안내 · 로그인 화면 · 두 번 잇달아 안 됨 → 대시보드에 알려 그날 쉼 (첫 화면부터 로그인이면 쉼 없이 멈춤만)

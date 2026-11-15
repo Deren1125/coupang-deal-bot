@@ -157,6 +157,8 @@ LOGINS_JS_GZIP_MAX = 4 * 1024 + 576
 # 11/14: 꾸미기 설치 칸 '설치했어요 (v5)' 단추 (새 판 알림을 끄는 곳 — kkumi.installed) → 11.3 KB (11563 B / 4802 B)
 LOGINS_JS_MAX = 11 * 1024 + 384
 LOGINS_JS_GZIP_MAX = 4 * 1024 + 768
+# 11/15: 이웃 관리 설치 칸의 '오늘 자동 결과 n — 할 일 탭에서 보기' 링크 (seoi.view go) → 11.4 KB (11658 B / 4859 B)
+LOGINS_JS_MAX = 11 * 1024 + 512
 # 10/27: 오늘 할 일 칸(할 일 탭 맨 위 — 하루 5칸 중 지금 칸만 펼침 · 줄마다 체크 · 복사 단추 · 3/8 진행) — logins.js 처럼 셸이 defer 로 받는
 # routine.js (CSS 도 여기서). 목록은 /dashboard/api/routine 으로 열 때만
 ROUTINE_JS_MAX = 8 * 1024
@@ -219,6 +221,10 @@ ROUTINE_JS_GZIP_MAX = 11 * 1024 + 512
 # 11/15: 홈 화면 앱에서 네이버 블로그 링크를 사파리로 (sf · x-safari-https — 책갈피가 사파리에) → 32.2 KB (32939 B / 11908 B)
 ROUTINE_JS_MAX = 32 * 1024 + 512
 ROUTINE_JS_GZIP_MAX = 11 * 1024 + 768
+# 11/15: '오늘 자동 결과' 표 (주인 '자동 한 바퀴 뒤 공감·댓글 검수') — routine.js 가 예산 끝이라 셸이 defer 로 받는 seoires.js (CSS 도 여기서 · 4353 B / 2191 B).
+# routine.js 에는 부르는 한 마디뿐 (32987 B / 11923 B — 예산 그대로)
+SEOIRES_JS_MAX = 5 * 1024
+SEOIRES_JS_GZIP_MAX = 2 * 1024 + 512
 # 11/14: 할 일 종류 목록 — 칸마다 data-k · 남은 수(cnt) · 종류 화면에선 늘 펼침 (칸 순서 점수는 뺌) → gzip 9.6 KB 그대로
 # 할 일 종류 목록·종류 화면 (주인 11/14 '첫 화면은 종류별 목록만') — app.js 가 예산 끝이라 셸이 defer 로 받는 todohub.js (CSS 도 여기서)
 TODOHUB_JS_MAX = 8 * 1024 + 512
@@ -264,9 +270,9 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     # logins.js (연결 탭 '로그인 관리' 칸, 10/26 — app.js 예산 끝이라 셸이 받음) · routine.js (할 일 탭 '오늘 할 일' 칸, 10/27) · boot
     # · kz.js (키자드 칸, 11/12) · ssalmuk.js (할 일 탭 '이벤트 참여' 카드·화면, 11/14) · todohub.js (할 일 종류 목록, 11/14)
     # · xstudio.js (X 글쓰기·답글 도구, 11/14) · xtoday.js (오늘 X 글·큰 사건 배너, 11/15)
-    # · xengage.js (X 반응 연속 모드, 11/15 — 맨 끝)
-    assert len(scripts) == 12
-    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (rt_attrs, rt_body), (kz_attrs, kz_body), \
+    # · xengage.js (X 반응 연속 모드, 11/15 — 맨 끝) · seoires.js (오늘 자동 결과 표, 11/15 — routine.js 다음)
+    assert len(scripts) == 13
+    (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (rt_attrs, rt_body), (sr_attrs, sr_body), (kz_attrs, kz_body), \
         (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (xt_attrs, xt_body), (xe_attrs, xe_body), (boot_attrs, _boot) = scripts
     assert re.fullmatch(r' defer src="/dashboard/static/xengage\.js\?v=[0-9a-f]{10}"', xe_attrs) and xe_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xtoday\.js\?v=[0-9a-f]{10}"', xt_attrs) and xt_body == ""
@@ -275,6 +281,7 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     assert re.fullmatch(r' defer src="/dashboard/static/ssalmuk\.js\?v=[0-9a-f]{10}"', ev_attrs) and ev_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/kz\.js\?v=[0-9a-f]{10}"', kz_attrs) and kz_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/routine\.js\?v=[0-9a-f]{10}"', rt_attrs) and rt_body == ""
+    assert re.fullmatch(r' defer src="/dashboard/static/seoires\.js\?v=[0-9a-f]{10}"', sr_attrs) and sr_body == ""
     assert re.fullmatch(r' blocking="render" src="/dashboard/static/theme\.js\?v=[0-9a-f]{10}"', th_attrs) and th_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/thpost\.js\?v=[0-9a-f]{10}"', tp_attrs) and tp_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/logins\.js\?v=[0-9a-f]{10}"', lg_attrs) and lg_body == ""
@@ -336,7 +343,8 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
                         ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript"),
                         ("logins.js", "text/javascript"), ("sns.js", "text/javascript"), ("routine.js", "text/javascript"),
                         ("ssalmuk.js", "text/javascript"), ("todohub.js", "text/javascript"), ("xstudio.js", "text/javascript"),
-                        ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript"), ("xengage.js", "text/javascript")):
+                        ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript"), ("xengage.js", "text/javascript"),
+                        ("seoires.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))
@@ -364,6 +372,8 @@ def test_asset_budgets() -> None:
     assert len(lg) <= LOGINS_JS_MAX and len(gzip.compress(lg, 9)) <= LOGINS_JS_GZIP_MAX
     rt = (STATIC / "routine.js").read_bytes()
     assert len(rt) <= ROUTINE_JS_MAX and len(gzip.compress(rt, 9)) <= ROUTINE_JS_GZIP_MAX
+    sr = (STATIC / "seoires.js").read_bytes()
+    assert len(sr) <= SEOIRES_JS_MAX and len(gzip.compress(sr, 9)) <= SEOIRES_JS_GZIP_MAX
     th = (STATIC / "todohub.js").read_bytes()
     assert len(th) <= TODOHUB_JS_MAX and len(gzip.compress(th, 9)) <= TODOHUB_JS_GZIP_MAX
     sn = (STATIC / "sns.js").read_bytes()

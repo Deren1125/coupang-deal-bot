@@ -27,8 +27,14 @@ today(): 할 일 탭·연결 탭이 읽는 오늘 수 ('오늘 이웃 들르기 
            허락하는 그때 tried 에 적는다 (a=done 이 안 와도 오늘은 다시 안 줌) · 방금 허락한 대상을 또 물으면 409 dup (탭 둘·다시 시작 — 같은 글 댓글 두 번 막기).
   a=done   한 명·한 편의 결과 r: ok(서이추 줄 체크 + 블로그 프로그램에 nb_requested — 손으로 체크할 때와 같은 길 routine.set_done·relay_add) ·
            skip(이미 이웃·신청 중·받지 않음 — 줄은 체크하되 하루 센 것은 되돌림 · 세기 전에 건너뛴 것은 다음까지 20~40초, '확인'을 누른 뒤면 간격 그대로) · 그 밖(fail·unsure·login·stop — 적기만 · 다음까지 적어도 20~40초).
-           무엇이든 tried 에 넣어 오늘은 다시 안 줌.
+           무엇이든 tried 에 넣어 오늘은 다시 안 줌. l·c = 그 글의 공감·댓글 결과 낱말 (없으면 옛 책갈피 — 아래 '오늘 자동 결과').
   a=stop w=all  서이추·들르기 둘 다 그날 쉼.
+오늘 자동 결과 (주인 11/15 14:1x — '한 바퀴 끝난 뒤 좋아요가 잘 눌렸는지·댓글이 잘 달렸는지 대시보드에서 검수'): a=done 마다 한 줄을
+  kv "seoi:res:<날 KST>" = {items: [{b 블로그, k add|visit, t 이웃 아이디, n 글 번호, r 결과, l 공감, c 댓글, at 시각}]} 에 (30일 · 하루 RES_MAX 줄 ·
+  같은 사람·글은 마지막 것만). 남의 글 본문·제목·내 댓글 글은 적지 않는다 — 아이디·글 번호·결과 낱말·시각뿐.
+  l·c = 책갈피가 done 에 실어 보내는 낱말 (LIKES·CMTS · 못 간 곳은 '-'). 옛 책갈피(칸 없음)는 서버가 아는 것으로 채움 (_guess):
+  r=ok 면 그 글에 허락한 표(ticket)의 공감 여부·초안 유무 그대로 · 그 밖은 '?'(확인 필요) · 표가 없으면 '-'.
+  results() → today()["by"][블로그]["res"] = {n, bad, rows: [{who, what, like, cmt, res, bad, url, hm}]} — 문제 줄 먼저 · 화면은 static/seoires.js.
 책갈피 판 (V): 책갈피가 요청마다 v 를 실어 보냄 → 지금 판이면 kv seoi_seen 에 적음 — 다르면 연결 탭·할 일 탭에 '다시 깔기' 안내 (is_new).
 책갈피 길이: 한글 한 글자가 주소에서 9글자라 pack() 이 한글이 든 글('…')을 Z('…')(글자마다 3글자)로 바꾼다 — seoi.js 의 Z 가 푼다 (28000자 예산).
 """
@@ -73,6 +79,23 @@ KINDS = ("add", "visit")
 RESULTS = ("ok", "skip", "fail", "unsure", "login", "stop")  # a=done 의 r
 SKIP_GAP = (20, 40)  # 건너뛴 뒤 (이미 이웃 등 — 화면만 열어 봄) 다음까지
 TRIED_MAX = 300
+RES_MAX = 400  # 하루 자동 결과 줄 (서이추 30×3 + 들르기 40 보다 넉넉히)
+# a=done 의 l(공감)·c(댓글) 낱말 → 표에 보일 글자 · 문제인지 · 결과 칸에 붙일 까닭 ('?' = 모름 — 옛 책갈피의 실패 줄 · '-' = 거기까지 안 감)
+LIKES: dict[str, tuple[str, bool, str]] = {
+    "ok": ("✅", False, ""), "had": ("✅", False, ""), "no": ("–", False, "공감은 누르지 않는 글"), "-": ("–", False, ""),
+    "miss": ("❌", True, "공감 단추를 못 찾음"), "fail": ("❌", True, "공감을 눌렀는데 표시가 안 바뀜"), "?": ("❓", True, ""),
+}
+CMTS: dict[str, tuple[str, bool, str]] = {
+    "ok": ("✅", False, ""), "had": ("✅", False, "내 댓글이 이미 있던 글"), "none": ("건너뜀", False, ""), "kept": ("건너뜀", False, "댓글 칸에 쓰던 글이 있었음"),
+    "-": ("–", False, ""), "login": ("❌", True, "댓글 칸이 로그인을 바람"), "nobox": ("❌", True, "댓글 칸을 못 찾음"),
+    "nobtn": ("❌", True, "등록 단추를 못 찾음"), "fail": ("❌", True, "등록을 눌렀는데 내 댓글이 안 보임"), "?": ("❓", True, ""),
+}
+RES_TEXT = {
+    "add": {"ok": "신청 완료", "skip": "이미 이웃·신청 중 (건너뜀)", "fail": "실패 — 신청 화면이 예상과 달랐어요",
+            "unsure": "확인 필요 — '확인'을 눌렀는데 신청 완료 글을 못 봤어요"},
+    "visit": {"ok": "들르기 완료", "skip": "건너뜀", "fail": "실패", "unsure": "확인 필요"},
+    "*": {"login": "로그인 화면이 나와 멈춤", "stop": "네이버 제한 안내 — 오늘 쉼"},
+}
 AUTO_AVG_S = 50  # 자동 한 번에 드는 시간 어림 (간격 + 화면 열기·읽기·누르기 · 서이추 ~40초 · 들르기 ~85초) — '약 n분'
 GAP = {"add": (25, 45), "visit": (25, 45)}  # 다음 허용까지 (초) — 받을 때마다 이 사이에서 무작위 · 주인 11/15 '122분은 너무 길어, 30분쯤' (예전 60~120·45~90)
 ADD_DAY_CAP = 30  # 블로그마다 (주인 11/12 '하루 블로그마다 30' · 네이버 한도 100)
@@ -242,6 +265,10 @@ def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | N
     if tz is not None:
         t = today(db, now or time.time(), tz)
         out["today"] = t
+        n, bad = sum(v["res"]["n"] for v in t["by"].values()), sum(v["res"]["bad"] for v in t["by"].values())
+        if n:  # 연결 탭 설치 칸의 링크 (logins.js) — 문제가 가장 많은(없으면 줄이 가장 많은) 블로그 칸으로
+            top = max(t["by"], key=lambda b: (t["by"][b]["res"]["bad"], t["by"][b]["res"]["n"]))
+            out["go"] = {"t": f"오늘 자동 결과 {n}" + (f" · 문제 {bad}" if bad else "") + " — 할 일 탭에서 보기", "h": f"#/todo/{top}"}
         out["note"] = (NEW.format(v=version()) + " · " if out["new"] else "") + t["note"]
     return out
 
@@ -282,11 +309,13 @@ def today(db: Any, now: float, tz: ZoneInfo, *, rows: Any = None, done: Any = No
     c = _counts(db, day)
     total = sum(c["visit"].values())
     by = {}
+    res = results(db, day, tz)
     for _nid, b, name in BLOGS:
         stop = [w for w, kind in (("서이추", "add"), ("들르기", "visit")) if b in c["stop"][kind]]
         by[b] = {"name": name, "add": c["add"][b], "add_cap": ADD_DAY_CAP, "visit": c["visit"][b],
                  "line": f"오늘 이웃 들르기 {c['visit'][b]} (세 블로그 합쳐 {total}/{VISIT_DAY_CAP}) · 서이추 {c['add'][b]}/{ADD_DAY_CAP}"
                          + (f" · 네이버 제한 안내로 오늘 {'·'.join(stop)} 쉼" if stop else "")}
+        by[b]["res"] = res[b]  # 오늘 자동 결과 표 (주인 11/15 — static/seoires.js)
         if rows is not None:
             a, v = _left(c, b, rows, done or ())
             by[b]["auto"] = {"add": len(a), "visit": len(v), "min": _minutes(len(a) + len(v))}
@@ -300,7 +329,72 @@ def today(db: Any, now: float, tz: ZoneInfo, *, rows: Any = None, done: Any = No
 
 def prune(db: Any, now: float, tz: ZoneInfo) -> int:
     cut = (datetime.fromtimestamp(now, tz) - timedelta(days=KEEP_DAYS)).strftime("%Y-%m-%d")
-    return db.kv_delete_prefix("seoi:day:", keep=lambda k, _v: k[len("seoi:day:"):] >= cut)
+    return sum(db.kv_delete_prefix(p, keep=lambda k, _v, p=p: k[len(p):] >= cut) for p in ("seoi:day:", "seoi:res:"))
+
+
+# ---------------------------------------------------------------- 오늘 자동 결과
+def _res_items(db: Any, day: str) -> list[dict[str, Any]]:
+    v = _json(db, f"seoi:res:{day}").get("items")
+    return [x for x in v if isinstance(x, dict)][-RES_MAX:] if isinstance(v, list) else []
+
+
+def _guess(db: Any, kind: str, target: str, no: str, result: str, now: float) -> tuple[str, str]:
+    """옛 책갈피 (done 에 공감·댓글 칸이 없음): 서버가 아는 것만으로 — 그 글에 허락한 표의 공감 여부·초안 유무 (r=ok 일 때만 믿음)."""
+    if kind != "visit":
+        return "-", "-"
+    tk = _pace(db, "visit", now)["tickets"].get(hashlib.sha256(f"https://blog.naver.com/{target}/{no}".encode()).hexdigest()[:16])
+    if not tk or result == "login":  # 허락받기 전에 끝남 (글을 못 읽음·로그인 화면) — 공감·댓글까지 가지 않음
+        return "-", "-"
+    if result != "ok":
+        return "?", "?"
+    return ("ok" if tk.get("like", True) else "no"), ("ok" if tk.get("comment") else "none")
+
+
+def record(db: Any, blog: str, kind: str, target: str, no: str, result: str, like: str | None, cmt: str | None, *, now: float, tz: ZoneInfo) -> None:
+    """자동 한 명·한 편의 결과 한 줄 (아이디·글 번호·결과 낱말·시각만 — 글 본문·제목·댓글 글은 적지 않음)."""
+    if like is None and cmt is None:
+        like, cmt = _guess(db, kind, target, no, result, now)
+    if kind != "visit":
+        like = cmt = "-"
+    row = {"b": blog, "k": kind, "t": target, "n": no if kind == "visit" else "", "r": result,
+           "l": like if like in LIKES else "?", "c": cmt if cmt in CMTS else "?", "at": int(now)}
+    day = _day(now, tz)
+    same = ("b", "k", "t", "n")
+    items = [x for x in _res_items(db, day) if any(x.get(f) != row[f] for f in same)]
+    _put(db, f"seoi:res:{day}", {"items": [*items, row][-RES_MAX:]})
+    prune(db, now, tz)
+
+
+def _res_row(x: dict[str, Any], tz: ZoneInfo) -> dict[str, Any] | None:
+    kind, r, t, n = x.get("k"), x.get("r"), str(x.get("t") or ""), str(x.get("n") or "")
+    if kind not in KINDS or r not in RESULTS or not _BLOG_ID.fullmatch(t) or (kind == "visit" and not re.fullmatch(r"\d{6,20}", n)):
+        return None
+    like, cmt = LIKES.get(str(x.get("l")), LIKES["?"]), CMTS.get(str(x.get("c")), CMTS["?"])
+    if kind == "add":
+        like, cmt = LIKES["-"], CMTS["-"]
+    text = RES_TEXT[kind].get(r) or RES_TEXT["*"][r]
+    why = [w for w in (like[2], cmt[2]) if w]
+    if kind == "visit" and r == "fail" and not why:
+        why = ["공감·댓글 가운데 안 된 것이 있어요 — 글을 열어 확인"] if "❓" in (like[0], cmt[0]) else ["글 화면이 예상과 달랐거나 네이버 알림이 떴어요"]
+    at = x.get("at") if isinstance(x.get("at"), int | float) else 0
+    return {"who": t, "what": "서이추" if kind == "add" else "들르기", "like": like[0], "cmt": cmt[0], "res": text + (" — " + " · ".join(why) if why else ""),
+            "bad": r not in ("ok", "skip") or like[1] or cmt[1], "url": f"https://m.blog.naver.com/{t}" + (f"/{n}" if kind == "visit" else ""),
+            "hm": datetime.fromtimestamp(at, tz).strftime("%H:%M") if at else "", "at": at}
+
+
+def results(db: Any, day: str, tz: ZoneInfo) -> dict[str, dict[str, Any]]:
+    """그날 자동 결과 {블로그: {n, bad, rows}} — 문제 있는 줄(❌·❓·실패·확인 필요)이 위, 그 안에서는 새것이 위."""
+    out: dict[str, dict[str, Any]] = {b: {"n": 0, "bad": 0, "rows": []} for b in NAMES}
+    for x in _res_items(db, day):
+        row = _res_row(x, tz) if x.get("b") in NAMES else None
+        if row:
+            out[x["b"]]["rows"].append(row)
+    for v in out.values():
+        v["rows"].sort(key=lambda r: (not r["bad"], -r["at"]))
+        for r in v["rows"]:
+            del r["at"]
+        v["n"], v["bad"] = len(v["rows"]), sum(1 for r in v["rows"] if r["bad"])
+    return out
 
 
 # ---------------------------------------------------------------- 사람 속도
@@ -441,7 +535,7 @@ def queue(db: Any, blog: str, *, now: float, tz: ZoneInfo, rows: Any, done: Any,
 
 
 def finish(db: Any, blog: str, kind: str, target: str, no: str, result: str, *, now: float, tz: ZoneInfo, rows: Any, day: str | None,
-           rng: Any = random) -> dict[str, Any]:
+           rng: Any = random, like: str | None = None, cmt: str | None = None) -> dict[str, Any]:
     """자동이 한 명·한 편을 끝냄 (a=done). 서이추 ok·skip = 오늘 할 일 줄 체크 + 블로그 프로그램에 '신청했어요'(nb_requested — 손으로 체크할 때와 같은 길) ·
     skip 은 센 것을 되돌림 · 무엇이든 오늘은 다시 주지 않게 적음."""
     key = f"{blog}:{target}" + (f"/{no}" if kind == "visit" else "")
@@ -450,6 +544,10 @@ def finish(db: Any, blog: str, kind: str, target: str, no: str, result: str, *, 
     if key not in c["tried"]:
         c["tried"] = [*c["tried"], key][-TRIED_MAX:]
         _put(db, f"seoi:day:{d}", c)
+    try:  # 오늘 자동 결과 표 한 줄 (간격을 고치기 전에 — 옛 책갈피는 그 글의 표를 읽음) · 못 적어도 자동은 그대로
+        record(db, blog, kind, target, no, result, like, cmt, now=now, tz=tz)
+    except Exception as e:  # noqa: BLE001
+        log.warning("seoi auto: 결과 적기 실패 %s", type(e).__name__)
     ticked = False
     if result != "ok" and not (kind == "add" and result == "skip" and refund(db, blog, target, now=now, tz=tz, rng=rng)):
         # 세지 않고 끝난 것(세기 전에 건너뜀·화면이 달라 못 함)도 화면은 열어 봤으니 다음까지 조금은 쉼 — 이미 더 긴 간격이 있으면 그대로
@@ -606,7 +704,7 @@ async def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None 
         target, no = str(form.get("t") or "").strip().lower(), str(form.get("n") or "")
         if kind not in KINDS or result not in RESULTS or not _BLOG_ID.fullmatch(target) or (kind == "visit" and not re.fullmatch(r"\d{6,20}", no)):
             raise CaptureError(400, "bad", "모르는 요청이에요")
-        return finish(db, blog, kind, target, no, result, now=now, tz=tz, rows=rows, day=day, rng=rng)
+        return finish(db, blog, kind, target, no, result, now=now, tz=tz, rows=rows, day=day, rng=rng, like=form.get("l"), cmt=form.get("c"))
     if a == "add":
         blog = _blog(form)
         target = str(form.get("t") or "").strip().lower()
