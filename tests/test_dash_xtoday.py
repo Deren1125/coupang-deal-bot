@@ -501,7 +501,12 @@ async def test_naver_news_falls_back_to_kakao_web_recency_and_keeps_only_outlets
             {"title": "블로그 글", "contents": "", "url": "https://blog.naver.com/x/1", "datetime": "2026-11-15T09:00:00.000+09:00"},
             {"title": "카페 글", "contents": "", "url": "https://cafe.daum.net/x/1", "datetime": "2026-11-15T09:00:00.000+09:00"},
             {"title": "영상", "contents": "", "url": "https://www.youtube.com/watch?v=1", "datetime": "2026-11-15T09:00:00.000+09:00"},
-            {"title": "", "contents": "", "url": "https://news.example/empty"}]
+            {"title": "커뮤니티 글 엔비디아 5조 달러", "contents": "", "url": "https://gall.dcinside.com/board/view/?id=x", "datetime": "2026-11-15T09:00:00.000+09:00"},
+            {"title": "지식iN", "contents": "", "url": "https://kin.naver.com/qna/detail.naver?d1id=1", "datetime": "2026-11-15T09:00:00.000+09:00"},
+            {"title": "쇼핑", "contents": "", "url": "https://smartstore.naver.com/x/products/1", "datetime": "2026-11-15T09:00:00.000+09:00"},
+            {"title": "포털 뉴스", "contents": "", "url": "https://v.daum.net/v/20261115090000000", "datetime": "2026-11-15T09:05:00.000+09:00"},
+            {"title": "언제 쓴 글인지 모름 엔비디아 5조 달러", "contents": "", "url": "https://old.example/2019", "datetime": ""},
+            {"title": "", "contents": "", "url": "https://news.example/empty", "datetime": "2026-11-15T09:00:00.000+09:00"}]
 
     class Http:
         async def get(self, url: str, *, params: dict[str, Any], headers: dict[str, str], timeout: float) -> httpx.Response:
@@ -520,10 +525,17 @@ async def test_naver_news_falls_back_to_kakao_web_recency_and_keeps_only_outlets
     assert [k for _u, k, _p in seen] == ["dealid", "blogid", "KakaoAK kakaofilekey"] and n.src == "kakao" and n.dead is False
     assert seen[-1][0] == "https://dapi.kakao.com/v2/search/web" and seen[-1][2] == {"query": "엔비디아", "sort": "recency", "size": 50, "page": 1}
     assert rows == [{"title": "엔비디아 시총 5조 달러", "link": "https://www.hankyung.com/article/1", "originallink": "https://www.hankyung.com/article/1",
-                     "pubDate": "Sun, 15 Nov 2026 09:10:00 +0900"}, {"title": "", "link": "https://news.example/empty", "originallink": "https://news.example/empty"}]
+                     "pubDate": "Sun, 15 Nov 2026 09:10:00 +0900"},
+                    {"title": "포털 뉴스", "link": "https://v.daum.net/v/20261115090000000", "originallink": "https://v.daum.net/v/20261115090000000",
+                     "pubDate": "Sun, 15 Nov 2026 09:05:00 +0900"},
+                    {"title": "", "link": "https://news.example/empty", "originallink": "https://news.example/empty", "pubDate": "Sun, 15 Nov 2026 09:00:00 +0900"}]
+    # 커뮤니티·지식iN·쇼핑·시각 모르는 글은 매체로 안 셈 (큰 사건 매체 수·속도 부풀림 방지) · 포털 뉴스·언론사 주소는 그대로
+    for host, drop in (("gall.dcinside.com", True), ("www.fmkorea.com", True), ("m.blog.naver.com", True), ("post.naver.com", True),
+                       ("n.news.naver.com", False), ("news.nate.com", False), ("www.yna.co.kr", False), ("biz.chosun.com", False), ("zdnet.co.kr", False)):
+        assert xt.not_outlet(host) is drop, host
     a = xt.article(rows[0], now[0])
     assert a is not None and a["outlet"] == "hankyung.com" and a["desc"] == "" and a["at"] < now[0]
-    assert xt.article(rows[1], now[0]) is None  # 제목 없는 줄은 버림 (예전 그대로)
+    assert xt.article(rows[2], now[0]) is None  # 제목 없는 줄은 버림 (예전 그대로)
     # 다음 검색은 카카오만 (네이버를 매번 두드리지 않음) · 하루 지나면 네이버를 다시 봄
     await n.search("조원")
     assert [k for _u, k, _p in seen][3:] == ["KakaoAK kakaofilekey"]

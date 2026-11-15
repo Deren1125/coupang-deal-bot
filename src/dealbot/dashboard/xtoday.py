@@ -74,9 +74,26 @@ NEWS_TIMEOUT = 6.0
 NEWS_DISPLAY = 100
 KAKAO_SIZE = 50  # 카카오 웹문서 검색 한 번에 50개까지
 KAKAO_RECHECK_S = 86400.0  # 카카오로 넘어간 뒤 네이버 키는 하루 한 번만 다시 봄 (ssalmuk.KEY_RECHECK 와 같게)
-# 카카오 웹문서는 뉴스만이 아니라서 — 블로그·카페·영상·사전 주소는 매체로 세지 않음 (매체 수가 점수에 들어감)
-NOT_OUTLET_RE = re.compile(r"(?:^|\.)(?:blog\.[a-z0-9.-]+|cafe\.[a-z0-9.-]+|tistory\.com|brunch\.co\.kr|velog\.io|youtube\.com|youtu\.be|"
-                           r"namu\.wiki|wikipedia\.org|instagram\.com|facebook\.com|x\.com|twitter\.com|threads\.net)$")
+# 카카오 웹문서는 뉴스만이 아니라서 — 블로그·카페·영상·사전·커뮤니티·쇼핑·앱 장터 주소는 매체로 세지 않음 (매체 수가 점수에 들어감 — 오탐 방지)
+NOT_OUTLET_RE = re.compile(
+    r"(?:^|\.)(?:blog\.[a-z0-9.-]+|cafe\.[a-z0-9.-]+|tistory\.com|brunch\.co\.kr|velog\.io|youtube\.com|youtu\.be|"
+    r"namu\.wiki|wikipedia\.org|instagram\.com|facebook\.com|x\.com|twitter\.com|threads\.net|threads\.com|tiktok\.com|"
+    r"kakao\.com|t\.me|band\.us|reddit\.com|medium\.com|linkedin\.com|pinterest\.[a-z.]+|github\.com|github\.io|substack\.com|"
+    r"blogspot\.com|wordpress\.com|egloos\.com|postype\.com|notion\.site|"
+    r"dcinside\.com|fmkorea\.com|clien\.net|ppomppu\.co\.kr|theqoo\.net|ruliweb\.com|mlbpark\.donga\.com|inven\.co\.kr|"
+    r"bobaedream\.co\.kr|instiz\.net|82cook\.com|todayhumor\.co\.kr|humoruniv\.com|etoland\.co\.kr|dogdrip\.net|"
+    r"arca\.live|quasarzone\.com|blind\.com|teamblind\.com|"
+    r"coupang\.com|gmarket\.co\.kr|11st\.co\.kr|auction\.co\.kr|danawa\.com|aliexpress\.com|"
+    r"play\.google\.com|apps\.apple\.com)$")
+# 포털은 뉴스 칸만 매체로 (지식iN·포스트·쇼핑·스마트스토어·카페 등은 뺌)
+PORTAL_RE = re.compile(r"(?:^|\.)(?:naver\.com|daum\.net|nate\.com|zum\.com)$")
+PORTAL_NEWS_RE = re.compile(r"(?:^|\.)(?:news\.naver\.com|v\.daum\.net|news\.daum\.net|news\.nate\.com|news\.zum\.com)$")
+
+
+def not_outlet(host: str) -> bool:
+    return bool(NOT_OUTLET_RE.search(host) or (PORTAL_RE.search(host) and not PORTAL_NEWS_RE.search(host)))
+
+
 BODY_MAX = 1024
 ID_RE = re.compile(r"^(?:t[0-9a-f]{10}|[0-9a-f]{8})$")
 
@@ -285,7 +302,8 @@ def in_quiet(spec: str, now: float) -> bool:
 # ── 뉴스 검색 (네이버 공식 Open API — 키만) ─────────────────────────────────────────────────────────
 def kakao_rows(data: Any) -> list[dict[str, Any]]:
     """카카오 웹문서 검색 답 → 네이버 뉴스 줄 꼴 {title, link, originallink, pubDate} (요약은 안 씀 — 제목·주소·매체·시각만).
-    블로그·카페·영상 주소는 뺀다 (NOT_OUTLET_RE)."""
+    블로그·카페·영상·커뮤니티·쇼핑 주소는 뺀다 (not_outlet) · 쓴 시각을 모르는 줄도 뺀다 — article() 이 시각 없는 줄을 '지금'으로 보기 때문에
+    (오래된 글이 방금 난 기사로 세어져 속도·매체 수가 부풀지 않게)."""
     from dealbot.dashboard.ssalmuk import kakao_items
 
     items, _total = kakao_items(data, "news")
@@ -296,12 +314,9 @@ def kakao_rows(data: Any) -> list[dict[str, Any]]:
             host = (urlsplit(link).hostname or "").lower()
         except ValueError:
             continue
-        if not host or NOT_OUTLET_RE.search(host):
+        if not host or not_outlet(host) or not it.get("pubDate"):
             continue
-        row = {"title": it.get("title") or "", "link": link, "originallink": link}
-        if it.get("pubDate"):
-            row["pubDate"] = it["pubDate"]
-        out.append(row)
+        out.append({"title": it.get("title") or "", "link": link, "originallink": link, "pubDate": it["pubDate"]})
     return out
 
 
