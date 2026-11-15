@@ -476,3 +476,19 @@ async def test_gzip_is_asked_and_passed_through_untouched(bot: DealBot, hub: Hub
     status, body, _c, h = await call(bot, "GET", "/dashboard/farm/", login(bot))
     sent = {k.lower(): v for k, v in hub.requests[-1].headers.items()}
     assert sent["accept-encoding"] == "identity" and body == b"plain" and "Content-Encoding" not in h
+
+
+async def test_static_cache_etag_304_and_server_timing_pass_through(bot: DealBot, hub: Hub) -> None:
+    """11/16 퍼프덱스 허브 속도 개선: 해시 붙은 정적 파일의 immutable 캐시·ETag·304·Server-Timing 을 덮지 않고 그대로."""
+    hub.reply = lambda req: (httpx.Response(304, headers={"etag": '"h1"', "cache-control": "no-cache"})
+                             if req.headers.get("if-none-match") == '"h1"' else
+                             httpx.Response(200, headers={"content-type": "text/javascript", "etag": '"h1"', "vary": "Origin",
+                                                          "cache-control": "public, max-age=31536000, immutable",
+                                                          "server-timing": "app;dur=3.2"}, content=b"x()"))
+    status, body, _c, h = await call(bot, "GET", "/dashboard/farm/static/js/x.js?v=abc", login(bot))
+    assert status == 200 and body == b"x()"
+    assert h["Cache-Control"] == "public, max-age=31536000, immutable" and h["ETag"] == '"h1"'
+    assert h["Server-Timing"] == "app;dur=3.2" and h["Vary"] == "Origin"
+    status, body, _c, h = await call(bot, "GET", "/dashboard/farm/static/js/x.js?v=abc", login(bot, **{"if-none-match": '"h1"'}))
+    sent = {k.lower(): v for k, v in hub.requests[-1].headers.items()}
+    assert sent["if-none-match"] == '"h1"' and status == 304 and body == b"" and h["ETag"] == '"h1"'

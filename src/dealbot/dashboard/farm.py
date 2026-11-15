@@ -56,7 +56,7 @@ REQ_ALLOW = ("accept", "accept-language", "content-type", "range", "if-none-matc
 # 허브 → 브라우저로 넘기는 머리글 (이것만 · Content-Type 은 따로). set-cookie·CSP·CORS·www-authenticate 등은 버림
 RESP_ALLOW = {"cache-control": "Cache-Control", "etag": "ETag", "last-modified": "Last-Modified", "content-range": "Content-Range",
               "accept-ranges": "Accept-Ranges", "content-disposition": "Content-Disposition", "retry-after": "Retry-After",
-              "content-encoding": "Content-Encoding"}  # 허브가 그래도 압축해 보냈으면 그 표시는 같이 (본문을 받은 그대로 넘기므로)
+              "content-encoding": "Content-Encoding", "server-timing": "Server-Timing", "vary": "Vary"}  # 허브가 그래도 압축해 보냈으면 그 표시는 같이 (본문을 받은 그대로 넘기므로)
 # 파밍 화면에 붙이는 보안 머리글 — 대시보드 기본(service.SECURITY_HEADERS)과 같은 틀: 불러오기·요청·폼 모두 이 서버로만 (바깥 주소 없음).
 # 다른 점: 허브 화면(crime_v3.html·research.html — 11/15 feat/oi-farming-core 에서 확인)이 페이지 안 <script>·onclick= 으로 돌아서
 # script-src 에 'unsafe-inline' (없으면 화면이 안 뜸) · 글꼴(font-src) · 상대 주소(base-uri 'self') · 허브 알림용 서비스 워커(worker-src —
@@ -232,8 +232,8 @@ class FarmProxy:
                     return _page(502, "막았어요", "파밍 화면이 다른 곳으로 보내려 해서 열지 않았어요.")
             else:
                 extra["Location"] = loc
-        if "Content-Encoding" in extra:
-            extra["Vary"] = "Accept-Encoding"
+        if "Content-Encoding" in extra and "accept-encoding" not in extra.get("Vary", "").lower():
+            extra["Vary"] = ", ".join(v for v in (extra.get("Vary"), "Accept-Encoding") if v)
         extra.update(FARM_HEADERS)
         extra.setdefault("Cache-Control", "no-store")
         if method == "HEAD":
