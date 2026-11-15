@@ -135,9 +135,9 @@ async def test_body_cap_512kb(bot: DealBot) -> None:
     assert res[0] == 411
 
 
-async def test_only_four_paths_open_without_login(bot: DealBot) -> None:
+async def test_only_five_paths_open_without_login(bot: DealBot) -> None:
     pub = set(api_mod.DashApi.public_paths())
-    assert {p for p in pub if p.startswith(B)} == {ssalmuk.PUSH_PATH, ssalmuk.COMMANDS_PATH, ssalmuk.ACK_PATH, ssalmuk.SEARCH_PATH}
+    assert {p for p in pub if p.startswith(B)} == {ssalmuk.PUSH_PATH, ssalmuk.COMMANDS_PATH, ssalmuk.ACK_PATH, ssalmuk.SEARCH_PATH, ssalmuk.LLM_PATH}
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     for path in (ssalmuk.STATE_PATH, ssalmuk.KEY_PATH):
         res = await bot.web.dispatch("GET", path, anon)
@@ -168,7 +168,8 @@ async def test_screen_needs_csrf_and_same_site(bot: DealBot) -> None:
     status, v, headers = await get_json(bot, ssalmuk.STATE_PATH, h)
     assert status == 200 and headers["Cache-Control"] == "no-store"
     assert v == {"state": None, "receivedAt": None, "pending": 0, "stale": True, "results": [],
-                 "search_proxy": {"keysrc": None, "today_count": 0, "keys": {}}, "alerts": []}  # alerts: 주인 11/14 오류 검수 (없으면 [])
+                 "search_proxy": {"keysrc": None, "today_count": 0, "keys": {}}, "alerts": [],
+                 "llm_proxy": {"gemini": {"today": 0, "cap": 40}, "claude": {"today": 0, "cap": 150, "sonnet": 0, "sonnet_cap": 50}}}  # alerts: 주인 11/14 오류 검수 (없으면 [])
 
 
 async def test_key_shown_only_logged_in_and_rotate(bot: DealBot) -> None:
@@ -909,7 +910,7 @@ async def test_search_kakao_key_from_blog_env_file(bot: DealBot, tmp_path: Path)
     assert [r.url.host for r in seen] == ["openapi.naver.com", "dapi.kakao.com"] and seen[-1].headers["authorization"] == f"KakaoAK {KAKAO_KEY}"
     bk = ssalmuk.BlogKeyFile(lambda: str(tmp_path / "blog.env"))
     assert bk.kakao() == KAKAO_KEY and bk.get() == (BLOG_ID, BLOG_SECRET)
-    assert "do-not-read" not in json.dumps(bk._vals) and set(bk._vals) == set(ssalmuk.BLOG_ENV_NAMES)
+    assert "do-not-read" not in json.dumps(bk._vals) and set(bk._vals) == set(ssalmuk.BLOG_ENV_NAMES) - {"GEMINI_API_KEY"}
     # 딜봇 환경 키가 있으면 그것 먼저
     seen = naver(bot, kakao_or_401, keyed=False, kakao="dealbot-kakao-key")
     await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
@@ -1028,7 +1029,7 @@ def test_act_search_retry_and_trust_host(bot: DealBot) -> None:
 
 
 # ---------------------------------------------------------------- 오류 검수 경고 한 줄 (주인 11/14 — 쌀먹 alerts[], SNSBOARD.md '오류 검수 칸')
-VIEW_KEYS = {"state", "receivedAt", "pending", "stale", "results", "search_proxy"}
+VIEW_KEYS = {"state", "receivedAt", "pending", "stale", "results", "search_proxy", "llm_proxy"}
 
 
 def test_alerts_absent_is_empty_and_view_keys_unchanged() -> None:

@@ -910,6 +910,14 @@ class DashboardConfig(BaseModel):
     manual_max_days_back: int = Field(60, ge=1, le=400)  # 직접 입력 날짜는 오늘부터 이만큼 전까지
     blogauto_metrics_path: str = "/home/ubuntu/Blog-Auto/var/metrics/blogauto.json"  # Blog-Auto 가 한 시간마다 쓰는 활동 기록
     ssalmuk_search_env_file: str = "~/Blog-Auto/.env"  # 딜봇 네이버 키가 막히면 이 파일의 NAVER_CLIENT_ID/SECRET 두 줄만 읽어 이벤트 참여 검색에 씀 (주인 11/14) · 11/15 KAKAO_REST_API_KEY 한 줄도 (딜봇에 카카오 키가 없을 때)
+    # 이벤트 참여 LLM 대리 호출 (주인 11/15 — POST /dashboard/api/ssalmuk/llm, dashboard/ssalmuk_llm.py): 하루(KST)·1분 한도와 몸 크기
+    ssalmuk_llm_gemini_per_day: int = Field(40, ge=0)
+    ssalmuk_llm_claude_per_day: int = Field(150, ge=0)  # Haiku + Sonnet
+    ssalmuk_llm_sonnet_per_day: int = Field(50, ge=0)  # 위 Claude 몫 가운데 Sonnet
+    ssalmuk_llm_per_minute: int = Field(10, ge=1)
+    ssalmuk_llm_body_kb: int = Field(32, ge=1, le=512)
+    ssalmuk_llm_gemini_models: list[str] = Field(default_factory=lambda: ["gemini-2.5-flash", "gemini-2.5-flash-lite"])  # 허용 목록 (gemini-* 만)
+    ssalmuk_llm_gemini_max_output_tokens: int = Field(8192, ge=1)  # generationConfig.maxOutputTokens 상한 (없으면 이 값으로)
     blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
     cards: list[DashboardCardConfig] = Field(default_factory=list)
     # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
@@ -1111,6 +1119,8 @@ class Secrets(BaseModel):
     naver_client_secret: str | None = None
     # 카카오(다음) 검색 REST API 키 (11/15 — 네이버 검색 앱이 지워져 401 · 이벤트 참여 대리 검색이 이어서 씀). 없으면 Blog-Auto .env 의 같은 이름 줄
     kakao_rest_api_key: str | None = None
+    # Gemini API 키 (11/15 — 이벤트 참여 LLM 대리 호출만 씀). 없으면 Blog-Auto .env 의 같은 이름 줄, 그것도 없으면 503 no_key
+    gemini_api_key: str | None = None
     dashboard_user: str | None = None  # DASHBOARD_USER / DASHBOARD_PASSWORD — /dashboard 기본 인증 (둘 다 있어야 페이지가 열림)
     dashboard_password: str | None = None
 
@@ -1391,6 +1401,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         naver_client_id=_env_str("NAVER_CLIENT_ID"),
         naver_client_secret=_env_str("NAVER_CLIENT_SECRET"),
         kakao_rest_api_key=_env_str("KAKAO_REST_API_KEY"),
+        gemini_api_key=_env_str("GEMINI_API_KEY"),
         dashboard_user=_env_str("DASHBOARD_USER"),
         dashboard_password=_env_str("DASHBOARD_PASSWORD"),
     )

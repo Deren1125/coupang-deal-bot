@@ -12,7 +12,9 @@
                                         네이버가 둘 다 막혀 카카오로 된 뒤엔 카카오 먼저 (네이버 키는 하루 한 번만 다시 봄 — KEY_RECHECK).
                                         키 1개당 1분 60번 · 하루 300번 (KST, kv ssalmuk_search_day — 키를 여럿 써 봐도 한 번) · 넘으면 429 {"code":"limit"} ·
                                         네이버·카카오가 401/429/5xx 등을 주면 502 {"code":"naver_error","status"} (카카오면 "source":"kakao" 더함) · 키가 하나도 없으면 503 {"code":"no_key"}
-  이 넷은 로그인·CSRF 없이 X-Ssalmuk-Key 로만 (해시끼리 hmac.compare_digest — 상수 시간) · 틀리면 401 {"code":"bad_key"} ·
+  POST /dashboard/api/ssalmuk/llm       LLM 대리 호출 (11/15 — ssalmuk_llm.py: Claude 는 서버 claude CLI 로 haiku·sonnet 만 · Gemini 는 서버 GEMINI_API_KEY 로 generateContent 만 ·
+                                        하루 Gemini 40·Claude 150(Sonnet 50)·1분 10회·몸 32KB · 전화·이메일 꼴이 있으면 400 pii · 글은 로그·kv 에 안 남김)
+  이 다섯은 로그인·CSRF 없이 X-Ssalmuk-Key 로만 (해시끼리 hmac.compare_digest — 상수 시간) · 틀리면 401 {"code":"bad_key"} ·
   몸 512KB 까지 · 같은 손님 1분 120번.
 화면(로그인 + 같은 사이트 + X-Dash-Token — DashApi.guard):
   GET  /dashboard/api/ssalmuk/state     {"state", "receivedAt", "pending", "stale", "results"} (no-store — 주인 이름·전화가 들어 있음)
@@ -50,9 +52,10 @@ STATE_PATH = f"{BASE}/state"
 ACT_PATH = f"{BASE}/act"
 KEY_PATH = f"{BASE}/key"
 ROTATE_PATH = f"{BASE}/rotate"
-# 로그인 없이 여는 것 — 이 넷뿐 (정확한 경로)
+# 로그인 없이 여는 것 — 이 다섯뿐 (정확한 경로)
 SEARCH_PATH = f"{BASE}/search"
-PUBLIC_PATHS = (PUSH_PATH, COMMANDS_PATH, ACK_PATH, SEARCH_PATH)
+LLM_PATH = f"{BASE}/llm"  # LLM 대리 호출 (ssalmuk_llm.py)
+PUBLIC_PATHS = (PUSH_PATH, COMMANDS_PATH, ACK_PATH, SEARCH_PATH, LLM_PATH)
 
 BODY_MAX = 512 * 1024
 ACT_BODY_MAX = 64 * 1024
@@ -87,6 +90,8 @@ KV_SEARCH_DAY = "ssalmuk_search_day"
 KV_SEARCH_KEYS = "ssalmuk_search_keys"  # 키마다 마지막 네이버 답 {"dealbot": {"s": "401 키틀림", "at": …}, "blog": {"s": 200, "at": …}, "at": …} (값만 — 키는 안 남김, 주인 11/14 '401 원인' · note_keys)
 KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' | 'kakao' — 어느 키가 통했는지 (값만, 비밀 아님)
 KEYSRCS = ("dealbot", "blog", "kakao")
+KV_LLM_DAY = "ssalmuk_llm_day"  # LLM 대리 호출 오늘(KST) 횟수만 {"d", "gemini", "claude", "sonnet"} — 글·키는 안 남김
+LLM_CAPS = {"gemini": 40, "claude": 150, "sonnet": 50}  # 기본값 (설정 dashboard.ssalmuk_llm_* 가 덮음 — ssalmuk_llm.register)
 KEY_RECHECK = 86400.0  # 블로그 키(또는 카카오)로 넘어간 뒤에도 앞 네이버 키를 하루 한 번 다시 봄
 # 카카오(다음) 검색 (11/15 — 네이버 검색 앱이 지워져 두 키 다 401 · 7/31 부터 새 키 신청 막힘). 공식 문서 developers.kakao.com/docs/latest/ko/daum-search/dev-guide
 KAKAO_URL = "https://dapi.kakao.com/v2/search/{type}"
@@ -265,11 +270,11 @@ def _why_401(resp: Any) -> str:
     return "검색미등록" if "scope" in msg.lower() else "키틀림"
 
 
-BLOG_ENV_NAMES = ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET", "KAKAO_REST_API_KEY")  # 이 세 줄만 읽음 (11/15 카카오 한 줄 더함)
+BLOG_ENV_NAMES = ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET", "KAKAO_REST_API_KEY", "GEMINI_API_KEY")  # 이 네 줄만 읽음 (11/15 카카오 · Gemini 한 줄씩 더함)
 
 
 class BlogKeyFile:
-    """Blog-Auto .env 에서 NAVER_CLIENT_ID/SECRET · KAKAO_REST_API_KEY 세 줄만 읽음 (다른 줄은 보지도 않음 · 값은 로그·응답에 안 남김).
+    """Blog-Auto .env 에서 NAVER_CLIENT_ID/SECRET · KAKAO_REST_API_KEY · GEMINI_API_KEY 네 줄만 읽음 (다른 줄은 보지도 않음 · 값은 로그·응답에 안 남김).
     처음 쓸 때 읽고 메모리에 두며 파일 수정 시각이 바뀌면 다시 읽음."""
 
     def __init__(self, path: Callable[[], str]) -> None:
@@ -296,6 +301,9 @@ class BlogKeyFile:
 
     def kakao(self) -> str | None:
         return self._load().get("KAKAO_REST_API_KEY") or None
+
+    def gemini(self) -> str | None:
+        return self._load().get("GEMINI_API_KEY") or None
 
     @staticmethod
     def _parse(p: Path) -> dict[str, str] | None:
@@ -325,6 +333,7 @@ class Ssalmuk:
     def __init__(self, db: Any, *, clock: Callable[[], float] = time.time) -> None:
         self.db = db
         self.clock = clock
+        self.llm_caps = dict(LLM_CAPS)
 
     # ------------------------------------------------------------ 키
     def key(self) -> str:
@@ -435,6 +444,33 @@ class Ssalmuk:
         saved = self._load(KV_SEARCH_DAY, {})
         return int(saved.get("n") or 0) if isinstance(saved, dict) and saved.get("d") == day else 0
 
+    def _llm_day(self) -> tuple[str, dict[str, int]]:
+        day = datetime.fromtimestamp(self.clock(), KST).strftime("%Y-%m-%d")
+        saved = self._load(KV_LLM_DAY, {})
+        same = isinstance(saved, dict) and saved.get("d") == day
+        out: dict[str, int] = {}
+        for k in ("gemini", "claude", "sonnet"):
+            v = saved.get(k) if same else 0
+            out[k] = v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+        return day, out
+
+    def llm_day_hit(self, provider: str, *, sonnet: bool = False) -> bool:
+        """LLM 대리 호출 하루(KST) 한도 — 안 넘었으면 하나 세고 True. Sonnet 은 Claude 몫 안에서 따로 한 번 더 봄."""
+        day, n = self._llm_day()
+        if n[provider] >= self.llm_caps[provider] or (sonnet and n["sonnet"] >= self.llm_caps["sonnet"]):
+            return False
+        n[provider] += 1
+        if sonnet:
+            n["sonnet"] += 1
+        self.db.kv_set(KV_LLM_DAY, json.dumps({"d": day, **n}))
+        return True
+
+    def llm_view(self) -> dict[str, Any]:
+        _d, n = self._llm_day()
+        c = self.llm_caps
+        return {"gemini": {"today": n["gemini"], "cap": c["gemini"]},
+                "claude": {"today": n["claude"], "cap": c["claude"], "sonnet": n["sonnet"], "sonnet_cap": c["sonnet"]}}
+
     def view(self) -> dict[str, Any]:
         """화면용 (로그인 아래에서만): 받아 둔 상태 · 받은 시각 · 안 끝난 명령 수 · 끊김 여부 · 최근 처리 결과."""
         saved = self._load(KV_STATE, {})
@@ -447,6 +483,7 @@ class Ssalmuk:
             "results": self._load(KV_RESULTS, [])[-10:],
             "search_proxy": {"keysrc": self.search_keysrc(), "today_count": self.search_today(),
                              "keys": self._load(KV_SEARCH_KEYS, {})},
+            "llm_proxy": self.llm_view(),  # 11/15 LLM 대리 호출 오늘 횟수·한도 (숫자만)
             # 오류 검수 경고 한 줄 (주인 11/14) — 거른 목록만 · 칸이 없으면 [] (화면은 그대로)
             "alerts": clean_alerts(saved.get("state") if isinstance(saved, dict) else None)}
         # 있을 때만 싣는 칸 (없으면 화면은 그대로): 마지막 실행 점검 한 줄 · 보내고 아직 쌀먹이 안 가져간 퀴즈 답
@@ -696,6 +733,9 @@ def register(web: Any, api: Any) -> Ssalmuk:
     web.route(COMMANDS_PATH, commands, with_headers=True)
     web.route_json(ACK_PATH, ack, max_body=BODY_MAX)
     web.route(SEARCH_PATH, search, with_headers=True)
+    from dealbot.dashboard import ssalmuk_llm
+
+    ssalmuk_llm.register(web, api, desk, machine, blog_keys, _j)
     web.route(STATE_PATH, state, with_headers=True)
     web.route_json(ACT_PATH, act, max_body=ACT_BODY_MAX)
     web.route(KEY_PATH, key, with_headers=True)

@@ -38,7 +38,7 @@
                                         · 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (nbvisit.tick — 응답에 row · 블로그마다 하루 5번)
                                         · 자동 (주인 11/15): a=queue 다음 차례·기다릴 초 · a=done 결과 (서로이웃 줄 체크 + nb_requested 맡기기) —
                                           오늘 목록(routine.blog_routine)일 때만 · 체크된 줄(done_ids·carried)은 뺌
-  POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
+  POST /dashboard/api/ssalmuk/{push,ack,llm} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/xstudio/state · POST /dashboard/api/xstudio/{draft,reply,posted,reply_go,targets,handoff}   X 글쓰기·답글 도구 (xstudio.py — 주인 11/14)
   GET  /dashboard/api/xtoday/state · POST /dashboard/api/xtoday/{make,skip}   오늘 X 글 카드 · 큰 사건 바로 알림 (xtoday.py — 주인 11/15)
