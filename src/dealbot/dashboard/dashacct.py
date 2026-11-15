@@ -8,7 +8,8 @@
   요청마다 파일을 다시 본다(바뀐 때만 읽음) → 서버를 다시 켜지 않아도 바로 적용.
 - 복구 길 둘 (잊거나 잘못 바꿔도 잠기지 않게):
   ① 그 파일을 지우면 .env 값으로 돌아간다.
-  ② 서버에서 `bash deploy/lightsail/setenv.sh DASHBOARD_PASSWORD` 로 새로 정하고 딜봇을 다시 켜면 그 값이 이긴다 —
+  ② 서버에서 `bash deploy/lightsail/setenv.sh DASHBOARD_PASSWORD` 로 예전과 *다른* 값을 정하고 `sudo systemctl restart dealbot` 하면 그 값이 이긴다
+     (아이디도 .env 의 DASHBOARD_USER 로 돌아감 · 같은 값으로 다시 정하면 지문이 같아 파일이 계속 이김) —
      파일에는 '바꿀 때의 .env 값 지문'(scrypt)을 같이 적어 두고, 지금 .env 지문이 그것과 다르면 파일을 쓰지 않는다 (.env 가 더 새것).
 - 파일이 깨졌거나 규칙에 안 맞으면 쓰지 않고 .env 값으로 (로그 한 줄 — 값은 남기지 않음).
 

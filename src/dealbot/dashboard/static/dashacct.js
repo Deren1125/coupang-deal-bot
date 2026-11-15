@@ -1,8 +1,8 @@
 /* 대시보드 로그인 (주인 11/16 — '로그인한 다음에 아이디·비번 볼 수 있는 기능, 거기서 수정도').
    연결 탭의 접는 칸 (바로 가기 #/connect/login). 값은 dashacct.py:
-   - 펼치면 GET /dashboard/api/dashacct (아이디만). 비밀번호는 ●●● — '보기'를 누르면 POST …/reveal 로 받아 10초 보였다 다시 가림 (값은 변수에만, 저장소·주소에 안 남김).
+   - 펼치면 GET /dashboard/api/dashacct (아이디만). 비밀번호는 ●●● — '보기'를 누르면 POST …/reveal 로 받아 10초 보였다 다시 가림 (변수에만).
    - '바꾸기': 새 아이디(비우면 그대로)·새 비밀번호 두 번 → 규칙 확인 → 새 값을 한 번 더 보여 주고 '이대로 저장' 을 눌러야 POST …/save.
-   글자는 모두 텍스트 노드 · 바깥 주소 없음. app.js 가 #main 을 다시 그리면 같은 칸을 다시 붙인다 (계정 정리 칸 아래). */
+   글자는 모두 텍스트 노드 · 바깥 주소 없음. #main 을 다시 그리면 다시 붙인다. 화면을 떠나면 보인 값·확인 화면을 가림. */
 'use strict';
 (() => {
 const D = document, W = window;
@@ -135,7 +135,7 @@ function body() {
     note,
     el('div', {class: 'bt'}, btn('sm ac', '바꾸기', edit)),
     el('p', {class: 'note'}, data.custom ? '이 화면에서 바꾼 값을 쓰고 있어요.' : '서버에 처음 정해 둔 값을 쓰고 있어요.'),
-    el('p', {class: 'note'}, '잊으면 서버에서 bash deploy/lightsail/setenv.sh DASHBOARD_PASSWORD 로 새로 정하고 딜봇을 다시 켜면 그 값으로 들어가요.')];
+    el('p', {class: 'note'}, '잊으면 서버에서 bash deploy/lightsail/setenv.sh DASHBOARD_PASSWORD 로 예전과 다른 값을 정하고 sudo systemctl restart dealbot 하면 그 값(아이디는 .env 의 DASHBOARD_USER)으로 들어가요.')];
 }
 
 function draw() {
@@ -158,7 +158,7 @@ function mount() {
     box = el('section', {id: 'dac', 'aria-label': '대시보드 로그인'});
     draw();
   }
-  if (box.parentNode !== m) {  // app.js 가 연결 탭을 다시 그리면 칸이 빠짐 → 계정 정리(없으면 로그인 관리) 칸 바로 아래에 다시
+  if (box.parentNode !== m) {  // 연결 탭을 다시 그리면 빠짐 → 계정 정리(없으면 로그인 관리) 칸 아래에
     const up = D.getElementById('acm') || D.getElementById('lgp');
     if (up && up.parentNode === m) up.after(box); else m.prepend(box);
   }
@@ -175,7 +175,7 @@ function start() {
   if (!m) return;
   new MutationObserver(mount).observe(m, {childList: true});
   W.addEventListener('hashchange', mount);
-  D.addEventListener('visibilitychange', () => { if (D.visibilityState !== 'visible' && shown) { hide(); draw(); } });  // 화면을 떠나면 바로 가림
+  D.addEventListener('visibilitychange', () => { if (D.visibilityState !== 'visible' && (shown || mode === 'confirm')) { hide(); if (mode === 'confirm') mode = 'edit'; draw(); } });
   mount();
 }
 W.SBDashAcct = {mount};
