@@ -638,6 +638,37 @@ async def test_posted_keeps_the_card_id_and_closes_the_big_event() -> None:
     assert d.view()["big"] == [] and router.closed == [f"xbig:{ev['id']}"]
 
 
+async def test_card_check_box_adds_once_undoes_within_ten_minutes_and_survives_reload() -> None:
+    """주인 11/15 '완료하면 체크 버튼으로 체크' — 카드 체크 = xstudio '올렸어요'(tid) 그대로. 글을 고쳐 해시가 달라도 카드 하나는 한 번."""
+    now = [at("09:00")]
+    d, _ask, router, _f, now = desk(rows=jensen(now[0]), now=now, hots=HOTS[:1])
+    await d.run()
+    big, card = d.view()["items"]
+    assert card["done"] is False and card["undo_s"] == 0
+    status, out = d.studio.posted({"op": "add", "text": card["preview"], "format": "auto", "mine": False, "tid": card["id"]})
+    assert status == 200 and out["posts"]["today"] == 1
+    # 글쓰기 화면에서 한마디를 붙여 또 '올렸어요' 해도 같은 카드면 한 번만 (오늘 올린 글 수·dash_x_posts 가 맞게)
+    assert d.studio.posted({"op": "add", "text": card["preview"] + "\n\n내 말", "tid": card["id"]})[1]["posts"]["today"] == 1
+    [row] = d.studio.posted_rows()
+    assert row["topic"] == card["id"] and row["edited"] is False and json.loads(d.db.kv_get(xs.KV_POSTS))[0]["topic"] == card["id"]
+    now[0] += 120
+    v = d.view()  # 새로고침해도 서버 기록으로 체크 유지
+    assert [i["done"] for i in v["items"]] == [False, True] and v["items"][1]["undo_s"] == int(xs.UNDO_WITHIN) - 120
+    # 다른 글(해시가 달라도) + 카드 번호로 취소 → 그 카드 줄이 지워짐
+    status, out = d.studio.posted({"op": "undo", "text": "고친 글\n\n한마디", "tid": card["id"]})
+    assert status == 200 and out["posts"]["today"] == 0 and d.view()["items"][1]["done"] is False
+    # 10분이 지나면 취소 못 함 (기존 UNDO_WITHIN)
+    d.studio.posted({"op": "add", "text": card["preview"], "tid": card["id"]})
+    now[0] += xs.UNDO_WITHIN + 1
+    assert d.view()["items"][1]["undo_s"] == 0
+    with pytest.raises(xs.StudioError) as e:
+        d.studio.posted({"op": "undo", "text": card["preview"], "tid": card["id"]})
+    assert e.value.status == 409 and "10분" in e.value.text and d.view()["items"][1]["done"] is True
+    # 큰 사건 카드 체크 → 알림도 닫힘 (xstudio on_posted 경로 그대로)
+    d.studio.posted({"op": "add", "text": big["preview"], "tid": big["id"]})
+    assert router.closed == [f"xbig:{big['eid']}"] and d.studio.post_stats()["today"] == 2
+
+
 async def test_manual_fill_runs_in_the_background_once_per_ten_minutes() -> None:
     d, ask, _r, _f, now = desk(now=[at("10:00")], big={"enabled": False})
     d.plan()
@@ -687,7 +718,7 @@ def test_xtoday_js_is_local_safe_and_loaded_by_shell() -> None:
     assert re.findall(r"https?://[^\s'\"`)]+", code) == []  # 바깥 주소 없음 — 출처 링크는 서버 값 (http(s) 만 건다)
     assert "/dashboard/api/xtoday/" in code and "X-Dash-Token" in code and "intent" not in code  # 올리기 링크는 xstudio.js 화면에서만
     for label in ("오늘 X 글", "큰 사건", "숫자 검사 통과", "숫자 확인 필요", "출처 기사", "열기 — 내 한마디 쓰고 올리기", "첫 답글 복사", "안 써요",
-                  "초안 만들기", "지금 보충하기", "자동으로 올리지 않아요"):
+                  "초안 만들기", "지금 보충하기", "자동으로 올리지 않아요", "긴 글 복사", "올렸어요", "execCommand('copy')", "/dashboard/api/xstudio/posted"):
         assert label in code, label
     raw = (STATIC / "xtoday.js").read_bytes()
     assert len(raw) <= 18 * 1024 and len(gzip.compress(raw, 9)) <= 7 * 1024
@@ -718,6 +749,7 @@ function mk(tag) {
     set textContent(v) { this._text = String(v); this.children = []; }, get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }};
   return n;
 }
+const mk0 = mk; mk = t => Object.assign(mk0(t), {focus() {}, select() {}, setSelectionRange() {}});
 const main = mk('main'), ttl = mk('h1'), toast = mk('div'), head = mk('head');
 main.attrs.id = 'main'; main.dataset.tab = 'sns'; ttl.attrs.id = 'ttl'; ttl.textContent = 'SNS'; toast.attrs.id = 'toast';
 const snt = mk('div'); snt.attrs.id = 'snt';
@@ -739,7 +771,10 @@ if (scenario !== 'both') global.SBXStudio = studio;
 global.fetch = async (u, o) => {
   if (u.startsWith('/dashboard/api/xstudio/')) {  // 진짜 xstudio.js 와 같이 돌릴 때
     if (!o || o.method !== 'POST') return {status: 200, json: async () => xsState};
-    posts.push(['xs:' + u.slice(23), o.headers['X-Dash-Token'], JSON.parse(o.body)]);
+    const b = JSON.parse(o.body);
+    posts.push(['xs:' + u.slice(23), o.headers['X-Dash-Token'], b]);
+    const it = scenario === 'check' && state.items.find(i => i.id === b.tid);  // 서버 기록처럼 (새로고침하면 그대로)
+    if (it) { it.done = b.op === 'add'; it.undo_s = it.done ? 600 : 0; }
     return {status: 200, json: async () => ({id: 'h1', posts: xsState.posts})};
   }
   const path = u.replace('/dashboard/api/xtoday/', '');
@@ -750,6 +785,9 @@ global.fetch = async (u, o) => {
   if (path === 'skip') return {status: 200, json: async () => Object.assign({}, state, {items: state.items.filter(i => i.id !== body.id), big: state.big.filter(b => b.id !== body.id)})};
   return {status: 200, json: async () => Object.assign({started: true}, state)};
 };
+const clip = []; let picked = '';
+Object.defineProperty(global, 'navigator', {value: {clipboard: {writeText: async t => { clip.push(t); }}}, configurable: true, writable: true});
+document.body = mk('body'); document.execCommand = c => { const t = find(document.body, n => n.tagName === 'TEXTAREA'); picked = t ? t.value : ''; return c === 'copy' && !!t; };
 const tick = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise(r => setImmediate(r)); };
 const text = n => n.textContent;
 const all = (n, f, out = []) => { if (f(n)) out.push(n); n.children.forEach(c => all(c, f, out)); return out; };
@@ -774,6 +812,21 @@ const click = n => n.listeners.click({currentTarget: n, preventDefault() {}});
     out.href = post.getAttribute('href');
     await click(byText(d, 'BUTTON', '올렸어요')); await tick();
     out.posts = posts; out.saved = JSON.parse(store.xs1).res.tid;
+  }
+  if (scenario === 'check') {
+    const cards = () => all(main.children[0], n => n.attrs['data-t'] != null), cd = i => cards()[i];
+    const inp = i => find(cd(i), n => n.attrs.type === 'checkbox'), flip = async (i, v) => { const x = inp(i); x.checked = v; await x.listeners.change({currentTarget: x}); await tick(); };
+    out.start = cards().map(c => [c.className, 'checked' in inp(cards().indexOf(c)).attrs]);
+    out.btns = all(cd(1), n => n.tagName === 'BUTTON').map(text);
+    await click(byText(cd(1), 'BUTTON', '복사')); await tick(); out.c1 = [clip[clip.length - 1], text(toast)];
+    studio.view.res = {tid: state.items[1].id}; studio.view.mine = {0: '이건 내 생각임'};  // 글쓰기 화면에서 쓴 한마디
+    await click(byText(cd(1), 'BUTTON', '복사')); await tick(); out.c2 = [clip[clip.length - 1], text(toast)];
+    await click(byText(cd(1), 'BUTTON', '첫 답글 복사')); await tick(); out.c3 = clip[clip.length - 1];
+    navigator.clipboard.writeText = async () => { throw new Error('NotAllowed'); };  // 사파리가 막으면 숨은 칸으로
+    await click(byText(cd(1), 'BUTTON', '복사')); await tick(); out.c4 = [picked, text(toast)];
+    await flip(1, true); out.add = posts[posts.length - 1]; out.after = [cd(1).className, 'checked' in inp(1).attrs, text(toast)];
+    await flip(1, false); out.undo = posts[posts.length - 1]; out.undone = [cd(1).className, 'checked' in inp(1).attrs];
+    const n = posts.length; await flip(0, false); out.late = [posts.length - n, inp(0).checked, text(toast), cd(0).className];
   }
   if (scenario === 'card') {
     out.order = main.children.map(c => c.attrs.id || c.tagName);
@@ -922,3 +975,25 @@ async def test_naver_news_calls_api_hub_first_then_old_address(tmp_path: Path, c
     _now[0] += 3600
     await d.poll()
     assert d.big()["keysrc"] == "kakao"
+
+
+@needs_node
+async def test_js_card_copy_buttons_and_posted_check_box() -> None:
+    """주인 11/15 'x 같은 경우에도 복사 버튼 … 완료하면 체크 버튼으로 체크' — 블로그 할 일 줄처럼."""
+    v, _ = await view_json()
+    v["items"][0].update(done=True, undo_s=0)  # 오래전에 올린 카드 (취소 못 함)
+    got = await asyncio.to_thread(run_shim, "check", json.dumps(v, ensure_ascii=False), "#/sns/xt", json.dumps({"posts": {"today": 1}}))
+    assert got["start"] == [["itm xd", True], ["itm", False], ["itm", False]]  # 서버 기록 done → 흐리게·줄긋기 + 체크
+    it = v["items"][1]
+    assert got["btns"][:2] == ["열기 — 내 한마디 쓰고 올리기", "복사"] and "첫 답글 복사" in got["btns"] and "안 써요" in got["btns"]
+    assert ("긴 글 복사" in got["btns"]) == bool(it["res"]["drafts"][0].get("long"))
+    # 한마디 없이도 복사는 되고, X 에서 한마디를 붙이라고 알려 줌 · 한마디가 있으면 붙여서
+    assert got["c1"] == [it["preview"], "복사했어요 — X 에서 내 한마디를 한 줄 붙여 주세요"]
+    assert got["c2"] == [it["preview"] + "\n\n이건 내 생각임", "글 복사했어요"] and got["c3"] == it["first_reply"]
+    assert got["c4"] == [it["preview"] + "\n\n이건 내 생각임", "글 복사했어요"]  # 클립보드 API 가 막히면 숨은 칸 골라 복사
+    # 체크 = xstudio '올렸어요' (카드 번호와) → 흐리게 · 다시 누르면 취소
+    assert got["add"][:2] == ["xs:posted", "tok"] and got["add"][2] == {"op": "add", "text": it["preview"] + "\n\n이건 내 생각임", "format": "auto", "mine": True, "tid": it["id"]}
+    assert got["after"][:2] == ["itm xd", True] and "기록했어요" in got["after"][2]
+    assert got["undo"][2]["op"] == "undo" and got["undo"][2]["tid"] == it["id"] and got["undone"] == ["itm", False]
+    # 10분 지난 카드는 서버에 보내지 않고 체크 그대로
+    assert got["late"] == [0, True, "올린 지 10분이 지나 취소할 수 없어요", "itm xd"]

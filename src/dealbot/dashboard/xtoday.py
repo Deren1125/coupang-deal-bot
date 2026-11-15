@@ -12,6 +12,8 @@ A. 오늘 X 글 — 1분 일(scheduler)에서 tick():
    · 시각은 xstudio.POST_TIMES 다섯. 글감 하나 = AI 한 번. 서버가 스스로 쓰는 초안은 하루 auto_drafts_per_day(8)번, 주인 몫 reserve(10)번은
      남긴다 (xstudio 하루 40번 안). 실패하면 그 차례는 끝 — 다음 보충 때만 다시 (돌려 가며 다시 부르지 않음).
    · 카드: 출처 기사 제목·링크 · 숫자 검사 통과 여부(원문에 없는 숫자 경고) · 첫 답글(출처) · 확인 안 된 이야기 표시.
+   · 카드마다 [복사]·[긴 글 복사]·[첫 답글 복사] + '올렸어요' 체크 상자 (주인 11/15): 체크 = xstudio posted {op:add, tid} 그대로
+     (오늘 올린 글 수·dash_x_posts 같이) · 다시 누르면 undo (10분 안) · 화면 값 done·undo_s 는 서버 기록에서.
 B. 큰 사건 바로 알림 — big.poll_minutes(20분)마다:
    · 네이버 공식 뉴스 검색 API (키만 — 로그인·크롤링 없음 · 기사 페이지를 열지 않음 · 딜봇 키가 막히면 Blog-Auto .env 키: ssalmuk 과 같은 길)
      + 화제 목록의 출처 기사 제목. 네이버 키가 둘 다 막히면(11/15 — 앱이 지워져 401) 카카오(다음) 웹문서 검색 최신순으로 이어서
@@ -812,7 +814,10 @@ class XToday:
     def view(self) -> dict[str, Any]:
         now, cfg = self.clock(), self.cfg()
         st, bg = self.plan(now), self.big(now)
-        done = {r.get("topic") for r in self.studio.posted_rows() if xs._day(r["posted_at"]) == st["day"]}
+        done: dict[str, float] = {}  # 카드 번호 → 마지막으로 '올렸어요' 누른 때 (체크 상자 · 새로고침해도 서버 기록 그대로)
+        for r in self.studio.posted_rows():
+            if isinstance(r.get("topic"), str) and xs._day(r["posted_at"]) == st["day"]:
+                done[r["topic"]] = max(done.get(r["topic"], 0.0), float(r["posted_at"]))
         items = []
         for i in sorted(st["items"], key=lambda i: (i.get("slot") or "00:00", i.get("made_at") or 0)):
             if i["id"] in st["skip"]:
@@ -824,7 +829,8 @@ class XToday:
                           "nums_ok": bool(drafts) and not first.get("warn"), "warn": list(first.get("warn") or [])[:3],
                           "confirmed": i["res"].get("confirmed") is not False, "preview": str(first.get("text") or ""),
                           "angle": str(first.get("angle") or ""), "first_reply": str(i["res"].get("first_reply") or ""),
-                          "done": i["id"] in done, "res": i["res"]})
+                          "done": i["id"] in done, "undo_s": max(0, int(xs.UNDO_WITHIN - (now - done[i["id"]]))) if i["id"] in done else 0,
+                          "res": i["res"]})
         made = {i.get("eid"): i["id"] for i in st["items"] if i.get("eid")}
         events = [{"id": e["id"], "title": str(e.get("title") or ""), "lead": str(e.get("lead") or ""), "shown": str(e.get("shown") or ""),
                    "outlets": int(e.get("outlets") or 0), "score": int(e.get("score") or 0), "at": _hm(e.get("told") or e["at"]),

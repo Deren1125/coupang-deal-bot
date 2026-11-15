@@ -12,7 +12,8 @@ X 수익(오리지널 콘텐츠 보상)은 '자동으로 만들거나 올린 글
   POST /dashboard/api/xstudio/draft     {rid, kind: hot|paste|topic, hot_id, url, text, topic, format, long} → 초안 3개(+긴 글) + 경고 + 첫 답글(출처)
   POST /dashboard/api/xstudio/reply     {rid, url, text, tone} → 답글 초안 3개 (글 내용이 비면 공개 oEmbed 로 읽어 봄 — 로그인 없음)
   POST /dashboard/api/xstudio/posted    {op: add|undo, text, format, mine[, tid]} → '올렸어요' 기록 (kv dash_x_posts — 글은 저장하지 않고 해시만 ·
-                                        tid = '오늘 X 글' 카드 번호면 topic 으로 같이 — xtoday.py)
+                                        tid = '오늘 X 글' 카드 번호면 topic 으로 같이 — xtoday.py · undo+tid 는 그 카드 줄을
+                                        올린 지 10분(UNDO_WITHIN) 안에만 지움 — 카드 체크 상자)
   POST /dashboard/api/xstudio/reply_go  {op: go|undo, sid} → 답글 한 번 기록 + 쉬는 시간 (60~120초 · 1시간 15개 · 하루 40개)
   POST /dashboard/api/xstudio/targets   {op: add|del, handle, memo} → 자주 보는 계정 (프로필 링크만 — 그 계정 글을 긁지 않는다)
   POST /dashboard/api/xstudio/handoff   {k, a: stats|target|ping, …} → 'X 도우미' 책갈피가 넘긴 값 (열쇠 k 가 맞을 때만 저절로 저장 · ping = 열쇠 확인만)
@@ -906,8 +907,14 @@ class Studio:
         mine = [r for r in rows if isinstance(r, dict) and r.get("draft_id") == h and r.get("kind") == "studio"
                 and isinstance(r.get("posted_at"), (int, float)) and _day(r["posted_at"]) == _day(now)]
         if body.get("op") == "undo":
+            if tid:  # '오늘 X 글' 카드 체크 (주인 11/15): 글을 고쳐 해시가 달라져도 그 카드 줄로 · 취소는 올린 지 10분 안 (UNDO_WITHIN)
+                mine += [r for r in rows if isinstance(r, dict) and r.get("topic") == tid and r not in mine
+                         and isinstance(r.get("posted_at"), (int, float)) and _day(r["posted_at"]) == _day(now)]
+                if mine and not any(0 <= now - r["posted_at"] <= UNDO_WITHIN for r in mine):
+                    raise StudioError(409, "late", "올린 지 10분이 지나 취소할 수 없어요")
             rows = [r for r in rows if r not in mine]
-        elif not mine:
+        elif not mine and not (tid and any(isinstance(r, dict) and r.get("topic") == tid and isinstance(r.get("posted_at"), (int, float))
+                                           and _day(r["posted_at"]) == _day(now) for r in rows)):  # 카드 하나는 하루 한 번만 (체크 + 글쓰기 화면)
             fmt = body.get("format") if body.get("format") in FORMATS else "auto"
             row = {"acct": "revenue", "kind": "studio", "frame": fmt, "slot": _slot(now), "draft_id": h, "url": "",
                    "posted_at": now, "edited": bool(body.get("mine"))}
