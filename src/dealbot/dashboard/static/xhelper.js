@@ -79,15 +79,23 @@ if (st.vf != null || st.im != null) {
   open_('stats', Object.assign({k: K}, st), rows.join('\n') + '\n\n→ 오늘 진행 숫자로 기록 (숫자가 다르면 취소)');
   return;
 }
-// 3) 프로필
+// 3) 지금 보이는 글 주소 (프로필·홈·검색 화면 → 반응 연속 모드 목록 #/x/engage — xengage.py 11/15. 주소만 읽고 X 단추는 누르지 않음)
+const ps = [];
+for (const a of D.querySelectorAll('article a[href*="/status/"]')) {
+  const sm = /^\/([A-Za-z0-9_]{1,15})\/status\/([0-9]{5,20})$/.exec(a.getAttribute('href') || '');
+  if (sm && ps.length < 20 && ps.indexOf(sm[1] + '/' + sm[2]) < 0) ps.push(sm[1] + '/' + sm[2]);
+}
+// 4) 프로필
 const fm = /^\/([A-Za-z0-9_]{1,15})\/?$/.exec(path);
 const skip = /^(home|explore|search|notifications|messages|settings|compose|i|jobs|premium|communities|lists|bookmarks)$/i;
 if (fm && !skip.test(fm[1]) && one(D, ['[data-testid="UserName"]', '[data-testid="UserProfileHeader_Items"]', '[data-testid="primaryColumn"] a[href$="/followers"]'])) {
   const fe = one(D, ['a[href$="/verified_followers"]', 'a[href$="/followers"]']);
   const fo = fe ? num(tx(fe)) : null;
   const ver = !!one(D, ['[data-testid="UserName"] [data-testid="icon-verified"]', '[data-testid="UserName"] svg[aria-label]']);
+  if (ps.length) { open_('engage', {k: K, l: ps.join(','), h: fm[1], fo: fo}, '@' + fm[1] + ' 프로필에서 보이는 글 ' + ps.length + '개\n\n→ 반응 연속 모드 목록에 넣기 (이 계정은 자주 보는 계정에도)'); return; }
   open_('target', {k: K, h: fm[1], fo: fo, v: ver ? 1 : ''}, '@' + fm[1] + (ver ? ' (인증 계정)' : '') + (fo != null ? ' · 팔로워 ' + fo.toLocaleString() : '') + '\n\n→ 자주 보는 계정에 넣기 (내 계정이면 팔로워 수 기록)');
   return;
 }
-alert('X 도우미: 이 화면에서 읽을 것을 못 찾았어요.\n\n· 글 하나를 연 화면 → 답글·인용 초안\n· 수익 조건(크리에이터 스튜디오) 화면 → 진행 숫자 기록\n· 큰 계정 프로필 → 자주 보는 계정에 넣기');
+if (ps.length) { open_('engage', {k: K, l: ps.join(',')}, '이 화면에서 보이는 글 ' + ps.length + '개\n\n→ 반응 연속 모드 목록에 넣기 (♥·리포스트·답글은 내가 직접)'); return; }
+alert('X 도우미: 이 화면에서 읽을 것을 못 찾았어요.\n\n· 글 하나를 연 화면 → 답글·인용 초안\n· 수익 조건(크리에이터 스튜디오) 화면 → 진행 숫자 기록\n· 큰 계정 프로필 → 자주 보는 계정에 넣기\n· 글이 보이는 프로필·홈·검색 화면 → 반응 연속 모드 목록');
 })();
