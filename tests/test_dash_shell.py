@@ -216,6 +216,9 @@ ROUTINE_JS_GZIP_MAX = 11 * 1024 + 128
 # 11/14: 서로이웃·공감 줄 여는 주소에 멘트·블로그(#bmmsg·bmb) + 블로그 칸 '이웃 들르기 (책갈피)' 한 줄 (오늘 수 · 이웃새글 열기) → 31.7 KB (32411 B / 11674 B)
 ROUTINE_JS_MAX = 32 * 1024
 ROUTINE_JS_GZIP_MAX = 11 * 1024 + 512
+# 11/15: 홈 화면 앱에서 네이버 블로그 링크를 사파리로 (sf · x-safari-https — 책갈피가 사파리에) → 32.2 KB (32939 B / 11908 B)
+ROUTINE_JS_MAX = 32 * 1024 + 512
+ROUTINE_JS_GZIP_MAX = 11 * 1024 + 768
 # 11/14: 할 일 종류 목록 — 칸마다 data-k · 남은 수(cnt) · 종류 화면에선 늘 펼침 (칸 순서 점수는 뺌) → gzip 9.6 KB 그대로
 # 할 일 종류 목록·종류 화면 (주인 11/14 '첫 화면은 종류별 목록만') — app.js 가 예산 끝이라 셸이 defer 로 받는 todohub.js (CSS 도 여기서)
 TODOHUB_JS_MAX = 8 * 1024 + 512

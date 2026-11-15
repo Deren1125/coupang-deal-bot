@@ -212,7 +212,7 @@ function item(it) {
   const m = /^(?:pub|rsv):(\w+):(\d+)$/.exec(it.id), ph = m && (W.SBPh || {})[`post-${m[1]}-${m[2]}`], pk = ph && ph.kind === 'photos' ? ph : null;
   const btns = it.done ? [] : [pk ? el('button', {class: 'sm', type: 'button', onclick: () => { location.hash = '#/i/' + pk.iid; }}, '사진 올리기') : [],
     it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label)),
-    it.links.map(l => el('a', {class: 'sm', href: l.url, target: '_blank', rel: 'noopener noreferrer'}, l.label))].flat();
+    it.links.map(l => el('a', {class: 'sm', href: sf(l.url), target: '_blank', rel: 'noopener noreferrer'}, l.label))].flat();
   return el('div', {class: 'it' + (it.done ? ' dn' : ''), 'data-id': it.id},
     el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
@@ -223,6 +223,8 @@ function item(it) {
 }
 
 // 이웃 줄은 짧게 (11/09) · 서로이웃은 이유·멘트도 (11/14) · 여는 주소 뒤에 멘트·블로그(#bmmsg=…&bmb=…) — 책갈피 '이웃 관리'가 읽음
+// 11/15 홈 화면 대시보드 앱(아이패드 standalone)에서 네이버 블로그 링크는 앱 안 창이 아니라 사파리로 — 책갈피가 사파리에 있어서 (주인 11/15). iOS 17+ x-safari-https
+const sf = u => (navigator.standalone === true && /^https:\/\/(m\.)?blog\.naver\.com\//.test(u || '')) ? 'x-safari-' + u : u;
 const nbUrl = (it, u, msg) => /^https:\/\/(m\.)?blog\.naver\.com\/[\w-]+(\/\d+)?$/.test(u) ? u + '#' + (msg ? 'bmmsg=' + encodeURIComponent(msg) + '&' : '') + 'bmb=' + it.blog : u;
 function mini(it) {
   const t = it.title.replace(/^(서로이웃 신청|공감·댓글) · /, ''), nb = it.id.startsWith('nb-add:'),
@@ -232,7 +234,7 @@ function mini(it) {
       onclick: () => check(it)}, it.done ? '✓' : ''),
     el('div', {class: 'grow'}, el('span', {class: 't'}, t), why ? el('span', {class: 's'}, why) : null,
       msg && !it.done ? el('span', {class: 's'}, '멘트 · ' + msg) : null, it.done ? null : el('div', {class: 'bt'},
-      it.links.map(l => el('a', {class: 'sm', href: nbUrl(it, l.url, msg), target: '_blank', rel: 'noopener noreferrer'}, l.label + ' ↗')),
+      it.links.map(l => el('a', {class: 'sm', href: sf(nbUrl(it, l.url, msg)), target: '_blank', rel: 'noopener noreferrer'}, l.label + ' ↗')),
       it.copy.map(c => el('button', {class: 'sm', type: 'button', onclick: () => copy(c.text)}, c.label + ' 복사')))));
 }
 
@@ -305,7 +307,7 @@ function ytcard(y) {
 // 누를 때마다 한 편 · 책갈피가 들른 글의 줄은 대시보드가 체크 (nbvisit.py) → 돌아오면 다음 글
 function nbv(k) {
   const b = data && data.nb && data.nb.by[k];
-  return b && b.left ? [b.next ? el('div', {class: 'bt nbv'}, el('a', {class: 'sm ac', href: b.next.url, target: '_blank', rel: 'noopener noreferrer'}, `이웃 글 들르기 시작 (${b.left}) ↗`)) : null,
+  return b && b.left ? [b.next ? el('div', {class: 'bt nbv'}, el('a', {class: 'sm ac', href: sf(b.next.url), target: '_blank', rel: 'noopener noreferrer'}, `이웃 글 들르기 시작 (${b.left}) ↗`)) : null,
     el('span', {class: 's'}, "열린 글을 읽고(20초쯤) 책갈피 '이웃 관리' → 공감 + 댓글 초안 · 등록은 직접 · 줄은 저절로 체크")] : null;
 }
 const TOP = new Set(['issue', 'finance', 'hotdeal']);  // 블로그 셋 — 할 일 맨 위 (주인 11/14)
@@ -314,7 +316,7 @@ const cnt = {};
 // 이웃 들르기 한 줄 (주인 11/14) — 책갈피 '이웃 관리'로 한 오늘 수 (routine.view seoi · 체크 없음 · 남은 일에 안 셈)
 const seoiRow = (k, sv, v) => el('div', {class: 'it mi', 'data-id': 'seoi:' + k}, el('span', {class: 'cb', style: 'opacity:.35'}),
   el('div', {class: 'grow'}, el('span', {class: 't'}, sv.line), el('span', {class: 's'}, v.how), el('div', {class: 'bt'},
-    v.feed ? el('a', {class: 'sm', href: v.feed, target: '_blank', rel: 'noopener noreferrer'}, '이웃새글 열기 ↗') : null, el('a', {class: 'sm', href: '#/connect'}, '책갈피 설치'))));
+    v.feed ? el('a', {class: 'sm', href: sf(v.feed), target: '_blank', rel: 'noopener noreferrer'}, '이웃새글 열기 ↗') : null, el('a', {class: 'sm', href: '#/connect'}, '책갈피 설치'))));
 function part(k, label, extra, hot) {
   hot = hot || [];
   const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done), yt = k === 'shorts' && by() ? ytc() : null, yl = yt && yt.kind === 'login' ? 1 : 0;

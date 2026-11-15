@@ -973,7 +973,7 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
 def test_todo_rows_open_the_blog_with_message_and_show_the_visit_line() -> None:
     """서로이웃 줄 '블로그 열기' 주소에 멘트·블로그(#bmmsg=…&bmb=…)가 붙고 책갈피가 읽는 방식으로 그대로 되돌아옴 · 블로그 칸에 '이웃 들르기' 한 줄."""
     rt = (STATIC / "routine.js").read_text(encoding="utf-8")
-    assert "href: nbUrl(it, l.url, msg)," in rt and "seoiRow(k, sv, data.seoi)" in rt and "if (sv) cnt[k].v = sv.visit;" in rt
+    assert "href: sf(nbUrl(it, l.url, msg)), target" in rt and "seoiRow(k, sv, data.seoi)" in rt and "if (sv) cnt[k].v = sv.visit;" in rt
     assert "'이웃새글 열기 ↗'" in rt and "href: '#/connect'}, '책갈피 설치'" in rt and "https://" not in rt
     assert "x.v ? ` · 들르기 ${x.v}` : ''" in (STATIC / "todohub.js").read_text(encoding="utf-8")
     line = next(ln for ln in rt.splitlines() if ln.startswith("const nbUrl = "))
