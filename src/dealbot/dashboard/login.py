@@ -130,26 +130,31 @@ def _sha(token: str) -> str:
 class SessionStore:
     """로그인 세션 (kv). 쿠키 값은 SHA-256 으로만 저장하고, 아이디·비밀번호 지문이 지금 설정과 같을 때만 유효."""
 
-    def __init__(self, db: Any, *, user: str | None, password: str | None, now: Callable[[], datetime],
-                 days: int = SESSION_DAYS, max_sessions: int = SESSION_MAX) -> None:
+    def __init__(self, db: Any, *, user: str | None = None, password: str | None = None, now: Callable[[], datetime],
+                 days: int = SESSION_DAYS, max_sessions: int = SESSION_MAX,
+                 creds: Callable[[], tuple[str | None, str | None]] | None = None) -> None:
         self.db = db
-        self._user = user or ""
-        self._password = password or ""
+        # creds: 지금 쓰는 (아이디, 비밀번호) — 화면에서 바꾸면(dashacct.py) 다시 켜지 않아도 달라진다. 없으면 받은 값 그대로
+        self._creds = creds or (lambda: (user, password))
         self.now = now
         self.days = days
         self.max_sessions = max(1, max_sessions)
         self._fp: str | None = None
+        self._fp_of: bytes | None = None
 
     @property
     def fingerprint(self) -> str:
-        """아이디·비밀번호 지문 (scrypt, 소금은 DB 에 한 번 만들어 둠). 프로세스마다 한 번만 계산."""
-        if self._fp is None:
+        """아이디·비밀번호 지문 (scrypt, 소금은 DB 에 한 번 만들어 둠). 값이 바뀔 때만 다시 계산."""
+        user, password = self._creds()
+        secret = f"{user or ''}\0{password or ''}".encode()
+        of = hashlib.sha256(secret).digest()
+        if self._fp is None or of != self._fp_of:
             salt = self.db.kv_get(KV_SALT)
             if not salt:
                 salt = secrets.token_hex(16)
                 self.db.kv_set(KV_SALT, salt)
-            secret = f"{self._user}\0{self._password}".encode()
             self._fp = hashlib.scrypt(secret, salt=bytes.fromhex(salt), n=2 ** 14, r=8, p=1, dklen=16).hex()
+            self._fp_of = of
         return self._fp
 
     def _load(self, key: str) -> dict[str, Any] | None:
@@ -204,6 +209,20 @@ class SessionStore:
         if exp is None or exp - now >= timedelta(days=RENEW_DAYS):
             return False
         data["exp"] = to_iso(now + timedelta(days=self.days))
+        self.db.kv_set(key, json.dumps(data))
+        return True
+
+    def adopt(self, token: str | None) -> bool:
+        """아이디·비밀번호를 방금 바꾼 그 세션만 새 지문으로 옮긴다 (dashacct.py — 바꾼 기기는 로그아웃되지 않게).
+        부르는 쪽이 바꾸기 '전에' valid 로 확인한 쿠키 값만 넘긴다. 만료된 세션은 옮기지 않는다."""
+        if not token or not _TOKEN_RE.match(token):
+            return False
+        key = KV_SESSION + _sha(token)
+        data = self._load(key)
+        exp = from_iso(str((data or {}).get("exp") or ""))
+        if data is None or exp is None or exp <= self.now():
+            return False
+        data["fp"] = self.fingerprint
         self.db.kv_set(key, json.dumps(data))
         return True
 

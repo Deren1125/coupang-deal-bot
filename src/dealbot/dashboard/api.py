@@ -25,6 +25,7 @@
   GET  /dashboard/api/routine           오늘 할 일 칸 (routine.view — 할 일 탭을 열 때만, 첫 상태 값 예산 밖 · no-store)
   GET  /dashboard/api/uploads           올리기 할 일 칸 (uploadplan.view — SNS 탭 '올리기'를 열 때만 · no-store)
   GET  /dashboard/api/accounts          계정 정리 표 (accounts_map.view — 연결 탭 '계정 정리 (구글·인스타)'를 펼칠 때만 · 상수 · 쓰임만, 주소·비밀 없음)
+  GET  /dashboard/api/dashacct          대시보드 로그인 칸 (dashacct.py — 아이디만 · no-store) · POST …/reveal (비밀번호 10초 보기, 1분 5번) · POST …/save (바꾸기)
   GET  /dashboard/api/kkumi             '꾸미기' 책갈피 {code: "javascript:…", len, steps, ver, version, ack} (kkumi.view — 연결 탭 '꾸미기 버튼 설치'를 펼칠 때만 ·
                                         ver = 코드 지문 · ack = 주인이 이 판을 '설치했어요' 했는지 — 대시보드 일 kkumi.installed {ver}, 주인 11/14)
   GET  /dashboard/api/statscap          '통계 보내기' 책갈피 {code, len, steps} (statscap.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
@@ -115,6 +116,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "lookbook.js": "text/javascript; charset=utf-8",  # lookbook.js: 룩북 릴스 (10/25, SNS 탭에서 처음 열 때만)
              "logins.js": "text/javascript; charset=utf-8",  # logins.js: 연결 탭 '로그인 관리' 칸 (10/26, 셸이 defer 로 — app.js 는 예산 끝)
              "accounts.js": "text/javascript; charset=utf-8",  # accounts.js: 연결 탭 '계정 정리 (구글·인스타)' 접는 칸 (11/15, 셸이 defer 로 — logins.js 는 예산 끝)
+             "dashacct.js": "text/javascript; charset=utf-8",  # dashacct.js: 연결 탭 '대시보드 로그인' 접는 칸 (11/16, 셸이 defer 로 — 아이디·비밀번호 보기·바꾸기)
              "sns.js": "text/javascript; charset=utf-8",  # sns.js: SNS 탭 상자 (10/26, SNS 탭을 처음 열 때만)
              "routine.js": "text/javascript; charset=utf-8",  # routine.js: 할 일 탭 '오늘 할 일' 칸 (10/27, 셸이 defer 로 — app.js 는 예산 끝)
              "seoires.js": "text/javascript; charset=utf-8",  # seoires.js: 할 일 탭 블로그 칸 '오늘 자동 결과' 표 (11/15, 셸이 defer 로 — routine.js 는 예산 끝)
@@ -294,6 +296,11 @@ class DashApi:
         from dealbot.dashboard import xengage
 
         self.xengage = xengage.register(web, self, self.xstudio)
+
+        # 대시보드 로그인 보기·바꾸기 (주인 11/16) — 로그인 아래 · POST 는 guard + 로그인 세션만 · 값은 데이터 폴더 파일 (.env 는 그대로)
+        from dealbot.dashboard import dashacct
+
+        dashacct.register(web, self)
 
         # 원격 로그인 화면 (주인 10/23): 대시보드 로그인 뒤, 세션이 살아 있을 때만 127.0.0.1:6080(websockify)로 잇는다
         web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))

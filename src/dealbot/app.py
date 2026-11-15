@@ -50,6 +50,7 @@ from dealbot.config import (
 )
 from dealbot.coupang.client import ApiBudget, CoupangClient, CoupangRateLimited
 from dealbot.dashboard.blogauto import BlogAutoReader
+from dealbot.dashboard.dashacct import FILE_NAME as DASH_LOGIN_FILE
 from dealbot.dashboard.service import Dashboard
 from dealbot.dashboard.sources import SourceContext
 from dealbot.dedupe import find_duplicate
@@ -650,7 +651,8 @@ class DealBot:
         )
         # links=self: '링크 넣기' 는 텔레그램 답장과 같은 attach_link·owner_link_problem·refresh_pending_notice 를 부른다
         return Dashboard(dc, ctx, user=s.secrets.dashboard_user, password=s.secrets.dashboard_password,
-                         public_base_url=s.secrets.public_base_url, links=self)
+                         public_base_url=s.secrets.public_base_url, links=self,
+                         login_file=s.data_dir / DASH_LOGIN_FILE)  # 화면에서 바꾼 로그인 (dashacct.py — .env 보다 먼저)
 
     # ------------------------------------------------------------ lifecycle
     async def start_telegram(self, *, polling: bool = True) -> None:

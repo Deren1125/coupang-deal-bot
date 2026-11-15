@@ -25,6 +25,7 @@ import re
 import secrets
 from collections import deque
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote
 
@@ -38,6 +39,7 @@ from dealbot.dashboard.auth import (
     client_key,
     password_problems,
 )
+from dealbot.dashboard.dashacct import LoginFile
 from dealbot.dashboard.login import (
     HOME,
     LOGIN_BODY_MAX,
@@ -171,12 +173,12 @@ class LinkDesk(Protocol):
 
 class Dashboard:
     def __init__(self, cfg: DashboardConfig, ctx: SourceContext, *, user: str | None = None, password: str | None = None,
-                 public_base_url: str | None = None, links: LinkDesk | None = None) -> None:
+                 public_base_url: str | None = None, links: LinkDesk | None = None, login_file: Path | None = None) -> None:
         self.cfg = cfg
         self.ctx = ctx
         self.db = ctx.db
-        self._user = user
-        self._password = password
+        # 지금 쓰는 아이디·비밀번호 (dashacct.py): 화면에서 바꾼 값(login_file — 데이터 폴더)이 있으면 그것, 없으면 받은 .env 값
+        self.creds = LoginFile(login_file, user, password)
         self.public_base_url = public_base_url
         self.links = links
         self._link_times: deque[datetime] = deque()  # '링크 넣기' 를 받은 시각 (1분 창)
@@ -203,7 +205,7 @@ class Dashboard:
         self._token: str | None = None
         self.limiter = FailureLimiter()  # 틀린 비밀번호 (기본 인증·로그인 화면 합쳐서)
         self.login_rate = AttemptLimiter()  # 로그인 버튼 1분 5번 (맞든 틀리든)
-        self.sessions = SessionStore(self.db, user=user, password=password, now=ctx.now)
+        self.sessions = SessionStore(self.db, creds=self.creds.current, now=ctx.now)
         self.csrf = LoginCsrf(self.db, clock=lambda: ctx.now().timestamp())
         self.api: Any = None  # dashboard/api.DashApi (app 이 attach_app 으로 넣어 줌 — 없으면 예전 화면만)
 
@@ -214,6 +216,14 @@ class Dashboard:
         self.api = DashApi(self, bot)
 
     # ------------------------------------------------------------ 상태
+    @property
+    def _user(self) -> str | None:
+        return self.creds.current()[0]
+
+    @property
+    def _password(self) -> str | None:
+        return self.creds.current()[1]
+
     @property
     def enabled(self) -> bool:
         return self.cfg.enabled
