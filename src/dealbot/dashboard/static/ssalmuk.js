@@ -18,6 +18,7 @@ const CSS = '.ev .kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))
   '.ev .key{font-family:ui-monospace,Menlo,monospace;font-size:13px;word-break:break-all;user-select:all}' +
   '.ev textarea.fl{min-height:96px;resize:vertical;line-height:1.5}.ev .fl{margin:0 0 10px;font-size:16px}' +
   '.ev .ck{display:flex;align-items:center;gap:10px;min-height:48px;font-size:15px}.ev .ck input{width:20px;height:20px}' +
+  '.ev .evt .row{align-items:flex-start;gap:8px}.ev .evt .t,.ev .evt .s{white-space:normal;overflow-wrap:anywhere}.ev .evt .sm{flex:none}' +
   '.evc .st{white-space:normal}.evc .chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0}' +
   '.ev .bn.warn{background:var(--or-soft);color:var(--or);border-color:transparent}' +
   '.ev .qz{border-top:1px solid var(--line);margin:10px 0;padding:10px 0 0}.ev .qz .qq{margin:0 0 8px;font-size:15px;font-weight:600;overflow-wrap:anywhere}' +
@@ -96,6 +97,25 @@ function skipNote() {
     () => { open.skip = !o; draw(); }, {'aria-expanded': o ? 'true' : 'false', style: 'background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer'}),
     o ? el('ul', {class: 'note', style: 'margin:4px 0 0;padding-left:18px'}, why.map(x => el('li', {}, `${x[0]} · ${x[1]}건`, skipEx(x[0]).length ? el('div', {style: 'font-size:12px;opacity:.7'}, skipEx(x[0]).join(' · ')) : null))) : null);
 }
+// 11/15 '오늘 응모한 이벤트' (applied[] 의 prize·winners·deadline·kind — 있을 때만): 마감 가까운 순 · 폼 주소 단추 · 글자로만
+const sf = u => (W.navigator && W.navigator.standalone === true) ? 'x-safari-' + u : u;  // 홈 화면 앱에서 바깥 주소는 사파리로 (routine.js sf 틀)
+const dday = v => {  // '2026년 11월 30일'·'11월 30일'·'2026-11-30'·'11/30' → [정렬 값, 'M/D'] · 못 읽으면 null
+  const m = /(?:(\d{4})\s*[년.\/-]\s*)?(\d{1,2})\s*[월.\/-]\s*(\d{1,2})/.exec(str(v, 30));
+  if (!m || +m[2] < 1 || +m[2] > 12 || +m[3] < 1 || +m[3] > 31) return null;
+  const now = new Date(Date.now() + 9 * 3600000), y = m[1] ? +m[1] : now.getUTCFullYear() + (+m[2] < now.getUTCMonth() - 5 ? 1 : 0);
+  return [y * 10000 + m[2] * 100 + +m[3], `${+m[2]}/${+m[3]}`];
+};
+const SNS_SELF = /SNS 조건 못 함|SNS 단계는 직접/;
+const formLabel = u => /^https:\/\/(docs\.google\.com\/forms|forms\.gle|forms\.office\.com|form\.naver\.com|naver\.me|tally\.so|([a-z0-9-]+\.)*typeform\.com)\b/.test(u) ? '폼 열기 ↗' : '열기 ↗';
+const byDeadline = xs => xs.map((h, i) => [h, (dday(h.deadline) || [Infinity])[0], i]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).map(x => x[0]);
+function trow(h) {
+  const d = dday(h.deadline), dl = d ? `마감 ${d[1]}` : str(h.deadline, 30) ? `마감 ${str(h.deadline, 30)}` : '';
+  const sns = SNS_SELF.test(str(h.kind, 20)) || SNS_SELF.test(str(h.detail, 200));
+  const sub = [str(h.prize, 60), str(h.winners, 30), dl, sns ? '' : str(h.kind, 10), h.status === 'duplicate' ? '이미 응모' : '', hm(h.at), str(h.source, 30)].filter(Boolean).join(' · ');
+  return el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, str(h.title, 200) || '(제목 없음)', sns ? ' (SNS 단계는 직접)' : ''),
+    sub ? el('span', {class: 's'}, sub) : null), https(h.url) ? el('a', {class: 'sm', href: sf(h.url), target: '_blank', rel: 'noopener noreferrer'}, formLabel(h.url)) : null);
+}
+const skipLine = () => { const w = skipWhy(); return w.length ? `빠진 것 ${skipped() || w.reduce((a, x) => a + x[1], 0)} · ` + w.slice(0, 3).map(x => `${x[0]} ${x[1]}`).join(' · ') : ''; };
 const openLabel = u => /^https:\/\/([a-z0-9-]+\.)*donzomyo\.kr\//.test(u) ? '돈좀요에서 열기' : '이벤트 열기';
 const hm = t => { const d = t ? new Date(t) : null; return d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : ''; };
 // 11/14 키마다 마지막 네이버 답 (401 원인 찾기) — '딜봇 키 401 · 블로그 키 파일 없음'
@@ -297,6 +317,7 @@ function drawCard2() {
     data.stale || s.running ? el('div', {class: 'chips'}, data.stale ? el('span', {class: 'cp stop'}, '연결 끊김') : null, s.running ? el('span', {class: 'cp ok'}, '확인 중') : null) : null,
     el('p', {class: 'st'}, `오늘 자동 응모 ${c.todayApplied} · 이번 주 ${c.weekApplied != null ? c.weekApplied : '-'} · 확인 필요 ${c.left}`),
     data.stale ? el('p', {class: 'st warn'}, `이벤트 참여 서버 연결 끊김 · 마지막 받음 ${kst(data.receivedAt)}`) : null,
+    skipLine() ? el('p', {class: 'st'}, skipLine()) : null,
     ta.slice(0, 3).map(h => el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, h.title || ''),
       el('span', {class: 's'}, [hm(h.at), h.source].filter(Boolean).join(' · '))), el('span', {class: 'cp ok'}, h.status === 'duplicate' ? '이미 응모' : '응모 완료'))),
     chk.slice(0, 3).map(t => el('div', {class: 'row'}, el('span', {class: 'grow'}, el('span', {class: 't'}, `확인 필요 · ${t.title || ''}`),
@@ -432,7 +453,7 @@ function drawScr() {
       nw && skipped() ? skipNote() : null, healthLines()));
     if (nw) {
       const ta = todayApplied();
-      out.push(el('p', {class: 'grp'}, `오늘 응모한 이벤트 ${ta.length}`), ta.length ? el('div', {class: 'box'}, ta.map(arow)) : el('p', {class: 'empty'}, '오늘은 아직 자동 응모한 이벤트가 없어요'),
+      out.push(el('p', {class: 'grp'}, `오늘 응모한 이벤트 ${ta.length}`), ta.length ? el('div', {class: 'box evt'}, byDeadline(ta).map(trow)) : el('p', {class: 'empty'}, '오늘은 아직 자동 응모한 이벤트가 없어요'),
         el('p', {class: 'grp'}, `확인 필요 ${left.length}`), left.length ? left.map(item) : el('p', {class: 'empty'}, '확인할 것 없어요'),
         dn.length ? [el('p', {class: 'grp'}, `완료 표시 ${dn.length}`), dn.map(item)] : null);
     } else {

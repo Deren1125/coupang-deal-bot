@@ -528,6 +528,77 @@ def test_ssalmuk_js_auto_apply_first_layout() -> None:
     assert "skipBtn" not in got  # skipReasons 없으면 단추 없이 한 줄
 
 
+# 11/15 '오늘 응모한 이벤트' — 홈 화면 앱(navigator.standalone) 흉내 + 오늘 목록의 줄·단추를 꺼냄
+SHIM_TODAY = SHIM.replace("eval(fs.readFileSync", "Object.defineProperty(global, 'navigator', {value: {standalone: process.env.SA === '1'}, configurable: true});\neval(fs.readFileSync").replace(
+    "  out.posts = posts;", """  const all = (n, f, a = []) => { if (f(n)) a.push(n); n.children.forEach(c => all(c, f, a)); return a; };
+  const box = find(main.children[0], n => /\\bevt\\b/.test(n.className || ''));
+  out.rows = box ? box.children.map(r => ({text: text(r), a: all(r, n => n.tagName === 'A').map(n => [text(n), n.attrs.href, n.attrs.rel])})) : null;
+  out.tags = all(main, n => !/^(MAIN|H1|H3|DIV|SECTION|ARTICLE|P|SPAN|A|BUTTON|B|UL|OL|LI|#TEXT|INPUT|SELECT|OPTION|TEXTAREA|LABEL|STYLE)$/.test(n.tagName)).map(n => n.tagName);
+  out.posts = posts;""")
+
+
+def _today_view(applied: list[dict[str, Any]], **counts: Any) -> dict[str, Any]:
+    c = {"auto": 2, "left": 0, "today": 0, "applied": len(applied), "todayApplied": len(applied), "weekApplied": 9}
+    c.update(counts)
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(sample(counts=c, notAutomated=15, applied=applied, todo=[sample()["todo"][0]]))
+    return s.view()
+
+
+def _run_today(view: dict[str, Any], standalone: bool = False) -> dict[str, Any]:
+    import os
+
+    out = subprocess.run([NODE, "-e", SHIM_TODAY, str(STATIC / "ssalmuk.js"), json.dumps(view, ensure_ascii=False)],
+                         capture_output=True, text=True, timeout=30, env=dict(os.environ, SA="1" if standalone else "0"))
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_today_applied_list_prize_winners_deadline() -> None:
+    """11/15 계약(applied[] prize·winners·deadline·kind): 오늘 응모한 이벤트 = 이름·경품·당첨 인원·마감(가까운 순)·폼 단추 · 없는 칸은 숨김 · 글자로만 · https 만 링크."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    iso = lambda m: (now - timedelta(seconds=m)).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+    applied = [
+        {"url": "https://docs.google.com/forms/d/e/abc/viewform", "title": "늦은 마감 설문", "at": iso(1), "status": "success", "source": "콘테스트코리아", "detail": "제출 완료",
+         "prize": "모바일 상품권 1만원", "winners": "추첨 100명", "deadline": "2026년 12월 30일", "kind": "설문"},
+        {"url": "https://event.example.go.kr/apply", "title": "가까운 마감 <img src=x onerror=alert(1)>", "at": iso(2), "status": "success", "source": "", "detail": "",
+         "prize": "<b>커피</b>", "winners": "전원", "deadline": "2026-12-01", "kind": "SNS 조건 못 함"},
+        {"url": "https://suto.example/e/3", "title": "옛 꼴 (새 칸 없음)", "at": iso(3), "status": "duplicate", "source": "슈퍼투데이", "detail": ""},
+        {"url": "javascript:alert(1)", "title": "주소가 이상함", "at": iso(4), "status": "success", "source": "", "detail": "", "prize": "치킨", "deadline": "2026. 12. 15"},
+        {"url": "http://plain.example/x", "title": "http 주소", "at": iso(5), "status": "success", "source": "", "detail": "", "deadline": "상시", "winners": 7, "prize": {"x": 1}},
+    ]
+    got = _run_today(_today_view(applied, skipReasons={"SNS 조건": 12, "네이버폼(폰에서)": 3}))
+    rows = got["rows"]
+    assert "오늘 응모한 이벤트 5" in got["scr"] and len(rows) == 5 and got["tags"] == []  # 태그 문자열은 글자 그대로 (IMG·B 요소 없음)
+    # 마감 가까운 순: 12/1 → 12/15 → 12/30 → 마감 못 읽는 것(받은 순)
+    assert [r["text"].split(" ")[0] for r in rows] == ["가까운", "주소가", "늦은", "옛", "http"]
+    assert rows[0]["text"].startswith("가까운 마감 <img src=x onerror=alert(1)> (SNS 단계는 직접)<b>커피</b> · 전원 · 마감 12/1")
+    assert "SNS 조건 못 함" not in rows[0]["text"] and rows[0]["a"] == [["열기 ↗", "https://event.example.go.kr/apply", "noopener noreferrer"]]
+    assert rows[2]["text"].startswith("늦은 마감 설문모바일 상품권 1만원 · 추첨 100명 · 마감 12/30 · 설문 · ") and "콘테스트코리아" in rows[2]["text"]
+    assert "SNS 단계" not in rows[2]["text"] and rows[2]["a"] == [["폼 열기 ↗", "https://docs.google.com/forms/d/e/abc/viewform", "noopener noreferrer"]]
+    # 옛 데이터: 새 칸이 없으면 그 칸만 숨김 (빈 '·'·'마감 -' 없음)
+    assert rows[3]["text"].startswith("옛 꼴 (새 칸 없음)이미 응모 · ") and "마감" not in rows[3]["text"] and " ·  · " not in rows[3]["text"]
+    assert rows[1]["a"] == [] and "치킨 · 마감 12/15" in rows[1]["text"]  # https 가 아니면 단추 없음
+    assert rows[4]["a"] == [] and "마감 상시" in rows[4]["text"] and "[object" not in rows[4]["text"] and "7 ·" not in rows[4]["text"]  # 글자가 아닌 칸은 버림
+    # 빠진 것 한 줄 (할 일 탭 카드)
+    assert "빠진 것 15 · SNS 조건 12 · 네이버폼(폰에서) 3" in got["card"]
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_today_applied_opens_safari_in_home_screen_app() -> None:
+    """홈 화면 앱(navigator.standalone)에서 폼 단추는 사파리로 (routine.js sf 틀) · skipReasons 가 없으면 카드에 '빠진 것' 줄 없음."""
+    from datetime import UTC, datetime
+
+    applied = [{"url": "https://forms.gle/abc", "title": "폼", "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "status": "success", "source": "", "detail": ""}]
+    got = _run_today(_today_view(applied), standalone=True)
+    assert got["rows"][0]["a"] == [["폼 열기 ↗", "x-safari-https://forms.gle/abc", "noopener noreferrer"]]
+    assert got["rows"][0]["text"].startswith("폼") and "빠진 것" not in got["card"]
+    assert _run_today(_today_view(applied))["rows"][0]["a"][0][1] == "https://forms.gle/abc"
+
+
 @pytest.mark.skipif(NODE is None, reason="node 없음")
 def test_ssalmuk_js_skip_reasons_breakdown() -> None:
     """counts.skipReasons: 접힌 줄에 위 2개, 누르면 많은 순 목록 · 라벨은 글자로만 (태그 문자열 그대로)."""
