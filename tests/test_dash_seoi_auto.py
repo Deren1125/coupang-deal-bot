@@ -835,7 +835,7 @@ const paint = type => { $$('._faceLayer a._button').forEach(x => set(x, x.getAtt
   $$('.my_reaction a._face').forEach(f => { set(f, !!type, 'aria-pressed'); f.querySelector('.u_likeit_icon').className = 'u_likeit_icon __reaction__' + (type || 'zeroface'); }); };
 if (/liked/.test(KIND)) paint('like');
 if (/otheron/.test(KIND)) $$('.other_reaction a._button[data-type=like]').forEach(x => set(x, true, 'aria-selected'));  // 남들 묶음에만 내 표시가 먼저 뜬 화면
-$$('._reactionModule').forEach(m => m.setAttribute('data-cid', ID.replace('/', '_')));  // 네이버: 블로그아이디_글번호
+$$('._reactionModule').forEach(m => m.setAttribute('data-cid', (/alias/.test(KIND) ? 'realid/' + ID.split('/')[1] : ID).replace('/', '_')));  // 네이버: 블로그아이디_글번호 (주소가 별칭이면 진짜 아이디)
 if (/feed/.test(KIND)) { const x = $('.my_reaction ._reactionModule').cloneNode(true); x.setAttribute('data-cid', 'other_1'); x.querySelector('a._button').className = 'u_likeit_list_button _button on'; x.style.display = 'none'; document.body.appendChild(x); }  // 아래 다른 글 묶음 (내가 공감한 글)
 if (!/unloaded/.test(KIND)) $$('._reactionModule').forEach(m => m.setAttribute('data-loaded', '1'));
 document.addEventListener('click', e => {
@@ -866,6 +866,15 @@ async def test_mobile_heart_presses_like_in_the_hidden_layer_and_sees_it_filled(
         assert got["alerts"][0].startswith("이웃 관리: 데런픽 · 공감 ✓ · 댓글 초안 넣음 ✓") and got["state"]["box"] == DRAFT
         assert got["state"]["pressed"] == "true" and "on" in got["state"]["face"].split() and "on" in got["state"]["like"].split()
     assert [(e["k"], e.get("type"), e.get("on")) for e in got["ev"] if e["k"] != "comment"] == [("react", "like", "1")]  # 하트·남들 묶음은 안 누름 · 한 번만
+
+
+@pytest.mark.parametrize("kind", ["alias", "alias liked"])
+async def test_mobile_heart_blog_id_alias_matches_by_post_number(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    """주소의 블로그 아이디가 별칭(묶음 data-cid 는 진짜 아이디_글번호)이어도 글번호로 이 글 묶음을 알아봄 — 빈 하트면 한 번 누르고, 이미 눌렸으면 안 누름."""
+    got = await step(bot, monkeypatch, tmp_path, kind, post=MPOST)
+    want = [] if "liked" in kind else [("react", "like", "1")]
+    assert [(e["k"], e.get("type"), e.get("on")) for e in got["ev"] if e["k"] in ("face", "react", "other")] == want
+    assert ("공감은 이미 눌러져 있어요" if "liked" in kind else "공감 ✓") in got["alerts"][0]
 
 
 @pytest.mark.parametrize("kind", ["liked", "otheron", "unloaded"])

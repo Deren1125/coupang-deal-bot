@@ -266,7 +266,8 @@ const lon = n => {
   return a.some(x => f(x, 'true') || /(^|\s)on(\s|$)/.test(x.className)) ? 1 : m.getAttribute('data-sid') && m.getAttribute('data-loaded') !== '1' ? -1 : a.some(x => f(x, 'false') || /(^|\s)off(\s|$)/.test(x.className)) ? 0 : -1;
 };
 // 이 글 것만 (묶음의 data-cid = 블로그아이디_글번호 · 글 아래 다른 글 묶음이 섞여도 그 표시로 판단하지 않게)
-const mine = n => { const c = lmod(n).getAttribute('data-cid'); return !c || c === P.id + '_' + P.no; };
+// 글번호로 맞춤 — 주소의 블로그 아이디가 별칭이면(naver_diary → naverofficial) 앞쪽이 달라서 · 글번호가 다르면 남의 것 = 안 봄·안 누름
+const mine = n => { const c = lmod(n).getAttribute('data-cid'); return !c || c.endsWith('_' + P.no); };
 const liked = () => qa(LK + ',._reactionModule').some(n => mine(n) && lon(n) > 0);
 // 자동입력 방지 칸 (공감·댓글·이웃추가 어디든 — 보이고 크기가 있는 것만)
 const caps = () => qa('[class*=captcha]').filter(n => vis(n) && n.offsetHeight > 9);
@@ -296,7 +297,7 @@ const visit = async () => {
   let bad = 0;
   // 공감: 글 끝 단추 하나 (떠 있는 단추는 다른 게 없을 때만) · 여러 개면 누르지 않음
   // 누르기 전에 글의 공감 단추 모두(가려진 것까지)에서 눌린 표시를 먼저 봄 — 이미 눌렸으면 절대 누르지 않음 (누르면 풀림)
-  const all = qa(LK).filter(mine), lk = all.filter(vis), fl = n => !!n.closest('[class*=Interact__is_floating],.floating_bottom'), end = lk.filter(n => !fl(n)), ls = end.length ? end : lk;
+  const all = qa(LK).filter(n => mine(n) && !n.closest('a.other_reaction')), lk = all.filter(vis), fl = n => !!n.closest('[class*=Interact__is_floating],.floating_bottom'), end = lk.filter(n => !fl(n)), ls = end.length ? end : lk;
   if (g.like === false) did.push('공감은 누르지 않았어요');
   else if (liked()) did.push('공감은 이미 눌러져 있어요');
   else if (cont) did.push('공감은 글 화면에서');
