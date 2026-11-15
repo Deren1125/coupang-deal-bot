@@ -61,10 +61,10 @@ RESP_ALLOW = {"cache-control": "Cache-Control", "etag": "ETag", "last-modified":
 # 다른 점: 허브 화면(crime_v3.html·research.html — 11/15 feat/oi-farming-core 에서 확인)이 페이지 안 <script>·onclick= 으로 돌아서
 # script-src 에 'unsafe-inline' (없으면 화면이 안 뜸) · 글꼴(font-src) · 상대 주소(base-uri 'self') · 허브 알림용 서비스 워커(worker-src —
 # 주소가 /dashboard/farm/sw.js 라 범위는 /dashboard/farm/ 까지만, Service-Worker-Allowed 는 넘기지 않아 대시보드 범위로 못 넓힘).
-# 허브가 스크립트를 파일로 옮기면 'unsafe-inline' 을 뺀다 (파밍 화면은 대시보드와 같은 출처에서 돈다)
+# 11/16 퍼프덱스 확인: 허브 전 페이지(크라임 포함) 인라인 <script>·on*= 0개 → script-src 에서 'unsafe-inline' 뺌 (style-src 는 그대로)
 # {src} = 이 서버의 /dashboard/farm/ 아래만 (farm_csp 가 '호스트/dashboard/farm/' 로 채움 — 대시보드 API 는 여기에 안 들어감)
 CSP_TEMPLATE = (
-    "default-src 'none'; script-src {src} 'unsafe-inline'; style-src {src} 'unsafe-inline'; img-src {src} data: blob:; "
+    "default-src 'none'; script-src {src}; style-src {src} 'unsafe-inline'; img-src {src} data: blob:; "
     "font-src {src} data:; media-src {src}; connect-src {src}; manifest-src {src}; worker-src {src}; form-action {src}; "
     "base-uri 'self'; frame-ancestors 'none'"
 )
@@ -194,7 +194,10 @@ class FarmProxy:
         out["authorization"] = f"Bearer {token}"
         out["x-forwarded-prefix"] = PREFIX
         out["x-forwarded-proto"] = "https"
-        out["accept-encoding"] = "identity"  # 받은 그대로 크기를 세고 넘기려고 (압축은 앞단 Caddy 가)
+        # 브라우저가 gzip 을 받으면 허브에도 gzip 으로 부탁 (11/16 '파밍 탭 느림' — Funnel 구간을 압축된 채로).
+        # 본문은 aiter_raw 로 풀지 않고 받은 그대로 넘기고 Content-Encoding 도 같이 넘기므로 깨지지 않는다. 크기 한도는 압축된 크기 기준.
+        gz = "gzip" in (headers.get("accept-encoding") or "").lower()
+        out["accept-encoding"] = "gzip" if gz else "identity"
         target = url + (path or "/") + (f"?{query}" if query else "")
         try:
             async with asyncio.timeout(TIMEOUT_S):
@@ -229,6 +232,8 @@ class FarmProxy:
                     return _page(502, "막았어요", "파밍 화면이 다른 곳으로 보내려 해서 열지 않았어요.")
             else:
                 extra["Location"] = loc
+        if "Content-Encoding" in extra:
+            extra["Vary"] = "Accept-Encoding"
         extra.update(FARM_HEADERS)
         extra.setdefault("Cache-Control", "no-store")
         if method == "HEAD":

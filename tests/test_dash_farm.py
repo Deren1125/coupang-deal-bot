@@ -198,11 +198,11 @@ async def test_response_drops_cookies_and_keeps_our_security_headers(bot: DealBo
     csp = low["content-security-policy"]
     assert low["x-frame-options"] == "DENY"
     assert low["x-content-type-options"] == "nosniff" and low["referrer-policy"] == "no-referrer"
-    # 이 서버의 /dashboard/farm/ 아래 스크립트·스타일·요청만 (허브 화면이 페이지 안 스크립트라 'unsafe-inline' 까지) — 바깥 주소·eval 은 안 됨
+    # 이 서버의 /dashboard/farm/ 아래 스크립트·스타일·요청만 — 페이지 안 스크립트는 막음 (11/16 허브 인라인 0개 확인) · 바깥 주소·eval 은 안 됨
     parts = dict(p.strip().split(" ", 1) for p in csp.split(";"))
     src = parts["connect-src"]
     assert src and all(s.endswith("/dashboard/farm/") for s in src.split()) and ORIGIN.split("://")[1] + "/dashboard/farm/" in src.split()
-    assert parts["script-src"] == src + " 'unsafe-inline'" and parts["default-src"] == "'none'"
+    assert parts["script-src"] == src and "unsafe-inline" not in parts["script-src"] and parts["default-src"] == "'none'"
     assert parts["worker-src"] == src and "unsafe-eval" not in csp  # 허브 알림 서비스 워커 (범위 /dashboard/farm/ 까지만)
     assert parts["style-src"].startswith(src) and parts["img-src"].startswith(src) and parts["font-src"].startswith(src)
     assert parts["form-action"] == src and parts["frame-ancestors"] == "'none'"
@@ -451,3 +451,28 @@ async def test_cross_site_link_into_farm_goes_to_farm_home_without_calling_hub(b
     for site in ("none", "same-origin"):
         assert (await call(bot, "GET", "/dashboard/farm/bots/3?tab=a", login(bot, **{"sec-fetch-site": site})))[0] == 200
     assert [r.url.path for r in hub.requests] == ["/", "/bots/3", "/bots/3"]
+
+
+async def test_gzip_is_asked_and_passed_through_untouched(bot: DealBot, hub: Hub) -> None:
+    """11/16 '파밍 탭 느림': 브라우저가 gzip 을 받으면 허브에도 gzip 을 부탁하고, 압축된 본문을 풀지 않고 Content-Encoding 과 같이 넘긴다."""
+    import gzip as _gz
+    page = b"<h1>farm</h1>" * 200
+    packed = _gz.compress(page)
+    seen: list[httpx.Request] = []
+
+    async def raw_hub(request: httpx.Request) -> httpx.Response:  # 압축된 바이트를 그대로 흘려 보냄 (.content 는 풀려 버려서)
+        seen.append(request)
+        return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8", "content-encoding": "gzip"},
+                              stream=httpx.ByteStream(packed))
+    bot.dashboard.farm._client = httpx.AsyncClient(transport=httpx.MockTransport(raw_hub))
+    status, body, _c, h = await call(bot, "GET", "/dashboard/farm/", login(bot, **{"accept-encoding": "gzip, deflate, br"}))
+    sent = {k.lower(): v for k, v in seen[-1].headers.items()}
+    assert status == 200 and sent["accept-encoding"] == "gzip"
+    assert body == packed and _gz.decompress(body) == page  # 풀린 본문에 gzip 표시가 붙는 일 없음
+    assert h["Content-Encoding"] == "gzip" and h["Vary"] == "Accept-Encoding"
+    # gzip 을 못 받는 브라우저 → identity
+    bot.dashboard.farm._client = httpx.AsyncClient(transport=httpx.MockTransport(hub.handler))
+    hub.reply = lambda req: httpx.Response(200, headers={"content-type": "text/html"}, content=b"plain")
+    status, body, _c, h = await call(bot, "GET", "/dashboard/farm/", login(bot))
+    sent = {k.lower(): v for k, v in hub.requests[-1].headers.items()}
+    assert sent["accept-encoding"] == "identity" and body == b"plain" and "Content-Encoding" not in h
