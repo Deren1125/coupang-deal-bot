@@ -64,7 +64,8 @@ def test_bookmarklet_is_one_javascript_url_within_safari_limit_and_has_endpoint_
     assert v["len"] == len(v["code"]) < 28000  # 꾸미기 책갈피와 같은 한도 (아이패드 사파리에서 25.9KB 돎)
     assert "'https://dash.example/dashboard/api/seoi_act'" in js and f"'{seoi.key(db)}'" in js and "@@" not in js
     assert seoi.blogs_json() in js and "/*" not in js and "\n//" not in js
-    assert len(v["steps"]) == len(seoi.STEPS) == 6 and "확인" in v["steps"][3] and "등록" in v["steps"][4]
+    assert len(v["steps"]) == len(seoi.STEPS) == 7 and "확인" in v["steps"][3] and "등록" in v["steps"][4]
+    assert v["steps"][5].startswith("자동 (켜 두면 알아서)") and "멈춤" in v["steps"][5] and v["version"] == seoi.version() == 2 and v["new"] is True
     with pytest.raises(ValueError):
         seoi.bookmarklet("https://x.example/a'b", "k")
 
@@ -74,9 +75,16 @@ def test_bookmarklet_never_submits_and_has_no_tricks() -> None:
     for bad in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "Function(", "import("):
         assert bad not in js, bad
     # 누르기는 press() 한 곳 — 마지막 단추(확인·등록·신청·다음)와 submit 은 거기서 거절
+    # (자동(주인 11/15)이 도는 중(au)에 press(n, 1) 로 부른 두 곳 — 이웃추가 화면의 확인 · 댓글 등록 — 만 빼고)
     assert js.count(".click()") == 1 and "n.click();" in js
     assert "const NO=/확인|등록|신청|보내기|완료|다음|취소|삭제|차단|submit/i;" in js
-    assert "if(ty==='submit'||ty==='image'||NO.test(t))return false;" in js
+    assert "if(!(f&&au)&&(ty==='submit'||ty==='image'||NO.test(t)))return false;" in js
+    assert re.findall(r"press\(([^()]*(?:\[\d\])?),1\)", js) == ["ok[0]", "up[0]"] and js.count(",1);") == 2
+    assert "const ok=qa('a.btn_ok').filter(" in js and "up=qa('.u_cbox_btn_upload').filter(vis)" in js
+    assert js.count("au=1") == 2 and "go=au=1;" in js and "if(au)F.au=1;" in js  # 자동은 떠 있는 칸의 '시작'을 눌렀을 때만 켜짐 (+ 요청에 표시)
+    # 자동이 여는 화면은 같은 m.blog 주소의 작은 창 둘뿐 (이웃추가 화면 · 이웃 글) — 바깥 스크립트·새 창 없음
+    assert "load(cur.no?'/'+cur.id+'/'+cur.no:'/BuddyAddForm.naver?blogId='+cur.id)" in js and js.count(".src=") == 1 and "createElement('script')" not in js
+    assert "if(L.hostname!=='m.blog.naver.com')" in js
     assert "ty=String(n.getAttribute('type')||(n.form&&n.type)||'').toLowerCase();" in js  # type 없는 button 도 폼 안이면 submit
     for bad in (".submit(", "requestSubmit", "KeyboardEvent", "MouseEvent", "PointerEvent", "TouchEvent", "keydown", "keypress", "keyup",
                 "mousedown", "mousemove", "touchstart", "userAgent", "navigator", "webdriver", "cookie", "XMLHttpRequest", "sendBeacon",
@@ -188,7 +196,9 @@ global.alert = m => out.alerts.push(m);
 global.prompt = (m, d) => { out.prompts.push([m, d]); return S.prompt == null ? null : S.prompt; };
 const replies = (S.replies || []).slice();
 global.fetch = async (u, o) => { out.url = u; out.opt = {mode: o.mode, credentials: o.credentials, method: o.method};
-  out.asks.push(Object.fromEntries(new URLSearchParams(o.body.toString())));
+  const sent = Object.fromEntries(new URLSearchParams(o.body.toString()));
+  out.v = sent.v; delete sent.v;  // 책갈피 판 번호는 요청마다 실림 (아래 test_bookmarklet_sends_its_version…)
+  out.asks.push(sent);
   if (S.down) throw new Error('offline');
   return {json: async () => replies.shift() || {ok: false, text: '대답 없음'}}; };
 // 고르기 창이 뜨면 S.choose 이름의 단추를 누름 (주인이 누르는 것)
@@ -324,6 +334,9 @@ def test_form_reports_what_it_found_when_it_cannot_do_it() -> None:
     assert got["clicks"] == [] and "submitted" not in got and got["els"]["msg"]["value"] == MSG and "서로이웃은 직접 골라 주세요" in got["alerts"][0]
 
 
+AUTO_PC = "이웃 관리: 서이추·들르기 자동은 m.blog.naver.com 화면(이웃새글이나 내 블로그)에서 눌러 주세요 — 남의 블로그 화면에서는 한 단계씩이에요"
+
+
 def blog_home(nid: str) -> dict[str, Any]:
     """모바일 블로그 첫 화면: 이웃추가 단추 하나 + 추천 블로그의 이웃추가(누르면 안 됨) · 로그인 아이디는 화면 데이터에."""
     return {"body": [["button", {"data-click-area": "ebc.add", "name": "add", "text": "이웃추가", "on": "nav"}],
@@ -360,8 +373,9 @@ def test_blog_page_in_pc_frame_and_refusals_do_nothing() -> None:
     assert got["alerts"] == ["이웃 관리: " + gap] and got["clicks"] == [] and "sbnb" not in got["ls"]
     got = run({**blog_home("derenpick"), "url": "https://m.blog.naver.com/neighbor1", "down": True})
     assert got["alerts"] == ["이웃 관리: 대시보드에 닿지 않아 아무것도 하지 않았어요 — 잠시 뒤 다시"] and got["clicks"] == []
-    got = run({**blog_home("derenpick"), "url": "https://m.blog.naver.com/demiyum"})
-    assert got["alerts"] == ["이웃 관리: 우리 블로그예요 — 아무것도 하지 않았어요"] and got["asks"] == []
+    # 우리 블로그 화면은 한 단계가 아니라 자동(주인 11/15)의 자리 — 아래 4) 자동 시험 · PC 화면에서는 안내만 하고 묻지도 않음
+    got = run({**blog_home("derenpick"), "url": "https://blog.naver.com/demiyum"})
+    assert got["alerts"] == [AUTO_PC] and got["asks"] == [] and got["clicks"] == []
     # 블로그 첫 화면 데이터가 손님 값이어도 막지 않음 (로그인 아이디를 못 읽은 것으로 보고 블로그를 물음)
     got = run({**blog_home(""), "url": "https://m.blog.naver.com/neighbor1", "choose": "그만두기"})
     assert got["chooser"] and got["alerts"] == [] and got["asks"] == [] and got["clicks"] == []
@@ -443,8 +457,8 @@ def test_post_page_waits_until_the_post_was_read_and_refusals_do_nothing() -> No
     assert got["alerts"] == ["이웃 관리: " + gap] and got["clicks"] == [] and got["els"]["like"]["pressed"] == "false" and got["els"]["box"]["text"] == ""
     got = run({"url": url, "win": win, "body": post_page(), "down": True})
     assert got["alerts"] == ["이웃 관리: 대시보드에 닿지 않아 아무것도 하지 않았어요 — 잠시 뒤 다시"] and got["clicks"] == []
-    got = run({"url": "https://m.blog.naver.com/derenlog/223456789012", "win": win, "body": post_page()})
-    assert got["alerts"] == ["이웃 관리: 우리 블로그 글이에요 — 아무것도 하지 않았어요"] and got["asks"] == []
+    got = run({"url": "https://blog.naver.com/derenlog/223456789012", "win": win, "body": post_page()})  # 우리 글 화면 = 자동의 자리 (PC 는 안내만)
+    assert got["alerts"] == [AUTO_PC] and got["asks"] == [] and got["clicks"] == []
     got = run({"url": url, "win": {"userId": "", "bLoginUser": False}, "body": post_page()})
     assert got["alerts"] == ["이웃 관리: 네이버에 로그인돼 있지 않아요 — 로그인한 뒤 다시"] and got["asks"] == []
     got = run({"url": url, "win": win, "body": [["div", {"class": "se-title-text", "text": "제목"}]]})
@@ -847,7 +861,9 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, monkeyp
     assert (await bot.web.dispatch("GET", "/dashboard/api/seoi", anon))[0] == 401
     status, v, hd = await get_json(bot, "/dashboard/api/seoi", session_headers(bot))
     assert status == 200 and v["steps"] == list(seoi.STEPS) and seoi.key(bot.db) in unquote(v["code"]) and hd["Cache-Control"] == "no-store"
-    assert v["note"].startswith("오늘 이웃 들르기 0/40 (데런픽 0 · 드라마 0 · 라커룸 0)") and set(v["today"]["by"]) == {"issue", "finance", "hotdeal"}
+    new = "'이웃 관리' 책갈피가 바뀌었어요 (v2 · 서이추·들르기 자동) — 연결 탭에서 코드를 다시 복사해 깔아 주세요 · "
+    assert v["note"].startswith(new + "오늘 이웃 들르기 0/40 (데런픽 0 · 드라마 0 · 라커룸 0)") and set(v["today"]["by"]) == {"issue", "finance", "hotdeal"}
+    assert v["new"] is True and v["version"] == 2
     d = FakeDrafter()
     monkeypatch.setattr(seoi, "get_drafter", lambda: d)
     res = await _post(bot, add_form(bot.db, "hotdeal"), origin="https://m.blog.naver.com")
@@ -882,7 +898,9 @@ def test_routine_view_carries_todays_counts_per_blog(bot: DealBot, tmp_path: Pat
     seoi.gate(bot.db, "add", "hotdeal", "neighbor1", now=now.timestamp(), tz=TZ)
     seoi.gate(bot.db, "visit", "finance", "abc", now=now.timestamp(), tz=TZ)
     r = routine.view(bot, now=now.timestamp())["seoi"]
-    assert r["by"]["hotdeal"]["add"] == 1 and r["by"]["finance"]["visit"] == 1 and r["visit"] == 1 and r["how"] == seoi.HOW and r["feed"] == seoi.FEED_URL
+    assert r["by"]["hotdeal"]["add"] == 1 and r["by"]["finance"]["visit"] == 1 and r["visit"] == 1 and r["feed"] == seoi.FEED_URL
+    assert r["how"] == seoi.NEW.format(v=2) + " · " + seoi.HOW + " · " + seoi.HOW_AUTO  # 새 판 책갈피가 한 번 물어 오면 앞의 안내는 사라짐
+    assert r["by"]["hotdeal"]["auto"] == {"add": 0, "visit": 0, "min": 0}
     assert r["by"]["finance"]["line"] == "오늘 이웃 들르기 1 (세 블로그 합쳐 1/40) · 서이추 0/30" and set(r["by"]) == {"issue", "finance", "hotdeal"}
 
 

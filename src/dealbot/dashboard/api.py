@@ -36,6 +36,8 @@
   POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
                                         · 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (nbvisit.tick — 응답에 row · 블로그마다 하루 5번)
+                                        · 자동 (주인 11/15): a=queue 다음 차례·기다릴 초 · a=done 결과 (서로이웃 줄 체크 + nb_requested 맡기기) —
+                                          오늘 목록(routine.blog_routine)일 때만 · 체크된 줄(done_ids·carried)은 뺌
   POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/xstudio/state · POST /dashboard/api/xstudio/{draft,reply,posted,reply_go,targets,handoff}   X 글쓰기·답글 도구 (xstudio.py — 주인 11/14)
@@ -728,16 +730,21 @@ class DashApi:
         cors["Cache-Control"] = "no-store"
         if not self.seoi_rate.hit(client_key(headers)):
             return jresp(429, {"ok": False, "code": "rate", "text": "너무 자주 눌렀어요 — 잠시 뒤 다시"}, cors)
-        rows = None
-        if form.get("a") == "add" and seoi.key_ok(self.bot.db, form.get("k")):  # 서이추: 오늘 할 일 줄에서 그 블로그의 멘트 (읽기만 · 열쇠가 맞을 때만)
+        rows, done, day = None, None, None
+        if form.get("a") in ("add", "queue", "done") and seoi.key_ok(self.bot.db, form.get("k")):  # 서이추: 오늘 할 일 줄에서 그 블로그의 멘트 (읽기만 · 열쇠가 맞을 때만)
             try:
                 from dealbot.dashboard import routine
 
-                rows = (routine.blog_routine(self.bot) or {}).get("items")
+                r = routine.blog_routine(self.bot) or {}
+                rows = r.get("items")
+                if form.get("a") != "add":  # 자동 (주인 11/15): 오늘 목록일 때만 차례를 주고 줄을 체크 · 이미 체크된 줄은 뺌
+                    t = time.time()
+                    day = r.get("day") if r.get("day") == routine.today(self.bot, t) else None
+                    done = (routine.done_ids(self.bot.db, day) | routine.carried(self.bot.db, t)) if day else set()
             except Exception as e:  # noqa: BLE001 — 줄을 못 읽어도 책갈피는 되게 (멘트는 주소·물어보기로)
                 log.warning("seoi_act: routine rows failed: %s", type(e).__name__)
         try:
-            got = await seoi.act(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone), rows=rows)
+            got = await seoi.act(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone), rows=rows, done=done, day=day)
         except seoi.CaptureError as e:
             if e.code == "key":
                 log.info("seoi_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])

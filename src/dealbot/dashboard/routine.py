@@ -6,7 +6,8 @@ GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 
      "overflow", "done", "total", "ably": {n, note, rows: [{rid, pid, title, piece, name, price, shop, url, due, due_text}]} | None,
      "times", "rising": [키워드], "rests": [한 줄], "stats": 한 줄 | None, "seoi": {…} | None (목록이 있을 때만)} — rising·rests 는 extras() (주인 10/30) ·
      stats = 늘 None ('오늘 통계 보내기' 할 일 줄은 11/14 에 뺌 — 알림: notify/stats_remind) ·
-     seoi = '이웃 관리' 책갈피의 오늘 수 (seoi.today — {visit, visit_cap, add_cap, how, feed, note, by: {블로그: {name, add, add_cap, visit, line}}} · 주인 11/14)
+     seoi = '이웃 관리' 책갈피의 오늘 수 (seoi.today — {visit, visit_cap, add_cap, how, feed, note, by: {블로그: {name, add, add_cap, visit, line, auto?}}} · 주인 11/14 ·
+       auto = {add, visit, min} 그 블로그에서 자동(11/15)으로 할 수 있는 수 — line 끝에 한 줄 · how 에 책갈피 새 판 안내)
   목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
   주인 11/14 ('오류가 다시 안 나게 · 주인이 보기 전에 걸러지게') — 늘 실리는 칸:
     age_min = 블로그 프로그램 기록 파일이 쓰인 지 몇 분 (모르면 None) → 30분 넘거나 today 가 거짓이면 화면이 '소식이 N분째 없어요' ·
@@ -396,7 +397,8 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     try:  # '이웃 관리' 책갈피로 한 오늘 서이추·이웃 들르기 수 (주인 11/14 — 블로그 칸 한 줄 · 목록이 있을 때만)
         from dealbot.dashboard import seoi
 
-        ex["seoi"] = seoi.today(bot.db, now, _tz(bot))
+        # 오늘 목록이면 블로그마다 자동(주인 11/15)으로 할 수 있는 수도 — 줄 끝에 '서이추 자동: … 약 n분'
+        ex["seoi"] = seoi.today(bot.db, now, _tz(bot), rows=r["items"] if r["day"] == today(bot, now) else None, done=done)
     except Exception as e:  # noqa: BLE001 — 수를 못 읽어도 할 일은 보이게
         log.warning("routine seoi failed: %s", type(e).__name__)
         ex["seoi"] = None

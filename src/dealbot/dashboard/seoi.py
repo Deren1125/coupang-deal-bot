@@ -19,6 +19,17 @@ kv: "seoi:day:<날 KST>" = {add: {블로그: n}, visit: {블로그: n}, stop: {a
   CLI 기본 모델에 맡기지 않고 늘 --model 을 넘긴다 — 기본은 CLI 별칭 'sonnet' (그때의 Sonnet · 버전 붙은 이름은 저장소에 두지 않음, test_config),
   정확한 이름은 서버 .env DEALBOT_MODEL_NEIGHBOR_COMMENT (Sonnet·Opus·Haiku 이름만 — comment_model() 이 Fable·Mythos 는 받지 않고 기본으로).
 today(): 할 일 탭·연결 탭이 읽는 오늘 수 ('오늘 이웃 들르기 n').
+자동 (주인 11/15 09:1x — '서이추 30명을 일일이 들어가 하기 귀찮다 · 한 번 켜 놓으면 이웃 가서 공감·댓글까지, 대신 시간 간격은 있게' · 보호조치 위험이
+  올라간다는 설명을 듣고 고름): 책갈피를 m.blog 의 내 블로그·이웃새글 화면에서 누르면 떠 있는 칸 [시작] → 주인 브라우저가 한 명·한 편씩 (서버는 여전히 네이버를 열지 않음).
+  a=queue  그 블로그의 오늘 남은 차례 {next: {id, msg} | {id, no} | None, wait(초), add, visit, min, text} — 오늘 할 일의 서로이웃 줄(nb-add)·이웃 글 들르기 줄(nb-visit)
+           가운데 체크 안 된 것 · 오늘 이미 해 본 것(tried) 빼고 · 하루 상한까지만. 서이추와 들르기를 번갈아 (방금 한 종류가 아닌 쪽 먼저).
+  a=add / a=visit 에 au=1  자동이 묻는 것 — 간격·한 시간 상한을 두 종류 합쳐서 본다 (hold: 서이추 60~120초 · 들르기 45~90초 가운데 늦은 쪽 · 합쳐 한 시간 15).
+  a=done   한 명·한 편의 결과 r: ok(서이추 줄 체크 + 블로그 프로그램에 nb_requested — 손으로 체크할 때와 같은 길 routine.set_done·relay_add) ·
+           skip(이미 이웃·신청 중·받지 않음 — 줄은 체크하되 센 것은 되돌림 · 다음까지 20~40초) · 그 밖(fail·unsure·login·stop — 적기만 · 다음까지 적어도 20~40초).
+           무엇이든 tried 에 넣어 오늘은 다시 안 줌.
+  a=stop w=all  서이추·들르기 둘 다 그날 쉼.
+책갈피 판 (V): 책갈피가 요청마다 v 를 실어 보냄 → 지금 판이면 kv seoi_seen 에 적음 — 다르면 연결 탭·할 일 탭에 '다시 깔기' 안내 (is_new).
+책갈피 길이: 한글 한 글자가 주소에서 9글자라 pack() 이 한글이 든 글('…')을 Z('…')(글자마다 3글자)로 바꾼다 — seoi.js 의 Z 가 푼다 (28000자 예산).
 """
 
 from __future__ import annotations
@@ -48,6 +59,7 @@ log = logging.getLogger(__name__)
 
 SRC = Path(__file__).resolve().parent / "static" / "seoi.js"
 KV_SECRET = "seoi_secret"
+KV_SEEN = "seoi_seen"  # 요청에 실려 온 책갈피 판 (지금 판과 다르면 '다시 깔기' 안내)
 PATH = "/dashboard/api/seoi_act"
 BODY_MAX = 60_000  # 본문 3000자를 %XX 로 (한글 9바이트) + 제목·주소
 TITLE_MAX = 200
@@ -57,6 +69,10 @@ TEXT_MIN = 30
 BLOGS: tuple[tuple[str, str, str], ...] = tuple((nid, b, statscap.BLOG_NAMES[b]) for nid, b in sorted(statscap.BLOG_IDS.items(), key=lambda x: x[1] != "issue"))
 NAMES = {b: n for _i, b, n in BLOGS}
 KINDS = ("add", "visit")
+RESULTS = ("ok", "skip", "fail", "unsure", "login", "stop")  # a=done 의 r
+SKIP_GAP = (20, 40)  # 건너뛴 뒤 (이미 이웃 등 — 화면만 열어 봄) 다음까지
+TRIED_MAX = 300
+AUTO_AVG_S = 100  # 자동 한 번에 드는 시간 어림 (간격 + 읽기·누르기) — '약 n분'
 GAP = {"add": (60, 120), "visit": (45, 90)}  # 다음 허용까지 (초) — 받을 때마다 이 사이에서 무작위
 ADD_DAY_CAP = 30  # 블로그마다 (주인 11/12 '하루 블로그마다 30' · 네이버 한도 100)
 VISIT_DAY_CAP = 40  # 세 블로그 합쳐
@@ -79,10 +95,15 @@ STEPS = (
     "서이추: 할 일의 서로이웃 줄에서 '블로그 열기' → 열린 블로그에서 책갈피 '이웃 관리' (이웃추가가 눌려요) → 신청 화면이 뜨면 책갈피를 한 번 더 "
     "(서로이웃·멘트가 채워져요) → 읽어 보고 '확인'은 직접 눌러요.",
     "이웃 들르기: 네이버 이웃새글에서 글을 열어 읽고 (20초쯤) 책갈피 '이웃 관리' → 공감이 눌리고 댓글 초안이 댓글 칸에 들어가요 → 내 말로 고친 뒤 '등록'은 직접.",
+    "자동 (켜 두면 알아서): 대시보드 할 일의 '이웃새글 열기'(m.blog.naver.com)나 내 블로그 화면에서 책갈피 '이웃 관리' → 떠 있는 칸의 '시작'. "
+    "그 화면 안 작은 창에서 서로이웃 신청(멘트·확인까지)과 이웃 글 들르기(읽기·공감·댓글 등록까지)를 1~2분 간격으로 차례로 해요. "
+    "화면을 켜 둔 채 그 탭에 두세요 — 네이버가 제한 안내나 로그인 화면을 보이면 바로 멈추고 그날은 쉬어요. '멈춤'으로 언제든 멈춰요.",
     "천천히 해요: 서이추는 1~2분, 들르기는 1분쯤 사이를 둬요 — 너무 빨리 누르면 '조금 쉬었다가' 알림만 뜨고 아무것도 하지 않아요. "
     f"하루 서이추는 블로그마다 {ADD_DAY_CAP}개, 들르기는 모두 합쳐 {VISIT_DAY_CAP}개까지. 로그인한 네이버 계정이 어느 블로그인지 스스로 알아봐요 (못 알아보면 한 번 물어요).",
 )
 HOW = "이웃새글에서 글을 열어 읽고 책갈피 '이웃 관리' → 공감 + 댓글 초안 (등록은 직접) · 사이는 1분쯤"
+HOW_AUTO = "자동: '이웃새글 열기' 화면에서 책갈피 '이웃 관리' → 시작 · 탭 켜 두기"
+NEW = "'이웃 관리' 책갈피가 바뀌었어요 (v{v} · 서이추·들르기 자동) — 연결 탭에서 코드를 다시 복사해 깔아 주세요"
 FEED_URL = "https://m.blog.naver.com/FeedList.naver"  # 이웃새글 (주인 브라우저에서 엶 — 서버는 열지 않음)
 
 _BLOG_ID = re.compile(r"[a-z0-9_-]{3,30}")
@@ -137,9 +158,66 @@ def key_ok(db: Any, given: str | None) -> bool:
     return bool(given) and hmac.compare_digest(key(db).encode(), str(given).encode())
 
 
+_HANGUL = re.compile("[가-힣]")
+_PLAIN = set("abcdefghijklmnopqrstuvwxyz0123456789KLMNOPQRSTUVWXYZ-!~*()")
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def pack_text(text: str) -> str | None:
+    """한글이 든 글 → 주소에서 안 늘어나는 글자만으로 (seoi.js Z 가 품): 한글 = A~I + 36진 두 글자 · 빈칸 = _ · 그 밖 = .xx / Jxxxx. 못 바꾸면 None."""
+    out = []
+    for ch in text:
+        cp = ord(ch)
+        if 0xAC00 <= cp <= 0xD7A3:
+            hi, lo = divmod(cp - 0xAC00, 1296)
+            out.append(chr(65 + hi) + _B36[lo // 36] + _B36[lo % 36])
+        elif ch == " ":
+            out.append("_")
+        elif ch in _PLAIN:
+            out.append(ch)
+        elif cp < 256:
+            out.append(f".{cp:02x}")
+        elif cp <= 0xFFFF:
+            out.append(f"J{cp:04x}")
+        else:
+            return None
+    return "".join(out)
+
+
+def pack(code: str) -> str:
+    """줄인 코드에서 한글이 든 '…'·"…" 글을 Z('…') 로 (정규식 안에는 따옴표가 없고 글 안에는 역슬래시가 없다 — test_dash_seoi 가 지킴)."""
+    out, i, n = [], 0, len(code)
+    while i < n:
+        c = code[i]
+        if c not in "'\"`":
+            out.append(c)
+            i += 1
+            continue
+        j = i + 1
+        while j < n and code[j] != c:
+            j += 2 if code[j] == "\\" else 1
+        body = code[i + 1:j]
+        packed = pack_text(body) if c != "`" and "\\" not in body and _HANGUL.search(body) else None
+        out.append(f"Z('{packed}')" if packed is not None else code[i:j + 1])
+        i = j + 1
+    return "".join(out)
+
+
 @lru_cache(maxsize=1)
 def _code() -> str:
-    return kkumi.minify(SRC.read_text(encoding="utf-8"))
+    return pack(kkumi.minify(SRC.read_text(encoding="utf-8")))
+
+
+@lru_cache(maxsize=1)
+def version() -> int:
+    """seoi.js 의 판 번호 ('const V = 2;'). 못 찾으면 0."""
+    m = re.search(r"^const V = (\d+);", SRC.read_text(encoding="utf-8"), re.M)
+    return int(m.group(1)) if m else 0
+
+
+def is_new(db: Any) -> bool:
+    """주인 브라우저의 책갈피가 지금 판이 아님 (지금 판 책갈피가 한 번이라도 물어 오면 거짓)."""
+    return str(db.kv_get(KV_SEEN) or "") != str(version())
 
 
 def blogs_json() -> str:
@@ -159,11 +237,11 @@ def bookmarklet(endpoint: str, k: str) -> str:
 
 def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | None = None) -> dict[str, Any]:
     code = bookmarklet(public_url.rstrip("/") + PATH, key(db))
-    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS)}
+    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS), "version": version(), "new": is_new(db)}
     if tz is not None:
         t = today(db, now or time.time(), tz)
         out["today"] = t
-        out["note"] = t["note"]
+        out["note"] = (NEW.format(v=version()) + " · " if out["new"] else "") + t["note"]
     return out
 
 
@@ -192,11 +270,13 @@ def _counts(db: Any, day: str) -> dict[str, Any]:
         out[kind] = {b: int(got.get(b) or 0) for b in NAMES}
     st = v.get("stop") if isinstance(v.get("stop"), dict) else {}
     out["stop"] = {kind: [b for b in (st.get(kind) or []) if b in NAMES] for kind in KINDS}
+    tr = v.get("tried") if isinstance(v.get("tried"), list) else []
+    out["tried"] = [x for x in tr if isinstance(x, str)][-TRIED_MAX:]  # 자동이 오늘 해 본 것 ('블로그:아이디' · '블로그:아이디/글 번호')
     return out
 
 
-def today(db: Any, now: float, tz: ZoneInfo) -> dict[str, Any]:
-    """오늘 서이추·이웃 들르기 수 (할 일 탭 블로그 칸 한 줄 · 연결 탭 설치 칸)."""
+def today(db: Any, now: float, tz: ZoneInfo, *, rows: Any = None, done: Any = None) -> dict[str, Any]:
+    """오늘 서이추·이웃 들르기 수 (할 일 탭 블로그 칸 한 줄 · 연결 탭 설치 칸). rows(오늘 할 일 줄)·done(체크된 줄 id)을 주면 블로그마다 자동으로 할 수 있는 수도."""
     day = _day(now, tz)
     c = _counts(db, day)
     total = sum(c["visit"].values())
@@ -206,9 +286,15 @@ def today(db: Any, now: float, tz: ZoneInfo) -> dict[str, Any]:
         by[b] = {"name": name, "add": c["add"][b], "add_cap": ADD_DAY_CAP, "visit": c["visit"][b],
                  "line": f"오늘 이웃 들르기 {c['visit'][b]} (세 블로그 합쳐 {total}/{VISIT_DAY_CAP}) · 서이추 {c['add'][b]}/{ADD_DAY_CAP}"
                          + (f" · 네이버 제한 안내로 오늘 {'·'.join(stop)} 쉼" if stop else "")}
+        if rows is not None:
+            a, v = _left(c, b, rows, done or ())
+            by[b]["auto"] = {"add": len(a), "visit": len(v), "min": _minutes(len(a) + len(v))}
+            if a or v:  # 주인 11/15 — 할 일 줄 한 줄
+                by[b]["line"] += f" · 서이추 자동: 내 블로그에서 책갈피 → 시작 · 탭 켜 두기 · 약 {_minutes(len(a) + len(v))}분"
     note = (f"오늘 이웃 들르기 {total}/{VISIT_DAY_CAP} (" + " · ".join(f"{v['name']} {v['visit']}" for v in by.values()) + ") · 서이추 "
             + " · ".join(f"{v['name']} {v['add']}/{ADD_DAY_CAP}" for v in by.values()))
-    return {"day": day, "visit": total, "visit_cap": VISIT_DAY_CAP, "add_cap": ADD_DAY_CAP, "by": by, "how": HOW, "feed": FEED_URL, "note": note}
+    how = (NEW.format(v=version()) + " · " if is_new(db) else "") + HOW + " · " + HOW_AUTO
+    return {"day": day, "visit": total, "visit_cap": VISIT_DAY_CAP, "add_cap": ADD_DAY_CAP, "by": by, "how": how, "feed": FEED_URL, "note": note}
 
 
 def prune(db: Any, now: float, tz: ZoneInfo) -> int:
@@ -226,8 +312,19 @@ def _pace(db: Any, kind: str, now: float) -> dict[str, Any]:
     return {"next": float(nxt) if isinstance(nxt, int | float) else 0.0, "recent": recent, "tickets": tickets}
 
 
-def gate(db: Any, kind: str, blog: str, target: str, *, now: float, tz: ZoneInfo, rng: Any = random) -> dict[str, Any]:
-    """한 번 해도 되는지 보고, 되면 센다. 돌려줌 {again, ticket, n}. 안 되면 CaptureError(429) — 아무것도 바꾸지 않음."""
+def hold(db: Any, now: float) -> float:
+    """자동: 다음 한 번까지 기다릴 초 — 서이추·들르기를 합쳐서 (둘 가운데 늦은 간격 · 합쳐 한 시간 HOUR_CAP 번)."""
+    pa, pv = _pace(db, "add", now), _pace(db, "visit", now)
+    wait = max(pa["next"], pv["next"]) - now
+    rec = sorted(pa["recent"] + pv["recent"])
+    if len(rec) >= HOUR_CAP:
+        wait = max(wait, rec[-HOUR_CAP] + 3600 - now)
+    return max(0.0, wait)
+
+
+def gate(db: Any, kind: str, blog: str, target: str, *, now: float, tz: ZoneInfo, rng: Any = random, auto: bool = False) -> dict[str, Any]:
+    """한 번 해도 되는지 보고, 되면 센다. 돌려줌 {again, ticket, n}. 안 되면 CaptureError(429) — 아무것도 바꾸지 않음.
+    auto = 자동이 묻는 것 — 간격·한 시간 상한을 서이추·들르기 합쳐서 (hold)."""
     name, day = NAMES[blog], _day(now, tz)
     c, p = _counts(db, day), _pace(db, kind, now)
     what = "서이추" if kind == "add" else "이웃 들르기"
@@ -236,6 +333,8 @@ def gate(db: Any, kind: str, blog: str, target: str, *, now: float, tz: ZoneInfo
     tk = p["tickets"].get(target) if target else None
     if tk and tk.get("blog") == blog:
         return {"again": True, "ticket": tk, "n": c[kind][blog], "total": sum(c[kind].values())}
+    if auto and (w := hold(db, now)) > 0:
+        raise CaptureError(429, "gap", f"조금 쉬었다가 — {math.ceil(w)}초 뒤에 (아무것도 하지 않았어요)")
     wait = p["next"] - now
     if wait > 0:
         raise CaptureError(429, "gap", f"조금 쉬었다가 — {math.ceil(wait)}초 뒤에 다시 눌러 주세요 (아무것도 하지 않았어요)")
@@ -262,6 +361,104 @@ def _ticket(db: Any, kind: str, target: str, now: float, **fields: Any) -> None:
     if target in p["tickets"]:
         p["tickets"][target].update(fields)
         _put(db, f"seoi:pace:{kind}", p)
+
+
+def refund(db: Any, blog: str, target: str, *, now: float, tz: ZoneInfo, rng: Any = random) -> bool:
+    """자동이 서이추 한 번을 세고 열어 보니 신청할 수 없는 사람(이미 이웃·신청 중·받지 않음) → 센 것을 되돌림 (그 사람 표가 있을 때 한 번만).
+    화면은 열어 봤으므로 다음까지 SKIP_GAP 은 둔다."""
+    p = _pace(db, "add", now)
+    tk = p["tickets"].get(target)
+    if not tk or tk.get("blog") != blog or tk.get("back"):
+        return False
+    day = _day(now, tz)
+    c = _counts(db, day)
+    c["add"][blog] = max(0, c["add"][blog] - 1)
+    _put(db, f"seoi:day:{day}", c)
+    recent = list(p["recent"])
+    if tk["at"] in recent:
+        recent.remove(tk["at"])
+    tk["back"] = True
+    _put(db, "seoi:pace:add", {"next": now + rng.randint(*SKIP_GAP), "recent": recent, "tickets": p["tickets"]})
+    return True
+
+
+def _minutes(n: int) -> int:
+    """자동 n 번에 걸리는 시간 어림 (분) — 한 번에 AUTO_AVG_S 초쯤 · 한 시간 HOUR_CAP 번."""
+    return 0 if n <= 0 else ((n - 1) // HOUR_CAP) * 60 + math.ceil(((n - 1) % HOUR_CAP + 1) * AUTO_AVG_S / 60)
+
+
+def _left(c: dict[str, Any], blog: str, rows: Any, done: Any) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """그 블로그의 오늘 남은 자동 차례 (서이추 [{id, msg}], 들르기 [{id, no}]) — 체크된 줄·오늘 해 본 것·쉬는 종류·하루 상한을 넘는 것은 뺌."""
+    from dealbot.dashboard import nbvisit
+
+    tried, own = set(c["tried"]), {nid for nid, _b, _n in BLOGS}
+    adds: list[dict[str, str]] = []
+    head = f"nb-add:{blog}:"
+    for it in rows if isinstance(rows, list) else []:
+        rid = it.get("id") if isinstance(it, dict) else None
+        if not isinstance(rid, str) or not rid.startswith(head) or rid in done or it.get("done") is True:
+            continue
+        t = rid[len(head):]
+        if _BLOG_ID.fullmatch(t) and t not in own and f"{blog}:{t}" not in tried and all(a["id"] != t for a in adds):
+            adds.append({"id": t, "msg": (row_for(rows, blog, t) or {}).get("msg", "")})
+    visits = [{"id": r["nid"], "no": r["no"]} for r in nbvisit.rows(rows, blog)
+              if not r["done"] and r["id"] not in done and r["nid"] not in own and _BLOG_ID.fullmatch(r["nid"]) and f"{blog}:{r['nid']}/{r['no']}" not in tried]
+    if blog in c["stop"]["add"]:
+        adds = []
+    if blog in c["stop"]["visit"]:
+        visits = []
+    return adds[:max(0, ADD_DAY_CAP - c["add"][blog])], visits[:max(0, VISIT_DAY_CAP - sum(c["visit"].values()))]
+
+
+def queue(db: Any, blog: str, *, now: float, tz: ZoneInfo, rows: Any, done: Any, fresh: bool) -> dict[str, Any]:
+    """자동의 다음 차례 (a=queue). 쉬는 날이면 CaptureError(429 stopped). 서이추·들르기를 번갈아 — 방금 한 종류가 아닌 쪽을 먼저."""
+    name, day = NAMES[blog], _day(now, tz)
+    c = _counts(db, day)
+    if blog in c["stop"]["add"] and blog in c["stop"]["visit"]:
+        raise CaptureError(429, "stopped", f"오늘은 네이버가 제한 안내를 보여서 {name} 서이추·들르기를 쉬어요 — 내일 다시")
+    adds, visits = _left(c, blog, rows if fresh else [], done or ())
+    nxt: dict[str, str] | None = None
+    if adds and visits:
+        nxt = adds[0] if _pace(db, "add", now)["next"] <= _pace(db, "visit", now)["next"] else visits[0]
+    elif adds or visits:
+        nxt = (adds or visits)[0]
+    n = len(adds) + len(visits)
+    if nxt:
+        text = f"오늘 이웃 자동 — {name} · 서이추 {len(adds)}명 · 들르기 {len(visits)}편 · 약 {_minutes(n)}분 · 화면을 켜 둔 채 이 탭에 두세요"
+    elif not fresh:
+        text = f"오늘 할 일 목록이 아직 없어요 — {name} 자동은 목록이 온 뒤에 (아침 7시쯤)"
+    else:
+        text = f"오늘 {name} 자동으로 할 것은 다 했어요 (서이추 {c['add'][blog]}/{ADD_DAY_CAP} · 들르기 {c['visit'][blog]})"
+    return {"ok": True, "blog": blog, "name": name, "next": nxt, "wait": math.ceil(hold(db, now)) if nxt else 0, "add": len(adds), "visit": len(visits),
+            "min": _minutes(n), "text": text}
+
+
+def finish(db: Any, blog: str, kind: str, target: str, no: str, result: str, *, now: float, tz: ZoneInfo, rows: Any, day: str | None,
+           rng: Any = random) -> dict[str, Any]:
+    """자동이 한 명·한 편을 끝냄 (a=done). 서이추 ok·skip = 오늘 할 일 줄 체크 + 블로그 프로그램에 '신청했어요'(nb_requested — 손으로 체크할 때와 같은 길) ·
+    skip 은 센 것을 되돌림 · 무엇이든 오늘은 다시 주지 않게 적음."""
+    key = f"{blog}:{target}" + (f"/{no}" if kind == "visit" else "")
+    d = _day(now, tz)
+    c = _counts(db, d)
+    if key not in c["tried"]:
+        c["tried"] = [*c["tried"], key][-TRIED_MAX:]
+        _put(db, f"seoi:day:{d}", c)
+    ticked = False
+    if result != "ok" and not (kind == "add" and result == "skip" and refund(db, blog, target, now=now, tz=tz, rng=rng)):
+        # 세지 않고 끝난 것(세기 전에 건너뜀·화면이 달라 못 함)도 화면은 열어 봤으니 다음까지 조금은 쉼 — 이미 더 긴 간격이 있으면 그대로
+        p = _pace(db, kind, now)
+        _put(db, f"seoi:pace:{kind}", {"next": max(p["next"], now + rng.randint(*SKIP_GAP)), "recent": p["recent"], "tickets": p["tickets"]})
+    if kind == "add" and result in ("ok", "skip"):
+        row = row_for(rows, blog, target)
+        if day and row and row["blog"] == blog:
+            from dealbot.dashboard import routine
+
+            rid = f"nb-add:{blog}:{target}"
+            routine.set_done(db, day, rid, True)
+            routine.relay_add(db, "nb_requested", {"blog": blog, "target": target, "done": True}, rid, now)
+            ticked = True
+    log.info("seoi auto: blog=%s kind=%s result=%s row=%s", blog, kind, result, ticked)
+    return {"ok": True, "row": ticked, "text": "적었어요"}
 
 
 def stop(db: Any, kind: str, blog: str, *, now: float, tz: ZoneInfo) -> list[str]:
@@ -376,20 +573,33 @@ def _blog(form: dict[str, str]) -> str:
 
 
 async def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None, drafter: Any = None, rng: Any = random,
-              rows: Any = None) -> dict[str, Any]:
+              rows: Any = None, done: Any = None, day: str | None = None) -> dict[str, Any]:
     """책갈피가 보낸 폼 하나. 돌려줌 {ok, text, …} — 안 되면 CaptureError (책갈피는 그 글을 알리고 아무것도 하지 않음).
-    rows = 오늘 할 일 줄 (서이추 멘트·블로그 맞추기 — 없으면 맞추지 않음)."""
+    rows = 오늘 할 일 줄 (서이추 멘트·블로그 맞추기 — 없으면 맞추지 않음) · done = 체크된 줄 id · day = 그 목록이 오늘 것일 때 그 날짜 (자동의 차례·줄 체크)."""
     if not key_ok(db, form.get("k")):
         raise CaptureError(403, "key", "열쇠가 맞지 않아요 — 대시보드 연결 탭에서 '이웃 관리' 책갈피를 다시 설치해 주세요")
     now = now or time.time()
+    if str(form.get("v") or "") == str(version()) and is_new(db):
+        db.kv_set(KV_SEEN, str(version()))  # 지금 판 책갈피가 깔려 있음 — '다시 깔기' 안내를 거둠
     a = str(form.get("a") or "")
+    auto = str(form.get("au") or "") == "1"
     if a == "stop":
         kind = str(form.get("w") or "")
-        if kind not in KINDS:
+        if kind not in (*KINDS, "all"):
             raise CaptureError(400, "bad", "모르는 요청이에요")
-        who = stop(db, kind, str(form.get("b") or ""), now=now, tz=tz)
+        who: list[str] = []
+        for k in KINDS if kind == "all" else (kind,):
+            who = stop(db, k, str(form.get("b") or ""), now=now, tz=tz)
         log.warning("seoi: 네이버 제한 안내 — 오늘 %s 쉼 (%s)", kind, ",".join(who))
         return {"ok": True, "text": "오늘은 쉬어요"}
+    if a == "queue":
+        return queue(db, _blog(form), now=now, tz=tz, rows=rows, done=done, fresh=bool(day))
+    if a == "done":
+        blog, kind, result = _blog(form), str(form.get("w") or ""), str(form.get("r") or "")
+        target, no = str(form.get("t") or "").strip().lower(), str(form.get("n") or "")
+        if kind not in KINDS or result not in RESULTS or not _BLOG_ID.fullmatch(target) or (kind == "visit" and not re.fullmatch(r"\d{6,20}", no)):
+            raise CaptureError(400, "bad", "모르는 요청이에요")
+        return finish(db, blog, kind, target, no, result, now=now, tz=tz, rows=rows, day=day, rng=rng)
     if a == "add":
         blog = _blog(form)
         target = str(form.get("t") or "").strip().lower()
@@ -401,8 +611,8 @@ async def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None 
         if row and row["blog"] != blog:  # 세기 전에 — 블로그마다 명단·멘트가 따로
             raise CaptureError(409, "row", f"이 블로그는 {NAMES[row['blog']]} 할 일이에요 — 지금은 {NAMES[blog]} 계정으로 보여요. "
                                            "계정(또는 고른 블로그)을 바꾼 뒤 다시 눌러 주세요")
-        g = gate(db, "add", blog, target, now=now, tz=tz, rng=rng)
-        log.info("seoi add: blog=%s again=%s n=%d row=%s", blog, g["again"], g["n"], bool(row))
+        g = gate(db, "add", blog, target, now=now, tz=tz, rng=rng, auto=auto)
+        log.info("seoi add: blog=%s again=%s n=%d row=%s auto=%s", blog, g["again"], g["n"], bool(row), auto)
         return {"ok": True, "blog": blog, "again": g["again"], "n": g["n"], "cap": ADD_DAY_CAP, "msg": row["msg"] if row else "",
                 "text": f"오늘 {NAMES[blog]} 서이추 {g['n']}/{ADD_DAY_CAP}"}
     if a != "visit":
@@ -429,7 +639,7 @@ async def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None 
         need = READ_SCROLL_S if str(form.get("sc") or "") == "1" else READ_S
         if rd < need:
             raise CaptureError(429, "read", f"글을 조금 더 읽고 눌러 주세요 — {need - max(rd, 0)}초 뒤에 다시")
-    g = gate(db, "visit", blog, target, now=now, tz=tz, rng=rng)
+    g = gate(db, "visit", blog, target, now=now, tz=tz, rng=rng, auto=auto)
     tail = f"오늘 이웃 들르기 {g['total']}/{VISIT_DAY_CAP} · {NAMES[blog]} {g['n']}"
     base = {"ok": True, "blog": blog, "again": g["again"], "n": g["n"], "total": g["total"], "cap": VISIT_DAY_CAP, "text": tail}
     tk = g["ticket"]
