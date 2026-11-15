@@ -1,6 +1,7 @@
 /* 키자드 (주인 11/12 '키자드 도구를 대시보드 화면으로'): Blog-Auto tools/keyzard_indexer 를 /dashboard/keyzard/api/… 로 (대시보드 로그인 그대로).
-   블로그 탭 각 블로그 맨 위 '키자드' 칸 · 연결 탭 '키자드 로그인' 줄 · SNS › 룩북 아래 '룩북 수집'·'코디 레시피'·'코디 트렌드'.
-   등록·수집·로그인은 사람이 단추를 누를 때만 (키자드가 매크로 금지) — 이 파일은 스스로 POST 하지 않는다. 글은 textContent 로만.
+   블로그 탭 각 블로그 맨 위 '키자드' 칸 · SNS › 룩북 아래 '룩북 수집'·'코디 레시피'·'코디 트렌드'.
+   키자드 등록은 폰에서 직접 (주인 11/13·11/16 — Cloudflare 사람 확인이 서버 브라우저에서 안 넘어감, 우회 금지): 서버 등록·서버 로그인 단추 없음,
+   주소 복사 → keyzard.cc/nb 열기만. 수집은 사람이 단추를 누를 때만 — 이 파일은 스스로 POST 하지 않는다. 글은 textContent 로만.
    logins.js 처럼 셸이 defer 로 받고, app.js 가 #main 을 다시 그리면 같은 칸을 다시 붙인다. 예전 화면은 '예전 화면' 링크. */
 'use strict';
 (() => {
@@ -11,8 +12,9 @@ const CSS = '.kz .row{flex-wrap:wrap;row-gap:6px}.kz .row .grow{flex:1 1 60%}.kz
 // 대시보드 블로그 ↔ 도구 블로그(b1~b3): 도구가 알려 주는 블로그 주소(blog_home = RSS 주소에서)의 네이버 아이디로 — Blog-Auto config/<블로그>.yaml blog_id
 const NID = {derenlog: 'finance', derenpick: 'issue', demiyum: 'hotdeal'}, NAME = {finance: '드라마', issue: '데런픽', hotdeal: '라커룸'};
 const OTHER = /^(pics|search|trial|ptrial|sched)$/, SNS = ['threads', 'x', 'lookbook', 'shorts'];
-const RES = {ok: '✅ 등록됐어요', failed: '❌ 등록이 안 됐어요 (대기 목록에 남겨 둠)', limit: '⏸ 오늘 한도에 걸렸어요 — 내일 다시', skipped: '이미 등록된 글이라 끝으로 표시했어요',
-  need_login: '🔑 키자드 로그인이 필요해요 — 연결 탭 키자드 로그인', unknown: '키자드 반응을 읽지 못했어요 — 아래에서 결과를 골라 주세요'};
+const KZ = 'https://keyzard.cc/nb', PHONE = '키자드는 폰에서 직접 등록해요 — 주소 복사 → keyzard.cc/nb';
+// 홈 화면 앱(아이패드 standalone)이면 사파리로 (routine.js sf 처럼 x-safari-https)
+const sf = u => navigator.standalone === true ? 'x-safari-' + u : u;
 const ST = {d: null, at: 0, err: '', busy: false}, LK = {d: null, at: 0, err: ''}, NV = {d: null, at: 0, err: ''}, RC = {d: null, at: 0, err: '', all: false};
 const MSG = {};  // 칸마다 마지막 결과 한 줄 {text, bad}
 let WORK = '', tt = null;
@@ -62,15 +64,19 @@ async function get(o, path, max) {
   if (r.ok) { o.d = r.d; o.err = ''; } else o.err = r.msg;
   draw();
 }
-// 원격 로그인이 서버 크롬 차례를 기다리는 동안엔 4초마다 다시 봐서 '기다리는 중 — n초' 가 움직이게
-let LT = 0;
-const LWAIT = ['waiting', 'memory', 'opening'];
-const lstate = () => (ST.d && ST.d.login_state) || {};
 const status = async (force) => {
   if (force) ST.at = 0;
   await get(ST, 'status', 30000);
-  if (LWAIT.includes(lstate().phase) && !LT) LT = setTimeout(() => { LT = 0; status(true); }, 4000);
 };
+async function copy(t, m) {
+  try { await navigator.clipboard.writeText(t); toast(m); return; } catch (e) { /* 아래로 */ }
+  const a = el('textarea', {readonly: true, style: 'position:fixed;top:0;left:0;opacity:0'});
+  a.value = t; D.body.append(a); a.select();
+  let ok = false;
+  try { ok = D.execCommand('copy'); } catch (e) { ok = false; }
+  a.remove();
+  toast(ok ? m : '복사하지 못했어요 — 주소를 꾹 눌러 복사해 주세요');
+}
 
 // 단추 — 사람이 누를 때만. 한 번에 하나 (WORK = 지금 하는 일 글)
 async function act(slot, work, path, body, done, ask) {
@@ -87,8 +93,6 @@ async function act(slot, work, path, body, done, ask) {
   ST.at = LK.at = NV.at = 0;
   draw(); status(); look();
 }
-const res1 = x => (RES[x && x.status] || (x && x.status) || '결과 없음') + (x && x.message && x.status !== 'ok' ? '\n키자드: ' + String(x.message).slice(0, 120) : '');
-const isBad = x => !x || x.status !== 'ok';
 
 // -- 어느 화면인지 (app.js 와 같은 규칙: 블로그 고른 것·SNS 칸은 localStorage)
 const LSG = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
@@ -112,63 +116,25 @@ const blogOf = key => ((ST.d && ST.d.blogs) || []).find(b => keyOf(b) === key) |
 const msgEl = slot => MSG[slot] ? el('p', {class: 'msg' + (MSG[slot].bad ? ' bad' : '')}, MSG[slot].text) : null;
 const wait = (o, what) => o.err ? el('p', {class: 'msg bad'}, o.err) : !o.d ? el('p', {class: 'note'}, what || '불러오는 중…') : null;
 
-// ---------- 블로그 탭 '키자드' 칸
+// ---------- 블로그 탭 '키자드' 칸 — 폰에서 직접 등록 (주소 복사 → keyzard.cc 열기)
 function blogBox(key) {
-  const head = el('div', {class: 'top'}, el('b', {}, '키자드'), btn('lnk mute', '다시 보기', () => status(true)), old());
+  const head = el('div', {class: 'top'}, el('b', {}, '키자드'), btn('lnk mute', '다시 보기', () => status(true)));
   if (!ST.d) return [head, wait(ST)];
   const b = blogOf(key);
-  if (!b) return [head, el('p', {class: 'note'}, '이 블로그의 키자드 설정을 찾지 못했어요 — 예전 화면에서 확인해 주세요')];
-  const w = Array.isArray(b.waiting) ? b.waiting : [], left = Number(b.remaining_today) || 0, lim = Number(b.daily_limit) || 5, n = Math.min(w.length, left);
-  const t = ST.d.task && ST.d.task.bid === b.id ? ST.d.task : null, slot = 'b' + b.id;
-  const out = [head, el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, `등록 대기 ${w.length}개 · 오늘 남은 한도 ${left}/${lim}`),
-    el('span', {class: 's' + (b.need_login ? ' bad' : '')}, b.need_login ? '로그인 필요 — 연결 탭 키자드 로그인' : !b.active ? '꺼짐 (RSS 주소 없음)' :
-      `새 글 확인 ${b.running ? '하는 중' : when(b.last_run)}` + (b.rss_used_this_week ? ' · 이번 주 RSS 등록 함' : ''))),
-    b.need_login ? el('a', {class: 'sm', href: '#/connect'}, '로그인') : null)];
-  if (t) {
-    out.push(el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, '결과를 아직 몰라요'),
-      el('span', {class: 's'}, (t.link === ST.d.rss_task ? 'RSS 등록' : t.link) + ' — 키자드 화면을 보고 골라 주세요')),
-      btn('sm', '등록됐어요', () => act(slot, '표시하는 중…', 'kz/resolve/' + b.id, {status: 'ok'}, () => ({text: '등록됐다고 표시했어요'}))),
-      btn('sm', '안 됐어요', () => act(slot, '표시하는 중…', 'kz/resolve/' + b.id, {status: 'failed'}, () => ({text: '안 됐다고 표시했어요 (대기 목록에 남김)'})))));
-  }
-  const busy = !!WORK || !b.active;
-  out.push(btn('pb soft', `오늘 대기 글 모두 등록 (${n}개)`, () => act(slot, '등록하는 중… 글마다 몇 초씩 걸려요', 'kz/register_all/' + b.id, {}, d => {
-    const rs = Array.isArray(d.results) ? d.results : [], last = rs[rs.length - 1];
-    return {text: `${d.done || 0}/${d.planned || rs.length}개 등록됐어요` + (last && last.status !== 'ok' ? '\n멈춘 까닭: ' + res1(last) : ''), bad: !!last && last.status !== 'ok'};
-  }, `대기 글 ${n}개를 키자드에 차례로 등록할까요? (성공이 아니면 바로 멈춰요)`), {disabled: busy || !n}),
-  btn('pb soft', b.rss_used_this_week ? 'RSS 등록 (이번 주 함 · 월요일에 다시)' : 'RSS 등록 (주 1번 · 최근 글 50개)', () => act(slot, 'RSS 등록하는 중…', 'kz/rss/' + b.id, {}, d => {
-    const x = d.result || {};
-    return {text: res1(x) + (x.moved ? `\n대기 글 ${x.moved}개를 RSS로 등록됨으로 정리했어요` : ''), bad: isBad(x)};
-  }, '이 블로그의 키자드 계정으로 RSS 등록을 할까요? (일주일에 1번)'), {disabled: busy || !!b.rss_used_this_week}), msgEl(slot));
+  if (!b) return [head, el('p', {class: 'note'}, '이 블로그의 키자드 설정을 찾지 못했어요')];
+  const w = Array.isArray(b.waiting) ? b.waiting : [], links = w.map(x => x.link).filter(Boolean);
+  const out = [head, el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, `등록 대기 ${w.length}개 · 계정당 하루 ${Number(b.daily_limit) || 5}개`),
+    el('span', {class: 's'}, PHONE)),
+    el('a', {class: 'sm ac', href: sf(KZ), target: '_blank', rel: 'noopener'}, '키자드 열기'))];
+  if (links.length > 1) out.push(btn('pb soft', `주소 ${links.length}개 전부 복사`, () => copy(links.join('\n'), `${links.length}개 복사했어요 — 키자드에 붙여넣기 하세요`)));
   if (w.length) {
     const box = el('div', {style: 'margin-top:8px'});
-    box.append(...w.slice(0, 20).map(x => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, (x.title || '제목 없음') + (x.status === 'failed' ? ' · 지난번 실패' : '')),
+    box.append(...w.slice(0, 20).map(x => el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, x.title || '제목 없음'),
       el('span', {class: 's'}, x.link || '')),
-      btn('sm ac', '키자드에 등록', () => act(slot, '등록하는 중…', 'kz/prepare/' + b.id, {link: x.link, submit: true}, d => ({text: res1(d.result), bad: isBad(d.result)}),
-        '이 글을 키자드에 등록할까요?\n' + (x.title || x.link)), {disabled: busy || left <= 0}))));
+      x.link ? btn('sm', '주소 복사', () => copy(x.link, '주소를 복사했어요 — 키자드에 붙여넣기 하세요')) : null)));
     out.push(box);
   } else out.push(el('p', {class: 'note'}, '등록 대기 글이 없어요'));
-  if (left <= 0 && w.length) out.push(el('p', {class: 'note'}, '오늘 한도를 다 썼어요 — 대기 글은 내일 등록해요'));
   return out;
-}
-
-// ---------- 연결 탭 '키자드 로그인'
-function loginBox() {
-  const head = el('div', {class: 'top', style: 'margin:20px 0 6px'}, el('h2', {}, '키자드 로그인'), btn('lnk', '다시 보기', () => status(true)), old());
-  if (!ST.d) return [head, el('div', {class: 'box'}, wait(ST))];
-  const open = ST.d.login_blog || '';
-  const rows = (ST.d.blogs || []).map(b => {
-    const k = keyOf(b), mine = open === b.id, bad = !mine && (b.need_login || (b.active && !b.logged_in_before));
-    const ls = lstate(), waiting = !mine && ls.target === b.id && LWAIT.includes(ls.phase), failed = !mine && ls.target === b.id && ls.phase === 'failed';
-    const txt = mine ? '원격 화면 열림 — 로그인한 뒤 닫기' : waiting ? String(ls.message || '차례 기다리는 중') : failed ? String(ls.message || '원격 화면을 못 열었어요') : b.need_login ? '로그인 필요' + (b.message ? ' — ' + String(b.message).slice(0, 80) : '')
-      : !b.active ? '꺼짐 (RSS 주소 없음)' : b.logged_in_before ? '로그인 확인 전 — 첫 등록 때 확인돼요' : '아직 로그인한 적 없어요';
-    return el('div', {class: 'row'}, el('div', {class: 'grow'}, el('span', {class: 't'}, `${(k && NAME[k]) || b.name || b.id} 키자드`), el('span', {class: 's' + (bad || failed ? ' bad' : '')}, txt)),
-      mine ? [el('a', {class: 'sm ac', href: OLD, target: '_blank', rel: 'noopener'}, '원격 화면 열기'),
-        btn('sm', '닫기', () => act('login', '닫는 중…', 'login/done', {}, () => ({text: '원격 화면을 닫았어요'})))]
-        : btn('sm' + (bad ? ' ac' : ''), '원격 로그인', () => act('login', '원격 화면 여는 중…', 'login/start/' + b.id, {}, d => ({text: d && LWAIT.includes(d.phase) ? String(d.message || '브라우저 차례 기다리는 중') + ' — 이 칸에서 계속 알려 드려요' : '원격 화면을 열었어요 — \'원격 화면 열기\'를 눌러 로그인해 주세요'})),
-          {disabled: !!WORK || waiting || (!!open && open !== b.id)}));
-  });
-  return [head, el('div', {class: 'box'}, rows.length ? rows : el('p', {class: 'note'}, '블로그가 없어요'), msgEl('login')),
-    el('p', {class: 'note'}, '로그인은 주인이 직접 해요 — 아이디·비밀번호는 저장하지 않아요')];
 }
 
 // ---------- SNS › 룩북 아래: 룩북 수집 · 코디 레시피 · 코디 트렌드
@@ -220,7 +186,6 @@ function fill(s, fn) {
 function draw() {
   const k = blogKey();
   if (k && BOX.kzb) { BOX.kzb.className = 'kz box'; fill(BOX.kzb, () => blogBox(k)); }
-  if (parts()[0] === 'connect' && BOX.kzl) fill(BOX.kzl, loginBox);
   if (snsLook() && BOX.kzk) fill(BOX.kzk, lookBox);
 }
 let KEY = null;
@@ -229,18 +194,12 @@ function mount() {
     const m = D.getElementById('main');
     if (!m) return;
     if (!D.getElementById('kz-css')) D.head.append(el('style', {id: 'kz-css', text: CSS}));
-    const k = blogKey(), c = parts()[0] === 'connect', lk = snsLook();
-    for (const [id, want] of [['kzb', k], ['kzl', c], ['kzk', lk]]) if (!want && BOX[id] && BOX[id].parentNode) BOX[id].remove();
+    const k = blogKey(), lk = snsLook();
+    for (const [id, want] of [['kzb', k], ['kzk', lk]]) if (!want && BOX[id] && BOX[id].parentNode) BOX[id].remove();
     if (k) {
       const s = sec('kzb', '키자드'), seg = m.querySelector(':scope>.seg');
       if (k !== KEY) { KEY = k; fill(s, () => blogBox(k)); s.className = 'kz box'; }
       if (seg ? seg.nextSibling !== s : m.firstChild !== s) seg ? seg.after(s) : m.prepend(s);
-      status();
-    }
-    if (c) {
-      const s = sec('kzl', '키자드 로그인'), lg = D.getElementById('lgp');
-      if (!s.firstChild) fill(s, loginBox);
-      if (lg && lg.parentNode === m ? lg.nextSibling !== s : m.firstChild !== s) lg && lg.parentNode === m ? lg.after(s) : m.prepend(s);
       status();
     }
     if (lk) {

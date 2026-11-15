@@ -1,6 +1,7 @@
 """대시보드 안 키자드 칸 (주인 11/12 '키자드 도구를 대시보드 화면으로') — static/kz.js.
 
-1) 파일: 바깥 주소·innerHTML 없음 · 부르는 곳은 /dashboard/keyzard/api/… 뿐 · 스스로 POST 하지 않음(단추 act() 안에서만) · 크기 예산 · 셸·앱 파일 등록.
+11/16 주인 '키자드 원격 로그인 없애줘': 연결 탭 '키자드 로그인' 줄·서버 등록 단추 없음 — 블로그 칸은 주소 복사 → keyzard.cc/nb 열기만 (폰에서 직접).
+1) 파일: 바깥 주소(keyzard.cc/nb 하나만 빼고)·innerHTML 없음 · 부르는 곳은 /dashboard/keyzard/api/… 뿐 · 스스로 POST 하지 않음(단추 act() 안에서만) · 크기 예산 · 셸·앱 파일 등록.
 2) 진짜 크롬 (node playwright 가 있을 때만): 가짜 키자드 API 로 블로그 탭(데런픽 = b2 — 도구의 blog_home 으로 맞춤)·연결 탭·SNS 룩북을
    그린다 — 콘솔 오류 없음 · '[object'·'undefined'·'NaN' 없음 · 폰 너비 안 넘침 · 단추를 누를 때만 POST · 오류는 짧은 한국어 · app.js 처럼
    #main 을 다시 그려도 칸이 다시 붙음 · 키자드 도구가 꺼져도(502) 탭이 깨지지 않음.
@@ -29,6 +30,8 @@ KZ_JS_GZIP_MAX = 7 * 1024 + 512
 def test_kz_js_local_safe_and_wired() -> None:
     raw = (STATIC / "kz.js").read_bytes()
     js = raw.decode("utf-8")
+    assert js.count("https://") == 1 and "const KZ = 'https://keyzard.cc/nb'" in js
+    js = js.replace("https://keyzard.cc/nb", "")
     assert len(raw) <= KZ_JS_MAX and len(gzip.compress(raw, 9)) <= KZ_JS_GZIP_MAX
     for bad in ("http://", "https://", "innerHTML", "eval(", "new Function", "XMLHttpRequest", "sendBeacon", "setInterval"):
         assert bad not in js, bad
@@ -37,9 +40,11 @@ def test_kz_js_local_safe_and_wired() -> None:
     assert len(re.findall(r"kz\('[^']*', ", js)) == 0 and js.count("await kz(path, body || {})") == 1
     calls = [m.start() for m in re.finditer(r"\bact\(", js) if not js[:m.start()].endswith("function ")]
     assert calls and all(js[i - 6:i] == "() => " for i in calls)
-    for word in ("'키자드에 등록'", "오늘 대기 글 모두 등록", "RSS 등록", "'예전 화면'", "'키자드 로그인'", "'원격 로그인'", "'룩북 수집'", "'코디 레시피'",
+    for word in ("'키자드 열기'", "'주소 복사'", "전부 복사", "'예전 화면'", "'룩북 수집'", "'코디 레시피'", "x-safari-",
                  "'코디 트렌드'", "'지금 수집'", "'지금 모으기'", "derenpick: 'issue'", "blog_home", "W.SBKz"):
         assert word in js, word
+    for gone in ("login/start", "login/done", "kz/prepare", "kz/register_all", "kz/rss", "kz/resolve", "원격 로그인", "키자드 로그인"):
+        assert gone not in js, gone  # 서버가 키자드에 로그인·등록하는 길 없음 (11/16)
     html = shell.page({"me": {}})
     assert re.search(r'<script defer src="/dashboard/static/kz\.js\?v=[0-9a-f]{10}"></script>', html)
     assert "kz.js" in dash_api.APP_FILES
@@ -127,23 +132,17 @@ const fs = require('fs');
   out.wide = [await p.evaluate(() => document.documentElement.scrollWidth)];
   out.postsBefore = posts.length;
   if (!down) {
-    await p.click('#kzb .row .sm.ac');  // 첫 대기 글 '키자드에 등록'
-    await p.waitForFunction(() => /등록됐어요/.test(document.querySelector('#kzb').innerText));
-    await p.evaluate(() => fakeRender());  // 앱이 다시 그려도 칸·결과 줄이 그대로
+    out.open = await p.$$eval('#kzb a.sm', es => es.map(e => [e.getAttribute('href'), e.target]));
+    await p.click('#kzb button.sm');  // 첫 대기 글 '주소 복사' (클립보드가 막혀도 짧은 안내)
+    await p.waitForFunction(() => !document.getElementById('toast').hidden);
+    out.toast = await p.$eval('#toast', e => e.innerText);
+    await p.evaluate(() => fakeRender());  // 앱이 다시 그려도 칸이 그대로
     await settle();
     out.afterRender = await text();
-    await p.click('text=오늘 대기 글 모두 등록');
-    await p.waitForFunction(() => /멈춘 까닭/.test(document.querySelector('#kzb').innerText));
-    out.all = await p.$eval('#kzb', e => e.innerText);
   }
   await p.evaluate(() => { location.hash = '#/connect'; });
   await settle();
   out.connect = await text();
-  if (!down) {
-    await p.click('#kzl .row:nth-child(3) .sm');  // 핫딜 '원격 로그인' → 409
-    await p.waitForFunction(() => /자동 작업 중/.test(document.querySelector('#kzl').innerText));
-    out.connect2 = await p.$eval('#kzl', e => e.innerText);
-  }
   out.wide.push(await p.evaluate(() => document.documentElement.scrollWidth));
   await p.evaluate(() => { location.hash = '#/sns/lookbook'; });
   await settle();
@@ -190,27 +189,25 @@ def test_real_browser_three_places_and_buttons_only_on_tap() -> None:
     _clean(got)
     # 블로그 탭: 데런픽(issue) = 도구 b2 (blog_home derenpick) · 고르기 칸 바로 아래
     assert got["blogOrder"][:2] == ["seg", "kzb"] and got["postsBefore"] == 0
-    for word in ("키자드", "등록 대기 2개 · 오늘 남은 한도 3/5", "오늘 대기 글 모두 등록 (2개)", "RSS 등록 (주 1번", "겨울 니트 코디", "지난번 실패", "키자드에 등록", "예전 화면"):
+    for word in ("키자드", "등록 대기 2개", "키자드는 폰에서 직접 등록해요 — 주소 복사 → keyzard.cc/nb", "키자드 열기", "주소 2개 전부 복사", "겨울 니트 코디", "주소 복사"):
         assert word in got["blog"], word
-    assert "룩북" not in got["blog"]  # 블로그 화면에 '룩북' 글자 없음 (test_dash_sns 와 같은 원칙)
-    assert "✅ 등록됐어요" in got["afterRender"] and "앱 칸" in got["afterRender"]
-    assert "1/2개 등록됐어요" in got["all"] and "오늘 한도에 걸렸어요" in got["all"] and "5회 초과" in got["all"]
-    for word in ("키자드 로그인", "드라마 키자드", "데런픽 키자드", "라커룸 키자드", "로그인 필요 — 로그인이 풀렸습니다", "원격 로그인"):
-        assert word in got["connect"], word
-    assert "지금 자동 작업 중입니다" in got["connect2"]
+    for gone in ("룩북", "모두 등록", "RSS 등록", "키자드에 등록", "로그인"):  # 블로그 화면에 '룩북' 글자 없음 · 서버 등록·로그인 단추 없음 (11/16)
+        assert gone not in got["blog"], gone
+    assert got["open"] == [["https://keyzard.cc/nb", "_blank"]] and "복사" in got["toast"]
+    assert "키자드" in got["afterRender"] and "앱 칸" in got["afterRender"]
+    assert "키자드" not in got["connect"]  # 연결 탭 '키자드 로그인' 줄 없앰 (11/16)
     for word in ("룩북 수집", "29CM 룩북", "11-12 02:24 · 룩북 10 · 상품 0 · 24시간마다", "멈춤: 봇 확인 화면", "지금 수집", "코디 레시피", "데이트 룩 1",
                  "상의 아이보리 울 니트 · 하의 블랙 롱스커트", "♥ 1,234", "인기 조합", "코디 트렌드", "니트 · 글 30개 ▲2", "코트 · 글 20개 NEW", "꾸안꾸 · 글 12개 ▼1",
                  "지금 모으기"):
         assert word in got["look"], word
     assert got["lookLast"] == "kzk" and "수집했어요: 룩북 10개" in got["look2"]
     assert got["btn"] >= 36
-    assert [p[0] for p in got["posts"]] == ["kz/prepare/b2", "kz/register_all/b2", "login/start/b3", "look/run/s1"]
-    assert got["posts"][0][1] == {"link": "https://blog.naver.com/derenpick/224000000001", "submit": True}
+    assert [p[0] for p in got["posts"]] == ["look/run/s1"]
 
 
 def test_real_browser_tool_down_shows_short_korean_and_keeps_tabs() -> None:
     got = _run(down=True)
     _clean(got)
-    assert "키자드 도구가 응답하지 않아요" in got["blog"] and "앱 칸" in got["blog"] and "예전 화면" in got["blog"]
-    assert "키자드 도구가 응답하지 않아요" in got["connect"] and "키자드 도구가 응답하지 않아요" in got["look"]
+    assert "키자드 도구가 응답하지 않아요" in got["blog"] and "앱 칸" in got["blog"] and "키자드 열기" not in got["blog"]
+    assert "키자드" not in got["connect"] and "키자드 도구가 응답하지 않아요" in got["look"]
     assert got["posts"] == []

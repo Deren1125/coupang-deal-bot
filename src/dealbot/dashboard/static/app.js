@@ -730,7 +730,7 @@ function vSearch() {
   const s = S.search, out = [el('div', {class: 'top'}, el('h2', {}, '구글 검색 등록'), el('a', {class: 'lnk', href: '#/blog/' + (LS.g('blog') || 'finance')}, '블로그로'))];
   if (!s || !s.days.length) return out.concat(el('p', {class: 'empty'}, '새로 발행한 글이 아직 없어요'));
   out.push(el('p', {class: 'note'}, '블로그 아이디마다 키자드에 붙여넣고 등록함을 눌러 주세요'),
-    el('a', {class: 'mr', href: '/dashboard/keyzard/'}, '키자드 등록 도우미 열기 (버튼으로 등록 · 계정당 하루 5번)'));
+    s.keyzard ? el('a', {class: 'mr', href: (navigator.standalone === true ? 'x-safari-' : '') + s.keyzard, target: '_blank', rel: 'noopener'}, '키자드 열기 — 폰에서 직접 등록 (계정당 하루 5번)') : null);
   for (const g of s.blogs) {
     const left = g.items.filter(x => !isOn(x)).map(x => x.url);
     out.push(el('div', {class: 'top hs'}, el('p', {class: 'h3'}, `${g.label} · ${left.length ? left.length + '개 남음' : '다 했어요'}`),
