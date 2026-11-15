@@ -13,7 +13,7 @@
   몸 512KB 까지 · 같은 손님 1분 120번.
 화면(로그인 + 같은 사이트 + X-Dash-Token — DashApi.guard):
   GET  /dashboard/api/ssalmuk/state     {"state", "receivedAt", "pending", "stale", "results"} (no-store — 주인 이름·전화가 들어 있음)
-                                        있을 때만: "health" (마지막 실행 점검 줄 — clean_health) · "quiz_pending" (보내고 아직 안 가져간 퀴즈 답)
+                                        있을 때만: "health" (마지막 실행 점검 줄 — clean_health) · "quiz_pending" (보내고 아직 안 가져간 퀴즈 답 [{id, at, question, answer, key}] 새것 30개)
   POST /dashboard/api/ssalmuk/act       {"op": "run"|"done"|"profile"|"search_retry"|"trust_host"|"quiz_answer", "args": {...}} → 명령 쌓기
                                         (done 은 받아 둔 상태에도 먼저 · quiz_answer {question, answer, key} — 퀴즈 카드 보기 단추, 쌀먹 6663b6c)
   GET  /dashboard/api/ssalmuk/key       {"key", "url", "at"} — 연결 칸을 펼칠 때만 (no-store)
@@ -68,6 +68,7 @@ OPS = ("run", "done", "profile", "search_retry", "trust_host", "quiz_answer")  #
 QUIZ_Q_MAX = 1000
 QUIZ_A_MAX = 300  # 쌀먹이 100자·'카드 보기 중 하나'를 다시 봄 — 여기선 모양만
 QUIZ_KEY_MAX = 1000
+QUIZ_PENDING_MAX = 30  # 화면 응답에 싣는 '보내고 아직 안 가져간 퀴즈 답' (새것부터 — 쌓여도 응답이 커지지 않게)
 HOST_RE = re.compile(r"^(?=.{4,253}$)(?!-)[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})*\.[a-z]{2,24}$")
 # 쌀먹 sync.js PROFILE_KEYS 와 같게 (점 키 그대로)
 PROFILE_KEYS = ("name", "phone", "email", "birth", "gender", "zipcode", "address", "addressDetail", "shareUrl", "surveyMode",
@@ -395,7 +396,9 @@ class Ssalmuk:
         health = clean_health(out["state"])
         if health is not None:
             out["health"] = health
-        quiz = [{"id": c["id"], **{k: c["args"].get(k) for k in ("question", "answer", "key")}} for c in cmds if c["op"] == "quiz_answer"]
+        # at = 보낸 시각 (화면이 5분 넘은 대기를 '아직 대기'로 — 명령은 하루 뒤 _cmds 에서 사라짐)
+        quiz = [{"id": c["id"], "at": c.get("at"), **{k: c["args"].get(k) for k in ("question", "answer", "key")}}
+                for c in cmds if c["op"] == "quiz_answer"][-QUIZ_PENDING_MAX:]
         if quiz:
             out["quiz_pending"] = quiz
         return out

@@ -39,7 +39,7 @@ const AREAS = [['commentTemplates', '기대평·댓글 문구 (한 줄에 하나
 
 let data = null, at = 0, busy = false, timer = null, card = null, scr = null, tt = null, kinfo = null, kbusy = false;
 let seg = 'todo';
-const open = {}, steps = {}, draft = {}, mine = new Set(), seen = new Set(), qsent = [];
+const open = {}, steps = {}, draft = {}, mine = new Set(), seen = new Set(), qsent = [], qok = new WeakSet();
 
 function el(t, a, ...kids) {
   const e = D.createElement(t);
@@ -134,9 +134,13 @@ function recount() {
 async function load() {
   if (busy) return;
   busy = true;
+  const had = qsent.filter(r => qok.has(r));  // 이 읽기를 시작하기 전에 서버가 받은 퀴즈 답만 — 아직 보내는 중인 답은 이 응답에 없으니 그대로 둠
   try {
     const r = await fetch(API + 'state', {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}});
-    if (r.status === 200) { data = await r.json(); at = Date.now(); qsent.length = 0; }  // 방금 누른 퀴즈 답은 이제 서버 값(quiz_pending·results)으로
+    if (r.status === 200) {  // 서버가 받은 퀴즈 답은 이제 서버 값(quiz_pending·results)으로
+      data = await r.json(); at = Date.now();
+      for (const x of had) { const i = qsent.indexOf(x); if (i >= 0) qsent.splice(i, 1); }
+    }
   } catch (e) { /* 다음에 다시 */ }
   busy = false;
   for (const x of (data && data.results) || []) {
@@ -189,18 +193,22 @@ async function retrySearch(b) {
 }
 // 11/14 퀴즈 카드 (이벤트 참여 서버 6663b6c — todo[].quiz[] {q, options, suggest, confidence, evidence, why, key}): 보기 단추 → 확인 창 한 번 →
 // act quiz_answer {question: q 그대로, answer: 보기 글, key: 카드 key 그대로(없으면 null)}. 답은 보기 중 하나만 (직접 입력·되돌리기는 명세에 없음).
-// 상태: 보냄·대기(quiz_pending — 1분 안에 가져감) → 반영됨(results 'ok') / 저장 안 됨(results 이유 글). 모르는 꼴은 버림 · 글 노드만
+// 상태: 보냄·대기(quiz_pending — 1분 안에 가져감 · 5분 넘거나 연결이 끊겼으면 '아직 대기'로 다시 고를 수 있게, 하루 지나면 서버가 지움)
+//  → 반영됨(results 'ok') / 저장 안 됨(results 이유 글). 모르는 꼴은 버림 · 글 노드만
+// 길이: 바깥(이벤트 참여 서버 push)에서 온 글 — 서버(ssalmuk.py QUIZ_*_MAX)가 안 받을 긴 질문·key·보기는 그리지 않음 (자르면 다른 질문이 되므로 자르지 않고 뺌)
+const QQ = 1000, QA = 300, QLATE = 300000;
 const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
-const quizzes = t => (Array.isArray(t.quiz) ? t.quiz : []).filter(x => x && typeof x === 'object' && typeof x.q === 'string' && x.q.trim()).slice(0, 3)
+const quizzes = t => (Array.isArray(t.quiz) ? t.quiz : []).filter(x => x && typeof x === 'object' && typeof x.q === 'string' && x.q.trim() && x.q.length <= QQ
+  && !(typeof x.key === 'string' && x.key.length > QQ)).slice(0, 3)
   .map(x => ({q: x.q, key: typeof x.key === 'string' && x.key ? x.key : null,
-    options: (Array.isArray(x.options) ? x.options : []).filter(o => typeof o === 'string' && o.trim()).slice(0, 12),
+    options: (Array.isArray(x.options) ? x.options : []).filter(o => typeof o === 'string' && o.trim() && o.length <= QA).slice(0, 12),
     suggest: typeof x.suggest === 'string' ? x.suggest : null,
     conf: typeof x.confidence === 'number' && x.confidence >= 0 && x.confidence <= 1 ? Math.round(x.confidence * 100) / 100 : null,
     evidence: str(x.evidence, 200), why: str(x.why, 200)}));
 const qsame = (r, x) => !!r && typeof r === 'object' && r.question === x.q && (r.key || null) === x.key;
 function qstate(x) {
   const w = qsent.find(r => qsame(r, x)) || (Array.isArray(data && data.quiz_pending) ? data.quiz_pending : []).find(r => qsame(r, x));
-  if (w) return {s: 'wait', answer: w.answer};
+  if (w) return {s: 'wait', answer: w.answer, late: typeof w.at === 'string' && (!!data.stale || Date.now() - Date.parse(w.at) > QLATE)};
   const rs = (Array.isArray(data && data.results) ? data.results : []).filter(r => r && r.op === 'quiz_answer' && qsame(r.ref, x));
   const r = rs[rs.length - 1];
   return r ? {s: r.result === 'ok' ? 'ok' : 'no', answer: r.ref.answer, why: str(r.result, 200)} : null;
@@ -217,14 +225,14 @@ async function quiz(x, o) {
   if (W.confirm && !W.confirm(`이 답으로 저장할까요?\n\n${x.q.slice(0, 120)}\n→ ${o}\n\n다음 확인부터 이 질문은 이 답으로 자동 응모해요.`)) return;
   const r = {question: x.q, answer: o, key: x.key};
   qsent.push(r); draw();
-  if (await act('quiz_answer', r)) { toast('보냈어요 — 이벤트 참여 서버가 1분 안에 가져가요'); return; }
+  if (await act('quiz_answer', r)) { qok.add(r); toast('보냈어요 — 이벤트 참여 서버가 1분 안에 가져가요'); return; }
   const i = qsent.indexOf(r);
   if (i >= 0) qsent.splice(i, 1);
   draw();
 }
 function quizBox(t) {
   return quizzes(t).map(x => {
-    const s = qstate(x), wait = !!s && s.s === 'wait';
+    const s = qstate(x), wait = !!s && s.s === 'wait' && !s.late;
     return el('div', {class: 'qz'}, el('p', {class: 'qq'}, '퀴즈 · ' + x.q),
       x.options.length ? el('div', {class: 'opts'}, x.options.map(o => btn('tg', o + (x.suggest === o ? ` · 추천${x.conf != null ? ' ' + x.conf : ''}` : ''), () => quiz(x, o),
         {disabled: wait || null, 'aria-pressed': s && s.answer === o ? 'true' : 'false'})))
@@ -232,6 +240,8 @@ function quizBox(t) {
       x.evidence ? el('p', {class: 'note qe'}, '근거: ' + x.evidence) : null, x.why ? el('p', {class: 'note qe'}, x.why) : null,
       !s ? (x.options.length ? el('p', {class: 'note qe'}, '보기를 누르면 다음 확인부터 이 질문은 자동으로 답해요') : null)
         : wait ? el('p', {class: 'st'}, el('span', {class: 'cp info'}, '보냄 · 대기'), `'${str(s.answer, 100)}' — 이벤트 참여 서버가 1분 안에 가져가요`)
+        : s.s === 'wait' ? el('p', {class: 'st'}, el('span', {class: 'cp hot'}, '아직 대기'),
+          `'${str(s.answer, 100)}' — 이벤트 참여 서버가 아직 안 가져갔어요 (연결되면 저장돼요 · 하루 넘게 못 가져가면 사라져요 · 다시 골라도 돼요)`)
         : s.s === 'ok' ? el('p', {class: 'st'}, el('span', {class: 'cp ok'}, '반영됨'), `'${str(s.answer, 100)}' — 다음 확인부터 자동으로 답해요`)
         : el('p', {class: 'st warn'}, qwhy(x, s.why)));
   });

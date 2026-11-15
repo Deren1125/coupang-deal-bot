@@ -14,6 +14,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -947,7 +948,9 @@ def test_quiz_pending_and_ack_reason_reach_the_view() -> None:
     a = s.act({"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}})[1]["id"]
     b = s.act({"op": "quiz_answer", "args": {"question": Q2["q"], "answer": "O", "key": None}})[1]["id"]
     v = s.view()
-    assert v["quiz_pending"] == [{"id": a, "question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}, {"id": b, "question": Q2["q"], "answer": "O", "key": None}]
+    assert [{k: x[k] for k in ("id", "question", "answer", "key")} for x in v["quiz_pending"]] == [
+        {"id": a, "question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}, {"id": b, "question": Q2["q"], "answer": "O", "key": None}]
+    assert all(set(x) == {"id", "at", "question", "answer", "key"} and x["at"].endswith("Z") for x in v["quiz_pending"])
     why = "같은 질문 카드가 여럿이라 저장 안 함"
     assert s.ack({"ids": [a, b], "results": {a: "ok", b: why}})[0] == 200
     v = s.view()
@@ -983,6 +986,20 @@ QUIZ_SHIM = SHIM.replace("const runb = find(scr,", r"""
   out.health = all(scr, n => n.className === 'st hl').map(n => [n.children[0].className, text(n)]);
   out.note = all(scr, n => n.className === 'note').map(text)[0];
   const pick = process.env.QUIZ_PICK ? JSON.parse(process.env.QUIZ_PICK) : null;
+  if (pick && process.env.QUIZ_RACE) {  // 답을 보내는 중(POST 가 아직 안 끝남)에 화면이 상태를 다시 읽어도 '보냄 · 대기'가 풀리지 않아야 함
+    global.confirm = () => true;
+    let go; const gate = new Promise(r => { go = r; }), f0 = global.fetch;
+    global.fetch = async (u, o) => { if (o && o.method === 'POST') await gate; return f0(u, o); };
+    const b = all(qz()[pick[0]], x => x.tagName === 'BUTTON')[pick[1]];
+    const p = b.listeners.click({currentTarget: b});
+    await window.SBEvent.load();
+    out.during = qz().map(n => ({text: text(n), btns: btns(n)}));
+    go(); await p;
+    out.sent = qz().map(n => ({text: text(n), btns: btns(n)}));
+    await window.SBEvent.load();  // 서버가 받은 뒤의 읽기 → 이제 서버 값대로 (이 시험의 응답에는 대기가 없음)
+    out.after = qz().map(n => ({text: text(n), btns: btns(n)})); out.posts = posts;
+    console.log(JSON.stringify(out)); return;
+  }
   if (pick) {
     const asked = []; global.confirm = m => { asked.push(m); return process.env.QUIZ_NO ? false : true; };
     const b = all(qz()[pick[0]], x => x.tagName === 'BUTTON')[pick[1]];
@@ -993,12 +1010,15 @@ QUIZ_SHIM = SHIM.replace("const runb = find(scr,", r"""
   const runb = find(scr,""")
 
 
-def _quiz_render(view: dict[str, Any], pick: list[int] | None = None, no: bool = False) -> dict[str, Any]:
+def _quiz_render(view: dict[str, Any], pick: list[int] | None = None, no: bool = False, race: bool = False) -> dict[str, Any]:
     import os
 
     env = dict(os.environ)
     env.pop("QUIZ_PICK", None)
     env.pop("QUIZ_NO", None)
+    env.pop("QUIZ_RACE", None)
+    if race:
+        env["QUIZ_RACE"] = "1"
     if pick is not None:
         env["QUIZ_PICK"] = json.dumps(pick)
     if no:
@@ -1093,6 +1113,76 @@ def test_ssalmuk_js_quiz_unknown_shapes_ignored() -> None:
     assert got["quiz"][0]["btns"] == [["가", "false", False], ["나", "false", False]] and "추천" not in got["quiz"][0]["text"]
     assert got["quiz"][1]["btns"] == [] and "보기가 없는 질문이에요" in got["quiz"][1]["text"]
     assert got["posts"][0][2]["args"] == {"question": "보기 꼴이 이상한 질문입니다", "answer": "나", "key": None}  # 글이 아닌 key 는 null
+
+
+def test_quiz_pending_is_capped_dated_and_gone_after_a_day() -> None:
+    now = [1_800_000_000.0]
+    s = ssalmuk.Ssalmuk(FakeDb(), clock=lambda: now[0])
+    s.push(quiz_sample())
+    for i in range(ssalmuk.QUIZ_PENDING_MAX + 5):
+        now[0] += 1
+        assert s.act({"op": "quiz_answer", "args": {"question": f"서로 다른 퀴즈 질문 {i}번입니다", "answer": "O", "key": f"q2:k{i}"}})[0] == 200
+    qp = s.view()["quiz_pending"]
+    assert len(qp) == ssalmuk.QUIZ_PENDING_MAX and qp[-1]["key"] == f"q2:k{ssalmuk.QUIZ_PENDING_MAX + 4}"  # 새것부터 남김
+    assert qp[-1]["at"] == ssalmuk._iso(now[0])
+    assert len(s.commands()["commands"]) == ssalmuk.QUIZ_PENDING_MAX + 5  # 명령 자체는 그대로 (화면 응답만 줄임)
+    now[0] += ssalmuk.CMD_KEEP + 1  # 하루 넘게 안 가져가면 명령이 사라지고 카드도 대기에서 풀림
+    v = s.view()
+    assert "quiz_pending" not in v and v["pending"] == 0
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_quiz_old_pending_can_be_picked_again() -> None:
+    now = [time.time() - 400]  # 6분 넘게 전에 누른 답 (쌀먹이 안 가져감)
+    s = ssalmuk.Ssalmuk(FakeDb(), clock=lambda: now[0])
+    s.push(quiz_sample())
+    s.act({"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}})
+    now[0] = time.time()
+    got = _quiz_render(s.view(), pick=[0, 2])
+    q1 = got["quiz"][0]
+    assert q1["chips"] == ["cp hot:아직 대기"] and "아직 안 가져갔어요" in q1["text"] and "1분 안에" not in q1["text"]
+    assert q1["btns"][0] == ["한국전력", "true", False] and not any(b[2] for b in q1["btns"])  # 잠기지 않음 — 다시 고를 수 있음
+    assert got["posts"][0][2]["args"] == {"question": Q1["q"], "answer": "<b>가스공사</b>", "key": Q1["key"]}
+    assert "보냄 · 대기" in got["picked"][0]["text"] and all(b[2] for b in got["picked"][0]["btns"])  # 다시 보낸 답은 방금 것으로
+    # 방금 보낸 답이라도 연결이 끊겼으면(20분 넘게 push 없음) '1분 안에'라고 하지 않음
+    s2 = ssalmuk.Ssalmuk(FakeDb(), clock=lambda: now[0])
+    s2.push(quiz_sample())
+    now[0] += ssalmuk.STALE_AFTER + 5
+    s2.act({"op": "quiz_answer", "args": {"question": Q1["q"], "answer": "한국전력", "key": Q1["key"]}})
+    v = s2.view()
+    assert v["stale"] is True
+    assert _quiz_render(v)["quiz"][0]["chips"] == ["cp hot:아직 대기"]
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_quiz_sending_survives_a_reload_in_between() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    s.push(quiz_sample())
+    got = _quiz_render(s.view(), pick=[0, 0], race=True)
+    # 보내는 중에 끼어든 읽기(그 응답에는 아직 대기가 없음)가 '보냄 · 대기'를 지우면 단추가 다시 열려 두 번 누르게 됨
+    assert "보냄 · 대기" in got["during"][0]["text"] and all(b[2] for b in got["during"][0]["btns"])
+    assert "보냄 · 대기" in got["sent"][0]["text"] and len(got["posts"]) == 1
+    assert "보냄 · 대기" not in got["after"][0]["text"] and not any(b[2] for b in got["after"][0]["btns"])  # 서버가 받은 뒤엔 서버 값대로
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_quiz_too_long_outside_text_not_drawn() -> None:
+    s = ssalmuk.Ssalmuk(FakeDb())
+    st = quiz_sample()
+    st["todo"][1].pop("quiz")
+    st["todo"][0]["quiz"] = [{"q": "가" * (ssalmuk.QUIZ_Q_MAX + 1), "options": ["O", "X"], "key": "k1"},
+                             {"q": "key 가 너무 긴 질문입니다", "options": ["O"], "key": "k" * (ssalmuk.QUIZ_KEY_MAX + 1)},
+                             {"q": "보기 하나가 너무 긴 질문입니다", "options": ["가", "나" * (ssalmuk.QUIZ_A_MAX + 1)], "evidence": "근" * 900, "why": "까" * 900, "key": "k3"}]
+    s.push(st)
+    got = _quiz_render(s.view())
+    assert len(got["quiz"]) == 1 and got["quiz"][0]["btns"] == [["가", "false", False]]  # 서버가 안 받을 길이는 그리지 않음
+    assert len(got["quiz"][0]["text"]) < 600  # 근거·까닭은 200자까지
+    # 안 된 이유(ack 결과 — 바깥 글)도 200자까지 · 태그는 글자로
+    c = s.act({"op": "quiz_answer", "args": {"question": "보기 하나가 너무 긴 질문입니다", "answer": "가", "key": "k3"}})[1]["id"]
+    s.ack({"ids": [c], "results": {c: "<img src=x onerror=alert(1)>" + "긴" * 900}})
+    got = _quiz_render(s.view())
+    assert len(got["quiz"][0]["warn"]) == 1 and got["quiz"][0]["warn"][0].startswith("저장 안 됨 — <img src=x onerror=alert(1)>")
+    assert len(got["quiz"][0]["warn"][0]) < 230 and got["quiz"][0]["tags"] == 0
 
 
 HEALTH = {"level": "warn", "at": "2026-11-13T22:30:00Z", "runId": "r1", "label": "07:23 정기", "status": "aborted",
