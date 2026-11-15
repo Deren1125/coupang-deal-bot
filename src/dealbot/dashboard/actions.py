@@ -218,7 +218,8 @@ def dismissible(iid: str, key: str, *, dealbot_row: bool) -> bool:
     if iid == "sns-replies":
         return True
     head = key.split(":", 1)[0]
-    kind_ok = (iid.startswith("post-") and head in DISMISS_POST_HEADS) or iid.startswith(("blog-", "sys-")) or iid == "sns-status"
+    kind_ok = (iid.startswith("post-") and head in DISMISS_POST_HEADS) or iid.startswith(("blog-", "sys-")) or iid == "sns-status" \
+        or (iid.startswith("x-big-") and head == "xbig")  # X 큰 사건 줄 — 직접 썼으면 할 일에서 바로 체크 (주인 11/16)
     if not kind_ok or head in REAL_WORK_HEADS or not key or key.endswith(":"):
         return False
     return dealbot_row or head in BLOGAUTO_DISMISS_HEADS
