@@ -86,6 +86,20 @@ with open(sys.argv[1], "a", encoding="utf-8") as f:
 ' "$dir/blogauto_inbox.jsonl" || true
 }
 
+owner_resolve() {  # 11/15 주인 '해결된 알림은 자동으로 지워지게' — 업데이트가 됐으면 앞서 띄운 '딜봇 업데이트 막힘'(update:*) 줄을 닫는다
+  local dir
+  dir="$(grep -E '^DEALBOT_DATA_DIR=' .env | tail -1 | cut -d= -f2- | tr -d "\"'")"
+  dir="${dir:-data}"
+  [ -d "$dir" ] || return 0
+  command -v python3 >/dev/null || return 0
+  python3 -c '
+import json, sys, time
+note = {"v": 2, "resolve": ["update:"], "at": time.time()}
+with open(sys.argv[1], "a", encoding="utf-8") as f:
+    f.write(json.dumps({"owner_notice": note}, ensure_ascii=False) + "\n")
+' "$dir/blogauto_inbox.jsonl" || true
+}
+
 mkdir -p var
 exec 9>var/auto-update.lock
 if command -v flock >/dev/null; then flock -n 9 || exit 0; fi  # 타이머와 손으로 돌린 것이 겹치지 않게
@@ -218,6 +232,7 @@ fi
 if [ -n "$(find var -maxdepth 1 \( -name 'update_failed_*' -o -name 'update_bad_*' \) 2>/dev/null | head -1)" ]; then
   notify "✅ 핫딜 봇 자동 업데이트: 다시 시도해서 새 코드($HEAD_SHORT)로 바꿨어요."
 fi
+owner_resolve  # 막힘 알림이 남아 있으면 닫음 (표식이 지워진 뒤에 성공해도 — 이미 닫혔으면 아무 일 없음)
 rm -f var/update_failed_* var/update_bad_* var/restarted_unknown_*
 [ "$NOW_RUNNING" = "?" ] && touch "var/restarted_unknown_$HEAD_SHORT"
 echo "✅ 업데이트 완료: $HEAD_SHORT $(git log -1 --format=%s | cut -c1-60)"
