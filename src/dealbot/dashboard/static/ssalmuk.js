@@ -164,7 +164,13 @@ async function post(path, body) {
 const why = (s, d, f) => !s ? '인터넷 연결을 확인해 주세요' : s === 401 ? '다시 로그인해 주세요 — 새로고침하면 로그인 화면이 떠요'
   : s === 403 && d.code === 'csrf' ? '화면이 오래됐어요 — 새로고침해 주세요' : d.text || f;
 async function act(op, args) {
-  const [s, d] = await post('act', {op, args});
+  // 11/15 서버 업데이트로 대시보드가 잠깐 다시 켜지는 동안(연결 실패·502~504 — 서버가 받기 전)은 3초·8초 뒤 두 번 더 (주인 10:44 '지금 확인하기' 실패)
+  let [s, d] = await post('act', {op, args});
+  for (const w of [3000, 8000]) {
+    if (!(s === 0 || s === 502 || s === 503 || s === 504)) break;
+    await new Promise(r => setTimeout(r, w));
+    [s, d] = await post('act', {op, args});
+  }
   if (s === 200 && d.ok) { if (d.id) mine.add(d.id); setTimeout(load, 800); return true; }
   toast(why(s, d, '보내지 못했어요 — 잠시 뒤 다시'));
   return false;
