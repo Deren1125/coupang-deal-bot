@@ -17,7 +17,14 @@
 - GET·HEAD 가 아닌 요청은 같은 사이트에서 온 것만 (DashApi.same_site — Sec-Fetch-Site 가 same-origin 또는 없음 + Origin 이 있으면
   대시보드 주소만). 파밍 화면은 X-Dash-Token 을 모르므로 이 경로는 그 확인을 쓰지 않는다
 
-파밍 화면의 스크립트는 대시보드와 같은 출처에서 돈다 — CSP 로 불러오기·요청을 이 서버로만 묶는다 (바깥 주소 없음, FARM_HEADERS).
+파밍 화면의 스크립트는 대시보드와 같은 출처에서 돈다 — 허브 화면에 나쁜 스크립트(XSS)가 끼어도 대시보드까지 닿지 않게 (보안 검토 11/15):
+- CSP 의 불러오기·요청·폼을 '이 서버'가 아니라 '이 서버의 /dashboard/farm/ 아래'로만 묶는다 (farm_csp — 경로까지 적은 출처).
+  파밍 화면의 fetch·XHR·폼은 /dashboard/api/… (대시보드 API·상태·X-Dash-Token) 에 가지 못한다. 머리글이라 화면 스크립트가 못 바꾼다
+- CSP 는 리디렉션 뒤에는 경로를 보지 않으므로, 허브가 준 Location 에 '..' 이 있으면 막는다 (/dashboard/farm 밖으로 못 나가게)
+- Cross-Origin-Opener-Policy: 파밍은 unsafe-none, 그 밖의 이 서버 응답은 모두 same-origin (web._respond) — 파밍 화면이
+  window.open('/dashboard/') 으로 대시보드 창을 열어도 그 창을 만질 수 없다 (서로 다른 묶음). 틀(iframe)은 양쪽 CSP·X-Frame-Options 가 막음
+- 남는 것 (머리글로는 못 막음 — 완전히 가르려면 파밍을 다른 주소(출처)로): 같은 출처라 Cache Storage·localStorage 는 같이 쓴다
+  (대시보드 서비스 워커의 저장본을 읽거나 바꿔치기), 화면 이동(location=…)은 CSP 가 막지 않는다. docs/DASHBOARD.md '파밍' 칸
 허브가 지킬 것: 주소는 상대 경로(또는 X-Forwarded-Prefix 를 앞에 붙임) · 바깥 주소(CDN·글꼴) 없음 · '← SNS' 는 /dashboard/ 로.
 """
 
@@ -27,7 +34,7 @@ import asyncio
 import logging
 import re
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
@@ -55,12 +62,29 @@ RESP_ALLOW = {"cache-control": "Cache-Control", "etag": "ETag", "last-modified":
 # script-src 에 'unsafe-inline' (없으면 화면이 안 뜸) · 글꼴(font-src) · 상대 주소(base-uri 'self') · 허브 알림용 서비스 워커(worker-src —
 # 주소가 /dashboard/farm/sw.js 라 범위는 /dashboard/farm/ 까지만, Service-Worker-Allowed 는 넘기지 않아 대시보드 범위로 못 넓힘).
 # 허브가 스크립트를 파일로 옮기면 'unsafe-inline' 을 뺀다 (파밍 화면은 대시보드와 같은 출처에서 돈다)
+# {src} = 이 서버의 /dashboard/farm/ 아래만 (farm_csp 가 '호스트/dashboard/farm/' 로 채움 — 대시보드 API 는 여기에 안 들어감)
+CSP_TEMPLATE = (
+    "default-src 'none'; script-src {src} 'unsafe-inline'; style-src {src} 'unsafe-inline'; img-src {src} data: blob:; "
+    "font-src {src} data:; media-src {src}; connect-src {src}; manifest-src {src}; worker-src {src}; form-action {src}; "
+    "base-uri 'self'; frame-ancestors 'none'"
+)
+HOST_RE = re.compile(r"[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:[0-9]{1,5})?")
+
+
+def farm_csp(hosts: Any) -> str:
+    """파밍 화면의 CSP. hosts = 이 대시보드가 열리는 호스트들 ('이름' 또는 '이름:포트'). 이상한 값은 버리고, 하나도 없으면 아무것도 못 부름."""
+    seen: list[str] = []
+    for h in hosts:
+        h = (h or "").strip().lower()
+        if HOST_RE.fullmatch(h) and h not in seen:
+            seen.append(h)
+    return CSP_TEMPLATE.format(src=" ".join(f"{h}{PREFIX}/" for h in seen[:6]) or "'none'")
+
+
 FARM_HEADERS = {
-    "Content-Security-Policy": (
-        "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-        "font-src 'self' data:; media-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; form-action 'self'; "
-        "base-uri 'self'; frame-ancestors 'none'"
-    ),
+    "Content-Security-Policy": farm_csp(()),  # 호스트를 모를 때 (handle 은 요청마다 farm_csp 로 덮는다)
+    # 대시보드(same-origin, web._respond 기본)와 다른 값 — 파밍 화면이 연 대시보드 창과 서로 만질 수 없게 갈린다
+    "Cross-Origin-Opener-Policy": "unsafe-none",
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -79,12 +103,18 @@ def _page(status: int, title: str, body: str) -> tuple[int, str, str, dict[str, 
     return status, web_page(title, body, back=BACK_HOME), HT, {**FARM_HEADERS, "Cache-Control": "no-store"}
 
 
+def _dotted(loc: str) -> bool:
+    """경로에 '..' 칸이 있나 ('%2e%2e' 로 적은 것 포함 — 브라우저가 풀어서 /dashboard/farm 밖으로 올라간다)."""
+    path = unquote(loc.split("#", 1)[0].split("?", 1)[0])
+    return ".." in path.replace("\\", "/").split("/")
+
+
 def rewrite_location(loc: str, base: str) -> str | None:
     """허브가 준 Location → 브라우저에 줄 값. 허브 주소·절대 경로는 /dashboard/farm 을 앞에, 상대 주소는 그대로, 그 밖(다른 곳)은 None."""
     loc = (loc or "").strip()
     if not loc or not all(0x20 < ord(ch) < 0x7F for ch in loc) or "\\" in loc:
         return None
-    if loc.startswith("//"):
+    if loc.startswith("//") or _dotted(loc):  # '..' 로 /dashboard/farm 밖(대시보드 API)으로 올라가는 주소는 막는다
         return None
     if loc.startswith("/"):
         out = PREFIX + loc
@@ -132,8 +162,31 @@ class FarmProxy:
 
     # ------------------------------------------------------------ 넘기기
     async def handle(self, method: str, path: str, query: str, headers: dict[str, str], body: bytes) -> Any:
+        sec = self.sec_headers(headers)
+        return self._with(sec, await self._handle(method, path, query, headers, body))
+
+    @staticmethod
+    def _with(sec: dict[str, str], res: Any) -> Any:
+        """어느 길로 나가든 (안내·오류 화면 포함) 보안 머리글은 이 요청의 것 (경로까지 묶은 CSP)."""
+        return res[0], res[1], res[2], {**res[3], **sec}
+
+    def sec_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        """이 요청에 붙일 보안 머리글 — CSP 의 출처는 브라우저가 부른 호스트(Host) + 설정의 대시보드 주소, 모두 /dashboard/farm/ 아래만."""
+        hosts = [headers.get("host") or ""]
+        try:
+            hosts += sorted(urlsplit(o).netloc for o in self.api.allowed_origins())
+        except Exception:  # noqa: BLE001 — 설정을 못 읽으면 Host 만
+            pass
+        return {**FARM_HEADERS, "Content-Security-Policy": farm_csp(hosts)}
+
+    async def _handle(self, method: str, path: str, query: str, headers: dict[str, str], body: bytes) -> Any:
         if method not in ("GET", "HEAD") and not self.api.same_site(headers):
             return _page(403, "막았어요", "다른 곳에서 보낸 요청이라 파밍으로 넘기지 않았어요.")
+        # 다른 사이트의 링크로 파밍 안쪽 주소를 바로 여는 것은 허브로 넘기지 않고 첫 화면으로 (보안 검토 11/15 — 세션 쿠키가 Lax 라
+        # 다른 사이트의 링크(GET)에는 쿠키가 실린다: 허브에 '주소만 열면 바뀌는' 길이 있어도 남이 누르게 하지 못하게).
+        # 주소창·책갈피·앱에서 연 것(none)과 이 서버 안에서 간 것(same-origin), 머리글이 없는 것은 그대로
+        if (headers.get("sec-fetch-site") or "").strip().lower() not in ("", "same-origin", "none") and (path != "/" or query):
+            return 303, HOME, None, {"Cache-Control": "no-store"}
         url, token = self.target()
         if not url or not token:
             return self.setup_page(url, token)

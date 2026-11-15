@@ -432,5 +432,11 @@ class YouTubeSource(Source):
 - 올리기 15MB(413) · 받기 20MB · 30초(504). GET·HEAD 가 아닌 요청은 같은 사이트에서 온 것만 (X-Dash-Token 은 안 봄 — 파밍 화면은 모름).
 - 허브가 지킬 것: 주소는 상대 경로(또는 X-Forwarded-Prefix 를 앞에) · 바깥 주소(CDN·글꼴) 없음(CSP 가 막음) · 웹소켓·SSE 없음 ·
   화면에 '← SNS'(`/dashboard/`). 페이지 안 스크립트는 지금은 허용(`'unsafe-inline'` — 허브 화면이 그렇게 돌아서), 파일로 옮기면 뺀다.
+- 같은 출처 막이 (보안 검토 11/15 — 허브 화면에 나쁜 스크립트가 끼어도 대시보드까지 닿지 않게): 파밍 응답의 CSP 는 불러오기·요청·폼을
+  `<호스트>/dashboard/farm/` 아래로만 묶는다 (`farm.farm_csp` — 파밍 화면의 fetch·폼은 `/dashboard/api/…` 에 못 감). 허브 Location 에 `..` 이 있으면 막음.
+  창 묶음(`Cross-Origin-Opener-Policy`)은 파밍 `unsafe-none` · 이 서버의 다른 모든 응답 `same-origin` (`web._respond`) — 파밍 화면이 연 대시보드 창을 못 만짐.
+  다른 사이트의 링크로 파밍 안쪽 주소(GET)를 열면 허브를 부르지 않고 `/dashboard/farm/` 으로 (주소창·책갈피·앱 안 이동은 그대로).
+  남는 것: 같은 출처라 Cache Storage·localStorage 는 같이 쓰고(대시보드 서비스 워커 저장본을 읽거나 바꿔치기 가능), 화면 이동은 CSP 가 못 막고,
+  원격 화면 터널 응답에는 이 머리글이 안 붙는다 → 완전히 가르려면 파밍을 다른 호스트 이름(출처)으로 옮기거나 허브가 페이지 안 스크립트를 없애 `'unsafe-inline'` 을 뺀다.
 - 허브의 서비스 워커(`/dashboard/farm/sw.js`, 알림용)는 범위가 `/dashboard/farm/` 까지라 대시보드 것(`/dashboard/`)과 따로 돈다.
 - 아이콘(오리 그림, 11/15 — perpfarm/hub_static 의 icon-1024.jpg 에서): `python tools/app_icons.py <그림 폴더>` — static 아이콘 다섯 개와 `tests/fixtures/dash_icons.json` 을 같이 바꾼다.

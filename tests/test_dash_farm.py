@@ -113,7 +113,7 @@ async def test_setup_page_when_not_configured(bot: DealBot, hub: Hub, url: str |
     assert "파밍 연결 준비 중 — 주인 할 일 2개" in body and "FARM_HUB_URL" in body and "FARM_HUB_TOKEN" in body
     assert "대시보드로 돌아가기" in body and "href='/dashboard/'" in body and "테일스케일" not in body  # 설치 안내 없음 — .env 두 줄만
     assert TOKEN not in body and "bad token" not in body and "tail1234" not in body
-    assert headers["Content-Security-Policy"] == farm.FARM_HEADERS["Content-Security-Policy"]
+    assert "/dashboard/farm/" in headers["Content-Security-Policy"] and "connect-src 'self'" not in headers["Content-Security-Policy"]
     assert (await call(bot, "GET", "/dashboard/farm/static/app.js", login(bot)))[0] == 200  # 아래 경로도 같은 안내
 
 
@@ -196,15 +196,20 @@ async def test_response_drops_cookies_and_keeps_our_security_headers(bot: DealBo
     for gone in ("access-control-allow-origin", "server", "www-authenticate", "service-worker-allowed", "clear-site-data"):
         assert gone not in low, gone
     csp = low["content-security-policy"]
-    assert csp == farm.FARM_HEADERS["Content-Security-Policy"] and low["x-frame-options"] == "DENY"
+    assert low["x-frame-options"] == "DENY"
     assert low["x-content-type-options"] == "nosniff" and low["referrer-policy"] == "no-referrer"
-    # 같은 출처의 스크립트·스타일·요청만 (허브 화면이 페이지 안 스크립트라 'unsafe-inline' 까지) — 바깥 주소·eval 은 안 됨
+    # 이 서버의 /dashboard/farm/ 아래 스크립트·스타일·요청만 (허브 화면이 페이지 안 스크립트라 'unsafe-inline' 까지) — 바깥 주소·eval 은 안 됨
     parts = dict(p.strip().split(" ", 1) for p in csp.split(";"))
-    assert parts["script-src"] == "'self' 'unsafe-inline'" and parts["connect-src"] == "'self'" and parts["default-src"] == "'none'"
-    assert parts["worker-src"] == "'self'" and "unsafe-eval" not in csp  # 허브 알림 서비스 워커 (범위 /dashboard/farm/ 까지만)
-    assert "'self'" in parts["style-src"] and "'self'" in parts["img-src"] and "'self'" in parts["font-src"]
-    assert parts["form-action"] == "'self'" and parts["frame-ancestors"] == "'none'"
+    src = parts["connect-src"]
+    assert src and all(s.endswith("/dashboard/farm/") for s in src.split()) and ORIGIN.split("://")[1] + "/dashboard/farm/" in src.split()
+    assert parts["script-src"] == src + " 'unsafe-inline'" and parts["default-src"] == "'none'"
+    assert parts["worker-src"] == src and "unsafe-eval" not in csp  # 허브 알림 서비스 워커 (범위 /dashboard/farm/ 까지만)
+    assert parts["style-src"].startswith(src) and parts["img-src"].startswith(src) and parts["font-src"].startswith(src)
+    assert parts["form-action"] == src and parts["frame-ancestors"] == "'none'"
     assert "http" not in csp and "*" not in csp
+    # 보안 검토 11/15: 파밍 화면(같은 출처)의 fetch·폼이 대시보드 API 로 가지 못하게 — 'self'(서버 전체)는 base-uri 에만
+    assert csp.count("'self'") == 1 and parts["base-uri"] == "'self'"
+    assert low["cross-origin-opener-policy"] == "unsafe-none"  # 대시보드(same-origin)와 달라야 서로 연 창을 못 만짐
     # 캐시 말이 없으면 저장하지 않음
     hub.reply = lambda req: httpx.Response(200, json={"a": 1})
     assert (await call(bot, "GET", "/dashboard/farm/api/a", login(bot)))[3]["Cache-Control"] == "no-store"
@@ -225,6 +230,13 @@ async def test_response_drops_cookies_and_keeps_our_security_headers(bot: DealBo
     ("javascript:alert(1)", None),
     ("/a b", None),
     ("", None),
+    # '..' 로 /dashboard/farm 밖(대시보드 API)으로 올라가는 주소 — CSP 는 리디렉션 뒤 경로를 보지 않으므로 여기서 막는다
+    ("../api/state", None),
+    ("/../api/state", None),
+    ("/a/%2e%2E/../../api/state", None),
+    ("a/..\\..\\api", None),
+    (HUB + "/x/../../api/state", None),
+    ("/a..b/c...", "/dashboard/farm/a..b/c..."),
 ])
 def test_rewrite_location(loc: str, want: str | None) -> None:
     assert farm.rewrite_location(loc, HUB) == want
@@ -263,6 +275,13 @@ async def test_real_request_writes_location_header_once(bot: DealBot, hub: Hub) 
         head = got.split(b"\r\n\r\n", 1)[0].decode().lower()
         assert head.startswith("http/1.1 302 found") and head.count("location: /dashboard/farm/bots") == 1
         assert head.count("location:") == 1 and "set-cookie" not in head and head.count("content-length:") == 1
+        # 창 묶음: 파밍 응답은 unsafe-none, 대시보드의 다른 응답(화면·정적 파일·로그인으로 보내기)은 모두 same-origin
+        assert head.count("cross-origin-opener-policy: unsafe-none") == 1 and "same-origin" not in head
+        assert "connect-src x/dashboard/farm/ " in head  # 브라우저가 부른 호스트(Host: x)의 /dashboard/farm/ 아래만
+        for other in ("/dashboard/", "/dashboard/static/app.js", "/dashboard/api/state", "/nope"):
+            for ck in (f"Cookie: {cookie}\r\n", ""):
+                oh = (await raw(f"GET {other} HTTP/1.1\r\nHost: x\r\n{ck}\r\n".encode())).split(b"\r\n\r\n", 1)[0].decode().lower()
+                assert oh.count("cross-origin-opener-policy: same-origin") == 1, other
         got = await raw(f"HEAD /dashboard/farm/big HTTP/1.1\r\nHost: x\r\nCookie: {cookie}\r\n\r\n".encode())
         head, _, rest = got.partition(b"\r\n\r\n")
         assert b"content-length: 1234" in head.lower() and rest == b""
@@ -411,3 +430,24 @@ def test_icon_urls_follow_the_files(tmp_path: Path) -> None:
     assert tool.apply(files, static, table) == []  # 다시 돌려도 그대로
     with pytest.raises(SystemExit):
         tool.build(tmp_path / "none")  # 그림이 없는 폴더
+
+
+def test_farm_csp_takes_only_plain_hosts() -> None:
+    """CSP 출처는 '호스트[:포트]/dashboard/farm/' 만 — 이상한 Host 값(빈칸·세미콜론·따옴표)은 버리고, 하나도 없으면 아무것도 못 부름."""
+    csp = farm.farm_csp(["Dash.Example.com:8443", "a b", "x;script-src *", "'self'", "evil.com/", "*", "", "dash.example.com:8443"])
+    parts = dict(p.strip().split(" ", 1) for p in csp.split(";"))
+    assert parts["connect-src"] == "dash.example.com:8443/dashboard/farm/" and "*" not in csp and "evil" not in csp
+    assert dict(p.strip().split(" ", 1) for p in farm.farm_csp([]).split(";"))["connect-src"] == "'none'"
+
+
+async def test_cross_site_link_into_farm_goes_to_farm_home_without_calling_hub(bot: DealBot, hub: Hub) -> None:
+    """다른 사이트의 링크로 파밍 안쪽 주소(GET)를 열면 허브를 부르지 않고 첫 화면으로 — 첫 화면·주소창·앱 안 이동은 그대로."""
+    for site in ("cross-site", "same-site"):
+        status, body, _ct, headers = await call(bot, "GET", "/dashboard/farm/bots/3/stop?now=1", login(bot, **{"sec-fetch-site": site}))
+        assert (status, body) == (303, "/dashboard/farm/") and not hub.requests
+        assert headers["Cross-Origin-Opener-Policy"] == "unsafe-none"
+        assert (await call(bot, "GET", "/dashboard/farm/?x=1", login(bot, **{"sec-fetch-site": site})))[0] == 303 and not hub.requests
+    assert (await call(bot, "GET", "/dashboard/farm/", login(bot, **{"sec-fetch-site": "cross-site"})))[0] == 200
+    for site in ("none", "same-origin"):
+        assert (await call(bot, "GET", "/dashboard/farm/bots/3?tab=a", login(bot, **{"sec-fetch-site": site})))[0] == 200
+    assert [r.url.path for r in hub.requests] == ["/", "/bots/3", "/bots/3"]

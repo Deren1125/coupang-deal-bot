@@ -744,6 +744,9 @@ class WebServer:
             given = more.pop(":length", "")
             size, raw = (int(given) if given.isdigit() else 0), b""
         more.pop(":length", None)
+        # 이 서버의 화면은 다른 창과 묶이지 않는다 (보안 검토 11/15): 같은 출처에서 도는 파밍 화면(dashboard/farm.py — unsafe-none 을 준다)이
+        # window.open 으로 대시보드·정적 파일 창을 열어 그 안을 만지지 못하게. 핸들러가 값을 주면 그 값
+        more.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         for name, value in more.items():
             if _header_safe(name) and _header_safe(value):  # 줄바꿈이 섞인 값으로 헤더를 끼워 넣지 못하게
                 extra += f"{name}: {value}\r\n"
