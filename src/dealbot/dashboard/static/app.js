@@ -17,7 +17,7 @@ function el(t, a, ...kids) {
   return e;
 }
 const btn = (cls, label, on, x) => el('button', Object.assign({class: cls, type: 'button', onclick: on}, x), label);
-const ext = (cls, label, url) => el('a', {class: cls, href: url, target: '_blank', rel: 'noopener noreferrer'}, label, ' ↗');
+const ext = (cls, label, url) => el('a', {class: cls, href: typeof sf == 'function' ? sf(url) : url, target: '_blank', rel: 'noopener noreferrer'}, label, ' ↗');  // 네이버 블로그는 홈 화면 앱에서 사파리로 (routine.js sf, 주인 11/15)
 const rnd = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('');
 
 const TABS = {todo: '할 일', deal: '딜', blog: '블로그', sns: 'SNS', stats: '통계', connect: '연결'}, SUBS = {sns: ['threads', 'x', 'lookbook', 'shorts']};
@@ -476,7 +476,7 @@ function igAdd(st, sl) {
 
 // 누를 것: 바로 · 그 자리 · 시트
 function act(it, a, b, inline) {
-  if (a.input === 'open') { W.open(a.url, '_blank', 'noopener'); return; }
+  if (a.input === 'open') { W.open(typeof sf == 'function' ? sf(a.url) : a.url, '_blank', 'noopener'); return; }
   if (a.input === 'goto') { go('#' + a.goto.replace(/^#/, '')); return; }
   if (a.input === 'none' || !a.input) { exec(a, {}, {btn: b, iid: it.iid}); return; }
   if (a.input === 'pics') { exec(a, picks(it, 1), {btn: b, iid: it.iid}); return; }
