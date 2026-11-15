@@ -7,8 +7,11 @@
   POST /dashboard/api/ssalmuk/ack       {"ids": [...], "results": {id: "ok" | 오류 글}} → 그 명령을 지움
   GET  /dashboard/api/ssalmuk/search    ?type=blog|news|webkr&q=&display=1-20&sort=sim|date → 네이버 검색 Open API 를 딜봇 키로 대신 (딜봇 키가 401/403 이면 Blog-Auto .env 키로 이어서 · state 의 search_proxy.keysrc) (주인 11/14 —
                                         쌀먹 서버에 키를 옮기지 않음). {"items":[{title,link,description,postdate|pubDate,bloggername}],"total"}
-                                        키 1개당 1분 60번 · 하루 300번 (KST, kv ssalmuk_search_day) · 넘으면 429 {"code":"limit"} ·
-                                        네이버가 401/429/5xx 등을 주면 502 {"code":"naver_error","status"} · 딜봇에 키가 없으면 503 {"code":"no_key"}
+                                        11/15 네이버 키가 둘 다 401/403/없음이면 카카오(다음) 검색 API 로 이어서 (KAKAO_REST_API_KEY — 딜봇 환경, 없으면 Blog-Auto .env 한 줄) —
+                                        같은 모양으로 바꿔 주고 "source":"kakao" 만 더함 (blog→blog · webkr→web · news→web 최신순, 카카오엔 뉴스 검색이 없음).
+                                        네이버가 둘 다 막혀 카카오로 된 뒤엔 카카오 먼저 (네이버 키는 하루 한 번만 다시 봄 — KEY_RECHECK).
+                                        키 1개당 1분 60번 · 하루 300번 (KST, kv ssalmuk_search_day — 키를 여럿 써 봐도 한 번) · 넘으면 429 {"code":"limit"} ·
+                                        네이버·카카오가 401/429/5xx 등을 주면 502 {"code":"naver_error","status"} (카카오면 "source":"kakao" 더함) · 키가 하나도 없으면 503 {"code":"no_key"}
   이 넷은 로그인·CSRF 없이 X-Ssalmuk-Key 로만 (해시끼리 hmac.compare_digest — 상수 시간) · 틀리면 401 {"code":"bad_key"} ·
   몸 512KB 까지 · 같은 손님 1분 120번.
 화면(로그인 + 같은 사이트 + X-Dash-Token — DashApi.guard):
@@ -82,8 +85,14 @@ SEARCH_PER_DAY = 300
 SEARCH_Q_MAX = 100
 KV_SEARCH_DAY = "ssalmuk_search_day"
 KV_SEARCH_KEYS = "ssalmuk_search_keys"  # 키마다 마지막 네이버 답 {"dealbot": {"s": "401 키틀림", "at": …}, "blog": {"s": 200, "at": …}, "at": …} (값만 — 키는 안 남김, 주인 11/14 '401 원인' · note_keys)
-KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' — 어느 키가 통했는지 (값만, 비밀 아님)
-KEY_RECHECK = 86400.0  # 블로그 키로 넘어간 뒤에도 딜봇 키를 하루 한 번 다시 봄
+KV_SEARCH_KEYSRC = "ssalmuk_search_keysrc"  # 'dealbot' | 'blog' | 'kakao' — 어느 키가 통했는지 (값만, 비밀 아님)
+KEYSRCS = ("dealbot", "blog", "kakao")
+KEY_RECHECK = 86400.0  # 블로그 키(또는 카카오)로 넘어간 뒤에도 앞 네이버 키를 하루 한 번 다시 봄
+# 카카오(다음) 검색 (11/15 — 네이버 검색 앱이 지워져 두 키 다 401 · 7/31 부터 새 키 신청 막힘). 공식 문서 developers.kakao.com/docs/latest/ko/daum-search/dev-guide
+KAKAO_URL = "https://dapi.kakao.com/v2/search/{type}"
+KAKAO_TYPE = {"blog": "blog", "webkr": "web", "news": "web"}  # 카카오엔 뉴스 검색이 없음 → 웹문서 최신순
+KAKAO_SORT = {"sim": "accuracy", "date": "recency"}
+KAKAO_SIZE_MAX = 50  # web·blog size 1~50
 _TAG_RE = re.compile(r"<[^>]*>")
 OP_LABEL = {"run": "지금 확인하기", "done": "완료 표시", "profile": "내 정보 저장", "search_retry": "검색 다시 켜기", "trust_host": "사이트 허용",
             "quiz_answer": "퀴즈 답 저장"}
@@ -157,6 +166,42 @@ def clean_health(state: Any) -> dict[str, Any] | None:
             "stopped": status == "aborted" and run is not None and run["level"] == "warn", "llm": llm[:2]}
 
 
+def _kakao_dt(v: Any) -> datetime | None:
+    """카카오 datetime ('2026-11-14T10:24:00.000+09:00') → datetime (모르면 None)."""
+    try:
+        d = datetime.fromisoformat(str(v or "").strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=KST)
+
+
+def kakao_items(data: Any, typ: str) -> tuple[list[dict[str, str]], int]:
+    """카카오 documents → 네이버 items 꼴 (쌀먹 계약 그대로 — search_items 와 같은 칸).
+    title·contents 의 <b> 와 글자 표현은 네이버와 같이 풀고 · blog 는 postdate(YYYYMMDD)·bloggername(blogname) ·
+    news(=웹문서 최신순) 는 pubDate (네이버와 같은 RFC 822 꼴, KST) · webkr 은 네이버처럼 날짜 칸 없음."""
+    raw = data.get("documents") if isinstance(data, dict) else None
+    items: list[dict[str, str]] = []
+    for x in raw if isinstance(raw, list) else []:
+        if not isinstance(x, dict):
+            continue
+        it = {"title": _plain(x.get("title")), "link": str(x.get("url") or ""), "description": _plain(x.get("contents"))}
+        d = _kakao_dt(x.get("datetime"))
+        if typ == "blog":
+            if d is not None:
+                it["postdate"] = d.astimezone(KST).strftime("%Y%m%d")
+            if x.get("blogname"):
+                it["bloggername"] = _plain(x["blogname"])
+        elif typ == "news" and d is not None:
+            k = d.astimezone(KST)  # 요일·달 이름은 영어 (네이버 pubDate 와 같게 — 지역 설정과 상관없이)
+            it["pubDate"] = (f"{('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')[k.weekday()]}, {k.day:02d} "
+                             f"{('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')[k.month - 1]} "
+                             f"{k.year} {k:%H:%M:%S} +0900")
+        items.append(it)
+    meta = data.get("meta") if isinstance(data, dict) else None
+    total = meta.get("total_count") if isinstance(meta, dict) else None
+    return items, total if isinstance(total, int) and not isinstance(total, bool) else len(items)
+
+
 def search_items(data: Any) -> tuple[list[dict[str, str]], int]:
     raw = data.get("items") if isinstance(data, dict) else None
     items: list[dict[str, str]] = []
@@ -220,27 +265,40 @@ def _why_401(resp: Any) -> str:
     return "검색미등록" if "scope" in msg.lower() else "키틀림"
 
 
+BLOG_ENV_NAMES = ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET", "KAKAO_REST_API_KEY")  # 이 세 줄만 읽음 (11/15 카카오 한 줄 더함)
+
+
 class BlogKeyFile:
-    """Blog-Auto .env 에서 NAVER_CLIENT_ID/SECRET 두 줄만 읽음. 처음 쓸 때 읽고 메모리에 두며 파일 수정 시각이 바뀌면 다시 읽음."""
+    """Blog-Auto .env 에서 NAVER_CLIENT_ID/SECRET · KAKAO_REST_API_KEY 세 줄만 읽음 (다른 줄은 보지도 않음 · 값은 로그·응답에 안 남김).
+    처음 쓸 때 읽고 메모리에 두며 파일 수정 시각이 바뀌면 다시 읽음."""
 
     def __init__(self, path: Callable[[], str]) -> None:
         self._path = path
         self._sig: tuple[str, int] | None = None
-        self._pair: tuple[str, str] | None = None
+        self._vals: dict[str, str] = {}
 
-    def get(self) -> tuple[str, str] | None:
+    def _load(self) -> dict[str, str]:
         try:
             p = Path(self._path()).expanduser()
             sig = (str(p), os.stat(p).st_mtime_ns)
         except (OSError, ValueError):
-            self._sig = self._pair = None
-            return None
+            self._sig, self._vals = None, {}
+            return self._vals
         if sig != self._sig:
-            self._sig, self._pair = sig, self._parse(p)
-        return self._pair
+            self._sig, self._vals = sig, self._parse(p) or {}
+        return self._vals
+
+    def get(self) -> tuple[str, str] | None:
+        """네이버 키 한 쌍 (둘 다 있을 때만)."""
+        v = self._load()
+        i, s = v.get("NAVER_CLIENT_ID"), v.get("NAVER_CLIENT_SECRET")
+        return (i, s) if i and s else None
+
+    def kakao(self) -> str | None:
+        return self._load().get("KAKAO_REST_API_KEY") or None
 
     @staticmethod
-    def _parse(p: Path) -> tuple[str, str] | None:
+    def _parse(p: Path) -> dict[str, str] | None:
         vals: dict[str, str] = {}
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
@@ -252,14 +310,13 @@ class BlogKeyFile:
                 line = line[7:].lstrip()
             name, eq, v = line.partition("=")
             name = name.strip()
-            if eq and name in ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"):
+            if eq and name in BLOG_ENV_NAMES:
                 v = v.strip()
                 if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
                     v = v[1:-1]
                 if v:
                     vals[name] = v
-        i, s = vals.get("NAVER_CLIENT_ID"), vals.get("NAVER_CLIENT_SECRET")
-        return (i, s) if i and s else None
+        return vals
 
 
 class Ssalmuk:
@@ -353,7 +410,7 @@ class Ssalmuk:
         old = self._load(KV_SEARCH_KEYS, {})
         old = old if isinstance(old, dict) else {}
         out: dict[str, Any] = {"at": now}
-        for k in ("dealbot", "blog"):
+        for k in KEYSRCS:
             v, prev = seen.get(k, "-"), old.get(k)
             if v not in ("-", None):
                 out[k] = {"s": v, "at": now}
@@ -367,7 +424,7 @@ class Ssalmuk:
 
     def search_keysrc(self) -> str | None:
         v = self.db.kv_get(KV_SEARCH_KEYSRC)
-        return v if v in ("dealbot", "blog") else None
+        return v if v in KEYSRCS else None
 
     def set_search_keysrc(self, src: str) -> None:
         if self.search_keysrc() != src:
@@ -511,7 +568,8 @@ def register(web: Any, api: Any) -> Ssalmuk:
 
     search_rate = RateWindow(SEARCH_PER_MIN, 60.0)  # 키 하나당 (손님 주소와 상관없이)
     blog_keys = BlogKeyFile(lambda: api.bot.settings.dashboard.ssalmuk_search_env_file)
-    state_rt = {"dealbot_try": 0.0}  # 딜봇 키를 마지막으로 써 본 때 (메모리 — 재시작하면 한 번 다시 봄)
+    # 앞 키를 마지막으로 써 본 때 (메모리 — 재시작하면 한 번 다시 봄): dealbot = 블로그 키로 넘어간 뒤 · naver = 카카오로 넘어간 뒤
+    state_rt = {"dealbot_try": 0.0, "naver_try": 0.0}
 
     async def search(query: dict[str, str], headers: dict[str, str]) -> Any:
         import httpx
@@ -535,44 +593,69 @@ def register(web: Any, api: Any) -> Ssalmuk:
         blog = blog_keys.get()
         if blog:
             keys["blog"] = blog
+        kakao = (getattr(sec, "kakao_rest_api_key", None) or "").strip() or blog_keys.kakao()  # 딜봇 환경 먼저, 없으면 Blog-Auto .env 한 줄
         seen: dict[str, Any] = {"dealbot": "none" if "dealbot" not in keys else "-",
-                                "blog": "no_file" if not blog else "-"}
-        if not keys:
+                                "blog": "no_file" if not blog else "-", "kakao": "none" if not kakao else "-"}
+        if not keys and not kakao:
             desk.note_keys(seen)
-            return _j(503, {"code": "no_key", "text": "딜봇에 네이버 검색 키가 없어요"})
+            return _j(503, {"code": "no_key", "text": "딜봇에 검색 키(네이버·카카오)가 없어요"})
         if not search_rate.hit("key") or not desk.search_day_hit():
             return _j(429, {"code": "limit", "text": "검색 한도(1분 60번·하루 300번)를 넘었어요"})
         now = desk.clock()
-        recheck = now - state_rt["dealbot_try"] >= KEY_RECHECK
-        order = ["blog", "dealbot"] if desk.search_keysrc() == "blog" and not recheck else ["dealbot", "blog"]
-        status, data = 0, None
-        for src in (o for o in order if o in keys):
+        src_now = desk.search_keysrc()
+        if src_now == "kakao" and kakao and now - state_rt["naver_try"] < KEY_RECHECK:
+            order = ["kakao", "dealbot", "blog"]  # 네이버 키가 둘 다 막혀 카카오로 된 뒤 — 네이버는 하루 한 번만 다시 봄
+        elif src_now == "blog" and now - state_rt["dealbot_try"] < KEY_RECHECK:
+            order = ["blog", "dealbot", "kakao"]
+        else:
+            order = ["dealbot", "blog", "kakao"]
+        status, data, used = 0, None, None
+        for src in (o for o in order if o in keys or (o == "kakao" and kakao)):
+            used = src
             if src == "dealbot":
                 state_rt["dealbot_try"] = now
-            cid, csec = keys[src]
+            if src != "kakao":
+                state_rt["naver_try"] = now
             try:
-                params = {"query": q, "display": display} if typ == "webkr" else {"query": q, "display": display, "sort": sort}  # 웹문서 검색은 sort 가 없음
-                resp = await api.bot.http.get(
-                    SEARCH_URL.format(type=typ), params=params,
-                    headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=SEARCH_TIMEOUT)
+                if src == "kakao":
+                    resp = await api.bot.http.get(
+                        KAKAO_URL.format(type=KAKAO_TYPE[typ]),
+                        params={"query": q, "sort": "recency" if typ == "news" else KAKAO_SORT[sort],
+                                "size": min(display, KAKAO_SIZE_MAX), "page": 1},
+                        headers={"Authorization": f"KakaoAK {kakao}"}, timeout=SEARCH_TIMEOUT)
+                else:
+                    cid, csec = keys[src]
+                    params = {"query": q, "display": display} if typ == "webkr" else {"query": q, "display": display, "sort": sort}  # 웹문서 검색은 sort 가 없음
+                    resp = await api.bot.http.get(
+                        SEARCH_URL.format(type=typ), params=params,
+                        headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=SEARCH_TIMEOUT)
                 status = resp.status_code
-                seen[src] = status if status != 401 else f"401 {_why_401(resp)}"
+                seen[src] = status if status != 401 or src == "kakao" else f"401 {_why_401(resp)}"
                 data = resp.json() if status == 200 else None
             except (httpx.HTTPError, ValueError) as e:  # 시간 초과·연결 실패·깨진 답 (키·주소는 로그에 안 남김)
                 log.info("ssalmuk search: %s (%s key)", type(e).__name__, src)
                 seen[src] = "no_answer"
                 desk.note_keys(seen)  # 여기까지 써 본 키의 답도 남김 (앞 키가 401 이었으면 그 줄이 보이게)
-                return _j(502, {"code": "naver_error", "status": 0, "text": "네이버 검색이 답하지 않아요"})
-            if status in (401, 403):  # 이 키는 막힘 — 다른 키로
-                log.info("ssalmuk search: naver HTTP %s (%s key)", status, src)
+                out: dict[str, Any] = {"code": "naver_error", "status": 0, "text": "네이버 검색이 답하지 않아요"}
+                if src == "kakao":
+                    out.update(source="kakao", text="카카오 검색이 답하지 않아요")
+                return _j(502, out)
+            if status in (401, 403):  # 이 키는 막힘 — 다른 키로 (카카오 401/403 도 — 남은 네이버 키가 있으면)
+                log.info("ssalmuk search: HTTP %s (%s key)", status, src)
                 continue
             if status == 200:
                 desk.set_search_keysrc(src)
             break
         desk.note_keys(seen)
         if status != 200:
-            log.info("ssalmuk search: naver HTTP %s", status)
-            return _j(502, {"code": "naver_error", "status": status, "text": "네이버 검색이 오류를 줬어요"})
+            log.info("ssalmuk search: HTTP %s (%s)", status, used)
+            out = {"code": "naver_error", "status": status, "text": "네이버 검색이 오류를 줬어요"}
+            if used == "kakao":
+                out.update(source="kakao", text="카카오 검색이 한도를 넘었어요" if status == 429 else "카카오 검색이 오류를 줬어요")
+            return _j(502, out)
+        if used == "kakao":
+            items, total = kakao_items(data, typ)
+            return _j(200, {"items": items, "total": total, "source": "kakao"})
         items, total = search_items(data)
         return _j(200, {"items": items, "total": total})
 

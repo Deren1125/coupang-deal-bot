@@ -909,7 +909,7 @@ class DashboardConfig(BaseModel):
     spark_days: int = Field(28, ge=7, le=90)  # 작은 추이 그래프의 기간
     manual_max_days_back: int = Field(60, ge=1, le=400)  # 직접 입력 날짜는 오늘부터 이만큼 전까지
     blogauto_metrics_path: str = "/home/ubuntu/Blog-Auto/var/metrics/blogauto.json"  # Blog-Auto 가 한 시간마다 쓰는 활동 기록
-    ssalmuk_search_env_file: str = "~/Blog-Auto/.env"  # 딜봇 네이버 키가 막히면 이 파일의 NAVER_CLIENT_ID/SECRET 두 줄만 읽어 이벤트 참여 검색에 씀 (주인 11/14)
+    ssalmuk_search_env_file: str = "~/Blog-Auto/.env"  # 딜봇 네이버 키가 막히면 이 파일의 NAVER_CLIENT_ID/SECRET 두 줄만 읽어 이벤트 참여 검색에 씀 (주인 11/14) · 11/15 KAKAO_REST_API_KEY 한 줄도 (딜봇에 카카오 키가 없을 때)
     blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
     cards: list[DashboardCardConfig] = Field(default_factory=list)
     # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
@@ -1109,6 +1109,8 @@ class Secrets(BaseModel):
     anthropic_api_key: str | None = None  # 정보 글 요약 (Claude API)
     naver_client_id: str | None = None  # 네이버 쇼핑 검색 API (쿠팡 딜 네이버 최저가 비교를 켤 때만, 선택 — API 는 2026-07-31 종료)
     naver_client_secret: str | None = None
+    # 카카오(다음) 검색 REST API 키 (11/15 — 네이버 검색 앱이 지워져 401 · 이벤트 참여 대리 검색이 이어서 씀). 없으면 Blog-Auto .env 의 같은 이름 줄
+    kakao_rest_api_key: str | None = None
     dashboard_user: str | None = None  # DASHBOARD_USER / DASHBOARD_PASSWORD — /dashboard 기본 인증 (둘 다 있어야 페이지가 열림)
     dashboard_password: str | None = None
 
@@ -1388,6 +1390,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None, *, load_env
         anthropic_api_key=_env_str("ANTHROPIC_API_KEY"),
         naver_client_id=_env_str("NAVER_CLIENT_ID"),
         naver_client_secret=_env_str("NAVER_CLIENT_SECRET"),
+        kakao_rest_api_key=_env_str("KAKAO_REST_API_KEY"),
         dashboard_user=_env_str("DASHBOARD_USER"),
         dashboard_password=_env_str("DASHBOARD_PASSWORD"),
     )

@@ -549,7 +549,7 @@ SEARCH = ssalmuk.SEARCH_PATH
 NAVER_ID, NAVER_SECRET = "test-naver-id-xyz", "test-naver-secret-abc"
 
 
-def naver(bot: DealBot, handler: Any, *, keyed: bool = True) -> list[Any]:
+def naver(bot: DealBot, handler: Any, *, keyed: bool = True, kakao: str | None = None) -> list[Any]:
     import httpx
 
     seen: list[Any] = []
@@ -561,6 +561,7 @@ def naver(bot: DealBot, handler: Any, *, keyed: bool = True) -> list[Any]:
     bot.http = httpx.AsyncClient(transport=httpx.MockTransport(h))
     s = bot.settings.secrets
     s.naver_client_id, s.naver_client_secret = (NAVER_ID, NAVER_SECRET) if keyed else (None, None)
+    s.kakao_rest_api_key = kakao  # 서버 환경에 카카오 키가 있어도 시험은 정해 둔 대로
     return seen
 
 
@@ -813,6 +814,201 @@ async def test_search_records_each_key_status(bot: DealBot, tmp_path: Path) -> N
     assert "키 파일 못 읽음" in js and "keyDiag(p && p.keys)" in js and "x.at ? hm(x.at * 1000)" in js and "키 응답 없음" in js
     assert "search_retry: '검색 다시 켜기'" in js and "trust_host: '사이트 허용'" in js  # 명령 결과 알림에 이름이 뜨게
     assert ssalmuk.OP_LABEL["search_retry"] == "검색 다시 켜기" and ssalmuk.OP_LABEL["trust_host"] == "사이트 허용"
+
+
+# ---------------------------------------------------------------- 7b) 카카오(다음) 검색으로 이어서 (11/15 — 네이버 검색 앱이 지워져 두 키 다 401)
+KAKAO_KEY = "test-kakao-rest-key-777"
+
+
+def kakao_docs(req: Any) -> Any:
+    import httpx
+
+    return httpx.Response(200, json={"meta": {"total_count": 1234, "pageable_count": 800, "is_end": False}, "documents": [
+        {"title": "<b>구글폼</b> 응모 &quot;이벤트&quot;", "contents": "경품 <b>추첨</b> &amp; 발표", "url": "https://blog.example/k1",
+         "datetime": "2026-11-14T10:24:00.000+09:00", "blogname": "주최<b>측</b>", "thumbnail": "https://img.example/t.jpg"},
+        {"title": "자정 넘긴 글", "contents": "", "url": "https://news.example/a", "datetime": "2026-11-13T15:30:00.000Z"},
+        "junk",
+    ]})
+
+
+def kakao_or_401(req: Any) -> Any:
+    import httpx
+
+    if req.url.host == "dapi.kakao.com":
+        return kakao_docs(req)
+    return httpx.Response(401, json={"errorMessage": "Not Exist Client ID : Authentication failed.", "errorCode": "024"})
+
+
+def test_kakao_items_shape() -> None:
+    """카카오 documents → 네이버 items 꼴 (쌀먹 계약 그대로): <b>·글자 표현 풀기 · blog 는 postdate·bloggername · news 는 pubDate · webkr 날짜 없음."""
+    data = kakao_docs(None).json()
+    items, total = ssalmuk.kakao_items(data, "blog")
+    assert total == 1234
+    assert items == [{"title": '구글폼 응모 "이벤트"', "link": "https://blog.example/k1", "description": "경품 추첨 & 발표",
+                      "postdate": "20261114", "bloggername": "주최측"},
+                     {"title": "자정 넘긴 글", "link": "https://news.example/a", "description": "", "postdate": "20261114"}]  # UTC 15:30 = KST 다음 날
+    items, _t = ssalmuk.kakao_items(data, "news")
+    assert items[0]["pubDate"] == "Sat, 14 Nov 2026 10:24:00 +0900" and items[1]["pubDate"] == "Sat, 14 Nov 2026 00:30:00 +0900"
+    assert "bloggername" not in items[0] and "postdate" not in items[0]
+    items, _t = ssalmuk.kakao_items(data, "webkr")
+    assert set(items[0]) == {"title", "link", "description"}
+    # 이상한 답: 빈 목록 · total 은 항목 수 · 날짜가 이상하면 날짜 칸만 뺌
+    assert ssalmuk.kakao_items(None, "blog") == ([], 0)
+    assert ssalmuk.kakao_items({"meta": {"total_count": "9"}, "documents": [{"title": "a", "datetime": "어제"}]}, "blog") == (
+        [{"title": "a", "link": "", "description": ""}], 1)
+
+
+async def test_search_naver_401_falls_back_to_kakao(bot: DealBot, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    blog_env(bot, tmp_path)
+    seen = naver(bot, kakao_or_401, kakao=KAKAO_KEY)
+    d = desk(bot)
+    now = [1_800_000_000.0]
+    d.clock = lambda: now[0]
+    key = d.key()
+    status, body = await mget(bot, f"{SEARCH}?q=구글폼&display=99&sort=date", key)
+    assert status == 200 and body["total"] == 1234 and body["source"] == "kakao"
+    assert body["items"][0] == {"title": '구글폼 응모 "이벤트"', "link": "https://blog.example/k1", "description": "경품 추첨 & 발표",
+                                "postdate": "20261114", "bloggername": "주최측"}
+    assert [r.url.host for r in seen] == ["openapi.naver.com", "openapi.naver.com", "dapi.kakao.com"]
+    req = seen[-1]
+    assert req.url.path == "/v2/search/blog" and req.headers["authorization"] == f"KakaoAK {KAKAO_KEY}"
+    assert dict(req.url.params) == {"query": "구글폼", "sort": "recency", "size": "20", "page": "1"}
+    assert "x-naver-client-id" not in req.headers  # 네이버 키는 카카오에 안 보냄
+    assert d.search_keysrc() == "kakao" and json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_DAY))["n"] == 1  # 키를 셋 써도 하루 한 번
+    keys = json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))
+    assert keys["dealbot"]["s"] == "401 키틀림" and keys["blog"]["s"] == "401 키틀림" and keys["kakao"]["s"] == 200
+    # 다음부터 카카오 먼저 (네이버는 안 부름) · 매핑: webkr→web · news→web 최신순 · sim→accuracy
+    for qs, path, srt in (("type=webkr&q=x", "/v2/search/web", "accuracy"), ("type=news&q=x", "/v2/search/web", "recency"),
+                          ("type=news&q=x&sort=sim", "/v2/search/web", "recency"), ("q=x", "/v2/search/blog", "accuracy")):
+        n = len(seen)
+        status, body = await mget(bot, f"{SEARCH}?{qs}", key)
+        assert status == 200 and body["source"] == "kakao", qs
+        assert [r.url.host for r in seen[n:]] == ["dapi.kakao.com"], qs
+        assert (seen[-1].url.path, seen[-1].url.params["sort"], seen[-1].url.params["size"]) == (path, srt, "10"), qs
+    _s, st, _h = await get_json(bot, f"{B}/state", session_headers(bot))
+    assert st["search_proxy"]["keysrc"] == "kakao" and st["search_proxy"]["keys"]["kakao"]["s"] == 200
+    # 하루 뒤엔 네이버 키를 다시 봄 — 살아났으면 되돌아감
+    now[0] += 86401
+    naver(bot, ok_blog, kakao=KAKAO_KEY)
+    status, body = await mget(bot, f"{SEARCH}?q=x", key)
+    assert status == 200 and "source" not in body and d.search_keysrc() == "dealbot"
+    for secret in (KAKAO_KEY, NAVER_ID, NAVER_SECRET, BLOG_ID, BLOG_SECRET):
+        assert secret not in caplog.text and secret not in json.dumps(st) and secret not in json.dumps(body)
+        assert secret not in (bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS) or "")
+
+
+async def test_search_kakao_key_from_blog_env_file(bot: DealBot, tmp_path: Path) -> None:
+    """딜봇 환경에 카카오 키가 없으면 Blog-Auto .env 의 KAKAO_REST_API_KEY 한 줄 (세 줄만 읽음 — 다른 줄은 안 봄)."""
+    blog_env(bot, tmp_path, f"NAVER_CLIENT_ID={BLOG_ID}\nNAVER_CLIENT_SECRET={BLOG_SECRET}\nexport KAKAO_REST_API_KEY='{KAKAO_KEY}'\nTG_TOKEN=do-not-read\n")
+    seen = naver(bot, kakao_or_401, keyed=False)
+    status, body = await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+    assert status == 200 and body["source"] == "kakao"
+    assert [r.url.host for r in seen] == ["openapi.naver.com", "dapi.kakao.com"] and seen[-1].headers["authorization"] == f"KakaoAK {KAKAO_KEY}"
+    bk = ssalmuk.BlogKeyFile(lambda: str(tmp_path / "blog.env"))
+    assert bk.kakao() == KAKAO_KEY and bk.get() == (BLOG_ID, BLOG_SECRET)
+    assert "do-not-read" not in json.dumps(bk._vals) and set(bk._vals) == set(ssalmuk.BLOG_ENV_NAMES)
+    # 딜봇 환경 키가 있으면 그것 먼저
+    seen = naver(bot, kakao_or_401, keyed=False, kakao="dealbot-kakao-key")
+    await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+    assert seen[-1].headers["authorization"] == "KakaoAK dealbot-kakao-key"
+    # 카카오 줄만 있는 파일 (네이버 키 없음) → 곧장 카카오
+    blog_env(bot, tmp_path, f"KAKAO_REST_API_KEY={KAKAO_KEY}\n")
+    seen = naver(bot, kakao_or_401, keyed=False)
+    assert (await mget(bot, f"{SEARCH}?q=x", desk(bot).key()))[0] == 200 and [r.url.host for r in seen] == ["dapi.kakao.com"]
+
+
+async def test_search_kakao_missing_key_keeps_naver_behavior(bot: DealBot, tmp_path: Path) -> None:
+    """카카오 키가 어디에도 없으면 예전 그대로 (네이버 401 → 502 · 키가 하나도 없으면 503) · 화면엔 '카카오 키 없음'."""
+    import httpx
+
+    blog_env(bot, tmp_path)
+    seen = naver(bot, kakao_or_401)
+    status, body = await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+    assert (status, body["code"], body["status"]) == (502, "naver_error", 401) and "source" not in body
+    assert all(r.url.host == "openapi.naver.com" for r in seen)
+    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["kakao"]["s"] == "none"
+    bot.settings.dashboard.ssalmuk_search_env_file = str(tmp_path / "gone.env")
+    seen = naver(bot, lambda r: httpx.Response(200), keyed=False)
+    status, body = await mget(bot, f"{SEARCH}?q=x", desk(bot).key())
+    assert (status, body["code"]) == (503, "no_key") and seen == []
+    # 카카오 키만 있으면 그것만으로 검색
+    seen = naver(bot, kakao_or_401, keyed=False, kakao=KAKAO_KEY)
+    assert (await mget(bot, f"{SEARCH}?q=x", desk(bot).key()))[0] == 200 and [r.url.host for r in seen] == ["dapi.kakao.com"]
+
+
+async def test_search_kakao_errors(bot: DealBot, caplog: pytest.LogCaptureFixture) -> None:
+    """카카오 401/403/429/5xx → (남은 네이버 키가 없으면) 502 status 그대로 · 시간 초과 → 502 status 0 — 모두 source kakao · 키는 안 남김."""
+    import logging
+
+    import httpx
+
+    caplog.set_level(logging.DEBUG)
+    key = desk(bot).key()
+    for st in (401, 403, 429, 500):
+        def h(r: Any, st: int = st) -> Any:
+            if r.url.host == "dapi.kakao.com":
+                return httpx.Response(st, json={"errorType": "AccessDeniedError", "message": KAKAO_KEY})
+            return httpx.Response(401, json={})
+        seen = naver(bot, h, kakao=KAKAO_KEY)
+        status, body = await mget(bot, f"{SEARCH}?q=x", key)
+        assert (status, body["code"], body["status"], body["source"]) == (502, "naver_error", st, "kakao"), st
+        assert KAKAO_KEY not in json.dumps(body) and len(seen) == 2
+        assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["kakao"]["s"] == st
+    assert desk(bot).search_keysrc() is None
+
+    def boom(req: Any) -> Any:
+        if req.url.host == "dapi.kakao.com":
+            raise httpx.ReadTimeout("t", request=req)
+        return httpx.Response(403)
+    naver(bot, boom, kakao=KAKAO_KEY)
+    status, body = await mget(bot, f"{SEARCH}?q=x", key)
+    assert (status, body["status"], body["source"]) == (502, 0, "kakao")
+    assert json.loads(bot.db.kv_get(ssalmuk.KV_SEARCH_KEYS))["kakao"]["s"] == "no_answer"
+    assert KAKAO_KEY not in caplog.text
+
+
+async def test_search_kakao_first_then_naver_when_kakao_dies(bot: DealBot) -> None:
+    """keysrc 가 kakao 이고 하루가 안 지났으면 카카오 먼저 · 카카오가 401 이면 네이버 키로 이어서 (살아 있으면 되돌아감)."""
+    import httpx
+
+    d = desk(bot)
+    now = [1_800_000_000.0]
+    d.clock = lambda: now[0]
+    key = d.key()
+    naver(bot, kakao_or_401, kakao=KAKAO_KEY)
+    await mget(bot, f"{SEARCH}?q=x", key)
+    assert d.search_keysrc() == "kakao"
+    now[0] += 60
+    seen = naver(bot, lambda r: httpx.Response(401) if r.url.host == "dapi.kakao.com" else ok_blog(r), kakao=KAKAO_KEY)
+    status, body = await mget(bot, f"{SEARCH}?q=x", key)
+    assert status == 200 and [r.url.host for r in seen] == ["dapi.kakao.com", "openapi.naver.com"]
+    assert d.search_keysrc() == "dealbot" and "source" not in body
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_shows_kakao_key() -> None:
+    """화면 한 줄: 키가 카카오면 '검색 · … · 키: 카카오(다음)' · keyDiag 에 '카카오 키 …'."""
+    s = ssalmuk.Ssalmuk(FakeDb())
+    st = sample()
+    st["sources"] = [{"id": "donzomyo", "name": "돈좀요", "status": "ok", "items": 12}]
+    s.push(st)
+    v = s.view()
+
+    def src(proxy: dict[str, Any]) -> str:
+        v["search_proxy"] = proxy
+        out = subprocess.run([NODE, "-e", SHIM, str(STATIC / "ssalmuk.js"), json.dumps(v, ensure_ascii=False)],
+                             capture_output=True, text=True, timeout=30)
+        assert out.returncode == 0, out.stderr
+        return json.loads(out.stdout)["src"]
+    keys = {"dealbot": {"s": "401 키틀림", "at": 1_800_000_000}, "blog": {"s": "401 키틀림", "at": None}, "kakao": {"s": 200, "at": None}, "at": 1}
+    got = src({"keysrc": "kakao", "today_count": 4, "keys": keys})
+    assert "검색 · 오늘 4회 · 키: 카카오(다음)" in got and "네이버 검색" not in got
+    assert "딜봇 키 401 키틀림" in got and "블로그 키 401 키틀림" in got and "카카오 키 200" in got
+    got = src({"keysrc": "dealbot", "today_count": 4, "keys": dict(keys, kakao={"s": "none", "at": None})})
+    assert "네이버 검색 · 오늘 4회 · 키: 딜봇" in got and "카카오 키 없음" in got
 
 
 def test_act_search_retry_and_trust_host(bot: DealBot) -> None:

@@ -14,7 +14,8 @@ A. 오늘 X 글 — 1분 일(scheduler)에서 tick():
    · 카드: 출처 기사 제목·링크 · 숫자 검사 통과 여부(원문에 없는 숫자 경고) · 첫 답글(출처) · 확인 안 된 이야기 표시.
 B. 큰 사건 바로 알림 — big.poll_minutes(20분)마다:
    · 네이버 공식 뉴스 검색 API (키만 — 로그인·크롤링 없음 · 기사 페이지를 열지 않음 · 딜봇 키가 막히면 Blog-Auto .env 키: ssalmuk 과 같은 길)
-     + 화제 목록의 출처 기사 제목. 키가 둘 다 막히면 6시간 쉰다 (돌려 가며 다시 부르지 않음).
+     + 화제 목록의 출처 기사 제목. 네이버 키가 둘 다 막히면(11/15 — 앱이 지워져 401) 카카오(다음) 웹문서 검색 최신순으로 이어서
+     (KAKAO_REST_API_KEY — 기사 제목·주소·매체 도메인·시각만, 블로그·카페·영상 주소는 뺌). 셋 다 막히면 6시간 쉰다 (돌려 가며 다시 부르지 않음).
    · 점수는 규칙만 (AI 판정 없음 — score()): 돈 크기 0~5 + 이름(인물 3·회사 2·AI 1, 4까지) + 센 낱말 0~2 + 매체 수 0~4 + 속도 0~2.
      같은 이름 + 같은 금액(또는 같은 센 낱말)을 window_minutes 안에 쓴 기사끼리 한 사건. 사망·참사·정치 기사는 뺀다.
      알림: 이름이 있고(또는 10조 넘는 돈) · 매체 min_outlets(3)곳 넘게 · 점수 min_score(9) 넘게.
@@ -62,6 +63,7 @@ HELD_MAX_S = 8 * 3600  # 조용한 시간에 미룬 알림은 이만큼 지나�
 NOTICE_TTL_H = 6.0  # 알림 줄이 열려 있는 시간 (뉴스는 금방 식는다)
 KEY_DEAD_S = 6 * 3600  # 키가 막히면 이만큼 쉼
 BLOG_KEY_PER_DAY = 600  # 빌려 쓰는 Blog-Auto 키로는 하루 이만큼만 (그 키 하루 25,000번은 블로그·이벤트 참여 몫 — api_per_day 를 올려도 여기까지)
+BORROWED_SRCS = ("blog", "kakao")  # 하루 BLOG_KEY_PER_DAY 를 지키는 키 (카카오 키도 이벤트 참여 검색과 같이 씀)
 HOT_MAX_AGE_S = 18 * 3600  # 이보다 오래된 화제는 오늘 글감으로 안 씀
 SLOT_GRACE_MIN = 30  # 추천 시각이 이만큼 지나기 전까지는 그 시각 카드를 만든다
 FILL_WINDOW_MIN = 90  # 보충 시각 뒤 이 안에 처음 도는 때만
@@ -70,6 +72,11 @@ LOG_KEEP = 30
 NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
 NEWS_TIMEOUT = 6.0
 NEWS_DISPLAY = 100
+KAKAO_SIZE = 50  # 카카오 웹문서 검색 한 번에 50개까지
+KAKAO_RECHECK_S = 86400.0  # 카카오로 넘어간 뒤 네이버 키는 하루 한 번만 다시 봄 (ssalmuk.KEY_RECHECK 와 같게)
+# 카카오 웹문서는 뉴스만이 아니라서 — 블로그·카페·영상·사전 주소는 매체로 세지 않음 (매체 수가 점수에 들어감)
+NOT_OUTLET_RE = re.compile(r"(?:^|\.)(?:blog\.[a-z0-9.-]+|cafe\.[a-z0-9.-]+|tistory\.com|brunch\.co\.kr|velog\.io|youtube\.com|youtu\.be|"
+                           r"namu\.wiki|wikipedia\.org|instagram\.com|facebook\.com|x\.com|twitter\.com|threads\.net)$")
 BODY_MAX = 1024
 ID_RE = re.compile(r"^(?:t[0-9a-f]{10}|[0-9a-f]{8})$")
 
@@ -276,17 +283,46 @@ def in_quiet(spec: str, now: float) -> bool:
 
 
 # ── 뉴스 검색 (네이버 공식 Open API — 키만) ─────────────────────────────────────────────────────────
+def kakao_rows(data: Any) -> list[dict[str, Any]]:
+    """카카오 웹문서 검색 답 → 네이버 뉴스 줄 꼴 {title, link, originallink, pubDate} (요약은 안 씀 — 제목·주소·매체·시각만).
+    블로그·카페·영상 주소는 뺀다 (NOT_OUTLET_RE)."""
+    from dealbot.dashboard.ssalmuk import kakao_items
+
+    items, _total = kakao_items(data, "news")
+    out = []
+    for it in items:
+        link = it.get("link") or ""
+        try:
+            host = (urlsplit(link).hostname or "").lower()
+        except ValueError:
+            continue
+        if not host or NOT_OUTLET_RE.search(host):
+            continue
+        row = {"title": it.get("title") or "", "link": link, "originallink": link}
+        if it.get("pubDate"):
+            row["pubDate"] = it["pubDate"]
+        out.append(row)
+    return out
+
+
 class NaverNews:
-    """최신 뉴스 제목·요약. 키는 딜봇 것 → 막히면(401·403) Blog-Auto .env 것 (ssalmuk 검색과 같은 길 · 값은 어디에도 안 남김).
+    """최신 뉴스 제목·요약. 키는 딜봇 것 → 막히면(401·403) Blog-Auto .env 것 (ssalmuk 검색과 같은 길 · 값은 어디에도 안 남김)
+    → 그것도 막히면 카카오(다음) 웹문서 최신순 (11/15 — KAKAO_REST_API_KEY: 딜봇 환경, 없으면 Blog-Auto .env 한 줄).
+    카카오로 된 뒤엔 카카오 먼저, 네이버 키는 하루 한 번만 다시 봄.
     search() 는 기사 줄 목록, 못 읽으면 None, 쓸 키가 없으면 dead=True (부르는 쪽이 6시간 쉼)."""
 
-    def __init__(self, bot: Any) -> None:
+    def __init__(self, bot: Any, *, clock: Callable[[], float] = time.time) -> None:
         from dealbot.dashboard.ssalmuk import BlogKeyFile
 
         self.bot = bot
         self.blog_keys = BlogKeyFile(lambda: bot.settings.dashboard.ssalmuk_search_env_file)
         self.src = ""  # 통했던 키
         self.dead = False
+        self.clock = clock
+        self.naver_try = 0.0  # 네이버 키를 마지막으로 써 본 때 (메모리)
+
+    def _kakao(self) -> str | None:
+        return (getattr(self.bot.settings.secrets, "kakao_rest_api_key", None) or "").strip() or self.blog_keys.kakao()
 
     def _keys(self) -> dict[str, tuple[str, str]]:
         sec, keys = self.bot.settings.secrets, {}
@@ -301,29 +337,43 @@ class NaverNews:
         import httpx
 
         keys = self._keys()
-        order = [k for k in ([self.src] if self.src in keys else []) + [k for k in ("dealbot", "blog") if k != self.src] if k in keys]
+        kakao = self._kakao()
+        naver = [k for k in ([self.src] if self.src in keys else []) + [k for k in ("dealbot", "blog") if k != self.src] if k in keys]
+        now = self.clock()
+        if self.src == "kakao" and kakao and now - self.naver_try < KAKAO_RECHECK_S:
+            order = ["kakao", *naver]  # 네이버 키는 하루 한 번만 다시 봄
+        else:
+            order = [*naver, *(["kakao"] if kakao else [])]
         if not order:
             self.dead = True
             return None
         for src in order:
-            cid, csec = keys[src]
             try:
-                r = await self.bot.http.get(NEWS_URL, params={"query": query, "display": NEWS_DISPLAY, "sort": "date"},
-                                            headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=NEWS_TIMEOUT)
+                if src == "kakao":
+                    r = await self.bot.http.get("https://dapi.kakao.com/v2/search/web",
+                                                params={"query": query, "sort": "recency", "size": KAKAO_SIZE, "page": 1},
+                                                headers={"Authorization": f"KakaoAK {kakao}"}, timeout=NEWS_TIMEOUT)
+                else:
+                    self.naver_try = now
+                    cid, csec = keys[src]
+                    r = await self.bot.http.get(NEWS_URL, params={"query": query, "display": NEWS_DISPLAY, "sort": "date"},
+                                                headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}, timeout=NEWS_TIMEOUT)
             except httpx.HTTPError as e:  # 키·주소는 로그에 안 남김
-                log.info("xbig news: %s", type(e).__name__)
+                log.info("xbig news: %s (%s key)", type(e).__name__, src)
                 return None
             if r.status_code in (401, 403):  # 이 키는 막힘 — 다른 키로 한 번
                 log.info("xbig news: HTTP %s (%s key)", r.status_code, src)
                 continue
             if r.status_code != 200:
-                log.info("xbig news: HTTP %s", r.status_code)
+                log.info("xbig news: HTTP %s (%s key)", r.status_code, src)
                 return None
             try:
                 data = r.json()
             except ValueError:
                 return None
             self.src, self.dead = src, False
+            if src == "kakao":
+                return kakao_rows(data)
             items = data.get("items") if isinstance(data, dict) else None
             return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
         self.dead = True
@@ -419,13 +469,13 @@ class XToday:
         api, dead = st["api"], st["dead_until"]
         if self.news is not None and now >= dead:
             for q in cfg.queries:
-                if api >= cfg.api_per_day or (getattr(self.news, "src", "") == "blog" and api >= BLOG_KEY_PER_DAY):
+                if api >= cfg.api_per_day or (getattr(self.news, "src", "") in BORROWED_SRCS and api >= BLOG_KEY_PER_DAY):
                     break
                 api += 1
                 rows = await self.news.search(q)
                 if getattr(self.news, "dead", False):
                     dead = now + KEY_DEAD_S
-                    log.warning("xbig: 네이버 검색 키를 쓸 수 없어요 — %d시간 쉼", KEY_DEAD_S // 3600)
+                    log.warning("xbig: 뉴스 검색 키(네이버·카카오)를 쓸 수 없어요 — %d시간 쉼", KEY_DEAD_S // 3600)
                     break
                 if rows is None:  # 못 읽음 (한도·서버 오류·시간 초과) — 남은 검색어로 더 두드리지 않고 다음 차례에
                     break

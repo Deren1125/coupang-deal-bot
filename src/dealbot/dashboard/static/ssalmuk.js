@@ -107,7 +107,7 @@ const keyDiag = k => {
     const s = v === 'none' ? `${name} 키 없음` : v === 'no_file' ? `${name} 키 파일 못 읽음` : v === 'no_answer' ? `${name} 키 응답 없음` : v === '-' || v == null ? '' : `${name} 키 ${String(v).slice(0, 12)}`;
     return s && t ? `${s} (${t})` : s;
   };
-  return [one('딜봇', k.dealbot), one('블로그', k.blog)].filter(Boolean).join(' · ');
+  return [one('딜봇', k.dealbot), one('블로그', k.blog), one('카카오', k.kakao)].filter(Boolean).join(' · ');  // 11/15 카카오(다음) 검색 키
 };
 // 11/14 네이버 검색 상태 한 줄 (state.search + 응답 search_proxy) — 글자로만, 없으면 null
 const searchLine = () => {
@@ -117,8 +117,8 @@ const searchLine = () => {
   if (!q && !ks && !(p && n(p.today_count))) return null;
   const d = q && q.lastAt ? new Date(q.lastAt) : null, hm = d && !isNaN(d) ? d.toLocaleTimeString('ko-KR', {timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false}) : '';
   const err = q && q.lastError ? String(q.lastError).slice(0, 40) : '';
-  return ['네이버 검색', cnt != null ? `오늘 ${cnt}회${q && n(q.ok) != null ? ` (성공 ${n(q.ok)} · 실패 ${n(q.fail) || 0})` : ''}` : '',
-    ks ? `키: ${ks === 'blog' ? '블로그 서버' : ks === 'dealbot' ? '딜봇' : String(ks).slice(0, 10)}` : '',
+  return [ks === 'kakao' ? '검색' : '네이버 검색', cnt != null ? `오늘 ${cnt}회${q && n(q.ok) != null ? ` (성공 ${n(q.ok)} · 실패 ${n(q.fail) || 0})` : ''}` : '',
+    ks ? `키: ${ks === 'blog' ? '블로그 서버' : ks === 'dealbot' ? '딜봇' : ks === 'kakao' ? '카카오(다음)' : String(ks).slice(0, 10)}` : '',
     q && q.lastStatus ? `마지막 ${String(q.lastStatus).slice(0, 10)}${hm ? ' ' + hm : ''}` : '', err ? `오류: ${err}` : '', keyDiag(p && p.keys)].filter(Boolean).join(' · ');
 };
 const todos = () => ((st() || {}).todo || []).filter(t => t && typeof t === 'object');

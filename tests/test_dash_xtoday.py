@@ -485,6 +485,75 @@ async def test_naver_news_uses_keys_only_falls_back_once_and_never_logs_them(tmp
         assert secret not in caplog.text
 
 
+async def test_naver_news_falls_back_to_kakao_web_recency_and_keeps_only_outlets(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """11/15 네이버 키 둘 다 401 → 카카오(다음) 웹문서 최신순 (제목·주소·매체·시각만, 블로그·카페·영상은 뺌) ·
+    카카오로 된 뒤엔 카카오 먼저, 네이버는 하루 한 번만 · 카카오 키는 딜봇 환경 먼저, 없으면 Blog-Auto .env 한 줄 · 값은 로그에 안 남김."""
+    from types import SimpleNamespace
+
+    import httpx
+
+    env = tmp_path / "blog.env"
+    env.write_text("NAVER_CLIENT_ID=blogid\nNAVER_CLIENT_SECRET=blogsecret\nKAKAO_REST_API_KEY=kakaofilekey\n", encoding="utf-8")
+    seen: list[tuple[str, str, dict[str, Any]]] = []
+    kakao_code = [200]
+    docs = [{"title": "<b>엔비디아</b> 시총 5조 달러", "contents": "요약은 안 씀", "url": "https://www.hankyung.com/article/1",
+             "datetime": "2026-11-15T09:10:00.000+09:00"},
+            {"title": "블로그 글", "contents": "", "url": "https://blog.naver.com/x/1", "datetime": "2026-11-15T09:00:00.000+09:00"},
+            {"title": "카페 글", "contents": "", "url": "https://cafe.daum.net/x/1", "datetime": "2026-11-15T09:00:00.000+09:00"},
+            {"title": "영상", "contents": "", "url": "https://www.youtube.com/watch?v=1", "datetime": "2026-11-15T09:00:00.000+09:00"},
+            {"title": "", "contents": "", "url": "https://news.example/empty"}]
+
+    class Http:
+        async def get(self, url: str, *, params: dict[str, Any], headers: dict[str, str], timeout: float) -> httpx.Response:
+            if "dapi.kakao.com" in url:
+                seen.append((url, headers["Authorization"], params))
+                return httpx.Response(kakao_code[0], json={"meta": {"total_count": 5}, "documents": docs} if kakao_code[0] == 200 else {})
+            seen.append((url, headers["X-Naver-Client-Id"], params))
+            return httpx.Response(401, json={"errorMessage": "Not Exist Client ID"})
+
+    now = [1_800_000_000.0]
+    bot = SimpleNamespace(http=Http(), settings=SimpleNamespace(secrets=SimpleNamespace(naver_client_id="dealid", naver_client_secret="dealsecret"),
+                                                                dashboard=SimpleNamespace(ssalmuk_search_env_file=str(env))))
+    n = xt.NaverNews(bot, clock=lambda: now[0])
+    caplog.set_level("DEBUG")
+    rows = await n.search("엔비디아")
+    assert [k for _u, k, _p in seen] == ["dealid", "blogid", "KakaoAK kakaofilekey"] and n.src == "kakao" and n.dead is False
+    assert seen[-1][0] == "https://dapi.kakao.com/v2/search/web" and seen[-1][2] == {"query": "엔비디아", "sort": "recency", "size": 50, "page": 1}
+    assert rows == [{"title": "엔비디아 시총 5조 달러", "link": "https://www.hankyung.com/article/1", "originallink": "https://www.hankyung.com/article/1",
+                     "pubDate": "Sun, 15 Nov 2026 09:10:00 +0900"}, {"title": "", "link": "https://news.example/empty", "originallink": "https://news.example/empty"}]
+    a = xt.article(rows[0], now[0])
+    assert a is not None and a["outlet"] == "hankyung.com" and a["desc"] == "" and a["at"] < now[0]
+    assert xt.article(rows[1], now[0]) is None  # 제목 없는 줄은 버림 (예전 그대로)
+    # 다음 검색은 카카오만 (네이버를 매번 두드리지 않음) · 하루 지나면 네이버를 다시 봄
+    await n.search("조원")
+    assert [k for _u, k, _p in seen][3:] == ["KakaoAK kakaofilekey"]
+    now[0] += 86401
+    await n.search("조원")
+    assert [k for _u, k, _p in seen][4:] == ["dealid", "blogid", "KakaoAK kakaofilekey"]
+    # 딜봇 환경에 카카오 키가 있으면 그것 먼저
+    bot.settings.secrets.kakao_rest_api_key = "kakaoenvkey"
+    await n.search("조원")
+    assert seen[-1][1] == "KakaoAK kakaoenvkey"
+    # 카카오 429 = 한도 — 쉬지 않고 이번만 못 읽음 · 401 이면 셋 다 막힘 → dead (부르는 쪽이 6시간 쉼)
+    kakao_code[0] = 429
+    assert await n.search("조원") is None and n.dead is False
+    kakao_code[0] = 401
+    assert await n.search("조원") is None and n.dead is True
+    for secret in ("dealsecret", "blogsecret", "dealid", "blogid", "kakaofilekey", "kakaoenvkey"):
+        assert secret not in caplog.text
+
+
+async def test_kakao_news_counts_against_the_borrowed_key_cap() -> None:
+    """카카오 키도 이벤트 참여 검색과 같이 쓰는 빌린 키 — api_per_day 를 올려도 하루 BLOG_KEY_PER_DAY 까지."""
+    d, _ask, _r, feed, now = desk(now=[at("09:00")], hots=[], big={"api_per_day": 5000})
+    feed.src = "kakao"  # type: ignore[attr-defined]
+    st = d.big()
+    st["api"] = xt.BLOG_KEY_PER_DAY - 2
+    d._save(xt.KV_BIG, st)
+    await d.poll()
+    assert len(feed.asked) == 2 and d.big()["api"] == xt.BLOG_KEY_PER_DAY
+
+
 # ---------------------------------------------------------------- 4) 글 쓰는 모델
 async def test_cards_are_written_through_xstudio_rules_and_never_by_fable(monkeypatch: pytest.MonkeyPatch) -> None:
     d, ask, _r, _f, now = desk(big={"enabled": False}, hots=HOTS[:1])
