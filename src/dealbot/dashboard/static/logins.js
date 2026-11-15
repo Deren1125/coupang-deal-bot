@@ -99,7 +99,7 @@ function row(r) {
 }
 
 // 책갈피 설치 칸 (꾸미기 10/27 · 통계 11/11 · 이웃 관리 11/14 — note = 오늘 수) · 코드는 펼칠 때 /dashboard/api/<api>
-const BM = [{api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드)'}, {api: 'statscap', t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'},
+const BM = [{api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)'}, {api: 'statscap', t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'},
   {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'seoi', t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'},
   {api: 'xhelper', t: 'X 도우미 버튼 설치'}];
 function kkDraw() {

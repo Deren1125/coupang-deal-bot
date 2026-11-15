@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v4 (주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v6 (v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -17,8 +17,8 @@ const D = look(document);
 if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
-// 판 번호 (11/14 — 끝 알림에 'v5' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 5;
+// 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
+const V = 6;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => D.querySelectorAll(CARD).length;
@@ -265,12 +265,101 @@ const tagsIn = async tags => {
   const left = (tagIn() || inp).value;
   return [n, left ? '남은 글 ' + left : ''];
 };
+// 예약 시각 채움 (v6 · 주인 11/14 '시간 고르는 수고 없게'): 발행 설정창에서 '예약'을 고르고 날짜·시·분을 채운 뒤 멈춘다 — 발행 단추는 주인이 직접.
+// 발행창 예약 칸은 로그인 없이 볼 수 없어 글자('현재'·'예약')와 모양(0~23 고르기 칸 · 분 고르기 칸 · 'YYYY. M. D' 날짜 칸 · 달력 표)으로 찾는다.
+// 하나라도 못 찾거나 확인이 안 되면 고르기 칸을 되돌리고 '현재'로 돌려놓은 뒤 안내만 (꾸미기 본 일은 그대로). 클릭 사이는 사람처럼 0.4~0.8초.
+const p2 = n => (n < 10 ? '0' : '') + n;
+const num = o => parseInt((/\d+/.exec(o.textContent) || /\d+/.exec(o.value) || [''])[0], 10);
+const ymd = e => { const m = /(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/.exec(e.value || e.innerText || ''); return m ? m[1] * 372 + m[2] * 31 + m[3] * 1 : 0; };
+const seen = e => e.offsetParent !== null;
+// 발행을 끝내는 단추는 어떤 일이 있어도 누르지 않는다 (이름에 confirm·publish 가 들었거나 submit 이면 멈춤)
+const tap = async e => {
+  if (/confirm|publish/i.test(e.className + e.getAttribute('data-testid')) || e.type === 'submit') throw 0;
+  press(e);
+  await S(400 + Math.random() * 400);
+};
+const put = (s, v) => {
+  Object.getOwnPropertyDescriptor(s.ownerDocument.defaultView.HTMLSelectElement.prototype, 'value').set.call(s, v);
+  for (const t of ['input', 'change']) s.dispatchEvent(new Event(t, {bubbles: true}));
+};
+const opt = (s, n) => {
+  const o = [...s.options].find(x => num(x) === n);
+  if (o) put(s, o.value);
+  return !!o && num(s.selectedOptions[0]) === n;
+};
+const atOf = a => a.slice(1).split(/\D/).map(Number);
+const atLabel = (m, mm) => m[1] + '/' + m[2] + ' ' + p2(m[3]) + ':' + p2(mm);
+const bookIn = async at => {
+  const m = atOf(at), [y, mo, d, h] = m, want = y * 372 + mo * 31 + d;
+  if (new Date(y, mo - 1, d, h, m[4]) - Date.now() < 3e5) return '지난 시각';
+  const radio = (b, t) => [...b.querySelectorAll('label,[role=radio]')].find(e => seen(e) && e.innerText.replace(/\s/g, '') === t);
+  let box = tagIn(), r1;
+  for (let k = 0; box && !r1 && k < 12; k++) { box = box.parentElement; r1 = box && radio(box, '예약'); }
+  if (!r1) return '예약 칸 없음';
+  const T = box.ownerDocument, r0 = radio(box, '현재'), on = e => e.control ? e.control.checked : e.getAttribute('aria-checked') === 'true', was = on(r1);
+  const sels = () => {
+    let H, M;
+    for (const s of box.querySelectorAll('select')) {
+      const n = [...s.options].map(num), x = Math.max(...n);
+      if (!seen(s)) continue;
+      if (!H && n.length === 24 && x === 23) H = s; else if (H && !M && x > 29 && x < 60) M = s;
+    }
+    const D_ = [...box.querySelectorAll('input,button')].find(e => seen(e) && ymd(e));
+    return H && M && D_ ? [H, M, D_] : null;
+  };
+  let old = null;
+  try {
+    if (!was) await tap(r1);
+    const got = await wait(sels, 2500);
+    if (!got || !on(r1)) throw 0;
+    const [H, M, D_] = got, mm = Math.max(...[...M.options].map(num).filter(n => n <= m[4]));
+    old = [H, H.value, M, M.value];
+    // 날짜: 이미 그 날이면 그대로 · 아니면 달력을 열어 다음 달 단추(두 번까지)·그 날을 누르고 날짜 칸이 바뀐 것을 본다
+    if (ymd(D_) !== want) {
+      await tap(D_);
+      const cal = () => {
+        for (const t of T.querySelectorAll('table')) {
+          // 본문에 넣은 표는 달력이 아님
+          if (!seen(t) || t.closest('.se-content') || t.querySelectorAll('td').length < 28) continue;
+          for (let c = t, k = 0; k < 4 && (c = c.parentElement); k++) {
+            const a = /(\d{4})\D{1,3}(\d{1,2})/.exec(c.innerText.replace(t.innerText, ''));
+            if (a) return [t, c, a[1] * 12 + a[2] * 1];
+          }
+        }
+      };
+      let c = await wait(cal, 2500);
+      for (let k = 0; c && c[2] < y * 12 + mo && k < 2; k++) {
+        const n = [...c[1].querySelectorAll('button,a')].find(e => seen(e) && /next|다음/i.test(e.className + e.title + e.getAttribute('aria-label') + e.innerText)), was_ = c[2];
+        if (!n) throw 0;
+        await tap(n);
+        c = await wait(() => { const x = cal(); return x && x[2] > was_ && x; }, 2000);
+      }
+      if (!c || c[2] !== y * 12 + mo) throw 0;
+      const ds = [...c[0].querySelectorAll('td')].filter(e => e.innerText.trim() === '' + d && !/other|disabled|outside/i.test(e.className + (e.firstElementChild || e).className));
+      if (ds.length !== 1) throw 0;
+      await tap(ds[0].querySelector('button,a') || ds[0]);
+      if (!await wait(() => { const s = sels(); return s && ymd(s[2]) === want; }, 2500)) throw 0;
+    }
+    if (!opt(H, h) || !opt(M, mm)) throw 0;
+    await S(300);
+    const s = sels();
+    if (!s || !on(r1) || ymd(s[2]) !== want || num(s[0].selectedOptions[0]) !== h || num(s[1].selectedOptions[0]) !== mm) throw 0;
+    if (mm !== m[4]) R.notes.push('분은 ' + p2(mm) + '분으로 내림');
+    R.at = atLabel(m, mm);
+    return '';
+  } catch (e) {
+    // 되돌리기: 고르기 칸 값 → 원래대로 · 우리가 고른 '예약' → '현재'
+    try { if (old) { put(old[0], old[1]); put(old[2], old[3]); } if (!was && r0 && on(r1)) press(r0); } catch (e2) {}
+    return '칸을 못 찾음';
+  }
+};
 const tagsOf = t => {
   const bits = t.slice(1).replace(/[^\u200c\u200d]/g, '');
   const bytes = new Uint8Array(Math.floor(bits.length / 8));
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8).replace(/\u200c/g, '0').replace(/\u200d/g, '1'), 2);
   // 카테고리는 맨 앞 '\u0001' 앞에 (11/09 — 발행창 카테고리가 늘 지난번 것으로 남음)
-  try { const a = new TextDecoder('utf-8').decode(bytes).split('\u0001'), t_ = a.pop(); return {cat: a[0] || '', tags: t_.split(/[\s,#]+/).filter(Boolean)}; } catch (e) { return {cat: '', tags: []}; }
+  // v6: 카테고리와 태그 사이에 예약 시각 '@2026-11-15T19:00' 이 올 수 있음 (딜봇 kkumi.stamp — 옛 책갈피는 그 칸을 안 읽음)
+  try { const a = new TextDecoder('utf-8').decode(bytes).split('\u0001'), t_ = a.pop(); return {cat: a[0] || '', at: a[1] || '', tags: t_.split(/[\s,#]+/).filter(Boolean)}; } catch (e) { return {cat: '', at: '', tags: []}; }
 };
 // 붙여 넣은 HTML → 조각 [{k: text|rule|card|quote|tags}] (사파리가 감싼 div·span 은 풀어서 문단만)
 const BLOCK = /^(P|BLOCKQUOTE|HR|H[1-6]|UL|OL|TABLE|FIGURE|PRE)$/;
@@ -395,6 +484,7 @@ try {
       R.tags[1] = p.tags.length;
       R.tagList = p.tags;
       R.cat = p.cat;
+      if (/^@\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(p.at)) { R.book = p.at; R.at = atLabel(atOf(p.at), atOf(p.at)[4]); R.bookWhy = '글이 덜 들어감'; }
     }
     R.done++;
   }
@@ -406,6 +496,7 @@ try {
     R.tags[0] = n;
     if (why) R.bad.push('태그 ' + why);
     if (R.cat) { const w = await catIn(R.cat); if (w) R.bad.push('카테고리 ' + w); else R.catOk = 1; }
+    if (R.book) R.bookWhy = await bookIn(R.book);
   }
 } finally { W.__kkumi = 0; }
 const out = [];
@@ -421,5 +512,5 @@ if (R.fx[0].some(Boolean)) { out.push('꾸밈 ' + fs(R.fx[0]) + ' → ' + fs(R.f
 else R.notes.push('꾸밈 없음');
 R.ok = R.shape === R.want && !R.bad.length;
 R.finished = true;
-alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
+alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.book ? R.bookWhy ? '\n예약 시각: ' + R.at + ' — 직접 골라 주세요 (' + R.bookWhy + ')' : '\n예약 ' + R.at + ' 채움 — 맞는지 보고 발행은 직접' : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
 })().catch(e => alert('꾸미기 오류: ' + e));

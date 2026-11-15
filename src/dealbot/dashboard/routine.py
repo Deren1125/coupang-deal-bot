@@ -14,6 +14,8 @@ GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 
     kkumi_new = 꾸미기 책갈피가 '설치했어요' 한 판과 다름 (kkumi.is_new) · relay = 블로그 프로그램에 아직 못 전한 체크 수 ·
     nb = 이웃 글 들르기 줄 (nbvisit.view — 블로그마다 남은 줄·오늘 책갈피로 체크한 수).
   줄의 paste.stale (만드는 중·못 만든 묶음 — html 없음)·gate {ok, codes, text} 는 blogauto._routine_item 이 거른 그대로.
+  예약 줄의 when {at 'YYYY-MM-DDTHH:MM', label 'M/D HH:MM', rule} (주인 11/14 — 있을 때만): 꾸미기 책갈피 v6 가 발행 설정에 채울 예약 시각.
+    같은 값이 paste.html·text 끝 태그 줄에 실려 있다 (kkumi.stamp) — 추천 시각 그대로, 없거나 지났으면 규칙으로 고른 것(rule 참).
 에이블리 링크 부탁 (주인 10/28): Blog-Auto 칸 ably_requests (blogauto._ably_requests) — 서버는 에이블리를 열지 않고 주인이 폰 앱에서
   링크를 만들어 붙여 넣음 → 대시보드 일 blog.similar_links {blog: issue, pid, links: [붙여 넣은 글], rid}. 없거나 0개면 None.
 출처: 블로그 프로그램 기록 파일 status.routine (blogauto._routine) + EXTRA_SOURCES (지금은 스레드 세션 몫 threads_items 하나 — 늘 []).
@@ -404,6 +406,17 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
                         for i in r["items"] if i["slot"] == s["key"]])
         slots.append({**s, "items": its, "done": sum(i["done"] for i in its), "total": len(its),
                       "min_left": sum(i["min"] for i in its if not i["done"]), "current": s["key"] == cur})
+    try:  # 예약 줄: 꾸미기 책갈피(v6)가 발행 설정에 채울 예약 시각을 글 끝 태그 줄에 싣는다 (주인 11/14 — kkumi.when_plan · stamp)
+        from dealbot.dashboard import kkumi
+
+        rows = [i for s in slots for i in s["items"]]
+        plan = kkumi.when_plan(rows, r["day"], datetime.fromtimestamp(now, _tz(bot)).replace(tzinfo=None))
+        for i in rows:
+            if (w := plan.get(i["id"])) and (h := kkumi.stamp(i["paste"]["html"], w["at"])) != i["paste"]["html"]:
+                i["paste"] = {**i["paste"], "html": h, "text": kkumi.stamp(i["paste"]["text"], w["at"])}
+                i["when"] = w
+    except Exception as e:  # noqa: BLE001 — 시각을 못 실어도 글은 그대로 복사됨 (책갈피가 예약 칸을 건드리지 않을 뿐)
+        log.warning("routine when failed: %s", type(e).__name__)
     try:  # 이웃 글 들르기 줄 ↔ '이웃 관리' 책갈피 (주인 11/14 — 블로그마다 다음에 열 글 · 오늘 책갈피로 체크한 수)
         from dealbot.dashboard import nbvisit
 

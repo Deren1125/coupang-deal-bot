@@ -42,7 +42,9 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     src = kkumi.SRC.read_text(encoding="utf-8")
     js = code()
     assert js == kkumi.minify(src) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
-    assert len(kkumi.bookmarklet()) < 28000  # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB · 11/09 25.9KB 돎 → 카테고리 넣으며 28KB 안 · 주인 확인)
+    # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB · 11/09 25.9KB 돎 → 카테고리 넣으며 28KB 안 · 주인 확인)
+    # 11/14 v6 예약 시각 채움 +5.5KB → 33.4KB — 이 길이는 아이패드에서 아직 저장해 보지 않음 (주인 확인 필요 · 안 되면 v5 로 되돌림)
+    assert len(kkumi.bookmarklet()) < 34000
     # 받기는 사진 하나뿐 (11/09 — 우리 공개 사진 /media/blog_*.jpg 만 · 쿠키 없이 → 네이버에 파일로 올림)
     assert js.count("fetch(") == 1 and "fetch(u,{credentials:'omit'})" in js and "if(!PIC.test(u))throw 0;" in js
     for net in ("XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "import(", ".src=", "location", "open(", "http://"):
@@ -325,7 +327,7 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    assert got["fold"] == ["꾸미기 버튼 설치 (링크 카드)", "false"] and got["before"] == 0  # 접혀 있고 펼칠 때만 받음
+    assert got["fold"] == ["꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)", "false"] and got["before"] == 0  # 접혀 있고 펼칠 때만 받음
     assert got["steps"] == list(kkumi.STEPS) and got["clip"] == [kkumi.bookmarklet()] and got["toast"].startswith("복사했어요")
     assert got["keep"] == "true" and got["calls"] == 1
     assert got["ack"] == [[f"설치했어요 (v{kkumi.version()})", False]]  # 새 판 알림을 끄는 단추 (11/14 — kkumi.installed {ver})
