@@ -14,6 +14,8 @@
         마지막 단추는 press(n, 1) 로만 (자동에서만 · 이웃추가 화면의 a.btn_ok '확인' · 댓글 칸의 .u_cbox_btn_upload '등록' 두 곳).
         다음까지 기다리는 시간은 대시보드가 정한다 (서이추 60~120초 · 들르기 45~90초 · 둘을 합쳐 한 시간 15 · 하루 상한) — 책갈피는 그 초만큼 세고 다시 묻는다.
         바로 멈춤: 네이버가 한도·제한·보호조치·잠시 후 다시 같은 글을 보이거나, 로그인 화면이 나오거나, 두 번 잇달아 안 되면 — 대시보드에 a=stop (그날 쉼).
+        자동입력 방지 칸([class*=captcha] — 보이고 크기가 있는 것)이 뜨면 어디서든 멈춤. 대시보드가 '방금 한 대상'(dup — 다른 탭·다시 시작)이라고 하면 그 대상은 건너뜀
+        (같은 글에 댓글 두 번 막기 — 댓글 칸에서도 목록이 뜨기를 2.5초 기다려 내 댓글·같은 글이 있으면 넣지 않음).
         이미 이웃·신청 중·서로이웃을 받지 않는 블로그는 건너뜀 (세지 않음). 탭이 뒤로 가면 느려질 뿐 돌아오면 이어서 · 새로고침하면 책갈피를 다시.
         네이버 알림 창(alert·confirm)은 그 작은 창에서만 글을 받아 적는다 (confirm 은 늘 '아니오') — 한도 안내를 읽으려는 것.
    사람 속도 지키기(주인 11/14 '너무 빠르면 봇으로 볼까 걱정'): 누르기 전에 대시보드(@@URL@@ · 열쇠 @@KEY@@ · 쿠키 없음)에 물어
@@ -40,11 +42,11 @@ W.__sbnb = 1;
 let ov = null, au = 0, fr = null, fx = '', cur = {}, res = '', said = '', gc = '', dl = [], t0 = 0;
 try {
 const NO = /확인|등록|신청|보내기|완료|다음|취소|삭제|차단|submit/i;
-const FULL = /하루|초과|비정상|보호조치|일시적|한도|제한|잠시후|스팸|차단|정지|자동입력/;
-const HAVE = /상대방이|이미(서로)?이웃|이미추가|신청중|진행중|이미신청/;
+const FULL = /하루|초과|비정상|보호조치|일시적|한도|제한|잠시후|스팸|차단|정지|자동입력|연속|도배|나중에|운영/;
+const HAVE = /상대방|이미(서로)?이웃|이미추가|신청중|진행중|이미신청/;
 const LY = '#_alertLayer,.lyr_popup', BODY = '.se-main-container,#postViewArea,.post_ct,#viewTypeSelector';
 // 네이버가 보인 글: full = 한도·제한 안내 (그날 쉼) · have = 이미 이웃·신청 중·받지 않음 (건너뜀)
-const kind = t => { t = t.replace(/\s/g, ''); return !/상대방이/.test(t) && FULL.test(t) ? 'full' : HAVE.test(t) ? 'have' : ''; };
+const kind = t => { t = t.replace(/\s/g, ''); return !/상대방/.test(t) && FULL.test(t) ? 'full' : HAVE.test(t) ? 'have' : ''; };
 // 알림: 한 단계는 알림 창 · 자동은 칸에 (r = 자동의 결과)
 const A = (t, r) => { said = t; if (r) res = r; if (!au) alert(SB + t); };
 const sl = t => new Promise(r => setTimeout(r, t));
@@ -218,8 +220,9 @@ const form = async () => {
       await sl(500);
       if (!wins().length) { res = 'login'; return; }
       const t = sq(qa(LY).filter(vis).map(tx).concat(dl).join(' ')), k = kind(t);
+      // 신청 완료 글은 화면에든 안내 창·알림에든 — 한도·이미 이웃 글이 먼저
+      if (!k && /신청(이|을)?(완료|하였|했|되었)/.test((page() + t).replace(/\s/g, ''))) { A(tg + ' 서로이웃 신청 ✓ (' + g.text + ')', 'ok'); return; }
       if (t) { A(k === 'full' ? '네이버가 한도·제한 안내를 보여요 (' + t.slice(0, 60) + ')' : k === 'have' ? '이미 이웃이거나 신청 중이에요' : '네이버 알림: ' + t.slice(0, 60), k === 'full' ? 'stop' : k === 'have' ? 'skip' : 'fail'); return; }
-      if (/신청완료|신청하였/.test(page().replace(/\s/g, ''))) { A(tg + ' 서로이웃 신청 ✓ (' + g.text + ')', 'ok'); return; }
     }
     A('확인을 눌렀는데 신청 완료 글을 못 봤어요', 'unsure');
     return;
@@ -259,6 +262,8 @@ const lon = n => {
   return a.some(x => f(x, 'true') || /(^|\s)on(\s|$)/.test(x.className)) ? 1 : a.some(x => f(x, 'false') || /(^|\s)off(\s|$)/.test(x.className)) ? 0 : -1;
 };
 const liked = () => qa(LK).some(n => lon(n) > 0);
+// 자동입력 방지 칸 (공감·댓글·이웃추가 어디든 — 보이고 크기가 있는 것만)
+const caps = () => qa('[class*=captcha]').filter(n => vis(n) && n.offsetHeight > 9);
 const visit = async () => {
   if (ours(P.id)) { A('우리 블로그 글이에요 — 아무것도 하지 않았어요'); return; }
   if (out()) { A('네이버에 로그인돼 있지 않아요 — 로그인한 뒤 다시', 'login'); return; }
@@ -295,7 +300,8 @@ const visit = async () => {
   else {
     // 반응 고르는 칸(._faceLayer)이 있으면: 얼굴 단추로 칸을 열고 그 안의 '공감' 하나를 누름 · 없으면 그 단추가 곧 공감
     const b = ls[0], os = Array.from(lmod(b).querySelectorAll('._faceLayer a._button')), o = os.find(n => n.getAttribute('data-type') === 'like') || (os.length === 1 ? os[0] : null);
-    if (!o || !vis(o)) press(b);
+    // 얼굴 단추를 누른 것만으로 공감이 되는 화면이면 그 표시가 뜰 때까지 기다림 (곧바로 칸 안을 또 누르면 풀림)
+    if (!o || !vis(o)) { press(b); await sl(900); }
     for (let i = 0; o && i < 6 && !vis(o); i++) await sl(400);
     if (o && vis(o) && !liked()) press(o);
     // 표시가 늦게 바뀌는 화면이 있어 5초쯤 다시 봄
@@ -312,8 +318,11 @@ const visit = async () => {
       const cb = qa('[class*=Interact__comment_btn],[class*=comment_btn__],a.btn_comment').filter(vis), ce = cb.filter(n => !fl(n)), c0 = (ce.length ? ce : cb).pop();
       if (c0 && press(c0)) for (let i = 0; i < 15 && !bx; i++) { await sl(400); bx = qa(BOX).filter(vis)[0]; }
     }
+    // 자동: 댓글 목록이 뜰 시간을 준 뒤 내 댓글·같은 글이 이미 있는지 봄 (같은 글에 두 번 달지 않게)
+    const has = () => qa('.u_cbox_comment').some(n => sq(tx(n)).includes(sq(cm).slice(0, 12)));
+    if (au) await sl(2500);
     if (qa('.u_cbox_type_logged_out').filter(vis).length) { did.push('댓글 칸이 로그인을 바라요'); bad = 1; }
-    else if (qa('li.u_cbox_comment[data-info*="mine:true"]').length) did.push('이미 내 댓글이 있는 글이에요 — 초안은 넣지 않았어요');
+    else if (qa('li.u_cbox_comment[data-info*="mine:true"]').length || (au && has())) did.push('이미 내 댓글이 있는 글이에요 — 초안은 넣지 않았어요');
     else if (!bx) { did.push('댓글 칸을 못 찾았어요 — 초안을 복사해 쓰세요'); bad = 1; if (!au) prompt('댓글 초안 (복사해서 쓰세요)', cm); }
     else if (sq(bx.getAttribute('contenteditable') === 'true' ? bx.textContent : bx.value)) { did.push('댓글 칸에 쓰던 글이 있어 그대로 뒀어요'); if (!au) prompt('댓글 초안 (복사해서 쓰세요)', cm); }
     else if (!au) { put(bx, cm); did.push("댓글 초안 넣음 ✓ — 내 말로 고친 뒤 '등록'은 직접"); }
@@ -321,7 +330,7 @@ const visit = async () => {
       // 자동: 등록(.u_cbox_btn_upload 하나)까지 누르고, 댓글 목록에 그 글이 실제로 생겼는지 봄
       put(bx, cm);
       await sl(1500);
-      const up = qa('.u_cbox_btn_upload').filter(vis), has = () => qa('.u_cbox_comment').some(n => sq(tx(n)).includes(sq(cm).slice(0, 12)));
+      const up = qa('.u_cbox_btn_upload').filter(vis);
       if (up.length !== 1) { did.push('등록 단추가 ' + up.length + '개라 누르지 않았어요'); bad = 1; }
       else {
         press(up[0], 1);
@@ -332,7 +341,7 @@ const visit = async () => {
     }
   }
   // 자동: 네이버가 띄우려던 알림·댓글 칸 안내·공감 자동입력 방지 창에 한도·제한 글이 있으면 멈춤
-  const cap = qa('[class*=likeit_captcha]').filter(vis), nt = au ? sq(dl.concat(cap.concat(qa('[class*=_likePopupModule]').filter(vis)).map(tx)).join(' ')) : '';
+  const cap = caps(), nt = au ? sq(dl.concat(cap.concat(qa('[class*=_likePopupModule]').filter(vis)).map(tx)).join(' ')) : '';
   if (nt) did.push('네이버 알림: ' + nt.slice(0, 60));
   A(nm(w.b) + ' · ' + did.join(' · ') + ' (' + g.text + ')', !wins().length ? 'login' : nt && (cap.length || kind(nt) === 'full') ? 'stop' : bad || nt ? 'fail' : 'ok');
 };
@@ -393,7 +402,8 @@ const auto = async () => {
         else if (cur.no) { await read(); if (!go) break; look(); await visit(); }
         else { look(); for (let i = 0; i < 20 && !(radios().length || qa('textarea,' + LY).filter(vis).length); i++) await sl(500); await form(); }
         if (res === 'down') { say(DOWN); break; }
-        if (res === 'srv' && /gap|hour/.test(gc)) continue;
+        if (res !== 'stop' && caps().length) { res = 'stop'; said = (said ? said + ' · ' : '') + '자동입력 방지 칸이 떴어요'; }
+        if (res === 'srv' && /gap|hour|dup/.test(gc)) continue;
         if (res === 'login' && !said) said = '로그인 화면이 나왔거나 화면을 읽지 못했어요 — 네이버에 로그인한 뒤 책갈피를 다시 눌러 주세요';
         if (res !== 'srv') await ask({a: 'done', b: fx, w: cur.no ? 'visit' : 'add', t: cur.id, n: cur.no || '', r: res});
         say(said);

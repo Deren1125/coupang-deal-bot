@@ -24,8 +24,9 @@ today(): 할 일 탭·연결 탭이 읽는 오늘 수 ('오늘 이웃 들르기 
   a=queue  그 블로그의 오늘 남은 차례 {next: {id, msg} | {id, no} | None, wait(초), add, visit, min, text} — 오늘 할 일의 서로이웃 줄(nb-add)·이웃 글 들르기 줄(nb-visit)
            가운데 체크 안 된 것 · 오늘 이미 해 본 것(tried) 빼고 · 하루 상한까지만. 서이추와 들르기를 번갈아 (방금 한 종류가 아닌 쪽 먼저).
   a=add / a=visit 에 au=1  자동이 묻는 것 — 간격·한 시간 상한을 두 종류 합쳐서 본다 (hold: 서이추 60~120초 · 들르기 45~90초 가운데 늦은 쪽 · 합쳐 한 시간 15).
+           허락하는 그때 tried 에 적는다 (a=done 이 안 와도 오늘은 다시 안 줌) · 방금 허락한 대상을 또 물으면 409 dup (탭 둘·다시 시작 — 같은 글 댓글 두 번 막기).
   a=done   한 명·한 편의 결과 r: ok(서이추 줄 체크 + 블로그 프로그램에 nb_requested — 손으로 체크할 때와 같은 길 routine.set_done·relay_add) ·
-           skip(이미 이웃·신청 중·받지 않음 — 줄은 체크하되 센 것은 되돌림 · 다음까지 20~40초) · 그 밖(fail·unsure·login·stop — 적기만 · 다음까지 적어도 20~40초).
+           skip(이미 이웃·신청 중·받지 않음 — 줄은 체크하되 하루 센 것은 되돌림 · 세기 전에 건너뛴 것은 다음까지 20~40초, '확인'을 누른 뒤면 간격 그대로) · 그 밖(fail·unsure·login·stop — 적기만 · 다음까지 적어도 20~40초).
            무엇이든 tried 에 넣어 오늘은 다시 안 줌.
   a=stop w=all  서이추·들르기 둘 다 그날 쉼.
 책갈피 판 (V): 책갈피가 요청마다 v 를 실어 보냄 → 지금 판이면 kv seoi_seen 에 적음 — 다르면 연결 탭·할 일 탭에 '다시 깔기' 안내 (is_new).
@@ -322,9 +323,11 @@ def hold(db: Any, now: float) -> float:
     return max(0.0, wait)
 
 
-def gate(db: Any, kind: str, blog: str, target: str, *, now: float, tz: ZoneInfo, rng: Any = random, auto: bool = False) -> dict[str, Any]:
-    """한 번 해도 되는지 보고, 되면 센다. 돌려줌 {again, ticket, n}. 안 되면 CaptureError(429) — 아무것도 바꾸지 않음.
-    auto = 자동이 묻는 것 — 간격·한 시간 상한을 서이추·들르기 합쳐서 (hold)."""
+def gate(db: Any, kind: str, blog: str, target: str, *, now: float, tz: ZoneInfo, rng: Any = random, auto: bool = False, mark: str = "") -> dict[str, Any]:
+    """한 번 해도 되는지 보고, 되면 센다. 돌려줌 {again, ticket, n}. 안 되면 CaptureError(429) — 아무것도 바꾸지 않음 (자동의 dup 만 tried 에 적음).
+    auto = 자동이 묻는 것 — 간격·한 시간 상한을 서이추·들르기 합쳐서 (hold). mark = 자동의 tried 열쇠 ('블로그:아이디' · '블로그:아이디/글 번호'):
+    허락하는 그때 적어 둔다 — 탭이 닫히거나 새로고침돼 a=done 이 안 와도 오늘은 그 사람·그 글을 다시 주지 않게 (같은 글에 댓글 두 번 막기).
+    자동은 이어 하기가 없다 — 방금(10분 안) 허락한 대상을 자동이 또 물으면 (다른 탭이 같이 돌거나 다시 시작) 409 dup 으로 거절: 책갈피는 그 대상을 건너뜀."""
     name, day = NAMES[blog], _day(now, tz)
     c, p = _counts(db, day), _pace(db, kind, now)
     what = "서이추" if kind == "add" else "이웃 들르기"
@@ -332,6 +335,11 @@ def gate(db: Any, kind: str, blog: str, target: str, *, now: float, tz: ZoneInfo
         raise CaptureError(429, "stopped", f"오늘은 네이버가 제한 안내를 보여서 {name} {what}를 쉬어요 — 내일 다시")
     tk = p["tickets"].get(target) if target else None
     if tk and tk.get("blog") == blog:
+        if auto:
+            if mark and mark not in c["tried"]:
+                c["tried"] = [*c["tried"], mark][-TRIED_MAX:]
+                _put(db, f"seoi:day:{day}", c)
+            raise CaptureError(409, "dup", "방금 이미 한 대상이에요 (다른 탭·다시 시작) — 건너뛰어요")
         return {"again": True, "ticket": tk, "n": c[kind][blog], "total": sum(c[kind].values())}
     if auto and (w := hold(db, now)) > 0:
         raise CaptureError(429, "gap", f"조금 쉬었다가 — {math.ceil(w)}초 뒤에 (아무것도 하지 않았어요)")
@@ -346,6 +354,8 @@ def gate(db: Any, kind: str, blog: str, target: str, *, now: float, tz: ZoneInfo
     if kind == "visit" and sum(c["visit"].values()) >= VISIT_DAY_CAP:
         raise CaptureError(429, "day", f"오늘 이웃 들르기 {VISIT_DAY_CAP}개를 다 했어요 — 내일 다시")
     c[kind][blog] += 1
+    if auto and mark and mark not in c["tried"]:
+        c["tried"] = [*c["tried"], mark][-TRIED_MAX:]
     _put(db, f"seoi:day:{day}", c)
     tk = {"at": now, "blog": blog}
     if target:
@@ -364,8 +374,8 @@ def _ticket(db: Any, kind: str, target: str, now: float, **fields: Any) -> None:
 
 
 def refund(db: Any, blog: str, target: str, *, now: float, tz: ZoneInfo, rng: Any = random) -> bool:
-    """자동이 서이추 한 번을 세고 열어 보니 신청할 수 없는 사람(이미 이웃·신청 중·받지 않음) → 센 것을 되돌림 (그 사람 표가 있을 때 한 번만).
-    화면은 열어 봤으므로 다음까지 SKIP_GAP 은 둔다."""
+    """자동이 서이추 한 번을 세고 '확인'까지 눌렀는데 네이버가 신청할 수 없는 사람이라고 함(신청 중·상대가 제한) → 하루 센 것만 되돌림 (그 사람 표가 있을 때 한 번만).
+    '확인'은 실제로 눌렀으므로 간격(60~120초)과 한 시간 수는 그대로 둔다 — 건너뛴 사람이 이어져도 네이버에 보내는 속도는 같게."""
     p = _pace(db, "add", now)
     tk = p["tickets"].get(target)
     if not tk or tk.get("blog") != blog or tk.get("back"):
@@ -374,11 +384,8 @@ def refund(db: Any, blog: str, target: str, *, now: float, tz: ZoneInfo, rng: An
     c = _counts(db, day)
     c["add"][blog] = max(0, c["add"][blog] - 1)
     _put(db, f"seoi:day:{day}", c)
-    recent = list(p["recent"])
-    if tk["at"] in recent:
-        recent.remove(tk["at"])
     tk["back"] = True
-    _put(db, "seoi:pace:add", {"next": now + rng.randint(*SKIP_GAP), "recent": recent, "tickets": p["tickets"]})
+    _put(db, "seoi:pace:add", {"next": max(p["next"], now + rng.randint(*SKIP_GAP)), "recent": p["recent"], "tickets": p["tickets"]})
     return True
 
 
@@ -611,7 +618,7 @@ async def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None 
         if row and row["blog"] != blog:  # 세기 전에 — 블로그마다 명단·멘트가 따로
             raise CaptureError(409, "row", f"이 블로그는 {NAMES[row['blog']]} 할 일이에요 — 지금은 {NAMES[blog]} 계정으로 보여요. "
                                            "계정(또는 고른 블로그)을 바꾼 뒤 다시 눌러 주세요")
-        g = gate(db, "add", blog, target, now=now, tz=tz, rng=rng, auto=auto)
+        g = gate(db, "add", blog, target, now=now, tz=tz, rng=rng, auto=auto, mark=f"{blog}:{target}" if target else "")
         log.info("seoi add: blog=%s again=%s n=%d row=%s auto=%s", blog, g["again"], g["n"], bool(row), auto)
         return {"ok": True, "blog": blog, "again": g["again"], "n": g["n"], "cap": ADD_DAY_CAP, "msg": row["msg"] if row else "",
                 "text": f"오늘 {NAMES[blog]} 서이추 {g['n']}/{ADD_DAY_CAP}"}
@@ -639,7 +646,7 @@ async def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None 
         need = READ_SCROLL_S if str(form.get("sc") or "") == "1" else READ_S
         if rd < need:
             raise CaptureError(429, "read", f"글을 조금 더 읽고 눌러 주세요 — {need - max(rd, 0)}초 뒤에 다시")
-    g = gate(db, "visit", blog, target, now=now, tz=tz, rng=rng, auto=auto)
+    g = gate(db, "visit", blog, target, now=now, tz=tz, rng=rng, auto=auto, mark=f"{blog}:{m.group(1)}/{m.group(2)}")
     tail = f"오늘 이웃 들르기 {g['total']}/{VISIT_DAY_CAP} · {NAMES[blog]} {g['n']}"
     base = {"ok": True, "blog": blog, "again": g["again"], "n": g["n"], "total": g["total"], "cap": VISIT_DAY_CAP, "text": tail}
     tk = g["ticket"]

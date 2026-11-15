@@ -135,13 +135,13 @@ async def test_done_ticks_the_row_hands_nb_requested_and_skip_gives_the_count_ba
     (r,) = routine.relay_rows(db)  # 블로그 프로그램에 '신청했어요' — 손으로 체크할 때와 같은 길 (relay_tick 이 맡김)
     assert (r["name"], r["args"], r["rid"]) == ("nb_requested", {"blog": "issue", "target": "nb1", "done": True}, "nb-add:issue:nb1") and "aid" not in r
     assert seoi.today(db, NOW + 8, TZ)["by"]["issue"]["add"] == 1
-    # 이미 이웃·신청 중·받지 않음: 줄은 체크하되 센 것은 되돌리고, 다음까지는 짧게 (20~40초)
+    # '확인'을 누른 뒤 네이버가 신청 중·상대가 제한이라고 함: 줄은 체크하되 하루 센 것만 되돌림 — 실제로 눌렀으니 간격(120초)·한 시간 수는 그대로
     await seoi.act(db, {**add_form(db, "issue", "nb2"), "au": "1"}, tz=TZ, now=NOW + 200, rows=rows, rng=Rng("hi"))
     assert seoi.today(db, NOW + 200, TZ)["by"]["issue"]["add"] == 2
     rng = Rng("hi")
     await seoi.act(db, done_form(db, "issue", "nb2", "skip"), tz=TZ, now=NOW + 210, rows=rows, day=DAY, rng=rng)
-    assert seoi.today(db, NOW + 210, TZ)["by"]["issue"]["add"] == 1 and rng.seen == [seoi.SKIP_GAP] and seoi.hold(db, NOW + 210) == 40
-    assert len(seoi._pace(db, "add", NOW + 210)["recent"]) == 1 and routine.done_ids(db, DAY) == {"nb-add:issue:nb1", "nb-add:issue:nb2"}
+    assert seoi.today(db, NOW + 210, TZ)["by"]["issue"]["add"] == 1 and rng.seen == [seoi.SKIP_GAP] and seoi.hold(db, NOW + 210) == 110
+    assert len(seoi._pace(db, "add", NOW + 210)["recent"]) == 2 and routine.done_ids(db, DAY) == {"nb-add:issue:nb1", "nb-add:issue:nb2"}
     await seoi.act(db, done_form(db, "issue", "nb2", "skip"), tz=TZ, now=NOW + 215, rows=rows, day=DAY)  # 두 번 보내도 한 번만 되돌림
     assert seoi.today(db, NOW + 215, TZ)["by"]["issue"]["add"] == 1
     # 세기 전에 건너뛴 사람(표 없음)은 되돌릴 것이 없음 · 줄에 없는 사람·다른 블로그 줄·어제 목록은 체크하지 않음
@@ -154,6 +154,44 @@ async def test_done_ticks_the_row_hands_nb_requested_and_skip_gives_the_count_ba
     assert (await seoi.act(db, done_form(db, "issue", "nb1", "unsure"), tz=TZ, now=NOW + 400, rows=rows, day=DAY))["row"] is False
     for bad in ({"r": "great"}, {"w": "like"}, {"t": "a b"}, {"w": "visit", "n": "12"}):
         assert (await refused(db, {**done_form(db, "issue", "nb1", "ok"), **bad}, NOW + 500)).code == "bad"
+
+
+async def test_auto_marks_tried_when_allowed_and_refuses_the_same_target_twice() -> None:
+    """탭이 닫히거나 새로고침돼 a=done 이 안 와도 오늘은 그 사람·그 글을 다시 주지 않음 · 탭 둘이 같은 차례를 받아도 한 번만 (같은 글에 댓글 두 번 막기)."""
+    db, d, au = FakeDb(), FakeDrafter(), {"au": "1"}
+    rows = [visit_row("issue", "neighbor1", POST_NO), visit_row("issue", "neighbor1", POST_NO + 1), nb_row("issue", "nb1", "멘트")]
+    assert (await seoi.act(db, q(db), tz=TZ, now=NOW, rows=rows, done=set(), day=DAY))["next"] == {"id": "nb1", "msg": "멘트"}
+    got = await seoi.act(db, {**visit_form(db, "issue"), **au}, tz=TZ, now=NOW, drafter=d, rng=Rng())
+    assert got["comment"] == DRAFT and got["again"] is False
+    assert seoi._counts(db, DAY)["tried"] == [f"issue:neighbor1/{POST_NO}"]  # a=done 없이도 적힘
+    # 다른 탭(또는 다시 시작한 책갈피)이 그 글을 또 물음: 초안을 다시 주지 않음 — 세지도 쓰지도 않음
+    for t in (NOW + 5, NOW + 300):
+        e = await refused(db, {**visit_form(db, "issue"), **au}, t, drafter=d)
+        assert (e.status, e.code) == (409, "dup")
+    assert len(d.calls) == 1 and seoi.today(db, NOW + 300, TZ)["visit"] == 1
+    got = await seoi.act(db, q(db), tz=TZ, now=NOW + 700, rows=rows, done=set(), day=DAY)  # 이어 하기 표(10분)가 지나도 오늘은 그 글을 안 줌
+    assert got["visit"] == 1 and all(n["id"] != "neighbor1" or n.get("no") != str(POST_NO) for n in [got["next"]])
+    # 손으로 누른 한 단계는 예전대로 이어 하기 (같은 초안 · 다시 세지 않음)
+    again = await seoi.act(db, visit_form(db, "issue"), tz=TZ, now=NOW + 10, drafter=d)
+    assert again["again"] is True and again["comment"] == DRAFT and len(d.calls) == 1
+    # 손으로 방금 한 대상을 자동이 물으면 건너뜀 + 오늘은 다시 안 줌 (같은 화면만 되풀이해 열지 않게)
+    db = FakeDb()
+    await seoi.act(db, visit_form(db, "issue"), tz=TZ, now=NOW, drafter=d)
+    assert seoi._counts(db, DAY)["tried"] == []
+    assert (await refused(db, {**visit_form(db, "issue"), **au}, NOW + 200, drafter=d)).code == "dup"
+    assert seoi._counts(db, DAY)["tried"] == [f"issue:neighbor1/{POST_NO}"]
+    got = await seoi.act(db, q(db), tz=TZ, now=NOW + 201, rows=rows[:1], done=set(), day=DAY)
+    assert got["next"] is None
+    # 서이추도 같음: 허락한 그때 적고, 또 물으면 거절 (세지 않음)
+    db = FakeDb()
+    await seoi.act(db, {**add_form(db, "issue", "nb1"), **au}, tz=TZ, now=NOW, rows=rows)
+    assert seoi._counts(db, DAY)["tried"] == ["issue:nb1"]
+    assert (await refused(db, {**add_form(db, "issue", "nb1"), **au}, NOW + 3, rows=rows)).code == "dup"
+    assert seoi.today(db, NOW + 3, TZ)["by"]["issue"]["add"] == 1
+    assert (await seoi.act(db, q(db), tz=TZ, now=NOW + 4, rows=rows[2:], done=set(), day=DAY))["next"] is None
+    # 간격에 걸려 거절된 것은 적지 않음 (다음에 다시 차례)
+    assert (await refused(db, {**add_form(db, "issue", "nb2"), **au}, NOW + 5, rows=rows)).code == "gap"
+    assert seoi._counts(db, DAY)["tried"] == ["issue:nb1"]
 
 
 async def test_stop_all_rests_both_kinds_and_queue_says_so() -> None:
@@ -250,6 +288,10 @@ $('.btn_ok').addEventListener('click', e => {
   if (KIND === 'pending') { alertLayer('서로이웃 신청 진행중입니다.'); return; }
   if (KIND === 'blocked') { alertLayer('상대방이 이웃 관계를 제한하여,<br>이웃/서로이웃을 신청하실 수 없습니다.'); return; }
   if (KIND === 'silent') return;
+  if (KIND === 'donelayer') { ev({k: 'submit', rel: rel, msg: ta.value}); alertLayer('서로이웃을 신청하였습니다.'); return; }
+  if (KIND === 'donealert') { ev({k: 'submit', rel: rel, msg: ta.value}); alert('서로이웃 신청이 완료되었습니다.'); return; }
+  if (KIND === 'crowded') { alertLayer('상대방의 이웃 수가 초과되어 더 이상 이웃을 추가할 수 없습니다.'); return; }
+  if (KIND === 'flood') { alertLayer('연속해서 신청할 수 없습니다.'); return; }
   ev({k: 'submit', rel: rel, msg: ta.value});
   setTimeout(() => { document.body.innerHTML = rel === '1' ? '<div class="head type1"><h2 class="title">서로이웃 신청 완료</h2><a href="#" class="btn_close">닫기</a></div><div id="ct"><p class="txt"><strong><em>' + ID + '</em></strong>님에게<br>서로이웃을 신청하였습니다.</p></div>'
     : '<div class="head type1"><h2 class="title">이웃추가 완료</h2></div><div id="ct"><p class="txt">이웃으로 추가하였습니다.</p></div>'; }, 300);
@@ -290,14 +332,16 @@ $$('._faceLayer a._button').forEach(b => b.addEventListener('click', e => {
   if (/captcha/.test(KIND)) { const c = document.createElement('div'); c.className = 'u_likeit_captcha'; c.textContent = '자동입력 방지 문자를 입력해 주세요'; document.body.appendChild(c); return; }
   setTimeout(() => { $$('._faceLayer a._button').forEach(x => set(x, x === b && on, 'aria-selected')); paint(); }, /slow/.test(KIND) ? 2600 : 150);
 }));
-$('.comment_btn__Wbuoq').addEventListener('click', () => { sheet.style.display = ''; });
+const own = () => { const li = document.createElement('li'); li.className = 'u_cbox_comment'; li.setAttribute('data-info', 'commentNo:2,mine:true'); li.textContent = '전에 남긴 내 댓글'; $('.u_cbox_list').appendChild(li); };
+$('.comment_btn__Wbuoq').addEventListener('click', () => { sheet.style.display = ''; if (/lateown/.test(KIND)) setTimeout(own, 1800); });
+if (/cboxcap/.test(KIND)) $('.u_cbox_btn_upload').addEventListener('click', () => { const c = document.createElement('div'); c.className = 'u_cbox_captcha_wrap'; c.style.height = '80px'; c.textContent = '아래 문자를 입력해 주세요'; sheet.appendChild(c); }, true);
 if (/sheet/.test(KIND)) sheet.style.display = '';
 if (/mine/.test(KIND)) { const li = document.createElement('li'); li.className = 'u_cbox_comment'; li.setAttribute('data-info', 'commentNo:2,mine:true'); li.textContent = '전에 남긴 내 댓글'; $('.u_cbox_list').appendChild(li); }
 $('.u_cbox_btn_upload').addEventListener('click', () => {
   const box = $('#naverComment__write_textarea'), t = box.textContent.trim();
   if (!t) return;
   if (/spam/.test(KIND)) { ev({k: 'comment_refused'}); alert('스팸성 댓글로 판단되어 등록이 제한되었습니다. 잠시 후 다시 시도해 주세요.'); return; }
-  if (/lost/.test(KIND)) { box.textContent = ''; return; }
+  if (/lost|cboxcap/.test(KIND)) { box.textContent = ''; return; }
   ev({k: 'comment', text: t});
   setTimeout(() => { const li = document.createElement('li'); li.className = 'u_cbox_comment'; li.setAttribute('data-info', 'commentNo:9,mine:true');
     const s = document.createElement('span'); s.className = 'u_cbox_contents'; s.textContent = t; li.appendChild(s); $('.u_cbox_list').appendChild(li); box.textContent = ''; }, 400);
@@ -667,6 +711,37 @@ async def test_auto_stops_on_a_like_captcha_and_on_two_lost_comments(bot: DealBo
     got = await drive(bot, monkeypatch, tmp_path, rows, {"me": "demiyum", "posts": {f"ww0/{POST_NO}": "lost", f"ww1/{POST_NO + 1}": "lost"}})
     assert ev(got, "comment") == [] and [r["form"]["r"] for r in acts(got, "done")] == ["fail", "fail"] and len(acts(got, "stop")) == 1
     assert "등록을 눌렀는데 내 댓글이 안 보여요" in got["last"]["line"] and acts(got, "visit")[0]["form"]["b"] == "hotdeal"
+
+
+async def test_auto_reads_done_notices_and_other_sides_limit_and_stops_on_flood(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """신청 완료가 안내 창·알림으로 와도 된 것으로 (예전엔 '네이버 알림'으로 실패 → 두 번이면 그날 쉼) · 상대방 이웃 수 초과는 내 한도가 아님(건너뜀) ·
+    '연속해서 …' 안내는 바로 멈춤."""
+    rows = [nb_row("issue", f"nb{i}", "멘트") for i in range(6)]
+    got = await drive(bot, monkeypatch, tmp_path, rows, {"buddies": {"nb0": "donelayer", "nb1": "donealert", "nb2": "crowded", "nb4": "flood"}})
+    assert [s["id"] for s in ev(got, "submit")] == ["nb0", "nb1", "nb3"] and got["alerts"] == [] and ev(got, "layer_ok") == []
+    assert [r["form"]["r"] for r in acts(got, "done")] == ["ok", "ok", "skip", "ok", "stop"] and [r["form"]["w"] for r in acts(got, "stop")] == ["all"]
+    assert "연속해서 신청할 수 없습니다" in got["last"]["line"] and got["last"]["line"].endswith("· 오늘은 쉬어요")
+    assert len([d for d in got["docs"] if "Buddy" in d["u"]]) == 5  # 멈춘 뒤로는 아무 화면도 열지 않음
+    ts = [d["t"] / 1000 for d in got["docs"] if "Buddy" in d["u"]]
+    assert ts[3] - ts[2] >= 60  # '확인'을 누른 뒤 건너뛴 사람 다음에도 간격은 그대로 (60초 넘게)
+
+
+async def test_auto_never_comments_twice_on_one_post(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """같은 글에 댓글 두 번 없음: 방금 초안을 받아 간 글(다른 탭·다시 시작)은 건너뜀 · 내 댓글이 늦게 뜨는 목록도 기다려서 봄 ·
+    등록 뒤 자동입력 방지 칸이 뜨면 바로 멈춤."""
+    day = tz_now(bot).date().isoformat()
+    base = datetime.fromisoformat(f"{day}T09:00:00").replace(tzinfo=ZoneInfo(bot.settings.app.timezone)).timestamp()
+    rows = [visit_row("issue", f"vv{i}", POST_NO + i) for i in range(5)]
+    seed = {"k": seoi.key(bot.db), "a": "visit", "b": "issue", "u": f"https://blog.naver.com/vv0/{POST_NO}", "t": "수원 직관 후기", "x": POST_TEXT_LONG, "rd": "31", "sc": "0"}
+    await seoi.act(bot.db, seed, tz=ZoneInfo(bot.settings.app.timezone), now=base + 1, drafter=FakeDrafter(comment=DRAFTS[4]))  # 다른 탭이 방금 받아 감
+    got = await drive(bot, monkeypatch, tmp_path, rows, {"posts": {f"vv1/{POST_NO + 1}": "lateown", f"vv3/{POST_NO + 3}": "cboxcap"}})
+    visits = acts(got, "visit")
+    assert [(r["form"]["u"].split("/")[-2], r["status"], r["reply"].get("code")) for r in visits][:2] == [("vv0", 409, "dup"), ("vv1", 200, None)]
+    assert [e["id"] for e in ev(got, "comment")] == [f"vv2/{POST_NO + 2}"]  # vv0 = 건너뜀 · vv1 = 내 댓글이 있음(늦게 뜸) · vv3 = 등록이 막힘
+    assert all(e["id"] != f"vv0/{POST_NO}" for e in got["ev"])  # 건너뛴 글에서는 공감도 누르지 않음
+    assert [d["u"] for d in got["docs"] if d["u"].startswith("/vv")] == [f"/vv{i}/{POST_NO + i}" for i in range(4)]  # 건너뛴 글을 되풀이해 열지 않음 · 멈춘 뒤 안 엶
+    assert [r["form"]["r"] for r in acts(got, "done")] == ["ok", "ok", "stop"] and [r["form"]["w"] for r in acts(got, "stop")] == ["all"]
+    assert "등록을 눌렀는데 내 댓글이 안 보여요 · 네이버 알림: 아래 문자를 입력해 주세요" in got["last"]["line"] and got["last"]["line"].endswith("· 오늘은 쉬어요")
 
 
 async def test_pause_waits_and_resume_goes_on_from_the_next_one(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
