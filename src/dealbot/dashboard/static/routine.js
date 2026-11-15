@@ -13,7 +13,7 @@ const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{di
   '.rt .cb[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}.rt .it .grow{flex:1;min-width:0;padding-top:10px}' +
   '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}.rt .sc{display:inline-block;margin-left:6px;padding:0 7px;border-radius:9px;font-size:12px;font-weight:600;line-height:20px;font-style:normal;color:var(--sub);background:var(--line);white-space:nowrap}.rt .sc.h{color:#E8590C;background:rgba(232,89,12,.14)}.rt .sc.ok{color:var(--gr);background:var(--gr-soft)}.rt .pp .sm[disabled]{opacity:.55}' +
   '.rt .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}.rt .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
-  '.rt a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}' +
+  '.rt a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}.rt a.sm.ac{color:var(--ac-on)}' +
   '.rt .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}.rt .bar i{display:block;height:100%;background:var(--gr)}' +
   '.rt .pp .sm{flex:1 1 30%;min-height:48px;font-size:15px;font-weight:600;justify-content:center}' +
   '.rt .ab .grow{padding-top:0}.rt .ab+.ab{background-position:0 0}.rt .pf .fl{flex:1 1 60%;min-width:0;font-size:16px}' +
