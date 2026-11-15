@@ -39,13 +39,14 @@
   POST /dashboard/api/ssalmuk/{push,ack} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/xstudio/state · POST /dashboard/api/xstudio/{draft,reply,posted,reply_go,targets,handoff}   X 글쓰기·답글 도구 (xstudio.py — 주인 11/14)
+  GET  /dashboard/api/xtoday/state · POST /dashboard/api/xtoday/{make,skip}   오늘 X 글 카드 · 큰 사건 바로 알림 (xtoday.py — 주인 11/15)
   GET  /dashboard/api/xhelper · GET /dashboard/share · GET /dashboard/x   'X 도우미' 책갈피 코드 · 안드로이드 공유 시트 · 바로 가기 디딤돌 (xstudio.py —
                                         뒤 둘은 로그인 없이: 주소만 넘김)
   GET  /dashboard/api/naver_qr.png      딜봇 네이버 QR 로그인 화면 (logins.qr_png — 주인이 'QR 로그인'을 누른 뒤 2분 동안만, 아니면 404)
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,xstudio.js,xgo.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,sns.js,routine.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,xstudio.js,xtoday.js,xgo.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -114,6 +115,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "ssalmuk.js": "text/javascript; charset=utf-8",  # ssalmuk.js: 할 일 탭 '이벤트 참여' 카드·화면 (11/14, 셸이 defer 로)
              "todohub.js": "text/javascript; charset=utf-8",  # todohub.js: 할 일 종류 목록·종류별 화면 (11/14, 셸이 defer 로)
              "xstudio.js": "text/javascript; charset=utf-8",  # xstudio.js: X 글쓰기·답글 도구 (11/14, 셸이 defer 로 — #/sns/xs)
+             "xtoday.js": "text/javascript; charset=utf-8",  # xtoday.js: '오늘 X 글' 카드·화면 · 큰 사건 배너 (11/15, 셸이 defer 로 — #/sns/xt)
              "xgo.js": "text/javascript; charset=utf-8"}  # xgo.js: X 도구 바로 가기 디딤돌 (/dashboard/x — 같은 사이트 안 이동으로 한 번 넘김)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -272,6 +274,10 @@ class DashApi:
         self.ssalmuk = ssalmuk.register(web, self)
         # X 글쓰기·답글 도구 (주인 11/14) — 모두 로그인 아래 · POST 는 guard (같은 사이트 + X-Dash-Token) · 서버는 초안만, 올리기는 주인 손
         self.xstudio = xstudio.register(web, self)
+        # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15) — 초안은 xstudio 와 같은 길로만 (Opus 까지) · scheduler 1분 일이 tick
+        from dealbot.dashboard import xtoday
+
+        self.xtoday = xtoday.register(web, self, self.xstudio)
 
         # 원격 로그인 화면 (주인 10/23): 대시보드 로그인 뒤, 세션이 살아 있을 때만 127.0.0.1:6080(websockify)로 잇는다
         web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))

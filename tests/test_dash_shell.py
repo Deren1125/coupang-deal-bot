@@ -260,10 +260,11 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     # theme.js (화면 밝기, 10/24) · app.js · thpost.js (스레드 칸, 10/21 — threads.js 보다 먼저 떠 있어야 칸이 붙음) ·
     # logins.js (연결 탭 '로그인 관리' 칸, 10/26 — app.js 예산 끝이라 셸이 받음) · routine.js (할 일 탭 '오늘 할 일' 칸, 10/27) · boot
     # · kz.js (키자드 칸, 11/12) · ssalmuk.js (할 일 탭 '이벤트 참여' 카드·화면, 11/14) · todohub.js (할 일 종류 목록, 11/14)
-    # · xstudio.js (X 글쓰기·답글 도구, 11/14 — 맨 끝)
-    assert len(scripts) == 10
+    # · xstudio.js (X 글쓰기·답글 도구, 11/14) · xtoday.js (오늘 X 글·큰 사건 배너, 11/15 — 맨 끝)
+    assert len(scripts) == 11
     (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (rt_attrs, rt_body), (kz_attrs, kz_body), \
-        (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (boot_attrs, _boot) = scripts
+        (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (xt_attrs, xt_body), (boot_attrs, _boot) = scripts
+    assert re.fullmatch(r' defer src="/dashboard/static/xtoday\.js\?v=[0-9a-f]{10}"', xt_attrs) and xt_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xstudio\.js\?v=[0-9a-f]{10}"', xs_attrs) and xs_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/todohub\.js\?v=[0-9a-f]{10}"', hub_attrs) and hub_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/ssalmuk\.js\?v=[0-9a-f]{10}"', ev_attrs) and ev_body == ""
@@ -330,7 +331,7 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
                         ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript"),
                         ("logins.js", "text/javascript"), ("sns.js", "text/javascript"), ("routine.js", "text/javascript"),
                         ("ssalmuk.js", "text/javascript"), ("todohub.js", "text/javascript"), ("xstudio.js", "text/javascript"),
-                        ("xgo.js", "text/javascript")):
+                        ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name
     img = Image.open(io.BytesIO((STATIC / "badge-72.png").read_bytes()))

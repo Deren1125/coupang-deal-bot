@@ -280,7 +280,7 @@ function draftCard(d, i) {
     const t = full(), b = e.currentTarget;
     if (!t) return;
     b.disabled = true;
-    const r = await call('posted', {op: done ? 'undo' : 'add', text: t, format: R.fmt || 'auto', mine: !!mine.value.trim()});
+    const r = await call('posted', {op: done ? 'undo' : 'add', text: t, format: R.fmt || 'auto', mine: !!mine.value.trim(), tid: R.tid});
     if (r.s === 200) { if (done) delete V.done[i]; else V.done[i] = r.d.id; ST.posts = r.d.posts; toast(done ? '기록을 지웠어요' : '올린 글로 기록했어요'); keep(); draw(true); }
     else { b.disabled = false; toast(r.d.text || '기록하지 못했어요'); }
   };
@@ -481,6 +481,6 @@ function start() {
   D.addEventListener('visibilitychange', () => { if (D.visibilityState === 'visible' && (onScr() || onX())) load(); });
   mount();
 }
-W.SBXStudio = {load, mount, xlen, sid, missing, state: () => ST, view: V};
+W.SBXStudio = {load, mount, keep, xlen, sid, missing, state: () => ST, view: V};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

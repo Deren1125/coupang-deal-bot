@@ -11,7 +11,8 @@ X 수익(오리지널 콘텐츠 보상)은 '자동으로 만들거나 올린 글
   GET  /dashboard/api/xstudio/state     오늘 글·답글 수 · 답글 쉬는 시간 · 화제 글감 · 자주 보는 계정 · 형식·말투 목록 · 링크 앞부분 (no-store)
   POST /dashboard/api/xstudio/draft     {rid, kind: hot|paste|topic, hot_id, url, text, topic, format, long} → 초안 3개(+긴 글) + 경고 + 첫 답글(출처)
   POST /dashboard/api/xstudio/reply     {rid, url, text, tone} → 답글 초안 3개 (글 내용이 비면 공개 oEmbed 로 읽어 봄 — 로그인 없음)
-  POST /dashboard/api/xstudio/posted    {op: add|undo, text, format, mine} → '올렸어요' 기록 (kv dash_x_posts — 글은 저장하지 않고 해시만)
+  POST /dashboard/api/xstudio/posted    {op: add|undo, text, format, mine[, tid]} → '올렸어요' 기록 (kv dash_x_posts — 글은 저장하지 않고 해시만 ·
+                                        tid = '오늘 X 글' 카드 번호면 topic 으로 같이 — xtoday.py)
   POST /dashboard/api/xstudio/reply_go  {op: go|undo, sid} → 답글 한 번 기록 + 쉬는 시간 (60~120초 · 1시간 15개 · 하루 40개)
   POST /dashboard/api/xstudio/targets   {op: add|del, handle, memo} → 자주 보는 계정 (프로필 링크만 — 그 계정 글을 긁지 않는다)
   POST /dashboard/api/xstudio/handoff   {k, a: stats|target|ping, …} → 'X 도우미' 책갈피가 넘긴 값 (열쇠 k 가 맞을 때만 저절로 저장 · ping = 열쇠 확인만)
@@ -171,6 +172,7 @@ POSTS_KEEP, REPLIES_KEEP = 400, 600
 JOB_KEEP, JOB_MAX = 600.0, 16
 RID_RE = re.compile(r"^[a-z0-9_]{6,40}$")
 HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+TID_RE = re.compile(r"^t[0-9a-f]{10}$")  # '오늘 X 글' 카드 번호 (xtoday.item_id) — 올린 글 기록에 topic 으로
 
 # ── 링크 (화면은 바깥 주소를 갖지 않는다 — 여기서 준 앞부분에 encodeURIComponent 로 붙임) ───────────────────────────
 INTENT_POST = "https://x.com/intent/post?text="
@@ -858,6 +860,7 @@ class Studio:
         self._asker: Any = None
         self.fetcher = fetcher
         self.hot = hot or (lambda: [])
+        self.on_posted: Callable[[str, bool], None] | None = None  # (카드 번호, 올림/취소) — xtoday 가 건다
         self.busy = asyncio.Lock()  # claude CLI 는 한 번에 하나 (작은 서버 — 메모리)
         self.jobs: dict[str, tuple[float, asyncio.Task[dict[str, Any]]]] = {}
 
@@ -898,6 +901,7 @@ class Studio:
         if not 1 <= len(text) <= POSTED_MAX:
             raise StudioError(400, "bad_args", "올린 글이 비었거나 너무 길어요")
         now, h = self.clock(), sha(text)
+        tid = body.get("tid") if isinstance(body.get("tid"), str) and TID_RE.match(body["tid"]) else ""
         rows = self._load(KV_POSTS, [])
         mine = [r for r in rows if isinstance(r, dict) and r.get("draft_id") == h and r.get("kind") == "studio"
                 and isinstance(r.get("posted_at"), (int, float)) and _day(r["posted_at"]) == _day(now)]
@@ -905,9 +909,14 @@ class Studio:
             rows = [r for r in rows if r not in mine]
         elif not mine:
             fmt = body.get("format") if body.get("format") in FORMATS else "auto"
-            rows.append({"acct": "revenue", "kind": "studio", "frame": fmt, "slot": _slot(now), "draft_id": h, "url": "",
-                         "posted_at": now, "edited": bool(body.get("mine"))})
+            row = {"acct": "revenue", "kind": "studio", "frame": fmt, "slot": _slot(now), "draft_id": h, "url": "",
+                   "posted_at": now, "edited": bool(body.get("mine"))}
+            if tid:
+                row["topic"] = tid
+            rows.append(row)
         self._save(KV_POSTS, rows[-POSTS_KEEP:])
+        if tid and self.on_posted is not None:  # 오늘 X 글 카드 (xtoday) — 올림 표시·큰 사건 알림 닫기
+            self.on_posted(tid, body.get("op") != "undo")
         return 200, {"status": "ok", "id": h, "posts": self.post_stats()}
 
     def post_stats(self) -> dict[str, Any]:
@@ -1183,7 +1192,11 @@ class Studio:
     async def draft_posts(self, body: dict[str, Any]) -> dict[str, Any]:
         fmt = body.get("format") if body.get("format") in FORMATS else "auto"
         want_long = body.get("long") is True
-        src = await self._source(body)
+        return await self.draft_src(await self._source(body), fmt, want_long)
+
+    async def draft_src(self, src: dict[str, Any], fmt: str = "auto", want_long: bool = True) -> dict[str, Any]:
+        """재료 하나(_source 모양: kind·text·title·url·fetched[·confirmed_hint]) → 초안. 화면의 '초안 만들기'와 '오늘 X 글'(xtoday —
+        서버가 미리 만드는 초안)이 같은 길: 하루 몫(DRAFT_PER_DAY)·모델 확인·숫자 검사·'내 한마디' 빈칸 모두 여기서."""
         if TRAGIC_RE.search(src["text"]):
             raise StudioError(422, "declined", "사망·참사·범죄 피해 같은 이야기는 초안을 쓰지 않아요")
         if not self._count("draft", DRAFT_PER_DAY):

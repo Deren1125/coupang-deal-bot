@@ -1,0 +1,231 @@
+/* 오늘 X 글 · 큰 사건 배너 (주인 11/15 '오늘 x 글 보내는게 아니라 대시보드에 띄워줘 … 큰 사건은 바로 알림'). 셸이 defer 로 받음 (xstudio.js 다음) — xtoday.py.
+   SNS 탭 X 칸에 '오늘 X 글' 카드 (시각별 · '오늘 할 X 일' 카드 아래) · 화면은 #/sns/xt (큰 사건 알림을 누르면 #/sns/xt/<번호>).
+   서버가 미리 써 둔 초안을 보여 주기만 한다 — '열기'는 그 초안을 X 글쓰기 화면(xstudio.js #/sns/xs/write)에 넣고, 거기서 '내 한마디'를 직접 써야
+   'X에서 올리기'가 켜진다. 자동으로 올리는 것은 없다. 주소만 보고 AI 를 부르지 않는다 (초안 만들기·보충은 내가 누를 때만).
+   이 파일에 바깥 주소·innerHTML 없음 (출처 기사 링크는 서버 값). 고치던 '내 한마디'는 이 기기에만 (localStorage xt1 · 그날 것만). */
+'use strict';
+(() => {
+const D = document, W = window, API = '/dashboard/api/xtoday/';
+const CSS = '.xtb{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 8px;padding:8px 10px;border-radius:10px;background:var(--or-soft);color:var(--or);font-size:14px;line-height:1.45}' +
+  '.xtb span{flex:1 1 180px;min-width:0;overflow-wrap:anywhere}.xtb .sm{flex:none}' +
+  '.xt .src{margin:0 0 10px;font-size:13px;line-height:1.5}.xt .src a{display:block;color:var(--ac-ink);overflow-wrap:anywhere;padding:3px 0}' +
+  '.xt .kw{display:block;font-size:16px;margin:6px 0}.xt .ih{flex-wrap:wrap}.xtc .ln{min-height:36px;align-items:center;cursor:pointer}' +
+  '.xtc .ln span:nth-child(2){flex:1;min-width:0;color:var(--text);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+  'main[data-xt]>:not(#xts){display:none!important}';
+const NW = {target: '_blank', rel: 'noopener'}, KEYS = ['ed', 'el', 'lg', 'mine', 'chk', 'done'];
+let ST = null, at = 0, loading = false, card = null, scr = null, tt = null, focus = '';
+const busy = {};
+let ED = {d: '', e: {}};
+try { const o = JSON.parse(W.localStorage.getItem('xt1') || 'null'); if (o && typeof o === 'object' && o.e && typeof o.e === 'object') ED = o; } catch (e) { /* 저장본 없음 */ }
+function keep() { try { W.localStorage.setItem('xt1', JSON.stringify(ED)); } catch (e) { /* 저장 못 해도 그대로 씀 */ } }
+
+function el(t, a, ...kids) {
+  const e = D.createElement(t);
+  for (const n in a || {}) {
+    const v = a[n];
+    if (v == null || v === false) continue;
+    if (n === 'class') e.className = v; else if (n === 'text') e.textContent = v;
+    else if (n.startsWith('on')) e.addEventListener(n.slice(2), v); else e.setAttribute(n, v === true ? '' : v);
+  }
+  for (const c of kids.flat(9)) if (c != null && c !== false) e.append(c.nodeType ? c : String(c));
+  return e;
+}
+const btn = (cls, label, f, x) => el('button', Object.assign({class: cls, type: 'button', onclick: f}, x), label);
+function toast(text) {
+  const t = D.getElementById('toast');
+  if (!t) return;
+  t.replaceChildren(el('span', {text}));
+  t.hidden = false;
+  clearTimeout(tt);
+  tt = setTimeout(() => { t.hidden = true; }, 3500);
+}
+function csrf() {
+  try { return JSON.parse(D.getElementById('boot').textContent).me.csrf || ''; } catch (e) { return ''; }
+}
+function copy(text, what) {
+  const c = W.navigator && W.navigator.clipboard;
+  (c && c.writeText ? c.writeText(String(text)) : Promise.reject(new Error('x')))
+    .then(() => toast(`${what} 복사했어요`), () => toast('복사하지 못했어요 — 글을 길게 눌러 복사해 주세요'));
+}
+async function call(path, body) {
+  try {
+    const r = await fetch(API + path, body ? {method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: {'Content-Type': 'application/json', 'X-Dash-Token': csrf()}, body: JSON.stringify(body)} : {credentials: 'same-origin', cache: 'no-store'});
+    let d = {};
+    try { d = await r.json(); } catch (e) { /* 빈 몸 */ }
+    if (r.status === 403 && d.code === 'csrf') d.text = '화면이 오래됐어요 — 새로고침한 뒤 다시 눌러 주세요';
+    if (r.status === 401) d.text = '로그인이 풀렸어요 — 새로고침해 주세요';
+    return {s: r.status, d};
+  } catch (e) { return {s: 0, d: {text: '연결이 끊겼어요 — 다시 눌러 주세요'}}; }
+}
+const take = d => { if (d && d.v && Array.isArray(d.items)) { ST = d; at = Date.now(); if (ED.d !== ST.day) { ED = {d: ST.day, e: {}}; keep(); } } };
+async function load() {
+  if (loading) return;
+  loading = true;
+  const r = await call('state');
+  loading = false;
+  at = Date.now();
+  if (r.s === 200) take(r.d); else if (!ST && r.d.text) toast(r.d.text);
+  draw();
+}
+
+// -- X 글쓰기 화면(xstudio.js)으로 넘기기: 초안 묶음을 그대로 넣고, 카드마다 고치던 글·'내 한마디'는 따로 기억
+const studio = () => (W.SBXStudio && W.SBXStudio.view ? W.SBXStudio : null);
+function sync() {
+  const X = studio(), V = X && X.view, id = V && V.res && V.res.tid;
+  if (!id || !ST || !ST.items.some(i => i.id === id)) return;
+  ED.e[id] = {};
+  for (const k of KEYS) ED.e[id][k] = V[k] || {};
+  keep();
+}
+function open(it) {
+  const X = studio();
+  if (!X) return toast('글쓰기 화면을 불러오는 중이에요 — 잠시 뒤 다시 눌러 주세요');
+  sync();
+  const V = X.view, e = ED.e[it.id] || {};
+  V.res = Object.assign({}, it.res, {tid: it.id, fmt: 'auto'});
+  for (const k of KEYS) V[k] = e[k] || {};
+  V.tab = 'write';
+  if (X.keep) X.keep();  // 넘긴 초안을 그 화면의 저장본에도 (화면이 다시 떠도 그대로)
+  location.hash = '#/sns/xs/write';
+  X.mount();
+  X.load();
+}
+async function make(ev) {
+  if (busy.make) return;
+  busy.make = ev.id; draw();
+  const r = await call('make', {id: ev.id});
+  busy.make = '';
+  take(r.d);
+  const it = r.s === 200 && ST.items.find(i => i.id === r.d.made);
+  if (it) return open(it);
+  toast(r.d.text || '초안을 쓰지 못했어요 — 잠시 뒤 다시');
+  draw();
+}
+async function skip(id) {
+  const r = await call('skip', {id});
+  take(r.d);
+  toast(r.s === 200 ? '오늘은 안 쓰기로 했어요' : r.d.text || '다시 눌러 주세요');
+  draw();
+}
+async function fill() {
+  if (busy.fill) return;
+  busy.fill = true; draw();
+  const r = await call('make', {op: 'fill'});
+  busy.fill = false;
+  take(r.d);
+  toast(r.s === 200 ? "만들기 시작했어요 — 몇 분 뒤 '다시 보기'를 눌러 주세요" : r.d.text || '보충하지 못했어요');
+  draw();
+}
+const itemOf = ev => ST.items.find(i => i.id === ev.item);
+const goBig = ev => { const it = itemOf(ev); if (it) open(it); else location.hash = '#/sns/xt/' + ev.id; };
+const state = it => (it.done ? '올림 ✓' : it.nums_ok ? '준비됨' : '숫자 확인');
+const links = xs => (xs || []).filter(s => /^https?:\/\//.test(s.link || '')).map(s => el('a', Object.assign({href: s.link}, NW), s.title || s.link));
+
+// -- 그리기
+function banner(ev) {
+  return el('div', {class: 'xtb'}, el('span', {}, `🔥 큰 사건 · ${ev.title}`), btn('sm', itemOf(ev) ? '초안 열기' : '초안 보기', () => goBig(ev)));
+}
+function drawCard() {
+  if (!card) return;
+  if (!ST) return card.replaceChildren(el('p', {class: 'note'}, '오늘 X 글 불러오는 중…'));
+  const by = t => ST.items.find(i => i.slot === t), now = ST.items.filter(i => !i.slot);
+  const line = (t, it) => el('div', {class: 'ln', onclick: it ? () => open(it) : null}, el('span', {}, t), el('span', {}, it ? it.keyword || '글' : '아직 없음'), el('span', {}, it ? state(it) : ''));
+  card.replaceChildren(...[
+    el('div', {class: 'ih'}, el('b', {class: 'ti'}, '오늘 X 글'), el('a', {class: 'lnk', href: '#/sns/xt'}, '열기 ›')),
+    ST.big.map(banner), now.map(it => line('바로', it)), ST.slots.map(t => line(t, by(t))),
+    ST.err ? el('p', {class: 'note'}, ST.err) : null,
+    el('p', {class: 'note'}, !ST.on ? '오늘 X 글 만들기가 꺼져 있어요' : ST.next ? `${ST.next} 에 ${ST.ran ? '보충해요' : '만들어요'} · 줄을 누르면 초안이 열려요` : "줄을 누르면 초안이 열려요 · '내 한마디'와 올리기는 내가")].flat(9).filter(Boolean));
+}
+function bigCard(ev) {
+  const it = itemOf(ev), mk = busy.make === ev.id;
+  return el('section', {class: 'itm' + (focus === ev.id ? ' hl' : ''), 'data-b': ev.id},
+    el('div', {class: 'ih'}, el('span', {class: 'cp hot'}, '큰 사건'), el('span', {class: 'cp info'}, `${ev.at} 알림`)),
+    el('b', {class: 'kw'}, ev.title),
+    el('p', {class: 'sf'}, [[ev.lead, ev.shown].filter(Boolean).join(' '), `매체 ${ev.outlets}곳`, `점수 ${ev.score}`].filter(Boolean).join(' · ')),
+    el('div', {class: 'src'}, links(ev.sources)),
+    el('div', {class: 'rw'}, it ? btn('pb', '초안 열기 — 내 한마디 쓰고 올리기', () => open(it))
+      : btn('pb', mk ? '쓰는 중… 30초~1분 걸려요' : '초안 만들기', () => make(ev), {disabled: !!busy.make || null}),
+    btn('pb soft', '안 써요', () => skip(ev.id))));
+}
+function itemCard(it) {
+  return el('section', {class: 'itm' + (focus && (focus === it.id || focus === it.eid) ? ' hl' : ''), 'data-t': it.id},
+    el('div', {class: 'ih'}, el('span', {class: 'cp info'}, it.slot || '바로'), el('span', {class: 'cp' + (it.kind === 'big' ? ' hot' : '')}, it.kind === 'big' ? '큰 사건' : '화제'),
+      el('span', {class: 'cp ' + (it.nums_ok ? 'ok' : 'stop')}, it.nums_ok ? '숫자 검사 통과' : '숫자 확인 필요'),
+      it.confirmed ? null : el('span', {class: 'cp hot'}, '확인 안 된 이야기'), it.done ? el('span', {class: 'cp ok'}, '올림 ✓') : null),
+    el('b', {class: 'kw'}, it.keyword || '오늘 글'),
+    it.angle ? el('p', {class: 'an'}, `관점 · ${it.angle}`) : null,
+    (it.warn || []).map(x => el('p', {class: 'w'}, x)),
+    el('div', {class: 'po'}, it.preview),
+    el('div', {class: 'src'}, el('span', {}, '출처 기사'), links(it.sources)),
+    el('div', {class: 'rw'}, btn('pb', '열기 — 내 한마디 쓰고 올리기', () => open(it))),
+    el('div', {class: 'rw'}, it.first_reply ? btn('pb soft', '첫 답글 복사', () => copy(it.first_reply, '첫 답글(출처)')) : null,
+      btn('pb soft', '안 써요', () => skip(it.id))));
+}
+function drawScr() {
+  if (!scr) return;
+  const top = el('div', {class: 'top'}, el('a', {class: 'lnk', href: '#/sns/x'}, '‹ X(트위터)'), el('span', {class: 'sub'}, ''), btn('lnk', '다시 보기', load));
+  if (!ST) return scr.replaceChildren(top, el('p', {class: 'boot'}, '불러오는 중…'));
+  const empty = ST.slots.filter(t => !ST.items.some(i => i.slot === t)), a = ST.ai, b = ST.bigcfg;
+  scr.replaceChildren(...[top,
+    el('p', {class: 'note', style: 'margin:0 0 12px'}, `그날 올릴 글을 서버가 미리 써 둬요 (초안 ${ST.model}) · '내 한마디'와 올리기는 내가 · 자동으로 올리지 않아요`),
+    ST.note ? el('p', {class: 'w'}, ST.note) : null,
+    ST.big.length ? [el('p', {class: 'grp'}, `🔥 큰 사건 ${ST.big.length}`), ST.big.map(bigCard)] : null,
+    el('p', {class: 'grp'}, `오늘 글 ${ST.items.length}개`),
+    ST.items.length ? ST.items.map(itemCard) : el('p', {class: 'note'}, !ST.on ? '오늘 X 글 만들기가 꺼져 있어요' : ST.ran ? '오늘은 쓸 만한 글감이 아직 없어요' : `아직 만들기 전이에요${ST.next ? ` — ${ST.next} 에 만들어요` : ''}`),
+    ST.err ? el('p', {class: 'w'}, ST.err) : null,
+    ST.on && empty.length ? el('p', {class: 'note', style: 'margin:0 0 10px'}, `${empty.join(' · ')} 글은 아직 없어요${ST.next ? ` — ${ST.next} 에 보충해요` : ''}`) : null,
+    ST.on && ST.free.length ? btn('pb soft', busy.fill ? '시작하는 중…' : '지금 보충하기', fill, {disabled: busy.fill || null}) : null,
+    el('p', {class: 'note'}, `서버가 스스로 쓴 초안 ${a.used}/${a.cap}번 · 오늘 초안 ${a.left}번 남음` + (b.on ? ` · 큰 사건 알림은 점수 ${b.min_score} 넘으면 하루 ${b.per_day}개까지` : ' · 큰 사건 알림 꺼짐')),
+    ST.log.length ? [el('p', {class: 'grp'}, '방금 본 뉴스 (점수)'), el('section', {class: 'box'}, ST.log.slice().reverse().map(x =>
+      el('p', {class: 'sf'}, `${x.at} · ${[x.lead, x.shown].filter(Boolean).join(' ') || '-'} · ${x.score}점${x.why ? ` · ${x.why}` : ' · 알림'}`)))] : null,
+  ].flat(9).filter(Boolean));
+}
+const inField = () => { const x = D.activeElement; return !!(scr && x && scr.contains(x) && /^(INPUT|TEXTAREA)$/.test(x.tagName)); };
+function draw() { sync(); drawCard(); if (!inField()) drawScr(); }
+
+// -- 붙이기 (app.js 가 #main 을 다시 그리면 다시 붙음 — xstudio.js 와 같은 틀)
+const onScr = () => /^#\/?sns\/xt(\/[0-9a-z]*)?\/?$/.test(location.hash);
+function onX() {
+  const m = D.getElementById('main'), s = D.getElementById('snt'), b = s && s.children[1];
+  return !!m && (m.dataset || {}).tab === 'sns' && !!b && b.getAttribute('aria-pressed') === 'true';
+}
+function title() {
+  const t = D.getElementById('ttl');
+  if (onScr() && t && t.textContent !== '오늘 X 글') t.textContent = '오늘 X 글';
+}
+function mount() {
+  const m = D.getElementById('main');
+  if (!m) return;
+  if (!D.getElementById('xt-css')) D.head.append(el('style', {id: 'xt-css', text: CSS}));
+  if (onScr()) {
+    const f = (/xt\/([0-9a-z]+)/.exec(location.hash) || [])[1] || '';
+    if (!scr) { focus = f; scr = el('section', {id: 'xts', class: 'xs xt', 'aria-label': '오늘 X 글'}); drawScr(); }
+    else if (f !== focus) { focus = f; drawScr(); }
+    if (m.firstChild !== scr) m.prepend(scr);
+    if (!m.hasAttribute('data-xt')) m.setAttribute('data-xt', '');
+    title();
+  } else {
+    if (m.hasAttribute('data-xt')) m.removeAttribute('data-xt');
+    if (scr && scr.parentNode) scr.remove();
+  }
+  if (!onScr() && onX() && !/^#\/?sns\/xs/.test(location.hash)) {
+    if (!card) { card = el('article', {id: 'xtc', class: 'itm xsc xtc', 'aria-label': '오늘 X 글'}); drawCard(); }
+    const x = D.getElementById('xsc'), a = x && x.parentNode === m ? x : D.getElementById('snt');  // '오늘 할 X 일' 카드 아래 (그 카드가 늘 칸 고르기 바로 밑)
+    if (a.nextSibling !== card) a.after(card);
+  } else if (card && card.parentNode) card.remove();
+  if ((onScr() || onX()) && (!ST || Date.now() - at > 120000)) load();
+}
+function start() {
+  const m = D.getElementById('main');
+  if (!m) return;
+  new MutationObserver(mount).observe(m, {childList: true});
+  const t = D.getElementById('ttl');
+  if (t) new MutationObserver(title).observe(t, {childList: true, characterData: true, subtree: true});
+  W.addEventListener('hashchange', () => { mount(); if (onScr()) W.scrollTo(0, 0); });
+  D.addEventListener('visibilitychange', () => { if (D.visibilityState === 'visible' && (onScr() || onX())) load(); });
+  mount();
+}
+W.SBXToday = {load, mount, open, state: () => ST};
+if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
+})();

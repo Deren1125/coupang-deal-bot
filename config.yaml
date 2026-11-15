@@ -664,6 +664,26 @@ dashboard:
   blogauto_stale_hours: 3          # 이보다 오래된 기록이면 블로그 활동은 '판단 불가'
   public_url: https://52-79-136-64.sslip.io   # 대시보드 앱 주소 (알림·카톡의 바로가기 링크 /dashboard/go/<항목>)
   actions_enabled: true            # false 면 대시보드는 보기만
+  x_today:                         # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15 — dashboard/xtoday.py · 화면 SNS 탭 X 칸)
+    enabled: true
+    morning: "07:40"               # 아침에 그날 X 초안을 만드는 시각 (한국시간)
+    fills: ["11:20", "17:20"]      # 빈 시각이 있을 때만 보충 (2번까지)
+    per_day: 5                     # 하루 카드 수 (추천 시각 08:30·12:00·15:30·18:30·21:30)
+    auto_drafts_per_day: 8         # 서버가 스스로 쓰는 초안(AI 호출) 하루 상한 — 큰 사건 초안 포함
+    reserve: 10                    # 주인이 화면에서 직접 누를 몫으로 남기는 하루 초안 수 (하루 40번 가운데)
+    big:                           # 큰 사건 바로 알림 — 네이버 공식 뉴스 검색 API (키만, 로그인 없음)
+      enabled: true
+      poll_minutes: 20             # 뉴스 확인 간격 (한 번에 queries 수만큼 API)
+      queries: ["억 달러", "조원", "엔비디아", "젠슨 황", "삼성전자", "오픈AI", "머스크", "AI 투자"]
+      api_per_day: 700             # 하루 뉴스 API 호출 상한 (8개 × 72번 = 576)
+      window_minutes: 120          # 이 안에 나온 기사끼리 '동시 보도'로 셈
+      min_score: 9                 # 이 점수부터 알림 — 알림이 잦으면 10·11 로 올리고, 너무 없으면 8 로
+      min_outlets: 3               # 같은 사건을 다룬 매체 수
+      per_day: 3                   # 하루 알림 상한
+      gap_minutes: 90              # 알림 사이 최소 간격
+      quiet_hours: ""              # 예: "01:00-07:00" — 그 시간엔 미뤘다가 끝나면 (빈칸 = 밤에도 바로)
+      predraft: true               # 알림과 함께 초안을 미리 만들어 둠
+      names: []                    # 더 볼 회사·인물 이름
   cards:
     # 주인이 할 일이 있는 카드를 맨 위에 (주인 요청 10/15: 핫딜 링크는 내가 줘야 하니 대시보드에 다 띄우기)
     - key: links

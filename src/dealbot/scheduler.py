@@ -395,6 +395,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
             await stats_remind.check(bot)
         except Exception as e:  # noqa: BLE001
             log.warning("stats reminder failed: %s", type(e).__name__)
+        try:  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15 — dashboard/xtoday.py): 뒤에서 돌림 (AI 초안이 몇 분 걸려도 이 루프는 그대로)
+            xt = getattr(getattr(getattr(bot, "dashboard", None), "api", None), "xtoday", None)
+            if xt is not None:
+                xt.tick()
+        except Exception as e:  # noqa: BLE001
+            log.warning("x today failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 

@@ -833,6 +833,68 @@ class DashboardCardConfig(BaseModel):
         return v
 
 
+def _hhmm(v: str, what: str) -> str:
+    hh, _, mm = str(v).strip().partition(":")
+    if not (hh.isdigit() and mm.isdigit() and 0 <= int(hh) < 24 and 0 <= int(mm) < 60):
+        raise ValueError(f"{what} 는 HH:MM")
+    return f"{int(hh):02d}:{int(mm):02d}"
+
+
+class XBigConfig(BaseModel):
+    """X '큰 사건 바로 알림' (주인 11/15 — 젠슨 황 1억 800만 달러 같은 큰 사건은 바로 앱 알림 · dashboard/xtoday.py).
+    네이버 공식 뉴스 검색 API(키만 — 로그인 없음)로 최신 기사 제목을 모아 규칙 점수로만 고른다 (AI 판정 없음)."""
+
+    enabled: bool = True
+    poll_minutes: int = Field(20, ge=10, le=240)  # 뉴스 확인 간격 (한 번에 queries 수만큼 API)
+    queries: list[str] = Field(default_factory=lambda: ["억 달러", "조원", "엔비디아", "젠슨 황", "삼성전자", "오픈AI", "머스크", "AI 투자"])
+    api_per_day: int = Field(700, ge=0, le=5000)  # 하루 뉴스 API 호출 상한 (8개 × 72번 = 576)
+    window_minutes: int = Field(120, ge=30, le=720)  # 이 안에 나온 기사끼리 '동시 보도'로 셈
+    min_score: int = Field(9, ge=1, le=30)  # 이 점수부터 알림 (높일수록 드묾 — 하루 0~3개가 목표)
+    min_outlets: int = Field(3, ge=1, le=30)  # 같은 사건을 다룬 매체 수
+    per_day: int = Field(3, ge=0, le=10)  # 하루 알림 상한
+    gap_minutes: int = Field(90, ge=0, le=720)  # 알림 사이 최소 간격
+    quiet_hours: str = ""  # 예: "01:00-07:00" — 그 시간엔 알림을 미뤘다가 끝나면 (기본 없음 = 밤에도 바로, 주인 11/15)
+    predraft: bool = True  # 알림과 함께 초안을 미리 만들어 둠 (자동 초안 하루 상한 안에서)
+    names: list[str] = Field(default_factory=list)  # 더 볼 회사·인물 이름 (기본 사전에 보탬)
+
+    @field_validator("quiet_hours")
+    @classmethod
+    def _quiet(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v and not re.fullmatch(r"[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]", v):
+            raise ValueError("dashboard.x_today.big.quiet_hours 는 HH:MM-HH:MM 또는 빈칸")
+        return v
+
+    @field_validator("queries", "names")
+    @classmethod
+    def _words(cls, v: list[str]) -> list[str]:
+        out = [" ".join(str(x).split())[:30] for x in v or []]
+        return [x for i, x in enumerate(out) if x and x not in out[:i]][:20]
+
+
+class XTodayConfig(BaseModel):
+    """'오늘 X 글' (주인 11/15 — 그날 올릴 X 초안 4~5개를 서버가 미리 만들어 대시보드 X 칸에 · dashboard/xtoday.py).
+    글은 xstudio 와 같은 길(Opus 까지)로 쓰고, 올리기는 주인이 손으로 (자동 게시 없음)."""
+
+    enabled: bool = True
+    morning: str = "07:40"  # 아침에 그날 초안을 만드는 시각 (app.timezone)
+    fills: list[str] = Field(default_factory=lambda: ["11:20", "17:20"])  # 빈 시각이 있을 때만 보충 (2번까지)
+    per_day: int = Field(5, ge=0, le=5)  # 하루 카드 수 (xstudio.POST_TIMES 다섯 시각)
+    auto_drafts_per_day: int = Field(8, ge=0, le=20)  # 서버가 스스로 쓰는 초안(AI 호출) 하루 상한 — 큰 사건 초안 포함
+    reserve: int = Field(10, ge=0, le=40)  # 주인이 화면에서 직접 누를 몫으로 남겨 두는 하루 초안 수 (xstudio 하루 40번 가운데)
+    big: XBigConfig = Field(default_factory=XBigConfig)
+
+    @field_validator("morning")
+    @classmethod
+    def _morning(cls, v: str) -> str:
+        return _hhmm(v, "dashboard.x_today.morning")
+
+    @field_validator("fills")
+    @classmethod
+    def _fills(cls, v: list[str]) -> list[str]:
+        return sorted({_hhmm(t, "dashboard.x_today.fills") for t in v or []})[:2]
+
+
 class DashboardConfig(BaseModel):
     """채널 대시보드 (주인 요청 10/14): /dashboard 에 채널별 구독자·이웃·조회수와 목표를 한 화면에.
     페이지는 DASHBOARD_USER / DASHBOARD_PASSWORD 가 모두 있을 때만 열린다 (없으면 404)."""
@@ -853,6 +915,7 @@ class DashboardConfig(BaseModel):
     # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
     public_url: str = "https://52-79-136-64.sslip.io"
     actions_enabled: bool = True  # false 면 대시보드는 보기만 (누르는 일은 모두 텔레그램으로)
+    x_today: XTodayConfig = Field(default_factory=XTodayConfig)  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15)
 
     @field_validator("public_url")
     @classmethod

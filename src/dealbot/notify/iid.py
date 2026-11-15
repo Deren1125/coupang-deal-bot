@@ -20,7 +20,8 @@ tests/fixtures/dash_contract/iid_map.json 이 두 저장소에서 같아야 한�
     neighbors:protect:B:…                          → blog-B-buddy (서로이웃 보호조치 문구 — 주인 10/18)
     err:…·loop:…·neighbors:config·album:…          → sys-blogauto
     정리                                            → digest-YYYYMMDD-am|pm      묶음 알림 → todo (할 일 화면)
-모르는 키는 그 프로그램의 시스템 줄 (sys-dealbot · sys-blogauto — 잃지 않게)."""
+모르는 키는 그 프로그램의 시스템 줄 (sys-dealbot · sys-blogauto — 잃지 않게).
+이 표 밖 (딜봇만 — iid_for 를 거치지 않음): X 큰 사건 알림 xbig:<번호> → x-big-<번호> (dashboard/xtoday.py 가 iid 를 직접 줌)."""
 
 from __future__ import annotations
 

@@ -682,6 +682,8 @@ class StateBuilder:
             link = rf.links[0]["url"] if rf else None
             primary = open_link("스레드 글 열기", link) if link else goto("자세히", "#/connect")
             more.append(dismiss)
+        elif iid.startswith("x-big-"):  # X 큰 사건 바로 알림 (주인 11/15 — xtoday.py): 그 사건 초안 화면으로 · 닫기는 그 화면의 '안 써요'·'올렸어요'
+            primary = goto("초안 보기", f"#/sns/xt/{iid.removeprefix('x-big-')}")
         elif iid.startswith("blog-"):
             primary = goto("글감 보기", f"#/blog/{iid.split('-')[1]}") if iid.endswith("-scan") else goto("블로그 보기", f"#/blog/{iid.split('-')[1]}")
             more.append(dismiss)

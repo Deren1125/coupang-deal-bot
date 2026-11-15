@@ -57,7 +57,9 @@ URGENCY: dict[str, str] = {**{k: "DIGEST" for k in (*DIGEST_DEALBOT, *DIGEST_BLO
 # 딜봇만 쓰는 정리 종류 (두 저장소 표에는 없음 — 모르는 종류처럼 정리에만, 기록 없이)
 LOCAL_DIGEST = ("soldout", "publish_failed", "sns_failed")
 # 딜봇만 여는 급한 종류 (두 저장소 표에는 없음 — Blog-Auto 는 이 알림을 내지 않는다): 블로그 프로그램 신호가 끊김
-LOCAL_URGENT = ("blogauto_down",)
+# x_big: X '큰 사건 바로 알림' (주인 11/15 — dashboard/xtoday.py). 푸시 + 할 일 줄만 — KAKAO_KINDS 에 넣지 않는다 (카톡 예비 없음)
+LOCAL_URGENT = ("blogauto_down", "x_big")
+X_BIG_ROUTE = "/dashboard/#/sns/xt/"  # x_big 알림을 누르면 바로 그 사건 초안 화면 (iid 'x-big-<번호>' 의 번호)
 BLOGAUTO_DOWN_S = 20 * 60  # 생존 신호(60초마다)가 이만큼 없으면 멈춘 것 (자동 업데이트 재시작은 이보다 짧다)
 BLOGAUTO_SEEN_KV = "notify:blogauto_bridge_seen"
 REMOTE_LOGIN_KV = "notify:remote_login_live_at"  # 원격 로그인 창을 마지막으로 본 때 — 닫힌 뒤 서비스가 다시 켜질 동안도 조용히
@@ -86,7 +88,7 @@ KIND_VERBS = {"link_request": "링크 넣기", "photo_need": "사진", "pick_pho
               "review_info": "확인", "publish_unsure": "채널 확인", "draft_ready": "발행", "ask": "답하기",
               "owner_edit": "직접 고친 글", "share_confirm": "보내기", "channel_ask": "채널", "channel_review": "채널",
               "upload_fail": "다시 올리기", "login": "로그인", "sns_auth": "다시 연결", "kakao_expiring": "카톡 연결",
-              "neighbors_protect": "서로이웃 확인"}
+              "neighbors_protect": "서로이웃 확인", "x_big": "X 큰 사건"}
 
 # 대시보드에서 주인이 누른 일의 항목 (iid). 그 안에서 같은 항목에 열린 알림만 quiet ("*" = 모두 — 예전 쓰임)
 _quiet: contextvars.ContextVar[str | None] = contextvars.ContextVar("dash_quiet", default=None)
@@ -364,8 +366,9 @@ class NotifyRouter:
         if len(items) == 1:
             n = items[0]
             body = n.body if not short else n.body[:60]
+            url = X_BIG_ROUTE + n.iid.removeprefix("x-big-") if n.kind == "x_big" and n.iid.startswith("x-big-") else f"/dashboard/go/{n.iid}"
             p = {"v": 1, "type": "item", "title": n.title or n.short, "body": body, "tag": n.iid,
-                 "url": f"/dashboard/go/{n.iid}", "urgent": True, "badge": badge, "ts": int(now)}
+                 "url": url, "urgent": True, "badge": badge, "ts": int(now)}
             # 사진 부탁: 첫 링크는 알림 버튼 하나로 (안드로이드 크롬 — 누르면 그 주소, 알림 자체를 누르면 그 할 일). iOS 는 버튼이 없음
             first = next((r.links[0] for r in rows if r.iid == n.iid and r.links), None)
             if first is not None:

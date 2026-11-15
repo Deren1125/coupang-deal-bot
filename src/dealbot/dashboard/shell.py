@@ -38,6 +38,7 @@ KZ_JS = "kz.js"  # 키자드 (11/12) — 블로그 탭 '키자드' 칸·연결 �
 SSALMUK_JS = "ssalmuk.js"  # 이벤트 참여 (11/14) — 할 일 탭 카드·화면 (#/todo/ev). routine.js 처럼 셸이 defer 로, 칸은 스스로 붙는다
 TODOHUB_JS = "todohub.js"  # 할 일 종류 목록 (11/14) — #/todo 는 종류만, #/todo/<종류> 는 그 종류 할 일만. 셸이 defer 로 (ssalmuk.js 다음)
 XSTUDIO_JS = "xstudio.js"  # X 글쓰기·답글 도구 (11/14) — SNS 탭 X 칸 카드·화면 (#/sns/xs)·바로 가기 주소 (#/x/…). 셸이 defer 로, 칸은 스스로 붙는다
+XTODAY_JS = "xtoday.js"  # 오늘 X 글 · 큰 사건 배너 (11/15) — SNS 탭 X 칸 카드·화면 (#/sns/xt). xstudio.js 다음 (그 화면에 초안을 넘김)
 ROUTINE_JS = "routine.js"  # 오늘 할 일 (10/27) — 할 일 탭 맨 위 칸. logins.js 와 같이 셸이 defer 로 받고, 칸은 스스로 할 일 탭에 붙는다
 
 
@@ -76,6 +77,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<script defer src="{asset_url(SSALMUK_JS)}"></script>'  # 이벤트 참여 (11/14) — 같은 이유로 "<script defer src="
         f'<script defer src="{asset_url(TODOHUB_JS)}"></script>'  # 할 일 종류 목록 (11/14) — 같은 이유로 "<script defer src="
         f'<script defer src="{asset_url(XSTUDIO_JS)}"></script>'  # X 글쓰기·답글 도구 (11/14) — 같은 이유로 "<script defer src="
+        f'<script defer src="{asset_url(XTODAY_JS)}"></script>'  # 오늘 X 글 (11/15) — 같은 이유로 "<script defer src="
         f'<meta name="sb-edit" content="{asset_url(EDIT_JS)}">'
         f'<meta name="sb-product" content="{asset_url(PRODUCT_JS)}">'
         f'<meta name="sb-sched" content="{asset_url(SCHED_JS)}">'
