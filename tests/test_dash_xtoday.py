@@ -250,13 +250,18 @@ def bot(settings: Settings, tmp_path: Path):  # type: ignore[no-untyped-def]
     b.db.close()
 
 
-async def test_push_opens_the_draft_screen_and_falls_back_to_no_kakao(bot: DealBot) -> None:
+async def test_push_opens_the_draft_screen_and_falls_back_to_no_kakao(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
     d: xt.XToday = bot.dashboard.api.xtoday  # type: ignore[union-attr]
     assert d.studio is bot.dashboard.api.xstudio and isinstance(d.news, xt.NaverNews)  # type: ignore[union-attr]
     server = PushServer(201)
     bot.router.http = server.client()  # type: ignore[union-attr]
     now = [at("09:00")]
     d.clock = d.studio.clock = bot.router.clock = lambda: now[0]  # type: ignore[union-attr]
+    # 할 일 목록(state.items)은 벽시계로 열린 알림을 고른다 — 시험 날짜 09:00 이 실제 시각보다 6시간 넘게 지나면 줄이 빠졌음 (11/15 오후부터 실패)
+    import dealbot.dashboard.state as statemod
+    monkeypatch.setattr(statemod.time, "time", lambda: now[0])
+    from datetime import UTC, datetime as _dt
+    monkeypatch.setattr(bot.dash_state, "_now", lambda: _dt.fromtimestamp(now[0], UTC))
     d.news = FakeNews(jensen(now[0]))
     d.cfg().big.predraft = False
     # 기기가 없을 때: 카톡 예비로 새지 않는다 (할 일 줄만)
