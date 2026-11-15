@@ -268,13 +268,16 @@ const tagsIn = async tags => {
 // 예약 시각 채움 (v6 · 주인 11/14 '시간 고르는 수고 없게'): 발행 설정창에서 '예약'을 고르고 날짜·시·분을 채운 뒤 멈춘다 — 발행 단추는 주인이 직접.
 // 발행창 예약 칸은 로그인 없이 볼 수 없어 글자('현재'·'예약')와 모양(0~23 고르기 칸 · 분 고르기 칸 · 'YYYY. M. D' 날짜 칸 · 달력 표)으로 찾는다.
 // 하나라도 못 찾거나 확인이 안 되면 고르기 칸을 되돌리고 '현재'로 돌려놓은 뒤 안내만 (꾸미기 본 일은 그대로). 클릭 사이는 사람처럼 0.4~0.8초.
+// try 안에서는 못 찾은 것(null·undefined)을 그대로 써서 나는 오류도 '못 찾음'으로 친다 (책갈피 주소를 짧게).
 const p2 = n => (n < 10 ? '0' : '') + n;
-const num = o => parseInt((/\d+/.exec(o.textContent) || /\d+/.exec(o.value) || [''])[0], 10);
+const num = o => parseInt(/\d+|$/.exec(o.text + ' ' + o.value)[0], 10);
 const ymd = e => { const m = /(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/.exec(e.value || e.innerText || ''); return m ? m[1] * 372 + m[2] * 31 + m[3] * 1 : 0; };
 const seen = e => e.offsetParent !== null;
-// 발행을 끝내는 단추는 어떤 일이 있어도 누르지 않는다 (이름에 confirm·publish 가 들었거나 submit 이면 멈춤)
+// 발행을 끝내는 단추는 어떤 일이 있어도 누르지 않는다: 누를 것(또는 그것을 감싼 단추·링크)의 이름에 confirm·publish·submit 이 들었거나
+// 종류가 submit(종류를 안 적은 단추 포함)이거나 글자에 발행·확인·등록이 있으면 멈춤
 const tap = async e => {
-  if (/confirm|publish/i.test(e.className + e.getAttribute('data-testid')) || e.type === 'submit') throw 0;
+  const b = e.closest('button,a') || e;
+  if (/confirm|publish|submit/i.test(b.className + b.getAttribute('data-testid') + b.type) || /발행|확인|등록/.test(b.innerText)) throw 0;
   press(e);
   await S(400 + Math.random() * 400);
 };
@@ -290,13 +293,14 @@ const opt = (s, n) => {
 const atOf = a => a.slice(1).split(/\D/).map(Number);
 const atLabel = (m, mm) => m[1] + '/' + m[2] + ' ' + p2(m[3]) + ':' + p2(mm);
 const bookIn = async at => {
-  const m = atOf(at), [y, mo, d, h] = m, want = y * 372 + mo * 31 + d;
-  if (new Date(y, mo - 1, d, h, m[4]) - Date.now() < 3e5) return '지난 시각';
+  const m = atOf(at), [y, mo, d, h] = m, want = y * 372 + mo * 31 + d, ym = y * 12 + mo, late = n => new Date(y, mo - 1, d, h, n) - Date.now() < 3e5;
+  if (late(m[4])) return '지난 시각';
   const radio = (b, t) => [...b.querySelectorAll('label,[role=radio]')].find(e => seen(e) && e.innerText.replace(/\s/g, '') === t);
-  let box = tagIn(), r1;
+  let box = tagIn(), r1, old, why = '칸 못 찾음';
   for (let k = 0; box && !r1 && k < 12; k++) { box = box.parentElement; r1 = box && radio(box, '예약'); }
   if (!r1) return '예약 칸 없음';
-  const T = box.ownerDocument, r0 = radio(box, '현재'), on = e => e.control ? e.control.checked : e.getAttribute('aria-checked') === 'true', was = on(r1);
+  const r0 = radio(box, '현재'), on = e => e.control ? e.control.checked : e.getAttribute('aria-checked') === 'true', was = on(r1);
+  // [시 고르기 칸, 분 고르기 칸, 날짜 칸] — '예약'이 골라져 있고 셋 다 보일 때만
   const sels = () => {
     let H, M;
     for (const s of box.querySelectorAll('select')) {
@@ -305,20 +309,20 @@ const bookIn = async at => {
       if (!H && n.length === 24 && x === 23) H = s; else if (H && !M && x > 29 && x < 60) M = s;
     }
     const D_ = [...box.querySelectorAll('input,button')].find(e => seen(e) && ymd(e));
-    return H && M && D_ ? [H, M, D_] : null;
+    return H && M && D_ && on(r1) && [H, M, D_];
   };
-  let old = null;
   try {
     if (!was) await tap(r1);
-    const got = await wait(sels, 2500);
-    if (!got || !on(r1)) throw 0;
-    const [H, M, D_] = got, mm = Math.max(...[...M.options].map(num).filter(n => n <= m[4]));
+    const [H, M, D_] = await wait(sels, 2500), mm = Math.max(...[...M.options].map(num).filter(n => n <= m[4]));
+    // 분을 내린 시각이 이미 지났으면(5분 안) 넣지 않는다
+    if (late(mm)) { why = '지난 시각'; throw 0; }
     old = [H, H.value, M, M.value];
     // 날짜: 이미 그 날이면 그대로 · 아니면 달력을 열어 다음 달 단추(두 번까지)·그 날을 누르고 날짜 칸이 바뀐 것을 본다
     if (ymd(D_) !== want) {
+      D_.focus();
       await tap(D_);
       const cal = () => {
-        for (const t of T.querySelectorAll('table')) {
+        for (const t of box.ownerDocument.querySelectorAll('table')) {
           // 본문에 넣은 표는 달력이 아님
           if (!seen(t) || t.closest('.se-content') || t.querySelectorAll('td').length < 28) continue;
           for (let c = t, k = 0; k < 4 && (c = c.parentElement); k++) {
@@ -328,29 +332,27 @@ const bookIn = async at => {
         }
       };
       let c = await wait(cal, 2500);
-      for (let k = 0; c && c[2] < y * 12 + mo && k < 2; k++) {
-        const n = [...c[1].querySelectorAll('button,a')].find(e => seen(e) && /next|다음/i.test(e.className + e.title + e.getAttribute('aria-label') + e.innerText)), was_ = c[2];
-        if (!n) throw 0;
-        await tap(n);
+      for (let k = 0; c[2] < ym && k < 2; k++) {
+        const was_ = c[2];
+        await tap([...c[1].querySelectorAll('button,a')].find(e => seen(e) && /next|다음/i.test(e.outerHTML)));
         c = await wait(() => { const x = cal(); return x && x[2] > was_ && x; }, 2000);
       }
-      if (!c || c[2] !== y * 12 + mo) throw 0;
       const ds = [...c[0].querySelectorAll('td')].filter(e => e.innerText.trim() === '' + d && !/other|disabled|outside/i.test(e.className + (e.firstElementChild || e).className));
-      if (ds.length !== 1) throw 0;
+      if (c[2] !== ym || ds.length !== 1) throw 0;
       await tap(ds[0].querySelector('button,a') || ds[0]);
-      if (!await wait(() => { const s = sels(); return s && ymd(s[2]) === want; }, 2500)) throw 0;
+      await wait(() => ymd(sels()[2]) === want, 2500);
     }
     if (!opt(H, h) || !opt(M, mm)) throw 0;
     await S(300);
     const s = sels();
-    if (!s || !on(r1) || ymd(s[2]) !== want || num(s[0].selectedOptions[0]) !== h || num(s[1].selectedOptions[0]) !== mm) throw 0;
-    if (mm !== m[4]) R.notes.push('분은 ' + p2(mm) + '분으로 내림');
+    if (ymd(s[2]) !== want || num(s[0].selectedOptions[0]) !== h || num(s[1].selectedOptions[0]) !== mm) throw 0;
+    if (mm !== m[4]) R.notes.push('분 내림');
     R.at = atLabel(m, mm);
     return '';
   } catch (e) {
     // 되돌리기: 고르기 칸 값 → 원래대로 · 우리가 고른 '예약' → '현재'
     try { if (old) { put(old[0], old[1]); put(old[2], old[3]); } if (!was && r0 && on(r1)) press(r0); } catch (e2) {}
-    return '칸을 못 찾음';
+    return why;
   }
 };
 const tagsOf = t => {
@@ -484,7 +486,7 @@ try {
       R.tags[1] = p.tags.length;
       R.tagList = p.tags;
       R.cat = p.cat;
-      if (/^@\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(p.at)) { R.book = p.at; R.at = atLabel(atOf(p.at), atOf(p.at)[4]); R.bookWhy = '글이 덜 들어감'; }
+      if (/^@\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(p.at)) { const a = atOf(R.book = p.at); R.at = atLabel(a, a[4]); R.why = '글 덜 들어감'; }
     }
     R.done++;
   }
@@ -496,7 +498,7 @@ try {
     R.tags[0] = n;
     if (why) R.bad.push('태그 ' + why);
     if (R.cat) { const w = await catIn(R.cat); if (w) R.bad.push('카테고리 ' + w); else R.catOk = 1; }
-    if (R.book) R.bookWhy = await bookIn(R.book);
+    if (R.book) R.why = await bookIn(R.book);
   }
 } finally { W.__kkumi = 0; }
 const out = [];
@@ -512,5 +514,5 @@ if (R.fx[0].some(Boolean)) { out.push('꾸밈 ' + fs(R.fx[0]) + ' → ' + fs(R.f
 else R.notes.push('꾸밈 없음');
 R.ok = R.shape === R.want && !R.bad.length;
 R.finished = true;
-alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.book ? R.bookWhy ? '\n예약 시각: ' + R.at + ' — 직접 골라 주세요 (' + R.bookWhy + ')' : '\n예약 ' + R.at + ' 채움 — 맞는지 보고 발행은 직접' : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
+alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.book ? '\n예약 ' + R.at + (R.why ? ' 못 채움 (' + R.why + ') — 직접 골라요' : ' 채움 — 발행은 직접') : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
 })().catch(e => alert('꾸미기 오류: ' + e));

@@ -4,7 +4,8 @@ static/kkumi.js = Blog-Auto blogauto/naver/kkumi_v4.js (10/29 아이패드 시�
 칸이 뜨고, 대시보드 '본문 복사'한 글을 그 칸에 붙여 넣으면 위에서부터 조각마다 에디터에 붙이며 짧은 구분선 · 주소 줄 다음 링크 카드 ·
 포스트잇 · 발행 설정창 태그까지 넣는다 (아이패드에서는 스크립트로 커서를 옮길 수 없어 맨 끝에 차례로 쌓음 · 바깥 요청 없음).
 
-  bookmarklet(): static/kkumi.js 에서 머리 주석·'//' 주석 줄·들여쓰기·빈 줄을 뺀 코드(minified) → "javascript:" + encodeURIComponent.
+  bookmarklet(): static/kkumi.js 에서 머리 주석·'//' 주석 줄·들여쓰기·빈 줄을 뺀 코드(minified) → "javascript:" + encode_short
+    (encodeURI 와 같되 '#' 은 %23 — 11/15 부터 · 그 전은 encodeURIComponent · 다른 책갈피(통계·이웃 관리 등)는 encode 그대로).
   view(): GET /dashboard/api/kkumi 몸 {code, len, steps, ver, version, ack} — 연결 탭 '꾸미기 버튼 설치' 칸(logins.js)이 열 때 받아 '코드 복사'.
 설치한 책갈피가 옛 판인지 알리기 (주인 11/14 — 책갈피는 주인이 다시 복사·저장해야 바뀌는데 그동안은 바뀐 줄 몰라 옛 판으로 붙여 넣음):
   ver() = 지금 코드의 sha256 앞 10자 · version() = kkumi.js 의 'const V = n' (끝 알림 'v<n>' 과 같은 수) ·
@@ -92,9 +93,16 @@ def encode(code: str) -> str:
     return quote(code, safe="-_.!~*'()")
 
 
+def encode_short(code: str) -> str:
+    """encode 보다 짧게 (꾸미기만 · 11/15 v6 — 33.4KB → 29KB): 주소에 그대로 써도 되는 글자 ; / ? : @ & = + $ , 는 % 로 바꾸지 않는다
+    (자바스크립트 encodeURI 와 같고 '#' 만 %23 으로 — '#' 뒤는 주소의 딴 부분으로 읽힘). 브라우저는 javascript: 주소를 통째로
+    % 풀기 한 뒤 돌리므로 푼 결과는 encode 와 같다 (decodeURIComponent 로 풀면 같은 코드 — 테스트가 확인)."""
+    return quote(code, safe="-_.!~*'();/?:@&=+$,")
+
+
 @lru_cache(maxsize=1)
 def bookmarklet() -> str:
-    return "javascript:" + encode(minify(SRC.read_text(encoding="utf-8")))
+    return "javascript:" + encode_short(minify(SRC.read_text(encoding="utf-8")))
 
 
 @lru_cache(maxsize=1)

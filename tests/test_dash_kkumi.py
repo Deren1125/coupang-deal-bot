@@ -1,6 +1,6 @@
 """'꾸미기' 책갈피 (주인 10/27 — 서버는 네이버에 로그인하지 않고 주인이 아이패드 사파리에서 붙여 넣음 · 10/29 v4: 위에서부터 차례로 쌓기).
 
-1) kkumi.bookmarklet(): static/kkumi.js 를 줄여 "javascript:" + encodeURIComponent — node 의 encodeURIComponent 와 같고 new Function 으로 읽힘 ·
+1) kkumi.bookmarklet(): static/kkumi.js 를 줄여 "javascript:" + encode_short (11/15 — encodeURI 와 같되 '#' 은 %23 · 풀면 같은 코드) — new Function 으로 읽힘 ·
    바깥 요청 없음.
 2) 가짜 글쓰기 화면(iframe 안 · 진짜 크롬, playwright 가 있을 때만) — 10/29 아이패드에서 본 대로: 스크립트로 넣은 것은 늘 맨 끝 · 붙여넣기
    신호는 맨 끝에 붙음 · 위 정렬 단추는 커서가 있는 글 덩어리에 · '본문 추가'로 맨 끝 새 줄. 칸에 붙여 넣은 글(표시 줄·인용구·주소 줄·태그 줄)이
@@ -43,8 +43,12 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     js = code()
     assert js == kkumi.minify(src) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
     # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB · 11/09 25.9KB 돎 → 카테고리 넣으며 28KB 안 · 주인 확인)
-    # 11/14 v6 예약 시각 채움 +5.5KB → 33.4KB — 이 길이는 아이패드에서 아직 저장해 보지 않음 (주인 확인 필요 · 안 되면 v5 로 되돌림)
-    assert len(kkumi.bookmarklet()) < 34000
+    # 11/14 v6 예약 시각 채움 +5.5KB → 33.4KB (32KB 를 넘는 길이는 아이패드에서 저장해 본 적 없음) → 11/15 마지막 검토: 주소에 그대로 써도 되는
+    # 글자(; / ? : @ & = + $ ,)를 % 로 바꾸지 않아(encode_short) 29.1KB — 아이패드에서 돈 v5(27.9KB)보다 1.3KB 김 · 주인 확인 필요
+    assert len(kkumi.bookmarklet()) < 29500
+    body = kkumi.bookmarklet()[len("javascript:"):]
+    assert not set(body) - set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'();/?:@&=+$,%")  # '#'·빈칸·줄바꿈·한글은 모두 %XX
+    assert kkumi.encode(js) != body and unquote(kkumi.encode(js)) == js  # 옛 방식(encodeURIComponent)으로 싼 것과 풀면 같은 코드
     # 받기는 사진 하나뿐 (11/09 — 우리 공개 사진 /media/blog_*.jpg 만 · 쿠키 없이 → 네이버에 파일로 올림)
     assert js.count("fetch(") == 1 and "fetch(u,{credentials:'omit'})" in js and "if(!PIC.test(u))throw 0;" in js
     for net in ("XMLHttpRequest", "sendBeacon", "WebSocket", "EventSource", "import(", ".src=", "location", "open(", "http://"):
@@ -69,10 +73,11 @@ def test_minify_keeps_strings_and_word_gaps() -> None:
 
 
 @needs_node
-def test_bookmarklet_parses_and_matches_encode_uri_component() -> None:
+def test_bookmarklet_parses_and_matches_encode_uri() -> None:
     js = code()
-    chk = "const c=process.argv[1];new Function(c);" \
-          "process.stdout.write(String('javascript:'+encodeURIComponent(c)===process.argv[2]))"
+    # 브라우저가 책갈피를 돌릴 때처럼 % 를 풀면 그 코드 · 만들기는 encodeURI 에 '#' 만 %23
+    chk = "const c=process.argv[1],b=process.argv[2];new Function(c);" \
+          "process.stdout.write(String('javascript:'+encodeURI(c).replace(/#/g,'%23')===b&&decodeURIComponent(b)==='javascript:'+c&&new URL(b).hash===''))"
     out = subprocess.run([NODE, "-e", chk, js, kkumi.bookmarklet()], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     assert out.stdout == "true"
