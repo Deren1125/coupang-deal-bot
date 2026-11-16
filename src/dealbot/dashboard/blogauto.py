@@ -193,6 +193,8 @@ class BlogAutoExport:
     own_stats: dict[str, OwnStats] = field(default_factory=dict)  # 이름(소문자)·blog_id → 자기 통계 (없으면 직접 입력만)
     todo: TodoExport | None = None  # 파일에 "todo" 가 없거나 모양이 다르면 None ('지금 할 일' 은 딜봇 것만 + 안내)
     version: int = 1
+    # 글 만들기 Claude 사용량 (주인 11/16 — Blog-Auto ai_cost.summary): 없거나 모양이 다르면 None (통계 탭 줄 숨김)
+    ai_cost: dict[str, float | None] | None = None
     # v2 (주인 10/18 대시보드 앱): posts·recent·scan·status·digest — 걸러 둔 사전 (parse_v2). 없으면 빈 사전
     v2: dict[str, Any] = field(default_factory=dict)
 
@@ -2029,6 +2031,36 @@ def parse_v2(data: dict[str, Any], media_base: str | None = None) -> dict[str, A
     return out
 
 
+def parse_ai_cost(v: Any) -> dict[str, float | None] | None:
+    """파일의 "ai_cost" (Blog-Auto ai_cost.summary) → {posts_7d, per_post_usd, post_usd_7d, usd_7d, post_pct_7d, pct_7d} 숫자만.
+    칸이 없거나 지난 7일 쓴 게 없으면 None. 못 읽은 숫자는 None (짐작하지 않음)."""
+    if not isinstance(v, dict):
+        return None
+    out: dict[str, float | None] = {}
+    for k in ("posts_7d", "per_post_usd", "post_usd_7d", "usd_7d", "post_pct_7d", "pct_7d"):
+        n = v.get(k)
+        ok = isinstance(n, (int, float)) and not isinstance(n, bool) and n == n and 0 <= n < 1e9
+        out[k] = float(n) if ok else None
+    return out if (out["usd_7d"] or out["post_usd_7d"]) else None
+
+
+def ai_cost_line(ac: dict[str, float | None] | None) -> str | None:
+    """통계 탭 한 줄: '블로그 글 만들기: 지난 7일 약 N편 · 글 1편당 ≈ $x · 주간 한도의 약 y% 이하(추정)'. 값이 없으면 None (줄 숨김).
+    금액은 API 값으로 환산한 것(구독이라 실제로 내는 돈 아님) · % 는 Blog-Auto 가 아직 못 구했으면 '재는 중'."""
+    if not ac:
+        return None
+    parts = []
+    if ac.get("posts_7d") is not None:
+        parts.append(f"지난 7일 약 {int(ac['posts_7d'])}편")
+    if ac.get("per_post_usd") is not None:
+        parts.append(f"글 1편당 ≈ ${ac['per_post_usd']:.2f}")
+    elif ac.get("post_usd_7d") is not None:
+        parts.append(f"7일 ≈ ${ac['post_usd_7d']:.2f}")
+    pct = ac.get("post_pct_7d")
+    parts.append(f"주간 한도의 약 {pct:g}% 이하(추정)" if pct is not None else "주간 한도 % 는 재는 중")
+    return "블로그 글 만들기: " + " · ".join(parts)
+
+
 def parse_export(data: Any, tz: str, media_base: str | None = None) -> BlogAutoExport:
     """media_base: 봇 공개 주소 (https://도메인 — 할 일 '붙여 넣기' 글의 사진 주소 앞부분). 없으면 붙여 넣기 칸은 None."""
     if not isinstance(data, dict):
@@ -2051,7 +2083,8 @@ def parse_export(data: Any, tz: str, media_base: str | None = None) -> BlogAutoE
     version = data.get("version") if data.get("version") in (1, 2) else 1
     return BlogAutoExport(OK, written_at=written, blogs=blogs, waiting=parse_waiting(data.get("waiting"), tz),
                           own_stats=parse_own_stats(data.get("own_stats"), tz), todo=parse_todo(data.get("todo"), tz),
-                          version=version, v2=parse_v2(data, media_base) if version == 2 else {})
+                          version=version, v2=parse_v2(data, media_base) if version == 2 else {},
+                          ai_cost=parse_ai_cost(data.get("ai_cost")))
 
 
 class BlogAutoReader:
@@ -2097,5 +2130,6 @@ class BlogAutoReader:
                 todo=parsed.todo,  # '지금 할 일' 은 그대로 보이고 '몇 시간 전 것' 안내만 붙는다
                 version=parsed.version,
                 v2=parsed.v2,
+                ai_cost=parsed.ai_cost,
             )
         return parsed

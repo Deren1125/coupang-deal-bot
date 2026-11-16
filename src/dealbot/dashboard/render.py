@@ -567,7 +567,7 @@ border-radius:10px;background:var(--card);color:var(--text);padding:0 10px;font-
 """
 
 
-def stats_fragment(*, views: list[CardView], today: date, tz: str, spark_days: int) -> str:
+def stats_fragment(*, views: list[CardView], today: date, tz: str, spark_days: int, note: str | None = None) -> str:
     """앱의 통계 탭 (GET /dashboard/api/stats.html): 예전 카드 그대로 한 줄씩 (텔레그램·인스타·스레드·블로그 셋·오픈채팅·쿠팡).
     폼·스크립트 없음 — 단추는 data-action. 카드 하나가 깨져도 나머지는 뜬다."""
     cards = []
@@ -580,6 +580,8 @@ def stats_fragment(*, views: list[CardView], today: date, tz: str, spark_days: i
             log.exception("dashboard stats card %s render failed", v.key)
             cards.append(_broken_card(v, err))
     body = "".join(cards) or '<p class="empty">보여 줄 카드가 없어요</p>'
+    if note:  # 글 만들기 Claude 사용량 한 줄 (주인 11/16 — blogauto.ai_cost_line · 없으면 줄 없음)
+        body = f'<p class="posted ai-cost">{e(note)}</p>{body}'
     return f"<style>{STATS_CSS}</style>{body}"
 
 

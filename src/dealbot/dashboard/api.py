@@ -878,6 +878,16 @@ class DashApi:
             return err(400, "bad_args", "찾을 낱말을 40자 안으로 넣어 주세요")
         return jresp(200, {"items": self.bot.find_view(q)})
 
+    def _ai_cost_note(self) -> str | None:
+        """통계 탭 '블로그 글 만들기' 한 줄 (주인 11/16 — Blog-Auto 기록 파일 ai_cost 칸). 칸이 없거나 못 읽으면 None."""
+        from dealbot.dashboard.blogauto import ai_cost_line
+
+        try:
+            reader = self.dash.ctx.blogauto
+            return ai_cost_line(reader.read().ai_cost) if reader is not None else None
+        except Exception:  # noqa: BLE001 — 이 줄 때문에 통계 탭이 깨지지 않게
+            return None
+
     async def stats_html(self, query: dict[str, str]) -> Any:
         """통계 카드 조각 — render.stats_fragment(C) 가 있으면 그것, 없으면 예전 카드 그대로 (폼 없이)."""
         from dealbot.dashboard import render
@@ -885,7 +895,8 @@ class DashApi:
         views = self.dash.views()
         frag = getattr(render, "stats_fragment", None)
         if frag is not None:
-            html = frag(views=views, today=self.dash.ctx.today(), tz=self.dash.ctx.tz, spark_days=self.dash.cfg.spark_days)
+            html = frag(views=views, today=self.dash.ctx.today(), tz=self.dash.ctx.tz, spark_days=self.dash.cfg.spark_days,
+                        note=self._ai_cost_note())
         else:
             html = "".join(render.card_html(v, token="", today=self.dash.ctx.today(), tz=self.dash.ctx.tz,
                                             spark_days=self.dash.cfg.spark_days) for v in views)
