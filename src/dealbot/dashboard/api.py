@@ -39,9 +39,9 @@
   GET  /dashboard/api/seoi              '이웃 관리' 책갈피 {code, len, steps, note, today} (seoi.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/14)
   POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
-  GET  /dashboard/api/writebm           '글쓰기 한 번에' 책갈피 {code, len, steps, note?} (writebm.view — 열쇠가 든 받는 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/16)
+  GET  /dashboard/api/writebm           '글쓰기 한 번에' 책갈피 {code, len, steps, note?} (writebm.view — 열쇠가 든 진행기 통째 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/16)
   POST /dashboard/api/write_act         그 책갈피가 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
-                                        → writebm.act: a=code 진행기 코드 · a=next 그 블로그의 다음 붙여넣기 대기 글 · a=done 결과 (발행 확인이면 할 일 줄 체크) · 서버는 네이버를 열지 않음
+                                        → writebm.act (데이터만 — 코드는 책갈피 안에 통째): a=next 그 블로그의 다음 붙여넣기 대기 글 · a=done 결과 (발행 확인이면 할 일 줄 체크) · 서버는 네이버를 열지 않음
                                         · 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (nbvisit.tick — 응답에 row · 블로그마다 하루 5번)
                                         · 자동 (주인 11/15): a=queue 다음 차례·기다릴 초 · a=done 결과 (서로이웃 줄 체크 + nb_requested 맡기기) —
                                           오늘 목록(routine.blog_routine)일 때만 · 체크된 줄(done_ids·carried)은 뺌
@@ -838,7 +838,7 @@ class DashApi:
             return err(503, "failed", "대시보드 공개 주소가 이상해요")
 
     async def write_act(self, form: dict[str, str], headers: dict[str, str]) -> Any:
-        """'글쓰기 한 번에' 책갈피가 묻는 곳 (주인 11/16). 열쇠 → 진행기 코드 · 다음 붙여넣기 대기 글 · 결과 (발행 확인이면 할 일 줄 체크).
+        """'글쓰기 한 번에' 책갈피가 묻는 곳 (주인 11/16). 열쇠 → 다음 붙여넣기 대기 글 · 결과 (발행 확인이면 할 일 줄 체크).
         서버는 네이버를 열지 않는다 — 글은 주인 브라우저가 가져가 넣는다. 응답 CORS 는 네이버 블로그 화면에만 (이 길만)."""
         from zoneinfo import ZoneInfo
 

@@ -1,7 +1,7 @@
 """'글쓰기 한 번에' 책갈피 (주인 11/16 — 글쓰기에서 한 번 누르면 오늘 붙여넣기 대기 글을 차례로 채우고 글마다 '발행'만 주인이).
 
-1) writebm.bookmarklet(): 짧은 받는 코드 (열쇠·주소·블로그 표) — 알림·확인 창 없음 · 진행기(runner) = write.js + kkumi.js 통째 (PATCHES 네 줄) · node 로 읽힘 ·
-   발행을 끝내는 단추를 누르는 코드가 없음.
+1) writebm.bookmarklet(): 진행기(runner = write.js + kkumi.js 통째, PATCHES 네 줄)를 주소에 통째로 (대시보드에서 코드를 받지 않음 — 메인 11/16) ·
+   알림·확인 창 없음 · node 로 읽힘 · 발행을 끝내는 단추를 누르는 코드가 없음.
 2) writebm.act(): 열쇠 · 그 블로그의 오늘 대기 글만 차례로 · 글 사이 30~60초 · 발행 확인이면 할 일 줄 체크 + 블로그 프로그램에 pasted · 확인 못 한 글·폰에서 직접은
    체크하지 않고 오늘은 다시 주지 않음 · 못 넣은 글은 다음에 다시.
 3) GET /dashboard/api/writebm (로그인 아래) · POST /dashboard/api/write_act (열쇠 · 교차 사이트 · CORS 는 네이버 블로그 화면만).
@@ -71,15 +71,19 @@ def _rows(day: str) -> dict:
 
 
 # ---------------------------------------------------------------- 1) 책갈피·진행기
-def test_bookmarklet_is_a_short_loader_with_no_dialogs() -> None:
+def test_bookmarklet_carries_the_whole_runner_and_fetches_no_code() -> None:
     db = FakeDb()
     v = writebm.view(db, "https://dash.example")
     js = unquote(v["code"][len("javascript:"):])
-    assert v["code"].startswith("javascript:") and v["len"] < 2500 and v["steps"] == list(writebm.STEPS) and v["version"] == 1
-    assert "'https://dash.example/dashboard/api/write_act'" in js and f"'{writebm.key(db)}'" in js and "@@" not in js
-    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js
-    for word in ("alert(", "confirm(", "prompt(", ".click(", "cookie"):
+    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= writebm.LEN_MAX and v["steps"] == list(writebm.STEPS) and v["version"] == 1
+    assert "#" not in v["code"] and v["code"] == "javascript:" + kkumi.encode_short(js)
+    assert "u:'https://dash.example/dashboard/api/write_act'" in js and f"k:'{writebm.key(db)}'" in js and "@@" not in js
+    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and kkumi.minify(writebm.runner()) in js
+    # 원격 코드 실행 없음: 받은 글을 코드로 돌리는 길이 없고, 대시보드에 코드를 달라고 하지 않음
+    for word in ("new Function", "Function(", "eval(", "a:'code'", "import(", "createElement('script')", "prompt(", "cookie", "localStorage"):
         assert word not in js, word
+    # 알림·확인 창: 꾸미기 코드의 alert·confirm 은 진행기가 넘긴 함수 (매개변수 이름이 가림) — 진짜 창을 부르는 곳은 없음
+    assert js.count("async(document,alert,confirm,GOT,PRE)=>{") == 1 and "window.alert" not in js and "W.alert" not in js
     with pytest.raises(ValueError):
         writebm.bookmarklet("http://dash.example/x", "k")
     assert writebm.key(db) == writebm.key(db) and writebm.key(FakeDb()) != writebm.key(db) and not writebm.key_ok(db, "") and writebm.key_ok(db, writebm.key(db))
@@ -133,7 +137,9 @@ def test_act_serves_the_blogs_pending_posts_in_order_and_checks_published(bot: D
     with pytest.raises(writebm.CaptureError) as e:
         writebm.act(bot.db, {"k": "wrong", "a": "code"}, tz=TZ)
     assert e.value.status == 403 and e.value.code == "key"
-    assert go(a="code")["code"] == writebm.runner()
+    with pytest.raises(writebm.CaptureError) as e:
+        go(a="code")  # 코드는 내려 주지 않음 (책갈피 안에 통째)
+    assert e.value.code == "bad"
     with pytest.raises(writebm.CaptureError) as e:
         go(a="next", b="nope")
     assert e.value.code == "who"
@@ -197,10 +203,10 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
     assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and "note" not in v
     with_routine(tmp_path, _rows(tz_now(bot).date().isoformat()))
     res = await _post(bot, {"k": k, "a": "code"}, origin="https://blog.naver.com")
-    assert res[0] == 200 and json.loads(res[1])["code"] == writebm.runner() and res[3]["Access-Control-Allow-Origin"] == "https://blog.naver.com"
-    assert res[3]["Cache-Control"] == "no-store"
+    assert res[0] == 400 and json.loads(res[1])["code"] == "bad"
     res = await _post(bot, {"k": k, "a": "next", "b": "issue"}, origin="https://blog.naver.com")
-    assert res[0] == 200 and json.loads(res[1])["next"]["id"] == "pub:issue:11"
+    assert res[0] == 200 and json.loads(res[1])["next"]["id"] == "pub:issue:11" and res[3]["Access-Control-Allow-Origin"] == "https://blog.naver.com"
+    assert res[3]["Cache-Control"] == "no-store"
     res = await _post(bot, {"k": k, "a": "done", "b": "issue", "id": "pub:issue:11", "r": "ok"}, origin="https://blog.naver.com")
     assert res[0] == 200 and json.loads(res[1])["checked"] is True
     status, rt, _ = await get_json(bot, "/dashboard/api/routine", session_headers(bot))
@@ -208,10 +214,10 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
     res = await _post(bot, {"k": "wrong", "a": "next", "b": "issue"}, origin="https://blog.naver.com")
     assert res[0] == 403 and json.loads(res[1])["code"] == "key" and "html" not in res[1].decode() if isinstance(res[1], bytes) else True
     for o in ("https://evil.example", "https://cafe.naver.com", "https://blog.naver.com.evil.example", "http://blog.naver.com", "null"):
-        res = await _post(bot, {"k": k, "a": "code"}, origin=o)  # 네이버 블로그 화면이 아니면 답을 못 읽음
+        res = await _post(bot, {"k": k, "a": "next", "b": "issue"}, origin=o)  # 네이버 블로그 화면이 아니면 답을 못 읽음
         assert "Access-Control-Allow-Origin" not in res[3] and res[3]["Vary"] == "Origin", o
     assert (await bot.web.dispatch("GET", writebm.PATH, anon))[0] == 405
-    assert (await _post(bot, {"k": k, "a": "code", "x": "가" * 3000}, origin="https://blog.naver.com"))[0] == 413
+    assert (await _post(bot, {"k": k, "a": "next", "b": "issue", "x": "가" * 3000}, origin="https://blog.naver.com"))[0] == 413
     # 다른 길에는 네이버 출처 CORS 가 붙지 않음 (이 길만)
     res = await bot.web.dispatch("GET", "/dashboard/api/routine", {**session_headers(bot), "origin": "https://blog.naver.com"})
     assert "Access-Control-Allow-Origin" not in res[3]
@@ -219,7 +225,7 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
 
 def test_connect_tab_lists_the_install_box() -> None:
     js = (STATIC / "logins.js").read_text(encoding="utf-8")
-    assert "BM.push({api: 'writebm', t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'});" in js
+    assert "{api: 'writebm', t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'}," in js.split("const BM = [", 1)[1].split("];", 1)[0]
 
 
 # ---------------------------------------------------------------- 4) 가짜 글쓰기 화면
@@ -252,11 +258,11 @@ document.addEventListener('click', e => {
 FLOW = r"""
 const {chromium} = require('playwright');
 (async () => {
-  const [editor, loader, runner, posts, mode] = process.argv.slice(1);
+  const [editor, loader, posts, mode] = process.argv.slice(1);
   const b = await chromium.launch();
   const ctx = await b.newContext({viewport: {width: 1100, height: 900}});
   const p = await ctx.newPage();
-  const out = {dialogs: [], done: [], pub: [], saved: [], next: 0, errors: []};
+  const out = {dialogs: [], done: [], hold: [], pub: [], saved: [], next: 0, errors: [], code: 0};
   const queue = JSON.parse(posts);
   p.on('dialog', async d => { out.dialogs.push(d.message()); await d.dismiss(); });
   p.on('pageerror', e => out.errors.push(String(e)));
@@ -266,7 +272,10 @@ const {chromium} = require('playwright');
     if (u.host === 'dash.test' && u.pathname === '/dashboard/api/write_act') {
       const f = new URLSearchParams(q.postData() || '');
       if (f.get('k') !== 'KEY') return r.fulfill({status: 403, headers: cors, contentType: 'application/json', body: '{"ok":false,"text":"열쇠"}'});
-      if (f.get('a') === 'code') return r.fulfill({headers: cors, contentType: 'application/json', body: JSON.stringify({ok: true, code: runner})});
+      if (f.get('a') !== 'next' && f.get('a') !== 'done') { out.code++; return r.fulfill({status: 400, headers: cors, contentType: 'application/json', body: '{"ok":false}'}); }
+      // 발행 단추를 누르기 전에 먼저 남기는 '해 봄' (두 번 발행 막기) — 발행된 뒤가 아니라 '준비 끝' 직전에 와야 함
+      if (f.get('a') === 'done' && f.get('n') === '발행 기다림') { out.hold.push({id: f.get('id'), r: f.get('r'), pub: out.pub.length});
+        return r.fulfill({headers: cors, contentType: 'application/json', body: JSON.stringify({ok: true, checked: false})}); }
       if (f.get('a') === 'next') { out.next++; const left = queue.filter(x => !out.done.some(d => d.id === x.id));
         return r.fulfill({headers: cors, contentType: 'application/json', body: JSON.stringify({ok: true, next: left[0] || null, left: left.length, wait: out.done.length ? 1 : 0, text: '데런픽: 오늘 붙여 넣을 글이 더 없어요'})}); }
       if (f.get('a') === 'done') { out.done.push({id: f.get('id'), r: f.get('r'), p: f.get('p'), n: f.get('n'), b: f.get('b')});
@@ -316,7 +325,7 @@ def _flow(posts: list[dict], mode: str) -> dict:
     if env is None:
         pytest.skip("node playwright·크롬 없음")
     loader = unquote(writebm.bookmarklet("https://dash.test/dashboard/api/write_act", "KEY")[len("javascript:"):])
-    out = subprocess.run([NODE, "-e", FLOW, _editor(), loader, writebm.runner(), json.dumps(posts, ensure_ascii=False), mode],
+    out = subprocess.run([NODE, "-e", FLOW, _editor(), loader, json.dumps(posts, ensure_ascii=False), mode],
                          capture_output=True, text=True, timeout=240, env=env)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
@@ -352,7 +361,8 @@ def test_one_press_fills_two_posts_and_waits_for_publish_each_time() -> None:
     assert len(got["lines"]) == 2 and all("할 일 줄 체크 ✓" in x for x in got["lines"])
     # 네이버 화면이 맨 위 창을 글 주소로 옮기려 했지만 진행기는 누른 화면에 그대로 (sandbox) · 끝나면 글쓰기 창을 치움
     assert got["url"] == "https://blog.naver.com/derenpick/postwrite" and got["sandbox"] and "allow-top-navigation" not in got["sandbox"]
-    assert got["frames"] == 0 and got["next"] == 3
+    assert got["frames"] == 0 and got["next"] == 3 and got["code"] == 0
+    assert got["hold"] == [{"id": "pub:issue:11", "r": "unsure", "pub": 0}, {"id": "rsv:issue:12", "r": "unsure", "pub": 1}]  # 발행 전에 먼저 '해 봄'
 
 
 @needs_node

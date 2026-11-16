@@ -4,21 +4,23 @@
 서버는 네이버를 열지도 로그인하지도 않는다 — 모든 일은 주인이 로그인한 자기 브라우저(아이패드 사파리)에서. 발행·예약을 끝내는 단추는 책갈피가 누르지 않는다
 (꾸미기 kkumi.js 의 tap() 막이 그대로 · 주인이 누른 것을 지켜보기만 함). 네이버가 자동입력 방지·사람 확인을 보이면 풀지 않고 그 글은 임시저장 → '폰에서 직접'.
 
-책갈피 = 작은 받는 코드 (LOADER): 누르면 POST /dashboard/api/write_act a=code (열쇠 k) 로 진행기 코드를 받아 그 화면에서 돌린다 —
-  진행기가 길고(꾸미기 29KB + 껍데기) 자주 고칠 것이라 책갈피 주소에 다 넣지 않는다 (다시 깔 일이 없게). 받는 곳은 이 길 하나 · 열쇠가 맞을 때만.
+책갈피 = 진행기 코드 통째 (메인 11/16 — 원격 코드 실행 금지): 꾸미기·한 번에 책갈피처럼 코드를 책갈피 주소에 다 넣는다 (kkumi.minify + encode_short).
+  대시보드는 코드를 내려 주지 않는다 (new Function·eval 없음 — 대시보드가 뚫려도 네이버 로그인 화면에서 새 코드가 돌지 않음) · write_act 는 데이터만.
+  고치면 책갈피를 다시 깔아야 함 (판 번호 V · 끝 요약 'v<n>').
 진행기 = static/write.js (껍데기) 의 '@@KKUMI@@' 자리에 static/kkumi.js 를 통째로 (코드를 다시 쓰지 않음 — PATCHES 네 줄만 바꿈):
   ① 책갈피 머리 → 함수 (화면·알림·묻기를 껍데기가 넘김 — 알림·확인 창 0개) ② 붙여넣기 칸을 띄우지 않고 받은 글을 바로 ③ 글을 넣기 전에 껍데기의 제목 넣기
   ④ 꼬리. kkumi.js 에서 그 줄이 사라지면 ValueError (test_dash_writebm 이 지킴 — kkumi.js 를 고칠 때 같이).
 페이지 이동에도 이어가기: 진행기는 누른 화면(blog.naver.com)에 남고, 글쓰기는 그 안의 같은 출처 iframe 으로 글마다 새로 연다 (write.js 머리 주석).
 
-POST /dashboard/api/write_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv writebm_secret) · CORS 는 https://*.blog.naver.com 만 · 이 길만):
-  a=code           {ok, code, v}
+POST /dashboard/api/write_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv writebm_secret) · CORS 는 https://*.blog.naver.com 만 · 이 길만 · 데이터만):
   a=next  b=블로그  {ok, next: {id, title, html, text, group, when, photos} | None, left, wait(초), text} — 오늘 할 일의 그 블로그 발행·예약 줄 가운데
                    체크 안 됨 · 다 만든 묶음(만드는 중·점검에 걸린 것 뺌) · 오늘 이미 해 본 것(tried) 뺌. 오늘 목록이 아니면 next 없음.
                    wait = 앞 글을 끝낸 뒤 30~60초(GAP · 무작위)가 되기까지 남은 초 — 진행기가 그만큼 쉰 뒤 다음 글을 연다.
   a=done  b id r   r: ok(발행·예약 확인 — 할 일 줄 체크 + 블로그 프로그램에 pasted · 손으로 체크할 때와 같은 길 routine.set_done·relay_add) ·
                    unsure(발행은 눌렀는데 확인 못 함 — 체크하지 않음) · phone(자동입력 방지 등 — 폰에서 직접) · fail(못 넣음 — 다음에 다시).
                    p=1 사진은 직접 · n=한마디. ok·unsure·phone 은 tried 에 넣어 오늘은 다시 주지 않는다 (같은 글 두 번 발행 막기).
+                   진행기는 '준비 끝'(발행 단추를 누를 수 있게 되기) 직전에 r=unsure n='발행 기다림' 을 먼저 보낸다 — 발행 뒤 탭이 닫혀
+                   ok 를 못 보내도 다시 눌렀을 때 같은 글을 또 주지 않게 (못 보내면 그 글은 멈춤).
 kv: "writebm:day:<날 KST>" = {tried: {줄 id: r}, last, gap, res: [{id, b, r, p, n, at}]} (그날·전날만) · today() = 연결 탭 설치 칸의 한 줄.
 """
 
@@ -68,7 +70,7 @@ SLOT = "'@@KKUMI@@'"
 STEPS = (
     "아래 '코드 복사'를 눌러요.",
     "사파리에서 아무 페이지나 연 뒤 공유 단추 → '책갈피 추가' → 이름을 '글쓰기 한 번에'로 저장해요.",
-    "책갈피 목록 → '편집' → '글쓰기 한 번에'의 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'. (짧은 코드예요 — 고쳐져도 다시 깔 일이 거의 없어요)",
+    "책갈피 목록 → '편집' → '글쓰기 한 번에'의 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'. (코드가 길어요 — 저장이 안 되면 예전처럼 꾸미기 책갈피로)",
     "쓰는 법: 네이버에 로그인한 사파리에서 그 블로그의 글쓰기 화면을 열고 '글쓰기 한 번에'를 한 번 → 오늘 붙여넣기 대기 글을 차례로 가져와 "
     "제목·본문·꾸미기·사진·태그·카테고리·예약 시각까지 채우고 멈춰요 → 화면 위 줄에 '발행만 눌러 주세요'가 뜨면 발행 단추만 눌러요 → "
     "발행되면 30~60초 쉬고 다음 글을 스스로 열어요 → 끝나면 할 일 줄이 체크되고 화면 위에 요약이 남아요.",
@@ -76,16 +78,12 @@ STEPS = (
     "네이버가 자동입력 방지·사람 확인을 보이면 풀지 않고 그 글은 임시저장한 뒤 다음 글로 넘어가요 — 요약의 '폰에서 직접'에 남은 글만 폰에서 올리면 돼요. "
     "사진을 못 넣은 글은 '사진은 직접'이라고 알려요. 블로그 계정이 여럿이면 계정마다 로그인해서 같은 식으로 (한 번에 로그인된 블로그 하나의 글만 해요).",
 )
-# 책갈피 (받는 코드) — 알림 창 없이 화면 위 한 줄. @@URL@@·@@KEY@@·@@BLOGS@@ 는 bookmarklet() 이 넣음
-LOADER = (
-    "(async()=>{const W=window,D=document,U='@@URL@@',K='@@KEY@@';if(W.__wbm)return;W.__wbm=1;"
-    "const say=t=>{const o=D.createElement('div');o.style.cssText='position:fixed;left:8px;right:8px;top:8px;z-index:2147483647;padding:14px;"
-    "border-radius:12px;background:#111;color:#fff;font:16px/1.5 sans-serif;text-align:center';o.textContent=t;let d=D;try{if(D.body.tagName=='FRAMESET')d=W.frames[0].document}catch(e){}(d.body||d.documentElement).appendChild(o);"
-    "setTimeout(()=>o.remove(),9000);W.__wbm=0};"
-    "let j=null;try{j=await(await fetch(U,{method:'POST',mode:'cors',credentials:'omit',body:new URLSearchParams({k:K,a:'code'})})).json()}catch(e){}"
-    "if(!j||!j.code)return say(j&&j.text||'글쓰기 한 번에: 대시보드에 닿지 못했어요 — 네이버 블로그 글쓰기 화면에서 눌러 주세요');"
-    "try{await new Function('return('+j.code+')')()({u:U,k:K,bl:JSON.parse('@@BLOGS@@')})}catch(e){say('글쓰기 한 번에 오류: '+e)}W.__wbm=0})()"
-)
+LEN_MAX = 50000  # 꾸미기(29KB) + 껍데기 = 47KB 남짓 — '한 번에'(45KB)와 비슷 (아이패드 사파리에서 돈 가장 긴 책갈피는 29KB — 저장이 안 되면 꾸미기 책갈피로)
+# 책갈피 = 진행기를 그 자리에서 부름 (한 번에 두 번 돌지 않게 · 오류는 화면 위 한 줄 — 알림 창 없음). @@URL@@·@@KEY@@·@@BLOGS@@ 는 bookmarklet() 이 넣음
+HEAD = "(async()=>{const W=window;if(W.__wbm)return;W.__wbm=1;try{await("
+TAIL = (")({u:'@@URL@@',k:'@@KEY@@',bl:JSON.parse('@@BLOGS@@')})}catch(e){const o=document.createElement('div');"
+        "o.style.cssText='position:fixed;left:8px;right:8px;top:8px;z-index:2147483647;padding:14px;border-radius:12px;background:#111;color:#fff;"
+        "font:16px/1.5 sans-serif;text-align:center';o.textContent='글쓰기 한 번에 오류: '+e;(document.body||document.documentElement).appendChild(o)}W.__wbm=0})()")
 
 
 def _secret(db: Any) -> bytes:
@@ -130,10 +128,16 @@ def runner() -> str:
     return shell.replace(SLOT, _core()).rstrip().rstrip(";")
 
 
+@lru_cache(maxsize=1)
+def _code() -> str:
+    return HEAD + kkumi.minify(runner()) + TAIL
+
+
 def bookmarklet(endpoint: str, k: str) -> str:
+    """javascript: 주소 — 진행기 통째 + 주소·열쇠·블로그 표 (따옴표·역슬래시 없는 글자만)."""
     if not re.fullmatch(r"https://[A-Za-z0-9.\-:]+/[A-Za-z0-9_/\-]+", endpoint) or not re.fullmatch(r"[A-Za-z0-9_\-]+", k):
         raise ValueError("bad endpoint or key")
-    return "javascript:" + kkumi.encode(LOADER.replace("@@URL@@", endpoint).replace("@@KEY@@", k).replace("@@BLOGS@@", seoi.blogs_json()))
+    return "javascript:" + kkumi.encode_short(_code().replace("@@URL@@", endpoint).replace("@@KEY@@", k).replace("@@BLOGS@@", seoi.blogs_json()))
 
 
 def _day(now: float, tz: ZoneInfo) -> str:
@@ -174,6 +178,8 @@ def today(db: Any, now: float, tz: ZoneInfo) -> dict[str, Any]:
 
 def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | None = None) -> dict[str, Any]:
     code = bookmarklet(public_url.rstrip("/") + PATH, key(db))
+    if len(code) > LEN_MAX:
+        raise ValueError("bookmarklet too long")
     out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS), "version": version()}
     if tz is not None and (note := today(db, now or time.time(), tz)["note"]):
         out["note"] = note
@@ -203,13 +209,11 @@ def _blog(form: dict[str, str]) -> str:
 
 
 def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None, rv: Any = None, rng: Any = random) -> dict[str, Any]:
-    """책갈피·진행기가 보낸 폼 하나. rv = routine.view() 값 (a=next·done 일 때 · 호출하는 쪽이 열쇠를 본 뒤 읽어 넘김)."""
+    """책갈피가 보낸 폼 하나 (데이터만 — 코드는 내려 주지 않음). rv = routine.view() 값 (a=next·done 일 때 · 호출하는 쪽이 열쇠를 본 뒤 읽어 넘김)."""
     if not key_ok(db, form.get("k")):
         raise CaptureError(403, "key", "열쇠가 맞지 않아요 — 대시보드 연결 탭에서 '글쓰기 한 번에' 책갈피를 다시 설치해 주세요")
     now = now or time.time()
     a = str(form.get("a") or "")
-    if a == "code":
-        return {"ok": True, "code": runner(), "v": version()}
     day = _day(now, tz)
     if a == "next":
         blog = _blog(form)

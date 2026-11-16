@@ -1,4 +1,4 @@
-/* '글쓰기 한 번에' 진행기 (주인 11/16). 책갈피(writebm.py LOADER)가 대시보드에서 받아 네이버 블로그 글쓰기 화면에서 돌린다 — 화면에서 바로 받지 않는 파일.
+/* '글쓰기 한 번에' 진행기 (주인 11/16). writebm.py 가 줄여 책갈피 주소에 통째로 넣는다 (대시보드에서 코드를 받지 않음 — 데이터만) — 화면에서 바로 받지 않는 파일.
    한 번 누르면: 그 블로그(로그인된 아이디)의 오늘 붙여넣기 대기 글을 하나씩 받아 → 새 글쓰기 화면을 열고 → 제목 → 본문·꾸미기·사진·태그·카테고리·예약 시각
    (아래 CORE = 꾸미기 책갈피 kkumi.js 그대로) → 멈춤 → 주인이 '발행'을 누르면 → 대시보드에 알리고(할 일 줄 체크) 30~60초 쉰 뒤 다음 글. 끝나면 요약.
    이동에도 이어가기: 진행기는 누른 화면에 남는다. 그 화면의 내용을 비우고(바깥이 frameset 이어도 보이게 body 를 새로 끼움) 글쓰기 화면을 같은 출처 iframe 으로
@@ -49,8 +49,9 @@ for (const d of first) {
     for (const x of [u.searchParams.get('blogId'), m && m[1], d.defaultView.blogId, d.defaultView.userId]) if (x && typeof x === 'string') ids.push(x.toLowerCase());
   } catch (e) {}
 }
-const mine = CFG.bl.find(x => ids.includes(x[0]));
-if (!mine) { alert_('우리 블로그 계정의 글쓰기 화면이 아니에요' + (ids[0] ? ' (' + ids[0] + ')' : '')); return; }
+// 우리 블로그 하나로만 읽혀야 함 (둘 이상이면 어느 블로그 글을 넣을지 모름 — 멈춤)
+const mines = CFG.bl.filter(x => ids.includes(x[0])), mine = mines.length === 1 ? mines[0] : null;
+if (!mine) { alert_(mines.length ? '어느 블로그 계정인지 헷갈려요 — 그 블로그로 로그인한 글쓰기 화면에서 눌러 주세요' : '우리 블로그 계정의 글쓰기 화면이 아니에요' + (ids[0] ? ' (' + ids[0] + ')' : '')); return; }
 const BLOG = mine[1], URL_ = E0.location.href.split('#')[0];
 // ── 화면 차지: 위 한 줄(지금 하는 일) + 아래 글쓰기 창
 const nb = D0.createElement('body'), box = D0.createElement('div');
@@ -209,8 +210,11 @@ const one = async (it, at) => {
   // 발행 설정창이 안 열려 있으면 열어 둔다 (꾸미기가 태그를 넣을 때 여는 그 단추 — 마지막 발행 단추가 아님)
   if (!K.tagIn()) { const b = K.pubBtn(); if (b) { K.press(b); await K.wait(K.tagIn, 4000); } }
   const ready = at + ' 「' + it.title + '」 준비 끝 — ' + (it.group === '예약' ? "'발행'만 눌러 주세요 (예약)" : "'발행'만 눌러 주세요") + (tips.length ? ' · ' + tips.join(' · ') : '');
-  say(ready);
   const note = tips.join(' · ').slice(0, 70);
+  // 발행을 누르기 전에 대시보드에 '이 글은 오늘 해 봄'(확인 필요)을 먼저 남김 — 발행 뒤 탭이 닫히거나 새로 고쳐져도 다시 눌렀을 때 같은 글을 또 주지 않게 (두 번 발행 막기)
+  const hold = await ask({a: 'done', b: BLOG, id: it.id, r: 'unsure', p: photo ? 1 : 0, n: '발행 기다림'});
+  if (!hold || !hold.ok) return {r: 'fail', n: '대시보드에 닿지 못했어요 (발행 전)'};
+  say(ready);
   let gone = 0;
   for (;;) {
     await S(500);
