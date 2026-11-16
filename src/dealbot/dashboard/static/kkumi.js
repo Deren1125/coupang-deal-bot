@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v6 (v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v7 (v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -18,7 +18,7 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 6;
+const V = 7;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => D.querySelectorAll(CARD).length;
@@ -70,9 +70,10 @@ const setSel = p => {
 // 글자 비교는 빈칸을 하나로 (11/14 라커룸 '글 안 들어감' — 에디터가 꾸민 숫자 앞 빈칸을 &nbsp; 로 바꿔 '타율 0.322' 를 못 찾음)
 const sp=t=>(t||'').replace(/\s+/g,' ');
 const count = s_ => { const a=sp(content().textContent),s=sp(s_); let n = 0, i = 0; if (!s.trim()) return 0; while ((i = a.indexOf(s, i)) >= 0) { n++; i += s.length; } return n; };
-const pasteIn = async (html, plain, probe) => {
+// at: 붙일 칸 (없으면 본문 끝 줄)
+const pasteIn = async (html, plain, probe, at) => {
   const ps = body_(), before = count(probe), imgs = D.querySelectorAll('.se-component.se-image').length;
-  setSel(ps[ps.length - 1]);
+  setSel(at || ps[ps.length - 1]);
   const dt = new W.DataTransfer();
   dt.setData('text/html', html);
   dt.setData('text/plain', plain);
@@ -198,8 +199,11 @@ const quote = async b => {
   if (!q) return '안 생김';
   await S(300);
   const probe = (b.lines[0] || '').slice(0, 20);
-  await pasteIn(b.html, b.lines.join('\n'), probe);
-  const inside = probe && q.textContent.includes(probe);
+// 11/16 드라마 표 인용구 (앞에 선 없이 글 다음): 본문 끝 줄이 포스트잇 밖(뒤 빈 줄)일 수 있음 → 포스트잇 안 칸을 눌러 거기에 붙임
+// 빈칸 비교는 sp (숫자 앞 &nbsp;) · 어디에도 안 들어갔으면 한 번 더 (밖에 들어갔으면 두 번 넣지 않음)
+  const at = q.querySelector('.se-quote .se-text-paragraph,.se-text-paragraph'), n = count(probe), has = () => sp(q.textContent).includes(sp(probe));
+  for (let k = 0; k < 2 && !(k && (!probe || has() || count(probe) > n)); k++) { if (at) press(at); await pasteIn(b.html, b.lines.join('\n'), probe, at || q); }
+  const inside = probe && has();
   R.q.push('글 ' + (inside ? '안' : '밖'));
   const bt = vis(BOTTOM);
   if (bt) press(bt);
