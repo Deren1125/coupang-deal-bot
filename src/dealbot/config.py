@@ -882,7 +882,7 @@ class XTrendConfig(BaseModel):
     enabled: bool = True
     fx: bool = True  # FxTwitter 공개 API (X 글 조회·답글 수) — false 면 구글 검색어·화제 목록만
     google: bool = True  # 구글 트렌드 '지금 뜨는 검색어' RSS (한국)
-    fx_per_day: int = Field(400, ge=0, le=2000)  # 하루 FxTwitter 요청 상한 (새로 보기 한 번에 8번까지)
+    fx_per_day: int = Field(200, ge=0, le=2000)  # 하루 FxTwitter 요청 상한 (새로 보기 한 번에 5번까지 · 메인 11/16 400 → 200)
     google_per_day: int = Field(100, ge=0, le=300)  # 하루 구글 RSS 요청 상한 (새로 보기 한 번에 1번)
 
 

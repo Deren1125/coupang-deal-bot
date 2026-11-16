@@ -10,7 +10,7 @@ A. 지금 뜨는 주제 — 주인이 화면을 열었을 때만 새로 본다 (
      API 를 긁지 말라는 말이고 문서가 API 를 프로그램에서 쓰라고 내놓은 곳이라 씀. 주인·메인이 꺼리면 dashboard.x_trend.fx: false 한 줄.
      /2/trends 는 나라를 못 골라 미국 순위만 줘서 안 씀 — 11/16 확인). ① 한국어·좋아요 많은 최근 글 표본(한 쪽 20개) → 여러 사람이 같이 쓴 해시태그·낱말
      ② 주제마다 검색 한 번 (최근 24시간 · 좋아요 20 넘는 글의 조회·답글·좋아요 수, 대표 글 2개). 한 번 새로 볼 때 FX_PER_REFRESH 번까지 (오래 안 본
-     주제부터 · 나머지는 다음 번), 사이 FX_GAP_S, 하루 dashboard.x_trend.fx_per_day 번. 몰아 부르면 한동안 404 를 줘서 천천히 부른다.
+     주제부터 · 나머지는 다음 번), 사이 FX_GAP_S, 하루 dashboard.x_trend.fx_per_day 번. 404·429 가 연속 2번이면 6시간 쉼. 몰아 부르면 한동안 404 를 줘서 천천히 부른다.
    · 구글 트렌드 '지금 뜨는 검색어' RSS (trends.google.com/trending/rss?geo=KR — robots.txt 가 막는 곳은 /explore 뿐): 검색어·대략 검색량·기사 제목.
    · Blog-Auto 화제 목록 (x_hot — 이미 대시보드에 오는 값 · 바깥 요청 없음).
    쓰지 않는 곳: trends24.in·getdaytrends.com (둘 다 이용약관이 긁기·저장을 금지) · x.com (robots.txt Disallow: / · 로그인) · X 공식 API (유료).
@@ -57,11 +57,13 @@ GOOGLE_RSS = "https://trends.google.com/trending/rss"
 X_SEARCH = "https://x.com/search?q="  # 주인이 누르는 링크 (서버는 열지 않음)
 CACHE_S = 15 * 60  # 이보다 오래되면 화면이 새로 보기를 부른다
 REFRESH_MIN_S = 10 * 60  # 새로 보기는 이 사이에 한 번
-OFF_S = 6 * 3600  # 막힌 출처(401·403·429·451)는 이만큼 쉼
-SOFT_OFF_S = 20 * 60  # 그 밖에 못 읽은 때 (404·5xx·시간 초과 — FxTwitter 검색은 몰아 부르면 한동안 404 를 준다, 11/16 확인)
-BLOCKED = (401, 403, 429, 451)
+OFF_S = 6 * 3600  # 막힌 출처(401·403·451)는 이만큼 쉼
+SOFT_OFF_S = 20 * 60  # 그 밖에 못 읽은 때 (404·429·5xx·시간 초과 — FxTwitter 검색은 몰아 부르면 한동안 404 를 준다, 11/16 확인)
+BLOCKED = (401, 403, 451)
+STREAK = (404, 429)  # 이 둘이 연속 STREAK_MAX 번이면 OFF_S 쉼 (메인 11/16 — 양 줄이기)
+STREAK_MAX = 2
 FX_GAP_S = 5.0
-FX_PER_REFRESH = 8  # 표본 1 + 주제 7 — 나머지 주제는 다음 번에 (오래 안 본 주제부터)
+FX_PER_REFRESH = 5  # 표본 1 + 주제 4 (메인 11/16 — 8 → 5) — 나머지 주제는 다음 번에 (오래 안 본 주제부터)
 SAMPLE_QUERY = "lang:ko min_faves:2000 -filter:replies"
 TOPIC_MAX = 14  # 한 번에 보는 주제 수 (구글 GOOGLE_MAX + X 낱말 NATIVE_MAX + 화제)
 GOOGLE_MAX, NATIVE_MAX = 8, 4
@@ -133,6 +135,12 @@ MINE_SCHEMA = {"type": "object",
                "required": ["ok", "why", "drafts"]}
 
 Getter = Callable[[str, dict[str, str]], Awaitable[tuple[int, str]]]
+
+
+def https_link(v: Any) -> str:
+    """바깥 글 링크는 https 만 (http·javascript: 등은 '')."""
+    link = xt.web_link(v)
+    return link if link.startswith("https://") else ""
 
 
 def _int(v: Any) -> int:
@@ -210,7 +218,7 @@ def google_rows(xml: str, now: float) -> list[dict[str, Any]] | None:
             if tail(n) != "news_item":
                 continue
             nv = {tail(e): (e.text or "").strip() for e in n}
-            link = xt.web_link(nv.get("news_item_url"))
+            link = https_link(nv.get("news_item_url"))
             if link and nv.get("news_item_title"):
                 news.append({"title": xs.one_line(nv["news_item_title"], 120), "link": link, "source": xs.one_line(nv.get("news_item_source"), 30)})
         out.append({"kw": kw, "traffic": traffic(vals.get("approx_traffic")), "since": since if 0 < since <= now + 3600 else 0.0, "news": news[:3]})
@@ -328,6 +336,7 @@ class XTrend:
                       and isinstance(h.get("rank"), dict) and 0 <= now - h["at"] <= HIST_HI_S][-HIST_KEEP:]
         st["at"] = float(st["at"]) if isinstance(st.get("at"), (int, float)) else 0.0
         st["off"] = {s: v for s, v in st["off"].items() if isinstance(v, (int, float))} if isinstance(st.get("off"), dict) else {}
+        st["streak"] = {s: _int(v) for s, v in st["streak"].items()} if isinstance(st.get("streak"), dict) else {}
         st.pop("fail", None)
         st["fx"], st["google"] = _int(st.get("fx")), _int(st.get("google"))
         return st
@@ -349,8 +358,11 @@ class XTrend:
             log.info("xtrend %s: %s", src, type(e).__name__)
             status, text = 0, ""
         if status == 200 and text:
+            st["streak"][src] = 0
             return text
-        rest = OFF_S if status in BLOCKED else SOFT_OFF_S
+        streak = st["streak"].get(src, 0) + 1 if status in STREAK else 0
+        st["streak"][src] = streak
+        rest = OFF_S if status in BLOCKED or streak >= STREAK_MAX else SOFT_OFF_S
         st["off"][src] = now + rest
         log.warning("xtrend %s: HTTP %s — %d분 쉼", src, status, rest // 60)
         return None
@@ -400,8 +412,8 @@ class XTrend:
             for h in self.studio.hot_list():
                 srcs = [s for s in h.get("sources") or [] if isinstance(s, dict)]
                 add(str(h.get("keyword") or ""), "hot",
-                    news=[{"title": xs.one_line(s.get("title"), 120), "link": xt.web_link(s.get("link")), "source": ""} for s in srcs[:3]
-                          if xt.web_link(s.get("link")) and s.get("title")])
+                    news=[{"title": xs.one_line(s.get("title"), 120), "link": https_link(s.get("link")), "source": ""} for s in srcs[:3]
+                          if https_link(s.get("link")) and s.get("title")])
             since = (datetime.fromtimestamp(now, xs.KST) - timedelta(days=1)).strftime("%Y-%m-%d")
             old = {r["id"]: r for r in st["rows"] if isinstance(r.get("chk"), (int, float)) and 0 <= now - r["chk"] <= HIST_HI_S}
             found: dict[str, dict[str, dict[str, Any]]] = {}
@@ -574,8 +586,8 @@ class XTrend:
                          "posts": [{"url": p["url"], "author": p["author"], "text": xs.one_line(p["text"], 90), "views": _int(p.get("views")),
                                     "replies": _int(p.get("replies")), "likes": _int(p.get("likes")), "at": xt._hm(p["at"])}
                                    for p in r.get("posts") or [] if isinstance(p, dict) and xs.status_id(p.get("url"))][:2],
-                         "news": [{"title": str(x.get("title") or ""), "link": xt.web_link(x.get("link")), "source": str(x.get("source") or "")}
-                                  for x in r.get("news") or [] if isinstance(x, dict) and xt.web_link(x.get("link"))][:2]})
+                         "news": [{"title": str(x.get("title") or ""), "link": https_link(x.get("link")), "source": str(x.get("source") or "")}
+                                  for x in r.get("news") or [] if isinstance(x, dict) and https_link(x.get("link"))][:2]})
         done: dict[str, float] = {}
         for p in self.studio.posted_rows():
             if isinstance(p.get("topic"), str) and xs._day(p["posted_at"]) == xs._day(now):

@@ -131,7 +131,8 @@ def test_fx_answer_keeps_only_recent_korean_original_posts() -> None:
 
 
 # ---------------------------------------------------------------- 2) 새로 보기
-async def test_refresh_ranks_by_views_with_top_posts_and_hides_politics() -> None:
+async def test_refresh_ranks_by_views_with_top_posts_and_hides_politics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(xr, "FX_PER_REFRESH", 8)  # 순위 셈만 보는 시험 — 한 번에 주제를 다 보게 (상한은 아래 시험)
     topic = {"수능 연기": (200, fx(post(11, "kim", "수능 연기 반대함", views=300000, replies=40), post(12, "lee", "수능 연기 찬성", views=100000, replies=900),
                                     post(13, "rude", "수능 연기 씨발", views=999999, replies=1))),
              "치즈냥이": (200, fx(post(3, "ccc", "치즈냥이 귀여움", views=900000)))}
@@ -170,12 +171,14 @@ async def test_refresh_stays_inside_caps_and_a_blocked_source_rests_six_hours() 
                                hots=[{"id": f"h{i}", "keyword": f"화제{i}", "text": "t"} for i in range(30)])
     await d.refresh()
     v = d.view()
-    assert len(v["rows"]) + len(v["hidden"]) == xr.TOPIC_MAX and len(get.fx_calls()) == xr.FX_PER_REFRESH  # 구글 8 + X 낱말 + 화제 · 표본 1 + 주제 7
+    assert len(v["rows"]) + len(v["hidden"]) == xr.TOPIC_MAX and len(get.fx_calls()) == xr.FX_PER_REFRESH  # 구글 8 + X 낱말 + 화제 · 표본 1 + 주제 4
     assert [r["seen"] for r in v["rows"]].count(True) == xr.FX_PER_REFRESH - 1
-    now[0] += xr.CACHE_S  # 다음 번에는 아직 못 본 주제부터 — 두 번이면 다 봄 (앞서 본 수는 그대로)
-    await d.refresh()
+    rounds = 1 + -(-13 // (xr.FX_PER_REFRESH - 1))  # 다음 번에는 아직 못 본 주제부터 — 몇 번이면 다 봄 (앞서 본 수는 그대로)
+    for _ in range(rounds - 1):
+        now[0] += xr.CACHE_S
+        await d.refresh()
     qs = [p["q"] for p in get.fx_calls()]
-    assert len(qs) == 2 * xr.FX_PER_REFRESH and len(set(qs)) == 1 + 13 and all(r["seen"] for r in d.view()["rows"])
+    assert len(qs) == rounds * xr.FX_PER_REFRESH and len(set(qs)) == 1 + 13 and all(r["seen"] for r in d.view()["rows"])
     # 하루 몫
     d, get, _a, now, _t = desk(fx_per_day=3)
     await d.refresh()
@@ -198,10 +201,11 @@ async def test_refresh_stays_inside_caps_and_a_blocked_source_rests_six_hours() 
     await d.refresh()
     assert len(get.fx_calls()) > 1 and d.view()["note"] == ""
     # 그 밖에 못 읽은 때(404·500 — 몰아 부르면 404 를 준다)는 그 차례를 끝내고 20분 쉼
-    d, get, _a, now, _t = desk(get=FakeGet(fx_status=404), google=False, hots=[{"id": f"h{i}", "keyword": f"화제{i}", "text": "t"} for i in range(5)])
+    d, get, _a, now, _t = desk(get=FakeGet(fx_status=404), google=False,
+                               hots=[{"id": f"h{i}", "keyword": f"화제{i}", "text": "t"} for i in range(xr.FX_PER_REFRESH - 3)])
     await d.refresh()
     assert len(get.fx_calls()) == 1 and d.state(now[0])["off"]["fx"] == now[0] + xr.SOFT_OFF_S and [u for u, _p in get.calls if u == xr.GOOGLE_RSS] == []
-    assert len(d.view()["rows"]) == 5 and not any(r["seen"] for r in d.view()["rows"])
+    assert len(d.view()["rows"]) == xr.FX_PER_REFRESH - 3 and not any(r["seen"] for r in d.view()["rows"])
     now[0] += xr.SOFT_OFF_S + 1
     get.fx_status = 200
     await d.refresh()
@@ -217,6 +221,28 @@ async def test_refresh_stays_inside_caps_and_a_blocked_source_rests_six_hours() 
     with pytest.raises(xs.StudioError) as e:
         off.start()
     assert e.value.code == "off"
+
+
+async def test_404_or_429_twice_in_a_row_rests_six_hours_and_links_are_https_only() -> None:
+    d, get, _a, now, _t = desk(get=FakeGet(fx_status=429), google=False)
+    await d.refresh()
+    assert len(get.fx_calls()) == 1 and d.state(now[0])["off"]["fx"] == now[0] + xr.SOFT_OFF_S  # 한 번은 20분
+    now[0] += xr.SOFT_OFF_S + 1
+    get.fx_status = 404
+    await d.refresh()
+    assert len(get.fx_calls()) == 2 and d.state(now[0])["off"]["fx"] == now[0] + xr.OFF_S  # 연속 두 번이면 6시간
+    now[0] += xr.OFF_S + 1
+    get.fx_status = 200
+    await d.refresh()
+    assert d.state(now[0])["streak"]["fx"] == 0  # 읽히면 처음부터
+    get.fx_status = 404
+    now[0] += xr.CACHE_S
+    await d.refresh()
+    assert d.state(now[0])["off"]["fx"] == now[0] + xr.SOFT_OFF_S
+    assert xr.https_link("http://news.example/a") == "" and xr.https_link("javascript:alert(1)") == ""
+    assert xr.https_link("https://news.example/a") == "https://news.example/a"
+    rows = xr.google_rows(RSS.replace("https://news.example/a1", "http://news.example/a1"), NOW) or []
+    assert rows and rows[0]["news"] == []
 
 
 async def test_refresh_button_runs_in_the_background_once_per_ten_minutes() -> None:
@@ -372,7 +398,7 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot, monkeypatc
     assert (await post_json(bot, xr.POSTED_PATH, {"set": "m000000000", "i": 0}, h))[0] == 404
     assert (await bot.web.dispatch("GET", "/dashboard/static/xtrend.js", anon))[0] == 200
     cfg = bot.settings.dashboard.x_trend
-    assert (cfg.enabled, cfg.fx, cfg.google, cfg.fx_per_day, cfg.google_per_day) == (True, True, True, 400, 100)
+    assert (cfg.enabled, cfg.fx, cfg.google, cfg.fx_per_day, cfg.google_per_day) == (True, True, True, 200, 100)
     assert xr.FX_PER_REFRESH * (86400 // xr.CACHE_S) >= cfg.fx_per_day >= xr.FX_PER_REFRESH * 24  # 하루 상한이 한 시간에 한 번은 넘고 15분마다 보다는 적게
 
 

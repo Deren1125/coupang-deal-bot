@@ -673,7 +673,7 @@ dashboard:
     enabled: true
     fx: true                       # FxTwitter 공개 API 로 X 글 조회·답글 수 (로그인·키 없음 · 막히면 6시간 · 못 읽으면 20분 쉼)
     google: true                   # 구글 트렌드 '지금 뜨는 검색어' RSS (한국)
-    fx_per_day: 400                # 하루 FxTwitter 요청 상한 (화면을 열 때만 · 15분 캐시 · 한 번에 8번까지 · 5초 간격)
+    fx_per_day: 200                # 하루 FxTwitter 요청 상한 (화면을 열 때만 · 15분 캐시 · 한 번에 5번까지 · 5초 간격 · 404·429 연속 2번이면 6시간 쉼)
     google_per_day: 100
   x_today:                         # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15 — dashboard/xtoday.py · 화면 SNS 탭 X 칸)
     enabled: true
