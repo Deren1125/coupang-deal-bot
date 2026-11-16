@@ -121,7 +121,7 @@ def test_install_box_puts_one_first_and_folds_the_two_old_buttons() -> None:
     lg = (STATIC / "logins.js").read_text(encoding="utf-8")
     bm = lg.split("const BM = [", 1)[1].split("];", 1)[0]
     apis = re.findall(r"api: '(\w+)'", bm)
-    assert apis == ["one", "kkumi", "ablyrank", "xhelper", "statscap", "seoi"]
+    assert apis == ["one", "kkumi", "writebm", "ablyrank", "xhelper", "statscap", "seoi"]
     assert re.findall(r"api: '(\w+)', old: 1", bm) == ["statscap", "seoi"] and bm.index("MORE") < bm.index("statscap")
     assert "const MORE = {t: '따로 쓰고 싶을 때 (통계 보내기 · 이웃 관리)'}" in lg and "BM.filter(b => !b.old || MORE.o)" in lg
     assert "한 번에 버튼 설치 (통계 + 서이추·들르기 · 누를 단추 없음)" in bm

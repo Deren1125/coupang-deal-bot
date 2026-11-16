@@ -102,6 +102,7 @@ function row(r) {
 // 11/16 '한 번에'(통계 + 이웃 관리)를 맨 위에 · 그 둘의 옛 버튼(old)은 '따로 쓰고 싶을 때'(MORE) 아래로 접음
 const MORE = {t: '따로 쓰고 싶을 때 (통계 보내기 · 이웃 관리)'};
 const BM = [{api: 'one', t: '한 번에 버튼 설치 (통계 + 서이추·들르기 · 누를 단추 없음)'}, {api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)'},
+  {api: 'writebm', t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'},
   {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'xhelper', t: 'X 도우미 버튼 설치'}, MORE,
   {api: 'statscap', old: 1, t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'}, {api: 'seoi', old: 1, t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}];
 function kkDraw() {

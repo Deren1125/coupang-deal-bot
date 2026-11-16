@@ -958,10 +958,10 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
   const folds = () => box().all(c => c.className === 'fold kf');
   out.folds = folds().map(f => f.textContent);
   out.folded = folds().length;  // 11/16: 통계·이웃 관리 옛 버튼은 '따로 쓰고 싶을 때' 아래 — 펼쳐야 보임
-  folds()[4].click();
+  folds()[5].click();
   await tick();
   out.folds = folds().map(f => f.textContent);
-  const kf = () => folds()[6];
+  const kf = () => folds()[7];
   folds()[1].click();  // 다른 칸(꾸미기)에는 note 가 없음 — 'null' 글자가 끼지 않아야
   await tick(); await tick();
   kf().click();
@@ -980,8 +980,9 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    assert got["folded"] == 5 and got["folds"][0].startswith("한 번에 버튼 설치") and got["folds"][3] == "X 도우미 버튼 설치"  # 맨 위 = 한 번에 (11/16)
-    assert got["folds"][4] == "따로 쓰고 싶을 때 (통계 보내기 · 이웃 관리)" and got["folds"][6] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)" and len(got["folds"]) == 7
+    assert got["folded"] == 6 and got["folds"][0].startswith("한 번에 버튼 설치") and got["folds"][4] == "X 도우미 버튼 설치"  # 맨 위 = 한 번에 (11/16)
+    assert got["folds"][2].startswith("글쓰기 한 번에 버튼 설치")  # 꾸미기 다음 = 글쓰기 한 번에 (11/16)
+    assert got["folds"][5] == "따로 쓰고 싶을 때 (통계 보내기 · 이웃 관리)" and got["folds"][7] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)" and len(got["folds"]) == 8
     assert sv["note"] in got["notes"] and got["steps"][-len(seoi.STEPS):] == list(seoi.STEPS)
     assert got["clip"] == [sv["code"]] and got["toast"].startswith("복사했어요") and "null" not in got["text"] and "undefined" not in got["text"]
 

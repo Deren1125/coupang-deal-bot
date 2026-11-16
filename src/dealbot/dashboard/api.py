@@ -39,6 +39,9 @@
   GET  /dashboard/api/seoi              '이웃 관리' 책갈피 {code, len, steps, note, today} (seoi.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/14)
   POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
+  GET  /dashboard/api/writebm           '글쓰기 한 번에' 책갈피 {code, len, steps, note?} (writebm.view — 열쇠가 든 받는 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/16)
+  POST /dashboard/api/write_act         그 책갈피가 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
+                                        → writebm.act: a=code 진행기 코드 · a=next 그 블로그의 다음 붙여넣기 대기 글 · a=done 결과 (발행 확인이면 할 일 줄 체크) · 서버는 네이버를 열지 않음
                                         · 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (nbvisit.tick — 응답에 row · 블로그마다 하루 5번)
                                         · 자동 (주인 11/15): a=queue 다음 차례·기다릴 초 · a=done 결과 (서로이웃 줄 체크 + nb_requested 맡기기) —
                                           오늘 목록(routine.blog_routine)일 때만 · 체크된 줄(done_ids·carried)은 뺌
@@ -139,6 +142,7 @@ ABLY_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*a-bly\.com$")
 SEOI_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*blog\.naver\.com$")  # 이웃 관리 책갈피가 도는 화면만 (seoi.js 의 hostname 확인과 같게)
 ABLYRANK_BODY_MAX = 600_000  # ablyrank.BODY_MAX 와 같게
 SEOI_BODY_MAX = 60_000  # seoi.BODY_MAX 와 같게
+WRITEBM_RATE_N = 90  # 글쓰기 한 번에 책갈피 (손님마다 10분에 — 글 하나에 next·done 두 번 + 코드 한 번)
 LABELS = ("Galaxy", "iPhone", "iPad", "컴퓨터", "휴대폰")
 
 
@@ -184,6 +188,7 @@ class DashApi:
         self.sub_rate = RateWindow(10, 3600.0)
         self.statscap_rate = RateWindow(120, 600.0)  # 통계 보내기 (손님마다 10분에 120번 — 11/12 한 번 누르면 40개까지)
         self.ablyrank_rate = RateWindow(20, 600.0)  # Ably 랭킹 보내기 (손님마다 10분에 20번)
+        self.writebm_rate = RateWindow(WRITEBM_RATE_N, 600.0)
         self.seoi_rate = RateWindow(SEOI_RATE_N, 600.0)  # 이웃 관리 책갈피 (손님마다 10분에 SEOI_RATE_N 번 — 진짜 간격·상한은 seoi.gate 가 kv 로)
         self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
         self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,
@@ -278,6 +283,8 @@ class DashApi:
         web.route(f"{API}/one", self.one)
         web.route_post(f"{API}/seoi_act", self.seoi_act, max_body=SEOI_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/naver_qr.png", self.naver_qr)
+        web.route(f"{API}/writebm", self.writebm)
+        web.route_post(f"{API}/write_act", self.write_act, max_body=4000, with_headers=True, cross_site=True)
         web.route(f"{API}/deal/hot", self.deal_hot)
         web.route(f"{API}/deal/find", self.deal_find)
         web.route(f"{API}/stats.html", self.stats_html)
@@ -321,6 +328,7 @@ class DashApi:
 
         return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture",
                 f"{API}/ably_rank_capture", f"{API}/seoi_act",  # stats_capture·ably_rank_capture·seoi_act: 열쇠로 직접 확인
+                f"{API}/write_act",  # 글쓰기 한 번에 책갈피: 열쇠로 직접 확인
                 *SSALMUK_PUBLIC,  # 이벤트 참여 push·commands·ack: X-Ssalmuk-Key 로 직접 확인
                 *XSTUDIO_PUBLIC]  # X 도구 바로 가기 디딤돌·공유 시트: 주소만 넘김 (데이터 없음 — 그다음 화면은 로그인 아래)
 
@@ -816,6 +824,48 @@ class DashApi:
             return 404, "QR 이 없어요 — 로그인 관리에서 'QR 로그인'을 다시 눌러 주세요", "text/plain; charset=utf-8", {
                 "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"}
         return 200, p.read_bytes(), "image/png", {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
+
+    async def writebm(self, query: dict[str, str]) -> Any:
+        """'글쓰기 한 번에' 책갈피 코드 (주인 11/16 — 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import writebm
+
+        try:
+            return jresp(200, writebm.view(self.bot.db, self.bot.settings.dashboard.public_url, tz=ZoneInfo(self.bot.settings.app.timezone)),
+                         {"Cache-Control": "no-store"})
+        except ValueError:
+            return err(503, "failed", "대시보드 공개 주소가 이상해요")
+
+    async def write_act(self, form: dict[str, str], headers: dict[str, str]) -> Any:
+        """'글쓰기 한 번에' 책갈피가 묻는 곳 (주인 11/16). 열쇠 → 진행기 코드 · 다음 붙여넣기 대기 글 · 결과 (발행 확인이면 할 일 줄 체크).
+        서버는 네이버를 열지 않는다 — 글은 주인 브라우저가 가져가 넣는다. 응답 CORS 는 네이버 블로그 화면에만 (이 길만)."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import writebm
+
+        origin = (headers.get("origin") or "").strip().rstrip("/")
+        cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if SEOI_ORIGIN_RE.fullmatch(origin) else {"Vary": "Origin"}
+        cors["Cache-Control"] = "no-store"
+        if not self.writebm_rate.hit(client_key(headers)):
+            return jresp(429, {"ok": False, "code": "rate", "text": "너무 자주 눌렀어요 — 잠시 뒤 다시"}, cors)
+        rv = None
+        if form.get("a") in ("next", "done") and writebm.key_ok(self.bot.db, form.get("k")):  # 오늘 할 일 (열쇠가 맞을 때만 읽음)
+            try:
+                from dealbot.dashboard import routine
+
+                rv = routine.view(self.bot)
+            except Exception as e:  # noqa: BLE001 — 못 읽으면 '목록이 아직 없어요'
+                log.warning("write_act: routine view failed: %s", type(e).__name__)
+        try:
+            got = writebm.act(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone), rv=rv)
+        except writebm.CaptureError as e:
+            if e.code == "key":
+                log.info("write_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
+            return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
+        if form.get("a") == "done":
+            log.info("write_act: done blog=%s r=%s checked=%s", form.get("b"), form.get("r"), got.get("checked"))
+        return jresp(200, got, cors)
 
     async def deal_hot(self, query: dict[str, str]) -> Any:
         raw = (query.get("n") or "5").strip()

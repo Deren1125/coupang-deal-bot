@@ -367,6 +367,11 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
     assert {px[:3] for px in img.getdata() if px[3] > 200} <= {(255, 255, 255)}
 
 
+# 11/16: 책갈피 설치 칸에 '글쓰기 한 번에' 한 줄 (logins.js BM.push · /dashboard/api/writebm) — 위 한도에 더함 (같은 날 '한 번에' 칸과 따로 늘려도 합쳐지게)
+LOGINS_JS_MAX += 128
+LOGINS_JS_GZIP_MAX += 96
+
+
 def test_asset_budgets() -> None:
     js = (STATIC / "app.js").read_bytes()
     assert len(js) <= APP_JS_MAX and len(gzip.compress(js, 9)) <= APP_JS_GZIP_MAX
