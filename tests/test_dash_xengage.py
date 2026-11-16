@@ -114,7 +114,7 @@ def test_cockpit_script_never_presses_x_buttons_and_never_moves_on_by_itself() -
     assert PRESS.findall(code) == []  # 누르기 흉내·키 이벤트·창 열기·폼 보내기 없음
     assert "innerHTML" not in code and "outerHTML" not in code and "eval(" not in code and "new Function" not in code and "document.write" not in code
     assert re.findall(r"https?://[^\s'\"`)]+", code) == []  # 바깥 주소 없음 — X 로 가는 길은 서버가 준 링크(a)를 주인이 누를 때만
-    assert re.findall(r"location\.(?:href|assign)\s*[=(]", code) == [] and set(re.findall(r"location\.replace\(([^)]*)\)", code)) == {"'#/sns/xe'"}
+    assert re.findall(r"location\.(?:href|assign)\s*[=(]", code) == [] and set(re.findall(r"location\.replace\(([^)]*)\)", code)) == {"'#/sns/xe'", "'#/sns/xt'", "'#/sns/xt/off'"}  # 숨김이면 체크리스트로 (11/16)
     assert re.findall(r"\blocation\s*=[^=]", code) == [] and set(re.findall(r"location\.hash\s*=\s*([^=;]+);", code)) == {"'#/sns/xe'"}  # 옮겨 가는 곳은 조종석뿐
     # 요청은 대시보드 API 두 갈래뿐 (X 로 보내는 요청 없음)
     assert set(re.findall(r"'(/dashboard/[^']*)'", code)) == {"/dashboard/api/xengage/", "/dashboard/api/xstudio/reply_go"}
@@ -390,6 +390,12 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot) -> None:
     assert status == 200 and got["pace"]["today"] == 1
     status, got, _ = await post_json(bot, xe.STEP_PATH, {"sid": sid(1), "op": "next"}, h)
     assert status == 429 and got["code"] == "pace" and got["text"].startswith("조금 쉬었다가 ")
+    # 주인 11/16 'X 는 체크리스트만': 기본은 책갈피·연속 모드 숨김 — 예전 책갈피로 와도 한 줄만 (목록은 그대로)
+    assert got_state_flags(eng) == (False, False)
+    status, got, _ = await post_json(bot, xe.HANDOFF_PATH, {"k": xs.helper_key(eng.desk.db), "l": f"a/{sid(5)}"}, h)
+    assert status == 410 and got["code"] == "off" and got["text"] == xs.HELPER_OFF and len(eng.view()["queue"]) == 2
+    bot.settings.dashboard.x_helper = bot.settings.dashboard.x_engage = True  # 설정을 켜면 예전대로
+    assert got_state_flags(eng) == (True, True)
     status, got, _ = await post_json(bot, xe.HANDOFF_PATH, {"k": "nope", "l": f"a/{sid(5)}"}, h)
     assert status == 403 and got["code"] == "bad_key"
     status, got, _ = await post_json(bot, xe.HANDOFF_PATH, {"k": xs.helper_key(eng.desk.db), "l": f"a/{sid(5)}"}, h)
@@ -533,9 +539,9 @@ const tap = n => { const e = {currentTarget: n, prevented: false, preventDefault
     eval(fs.readFileSync(src, 'utf8'));
     await tick();
     out.order = main.children.map(c => c.attrs.id || c.tagName);
-    out.card = text(byId(main, 'xec')); out.posts = posts;
+    out.card = byId(main, 'xec') ? text(byId(main, 'xec')) : null; out.posts = posts;
     location.hash = '#/sns/xe'; window.SBXEngage.mount(); await tick();
-    out.scr = main.children[0].attrs.id; out.hidden = 'data-xe' in main.attrs; out.title = text(ttl);
+    out.scr = main.children[0].attrs.id; out.hidden = 'data-xe' in main.attrs; out.title = text(ttl); out.h2 = location.hash;
     location.hash = '#/sns/x'; window.SBXEngage.mount();
     out.back = ['data-xe' in main.attrs, main.children.map(c => c.attrs.id || c.tagName)];
   }
@@ -650,3 +656,21 @@ def test_js_deep_link_hands_the_list_to_the_server_with_the_key() -> None:
     got = run_shim("deep", view_json(e), {"xengage/handoff": [{"_status": 403, "status": "error", "code": "bad_key", "text": "책갈피가 예전 것이에요"}]})
     assert got["hash"] == "#/sns/xe" and got["toast"] == "책갈피가 예전 것이에요"
     assert got["handoff"] == [["xengage/handoff", "tok", {"k": "KEY123", "l": f"saver/{sid(1)},other/{sid(2)}", "h": "saver", "fo": "27000"}]]
+
+
+@needs_node
+def test_js_hidden_by_default_switch_no_card_cockpit_goes_to_checklist_and_old_bookmark_gets_one_line() -> None:
+    """주인 11/16 'X 는 체크리스트만' — on=false (설정 dashboard.x_engage 기본) 면 카드 없음 · #/sns/xe 는 '오늘 X 글' 체크리스트로."""
+    e, _now = engage()
+    e.add_pasted({"text": urls(1, 2)})
+    e.on = lambda: False
+    got = run_shim("card", view_json(e))
+    assert got["order"] == ["snt", "xsc", "DIV"] and got["posts"] == [] and got["h2"] == "#/sns/xt" and got["scr"] == "snt" and not got["hidden"]
+    e.desk.helper_on = lambda: False  # 예전 책갈피로 와도 받지 않고 한 줄만 → 체크리스트
+    got = run_shim("deep", view_json(e))
+    assert got["hash"] == "#/sns/xt/off" and got["handoff"] == [] and got["toast"] == xs.HELPER_OFF
+
+
+def got_state_flags(eng: xe.Engage) -> tuple[bool, bool]:
+    v = eng.view()
+    return v["on"], v["helper"]

@@ -173,6 +173,8 @@ async function makeReply() {
 async function runDeep() {
   const d = DL;
   DL = null;
+  // X 도우미 책갈피가 꺼져 있으면 (주인 11/16 '체크리스트만' — 설정 dashboard.x_helper) 예전 책갈피로 와도 한 줄만 보이고 체크리스트로
+  if (d.k && ST.helper === false) { toast('X 도우미 책갈피는 이제 안 써요 — 대시보드 X 체크리스트를 쓰세요'); location.replace('#/sns/xt/off'); return; }
   // 바로 초안은 직접 연 것(디딤돌 표시)이나 책갈피 열쇠가 맞을 때만 — 남의 링크로 왔으면 칸만 채우고 앞서 받은 초안은 그대로 둠
   const auto = d.a !== 'reply' && d.a !== 'write' ? true : d.dr || (!!d.k && (await call('handoff', {k: d.k, a: 'ping'})).s === 200);
   const wait = () => { toast("받은 글을 칸에 넣었어요 — 아래 '초안 만들기'를 눌러 주세요"); keep(); draw(true); };
@@ -400,9 +402,9 @@ function helpTab() {
     el('p', {class: 'grp'}, '갤럭시 (안드로이드)'),
     el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0'}, "크롬에서 Deren 을 '앱 설치(홈 화면에 추가)' 해 두면 X 앱 공유 목록에 'Sns-board' 가 나와요 — 누르면 바로 초안. " +
       "(설치한 지 하루쯤 지나야 목록에 보여요. 안 보이면 'HTTP Shortcuts' 같은 앱에서 위 주소 뒤에 공유한 글을 붙여 브라우저로 여는 바로가기를 만들어요.)")),
-    el('p', {class: 'grp'}, 'X 도우미 책갈피 (사파리 x.com)'),
-    el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0 0 8px'}, '글 화면 → 답글 초안 · 수익 조건 화면 → 인증 팔로워·노출 숫자 저절로 기록 · 프로필 → 자주 보는 계정에 넣기. X 에서는 아무것도 누르지 않아요.'),
-      HP ? [el('ol', {}, HP.steps.map(x => el('li', {text: x}))), btn('sm ac', '코드 복사', () => copy(HP.code, '책갈피 코드'))] : btn('pb soft', '설치 방법 보기', hp)),
+    ST.helper === false ? null : [el('p', {class: 'grp'}, 'X 도우미 책갈피 (사파리 x.com)'),
+      el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0 0 8px'}, '글 화면 → 답글 초안 · 수익 조건 화면 → 인증 팔로워·노출 숫자 저절로 기록 · 프로필 → 자주 보는 계정에 넣기. X 에서는 아무것도 누르지 않아요.'),
+        HP ? [el('ol', {}, HP.steps.map(x => el('li', {text: x}))), btn('sm ac', '코드 복사', () => copy(HP.code, '책갈피 코드'))] : btn('pb soft', '설치 방법 보기', hp))],
     el('p', {class: 'grp'}, '하루치 한 번에 — X 예약 게시'),
     el('section', {class: 'box'}, el('p', {class: 'note', style: 'margin:0 0 8px'}, "x.com 웹 글쓰기 창의 달력 단추로 예약할 수 있어요 (X 앱에는 없음). 초안 카드의 'x.com 웹에서 예약하기'를 사파리에서 열거나, " +
       `'글 복사' 후 아래 웹 글쓰기에 붙여넣고 ${ST.posts.times.join(' · ')} 으로 예약해요. 예약해도 '내 한마디'는 꼭 직접 써요.`),

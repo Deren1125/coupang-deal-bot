@@ -666,6 +666,8 @@ dashboard:
   public_url: https://52-79-136-64.sslip.io   # 대시보드 앱 주소 (알림·카톡의 바로가기 링크 /dashboard/go/<항목>)
   actions_enabled: true            # false 면 대시보드는 보기만
   farm_hub_url: ""                 # 파밍 대시보드 주소 (/dashboard/farm/ 이 넘기는 곳 · https://….ts.net 만) — 보통 .env FARM_HUB_URL 로. 열쇠는 .env FARM_HUB_TOKEN
+  x_helper: false                  # X 도우미 책갈피 설치 칸 (주인 11/16 — X 는 책갈피 말고 체크리스트만 · true 면 다시 보임)
+  x_engage: false                  # X 반응 연속 모드 카드·화면 (주인 11/16 숨김 · true 면 다시 보임)
   x_today:                         # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15 — dashboard/xtoday.py · 화면 SNS 탭 X 칸)
     enabled: true
     morning: "07:40"               # 아침에 그날 X 초안을 만드는 시각 (한국시간)

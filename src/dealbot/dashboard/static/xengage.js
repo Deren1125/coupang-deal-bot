@@ -3,6 +3,8 @@
    [X에서 이 글 열기] · [답글 쓰기](X 공식 글쓰기 창) · [다음 글]. ♥·리포스트·게시는 X 화면에서 내가 직접 누른다.
    이 파일은 X 의 단추를 누르지 않는다 — 누르기 흉내·키 이벤트·창 열기 함수가 없고, X 로 가는 길은 내가 누르는 링크(a)뿐이다.
    '다음 글'도 내가 누를 때만 (시간이 지났다고 저절로 넘어가지 않음 — 1초마다 도는 것은 남은 시간 글자뿐).
+   숨김 스위치 (주인 11/16 'X 는 체크리스트만'): 서버 값 on=false (설정 dashboard.x_engage, 기본) 면 카드를 붙이지 않고 #/sns/xe 는 '오늘 X 글'
+   체크리스트(#/sns/xt)로 · helper=false 면 예전 책갈피로 와도 '이제 안 써요' 한 줄만. 코드·API 는 그대로 (true 면 예전대로).
    목록은 'X 도우미' 책갈피가 넘긴 보이는 글(#/x/engage?k=…&l=… — 열쇠가 맞을 때만)과 붙여넣은 주소. 링크 앞부분은 서버 값 — 바깥 주소·innerHTML 없음. */
 'use strict';
 (() => {
@@ -122,6 +124,7 @@ async function load() {
   loading = false;
   at = Date.now();
   if (r.s === 200) apply(r.d); else if (!ST && r.d.text) toast(r.d.text);
+  if (r.s === 200) mount();  // 숨김 스위치를 안 뒤에 카드를 붙이거나 화면을 넘김
   draw();
   if (ST && DL) await runDeep();
   prefetch();
@@ -162,6 +165,7 @@ async function next(sid) {
 async function runDeep() {
   const d = DL;
   DL = null;
+  if (ST.helper === false) { toast('X 도우미 책갈피는 이제 안 써요 — 대시보드 X 체크리스트를 쓰세요'); location.replace('#/sns/xt/off'); return; }
   const r = await call(API + 'handoff', d);
   apply(r.d);
   toast(r.d.text || (r.s === 200 ? '받았어요' : '받지 못했어요'));
@@ -296,6 +300,8 @@ function mount() {
   const m = D.getElementById('main');
   if (!m) return;
   if (!D.getElementById('xe-css')) D.head.append(el('style', {id: 'xe-css', text: CSS}));
+  const off = !ST || ST.on === false;  // 숨김 (주인 11/16) — 불러오기 전에도 카드는 안 붙임
+  if (onScr() && ST && ST.on === false && !DL) { location.replace('#/sns/xt'); return; }
   if (onScr()) {
     if (!scr) { scr = el('section', {id: 'xes', class: 'xe', 'aria-label': 'X 반응 연속 모드'}); drawScr(); }
     if (m.firstChild !== scr) m.prepend(scr);
@@ -305,7 +311,7 @@ function mount() {
     if (m.hasAttribute('data-xe')) m.removeAttribute('data-xe');
     if (scr && scr.parentNode) scr.remove();
   }
-  if (!onScr() && onX()) {
+  if (!onScr() && onX() && !off) {
     if (!card) { card = el('article', {id: 'xec', class: 'itm xec', 'aria-label': '반응 연속 모드'}); drawCard(); }
     // '오늘 X 글' 카드(xtoday.js) 아래 → 없으면 '오늘 할 X 일' 카드 아래 → 칸 고르기 아래. xtoday 카드도 '오늘 할 X 일' 바로 밑에 붙으므로
     // 같은 자리를 다투면 두 파일이 서로 끝없이 옮긴다 (둘 다 #main 을 지켜봄) — 그래서 늘 그 카드 뒤에 선다

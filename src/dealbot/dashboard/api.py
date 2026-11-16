@@ -48,7 +48,7 @@
   POST /dashboard/api/ssalmuk/{push,ack,llm} · GET /dashboard/api/ssalmuk/{commands,search}   이벤트 참여(쌀먹) 서버가 부름 (로그인 없이 · X-Ssalmuk-Key)
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/xstudio/state · POST /dashboard/api/xstudio/{draft,reply,posted,reply_go,targets,handoff}   X 글쓰기·답글 도구 (xstudio.py — 주인 11/14)
-  GET  /dashboard/api/xtoday/state · POST /dashboard/api/xtoday/{make,skip}   오늘 X 글 카드 · 큰 사건 바로 알림 (xtoday.py — 주인 11/15)
+  GET  /dashboard/api/xtoday/state · POST /dashboard/api/xtoday/{make,skip,react}   오늘 X 글 카드 · 큰 사건 바로 알림 (xtoday.py — 주인 11/15)
   GET  /dashboard/api/xengage/state · POST /dashboard/api/xengage/{add,handoff,open,step,draft}   X 반응 연속 모드 (xengage.py — 주인 11/15 · 반자동: 누르기는 주인)
   GET  /dashboard/api/xhelper · GET /dashboard/share · GET /dashboard/x   'X 도우미' 책갈피 코드 · 안드로이드 공유 시트 · 바로 가기 디딤돌 (xstudio.py —
                                         뒤 둘은 로그인 없이: 주소만 넘김)
@@ -303,6 +303,7 @@ class DashApi:
         from dealbot.dashboard import xengage
 
         self.xengage = xengage.register(web, self, self.xstudio)
+        self.xtoday.engage = self.xengage  # '오늘 X 글' 체크리스트의 '오늘 반응 할 것' 줄 (주인 11/16)
 
         # 대시보드 로그인 보기·바꾸기 (주인 11/16) — 로그인 아래 · POST 는 guard + 로그인 세션만 · 값은 데이터 폴더 파일 (.env 는 그대로)
         from dealbot.dashboard import dashacct

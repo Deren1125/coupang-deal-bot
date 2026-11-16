@@ -701,13 +701,20 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot) -> None:
     assert status == 200 and headers["Cache-Control"] == "no-store"
     assert v["v"] == 1 and v["on"] is True and v["slots"] == list(xs.POST_TIMES) and v["items"] == [] and v["big"] == [] and v["model"] == "Opus"
     assert v["ai"] == {"used": 0, "cap": 13, "left": xs.DRAFT_PER_DAY}
-    for path, body in ((xt.MAKE_PATH, {"id": "0123abcd"}), (xt.SKIP_PATH, {"id": "0123abcd"})):
+    for path, body in ((xt.MAKE_PATH, {"id": "0123abcd"}), (xt.SKIP_PATH, {"id": "0123abcd"}), (xt.REACT_PATH, {"key": "habc"})):
         assert (await post_json(bot, path, body, session_headers(bot, csrf=False)))[0] == 403, path
         assert (await post_json(bot, path, body, anon))[0] in (401, 403), path
     assert (await post_json(bot, xt.MAKE_PATH, {"id": "0123abcd"}, h))[0] == 404
     assert (await post_json(bot, xt.MAKE_PATH, {"id": "nope"}, h))[0] == 400
     status, out, _ = await post_json(bot, xt.SKIP_PATH, {"id": "0123abcd"}, h)
     assert status == 200 and out["status"] == "ok" and out["items"] == []
+    # '오늘 반응 할 것' (주인 11/16) — 자주 보는 계정 줄 체크 · 반응 목록은 xengage 와 같은 것 · 숨김 스위치 기본 끔
+    assert v["react"] == [] and bot.dashboard.api.xtoday.engage is bot.dashboard.api.xengage  # type: ignore[union-attr]
+    assert (bot.settings.dashboard.x_helper, bot.settings.dashboard.x_engage) == (False, False)
+    bot.dashboard.api.xstudio.set_target({"handle": "abc"})  # type: ignore[union-attr]
+    assert (await post_json(bot, xt.REACT_PATH, {"key": "hnobody"}, h))[0] == 400
+    status, out, _ = await post_json(bot, xt.REACT_PATH, {"key": "habc", "done": True}, h)
+    assert status == 200 and out["react"] == [{"key": "habc", "label": "@abc 최근 글에 반응", "url": "https://x.com/abc", "done": True}]
     cfg = bot.settings.dashboard.x_today
     assert (cfg.morning, cfg.fills, cfg.per_day, cfg.auto_drafts_per_day, cfg.reserve, cfg.goal_posts) == ("07:40", ["11:20", "17:20"], 10, 13, 15, True)
     assert cfg.per_day + cfg.big.per_day <= cfg.auto_drafts_per_day and xs.DRAFT_PER_DAY - cfg.auto_drafts_per_day >= cfg.reserve  # 카드 10 + 큰 사건 · 주인 몫
@@ -732,7 +739,7 @@ def test_xtoday_js_is_local_safe_and_loaded_by_shell() -> None:
                   "초안 만들기", "지금 보충하기", "자동으로 올리지 않아요", "긴 글 복사", "올렸어요", "execCommand('copy')", "/dashboard/api/xstudio/posted"):
         assert label in code, label
     raw = (STATIC / "xtoday.js").read_bytes()
-    assert len(raw) <= 18 * 1024 and len(gzip.compress(raw, 9)) <= 7 * 1024
+    assert len(raw) <= 24 * 1024 and len(gzip.compress(raw, 9)) <= 8 * 1024  # 11/16 체크리스트 (진행 표시·반응 줄) 로 늘림
     assert shell.XTODAY_JS == "xtoday.js"
     page = shell.page({})
     tag = f'<script defer src="{shell.asset_url("xtoday.js")}"></script>'
@@ -793,6 +800,7 @@ global.fetch = async (u, o) => {
   const body = JSON.parse(o.body);
   posts.push([path, o.headers['X-Dash-Token'], body]);
   if (path === 'make' && body.id) return {status: 200, json: async () => Object.assign({}, state, {made: state.items[0].id, big: state.big.map(b => Object.assign({}, b, {item: state.items[0].id}))})};
+  if (path === 'react') { const r = (state.react || []).find(x => x.key === body.key); if (r) r.done = body.done; }
   if (path === 'skip') return {status: 200, json: async () => Object.assign({}, state, {items: state.items.filter(i => i.id !== body.id), big: state.big.filter(b => b.id !== body.id)})};
   return {status: 200, json: async () => Object.assign({started: true}, state)};
 };
@@ -804,7 +812,7 @@ const text = n => n.textContent;
 const all = (n, f, out = []) => { if (f(n)) out.push(n); n.children.forEach(c => all(c, f, out)); return out; };
 const find = (n, f) => all(n, f)[0];
 const byText = (root, tag, t) => find(root, n => n.tagName === tag && text(n) === t);
-const click = n => n.listeners.click({currentTarget: n, preventDefault() {}});
+const click = n => n.listeners.click({currentTarget: n, preventDefault() {}, stopPropagation() {}});
 (async () => {
   const out = {};
   if (scenario === 'both') eval(fs.readFileSync(src.replace('xtoday.js', 'xstudio.js'), 'utf8'));
@@ -838,6 +846,15 @@ const click = n => n.listeners.click({currentTarget: n, preventDefault() {}});
     await flip(1, true); out.add = posts[posts.length - 1]; out.after = [cd(1).className, 'checked' in inp(1).attrs, text(toast)];
     await flip(1, false); out.undo = posts[posts.length - 1]; out.undone = [cd(1).className, 'checked' in inp(1).attrs];
     const n = posts.length; await flip(0, false); out.late = [posts.length - n, inp(0).checked, text(toast), cd(0).className];
+  }
+  if (scenario === 'list') {  // 체크리스트 (주인 11/16)
+    const card = byId(main, 'xtc'), lines = () => all(byId(main, 'xtc'), n => /^ln( |$)/.test(n.className)).map(text);
+    out.order = main.children.map(c => c.attrs.id || c.tagName); out.card = text(card); out.lines = lines();
+    out.links = all(card, n => n.tagName === 'A').map(a => [a.attrs.href, a.attrs.target, a.attrs.rel]);
+    await click(byText(card, 'BUTTON', '복사')); await tick(); out.copied = [clip[clip.length - 1], location.hash];  // 복사는 초안 화면을 열지 않음
+    const rx = find(byId(main, 'xtc'), n => (n.attrs['aria-label'] || '') === '@bigacct 최근 글에 반응 했어요');
+    rx.checked = true; await rx.listeners.change({currentTarget: rx}); await tick();
+    out.react = posts[posts.length - 1]; out.after = lines(); out.card2 = text(byId(main, 'xtc')); out.toast = text(toast);
   }
   if (scenario === 'card') {
     out.order = main.children.map(c => c.attrs.id || c.tagName);
@@ -899,12 +916,62 @@ async def test_js_card_lists_today_by_time_with_big_banner_and_hands_draft_to_st
     v, state = await view_json()
     got = await asyncio.to_thread(run_shim, "card", state, "#/sns/x")
     assert got["order"] == ["snt", "xsc", "xtc", "DIV"]  # '오늘 할 X 일' 카드 바로 아래
-    assert got["lines"] == ["바로젠슨 황 1억800만달러숫자 확인", "08:30쿠팡 과징금숫자 확인", "12:00카카오 먹통숫자 확인", "15:30아직 없음", "18:30아직 없음", "21:30아직 없음"]
+    # 주인 11/16 체크리스트: 글마다 [복사]·[✓ 올렸어요] 한 줄 · 맨 위 '오늘 X n/전체 올림' · 초안 전 시각은 줄 대신 개수만
+    assert got["lines"] == ["바로젠슨 황 1억800만달러복사✓ 올렸어요", "08:30쿠팡 과징금복사✓ 올렸어요", "12:00카카오 먹통복사✓ 올렸어요"]
+    assert f"오늘 X 0/{len(v['slots'])} 올림" in got["card"] and f"{len(v['slots']) - 2}개는 아직 초안 전" in got["card"]
     assert "오늘 X 글" in got["card"] and "🔥 큰 사건 · 젠슨 황, 1억 800만 달러" in got["card"] and got["links"] == ["#/sns/xt"]
     # 줄을 누르면: 그 카드의 초안 묶음을 X 글쓰기 화면에 넘김 (카드 번호 tid 와 함께) — 서버에 보내는 것 없음
     assert got["hash"] == "#/sns/xs/write" and got["tab"] == "write" and got["calls"] == ["keep", "mount", "load"] and got["posts"] == []
     assert got["res"]["tid"] == v["items"][1]["id"] and got["res"]["drafts"] == v["items"][1]["res"]["drafts"]
     assert got["res"]["first_reply"].startswith("출처: 쿠팡에 과징금 부과") and got["res"]["src_nums"] == v["items"][1]["res"]["src_nums"]
+
+
+@needs_node
+async def test_js_card_is_a_checklist_progress_copy_tick_and_react_rows() -> None:
+    """주인 11/16 'X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만' — 올린 글은 취소 10분 뒤 카드에서 빠지고, 반응은 링크 + ✓ 했어요."""
+    v, _ = await view_json()
+    v["items"][0].update(done=True, undo_s=0)  # 오래전에 올림 → 카드에서 빠짐
+    v["items"][1].update(done=True, undo_s=300)  # 방금 올림 → 취소할 수 있게 줄긋기로 남음
+    v["react"] = [{"key": "p1234567890", "label": "@someone 글에 반응", "url": "https://x.com/someone/status/1234567890", "done": False},
+                  {"key": "hbigacct", "label": "@bigacct 최근 글에 반응", "url": "https://x.com/bigacct", "done": False},
+                  {"key": "hdone", "label": "@done 최근 글에 반응", "url": "https://x.com/done", "done": True}]
+    got = await asyncio.to_thread(run_shim, "list", json.dumps(v, ensure_ascii=False), "#/sns/x")
+    assert got["order"] == ["snt", "xsc", "xtc", "DIV"]
+    n = len(v["slots"])
+    assert f"오늘 X 2/{n} 올림" in got["card"] and "오늘 반응 할 것 1/3" in got["card"] and "♥·리포스트·답글은 X 에서 내가 직접" in got["card"]
+    assert got["lines"] == ["08:30쿠팡 과징금✓ 올렸어요", "12:00카카오 먹통복사✓ 올렸어요", "열기@someone 글에 반응✓ 했어요", "열기@bigacct 최근 글에 반응✓ 했어요"]
+    # 링크는 서버 값 그대로 새 탭 (X 에서 누르는 건 나) — 자동 클릭 없음
+    assert ["https://x.com/someone/status/1234567890", "_blank", "noopener"] in got["links"] and ["https://x.com/bigacct", "_blank", "noopener"] in got["links"]
+    assert got["copied"] == [v["items"][2]["preview"], "#/sns/x"]
+    assert got["react"] == ["react", "tok", {"key": "hbigacct", "done": True}] and "체크했어요" in got["toast"]
+    assert got["after"] == got["lines"][:3] and "오늘 반응 할 것 2/3" in got["card2"]  # 한 줄은 사라짐
+
+
+async def test_react_rows_come_from_the_engage_queue_then_targets_and_ticks_last_the_day() -> None:
+    d, _ask, _r, _f, now = desk(now=[at("09:00")], hots=[])
+    assert d.view()["react"] == []
+    d.studio.set_target({"handle": "BigAcct", "memo": "AI"})
+    d.studio.set_target({"handle": "other"})
+
+    class Eng:
+        def _st(self) -> dict[str, Any]:
+            return {"queue": [{"sid": "1234567890", "h": "someone"}, {"sid": "2234567890", "h": ""}]}
+
+    d.engage = Eng()
+    rows = d.view()["react"]
+    assert [(r["key"], r["label"], r["url"], r["done"]) for r in rows] == [
+        ("p1234567890", "@someone 글에 반응", "https://x.com/someone/status/1234567890", False),
+        ("p2234567890", "X 글에 반응", "https://x.com/i/web/status/2234567890", False),
+        ("hbigacct", "@BigAcct 최근 글에 반응 · AI", "https://x.com/BigAcct", False), ("hother", "@other 최근 글에 반응", "https://x.com/other", False)]
+    status, got = d.react({"key": "hbigacct", "done": True})
+    assert status == 200 and [r["key"] for r in got["react"] if r["done"]] == ["hbigacct"]
+    for bad in ({"key": "hnobody"}, {"key": "x1"}, {"key": 3}, {}):
+        with pytest.raises(xs.StudioError):
+            d.react(bad)
+    assert d.react({"key": "hbigacct", "done": False})[1]["react"][2]["done"] is False
+    d.react({"key": "p1234567890"})
+    now[0] += 86400  # 다음 날은 새로
+    assert all(not r["done"] for r in d.view()["react"])
 
 
 @needs_node

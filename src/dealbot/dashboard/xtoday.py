@@ -33,6 +33,10 @@ B. 큰 사건 바로 알림 — big.poll_minutes(20분)마다:
   GET  /dashboard/api/xtoday/state   오늘 카드·큰 사건·남은 몫 (no-store)
   POST /dashboard/api/xtoday/make    {id: 큰 사건 번호} → 그 사건 초안 · {op: "fill"} → 지금 보충 (10분에 한 번 · 뒤에서 만듦)
   POST /dashboard/api/xtoday/skip    {id} → 카드·큰 사건 안 쓰기 (알림 닫힘)
+  POST /dashboard/api/xtoday/react   {key, done} → '오늘 반응 할 것' 줄 체크 (주인 11/16 체크리스트 — 링크 열기는 주인 손, 기록은 그날 kv xtoday_react 만)
+C. 체크리스트 (주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만"): 카드는 '오늘 X n/10 올림' + 글마다
+   [복사]·[✓ 올렸어요] 한 줄 (올린 글은 취소 10분이 지나면 카드에서 빠짐) · '오늘 반응 할 것' = 반응 목록(xengage 큐)·자주 보는 계정에서
+   REACT_MAX 줄 — [열기](X 링크, 주인이 누름) + [✓ 했어요]. 자동 클릭·X 요청 없음 그대로. 반응 연속 모드·X 도우미 책갈피는 설정으로 숨김.
 모두 로그인 아래 · POST 는 같은 사이트 + X-Dash-Token (DashApi.guard).
 하지 않는 것: X 로그인 · X API · 자동 게시 · 남의 타임라인 긁기 · 기사 페이지 긁기. 초안 글은 화면에 띄우려고 kv xtoday 에 하루만 둔다
 (날이 바뀌면 다음 1분 일에서 지움 — 로그에는 종류·길이만).
@@ -59,7 +63,10 @@ from dealbot.dashboard import xstudio as xs
 log = logging.getLogger(__name__)
 
 BASE = "/dashboard/api/xtoday"
-STATE_PATH, MAKE_PATH, SKIP_PATH = f"{BASE}/state", f"{BASE}/make", f"{BASE}/skip"
+STATE_PATH, MAKE_PATH, SKIP_PATH, REACT_PATH = f"{BASE}/state", f"{BASE}/make", f"{BASE}/skip", f"{BASE}/react"
+KV_REACT = "xtoday_react"  # {"day", "done": [줄 키]} — '오늘 반응 할 것' 체크 (그날만)
+REACT_MAX = 5  # '오늘 반응 할 것' 줄 수 (주인 11/16 '체크 줄 몇 개')
+REACT_KEY_RE = re.compile(r"^(?:p[0-9]{5,20}|h[a-z0-9_]{1,15})$")  # p+글 번호 (반응 목록) · h+아이디 (자주 보는 계정)
 KV = "xtoday"  # {"day", "items": [...], "runs": {이름: 시각}, "ai": n, "err": "", "skip": [카드 번호], "doing": 만드는 중인 일, "resumed": 이어서 한 번 했나}
 KV_USED = "xtoday_used"  # [{"k": 글감 키, "toks": [...], "lead": 이름, "nums": [...], "at": 시각}] — 같은 사건을 다시 쓰지 않게 (7일)
 KV_GOAL = "xtoday_goal"  # [{"at": 시각, "day", "goal": n|None, "line": 첫 줄, "toks": [...]}] — 팔로워 목표 글 (14일)
@@ -423,6 +430,7 @@ class XToday:
         self.bg: asyncio.Task[Any] | None = None
         self.fill_at = 0.0
         self.fill_task: asyncio.Task[Any] | None = None
+        self.engage: Any = None  # xengage.Engage (DashApi 가 건다 — 반응 목록이 있으면 '오늘 반응 할 것' 앞쪽에)
         studio.on_posted = self.mark_posted
 
     # ---------------------------------------------------------- kv
@@ -865,6 +873,35 @@ class XToday:
             self._close(eid, "skipped")
         return 200, {"status": "ok", **self.view()}
 
+    def react_rows(self, now: float) -> list[dict[str, Any]]:
+        """'오늘 반응 할 것' 줄 — 반응 목록(xengage 큐) 글 먼저, 그다음 자주 보는 계정 프로필. 링크만 (누르기는 주인 · X 요청 없음)."""
+        st = self._load(KV_REACT)
+        done = set(st.get("done") or []) if st.get("day") == xs._day(now) else set()
+        rows: list[dict[str, Any]] = []
+        try:
+            queue = self.engage._st()["queue"] if self.engage is not None else []
+        except Exception as e:  # noqa: BLE001 — 반응 목록을 못 읽어도 체크리스트는 그대로
+            log.info("xtoday react queue: %s", type(e).__name__)
+            queue = []
+        for q in queue:
+            rows.append({"key": f"p{q['sid']}", "label": f"@{q['h']} 글에 반응" if q["h"] else "X 글에 반응",
+                         "url": f"{xs.PROFILE}{q['h'] or 'i/web'}/status/{q['sid']}"})
+        for t in self.studio.targets():
+            rows.append({"key": f"h{t['h'].lower()}", "label": f"@{t['h']} 최근 글에 반응" + (f" · {t['memo']}" if t.get("memo") else ""),
+                         "url": f"{xs.PROFILE}{t['h']}"})
+        return [{**r, "done": r["key"] in done} for r in rows[:REACT_MAX]]
+
+    def react(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """'오늘 반응 할 것' 줄의 [✓ 했어요] — 그날 체크만 남긴다 (다시 누르면 풂)."""
+        key, now = body.get("key"), self.clock()
+        if not isinstance(key, str) or not REACT_KEY_RE.match(key) or all(r["key"] != key for r in self.react_rows(now)):
+            raise xs.StudioError(400, "bad_args", "그 줄은 없어요 — 새로고침해 주세요")
+        day, st = xs._day(now), self._load(KV_REACT)
+        done = [k for k in (st.get("done") or []) if isinstance(k, str)] if st.get("day") == day else []
+        done = [k for k in done if k != key] + ([key] if body.get("done") is not False else [])
+        self._save(KV_REACT, {"day": day, "done": done[-50:]})
+        return 200, {"status": "ok", **self.view()}
+
     async def _fill(self, now: float) -> None:
         try:
             await self.build("manual", now)
@@ -926,7 +963,7 @@ class XToday:
                 "bigcfg": {"on": bool(cfg.big.enabled), "min_score": cfg.big.min_score, "per_day": cfg.big.per_day},
                 "log": [{"at": _hm(x.get("at") or 0), "lead": str(x.get("lead") or ""), "shown": str(x.get("shown") or ""),
                          "score": int(x.get("score") or 0), "why": str(x.get("why") or "")} for x in bg["log"][-8:]],
-                "model": xs.model_label(self.studio.model)}
+                "model": xs.model_label(self.studio.model), "react": self.react_rows(now)}
 
 
 def register(web: Any, api: Any, studio: xs.Studio) -> XToday:
@@ -961,21 +998,25 @@ def register(web: Any, api: Any, studio: xs.Studio) -> XToday:
         audit(caller, "make", "done")
         return xs._j(200, out)
 
-    async def skip(body: dict[str, Any], headers: dict[str, str]) -> Any:
-        g = api.guard(headers)
-        if len(g) == 4:
-            return g
-        caller, _ident = g
-        if not tap_rate.hit(caller.session):
-            return slow
-        try:
-            status, out = desk.skip(body)
-        except xs.StudioError as e:
-            status, out = e.status, e.body()
-        audit(caller, "skip", str(out.get("code") or "done"))
-        return xs._j(status, out)
+    def tapper(name: str, run: Callable[[dict[str, Any]], tuple[int, dict[str, Any]]]) -> Any:
+        async def handler(body: dict[str, Any], headers: dict[str, str]) -> Any:
+            g = api.guard(headers)
+            if len(g) == 4:
+                return g
+            caller, _ident = g
+            if not tap_rate.hit(caller.session):
+                return slow
+            try:
+                status, out = run(body)
+            except xs.StudioError as e:
+                status, out = e.status, e.body()
+            audit(caller, name, str(out.get("code") or "done"))
+            return xs._j(status, out)
+
+        return handler
 
     web.route(STATE_PATH, state, with_headers=True)
     web.route_json(MAKE_PATH, make, max_body=BODY_MAX)
-    web.route_json(SKIP_PATH, skip, max_body=BODY_MAX)
+    web.route_json(SKIP_PATH, tapper("skip", desk.skip), max_body=BODY_MAX)
+    web.route_json(REACT_PATH, tapper("react", desk.react), max_body=1024)
     return desk

@@ -931,6 +931,9 @@ class DashboardConfig(BaseModel):
     # 파밍 서버가 Tailscale Funnel 로 연 주소 https://perpfarm.<tailnet>.ts.net 만 (경로 없이). 빈칸이면 안내 화면. 열쇠는 .env FARM_HUB_TOKEN 에만
     farm_hub_url: str = ""
     x_today: XTodayConfig = Field(default_factory=XTodayConfig)  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15)
+    # 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 둘 다 숨김 (코드·API 는 그대로, true 면 예전 화면)
+    x_helper: bool = False  # 'X 도우미' 책갈피 (static/xhelper.js) 설치 칸 · 받기. false 면 이미 깐 책갈피를 눌러도 '이제 안 써요' 한 줄만
+    x_engage: bool = False  # X '반응 연속 모드' 카드·화면 (static/xengage.js · #/sns/xe). false 면 '오늘 X 글' 체크리스트의 '오늘 반응 할 것' 줄로
 
     @field_validator("public_url")
     @classmethod

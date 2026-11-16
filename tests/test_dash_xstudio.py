@@ -1006,6 +1006,12 @@ async def test_helper_endpoint_share_route_and_manifest(bot: DealBot) -> None:
     status, got, head = await get_json(bot, xs.HELPER_PATH, h)
     assert status == 200 and head["Cache-Control"] == "no-store" and got["code"].startswith("javascript:") and len(got["steps"]) == 4
     assert xs.helper_key(bot.db) in unquote(got["code"])
+    # 주인 11/16 'X 는 책갈피 말고 체크리스트만': 기본은 꺼짐 — 맞는 열쇠라도 받지 않고 한 줄만 · 상태 값 helper=false · 설치 칸 숨김
+    status, got, _ = await post_json(bot, xs.HANDOFF_PATH, {"k": xs.helper_key(bot.db), "a": "stats", "vf": 31, "im": 20}, h)
+    assert status == 410 and got == {"status": "error", "code": "off", "text": "X 도우미 책갈피는 이제 안 써요 — 대시보드 X 체크리스트를 쓰세요"}
+    assert (await get_json(bot, xs.STATE_PATH, h))[1]["helper"] is False and (await get_json(bot, "/dashboard/api/logins", h))[1]["xhelper"] is False
+    bot.settings.dashboard.x_helper = True
+    assert (await get_json(bot, xs.STATE_PATH, h))[1]["helper"] is True and (await get_json(bot, "/dashboard/api/logins", h))[1]["xhelper"] is True
     status, got, _ = await post_json(bot, xs.HANDOFF_PATH, {"k": "nope", "a": "stats", "vf": 1}, h)
     assert status == 403 and got["code"] == "bad_key"
     status, got, _ = await post_json(bot, xs.HANDOFF_PATH, {"k": xs.helper_key(bot.db), "a": "stats", "vf": 31, "im": 20}, h)
@@ -1068,7 +1074,7 @@ def test_xstudio_js_is_local_safe_and_loaded_by_shell() -> None:
     raw = (STATIC / "xstudio.js").read_bytes()
     assert len(raw) <= 39 * 1024 and len(gzip.compress(raw, 9)) <= 14 * 1024  # 셸이 defer 로 받는 파일 (서비스 워커가 한 번 받아 둠)
     assert shell.XSTUDIO_JS == "xstudio.js" and f'<script defer src="{shell.asset_url("xstudio.js")}"></script>' in shell.page({})
-    assert "{api: 'xhelper', t: 'X 도우미 버튼 설치'}" in (STATIC / "logins.js").read_text(encoding="utf-8")  # 연결 탭 책갈피 설치 칸
+    assert "{api: 'xhelper', x: 1, t: 'X 도우미 버튼 설치'}" in (STATIC / "logins.js").read_text(encoding="utf-8")  # 연결 탭 책갈피 설치 칸 (설정 x_helper 켤 때만 — 11/16)
 
 
 SHIM = r"""
@@ -1376,3 +1382,14 @@ def test_js_stats_deep_link_hands_numbers_to_server_with_key() -> None:
     assert (path, tok) == ("handoff", "tok") and body["a"] == "stats" and body["k"] == "KEY123" and (body["vf"], body["im"], body["ai"]) == (31, 12000, 45678)
     assert "bad" not in body and got["toast"].startswith("X 숫자를 기록했어요")
     assert "인증 팔로워 31/500 · 90일 노출 12,000/500,000" in got["screen"] and "지금 속도면 인증 팔로워 2027/3/2쯤" in got["screen"] and "(X 도우미)" in got["screen"]
+
+
+@needs_node
+def test_js_old_bookmark_gets_one_line_and_goes_to_the_checklist_when_helper_is_off() -> None:
+    """주인 11/16 'X 는 책갈피 굳이 안 쓰는 게 나을 것 같아' — 설정 x_helper 꺼짐(helper=false): 예전 책갈피로 와도 아무것도 보내지 않고 한 줄만.
+    도우미 탭의 책갈피 설치 칸도 숨김 (공유 시트 단축어는 그대로)."""
+    v = json.loads(json.dumps(dict(json.loads(view_json()), helper=False), ensure_ascii=False))
+    got = run_shim("stats", json.dumps(v, ensure_ascii=False), {"handoff": {"status": "ok", "text": "받음"}})
+    assert got["hash"] == "#/sns/xt/off" and got["posts"] == [] and got["toast"] == xs.HELPER_OFF
+    js = (STATIC / "xstudio.js").read_text(encoding="utf-8")
+    assert "ST.helper === false ? null : [el('p', {class: 'grp'}, 'X 도우미 책갈피 (사파리 x.com)')" in js

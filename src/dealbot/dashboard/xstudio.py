@@ -835,6 +835,15 @@ HELPER_STEPS = (
 )
 
 
+# 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 설정 dashboard.x_helper (기본 false) 로 숨김.
+# 꺼져 있으면 받기(handoff)는 410 이 한 줄만 · 화면(xstudio.js·xengage.js)은 '오늘 X 글' 체크리스트(#/sns/xt/off)로. 코드·API 는 그대로 (true 면 예전대로)
+HELPER_OFF = "X 도우미 책갈피는 이제 안 써요 — 대시보드 X 체크리스트를 쓰세요"
+
+
+def helper_off() -> tuple[int, dict[str, Any]]:
+    return 410, {"status": "error", "code": "off", "text": HELPER_OFF}
+
+
 def _secret(db: Any) -> bytes:
     key = db.kv_get(KV_SECRET)
     if not key or not re.fullmatch(r"[0-9a-f]{64}", key):
@@ -952,6 +961,7 @@ class Studio:
         self.fetcher = fetcher
         self.hot = hot or (lambda: [])
         self.on_posted: Callable[[str, bool], None] | None = None  # (카드 번호, 올림/취소) — xtoday 가 건다
+        self.helper_on: Callable[[], bool] = lambda: True  # 'X 도우미' 책갈피 — register 가 설정 dashboard.x_helper 를 건다 (주인 11/16 기본 끔)
         self.busy = asyncio.Lock()  # claude CLI 는 한 번에 하나 (작은 서버 — 메모리)
         self.jobs: dict[str, tuple[float, asyncio.Task[dict[str, Any]]]] = {}
 
@@ -1152,6 +1162,8 @@ class Studio:
 
     def handoff(self, body: dict[str, Any], own: str = "") -> tuple[int, dict[str, Any]]:
         """'X 도우미' 책갈피가 주소(#)로 넘긴 값. 열쇠가 맞아야 한다 — 틀리면 403 (화면은 칸만 채우고 저절로는 아무것도 안 함)."""
+        if not self.helper_on():
+            return helper_off()
         if not helper_key_ok(self.db, body.get("k")):
             return 403, {"status": "error", "code": "bad_key", "text": "책갈피가 예전 것이에요 — 연결 탭에서 'X 도우미'를 다시 설치해 주세요"}
         a = body.get("a")
@@ -1200,7 +1212,7 @@ class Studio:
                            "post_text": POST_TEXT_MAX, "reply": [REPLY_LO, REPLY_HI], "long": [LONG_LO, LONG_HI], "long_max": LONG_MAX},
                 "left": {"draft": self._left("draft", DRAFT_PER_DAY), "reply": self._left("reply", REPLY_DRAFT_PER_DAY)},
                 "links": {"post": INTENT_POST, "reply": INTENT_REPLY, "profile": PROFILE, "compose": COMPOSE},
-                "model": model_label(self.model), "need": NEED, "hedge": list(HEDGE), "reply_goal": REPLY_GOAL}
+                "model": model_label(self.model), "need": NEED, "hedge": list(HEDGE), "reply_goal": REPLY_GOAL, "helper": bool(self.helper_on())}
 
     # ---------------------------------------------------------- AI
     async def ask(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
@@ -1436,6 +1448,7 @@ def register(web: Any, api: Any) -> Studio:
         return (x or {}).get("hot") or []
 
     desk = Studio(api.dash.db, fetcher=Fetcher(api.bot.settings.http.user_agent), hot=hot)
+    desk.helper_on = lambda: bool(getattr(api.bot.settings.dashboard, "x_helper", False))
     view_rate, draft_rate, tap_rate = RateWindow(60, 60.0), RateWindow(DRAFT_PER_MIN, 60.0), RateWindow(60, 60.0)
     slow = _j(429, {"status": "error", "code": "rate", "text": "너무 자주 눌렀어요 — 1분 뒤 다시"})
 

@@ -103,12 +103,12 @@ function row(r) {
 const MORE = {t: '따로 쓰고 싶을 때 (통계 보내기 · 이웃 관리)'};
 const BM = [{api: 'one', t: '한 번에 버튼 설치 (통계 + 서이추·들르기 · 누를 단추 없음)'}, {api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)'},
   {api: 'writebm', t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'},
-  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'xhelper', t: 'X 도우미 버튼 설치'}, MORE,
+  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'xhelper', x: 1, t: 'X 도우미 버튼 설치'}, MORE,  // x: 설정 x_helper
   {api: 'statscap', old: 1, t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'}, {api: 'seoi', old: 1, t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}];
 function kkDraw() {
   const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
-  kk.replaceChildren(...BM.filter(b => !b.old || MORE.o).flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
+  kk.replaceChildren(...BM.filter(b => (!b.old || MORE.o) && (!b.x || (data && data.xhelper))).flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
     b.o = !b.o; if (b.o && !b.d && b.api) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o || !b.api ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
     el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사'), b.d.go ? el('a', {class: 'sm', href: b.d.go.h}, b.d.go.t) : '',
     // 꾸미기 새 판 알림 (11/14): 책갈피에 저장한 뒤 '설치했어요' → 할 일의 '책갈피가 바뀌었어요' 줄이 사라짐
@@ -123,7 +123,8 @@ async function kkLoad(b) {
 
 function draw() {
   if (!box) return;
-  if (!kk) { kk = el('div', {class: 'box kk', style: 'padding:0 14px'}); kkDraw(); }
+  const xh = !!(data && data.xhelper);
+  if (!kk || kk.xh !== xh) { kk = kk || el('div', {class: 'box kk', style: 'padding:0 14px'}); kk.xh = xh; kkDraw(); }
   const rows = (data && data.rows) || [], q = data && data.qr, v = data && data.vnc;
   // 주인 몫이 없으면 한 줄 (누르면 펼침) · 필요하면 늘 펼침
   const calm = data && !data.need && !q && !v, f = calm && el('div', {class: 'box', style: 'padding:0 14px'}, el('button', {class: 'fold', type: 'button',

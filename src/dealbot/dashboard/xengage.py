@@ -96,6 +96,7 @@ class Engage:
     def __init__(self, desk: xs.Studio, own: Callable[[], str] = lambda: "") -> None:
         self.desk = desk
         self.own = own
+        self.on: Callable[[], bool] = lambda: True  # 화면 숨김 스위치 — register 가 설정 dashboard.x_engage 를 건다 (주인 11/16 기본 끔 · API 는 그대로)
 
     # ---------------------------------------------------------- kv
     def _st(self) -> dict[str, Any]:
@@ -173,6 +174,8 @@ class Engage:
 
     def handoff(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """'X 도우미' 책갈피가 주소(#)로 넘긴 '보이는 글' 목록. 열쇠가 맞아야 한다 (남의 링크로는 목록이 바뀌지 않음)."""
+        if not self.desk.helper_on():
+            return xs.helper_off()
         if not xs.helper_key_ok(self.desk.db, body.get("k")):
             return 403, {"status": "error", "code": "bad_key", "text": "책갈피가 예전 것이에요 — 연결 탭에서 'X 도우미'를 다시 설치해 주세요"}
         raw = body.get("l")
@@ -233,7 +236,7 @@ class Engage:
                 "tones": [["auto", "알아서"]] + [[k, lab] for k, (lab, _g) in xs.TONES.items()],
                 "limits": {"queue": QUEUE_MAX, "per_handle": PER_HANDLE, "reply": [xs.REPLY_LO, xs.REPLY_HI], "add": ADD_TEXT_MAX},
                 "left": d._left("reply", xs.REPLY_DRAFT_PER_DAY), "links": {"reply": xs.INTENT_REPLY, "profile": xs.PROFILE},
-                "model": xs.model_label(d.model)}
+                "model": xs.model_label(d.model), "on": bool(self.on()), "helper": bool(d.helper_on())}
 
     # ---------------------------------------------------------- 답글 초안 (xstudio 규칙 그대로 + 같은 답글 되풀이 막기)
     async def draft(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -283,6 +286,7 @@ def register(web: Any, api: Any, desk: xs.Studio) -> Engage:
     from dealbot.dashboard.actions import RateWindow, x_handles
 
     eng = Engage(desk, lambda: x_handles(api.dash.db).get("revenue") or "")
+    eng.on = lambda: bool(getattr(api.bot.settings.dashboard, "x_engage", False))
     view_rate, draft_rate, tap_rate = RateWindow(60, 60.0), RateWindow(xs.DRAFT_PER_MIN, 60.0), RateWindow(60, 60.0)
     slow = xs._j(429, {"status": "error", "code": "rate", "text": "너무 자주 눌렀어요 — 1분 뒤 다시"})
 
