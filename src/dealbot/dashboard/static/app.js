@@ -31,7 +31,7 @@ const MSG = {published: '발행했어요', saved: '저장했어요', done: '했�
   bad_args: '입력한 값을 다시 확인해 주세요', bad_upload: '올린 파일을 쓸 수 없어요', failed: '하지 못했어요 — 잠시 뒤 다시',
   login_needed: '지금은 서버가 로그인하지 않아요', unsupported: '블로그 프로그램 업데이트를 기다리는 중이에요',
   blogauto_down: '블로그 프로그램이 응답하지 않아요', rate: '너무 자주 눌렀어요 — 조금 뒤에 다시', net: '인터넷 연결을 확인해 주세요',
-  unknown: '확인이 필요해요 — 잠시 뒤 상태를 봐 주세요', confirm_expired: '확인 창이 오래됐어요 — 다시 눌러 주세요'};
+  unknown: '서버가 오래 답이 없어요 — 상태를 보고 필요하면 다시 눌러 주세요', interrupted: '서버가 다시 켜지며 끊겼어요 — 다시 눌러 주세요', confirm_expired: '확인 창이 오래됐어요 — 다시 눌러 주세요'};
 const SCH = /^blog\.(un)?schedule/, PIX = /^blog\.pics_/;
 const SECRET_KEY = {'sns.token': 'token', 'sns.code': 'code', 'blog.kakao_connect': 'url'};
 

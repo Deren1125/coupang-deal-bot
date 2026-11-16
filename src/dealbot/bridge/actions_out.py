@@ -44,6 +44,8 @@ TEXT_MAX = 120
 INFO_TEXT_MAX = 1500
 LONG_TEXT_ACTIONS = {"blog.info": INFO_TEXT_MAX, "blog.server_check": 3000}  # 줄마다 읽어 주는 긴 결과 (서버 점검: 줄 40개까지)
 RESULT_STATUSES = ("running", "ok", "error", "rejected")
+# 옛 Blog-Auto 는 재시작에 끊긴 일을 code failed + 이 글로 썼다 → interrupted 로 읽는다 (새 판은 code interrupted 를 바로 씀 · 주인 11/16)
+OLD_STOPPED_TEXT = "중간에 멈췄어요"
 
 
 class ActionsBusy(Exception):
@@ -192,6 +194,8 @@ class ActionsOut:
     def _clean_result(self, row: dict[str, Any], data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         status = data.get("status") if data.get("status") in RESULT_STATUSES else "error"
         code = data.get("code") if isinstance(data.get("code"), str) and len(data.get("code")) <= 40 else ""
+        if status == "error" and code == "failed" and str(data.get("text") or "").startswith(OLD_STOPPED_TEXT):
+            code = "interrupted"
         limit = LONG_TEXT_ACTIONS.get(row["action"], TEXT_MAX)
         text = data.get("text") if isinstance(data.get("text"), str) else ""
         text = "\n".join(safe_text(ln, limit) for ln in text.splitlines()[:40] if ln.strip())[:limit] if row["action"] in LONG_TEXT_ACTIONS \

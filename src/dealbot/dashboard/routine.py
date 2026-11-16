@@ -219,6 +219,13 @@ def carried(db: Any, now: float) -> set[str]:
     return out
 
 
+def _code(row: dict[str, Any] | None) -> str:
+    try:
+        return str((json.loads((row or {}).get("result") or "null") or {}).get("code") or "")
+    except (ValueError, AttributeError):
+        return ""
+
+
 def relay_tick(bot: Any, now: float | None = None) -> dict[str, int]:
     """1분마다 (scheduler.dashboard_loop): 못 전한 체크를 다시 맡기고, 맡긴 것의 결과를 본다. 돌려줌 {sent, done, dropped, left}."""
     now = now or time.time()
@@ -251,6 +258,8 @@ def relay_tick(bot: Any, now: float | None = None) -> dict[str, int]:
                 out["done"] += 1
                 keep.append({**x, "ok": now})
                 continue
+            if status == "error" and _code(row) == "interrupted":  # 블로그 프로그램이 다시 켜지며 끊김 (주인 11/16) — 다시 맡김
+                status = "expired"
             if status in ("rejected", "error"):  # 블로그 프로그램이 받아서 답함 — 다시 보내도 같은 답
                 out["dropped"] += 1
                 log.info("routine relay: %s %s → %s (다시 보내지 않음)", x["name"], x["rid"], status)
