@@ -163,8 +163,11 @@ const fs = require('fs'), path = require('path');
 """
 
 
-async def test_real_browser_hub_and_routes(bot: DealBot, settings: Settings, tmp_path: Path) -> None:
+async def test_real_browser_hub_and_routes(bot: DealBot, settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dealbot.dashboard import logins
     from test_dash_kkumi import _playwright_env
+
+    monkeypatch.setattr(logins, "mall_todo", lambda *a, **k: [])  # 기록 파일 예의 지그재그 '로그인 필요' 줄은 빼고 ('기타'가 빈 칸인지 봄)
 
     env = _playwright_env()
     if env is None:

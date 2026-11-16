@@ -181,8 +181,20 @@ def _when(iso: str | float | None, tz: ZoneInfo, now: float) -> str:
     return f"{d:%H:%M}" if d.date() == datetime.fromtimestamp(now, tz).date() else f"{d:%m/%d %H:%M}"
 
 
-def _text(state: str | None, note: str, tz: ZoneInfo, now: float, *, checked: Any = None, until: Any = None) -> str:
+def _day(iso: Any, tz: ZoneInfo) -> str:
+    """'11/13' (풀린 날 — '로그인 필요 (11/13부터)')."""
+    try:
+        d = datetime.fromisoformat(iso).astimezone(tz) if isinstance(iso, str) else None
+        return f"{d.month}/{d.day}" if d else ""
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
+def _text(state: str | None, note: str, tz: ZoneInfo, now: float, *, checked: Any = None, until: Any = None,
+          since: Any = None) -> str:
     parts = [STATE_TEXT.get(state or "", "") or "여기서는 상태를 안 봐요"]
+    if state == "needed" and (d := _day(since, tz)):  # 언제부터 풀렸나 (주인 11/16 — '토스 쇼핑 — 로그인 필요 (11/13부터)')
+        parts[0] += f" ({d}부터)"
     if note:
         parts.append(note)
     if state == "resting" and (u := _when(until, tz, now)):
@@ -265,7 +277,7 @@ def rows(bot: Any, export: Any = None, now: float | None = None) -> list[dict[st
         """(상태, 한 줄) — 기록이 오래됐으면 '모름' (그때 상태만 덧붙임 · Blog-Auto 가 멈췄을 수 있어 지금 상태로 보이지 않게)."""
         if stale:
             return "unknown", f"모름 · {stale} (그때 {STATE_TEXT.get(r['state'], '모름')})"
-        return r["state"], _text(r["state"], r["note"], tz, now, checked=r["checked_at"], until=r["until"])
+        return r["state"], _text(r["state"], r["note"], tz, now, checked=r["checked_at"], until=r["until"], since=r.get("since"))
 
     for target, label in remote_login.TARGETS.items():  # 원격 로그인 대상은 기록이 없어도 늘 한 줄 (예전 Blog-Auto · 아직 안 씀)
         r = by_id.get(target)
@@ -358,8 +370,47 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- 할 일 줄
+MALL_TODO = ("toss", "zigzag", "ably")  # 쇼핑몰 로그인 풀림 할 일 줄 (주인 11/16)
+
+
+def mall_todo(bot: Any, now: float, *, act: Any, goto: Any, export: Any = None) -> list[dict[str, Any]]:
+    """쇼핑몰 로그인이 풀린 동안 할 일 한 줄 conn-mall-<몰> (주인 11/16 — '토스 로그인 풀렸다는 말이 연결 탭에 없다').
+    Blog-Auto 알림(mall_login:<몰>, 같은 줄 이름)은 푸시 한 번 뒤 24시간이면 닫혀서, 로그인 관리 줄(status.logins)이 '로그인 필요'인
+    동안은 이 줄이 남는다 (푸시 없음 — 알림은 Blog-Auto 가 처음 풀린 때 한 번). 기록이 오래됐거나 토스 점검 중이면 없음.
+    단추는 원격 로그인 (주인이 누를 때만 — 서버는 로그인을 시도하지 않음)."""
+    if export is None:
+        export = bot.dash_state._export() if getattr(bot, "dash_state", None) is not None else None
+    got = (((getattr(export, "v2", None) or {}).get("status") or {}).get("logins")) or []
+    if not got or _stale(export, now):
+        return []
+    tz = ZoneInfo(bot.settings.app.timezone)
+    out = []
+    for r in got:
+        if r.get("id") not in MALL_TODO or r.get("state") != "needed" or r.get("target") != r["id"]:
+            continue
+        if r["id"] == "toss" and _toss_paused(bot):
+            continue
+        try:
+            since = datetime.fromisoformat(r["since"]).timestamp() if r.get("since") else None
+        except (TypeError, ValueError, OverflowError, OSError):
+            since = None
+        out.append({"iid": f"conn-mall-{r['id']}", "src": "blog", "blog": "", "kind": "mall_login", "sev": "todo", "urgent": True,
+                    "title": f"{r['label']} 로그인 필요", "status": _text("needed", r.get("note") or "", tz, now, since=r.get("since")),
+                    "since": since, "expires_at": None, "primary": act("login.remote", REMOTE_LABEL, {"target": r["id"]}),
+                    "more": [goto("로그인 관리", "#/connect")],
+                    "detail": {"lines": ["서버는 로그인을 시도하지 않아요 — 원격 화면에서 주인이 직접 (폰 인증)",
+                                         "로그인 확인이 되면 이 줄은 저절로 사라져요"]}})
+    return out
+
+
 def todo_items(bot: Any, now: float, *, act: Any, open_link: Any, goto: Any) -> list[dict[str, Any]]:
-    """QR 이 떠 있으면 'QR 보기' 한 줄 · 딜봇이 일하다 네이버 쿠키가 없다고 봤으면 'QR 로그인' 한 줄 (브라우저 자동화를 켰을 때만)."""
+    """쇼핑몰 로그인 풀림 줄(mall_todo) + QR 이 떠 있으면 'QR 보기' 한 줄 · 딜봇이 일하다 네이버 쿠키가 없다고 봤으면 'QR 로그인' 한 줄
+    (네이버 줄은 브라우저 자동화를 켰을 때만)."""
+    malls = mall_todo(bot, now, act=act, goto=goto)
+    return malls + _naver_todo(bot, now, act=act, open_link=open_link, goto=goto)
+
+
+def _naver_todo(bot: Any, now: float, *, act: Any, open_link: Any, goto: Any) -> list[dict[str, Any]]:
     if browser_off(bot):
         return []
     base = {"src": "dealbot", "blog": "", "sev": "todo", "urgent": True, "expires_at": None}

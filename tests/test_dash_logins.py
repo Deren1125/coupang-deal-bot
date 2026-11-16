@@ -759,3 +759,40 @@ def test_queued_check_waits_for_the_real_result() -> None:
     js = (Path(__file__).resolve().parents[1] / "src/dealbot/dashboard/static/logins.js").read_text(encoding="utf-8")
     assert "r.status === 202 && d.id) return wait(d.id)" in js and "/dashboard/api/actions?ids=" in js
     assert "s.status !== 'queued' && s.status !== 'running'" in js and "toast(s.text" in js
+
+
+def test_toss_logout_row_says_since_when_and_stays_on_the_todo_list(bot: DealBot, tmp_path: Path) -> None:
+    """주인 11/16 '토스 로그인 풀렸다는 말이 연결 탭에 없다' — 연결 탭 '토스 … 로그인 필요 (11/13부터) · 원격 로그인' 줄 +
+    할 일 conn-mall-toss 한 줄 (Blog-Auto 알림이 24시간에 닫혀도 로그인 필요인 동안 남음 · 이 줄은 푸시 안 함 · 단추는 원격 로그인)."""
+    data = fixture("export_v2.json")
+    for r in data["status"]["logins"]:
+        if r["id"] == "toss":
+            r.update(state="needed", note="로그인 풀림 — 원격 로그인으로 다시 로그인해 주세요", since="2026-11-13T16:46:00+09:00",
+                     checked_at="2026-11-15T07:37:00+09:00")
+        if r["id"] == "zigzag":
+            r.update(state="ok", note="", since=None)
+    write_export(tmp_path / "blogauto.json", status=data["status"])
+    toss = rows_of(logins.view(bot))["toss"]
+    assert toss["bad"] and toss["text"].startswith("로그인 필요 (11/13부터) · 로그인 풀림")
+    assert toss["button"] == {"action": "login.remote", "args": {"target": "toss"}, "label": "원격 로그인"}
+    items = {it["iid"]: it for it in bot.dash_state.items()}
+    row = items["conn-mall-toss"]
+    assert row["title"] == "토스 쉐어링크 로그인 필요" and "11/13부터" in row["status"]
+    assert row["primary"]["action"] == "login.remote" and row["primary"]["args"] == {"target": "toss"}
+    assert "conn-mall-zigzag" not in items  # 로그인된 몰은 줄 없음
+    if bot.router is not None:
+        assert bot.router.store.open_rows(time.time()) == []  # 푸시 줄을 새로 열지 않음 (알림은 Blog-Auto 가 한 번)
+    bot._toss_no_link = lambda: True  # type: ignore[method-assign] — 토스 점검 중이면 줄 없음
+    assert "conn-mall-toss" not in {it["iid"] for it in bot.dash_state.items()}
+
+
+def test_mall_todo_is_empty_when_the_blog_record_is_stale(bot: DealBot, tmp_path: Path) -> None:
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    write_export(tmp_path / "blogauto.json")
+    data = json.loads((tmp_path / "blogauto.json").read_text(encoding="utf-8"))
+    assert [r["iid"] for r in logins.mall_todo(bot, time.time(), act=lambda *a: {"action": a[0]}, goto=lambda *a: {})] == ["conn-mall-zigzag"]
+    data["written_at"] = (datetime.now(ZoneInfo("Asia/Seoul")) - timedelta(hours=9)).isoformat(timespec="seconds")
+    (tmp_path / "blogauto.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert logins.mall_todo(bot, time.time(), act=lambda *a: {"action": a[0]}, goto=lambda *a: {}) == []
