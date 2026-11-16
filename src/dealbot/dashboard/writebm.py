@@ -49,6 +49,8 @@ SRC = STATIC / "write.js"
 KV_SECRET = "writebm_secret"
 DAY_KEY = "writebm:day:"
 PATH = "/dashboard/api/write_act"
+# 주인 11/16 14시 "꾸미기 책갈피 코드만" — 설정 dashboard.write_bm (기본 false) 이면 설치 칸이 숨고 GET writebm·POST write_act 가 403 으로 이 한 줄만
+OFF_TEXT = "이제 안 써요 — 꾸미기 책갈피를 쓰세요"
 BODY_MAX = 4000
 GAP = (30, 60)  # 글 사이 쉬는 초 (주인 11/16 '글 사이 30~60초')
 RESULTS = ("ok", "unsure", "phone", "fail")

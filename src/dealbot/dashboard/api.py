@@ -40,6 +40,7 @@
   POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
   GET  /dashboard/api/writebm           '글쓰기 한 번에' 책갈피 {code, len, steps, note?} (writebm.view — 열쇠가 든 진행기 통째 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/16)
+                                        주인 11/16 14시 접음: 설정 dashboard.write_bm 이 false(기본)면 이것·write_act 둘 다 403 off '이제 안 써요 — 꾸미기 책갈피를 쓰세요'
   POST /dashboard/api/write_act         그 책갈피가 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → writebm.act (데이터만 — 코드는 책갈피 안에 통째): a=next 그 블로그의 다음 붙여넣기 대기 글 · a=done 결과 (발행 확인이면 할 일 줄 체크) · 서버는 네이버를 열지 않음
                                         · 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (nbvisit.tick — 응답에 row · 블로그마다 하루 5번)
@@ -832,6 +833,8 @@ class DashApi:
 
         from dealbot.dashboard import writebm
 
+        if not self.bot.settings.dashboard.write_bm:  # 주인 11/16 접음 — 설정 write_bm 을 켤 때만
+            return err(403, "off", writebm.OFF_TEXT)
         try:
             return jresp(200, writebm.view(self.bot.db, self.bot.settings.dashboard.public_url, tz=ZoneInfo(self.bot.settings.app.timezone)),
                          {"Cache-Control": "no-store"})
@@ -850,6 +853,8 @@ class DashApi:
         cors["Cache-Control"] = "no-store"
         if not self.writebm_rate.hit(client_key(headers)):
             return jresp(429, {"ok": False, "code": "rate", "text": "너무 자주 눌렀어요 — 잠시 뒤 다시"}, cors)
+        if not self.bot.settings.dashboard.write_bm:  # 주인 11/16 14시 접음 — 이미 깐 책갈피를 눌러도 한 줄만 (열쇠·목록을 읽지 않음)
+            return jresp(403, {"ok": False, "code": "off", "text": writebm.OFF_TEXT}, cors)
         rv = None
         if form.get("a") in ("next", "done") and writebm.key_ok(self.bot.db, form.get("k")):  # 오늘 할 일 (열쇠가 맞을 때만 읽음)
             try:

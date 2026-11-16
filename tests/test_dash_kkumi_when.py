@@ -185,7 +185,7 @@ def test_dashboard_texts_mention_the_auto_fill() -> None:
     rt = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "it.when ?" in rt and "도 채워 줘요" in rt and "발행 단추만 직접" in rt and "새로 고름" in rt
     assert "예약 시각 자동 채움" in (STATIC / "logins.js").read_text(encoding="utf-8")
-    assert "예약 날짜·시각도 채워 줘요" in kkumi.STEPS[3] and "발행 단추는 직접" in kkumi.STEPS[3]
+    assert "예약 날짜·시각도 채워 줘요" in kkumi.USE and "발행 단추는 직접" in kkumi.USE
     assert kkumi.version() == 7
 
 

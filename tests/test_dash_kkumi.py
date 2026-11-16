@@ -58,7 +58,9 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
         assert word in js, word
     assert "data-value='left'" not in js and "execCommand" not in js  # 왼쪽으로 바꾸지 않음 · 글자 고치기 없음
     assert kkumi.view() == {"code": kkumi.bookmarklet(), "len": len(kkumi.bookmarklet()), "steps": list(kkumi.STEPS),
-                            "ver": kkumi.ver(), "version": kkumi.version()} and len(kkumi.STEPS) == 4
+                            "check": kkumi.check_line(), "use": kkumi.USE, "ver": kkumi.ver(), "version": kkumi.version()} and len(kkumi.STEPS) == 3
+    assert kkumi.check_line().endswith(f"맨 아래가 v{kkumi.version()} 이면 새 판이에요.") and "'\\nv' + V);" in kkumi.SRC.read_text(encoding="utf-8")  # 끝 알림 맨 아래 v7 (11/16)
+    assert [s.split()[0] for s in kkumi.STEPS] == ["사파리에서", "'책갈피", "책갈피"] and "공유 단추" in kkumi.STEPS[0] and "주소 칸" in kkumi.STEPS[2]  # 쉬운 3단계
     # 판 번호 (주인 11/14 — 끝 알림 'v5' · 지문은 코드가 바뀌면 달라짐) · 글꼴 살피기(나눔명조 — 주인이 취소)는 넣지 않음
     assert kkumi.version() >= 5 and f"const V={kkumi.version()};" in js and "'\\nv'+V" in js
     assert len(kkumi.ver()) == 10 and kkumi.ver() == __import__("hashlib").sha256(kkumi.bookmarklet().encode()).hexdigest()[:10]
@@ -310,20 +312,23 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
     shim = shim.replace("const VIEW = JSON.parse(process.argv[2]);", "const VIEW = JSON.parse(process.argv[2]), KK = JSON.parse(process.argv[3]);")
     flow = shim.split("  const box = () =>")[0] + r"""
   const box = () => main.children.find(c => c.attrs.id === 'lgp');
-  const kf = () => box().all(c => c.className === 'fold kf')[1];  // 맨 위는 '한 번에' (11/16)
-  out.fold = [kf().textContent, kf().attrs['aria-expanded']];
-  out.before = calls.filter(c => c.url === '/dashboard/api/kkumi').length;
-  kf().click();
+  // 주인 11/16 14시: 꾸미기는 접기 없이 맨 위 카드 (연결 탭을 열면 바로 받음) · 그 아래 접기 = 이웃 한 번에 · 따로 쓰고 싶을 때
   await tick(); await tick();
+  const kb = () => box().all(c => c.className === 'kb')[0];
+  out.head = kb().all(c => c.tagName === 'H3').map(c => c.textContent);
+  out.folds = box().all(c => c.className === 'fold kf').map(c => c.textContent);
   out.steps = box().all(c => c.tagName === 'LI').map(c => c.textContent);
+  out.notes = kb().all(c => c.className === 'note').map(c => c.textContent);
+  out.order = kb().children.map(c => c.tagName + ':' + c.textContent.slice(0, 6));
   out.ack = box().all(c => c.tagName === 'BUTTON' && /^설치했어요|설치됨/.test(c.textContent)).map(c => [c.textContent, 'disabled' in c.attrs]);
   box().all(c => c.tagName === 'BUTTON' && c.textContent === '코드 복사')[0].click();
   await tick();
   out.clip = clip; out.toast = toast.textContent;
-  main.replaceChildren(new E('div'));  // app.js 가 연결 탭을 다시 그려도 펼친 채
+  main.replaceChildren(new E('div'));  // app.js 가 연결 탭을 다시 그려도 카드는 그대로 · 다시 받지 않음
   await tick();
-  out.keep = kf().attrs['aria-expanded'];
+  out.keep = box().all(c => c.className === 'kb').length;
   out.calls = calls.filter(c => c.url === '/dashboard/api/kkumi').length;
+  out.text = box().textContent;
   console.log(JSON.stringify(out));
   process.exit(0);
 })();
@@ -332,10 +337,14 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    assert got["fold"] == ["꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)", "false"] and got["before"] == 0  # 접혀 있고 펼칠 때만 받음
+    v = kkumi.version()
+    assert got["head"] == [f"꾸미기 책갈피 (v{v})"] and got["folds"][0].startswith("이웃 한 번에 버튼 설치") and len(got["folds"]) == 2
+    assert got["folds"][1] == "따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)"
     assert got["steps"] == list(kkumi.STEPS) and got["clip"] == [kkumi.bookmarklet()] and got["toast"].startswith("복사했어요")
-    assert got["keep"] == "true" and got["calls"] == 1
-    assert got["ack"] == [[f"설치했어요 (v{kkumi.version()})", False]]  # 새 판 알림을 끄는 단추 (11/14 — kkumi.installed {ver})
+    assert got["notes"][1:] == [kkumi.check_line(), kkumi.USE] and f"맨 아래가 v{v}" in got["notes"][1]
+    assert [o.split(":")[0] for o in got["order"]] == ["H3", "P", "BUTTON", "OL", "P", "BUTTON", "P"] and got["order"][2] == "BUTTON:코드 복사"  # 코드 복사 → 3단계 → 판 확인
+    assert got["keep"] == 1 and got["calls"] == 1 and "글쓰기 한 번에" not in got["text"] and "X 도우미" not in got["text"]
+    assert got["ack"] == [[f"설치했어요 (v{v})", False]]  # 새 판 알림을 끄는 단추 (11/14 — kkumi.installed {ver})
     lg = (STATIC / "logins.js").read_text(encoding="utf-8")
     assert "action: 'kkumi.installed', args: {ver: b.d.ver}" in lg and "b.d.ack ? `v${b.d.version} 설치됨 ✓`" in lg
 

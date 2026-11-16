@@ -25,7 +25,7 @@ import pytest
 from dash_helpers import get_json, push_settings, session_headers
 from dealbot.app import DealBot
 from dealbot.config import Settings
-from dealbot.dashboard import actions, kkumi, routine, writebm
+from dealbot.dashboard import actions, kkumi, logins, routine, writebm
 from test_dash_kkumi import INNER, _playwright_env, _tags_line
 from test_dash_kkumi_when import RSV
 from test_dash_routine import SLOTS, item, tz_now, with_routine
@@ -196,6 +196,7 @@ async def _post(bot: DealBot, body: dict[str, str], **headers: str):  # type: ig
 
 
 async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_path: Path) -> None:
+    bot.settings.dashboard.write_bm = True  # 설정을 켰을 때의 길 (주인 11/16 14시부터 기본 꺼짐)
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     assert (await bot.web.dispatch("GET", "/dashboard/api/writebm", anon))[0] == 401
     status, v, hd = await get_json(bot, "/dashboard/api/writebm", session_headers(bot))
@@ -223,9 +224,25 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
     assert "Access-Control-Allow-Origin" not in res[3]
 
 
-def test_connect_tab_lists_the_install_box() -> None:
+def test_connect_tab_lists_the_install_box_only_when_switched_on(bot: DealBot) -> None:
+    """주인 11/16 14시 '글쓰기 한 번에는 접고 꾸미기만' — 설치 칸은 설정 write_bm 을 켤 때만 (기본 꺼짐 · 코드는 그대로)."""
     js = (STATIC / "logins.js").read_text(encoding="utf-8")
-    assert "{api: 'writebm', t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'}," in js.split("const BM = [", 1)[1].split("];", 1)[0]
+    assert "{api: 'writebm', old: 1, w: 1, t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'}" in js.split("const BM = [", 1)[1].split("];", 1)[0]
+    assert "(!b.w || (data && data.writebm))" in js
+    assert bot.settings.dashboard.write_bm is False and logins.view(bot)["writebm"] is False
+    bot.settings.dashboard.write_bm = True
+    assert logins.view(bot)["writebm"] is True
+
+
+async def test_switched_off_code_and_act_say_use_kkumi(bot: DealBot, tmp_path: Path) -> None:
+    """꺼져 있으면(기본) 코드 받기·이미 깐 책갈피 둘 다 403 '이제 안 써요 — 꾸미기 책갈피를 쓰세요' (맞는 열쇠라도 목록을 주지 않음)."""
+    bot.settings.dashboard.write_bm = False
+    status, v, _ = await get_json(bot, "/dashboard/api/writebm", session_headers(bot))
+    assert status == 403 and v["code"] == "off" and v["text"] == writebm.OFF_TEXT == "이제 안 써요 — 꾸미기 책갈피를 쓰세요"
+    with_routine(tmp_path, _rows(tz_now(bot).date().isoformat()))
+    res = await _post(bot, {"k": writebm.key(bot.db), "a": "next", "b": "issue"}, origin="https://blog.naver.com")
+    got = json.loads(res[1])
+    assert res[0] == 403 and got == {"ok": False, "code": "off", "text": writebm.OFF_TEXT} and res[3]["Access-Control-Allow-Origin"] == "https://blog.naver.com"
 
 
 # ---------------------------------------------------------------- 4) 가짜 글쓰기 화면

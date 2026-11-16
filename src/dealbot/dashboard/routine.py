@@ -476,6 +476,7 @@ def meta(bot: Any, now: float) -> dict[str, Any]:
         from dealbot.dashboard import kkumi
 
         out["kkumi_new"] = kkumi.is_new(bot.db)
+        out["kkumi_v"] = kkumi.version()  # 배너 '꾸미기 새 판(v7)' — 끝 알림 맨 아래 수와 같음 (주인 11/16)
     except Exception as e:  # noqa: BLE001
         log.warning("routine kkumi failed: %s", type(e).__name__)
     try:

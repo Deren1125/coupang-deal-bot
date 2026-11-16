@@ -6,11 +6,11 @@ static/kkumi.js = Blog-Auto blogauto/naver/kkumi_v4.js (10/29 아이패드 시�
 
   bookmarklet(): static/kkumi.js 에서 머리 주석·'//' 주석 줄·들여쓰기·빈 줄을 뺀 코드(minified) → "javascript:" + encode_short
     (encodeURI 와 같되 '#' 은 %23 — 11/15 부터 · 그 전은 encodeURIComponent · 다른 책갈피(통계·이웃 관리 등)는 encode 그대로).
-  view(): GET /dashboard/api/kkumi 몸 {code, len, steps, ver, version, ack} — 연결 탭 '꾸미기 버튼 설치' 칸(logins.js)이 열 때 받아 '코드 복사'.
+  view(): GET /dashboard/api/kkumi 몸 {code, len, steps, check, use, ver, version, ack} — 연결 탭 '꾸미기 버튼 설치' 칸(logins.js)이 열 때 받아 '코드 복사'.
 설치한 책갈피가 옛 판인지 알리기 (주인 11/14 — 책갈피는 주인이 다시 복사·저장해야 바뀌는데 그동안은 바뀐 줄 몰라 옛 판으로 붙여 넣음):
   ver() = 지금 코드의 sha256 앞 10자 · version() = kkumi.js 의 'const V = n' (끝 알림 'v<n>' 과 같은 수) ·
   설치 칸 '설치했어요' 단추 → 대시보드 일 kkumi.installed {ver} → kv "kkumi_ack" = 그 ver (지금 ver 과 같을 때만 받음) ·
-  is_new(db) = ver != ack → routine.view()["kkumi_new"] → 할 일 종류 목록(todohub.js)이 블로그 셋에 '꾸미기 책갈피가 바뀌었어요 — 다시 설치 (1분)'.
+  is_new(db) = ver != ack → routine.view()["kkumi_new"] → 할 일 종류 목록(todohub.js)이 블로그 셋에 '꾸미기 새 판 v<n> — 다시 깔아 주세요 (1분)' (11/16 — n = version(), meta kkumi_v).
 예약 시각 자동 채움 (v6 · 주인 11/14 — 글마다 발행 설정에서 날짜·시각을 고르는 수고를 없앰 · 마지막 발행 단추는 주인이 직접):
   책갈피는 바깥 요청을 하지 않으므로 시각은 복사하는 글 안에 싣는다 — 글 끝 태그 줄(\u2064 + 안 보이는 비트, Blog-Auto paste.tags_line
   '<카테고리>\x01<태그들>')의 가운데에 '@YYYY-MM-DDTHH:MM' 한 칸: '<카테고리>\x01@2026-11-15T19:00\x01<태그들>' (stamp).
@@ -33,14 +33,20 @@ from urllib.parse import quote
 
 SRC = Path(__file__).resolve().parent / "static" / "kkumi.js"
 KV_ACK = "kkumi_ack"  # 주인이 '설치했어요'를 누른 판의 지문
+# 설치 칸 (주인 11/16 14시 '꾸미기 책갈피 코드만' — 연결 탭 맨 위에 크게: 코드 복사 → 쉬운 3단계 → 판 확인 · 쓰는 법은 작게)
 STEPS = (
-    "아래 '코드 복사'를 눌러요.",
-    "사파리에서 아무 페이지나 연 뒤 공유 단추 → '책갈피 추가' → 이름을 '꾸미기'로 저장해요. (이미 있으면 건너뛰어요)",
-    "책갈피 목록 → '편집' → '꾸미기'를 눌러 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'. (꾸미기 책갈피는 하나만 두세요)",
-    "쓰는 법: 대시보드 '본문 복사' → 사파리 네이버 글쓰기에서 제목을 쓰고 빈 본문을 한 번 누름 → 책갈피 '꾸미기' → 뜨는 초록 칸을 길게 눌러 "
-    "붙여넣기 → 1~2분 기다리면 끝 알림 · 발행 설정창에서 태그를 보고 발행해요. 예약 글은 예약 날짜·시각도 채워 줘요 (v6) — 맞는지 보고 "
-    "발행 단추는 직접 눌러요.",
+    "사파리에서 아무 페이지나 열고 공유 단추(네모에 화살표)를 눌러요.",
+    "'책갈피 추가' → 이름을 '꾸미기'로 저장해요. (이미 있으면 건너뛰어요 · 꾸미기 책갈피는 하나만)",
+    "책갈피 목록 → '편집' → '꾸미기' → 주소 칸을 모두 지우고 복사한 코드를 붙여 넣은 뒤 저장해요.",
 )
+USE = ("쓰는 법: 대시보드 '본문 복사' → 사파리 네이버 글쓰기에서 제목을 쓰고 빈 본문을 한 번 누름 → 책갈피 '꾸미기' → 뜨는 초록 칸을 길게 눌러 "
+       "붙여넣기 → 1~2분 기다리면 끝 알림 · 발행 설정창에서 태그를 보고 발행해요. 예약 글은 예약 날짜·시각도 채워 줘요 — 맞는지 보고 "
+       "발행 단추는 직접 눌러요.")
+
+
+def check_line() -> str:
+    """지금 깔린 판 확인 한 줄 — 끝 알림 맨 아래 'v<n>' (kkumi.js alert 끝 '\\nv' + V)."""
+    return f"지금 깔린 판 확인: 꾸미기를 쓰고 난 끝 알림 맨 아래가 v{version()} 이면 새 판이에요."
 
 
 _WORD = re.compile(r"[A-Za-z0-9_$]")
@@ -137,7 +143,7 @@ def is_new(db: Any) -> bool:
 
 def view(db: Any = None) -> dict[str, Any]:
     code = bookmarklet()
-    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS), "ver": ver(), "version": version()}
+    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS), "check": check_line(), "use": USE, "ver": ver(), "version": version()}
     if db is not None:
         out["ack"] = acked(db) == ver()
     return out

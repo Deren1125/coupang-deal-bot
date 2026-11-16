@@ -393,7 +393,7 @@ function start() {
   mount();
 }
 // todohub.js 가 읽는 값 (11/14): 목록 날짜·오늘 것인지·기록이 쓰인 지 몇 분·자동 점검 한 줄·꾸미기 새 판·못 전한 체크 수 · 받기 전이면 null
-const meta = () => data ? {day: data.day, today: !!data.today, age_min: data.age_min, gate: data.gate || null, kkumi_new: !!data.kkumi_new, relay: data.relay || 0, at} : null;
+const meta = () => data ? {day: data.day, today: !!data.today, age_min: data.age_min, gate: data.gate || null, kkumi_new: !!data.kkumi_new, kkumi_v: data.kkumi_v || 0, relay: data.relay || 0, at} : null;
 W.SBRoutine = {load, mount, ids, by, part, cnt, meta};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

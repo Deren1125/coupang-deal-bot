@@ -74,7 +74,7 @@ function notes(p) {
   if (a > STALE_MIN) out.push(el('p', {class: 'hn w stl'}, `블로그 프로그램 소식이 ${a < 120 ? a + '분' : Math.floor(a / 60) + '시간'}째 없어요 — 목록이 오래됐을 수 있어요`));
   else if (!t.today) out.push(el('p', {class: 'hn w stl'}, t.day ? '오늘 목록이 아직 안 왔어요 — 보이는 건 지난 목록이에요' : '블로그 프로그램 목록이 아직 안 왔어요'));
   if (t.relay) out.push(el('p', {class: 'hn rl'}, `체크 ${t.relay}개는 블로그 프로그램이 깨어나면 전해요`));
-  if (t.kkumi_new && (p === 'hub' || BLOG3.includes(p))) out.push(el('a', {class: 'hn kn', href: '#/connect'}, '꾸미기 책갈피가 바뀌었어요 — 다시 설치 (1분) ›'));
+  if (t.kkumi_new && (p === 'hub' || BLOG3.includes(p))) out.push(el('a', {class: 'hn kn', href: '#/connect'}, `꾸미기 새 판 v${t.kkumi_v} — 다시 깔아 주세요 (1분) ›`));
   if (t.gate && (p === 'hub' || BLOG3.includes(p))) out.push(el('p', {class: 'hn g gt'}, t.gate.line));
   return out;
 }

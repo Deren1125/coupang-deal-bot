@@ -370,6 +370,9 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
 # 11/16: 책갈피 설치 칸에 '글쓰기 한 번에' 한 줄 (logins.js BM.push · /dashboard/api/writebm) — 위 한도에 더함 (같은 날 '한 번에' 칸과 따로 늘려도 합쳐지게)
 LOGINS_JS_MAX += 128
 LOGINS_JS_GZIP_MAX += 96
+# 11/16 14시: 맨 위 꾸미기 카드(코드 복사 + 쉬운 3단계 + 판 확인 · 늘 펼침) · 글쓰기 한 번에·X 도우미 숨김 스위치 — 주인 '꾸미기 책갈피만'
+LOGINS_JS_MAX += 1280
+LOGINS_JS_GZIP_MAX += 448
 
 
 def test_asset_budgets() -> None:

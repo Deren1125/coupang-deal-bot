@@ -9,7 +9,7 @@ const CSS = '#lgp .row{flex-wrap:wrap;row-gap:8px}#lgp .grow{flex-basis:60%}#lgp
   '#lgp .qr img{width:100%;max-width:520px;height:auto;border-radius:8px;border:1px solid var(--line);background:#fff}' +
   '#lgp .qr p{margin:0;font-size:13px;text-align:center}#lgp .vn{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}' +
   '#lgp .vn span{flex:1;min-width:0;font-size:14px}#lgp .ro .t{color:var(--sub)}#lgp .kk ol{margin:0;padding:0 0 10px 20px;font-size:14px;line-height:1.6}' +
-  '#lgp .kk .ac{width:100%;min-height:48px;margin-bottom:12px;justify-content:center}';
+  '#lgp .kk .ac{width:100%;min-height:48px;margin-bottom:12px;justify-content:center}#lgp .kb{padding:12px 0;border-bottom:1px solid var(--line)}#lgp .kb h3{margin:0 0 4px;font-size:17px}';
 let box = null, data = null, at = 0, timer = null, busy = false, tt = null, open = false, kk = null;
 
 function el(t, a, ...kids) {
@@ -98,33 +98,42 @@ function row(r) {
     right(r.check), right(r.button, r.bad));  // check: 몰 '지금 확인'
 }
 
-// 책갈피 설치 칸 (꾸미기 10/27 · 통계 11/11 · 이웃 관리 11/14 — note = 오늘 수) · 코드는 펼칠 때 /dashboard/api/<api>
-// 11/16 '한 번에'(통계 + 이웃 관리)를 맨 위에 · 그 둘의 옛 버튼(old)은 '따로 쓰고 싶을 때'(MORE) 아래로 접음
-const MORE = {t: '따로 쓰고 싶을 때 (통계 보내기 · 이웃 관리)'};
-const BM = [{api: 'one', t: '한 번에 버튼 설치 (통계 + 서이추·들르기 · 누를 단추 없음)'}, {api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)'},
-  {api: 'writebm', t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'},
-  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'xhelper', x: 1, t: 'X 도우미 버튼 설치'}, MORE,  // x: 설정 x_helper
-  {api: 'statscap', old: 1, t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'}, {api: 'seoi', old: 1, t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}];
+// 책갈피 설치 칸 (꾸미기 10/27 · 통계 11/11 · 이웃 관리 11/14 — note = 오늘 수) · 코드는 /dashboard/api/<api>
+// 주인 11/16 14시 '꾸미기 책갈피 코드만': 맨 위 꾸미기(KK — 늘 펼침 · 코드 복사 + 쉬운 3단계 + 판 확인) · 그 아래 이웃 한 번에 ·
+// 나머지는 '따로 쓰고 싶을 때'(MORE) 안. 글쓰기 한 번에(w)는 설정 write_bm, X 도우미(x)는 x_helper 를 켤 때만
+const KK = {api: 'kkumi'}, MORE = {t: '따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)'};
+const BM = [{api: 'one', t: '이웃 한 번에 버튼 설치 (이웃 서이추·들르기 + 통계 · 누를 단추 없음)'}, MORE,
+  {api: 'seoi', old: 1, t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}, {api: 'statscap', old: 1, t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'},
+  {api: 'ablyrank', old: 1, t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'xhelper', old: 1, x: 1, t: 'X 도우미 버튼 설치'},
+  {api: 'writebm', old: 1, w: 1, t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'}];
+const shown = b => (!b.old || MORE.o) && (!b.x || (data && data.xhelper)) && (!b.w || (data && data.writebm));
 function kkDraw() {
   const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
-  kk.replaceChildren(...BM.filter(b => (!b.old || MORE.o) && (!b.x || (data && data.xhelper))).flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
+  const cp = b => el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사');
+  // 꾸미기 새 판 알림 (11/14): 책갈피에 저장한 뒤 '설치했어요' → 할 일의 '꾸미기 새 판' 줄이 사라짐
+  const ack = b => b.d.ver ? el('button', {class: 'sm ac', type: 'button', disabled: !!b.d.ack, onclick: async e => { await press({action: 'kkumi.installed', args: {ver: b.d.ver}}, e); b.d = null; kkLoad(b); if (W.SBRoutine) W.SBRoutine.load(); }},
+    b.d.ack ? `v${b.d.version} 설치됨 ✓` : `설치했어요 (v${b.d.version})`) : '';
+  const k = KK.d;
+  kk.replaceChildren(el('div', {class: 'kb'}, el('h3', {}, '꾸미기 책갈피' + (k && k.version ? ` (v${k.version})` : '')),
+    el('p', {class: 'note'}, '이 책갈피 하나면 돼요 — 링크 카드 · 예약 시각 자동 채움'), ...(k ? [cp(KK), el('ol', {}, k.steps.map(x => el('li', {text: x}))),
+      k.check ? el('p', {class: 'note'}, k.check) : '', ack(KK), k.use ? el('p', {class: 'note'}, k.use) : '']
+      : [KK.e ? el('button', {class: 'sm', type: 'button', onclick: () => { KK.e = 0; kkLoad(KK); kkDraw(); }}, '다시 불러오기') : el('p', {class: 'note'}, '불러오는 중…')])),
+    ...BM.filter(shown).flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
     b.o = !b.o; if (b.o && !b.d && b.api) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o || !b.api ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
-    el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사'), b.d.go ? el('a', {class: 'sm', href: b.d.go.h}, b.d.go.t) : '',
-    // 꾸미기 새 판 알림 (11/14): 책갈피에 저장한 뒤 '설치했어요' → 할 일의 '책갈피가 바뀌었어요' 줄이 사라짐
-    b.d.ver ? el('button', {class: 'sm ac', type: 'button', disabled: !!b.d.ack, onclick: async e => { await press({action: 'kkumi.installed', args: {ver: b.d.ver}}, e); b.d = null; kkLoad(b); if (W.SBRoutine) W.SBRoutine.load(); }},
-      b.d.ack ? `v${b.d.version} 설치됨 ✓` : `설치했어요 (v${b.d.version})`) : ''] : [el('p', {class: 'note'}, '불러오는 중…')])]));
+    cp(b), b.d.go ? el('a', {class: 'sm', href: b.d.go.h}, b.d.go.t) : '', ack(b)] : [el('p', {class: 'note'}, '불러오는 중…')])]));
 }
 async function kkLoad(b) {
-  try { const r = await fetch('/dashboard/api/' + b.api, {credentials: 'same-origin', headers: {Accept: 'application/json'}}); if (r.status === 200) b.d = await r.json(); } catch (e) { /* 다시 펼치면 */ }
-  if (!b.d) { b.o = false; toast('불러오지 못했어요 — 잠시 뒤 다시'); }
+  try { const r = await fetch('/dashboard/api/' + b.api, {credentials: 'same-origin', headers: {Accept: 'application/json'}}); const d = r.status === 200 && await r.json(); if (d && d.code && d.steps) b.d = d; } catch (e) { /* 다시 펼치면 */ }
+  if (!b.d) { if (b === KK) b.e = 1; else { b.o = false; toast('불러오지 못했어요 — 잠시 뒤 다시'); } }  // 꾸미기 카드는 '다시 불러오기' 단추만
   kkDraw();
 }
 
 function draw() {
   if (!box) return;
-  const xh = !!(data && data.xhelper);
-  if (!kk || kk.xh !== xh) { kk = kk || el('div', {class: 'box kk', style: 'padding:0 14px'}); kk.xh = xh; kkDraw(); }
+  const kf = String([data && data.xhelper, data && data.writebm]);  // 설정으로 숨긴 칸이 바뀌면 다시
+  if (!kk) { kk = el('div', {class: 'box kk', style: 'padding:0 14px'}); kkLoad(KK); }
+  if (kk.f !== kf) { kk.f = kf; kkDraw(); }
   const rows = (data && data.rows) || [], q = data && data.qr, v = data && data.vnc;
   // 주인 몫이 없으면 한 줄 (누르면 펼침) · 필요하면 늘 펼침
   const calm = data && !data.need && !q && !v, f = calm && el('div', {class: 'box', style: 'padding:0 14px'}, el('button', {class: 'fold', type: 'button',

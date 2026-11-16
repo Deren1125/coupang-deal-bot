@@ -128,7 +128,7 @@ def test_view_groups_by_slot_marks_current_and_counts(bot: DealBot, tmp_path: Pa
     assert routine.view(bot) == {"day": None, "today": False, "slots": [], "overflow": 0, "done": 0, "total": 0,
                                  "ably": None, "rising": [], "rests": [], "stats": None,
                                  # 11/14: 늘 실리는 칸 — 기록 나이·자동 점검·꾸미기 새 판·못 전한 체크·이웃 글 들르기
-                                 "age_min": None, "gate": None, "kkumi_new": True, "relay": 0,
+                                 "age_min": None, "gate": None, "kkumi_new": True, "kkumi_v": 7, "relay": 0,
                                  "nb": None}  # 목록 없음 → 칸 숨김 (에이블리 링크 부탁도 없음 — test_dash_ably_requests)
     day = tz_now(bot).date().isoformat()
     with_routine(tmp_path, sample(day))

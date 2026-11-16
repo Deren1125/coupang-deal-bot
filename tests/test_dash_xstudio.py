@@ -1074,7 +1074,7 @@ def test_xstudio_js_is_local_safe_and_loaded_by_shell() -> None:
     raw = (STATIC / "xstudio.js").read_bytes()
     assert len(raw) <= 39 * 1024 and len(gzip.compress(raw, 9)) <= 14 * 1024  # 셸이 defer 로 받는 파일 (서비스 워커가 한 번 받아 둠)
     assert shell.XSTUDIO_JS == "xstudio.js" and f'<script defer src="{shell.asset_url("xstudio.js")}"></script>' in shell.page({})
-    assert "{api: 'xhelper', x: 1, t: 'X 도우미 버튼 설치'}" in (STATIC / "logins.js").read_text(encoding="utf-8")  # 연결 탭 책갈피 설치 칸 (설정 x_helper 켤 때만 — 11/16)
+    assert "{api: 'xhelper', old: 1, x: 1, t: 'X 도우미 버튼 설치'}" in (STATIC / "logins.js").read_text(encoding="utf-8")  # 연결 탭 책갈피 설치 칸 (설정 x_helper 켤 때만 — 11/16)
 
 
 SHIM = r"""

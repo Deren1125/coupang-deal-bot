@@ -923,6 +923,8 @@ class DashboardConfig(BaseModel):
     ssalmuk_llm_gemini_models: list[str] = Field(default_factory=lambda: ["gemini-2.5-flash", "gemini-2.5-flash-lite"])  # 허용 목록 (gemini-* 만)
     ssalmuk_llm_gemini_max_output_tokens: int = Field(8192, ge=1)  # generationConfig.maxOutputTokens 상한 (없으면 이 값으로)
     blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
+    # 주인 11/16 14시 "꾸미기 책갈피 코드만" — '글쓰기 한 번에' 책갈피(writebm.py) 설치 칸 숨김 · write_act 는 403 '이제 안 써요' (코드는 그대로, true 면 예전대로)
+    write_bm: bool = False
     cards: list[DashboardCardConfig] = Field(default_factory=list)
     # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
     public_url: str = "https://52-79-136-64.sslip.io"
