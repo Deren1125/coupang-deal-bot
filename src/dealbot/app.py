@@ -195,6 +195,9 @@ SKIP_NOT_SUMMARIZED = frozenset({"held", "held_price"})
 # 링크 요청 자리가 다 차서 빠진 딜 (저녁 요약에서 '안 올린 딜' 문장 대신 링크 자리 문장으로 따로 셈 — 주인 결정 10/15)
 LINK_FULL_LABEL = "요청 밀림"
 LINK_REPLACED_LABEL = "더 좋은 딜로 교체"
+# 자동 제휴 링크를 못 만들어 주인에게 묻지 않고 건너뛴 딜 (주인 11/16 '자동 링크만 올려' — publish.owner_link_requests: false)
+NO_AUTOLINK = "no auto link"
+NO_AUTOLINK_LABEL = "자동 링크 불가"
 # Blog-Auto 카톡 한 줄 200자 = 머리말('🌙 딜봇 10/14') + 빈칸 + 딜봇 하루 줄. 딜봇 하루 줄은 이 길이 안에서만 늘린다
 DAY_LINE_MAX = 180
 
@@ -220,6 +223,8 @@ def _closed_label(status: str, error: str | None) -> str:
         return "주인이 넘김"
     if e.startswith(REPLACED):
         return LINK_REPLACED_LABEL
+    if e.startswith(NO_AUTOLINK):
+        return NO_AUTOLINK_LABEL
     return "기타"
 
 
@@ -2560,6 +2565,9 @@ class DealBot:
             # (자리를 만들려고 다른 글을 내리지도 않음). 아래 조건부 UPDATE 는 자리를 만드는 동안의 짧은 틈까지 막는다
             log.info("queue #%d: owner answered while it was being checked — no link request", item.id)
             return True
+        if not self.settings.publish.owner_link_requests:
+            self._skip_no_autolink(item, deal, shop, why)  # 주인 11/16 '자동 링크만 올려' — 묻지 않고 건너뜀
+            return True
         if cap and self.db.queue_counts().get("awaiting_link", 0) >= cap and not await self._make_link_room(item, cap):
             # 링크 요청이 이미 여러 건 쌓여 있으면 더 보내지 않는다 (관리자 챗 폭주 방지). 딜은 어차피 곧 지난다
             if self.db.move_unlinked(item.id, status="skipped", error=f"manual link backlog full ({cap})"):
@@ -2577,6 +2585,60 @@ class DealBot:
         log.info("queue #%d awaiting manual link (%s)", item.id, why)
         await self.refresh_pending_notice()
         return True
+
+    def _skip_no_autolink(self, item: QueueItem, deal: Deal, shop: Any, why: str | None, *, waiting: bool = False) -> bool:
+        """자동 제휴 링크를 못 만드는 딜: 주인에게 링크를 묻지 않고(할 일 카드·카톡 없음) 채널에도 안 올리고 건너뛴다 — 기록에만
+        '자동 링크 불가' (주인 11/16 '내가 링크 넣어 줘야 하는 것들은 빼자. 자동 링크만 올려'). waiting: 이미 주인 링크를 기다리던 글(정리).
+        처리하는 사이 주인이 링크를 붙였거나 넘긴 글은 건드리지 않는다 (조건부 UPDATE). 건너뛰었으면 True."""
+        name = getattr(shop, "name", None) or deal.product.shop
+        error = f"{NO_AUTOLINK}: {name} ({why or 'manual link required'})"
+        done = (self.db.replace_awaiting_link(item.id, error) if waiting
+                else self.db.move_unlinked(item.id, status="skipped", error=error))
+        if not done:
+            return False
+        self.notifier.resolve(f"link:{item.id}")
+        self.db.log_event("INFO", "autolink", f"#{item.id} 자동 링크 불가로 건너뜀 — {name}: {why or '링크를 직접 만들어야 하는 몰'}"
+                          + (" (기다리던 링크 요청 정리)" if waiting else ""))
+        log.info("queue #%d skipped — no auto link (%s: %s)", item.id, name, why)
+        return True
+
+    def _no_auto_link_route(self, deal: Deal, shop: Any, auth: AuthResult) -> bool:
+        """주인 링크 말고는 링크를 얻을 길이 없는 딜인가 (자동 쉐어링크·쇼핑커넥트·'쇼핑 커넥트 없는 판매처'·토스 점검 기간 모두 아님)."""
+        if self._sc_store_known(deal, shop, auth):
+            return False
+        if shop is not None and shop.key == "toss" and self._toss_no_link():
+            return False
+        if self._toss_autolink_key(deal, shop, ignore_stop=True):
+            return False
+        return not self._autolink_product_no(deal, shop, auth, ignore_stop=True)
+
+    def _clear_owner_link_requests(self) -> int:
+        """owner_link_requests 를 끈 뒤 남아 있는 주인 링크 요청(할 일 '링크 넣기')을 정리한다: 자동 링크를 거칠 수 있는 글(토스 쉐어링크 등)은
+        자동 링크 대기로(멈춤이면 다시 될 때까지 — 깨우는 것은 _autolink_timeouts), 나머지는 '자동 링크 불가'로 건너뜀."""
+        if self.settings.publish.owner_link_requests or self.state.dry_run:
+            return 0
+        n = 0
+        for item in self.db.awaiting_items(200):
+            deal = item.deal
+            if deal.affiliate_url:
+                continue  # 주인이 이미 링크를 붙인 글은 그대로
+            shop = self.registry.get(deal.product.shop)
+            cached = deal.product.extra.get("auth")
+            auth = (AuthResult(str(cached.get("status") or "ok"), str(cached.get("reason") or ""), cached.get("seller"))
+                    if isinstance(cached, dict) else AuthResult("unknown", ""))
+            tried = bool(self.db.kv_get(f"{autolink.KV_TRIED}{item.id}"))
+            if not tried and self._toss_autolink_key(deal, shop, ignore_stop=True):
+                self.db.kv_set(f"{autolink.KV_TRIED}{item.id}", to_iso(utcnow()))
+                self._defer_autolink(item, deal, shop="toss", until=self._stop_until("toss") or utcnow())
+            elif not tried and (no := self._autolink_product_no(deal, shop, auth, ignore_stop=True)) and not self._sc_known_missing(no):
+                self.db.kv_set(f"{autolink.KV_TRIED}{item.id}", to_iso(utcnow()))
+                self._defer_autolink(item, deal, shop="naver", until=self._stop_until("naver") or utcnow(), no=no)
+            elif not self._skip_no_autolink(item, deal, shop, "자동 링크를 이미 시도함" if tried else None, waiting=True):
+                continue
+            n += 1
+        if n:
+            log.info("주인 링크 요청 %d건 정리 (자동 링크만 — owner_link_requests: false)", n)
+        return n
 
     async def _make_link_room(self, item: QueueItem, cap: int) -> bool:
         """링크 요청 자리가 다 참 (주인 결정 10/15): 기다리는 글 중 점수가 가장 낮은 글(같으면 가장 오래된 글)보다 이 딜의 점수가
@@ -2895,7 +2957,10 @@ class DealBot:
                 log.warning("toss autolink result failed (%s): %s", row.get("id"), e)
         if rows or pos != int(self.db.kv_get(autolink.KV_TOSS_POS) or 0):
             self.toss_results.commit(pos)
-        return n + await self._autolink_timeouts() + self._autolink_backlog()
+        cleared = self._clear_owner_link_requests()
+        if cleared:
+            await self.refresh_pending_notice()  # 정리한 링크 요청을 '기다리는 글' 안내에서도 뺀다
+        return n + await self._autolink_timeouts() + cleared + self._autolink_backlog()
 
     BACKLOG_PER_TICK = 3
 
@@ -3218,13 +3283,17 @@ class DealBot:
         so = self.settings.deal.sold_out
         state, err = await self._ensure_link(item)
         if state == "manual":
+            shop = self.registry.get(err or "")
+            if not self.settings.publish.owner_link_requests and not self._naver_short(deal) and self._no_auto_link_route(deal, shop, auth):
+                # 주인 11/16 '자동 링크만 올려': 주인 링크 말고는 길이 없는 딜 — 품절 확인(페이지 열기)도 없이 바로 건너뜀
+                self._skip_no_autolink(item, deal, shop, "링크를 직접 만들어야 하는 몰")
+                return True
             if so.enabled and so.check_page_before_link_request and await self._page_sold_out(deal.product):
                 # 링크를 만들어 달라고 하기 전에 품절이면 조용히 내린다 (헛수고 방지)
                 self.db.update_queue_item(item.id, status="skipped", error="sold out (page, before link request)")
                 self.db.log_event("INFO", "soldout", f"{pid} skipped before link request")
                 log.info("queue #%d sold out before link request — skipped", item.id)
                 return True
-            shop = self.registry.get(err or "")
             if self._sc_store_known(deal, shop, auth):
                 # 주인이 '쇼핑 커넥트에 없음'으로 표시한 판매처: 묻지 않고 링크 없이 (주인 10/18). 가격이 안 맞는 딜은 보류
                 if await self._held_before_autolink(item, deal):

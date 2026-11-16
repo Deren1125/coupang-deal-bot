@@ -106,6 +106,9 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     # 주인 알림 길 (주인 10/18): 예전 흐름 테스트는 legacy(카톡 받은편지함 + 텔레그램) 그대로 본다.
     # push(대시보드 앱 웹 푸시 · 관리자 챗 조용히)는 test_notify_*.py · test_dash_*.py 가 직접 켜서 본다
     s.notify.router = "legacy"
+    # 주인 11/16 '자동 링크만 올려' (운영 기본 owner_link_requests: false): 예전 링크 요청 흐름 테스트는 켠 채로 본다.
+    # 끈 흐름(묻지 않고 건너뜀·남은 요청 정리)은 test_autolink_only.py 가 직접 끄고 본다
+    s.publish.owner_link_requests = True
     return s
 
 
