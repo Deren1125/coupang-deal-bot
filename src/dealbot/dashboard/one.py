@@ -45,7 +45,8 @@ STEPS = (
     "누른 뒤에는 누를 단추도 확인 창도 없어요 — 화면을 켜 둔 채 그 탭에 두세요. 끝나면 화면 아래 칸에 요약이 남아요.",
     "왜 두 번인가요: 통계 화면과 블로그 화면은 네이버 주소가 달라 브라우저가 한 화면에서 둘을 못 하게 막아요 — 책갈피는 하나, 화면마다 한 번씩이에요. "
     "통계만·이웃만 하려면 그 화면에서만 누르면 돼요 (이웃새글이나 내 블로그 화면에서 바로 눌러도 돼요).",
-    "멈추려면 탭을 닫거나 새로 고침 — 다시 누르면 남은 것부터 이어서 해요 (차례·간격·상한은 대시보드가 기억해요: 30~40초 간격, "
+    "멈추려면 탭을 닫거나 새로 고침 — 다시 누르면 남은 것부터 이어서 해요 (차례·간격·상한은 대시보드가 기억해요: "
+    f"{seoi.GAP['add'][0]}~{seoi.GAP['add'][1]}초 간격, 한 시간 {seoi.HOUR_CAP}개, "
     f"하루 서이추 블로그마다 {seoi.ADD_DAY_CAP}개·들르기 합쳐 {seoi.VISIT_DAY_CAP}개).",
     "네이버가 제한 안내·자동입력 방지·로그인 화면을 보이면 바로 멈추고 그날은 쉬어요 (돌아가지 않아요) — 요약의 '폰에서 직접'에 남은 것만 폰에서 하면 돼요. "
     "블로그 계정이 여럿이면 계정마다 로그인해서 같은 식으로.",
@@ -74,6 +75,10 @@ def _code() -> str:
     one = kkumi.minify(SRC.read_text(encoding="utf-8"))
     st = kkumi.minify(statscap.SRC.read_text(encoding="utf-8")).replace("@@URL@@", "@@SURL@@").replace("@@KEY@@", "@@SKEY@@")
     so = kkumi.minify(_patched_seoi())
+    zl = "const Z=" + one.split("const Z=", 1)[1].split(";", 1)[0] + ";" if "const Z=" in one else ""
+    if not zl or so.count(zl) != 1:
+        raise ValueError("bad Z")
+    so = so.replace(zl, "", 1)  # seoi.js 의 Z 는 껍데기의 Z 와 똑같음 — 한 번만 (안쪽 코드는 바깥 Z 를 씀)
     if one.count("'@@STAT@@';") != 1 or one.count("'@@SEOI@@';") != 1:
         raise ValueError("bad one.js")
     return seoi.pack(one.replace("'@@STAT@@';", _inner(st)).replace("'@@SEOI@@';", _inner(so)))
