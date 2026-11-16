@@ -105,6 +105,11 @@ def replies(*texts: str) -> dict[str, Any]:
     return {"ok": True, "why": "", "replies": [{"text": t} for t in texts]}
 
 
+def _mins(hm: str) -> int:
+    h, m = hm.split(":")
+    return int(h) * 60 + int(m)
+
+
 def studio(ask: Any = None, **kw: Any) -> xs.Studio:
     now = kw.pop("now", [NOW])
     return xs.Studio(FakeDb(), ask=ask or FakeAsk(drafts(GOOD)), clock=lambda: now[0], **kw)
@@ -155,7 +160,8 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot) -> None:
     assert desk(bot)._ask_fn.calls == []  # 막힌 요청은 AI 까지 가지 않음
     status, got, head = await get_json(bot, xs.STATE_PATH, session_headers(bot))
     assert status == 200 and head["Cache-Control"] == "no-store"
-    assert got["posts"]["target"] == [4, 5] and got["posts"]["times"] == ["08:30", "12:00", "15:30", "18:30", "21:30"] and got["model"] == "Opus"  # 주인 11/14 하루 4~5개
+    assert got["posts"]["target"] == [8, 10] and got["model"] == "Opus"  # 주인 11/16 하루 10개 정도
+    assert len(got["posts"]["times"]) == 10 and all(abs(_mins(a) - _mins(b)) <= xs.POST_JITTER_MIN for a, b in zip(got["posts"]["times"], xs.POST_TIMES, strict=True))
     assert got["links"] == {"post": "https://x.com/intent/post?text=", "reply": "https://x.com/intent/post?in_reply_to=",
                             "profile": "https://x.com/", "compose": "https://x.com/compose/post"}
     assert [f[1] for f in got["formats"]] == ["알아서", "숫자 대비", "증발·폭락·폭등", "알려드림 분석", "역대 기록", "반전", "저장형 정리", "인용+관점"]
@@ -658,14 +664,21 @@ def test_posted_log_counts_today_and_week_without_storing_text() -> None:
     assert "엔비디아" not in json.dumps(s.db.kv, ensure_ascii=False)
     now[0] += 3 * 86400
     assert s.posted({"op": "add", "text": "다른 글\n\n내 말", "format": "x"})[1]["posts"] == {
-        "today": 1, "d7": 2, "target": [4, 5], "times": ["08:30", "12:00", "15:30", "18:30", "21:30"], "next": s.post_stats()["next"]}
+        "today": 1, "d7": 2, "target": [8, 10], "times": list(xs.post_times(xs._day(now[0]))), "next": s.post_stats()["next"]}
     now[0] += 5 * 86400
     assert s.post_stats()["today"] == 0 and s.post_stats()["d7"] == 1
     assert s.posted({"op": "undo", "text": "다른 글\n\n내 말"})[1]["posts"]["d7"] == 1  # 다른 날 줄은 그대로 (그날 것만 지움)
     with pytest.raises(xs.StudioError):
         s.posted({"op": "add", "text": ""})
-    # 다음 추천 시간
-    for hm, nxt in (((7, 0), "08:30"), ((11, 0), "12:00"), ((12, 0), "15:30"), ((16, 0), "18:30"), ((20, 59), "21:30"), ((22, 0), "")):
+    # 다음 추천 시간 — 11/16 부터 열 시각을 날마다 ±10분 흔듦 (11/14 는 아래 값 · 같은 날이면 늘 같음 · 날이 바뀌면 달라짐)
+    assert xs.post_times("2026-11-14") == tuple(["07:26", "08:57", "10:34", "11:56", "13:34", "15:00", "17:09", "18:53", "20:50", "22:34"]) == xs.post_times("2026-11-14")
+    assert xs.post_times("2026-11-15") != xs.post_times("2026-11-14") and len(set(xs.post_times("2026-11-15"))) == 10
+    for d in range(1, 31):
+        ts = xs.post_times(f"2026-12-{d:02d}")
+        assert list(ts) == sorted(ts) and all(abs(_mins(a) - _mins(b)) <= 10 for a, b in zip(ts, xs.POST_TIMES, strict=True))
+    assert min(_mins(t) for t in xs.POST_TIMES) >= 7 * 60 and max(_mins(t) for t in xs.POST_TIMES) <= 23 * 60  # 07~23시
+    for hm, nxt in (((7, 0), "07:26"), ((8, 0), "08:57"), ((11, 0), "11:56"), ((12, 0), "13:34"), ((16, 0), "17:09"), ((20, 0), "20:50"),
+                    ((22, 0), "22:34"), ((22, 40), "")):
         from datetime import datetime
 
         s.clock = lambda hm=hm: datetime(2026, 11, 14, *hm, tzinfo=xs.KST).timestamp()
@@ -1245,11 +1258,11 @@ def run_shim(scenario: str, state: str, extra: dict[str, Any] | None = None) -> 
 def test_js_card_on_x_section_and_screen_takes_over_sns_tab() -> None:
     got = run_shim("card", view_json())
     assert got["order"] == ["snt", "xsc", "DIV"]  # SNS 탭 칸 고르기 바로 아래 · X 칸 위
-    for t in ("오늘 할 X 일", "글 1/4~5개", "답글 0/10개", "글쓰기", "답글 달기", "@mad_dogdebt"):
+    for t in ("오늘 할 X 일", "글 1/8~10개", "답글 0/10개", "글쓰기", "답글 달기", "@mad_dogdebt"):
         assert t in got["card"], t
     assert got["links"] == ["#/sns/xs", "https://x.com/mad_dogdebt"]
     assert got["scr"] == "xss" and got["hidden"] and got["title"] == "X 글쓰기·답글" and got["kids"][0] == "xss"
-    for t in ("글쓰기답글계정도우미", "오늘 올린 글1/4~5", "추천 시간 08:30 · 12:00 · 15:30 · 18:30 · 21:30 · 하루 4~5개 · 화제 글 위주", "초안 3개 만들기", "초안 Opus · 마지막 한마디와 올리기는 내가"):
+    for t in ("글쓰기답글계정도우미", "오늘 올린 글1/8~10", "추천 시간 " + " · ".join(["07:26", "08:57", "10:34", "11:56", "13:34", "15:00", "17:09", "18:53", "20:50", "22:34"]) + " · 하루 8~10개 · 화제 글 위주", "초안 3개 만들기", "초안 Opus · 마지막 한마디와 올리기는 내가"):
         assert t in got["screen"], t
     assert got["back"] == [False, ["snt", "DIV"]]  # 다른 칸으로 가면 화면·카드 모두 빠짐
 

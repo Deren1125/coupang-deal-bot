@@ -873,15 +873,16 @@ class XBigConfig(BaseModel):
 
 
 class XTodayConfig(BaseModel):
-    """'오늘 X 글' (주인 11/15 — 그날 올릴 X 초안 4~5개를 서버가 미리 만들어 대시보드 X 칸에 · dashboard/xtoday.py).
+    """'오늘 X 글' (주인 11/15 — 그날 올릴 X 초안을 (11/16 부터 하루 10개) 서버가 미리 만들어 대시보드 X 칸에 · dashboard/xtoday.py).
     글은 xstudio 와 같은 길(Opus 까지)로 쓰고, 올리기는 주인이 손으로 (자동 게시 없음)."""
 
     enabled: bool = True
     morning: str = "07:40"  # 아침에 그날 초안을 만드는 시각 (app.timezone)
     fills: list[str] = Field(default_factory=lambda: ["11:20", "17:20"])  # 빈 시각이 있을 때만 보충 (2번까지)
-    per_day: int = Field(5, ge=0, le=5)  # 하루 카드 수 (xstudio.POST_TIMES 다섯 시각)
-    auto_drafts_per_day: int = Field(8, ge=0, le=20)  # 서버가 스스로 쓰는 초안(AI 호출) 하루 상한 — 큰 사건 초안 포함
-    reserve: int = Field(10, ge=0, le=40)  # 주인이 화면에서 직접 누를 몫으로 남겨 두는 하루 초안 수 (xstudio 하루 40번 가운데)
+    per_day: int = Field(10, ge=0, le=10)  # 하루 카드 수 (xstudio.POST_TIMES 열 시각 — 주인 11/16 "하루 10개 정도")
+    auto_drafts_per_day: int = Field(13, ge=0, le=30)  # 서버가 스스로 쓰는 초안(AI 호출) 하루 상한 — 카드 10 + 큰 사건 초안 3
+    reserve: int = Field(15, ge=0, le=50)  # 주인이 화면에서 직접 누를 몫으로 남겨 두는 하루 초안 수 (xstudio 하루 50번 가운데)
+    goal_posts: bool = True  # '팔로워 목표' 글 (하루 1편 · 7일에 3편까지 — 주인 11/16)
     big: XBigConfig = Field(default_factory=XBigConfig)
 
     @field_validator("morning")

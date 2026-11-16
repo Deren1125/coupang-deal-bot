@@ -187,14 +187,14 @@ function bigCard(ev) {
 }
 function itemCard(it) {
   return el('section', {class: 'itm' + (focus && (focus === it.id || focus === it.eid) ? ' hl' : '') + (it.done ? ' xd' : ''), 'data-t': it.id},
-    el('div', {class: 'ih'}, el('span', {class: 'cp info'}, it.slot || '바로'), el('span', {class: 'cp' + (it.kind === 'big' ? ' hot' : '')}, it.kind === 'big' ? '큰 사건' : '화제'),
+    el('div', {class: 'ih'}, el('span', {class: 'cp info'}, it.slot || '바로'), el('span', {class: 'cp' + (it.kind === 'big' ? ' hot' : '')}, it.kind === 'big' ? '큰 사건' : it.kind === 'goal' ? '팔로워 목표' : '화제'),
       el('span', {class: 'cp ' + (it.nums_ok ? 'ok' : 'stop')}, it.nums_ok ? '숫자 검사 통과' : '숫자 확인 필요'),
       it.confirmed ? null : el('span', {class: 'cp hot'}, '확인 안 된 이야기'), it.done ? el('span', {class: 'cp ok'}, '올림 ✓') : null),
     el('b', {class: 'kw'}, it.keyword || '오늘 글'),
     it.angle ? el('p', {class: 'an'}, `관점 · ${it.angle}`) : null,
     (it.warn || []).map(x => el('p', {class: 'w'}, x)),
     el('div', {class: 'po'}, it.preview),
-    el('div', {class: 'src'}, el('span', {}, '출처 기사'), links(it.sources)),
+    (it.sources || []).length ? el('div', {class: 'src'}, el('span', {}, '출처 기사'), links(it.sources)) : null,
     el('div', {class: 'rw'}, btn('pb', '열기 — 내 한마디 쓰고 올리기', () => open(it))),
     el('div', {class: 'rw'}, copyBtns(it)),
     el('div', {class: 'rw'}, box(it, '올렸어요'), btn('pb soft', '안 써요', () => skip(it.id))));

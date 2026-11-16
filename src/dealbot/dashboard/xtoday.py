@@ -9,8 +9,13 @@ A. 오늘 X 글 — 1분 일(scheduler)에서 tick():
    · 아침 x_today.morning (07:40) 뒤 처음 도는 때 그날 초안을 만든다. 빈 시각이 남으면 x_today.fills (11:20·17:20) 에 보충 (2번까지).
    · 글감: 큰 사건(B) 먼저 → 화제 목록(Blog-Auto x_hot — xstudio 의 hot 과 같은 것). 같은 사건은 한 번만 (7일 기억 kv xtoday_used —
      오늘 카드끼리 · 어제 카드 · 큰 사건과 화제가 같은 이야기일 때). 올린 글 기록(dash_x_posts)에는 카드 번호(topic)가 남는다.
-   · 시각은 xstudio.POST_TIMES 다섯. 글감 하나 = AI 한 번. 서버가 스스로 쓰는 초안은 하루 auto_drafts_per_day(8)번, 주인 몫 reserve(10)번은
-     남긴다 (xstudio 하루 40번 안). 실패하면 그 차례는 끝 — 다음 보충 때만 다시 (돌려 가며 다시 부르지 않음).
+   · 시각은 xstudio.post_times(그날) 열 (주인 11/16 "하루 10개 정도" — POST_TIMES 07:30~22:30 을 날마다 ±10분 흔듦).
+     글감 하나 = AI 한 번. 서버가 스스로 쓰는 초안은 하루 auto_drafts_per_day(13 = 카드 10 + 큰 사건 3)번, 주인 몫 reserve(15)번은
+     남긴다 (xstudio 하루 50번 안). 실패하면 그 차례는 끝 — 다음 보충 때만 다시 (돌려 가며 다시 부르지 않음).
+   · '팔로워 목표' 글 (주인 11/16 — "중간중간 '팔로워 몇 명이 목표다, 팔로우 부탁드린다' 같은 글도"): 하루 1편 · 7일에 3편까지 ·
+     앞 글에서 이틀 넘게 띄움 · 저녁 시각 하나를 씀 (GOAL_FROM 뒤). 팔로워 수(dash_x_stats, 7일 안 기록)를 알면 '다음 목표 N명', 모르면 숫자 없이.
+     글은 xstudio.draft_goal (GOAL_SYSTEM — 감사·소통 · 대가 약속·맞팔·스팸 금지 · 최근 14일 문구와 겹치면 버림). kv xtoday_goal 에는
+     만든 때·목표·첫 줄·낱말만 14일.
    · 카드: 출처 기사 제목·링크 · 숫자 검사 통과 여부(원문에 없는 숫자 경고) · 첫 답글(출처) · 확인 안 된 이야기 표시.
    · 카드마다 [복사]·[긴 글 복사]·[첫 답글 복사] + '올렸어요' 체크 상자 (주인 11/15): 체크 = xstudio posted {op:add, tid} 그대로
      (오늘 올린 글 수·dash_x_posts 같이) · 다시 누르면 undo (10분 안) · 화면 값 done·undo_s 는 서버 기록에서.
@@ -57,6 +62,10 @@ BASE = "/dashboard/api/xtoday"
 STATE_PATH, MAKE_PATH, SKIP_PATH = f"{BASE}/state", f"{BASE}/make", f"{BASE}/skip"
 KV = "xtoday"  # {"day", "items": [...], "runs": {이름: 시각}, "ai": n, "err": "", "skip": [카드 번호], "doing": 만드는 중인 일, "resumed": 이어서 한 번 했나}
 KV_USED = "xtoday_used"  # [{"k": 글감 키, "toks": [...], "lead": 이름, "nums": [...], "at": 시각}] — 같은 사건을 다시 쓰지 않게 (7일)
+KV_GOAL = "xtoday_goal"  # [{"at": 시각, "day", "goal": n|None, "line": 첫 줄, "toks": [...]}] — 팔로워 목표 글 (14일)
+GOAL_KEEP_S, GOAL_PER_WEEK, GOAL_GAP_DAYS = 14 * 86400, 3, 2  # 문구 비교 14일 · 7일에 3편 · 앞 글에서 이틀 띄움
+GOAL_FROM = "18:30"  # 이 뒤의 빈 시각에 (없으면 남은 마지막 시각)
+GOAL_STATS_S = 7 * 86400  # 팔로워 수 기록이 이보다 오래면 숫자 없이
 KV_BIG = "xbig"  # {"day", "api": n, "last": 시각, "dead_until": 시각, "events": [...], "log": [...]}
 USED_KEEP_S, USED_MAX = 7 * 86400, 200
 EVENT_KEEP_S, EVENT_MAX, EVENT_ARTS = 72 * 3600, 40, 6
@@ -586,7 +595,66 @@ class XToday:
         taken = {i["slot"] for i in live}
         cur = _mins(_hm(now)) - SLOT_GRACE_MIN
         room = self.cfg().per_day - len(live)
-        return [t for t in xs.POST_TIMES if _mins(t) >= cur and t not in taken][:max(0, room)]
+        return [t for t in xs.post_times(st["day"]) if _mins(t) >= cur and t not in taken][:max(0, room)]
+
+    # ---------------------------------------------------------- 팔로워 목표 글
+    def goal_rows(self, now: float) -> list[dict[str, Any]]:
+        try:
+            raw = json.loads(self.db.kv_get(KV_GOAL) or "[]")
+        except ValueError:
+            raw = []
+        return [r for r in raw if isinstance(r, dict) and isinstance(r.get("at"), (int, float)) and 0 <= now - r["at"] <= GOAL_KEEP_S] \
+            if isinstance(raw, list) else []
+
+    def goal_due(self, st: dict[str, Any], now: float) -> bool:
+        """오늘 팔로워 목표 글을 쓸 차례인가: 하루 1편 · 7일에 GOAL_PER_WEEK 편 · 앞 글에서 GOAL_GAP_DAYS 날 띄움 · 오늘 카드에 없음."""
+        if not self.cfg().goal_posts or any(i.get("kind") == "goal" for i in st["items"]):
+            return False
+        rows, today = self.goal_rows(now), datetime.fromisoformat(st["day"]).date()
+        days = [datetime.fromisoformat(str(r.get("day") or xs._day(r["at"]))).date() for r in rows]
+        week = [d for d in days if 0 <= (today - d).days < 7]
+        return len(week) < GOAL_PER_WEEK and all((today - d).days >= GOAL_GAP_DAYS for d in days)
+
+    def _followers(self, now: float) -> int | None:
+        from dealbot.dashboard.actions import x_stats_rows
+
+        rows = x_stats_rows(self.db)
+        last = rows[-1] if rows else None
+        return int(last["followers"]) if last and 0 <= now - last["at"] <= GOAL_STATS_S and last["followers"] > 0 else None
+
+    async def _draft_goal(self, st: dict[str, Any], slot: str, now: float) -> dict[str, Any] | None:
+        """팔로워 목표 카드 (AI 한 번 · 자동 몫에 셈). 규칙에 맞는 초안이 없으면 None (그날은 다시 안 씀)."""
+        try:
+            xs.assert_writer_model(self.studio.model)
+        except ValueError as e:
+            raise xs.StudioError(503, "ai_off", "서버 AI 설정이 글 쓰는 모델 규칙과 달라요 — 메인 세션에 알려 주세요") from e
+        followers, recent = self._followers(now), self.goal_rows(now)
+        st["ai"] += 1
+        self._save(KV, st)
+        key = f"goal:{st['day']}"
+        try:
+            res = await self.studio.draft_goal(followers, recent)
+        except xs.StudioError as e:
+            if e.code != "declined":
+                raise
+            res = None
+        goal = res.get("goal") if res else xs.next_goal(followers)
+        lines = [d["text"] for d in (res or {}).get("drafts") or []]
+        row = {"at": now, "day": st["day"], "goal": goal, "line": xs.one_line(lines[0].split("\n", 1)[0], 60) if lines else "",
+               "toks": sorted(set().union(*[xs.goal_toks(t) for t in lines]))[:60] if lines else []}
+        self._save(KV_GOAL, (self.goal_rows(now) + [row])[-20:])  # 만든 때 센다 (초안이 없어도 그날 몫은 씀 — 다시 부르지 않게)
+        if res is None:
+            log.info("xtoday: 팔로워 목표 글은 오늘 쉼")
+            return None
+        res = {k: res[k] for k in ("drafts", "src_nums", "confirmed", "first_reply", "source", "model") if k in res}
+        item = {"id": item_id(key), "key": key, "kind": "goal", "eid": "", "slot": slot,
+                "keyword": f"팔로워 다음 목표 {goal:,}명" if followers is not None and goal else "팔로워 감사 글", "sources": [],
+                "sig": {}, "res": res, "made_at": now}
+        st["items"].append(item)
+        st["skip"] = self.plan(now)["skip"]
+        self._save(KV, st)
+        log.info("xtoday: 카드 %s kind=goal slot=%s 초안 %d", item["id"], slot, len(res["drafts"]))
+        return item
 
     def due(self, st: dict[str, Any], now: float) -> str:
         """지금 돌 차례인 일 이름 ('morning' · 'fill:11:20' · 'resume' · '')."""
@@ -690,6 +758,17 @@ class XToday:
             st["err"], st["doing"] = "", name
             self._save(KV, st)  # 먼저 적는다 — 실패해도 같은 차례를 다시 돌지 않음
             slots = self._free_slots(st, now)
+            if slots and self.goal_due(st, now) and self._ai_room(st):  # 팔로워 목표 글 — 저녁 빈 시각 하나 (뉴스 글감보다 먼저 자리만 잡음)
+                late = [t for t in slots if _mins(t) >= _mins(GOAL_FROM)]
+                gslot = late[0] if late else slots[-1]
+                try:
+                    if await self._draft_goal(st, gslot, now) is not None:
+                        slots.remove(gslot)
+                        made += 1
+                except xs.StudioError as e:
+                    st["err"] = e.text
+                    log.warning("xtoday %s: 팔로워 목표 글 멈춤 (%s)", name, e.code)
+                    slots = []
             for cand in self.candidates(st, now):
                 if not slots:
                     break
@@ -841,7 +920,7 @@ class XToday:
         hm = _hm(now)
         nxt = cfg.morning if "morning" not in st["runs"] and hm < cfg.morning else next((f for f in cfg.fills if f > hm and f"fill:{f}" not in st["runs"]), "")
         note = "" if now >= bg["dead_until"] else "네이버 검색 키가 막혀서 큰 사건 확인을 쉬고 있어요 — 메인 세션에 알려 주세요"
-        return {"v": 1, "on": bool(cfg.enabled), "day": st["day"], "slots": list(xs.POST_TIMES), "items": items, "big": events,
+        return {"v": 1, "on": bool(cfg.enabled), "day": st["day"], "slots": list(xs.post_times(st["day"])), "items": items, "big": events,
                 "free": self._free_slots(st, now), "next": nxt, "err": st["err"], "note": note, "ran": bool(st["runs"]),
                 "ai": {"used": st["ai"], "cap": cfg.auto_drafts_per_day, "left": self.studio._left("draft", xs.DRAFT_PER_DAY)},
                 "bigcfg": {"on": bool(cfg.big.enabled), "min_score": cfg.big.min_score, "per_day": cfg.big.per_day},

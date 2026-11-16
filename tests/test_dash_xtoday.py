@@ -124,10 +124,20 @@ HOTS = [hot("a1", "세무사 시험 논란", "세무사 시험 채점 논란 확
         hot("a5", "넷플릭스 요금", "넷플릭스 요금 인상"), hot("a6", "아이폰 가격", "아이폰 출고가 인상")]
 
 
+@pytest.fixture(autouse=True)
+def five_slots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """이 파일의 시험은 11/15 의 다섯 시각(흔들기 없음)으로 카드 흐름을 본다 — 시각 수와 상관없는 규칙이라.
+    11/16 의 열 시각·날마다 흔들기·팔로워 목표 글은 test_dash_xtoday10.py."""
+    monkeypatch.setattr(xs, "POST_TIMES", ("08:30", "12:00", "15:30", "18:30", "21:30"))
+    monkeypatch.setattr(xs, "POST_JITTER_MIN", 0)
+
+
 def desk(*, ask: Any = None, hots: list[dict[str, Any]] | None = None, rows: list[dict[str, Any]] | None = None, now: list[float] | None = None,
          **cfg: Any) -> tuple[xt.XToday, FakeAsk, FakeRouter, FakeNews, list[float]]:
     now = now if now is not None else [at("07:45")]
     big = cfg.pop("big", {})
+    cfg.setdefault("per_day", 5)
+    cfg.setdefault("goal_posts", False)
     conf = XTodayConfig(**cfg, big=big)
     db, ask, router, feed = FakeDb(), ask or FakeAsk(), FakeRouter(), FakeNews(rows)
     studio = xs.Studio(db, ask=ask, hot=lambda: list(HOTS if hots is None else hots), clock=lambda: now[0])
@@ -690,7 +700,7 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot) -> None:
     status, v, headers = await get_json(bot, xt.STATE_PATH, h)
     assert status == 200 and headers["Cache-Control"] == "no-store"
     assert v["v"] == 1 and v["on"] is True and v["slots"] == list(xs.POST_TIMES) and v["items"] == [] and v["big"] == [] and v["model"] == "Opus"
-    assert v["ai"] == {"used": 0, "cap": 8, "left": xs.DRAFT_PER_DAY}
+    assert v["ai"] == {"used": 0, "cap": 13, "left": xs.DRAFT_PER_DAY}
     for path, body in ((xt.MAKE_PATH, {"id": "0123abcd"}), (xt.SKIP_PATH, {"id": "0123abcd"})):
         assert (await post_json(bot, path, body, session_headers(bot, csrf=False)))[0] == 403, path
         assert (await post_json(bot, path, body, anon))[0] in (401, 403), path
@@ -699,7 +709,8 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot) -> None:
     status, out, _ = await post_json(bot, xt.SKIP_PATH, {"id": "0123abcd"}, h)
     assert status == 200 and out["status"] == "ok" and out["items"] == []
     cfg = bot.settings.dashboard.x_today
-    assert (cfg.morning, cfg.fills, cfg.per_day, cfg.auto_drafts_per_day) == ("07:40", ["11:20", "17:20"], 5, 8)
+    assert (cfg.morning, cfg.fills, cfg.per_day, cfg.auto_drafts_per_day, cfg.reserve, cfg.goal_posts) == ("07:40", ["11:20", "17:20"], 10, 13, 15, True)
+    assert cfg.per_day + cfg.big.per_day <= cfg.auto_drafts_per_day and xs.DRAFT_PER_DAY - cfg.auto_drafts_per_day >= cfg.reserve  # 카드 10 + 큰 사건 · 주인 몫
     assert (cfg.big.min_score, cfg.big.min_outlets, cfg.big.per_day, cfg.big.gap_minutes, cfg.big.quiet_hours) == (9, 3, 3, 90, "")
     assert len(cfg.big.queries) * (24 * 60 // cfg.big.poll_minutes) <= cfg.big.api_per_day  # 하루 뉴스 API 가 상한 안
     with pytest.raises(ValueError):
