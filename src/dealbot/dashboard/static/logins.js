@@ -99,14 +99,16 @@ function row(r) {
 }
 
 // 책갈피 설치 칸 (꾸미기 10/27 · 통계 11/11 · 이웃 관리 11/14 — note = 오늘 수) · 코드는 펼칠 때 /dashboard/api/<api>
-const BM = [{api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)'}, {api: 'statscap', t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'},
-  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'seoi', t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'},
-  {api: 'xhelper', t: 'X 도우미 버튼 설치'}];
+// 11/16 '한 번에'(통계 + 이웃 관리)를 맨 위에 · 그 둘의 옛 버튼(old)은 '따로 쓰고 싶을 때'(MORE) 아래로 접음
+const MORE = {t: '따로 쓰고 싶을 때 (통계 보내기 · 이웃 관리)'};
+const BM = [{api: 'one', t: '한 번에 버튼 설치 (통계 + 서이추·들르기 · 누를 단추 없음)'}, {api: 'kkumi', t: '꾸미기 버튼 설치 (링크 카드 · 예약 시각 자동 채움)'},
+  {api: 'ablyrank', t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'xhelper', t: 'X 도우미 버튼 설치'}, MORE,
+  {api: 'statscap', old: 1, t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'}, {api: 'seoi', old: 1, t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}];
 function kkDraw() {
   const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
-  kk.replaceChildren(...BM.flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
-    b.o = !b.o; if (b.o && !b.d) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
+  kk.replaceChildren(...BM.filter(b => !b.old || MORE.o).flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
+    b.o = !b.o; if (b.o && !b.d && b.api) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o || !b.api ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
     el('button', {class: 'sm ac', type: 'button', onclick: () => c(b.d.code)}, '코드 복사'), b.d.go ? el('a', {class: 'sm', href: b.d.go.h}, b.d.go.t) : '',
     // 꾸미기 새 판 알림 (11/14): 책갈피에 저장한 뒤 '설치했어요' → 할 일의 '책갈피가 바뀌었어요' 줄이 사라짐
     b.d.ver ? el('button', {class: 'sm ac', type: 'button', disabled: !!b.d.ack, onclick: async e => { await press({action: 'kkumi.installed', args: {ver: b.d.ver}}, e); b.d = null; kkLoad(b); if (W.SBRoutine) W.SBRoutine.load(); }},

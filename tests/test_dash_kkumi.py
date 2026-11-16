@@ -310,7 +310,7 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
     shim = shim.replace("const VIEW = JSON.parse(process.argv[2]);", "const VIEW = JSON.parse(process.argv[2]), KK = JSON.parse(process.argv[3]);")
     flow = shim.split("  const box = () =>")[0] + r"""
   const box = () => main.children.find(c => c.attrs.id === 'lgp');
-  const kf = () => box().all(c => c.className === 'fold kf')[0];
+  const kf = () => box().all(c => c.className === 'fold kf')[1];  // 맨 위는 '한 번에' (11/16)
   out.fold = [kf().textContent, kf().attrs['aria-expanded']];
   out.before = calls.filter(c => c.url === '/dashboard/api/kkumi').length;
   kf().click();

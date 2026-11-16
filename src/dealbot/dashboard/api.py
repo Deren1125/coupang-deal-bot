@@ -33,6 +33,8 @@
   GET  /dashboard/api/ablyrank          'Ably 랭킹 보내기' 책갈피 {code, len, steps} (ablyrank.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
   POST /dashboard/api/ably_rank_capture 책갈피가 에이블리 랭킹 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 · 열쇠 k · CORS 는 https://*.a-bly.com 만)
                                         → ablyrank.save (kv) → Blog-Auto 가 알리면 일 ably_rank_capture 로 넘김 · 서버는 에이블리를 열지 않음
+  GET  /dashboard/api/one               '한 번에' 책갈피 {code, len, steps, note?, go?} (one.view — 통계 보내기 + 이웃 관리를 하나로 · 열쇠 둘이 든 코드 · 주인 11/16 ·
+                                        새 POST 길 없음 — 책갈피는 아래 stats_capture·seoi_act 로만 보냄)
   GET  /dashboard/api/seoi              '이웃 관리' 책갈피 {code, len, steps, note, today} (seoi.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/14)
   POST /dashboard/api/seoi_act          책갈피가 누르기 전에 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
@@ -271,6 +273,7 @@ class DashApi:
         web.route(f"{API}/ablyrank", self.ablyrank)
         web.route_post(f"{API}/ably_rank_capture", self.ably_rank_capture, max_body=ABLYRANK_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/seoi", self.seoi)
+        web.route(f"{API}/one", self.one)
         web.route_post(f"{API}/seoi_act", self.seoi_act, max_body=SEOI_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/naver_qr.png", self.naver_qr)
         web.route(f"{API}/deal/hot", self.deal_hot)
@@ -735,6 +738,18 @@ class DashApi:
         except ValueError:
             return err(503, "failed", "대시보드 공개 주소가 이상해요")
 
+    async def one(self, query: dict[str, str]) -> Any:
+        """'한 번에' 책갈피 코드 (주인 11/16 — 통계 보내기 + 이웃 관리 · 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import one
+
+        try:
+            return jresp(200, one.view(self.bot.db, self.bot.settings.dashboard.public_url, tz=ZoneInfo(self.bot.settings.app.timezone)),
+                         {"Cache-Control": "no-store"})
+        except ValueError:
+            return err(503, "failed", "대시보드 공개 주소가 이상해요")
+
     async def seoi_act(self, form: dict[str, str], headers: dict[str, str]) -> Any:
         """책갈피가 누르기 전에 묻는 곳 (주인 11/14 서이추·이웃 들르기). 열쇠 → 간격·상한 → (이웃 글이면) 댓글 초안. 안 되면 알릴 글과 함께 거절 —
         책갈피는 그 글만 보이고 아무것도 하지 않는다. 서버는 네이버를 열지 않고, 남의 글 본문은 기록하지 않는다. 응답 CORS 는 네이버 블로그 화면에만."""
@@ -766,6 +781,14 @@ class DashApi:
             if e.code == "key":
                 log.info("seoi_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
             return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
+        if form.get("a") == "queue" and got.get("blog"):
+            # '한 번에' 책갈피의 끝 요약 (주인 11/16): 오늘 그 블로그 통계가 왔는지 한 칸 (읽기만 · 못 읽으면 칸 없음)
+            try:
+                from dealbot.notify import stats_remind
+
+                got = {**got, "stats": got["blog"] not in stats_remind.missing(self.bot.db, time.time(), ZoneInfo(self.bot.settings.app.timezone))}
+            except Exception as e:  # noqa: BLE001
+                log.warning("seoi_act: stats flag failed: %s", type(e).__name__)
         if form.get("a") == "visit" and got.get("ok") and got.get("like") is not False:
             # 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (주인 11/14 — nbvisit.tick · 오늘 목록·그 블로그 줄만 · 하루 5번 · 봇 DB 만)
             try:

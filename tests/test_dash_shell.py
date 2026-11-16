@@ -159,6 +159,9 @@ LOGINS_JS_MAX = 11 * 1024 + 384
 LOGINS_JS_GZIP_MAX = 4 * 1024 + 768
 # 11/15: 이웃 관리 설치 칸의 '오늘 자동 결과 n — 할 일 탭에서 보기' 링크 (seoi.view go) → 11.4 KB (11658 B / 4859 B)
 LOGINS_JS_MAX = 11 * 1024 + 512
+# 11/16: 책갈피 설치 칸 맨 위 '한 번에'(통계 + 이웃 관리 · /dashboard/api/one) + 옛 두 버튼은 '따로 쓰고 싶을 때' 아래로 접음 → 11.8 KB (12055 B / 5023 B)
+LOGINS_JS_MAX = 11 * 1024 + 896
+LOGINS_JS_GZIP_MAX = 5 * 1024
 # 10/27: 오늘 할 일 칸(할 일 탭 맨 위 — 하루 5칸 중 지금 칸만 펼침 · 줄마다 체크 · 복사 단추 · 3/8 진행) — logins.js 처럼 셸이 defer 로 받는
 # routine.js (CSS 도 여기서). 목록은 /dashboard/api/routine 으로 열 때만
 ROUTINE_JS_MAX = 8 * 1024

@@ -219,7 +219,7 @@ def test_todo_tab_offers_one_post_per_tap(bot: DealBot, tmp_path: Path) -> None:
 def test_no_second_bookmarklet_and_no_ai_in_this_module() -> None:
     assert not (STATIC / "nbvisit.js").exists()  # 공감·댓글 책갈피는 '이웃 관리'(seoi.js) 하나
     lg = (STATIC / "logins.js").read_text(encoding="utf-8")
-    assert "{api: 'seoi', t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}" in lg and "nbvisit" not in lg and "nb_visit" not in lg
+    assert "{api: 'seoi', old: 1, t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}" in lg and "nbvisit" not in lg and "nb_visit" not in lg
     src = Path(nbvisit.__file__).read_text(encoding="utf-8")
     for word in ("llm", "claude", "anthropic", "JsonAsker", "http.get", "httpx", "urlopen", "requests", "playwright", "subprocess"):
         assert word not in src.split('"""', 2)[2], word  # 코드에 AI·바깥 접속 없음 (설명 글 제외)
