@@ -217,7 +217,7 @@ function bigCard(ev) {
 }
 function itemCard(it) {
   return el('section', {class: 'itm' + (focus && (focus === it.id || focus === it.eid) ? ' hl' : '') + (it.done ? ' xd' : ''), 'data-t': it.id},
-    el('div', {class: 'ih'}, el('span', {class: 'cp info'}, it.slot || '바로'), el('span', {class: 'cp' + (it.kind === 'big' ? ' hot' : '')}, it.kind === 'big' ? '큰 사건' : it.kind === 'goal' ? '팔로워 목표' : '화제'),
+    el('div', {class: 'ih'}, el('span', {class: 'cp info'}, it.slot || '바로'), el('span', {class: 'cp' + (it.kind === 'big' ? ' hot' : '')}, it.kind === 'big' ? '큰 사건' : it.kind === 'goal' ? '팔로워 목표' : it.kind === 'mine' ? '내 주제' : '화제'),
       el('span', {class: 'cp ' + (it.nums_ok ? 'ok' : 'stop')}, it.nums_ok ? '숫자 검사 통과' : '숫자 확인 필요'),
       it.confirmed ? null : el('span', {class: 'cp hot'}, '확인 안 된 이야기'), it.done ? el('span', {class: 'cp ok'}, '올림 ✓') : null),
     el('b', {class: 'kw'}, it.keyword || '오늘 글'),

@@ -283,9 +283,11 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     # · xengage.js (X 반응 연속 모드, 11/15 — 맨 끝) · seoires.js (오늘 자동 결과 표, 11/15 — routine.js 다음)
     # · accounts.js (연결 탭 '계정 정리' 칸, 11/15 — logins.js 다음)
     # · dashacct.js (연결 탭 '대시보드 로그인' 칸, 11/16 — accounts.js 다음)
-    assert len(scripts) == 15
+    # · xtrend.js (지금 뜨는 주제·내 주제로 글 쓰기, 11/16 — xengage.js 다음)
+    assert len(scripts) == 16
     (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (ac_attrs, ac_body), (da_attrs, da_body), (rt_attrs, rt_body), (sr_attrs, sr_body), (kz_attrs, kz_body), \
-        (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (xt_attrs, xt_body), (xe_attrs, xe_body), (boot_attrs, _boot) = scripts
+        (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (xt_attrs, xt_body), (xe_attrs, xe_body), (xr_attrs, xr_body), (boot_attrs, _boot) = scripts
+    assert re.fullmatch(r' defer src="/dashboard/static/xtrend\.js\?v=[0-9a-f]{10}"', xr_attrs) and xr_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xengage\.js\?v=[0-9a-f]{10}"', xe_attrs) and xe_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xtoday\.js\?v=[0-9a-f]{10}"', xt_attrs) and xt_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xstudio\.js\?v=[0-9a-f]{10}"', xs_attrs) and xs_body == ""
@@ -357,7 +359,7 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
                         ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript"),
                         ("logins.js", "text/javascript"), ("sns.js", "text/javascript"), ("routine.js", "text/javascript"),
                         ("ssalmuk.js", "text/javascript"), ("todohub.js", "text/javascript"), ("xstudio.js", "text/javascript"),
-                        ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript"), ("xengage.js", "text/javascript"),
+                        ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript"), ("xengage.js", "text/javascript"), ("xtrend.js", "text/javascript"),
                         ("seoires.js", "text/javascript"), ("accounts.js", "text/javascript"), ("dashacct.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name

@@ -875,6 +875,17 @@ class XBigConfig(BaseModel):
         return [x for i, x in enumerate(out) if x and x not in out[:i]][:20]
 
 
+class XTrendConfig(BaseModel):
+    """'지금 뜨는 주제' (주인 11/16 — X 에서 뜨는 주제 순위를 대시보드 X 칸에 · dashboard/xtrend.py). 로그인·키 없는 공개 출처만,
+    주인이 화면을 열 때만 읽는다 (15분 캐시). 못 읽으면 그 출처만 쉼 (막힘 6시간 · 그 밖 20분)."""
+
+    enabled: bool = True
+    fx: bool = True  # FxTwitter 공개 API (X 글 조회·답글 수) — false 면 구글 검색어·화제 목록만
+    google: bool = True  # 구글 트렌드 '지금 뜨는 검색어' RSS (한국)
+    fx_per_day: int = Field(400, ge=0, le=2000)  # 하루 FxTwitter 요청 상한 (새로 보기 한 번에 8번까지)
+    google_per_day: int = Field(100, ge=0, le=300)  # 하루 구글 RSS 요청 상한 (새로 보기 한 번에 1번)
+
+
 class XTodayConfig(BaseModel):
     """'오늘 X 글' (주인 11/15 — 그날 올릴 X 초안을 (11/16 부터 하루 10개) 서버가 미리 만들어 대시보드 X 칸에 · dashboard/xtoday.py).
     글은 xstudio 와 같은 길(Opus 까지)로 쓰고, 올리기는 주인이 손으로 (자동 게시 없음)."""
@@ -933,6 +944,7 @@ class DashboardConfig(BaseModel):
     # 파밍 서버가 Tailscale Funnel 로 연 주소 https://perpfarm.<tailnet>.ts.net 만 (경로 없이). 빈칸이면 안내 화면. 열쇠는 .env FARM_HUB_TOKEN 에만
     farm_hub_url: str = ""
     x_today: XTodayConfig = Field(default_factory=XTodayConfig)  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15)
+    x_trend: XTrendConfig = Field(default_factory=XTrendConfig)  # 지금 뜨는 주제 · 내 주제로 글 쓰기 (주인 11/16)
     # 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 둘 다 숨김 (코드·API 는 그대로, true 면 예전 화면)
     x_helper: bool = False  # 'X 도우미' 책갈피 (static/xhelper.js) 설치 칸 · 받기. false 면 이미 깐 책갈피를 눌러도 '이제 안 써요' 한 줄만
     x_engage: bool = False  # X '반응 연속 모드' 카드·화면 (static/xengage.js · #/sns/xe). false 면 '오늘 X 글' 체크리스트의 '오늘 반응 할 것' 줄로

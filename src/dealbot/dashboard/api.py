@@ -50,6 +50,7 @@
   GET  /dashboard/api/ssalmuk/{state,key} · POST /dashboard/api/ssalmuk/{act,rotate}   이벤트 참여 화면 (ssalmuk.py — 주인 11/14)
   GET  /dashboard/api/xstudio/state · POST /dashboard/api/xstudio/{draft,reply,posted,reply_go,targets,handoff}   X 글쓰기·답글 도구 (xstudio.py — 주인 11/14)
   GET  /dashboard/api/xtoday/state · POST /dashboard/api/xtoday/{make,skip,react}   오늘 X 글 카드 · 큰 사건 바로 알림 (xtoday.py — 주인 11/15)
+  GET  /dashboard/api/xtrend/state · POST /dashboard/api/xtrend/{refresh,draft,posted}   지금 뜨는 주제 · 내 주제로 글 쓰기 (xtrend.py — 주인 11/16)
   GET  /dashboard/api/xengage/state · POST /dashboard/api/xengage/{add,handoff,open,step,draft}   X 반응 연속 모드 (xengage.py — 주인 11/15 · 반자동: 누르기는 주인)
   GET  /dashboard/api/xhelper · GET /dashboard/share · GET /dashboard/x   'X 도우미' 책갈피 코드 · 안드로이드 공유 시트 · 바로 가기 디딤돌 (xstudio.py —
                                         뒤 둘은 로그인 없이: 주소만 넘김)
@@ -57,7 +58,7 @@
   GET  /dashboard/api/deal/hot?n=  ·  GET /dashboard/api/deal/find?q=   (/hot · /find)
   GET  /dashboard/api/stats.html        통계 카드 조각 (폼·스크립트 없음)
   GET  /dashboard/connect/<threads|instagram|instagram_look>   스레드·인스타·데런픽 룩 (다시) 연결 → 302 승인 화면 (같은 사이트에서 연 것만)
-  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,accounts.js,sns.js,routine.js,seoires.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,xstudio.js,xtoday.js,xengage.js,xgo.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
+  GET  /dashboard/sw.js · /dashboard/static/{app.js,app.css,edit.js,product.js,sched.js,earn.js,xpost.js,lookbook.js,logins.js,accounts.js,sns.js,routine.js,seoires.js,kz.js,kkumi.js,ssalmuk.js,todohub.js,xstudio.js,xtoday.js,xengage.js,xtrend.js,xgo.js,badge-72.png}   앱 파일 (로그인 없이 — 데이터 없음)
 
 상태를 바꾸는 POST 는 모두: 세션마다 다른 X-Dash-Token + Sec-Fetch-Site(same-origin 또는 없음) + Origin(있으면 대시보드 주소만).
 응답·기록에 비밀값(토큰·코드·카카오 주소·푸시 주소·CSRF 키)을 넣지 않는다.
@@ -132,6 +133,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "xstudio.js": "text/javascript; charset=utf-8",  # xstudio.js: X 글쓰기·답글 도구 (11/14, 셸이 defer 로 — #/sns/xs)
              "xtoday.js": "text/javascript; charset=utf-8",  # xtoday.js: '오늘 X 글' 카드·화면 · 큰 사건 배너 (11/15, 셸이 defer 로 — #/sns/xt)
              "xengage.js": "text/javascript; charset=utf-8",  # xengage.js: X 반응 연속 모드 조종석 (11/15, 셸이 defer 로 — #/sns/xe)
+             "xtrend.js": "text/javascript; charset=utf-8",  # xtrend.js: '지금 뜨는 주제' 카드·화면 · 내 주제로 글 쓰기 (11/16, 셸이 defer 로 — #/sns/xr)
              "xgo.js": "text/javascript; charset=utf-8"}  # xgo.js: X 도구 바로 가기 디딤돌 (/dashboard/x — 같은 사이트 안 이동으로 한 번 넘김)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -305,6 +307,10 @@ class DashApi:
 
         self.xengage = xengage.register(web, self, self.xstudio)
         self.xtoday.engage = self.xengage  # '오늘 X 글' 체크리스트의 '오늘 반응 할 것' 줄 (주인 11/16)
+        # 지금 뜨는 주제 · 내 주제로 글 쓰기 (주인 11/16) — 공개 출처만 · 초안은 xstudio 와 같은 길 · ✓ 는 오늘 X 체크리스트(xtoday)에
+        from dealbot.dashboard import xtrend
+
+        self.xtrend = xtrend.register(web, self, self.xstudio, self.xtoday)
 
         # 대시보드 로그인 보기·바꾸기 (주인 11/16) — 로그인 아래 · POST 는 guard + 로그인 세션만 · 값은 데이터 폴더 파일 (.env 는 그대로)
         from dealbot.dashboard import dashacct

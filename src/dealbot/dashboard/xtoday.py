@@ -858,6 +858,21 @@ class XToday:
         if on and item is not None and item.get("eid"):
             self._close(item["eid"], "done")
 
+    def add_mine(self, tid: str, topic: str, draft: dict[str, Any], now: float | None = None) -> dict[str, Any]:
+        """'내 주제로 글 쓰기'(xtrend) 초안을 오늘 체크리스트에 한 줄로 (시각 없음 · 이미 있으면 글만 바꿈). AI 를 부르지 않는다."""
+        now = self.clock() if now is None else now
+        st = self.plan(now)
+        item = next((i for i in st["items"] if i["id"] == tid), None)
+        res = {"drafts": [{"text": str(draft.get("text") or ""), "format": "내 주제", "angle": str(draft.get("angle") or ""), "hints": [],
+                           "warn": list(draft.get("warn") or []), "soft": []}], "src_nums": [], "confirmed": True, "first_reply": "",
+               "source": {"title": topic, "url": "", "chars": 0, "fetched": False, "quote_url": ""}}
+        if item is None:
+            item = {"id": tid, "key": f"mine:{tid}", "kind": "mine", "eid": "", "slot": "", "keyword": topic, "sources": [], "made_at": now}
+            st["items"].append(item)
+        item["res"] = res
+        self._save(KV, st)
+        return item
+
     def skip(self, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """'안 써요' — 카드는 오늘 숨기고, 큰 사건이면 알림도 닫는다."""
         i = body.get("id")
