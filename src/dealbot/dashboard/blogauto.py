@@ -1507,7 +1507,8 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
         paste = _paste_stale(paste["title"], {"tags": paste["tags"], "photos": paste["photos"]}, why="failed", reason=gate["text"])
     return {"id": x["id"], "slot": x["slot"], "group": x["group"], "blog": x.get("blog") if x.get("blog") in ROUTINE_BLOGS else "",
             "title": title, "note": note, "min": mins, "copy": copy, "links": links, "paste": paste,
-            **({"score": sc, "popular": x.get("popular") is True} if sc is not None else {}), **({"gate": gate} if gate is not None else {})}
+            **({"score": sc, "popular": x.get("popular") is True} if sc is not None else {}), **({"gate": gate} if gate is not None else {}),
+            **({"pubnow": True} if x.get("pubnow") is True and x["group"] in PASTE_GROUPS else {})}  # 지금 바로 발행 줄 (주인 11/16 · 없으면 칸 없음)
 
 
 def _routine_slots(v: Any) -> list[dict[str, str]]:

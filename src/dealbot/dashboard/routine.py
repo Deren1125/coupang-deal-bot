@@ -15,6 +15,8 @@ GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 
     kkumi_new = 꾸미기 책갈피가 '설치했어요' 한 판과 다름 (kkumi.is_new) · relay = 블로그 프로그램에 아직 못 전한 체크 수 ·
     nb = 이웃 글 들르기 줄 (nbvisit.view — 블로그마다 남은 줄·오늘 책갈피로 체크한 수).
   줄의 paste.stale (만드는 중·못 만든 묶음 — html 없음)·gate {ok, codes, text} 는 blogauto._routine_item 이 거른 그대로.
+  pubnow (있을 때만 true — 주인 11/16): Blog-Auto 가 '오늘 아직 안 올린 블로그'의 1번 글을 예약 대신 지금 바로 발행으로 (group 발행 · 예약 시각 없음
+    → when·stamp 없음 → 책갈피는 예약 칸을 안 채움) — 시간대 안 맨 위(by_score) · 화면은 붙여넣기 대기 맨 위에 '지금 발행' 표.
   예약 줄의 when {at 'YYYY-MM-DDTHH:MM', label 'M/D HH:MM', rule} (주인 11/14 — 있을 때만): 꾸미기 책갈피 v6 가 발행 설정에 채울 예약 시각.
     같은 값이 paste.html·text 끝 태그 줄에 실려 있다 (kkumi.stamp) — 추천 시각 그대로, 없거나 지났으면 규칙으로 고른 것(rule 참).
 에이블리 링크 부탁 (주인 10/28): Blog-Auto 칸 ably_requests (blogauto._ably_requests) — 서버는 에이블리를 열지 않고 주인이 폰 앱에서
@@ -355,8 +357,8 @@ def with_score(it: dict[str, Any], scores: dict[tuple[str, int], tuple[int, bool
 
 
 def by_score(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """같은 시간대 안: 점수 있는 글 줄 높은 순 → 점수 모르는 줄은 원래 차례 그대로 뒤에 (안정 정렬)."""
-    return sorted(items, key=lambda i: -i["sco"] if isinstance(i.get("sco"), int) else 1)
+    """같은 시간대 안: '지금 바로 발행' 줄(pubnow — 주인 11/16) 맨 위 → 점수 있는 글 줄 높은 순 → 점수 모르는 줄은 원래 차례 그대로 뒤에 (안정 정렬)."""
+    return sorted(items, key=lambda i: (not i.get("pubnow"), -i["sco"] if isinstance(i.get("sco"), int) else 1))
 
 
 def view(bot: Any, now: float | None = None) -> dict[str, Any]:

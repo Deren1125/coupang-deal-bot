@@ -11,7 +11,7 @@ const CSS = '.rt .box,.box.rt{padding:4px 16px 6px;margin-bottom:20px}.rt .sl{di
   '.rt .it+.it{background:linear-gradient(var(--line),var(--line)) 56px 0/100% 1px no-repeat}' +
   '.rt .cb{flex:none;width:44px;height:44px;padding:0;border:2px solid var(--fline);border-radius:12px;background:var(--field);color:var(--gr);font-size:20px}' +
   '.rt .cb[aria-checked=true]{background:var(--gr-soft);border-color:var(--gr)}.rt .it .grow{flex:1;min-width:0;padding-top:10px}' +
-  '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}.rt .sc{display:inline-block;margin-left:6px;padding:0 7px;border-radius:9px;font-size:12px;font-weight:600;line-height:20px;font-style:normal;color:var(--sub);background:var(--line);white-space:nowrap}.rt .sc.h{color:#E8590C;background:rgba(232,89,12,.14)}.rt .sc.ok{color:var(--gr);background:var(--gr-soft)}.rt .pp .sm[disabled]{opacity:.55}' +
+  '.rt .t{display:block;font-size:15px;font-weight:600;line-height:1.45;overflow-wrap:anywhere}.rt .dn .t{text-decoration:line-through;color:var(--sub)}.rt .sc{display:inline-block;margin-left:6px;padding:0 7px;border-radius:9px;font-size:12px;font-weight:600;line-height:20px;font-style:normal;color:var(--sub);background:var(--line);white-space:nowrap}.rt .sc.h{color:#E8590C;background:rgba(232,89,12,.14)}.rt .sc.ok{color:var(--gr);background:var(--gr-soft)}.rt .sc.now{margin:0 6px 0 0;color:#fff;background:#E8590C}.rt .pp .sm[disabled]{opacity:.55}' +
   '.rt .s{display:block;margin-top:3px;font-size:13px;line-height:1.5;color:var(--sub);overflow-wrap:anywhere}.rt .bt{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}' +
   '.rt a.sm{display:inline-flex;align-items:center;text-decoration:none;color:var(--text)}.rt a.sm.ac{color:var(--ac-on)}' +
   '.rt .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:0 0 14px}.rt .bar i{display:block;height:100%;background:var(--gr)}' +
@@ -203,6 +203,7 @@ function paste(it) {
   // 태그는 '꾸미기'가 발행 설정창에 넣어 줘서 따로 복사 단추 없음 (주인 11/06 '태그 복사 안 해도 들어가는데')
   return [el('div', {class: 'bt pp'}, big('제목 복사', () => copy(p.title)), big('본문 복사', () => body(p))),
   el('span', {class: 's'}, "본문은 글쓰기에 바로 붙이지 말고 — 빈 본문을 한 번 누르고 책갈피 '꾸미기' → 뜨는 칸에 붙여넣기 (태그도 저절로)"
+    + (it.pubnow ? ' · 예약 칸은 그대로(현재) — 지금 바로 발행' : '')
     + (it.when ? ` · 예약 ${it.when.label}${it.when.rule ? ' (새로 고름)' : ''} 도 채워 줘요 — 발행 단추만 직접` : ''))];
 }
 
@@ -216,7 +217,7 @@ function item(it) {
   return el('div', {class: 'it' + (it.done ? ' dn' : ''), 'data-id': it.id},
     el('button', {class: 'cb', type: 'button', role: 'checkbox', 'aria-checked': it.done ? 'true' : 'false', 'aria-label': it.title,
       onclick: () => check(it)}, it.done ? '✓' : ''),
-    el('div', {class: 'grow'}, el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null,
+    el('div', {class: 'grow'}, el('span', {class: 't'}, it.pubnow && !it.done ? el('i', {class: 'sc now'}, '⚡ 지금 발행') : null, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null,
       it.paste && it.gate && it.gate.ok && !nr(it) ? el('i', {class: 'sc ok'}, '점검 통과') : null),
       el('span', {class: 's'}, [by() ? it.group : it.tag, `${it.min}분`, it.note, pk && pk.status.split(' · ')[0]].filter(Boolean).join(' · ')),
       it.paste && !it.done ? paste(it) : null, btns.length ? el('div', {class: 'bt'}, btns) : null));
@@ -247,7 +248,7 @@ function slot(s) {
 }
 // 붙여넣기 대기 (주인 10/30) — 시간대 칸과 상관없이 맨 위에 모두 (안 한 것만 · 체크하면 제 칸으로) · 꾸미기 설치는 연결 탭
 function pasteBox() {
-  const ps = data && data.slots ? data.slots.flatMap(s => s.items.filter(i => i.paste && !i.done)).sort((a, b) => nr(a) - nr(b)) : [], mk = ps.filter(nr).length;
+  const ps = data && data.slots ? data.slots.flatMap(s => s.items.filter(i => i.paste && !i.done)).sort((a, b) => nr(a) - nr(b) || !!b.pubnow - !!a.pubnow) : [], mk = ps.filter(nr).length;
   return ps.length ? [el('div', {class: 'top', style: 'margin:4px 0 6px'}, el('h2', {}, `붙여넣기 대기 (준비 ${ps.length - mk} · 만드는 중 ${mk})`),
     el('a', {class: 'lnk', href: '#/connect'}, '꾸미기 설치')), el('div', {class: 'box'}, ps.map(item))] : [];
 }

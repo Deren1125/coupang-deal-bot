@@ -494,7 +494,7 @@ def test_post_rows_sorted_by_score_with_chip(bot: DealBot, tmp_path: Path) -> No
     assert "sco" not in its[3] and "sc" not in its[3] and "sco" not in its[4]
     js = (STATIC / "routine.js").read_text(encoding="utf-8")
     assert "a.done - b.done || nr(a) - nr(b) || (b.sco + 1 || 0) - (a.sco + 1 || 0)" in js  # 블로그별 칸: 준비된 글 먼저 → 점수 높은 순 (점수 모르는 줄은 뒤)
-    assert "el('span', {class: 't'}, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null," in js
+    assert "el('span', {class: 't'}, it.pubnow && !it.done ? el('i', {class: 'sc now'}, '⚡ 지금 발행') : null, it.title, it.sc ? el('i', {class: 'sc' + (it.hot ? ' h' : '')}, it.sc) : null," in js
 
 
 def test_row_own_score_wins_even_if_post_missing_from_v2_posts(bot: DealBot, tmp_path: Path) -> None:
@@ -515,6 +515,27 @@ def test_row_own_score_wins_even_if_post_missing_from_v2_posts(bot: DealBot, tmp
     assert [i["id"] for i in its] == ["rsv:issue:7002", "rsv:issue:7003", "rsv:issue:7001", "nb:issue:a", "rsv:issue:7004"]
     assert its[0]["sc"] == "🔥 91점" and its[0]["hot"] is True and its[1]["sc"] == "55점" and its[2]["sco"] == 12
     assert "sc" not in its[4]
+
+
+def test_pubnow_row_on_top_without_reserve_stamp(bot: DealBot, tmp_path: Path) -> None:
+    """주인 11/16 '발행한 글이 없으면 지금 발행 우선': Blog-Auto 가 pubnow 를 단 줄(group 발행 · 예약 시각 없음)은 점수와 상관없이 그 시간대 맨 위 ·
+    when 없음(책갈피가 예약 칸을 안 채움). pubnow 가 없거나 true 가 아니면 칸이 없음 (예전 Blog-Auto 도 그대로)."""
+    from dealbot.dashboard.blogauto import _routine_item
+
+    day = tz_now(bot).date().isoformat()
+    data = fixture("export_v2.json")
+    rt = {"day": day, "slots": SLOTS, "overflow": 0, "items": [
+        item("rsv:issue:7002", "s1", group="예약", blog="issue", score=91, copy=[{"label": "예약 시각", "text": "21:00"}], paste=READY),
+        item("rsv:issue:7001", "s1", group="발행", blog="issue", score=12, pubnow=True, title="데런픽 지금 바로 발행 · 글", paste=READY),
+    ]}
+    write_export(tmp_path / "blogauto.json", posts=data["posts"], status={**data["status"], "routine": rt})
+    its = routine.view(bot, now=at(bot, day, "09:30"))["slots"][0]["items"]
+    assert [i["id"] for i in its] == ["rsv:issue:7001", "rsv:issue:7002"]
+    assert its[0]["pubnow"] is True and "when" not in its[0] and "pubnow" not in its[1]
+    assert "pubnow" not in _routine_item(item("rsv:issue:1", group="예약", pubnow="yes"))
+    assert "pubnow" not in _routine_item(item("nb:issue:1", pubnow=True))  # 글 줄만
+    js = (STATIC / "routine.js").read_text(encoding="utf-8")
+    assert "nr(a) - nr(b) || !!b.pubnow - !!a.pubnow" in js  # 붙여넣기 대기 맨 위
 
 
 # ---------------------------------------------------------------- 5) 못 쓰는 묶음 · 자동 점검 · 못 전한 체크 (주인 11/14)
