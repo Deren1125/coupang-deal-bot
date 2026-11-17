@@ -98,6 +98,7 @@ ENV_FETCH = "DEALBOT_XSTUDIO_FETCH"  # '0' 이면 기사 주소를 서버가 열
 BANNED_MODEL_RE = re.compile(r"fable|mythos", re.I)
 ALIAS_ENV_RE = re.compile(r"^ANTHROPIC_DEFAULT_[A-Z0-9_]*MODEL$")  # claude CLI 가 별칭을 푸는 환경 변수 (…_OPUS_MODEL·…_SONNET_MODEL·…_HAIKU_MODEL)
 CLI_TIMEOUT = 90.0
+VISION_TIMEOUT = 170.0  # 사진을 보고 쓰는 초안 (xphoto.py — 사진 4장까지)
 RETRY_WITHIN = 40.0  # 첫 답이 이 안에 왔고 쓸 초안이 하나도 없을 때만 한 번 더 묻는다
 
 
@@ -654,16 +655,16 @@ async def _resolve(host: str) -> list[str]:
     return [i[4][0] for i in infos]
 
 
-def inflate(raw: bytes, encoding: str) -> bytes | None:
+def inflate(raw: bytes, encoding: str, cap: int = FETCH_CAP) -> bytes | None:
     """받은 몸을 FETCH_CAP 까지만 푼다 (작게 눌러 보낸 아주 큰 몸으로 메모리를 채우지 못하게). 모르는 누름 방식이면 None."""
     kind = (encoding or "").strip().lower()
     if kind in ("", "identity"):
-        return raw[:FETCH_CAP]
+        return raw[:cap]
     if kind not in ("gzip", "x-gzip", "deflate"):
         return None
     for wbits in (47, -15):  # gzip·zlib 머리 자동 → 머리 없는 deflate
         try:
-            return zlib.decompressobj(wbits).decompress(raw, FETCH_CAP)
+            return zlib.decompressobj(wbits).decompress(raw, cap)
         except zlib.error:
             continue
     return None
@@ -755,7 +756,7 @@ class Fetcher:
         self.resolver = resolver
         self.transport = transport
 
-    async def _get(self, url: str, accept: str, *, check_host: bool = True) -> tuple[int, str, bytes]:
+    async def _get(self, url: str, accept: str, *, check_host: bool = True, cap: int = FETCH_CAP) -> tuple[int, str, bytes]:
         import httpx
 
         kw: dict[str, Any] = {"timeout": FETCH_TIMEOUT, "follow_redirects": False,
@@ -778,15 +779,16 @@ class Fetcher:
                     got = bytearray()
                     async for chunk in r.aiter_raw():  # 눌린 그대로 받아 상한까지만 푼다 (inflate)
                         got += chunk
-                        if len(got) > FETCH_CAP:
+                        if len(got) > cap:
                             break
-                    body = inflate(bytes(got[:FETCH_CAP]), r.headers.get("content-encoding", ""))
+                    body = inflate(bytes(got[:cap]), r.headers.get("content-encoding", ""), cap)
                     return (200, r.headers.get("content-type", ""), body) if body is not None else (0, "", b"")
         return 0, "", b""
 
-    async def _get_within(self, url: str, accept: str, *, check_host: bool = True) -> tuple[int, str, bytes]:
-        """_get 을 FETCH_TOTAL 안에 (넘으면 TimeoutError — OSError 라 부르는 쪽이 '못 읽음'으로)."""
-        return await asyncio.wait_for(self._get(url, accept, check_host=check_host), FETCH_TOTAL)
+    async def _get_within(self, url: str, accept: str, *, check_host: bool = True, cap: int = FETCH_CAP) -> tuple[int, str, bytes]:
+        """_get 을 FETCH_TOTAL 안에 (넘으면 TimeoutError — OSError 라 부르는 쪽이 '못 읽음'으로). cap = 받는 바이트 상한 (기사 사진만 더 크게 — xphoto)."""
+        extra = {"cap": cap} if cap != FETCH_CAP else {}
+        return await asyncio.wait_for(self._get(url, accept, check_host=check_host, **extra), FETCH_TOTAL)
 
     async def article(self, url: str) -> tuple[str, str]:
         """(제목, 본문). 못 읽으면 ('', '')."""
@@ -1005,6 +1007,7 @@ class Studio:
         self.model = assert_writer_model(pick_model(model))
         self._ask_fn = ask
         self._asker: Any = None
+        self._vision: Any = None
         self.fetcher = fetcher
         self.hot = hot or (lambda: [])
         self.on_posted: Callable[[str, bool], None] | None = None  # (카드 번호, 올림/취소) — xtoday 가 건다
@@ -1269,10 +1272,11 @@ class Studio:
                 "model": model_label(self.model), "need": NEED, "hedge": list(HEDGE), "reply_goal": REPLY_GOAL, "helper": bool(self.helper_on())}
 
     # ---------------------------------------------------------- AI
-    async def ask(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    async def ask(self, system: str, user: str, schema: dict[str, Any], *, images: list[bytes] | None = None) -> dict[str, Any]:
+        """images = JPEG 목록 (사진으로 글 쓰기 — xphoto.py). 모델 규칙(Opus 까지 · Fable 이면 안 부름)은 글만 물을 때와 똑같다."""
         assert_writer_model(self.model)
         if self._ask_fn is not None:
-            return await self._ask_fn(system, user, schema)
+            return await (self._ask_fn(system, user, schema, images=images) if images else self._ask_fn(system, user, schema))
         from dealbot.llm_json import JsonAsker, LLMError
 
         bad_env = alias_env_problem()
@@ -1281,15 +1285,20 @@ class Studio:
             raise StudioError(503, "ai_off", "서버 AI 설정이 글 쓰는 모델 규칙과 달라요 — 메인 세션에 알려 주세요")
         if self._asker is None:  # 서버에 로그인된 claude CLI 로만 (한줄평과 같은 실행 파일) — 모델은 늘 이름으로 넘긴다
             self._asker = JsonAsker(None, cli_model=self.model, timeout=CLI_TIMEOUT)
-        assert_writer_model(self._asker.cli_model)
+        asker = self._asker
+        if images:  # 사진을 읽을 때는 오래 걸린다 — 시간만 넉넉한 같은 호출기 (모델 이름은 같음)
+            if self._vision is None:
+                self._vision = JsonAsker(None, cli_model=self.model, timeout=VISION_TIMEOUT)
+            asker = self._vision
+        assert_writer_model(asker.cli_model)
         try:
-            data = await self._asker.ask(system, user, schema)
+            data = await (asker.ask(system, user, schema, images=images) if images else asker.ask(system, user, schema))
         except LLMError as e:
             log.warning("xstudio ai: %s", str(e)[:120])
             raise ai_error(e, self.clock()) from e
         # 답을 실제로 쓴 모델도 본다 (CLI 가 알려 준 modelUsage): 환경 변수 말고 CLI 설정 파일(settings.json env·모델 바꿔치기)이
         # 별칭을 Fable 쪽으로 돌려놓았으면 그 답은 버린다 — 주인 '올라가는 글은 Opus 까지만'
-        used = [m for m in getattr(self._asker, "last_cli_models", None) or [] if BANNED_MODEL_RE.search(m)]
+        used = [m for m in getattr(asker, "last_cli_models", None) or [] if BANNED_MODEL_RE.search(m)]
         if used:
             log.error("xstudio: 답을 쓴 모델이 규칙 밖 (%s) → 초안을 버림", ", ".join(used)[:80])
             raise StudioError(503, "ai_off", "서버 AI 설정이 글 쓰는 모델 규칙과 달라요 — 메인 세션에 알려 주세요")

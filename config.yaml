@@ -680,6 +680,11 @@ dashboard:
     per_day: 3                     # 하루 카드 수 (본문 캡처 1~2장 + 한 줄 초안)
     times: ["11:40", "16:40", "20:40"]
     sources: [bobaedream, ppomppu] # robots.txt 허용·로그인 없음·서버에서 열리는 곳만. dcinside 는 기본 끔 · 네이트판(robots 막음)·인스티즈(사람 확인)·클리앙·루리웹(서버 IP 막힘)은 없음
+  x_photo:                         # 사진으로 X 글 쓰기 · 초안에 붙일 사진 (주인 11/17 — dashboard/xphoto.py · 화면 #/sns/xr/w '사진으로 글 쓰기')
+    enabled: true
+    photos_per_day: 24             # 하루에 쓰는 사진 장수 (한 번에 1~4장 · 모자이크본만 남기고 원본은 지움)
+    news: true                     # '오늘 X 글' 카드에 출처 기사 대표 사진 한 장 ('출처: 언론사' 같이 · robots.txt 가 막으면 안 받음)
+    news_per_day: 16
   x_today:                         # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15 — dashboard/xtoday.py · 화면 SNS 탭 X 칸)
     enabled: true
     morning: "07:40"               # 아침에 그날 X 초안을 만드는 시각 (한국시간)

@@ -79,7 +79,8 @@ class JsonAsker:
     def configured(self) -> bool:
         return self.backend is not None
 
-    async def ask(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    async def ask(self, system: str, user: str, schema: dict[str, Any], *, images: list[bytes] | None = None) -> dict[str, Any]:
+        """images = JPEG 바이트 목록 (사진을 보고 답해야 할 때 — dashboard/xphoto.py). 없으면 예전 그대로."""
         if not self.configured:
             raise LLMError("AI 없음 (ANTHROPIC_API_KEY·서버 claude CLI 둘 다 없음)")
         if self.disabled_reason:
@@ -87,9 +88,9 @@ class JsonAsker:
         if self.backend == "cli":
             if time.monotonic() < self._cli_down_until:
                 raise LLMError("서버 claude CLI 로그인이 풀림")
-            data = await self._ask_cli(system, user, schema)
+            data = await self._ask_cli(system, user, schema, images)
         else:
-            data = await self._ask_api(system, user, schema)
+            data = await self._ask_api(system, user, schema, images)
         self.last_backend = self.backend
         return data
 
@@ -98,14 +99,15 @@ class JsonAsker:
             self._client = anthropic.AsyncAnthropic(api_key=self.api_key, timeout=self.timeout, max_retries=1)
         return self._client
 
-    async def _ask_api(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    async def _ask_api(self, system: str, user: str, schema: dict[str, Any], images: list[bytes] | None = None) -> dict[str, Any]:
+        content: Any = [*image_blocks(images), {"type": "text", "text": user}] if images else user
         try:
             response = await self._get_client().messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 # 규칙·명령 목록은 매번 같다 → 캐시
                 system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": user}],
+                messages=[{"role": "user", "content": content}],
                 output_config={"format": {"type": "json_schema", "schema": schema}, "effort": self.effort},
             )
         except anthropic.AuthenticationError as e:
@@ -131,10 +133,14 @@ class JsonAsker:
         text = "".join(getattr(b, "text", "") for b in response.content if getattr(b, "type", "") == "text")
         return _loads(text)
 
-    async def _ask_cli(self, system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
+    async def _ask_cli(self, system: str, user: str, schema: dict[str, Any], images: list[bytes] | None = None) -> dict[str, Any]:
         self.last_cli_models = []
         args = [str(self.cli_bin), "-p", "--output-format", "json", "--model", posted_cli_model(self.cli_model, where="llm_json")]
         args += ["--system-prompt", system, "--json-schema", json.dumps(schema, ensure_ascii=False), "--tools", ""]
+        if images:  # 사진은 stream-json 입력으로만 넘길 수 있다 (도구는 그대로 없음 — 파일을 읽게 하지 않는다). 답은 줄마다 JSON, 끝 줄이 result
+            args[2:4] = ["--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]
+            user = json.dumps({"type": "user", "message": {"role": "user", "content": [*image_blocks(images), {"type": "text", "text": user}]}},
+                              ensure_ascii=False) + "\n"
         proc: asyncio.subprocess.Process | None = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -156,7 +162,7 @@ class JsonAsker:
         try:
             payload = json.loads(out.decode("utf-8", "replace") or "{}")
         except ValueError:
-            payload = None
+            payload = _stream_rows(out.decode("utf-8", "replace")) if images else None
         if isinstance(payload, list):
             payload = next((m for m in reversed(payload) if isinstance(m, dict) and m.get("type") == "result"), None)
         if not isinstance(payload, dict) or not payload:
@@ -179,6 +185,24 @@ class JsonAsker:
         if isinstance(data, dict):
             return data
         return _loads(str(payload.get("result") or ""))
+
+
+def image_blocks(images: list[bytes] | None) -> list[dict[str, Any]]:
+    """JPEG 바이트 → 메시지 그림 칸."""
+    import base64
+
+    return [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(b).decode("ascii")}} for b in images or []]
+
+
+def _stream_rows(text: str) -> list[Any] | None:
+    """stream-json 출력(줄마다 JSON) → 목록 (읽을 줄이 없으면 None)."""
+    rows = []
+    for ln in text.splitlines():
+        try:
+            rows.append(json.loads(ln))
+        except ValueError:
+            continue
+    return rows or None
 
 
 def _loads(text: str) -> dict[str, Any]:

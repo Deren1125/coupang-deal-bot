@@ -51,6 +51,7 @@ log = logging.getLogger(__name__)
 BASE = "/dashboard/api/xtrend"
 STATE_PATH, REFRESH_PATH, DRAFT_PATH, POSTED_PATH = f"{BASE}/state", f"{BASE}/refresh", f"{BASE}/draft", f"{BASE}/posted"
 KV = "xtrend"  # {"at", "rows": [...], "hist": [{"at", "rank": {키: 순위}}], "day", "fx": n, "google": n, "off": {출처: 쉬는 끝 시각}}
+PHOTO_IMG = "/dashboard/api/xphoto/img/"  # 사진으로 쓴 묶음의 모자이크본 (xphoto.py 가 내줌)
 KV_MINE = "xtrend_mine"  # {"day", "sets": [{"id", "at", "topic", "drafts": [...], "src_nums": [...]}]} — 그날만
 FX_SEARCH = "https://api.fxtwitter.com/2/search"
 GOOGLE_RSS = "https://trends.google.com/trending/rss"
@@ -633,7 +634,8 @@ class XTrend:
         tid = xt.item_id(f"mine:{sid}:{i}")
         undo = body.get("op") == "undo"
         if not undo:
-            self.today.add_mine(tid, s["topic"], {**s["drafts"][i], "text": text}, now)
+            extra = {"angle": f"사진 {_int(s['photos'])}장과 같이 — '내 초안'에서 사진 저장"} if s.get("photos") else {}
+            self.today.add_mine(tid, s["topic"], {**s["drafts"][i], "text": text, **extra}, now)
         self.studio.posted({"op": "undo" if undo else "add", "text": text, "format": "auto", "mine": True, "tid": tid})
         return 200, {"status": "ok", **self.view()}
 
@@ -673,12 +675,17 @@ class XTrend:
                 tid = xt.item_id(f"mine:{s['id']}:{i}")
                 ds.append({"text": str(d.get("text") or ""), "angle": str(d.get("angle") or ""), "warn": list(d.get("warn") or [])[:3],
                            "done": tid in done, "undo_s": max(0, int(xs.UNDO_WITHIN - (now - done[tid]))) if tid in done else 0})
-            sets.append({"id": s["id"], "at": xt._hm(s.get("at") or 0), "topic": str(s.get("topic") or ""), "long": s.get("long") is True, "drafts": ds})
+            np = min(4, _int(s.get("photos")))  # 사진으로 쓴 묶음 (xphoto.py) — 모자이크본 주소 · 가린 곳 수
+            sets.append({"id": s["id"], "at": xt._hm(s.get("at") or 0), "topic": str(s.get("topic") or ""), "long": s.get("long") is True, "drafts": ds,
+                         "imgs": [f"{PHOTO_IMG}{s['id']}-{k}.jpg" for k in range(1, np + 1)],
+                         "blur": sum(_int(x) for x in s.get("blur") or [] if isinstance(x, int)) if np else 0,
+                         "pkind": str(s.get("kind") or "") if np else "", "faces": s.get("faces") is True})
         mst = self.mine(now)
         fail, run = mst.get("fail") if isinstance(mst.get("fail"), dict) else None, mst.get("run") if isinstance(mst.get("run"), dict) else None
         newest = max([float(x.get("at") or 0) for x in mst["sets"]] + [0.0])
         fail_v = {"at": xt._hm(float(fail.get("at") or 0)), "code": str(fail.get("code") or ""), "text": str(fail.get("text") or "")[:200],
-                  "topic": str(fail.get("topic") or "")[:TOPIC_HI], "wait_s": max(0, int(_int(fail.get("until")) - now))} \
+                  "topic": str(fail.get("topic") or "")[:TOPIC_HI], "wait_s": max(0, int(_int(fail.get("until")) - now)),
+                  "photo": fail.get("photo") is True} \
             if fail and float(fail.get("at") or 0) > newest else None
         run_v = {"topic": str(run.get("topic") or "")[:TOPIC_HI], "at": xt._hm(float(run.get("at") or 0))} \
             if run and 0 <= now - float(run.get("at") or 0) <= RUN_SHOW_S else None

@@ -74,6 +74,7 @@ function item(it) {
       el('span', {class: 'n'}, `댓글 ${n(it.react.comments)} · 추천 ${n(it.react.rec)}`)),
     el('p', {class: 'ln1'}, it.line), it.angle ? el('p', {class: 'an'}, `왜 터졌나 · ${it.angle}`) : null,
     it.imgs.map((src, i) => el('img', {class: 'cap', src, alt: `캡처 ${i + 1} — ${it.title}`, loading: 'lazy'})),
+    it.blur != null ? el('p', {class: 'an'}, `가린 곳 ${it.blur}곳 (닉네임·프로필·전화번호·이메일·@아이디 모자이크) — 올리기 전에 남은 닉네임이 없는지 한 번 봐 주세요`) : null,
     el('div', {class: 'rw'}, it.imgs.map((src, i) => el('a', {class: 'pb soft', href: src, download: `${it.site}-${i + 1}.jpg`}, `사진 ${i + 1} 저장`)),
       btn('pb soft', '한 줄 복사', () => copy(it.line)), it.url ? el('a', Object.assign({class: 'lnk', href: it.url}, NW), '원글 ›') : null,
       btn('lnk', '안 써요', () => skip(it))));
@@ -88,7 +89,7 @@ function draw() {
     its.length ? its.map(item) : el('p', {class: 'note'}, !ST.on ? '꺼져 있어요' : ST.busy ? '반응 큰 글을 고르는 중이에요 — 1~3분' : ST.next ? `${ST.next} 쯤 첫 카드가 생겨요` : '오늘은 아직 없어요'),
     ST.err ? el('p', {class: 'w'}, ST.err) : null,
     ST.off.length ? el('p', {class: 'note'}, `${ST.off.join('·')} 은 막혀서 쉬는 중 (7일 · 우회 안 함)`) : null,
-    el('p', {class: 'note'}, `출처: ${ST.sources.join('·')} (로그인 없는 공개 글 · 닉네임·프로필은 안 찍어요) · 사진 저장 → X 앱에서 직접 올리고 ✓ 는 오늘 X 체크리스트에서`),
+    el('p', {class: 'note'}, `출처: ${ST.sources.join('·')} (로그인 없는 공개 글 · 글쓴이 칸은 안 찍고 닉네임·프로필은 모자이크) · 사진 저장 → X 앱에서 직접 올리고 ✓ 는 오늘 X 체크리스트에서`),
   ].flat(9).filter(Boolean));
 }
 function onX() {

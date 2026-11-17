@@ -44,6 +44,7 @@ XTODAY_JS = "xtoday.js"  # 오늘 X 글 · 큰 사건 배너 (11/15) — SNS 탭
 XENGAGE_JS = "xengage.js"  # X 반응 연속 모드 (11/15) — SNS 탭 X 칸 카드·조종석 화면 (#/sns/xe). 셸이 defer 로 (xtoday.js 다음 — 그 카드 아래에 붙음)
 XTREND_JS = "xtrend.js"  # 지금 뜨는 주제 · 내 주제로 글 쓰기 (11/16) — SNS 탭 X 칸 카드·화면 (#/sns/xr). 셸이 defer 로 (xengage.js 다음 — 그 카드 아래에 붙음)
 XCAP_JS = "xcap.js"  # X 커뮤 캡처 글 (11/17) — SNS 탭 X 칸 카드 (오늘 X 글 카드 아래). 셸이 defer 로 (kwrun.js 다음)
+XPHOTO_JS = "xphoto.js"  # 사진으로 X 글 쓰기 (11/17) — 지금 뜨는 주제 화면(#/sns/xr/w)의 '사진으로 글 쓰기' 칸. 셸이 defer 로 (xcap.js 다음)
 KWRUN_JS = "kwrun.js"  # 키워드 글쓰기 결과 줄 (11/17) — 블로그 탭 인기 키워드·할 일 탭 막 뜨는 중 단추 옆. 셸이 defer 로 (xtrend.js 다음)
 SEOIRES_JS = "seoires.js"  # 오늘 자동 결과 표 (11/15) — 할 일 탭 블로그 칸의 이웃 들르기 줄 아래 접는 칸. routine.js 가 예산 끝이라 셸이 defer 로 (routine.js 다음)
 FARM_URL = "/dashboard/farm/"  # 파밍 대시보드 (11/15, farm.py)
@@ -96,6 +97,7 @@ def page(boot: dict[str, Any], title: str = "") -> str:
         f'<script defer src="{asset_url(XTREND_JS)}"></script>'  # 지금 뜨는 주제 (11/16) — 같은 이유로 "<script defer src="
         f'<script defer src="{asset_url(KWRUN_JS)}"></script>'  # 키워드 글쓰기 결과 줄 (11/17) — 같은 이유로 "<script defer src="
         f'<script defer src="{asset_url(XCAP_JS)}"></script>'  # X 커뮤 캡처 글 (11/17) — 같은 이유로 "<script defer src="
+        f'<script defer src="{asset_url(XPHOTO_JS)}"></script>'  # 사진으로 X 글 쓰기 (11/17) — 같은 이유로 "<script defer src="
         f'<meta name="sb-edit" content="{asset_url(EDIT_JS)}">'
         f'<meta name="sb-product" content="{asset_url(PRODUCT_JS)}">'
         f'<meta name="sb-sched" content="{asset_url(SCHED_JS)}">'

@@ -38,7 +38,8 @@ C. 체크리스트 (주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 �
    [복사]·[✓ 올렸어요] 한 줄 (올린 글은 취소 10분이 지나면 카드에서 빠짐) · '오늘 반응 할 것' = 반응 목록(xengage 큐)·자주 보는 계정에서
    REACT_MAX 줄 — [열기](X 링크, 주인이 누름) + [✓ 했어요]. 자동 클릭·X 요청 없음 그대로. 반응 연속 모드·X 도우미 책갈피는 설정으로 숨김.
 모두 로그인 아래 · POST 는 같은 사이트 + X-Dash-Token (DashApi.guard).
-하지 않는 것: X 로그인 · X API · 자동 게시 · 남의 타임라인 긁기 · 기사 페이지 긁기. 초안 글은 화면에 띄우려고 kv xtoday 에 하루만 둔다
+하지 않는 것: X 로그인 · X API · 자동 게시 · 남의 타임라인 긁기 · 기사 본문 긁기 (11/17 부터 카드마다 출처 기사 한 곳의 대표 사진
+og:image 만 한 번 받는다 — xphoto.news_photo: robots.txt 확인 · 하루 상한 · 설정 dashboard.x_photo.news). 초안 글은 화면에 띄우려고 kv xtoday 에 하루만 둔다
 (날이 바뀌면 다음 1분 일에서 지움 — 로그에는 종류·길이만).
 """
 
@@ -107,6 +108,10 @@ NOT_OUTLET_RE = re.compile(
 # 포털은 뉴스 칸만 매체로 (지식iN·포스트·쇼핑·스마트스토어·카페 등은 뺌)
 PORTAL_RE = re.compile(r"(?:^|\.)(?:naver\.com|daum\.net|nate\.com|zum\.com)$")
 PORTAL_NEWS_RE = re.compile(r"(?:^|\.)(?:news\.naver\.com|v\.daum\.net|news\.daum\.net|news\.nate\.com|news\.zum\.com)$")
+
+
+PHOTO_IMG = "/dashboard/api/xphoto/img/"  # 카드에 붙는 기사 대표 사진 (xphoto.py 가 받아 둔 것)
+PHOTO_NAME_RE = re.compile(r"^n[0-9a-f]{12}\.jpg$")
 
 
 def not_outlet(host: str) -> bool:
@@ -431,6 +436,7 @@ class XToday:
         self.fill_at = 0.0
         self.fill_task: asyncio.Task[Any] | None = None
         self.engage: Any = None  # xengage.Engage (DashApi 가 건다 — 반응 목록이 있으면 '오늘 반응 할 것' 앞쪽에)
+        self.photo: Any = None  # xphoto.XPhoto.news_photo (DashApi 가 건다 — 출처 기사 대표 사진 한 장 · 주인 11/17 '초안에 사진 같이')
         studio.on_posted = self.mark_posted
 
     # ---------------------------------------------------------- kv
@@ -745,6 +751,15 @@ class XToday:
         res = {k: res[k] for k in ("drafts", "src_nums", "confirmed", "first_reply", "source", "model") if k in res}
         item = {"id": item_id(cand["key"]), "key": cand["key"], "kind": cand["kind"], "eid": cand.get("eid") or "", "slot": slot,
                 "keyword": cand["keyword"], "sources": cand["sources"], "sig": cand["sig"], "res": res, "made_at": now}
+        link = next((s["link"] for s in cand["sources"] if isinstance(s, dict) and s.get("link")), "")
+        if self.photo is not None and link:  # 출처 기사 대표 사진 (있으면 카드에 · 못 받으면 글만 — xphoto 가 robots·하루 상한을 본다)
+            try:
+                ph = await self.photo(link)
+            except Exception as e:  # noqa: BLE001
+                log.info("xtoday photo: %s", type(e).__name__)
+                ph = None
+            if ph:
+                item["photo"] = {"name": str(ph.get("name") or ""), "credit": str(ph.get("credit") or "")}
         st["items"].append(item)
         st["skip"] = self.plan(now)["skip"]  # AI 를 기다리는 동안 주인이 누른 '안 써요'를 덮어쓰지 않게
         self._save(KV, st)
@@ -961,6 +976,8 @@ class XToday:
                           "confirmed": i["res"].get("confirmed") is not False, "preview": str(first.get("text") or ""),
                           "angle": str(first.get("angle") or ""), "first_reply": str(i["res"].get("first_reply") or ""),
                           "done": i["id"] in done, "undo_s": max(0, int(xs.UNDO_WITHIN - (now - done[i["id"]]))) if i["id"] in done else 0,
+                          "photo": {"src": PHOTO_IMG + i["photo"]["name"], "credit": str(i["photo"].get("credit") or "")}
+                          if isinstance(i.get("photo"), dict) and PHOTO_NAME_RE.match(str(i["photo"].get("name") or "")) else None,
                           "res": i["res"]})
         made = {i.get("eid"): i["id"] for i in st["items"] if i.get("eid")}
         events = [{"id": e["id"], "title": str(e.get("title") or ""), "lead": str(e.get("lead") or ""), "shown": str(e.get("shown") or ""),

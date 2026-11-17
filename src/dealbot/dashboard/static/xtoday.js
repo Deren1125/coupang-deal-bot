@@ -225,6 +225,9 @@ function itemCard(it) {
     (it.warn || []).map(x => el('p', {class: 'w'}, x)),
     el('div', {class: 'po'}, it.preview),
     (it.sources || []).length ? el('div', {class: 'src'}, el('span', {}, '출처 기사'), links(it.sources)) : null,
+    it.photo ? [el('img', {src: it.photo.src, alt: `기사 사진 — ${it.keyword}`, loading: 'lazy', style: 'display:block;width:100%;height:auto;border-radius:8px;margin:6px 0'}),
+      el('div', {class: 'rw'}, el('a', {class: 'pb soft', href: it.photo.src, download: 'x-photo.jpg'}, '사진 저장'), btn('pb soft', '출처 줄 복사', () => copy(`출처: ${it.photo.credit}`, '출처 줄')),
+        el('span', {class: 'n'}, `출처: ${it.photo.credit} · 보도 사진이라 올릴 땐 출처를 같이 (안 써도 돼요)`))] : null,
     el('div', {class: 'rw'}, btn('pb', '열기 — 내 한마디 쓰고 올리기', () => open(it))),
     el('div', {class: 'rw'}, copyBtns(it)),
     el('div', {class: 'rw'}, box(it, '✓ 올렸어요'), btn('pb soft', '안 써요', () => skip(it.id))));

@@ -3,6 +3,7 @@
    순위는 서버가 공개 출처에서 읽어 둔 값 (15분 지났으면 이 화면이 '새로 보기'를 한 번 부름 — 서버가 10분에 한 번만 받음). X 에 로그인·자동 게시·자동 클릭 없음:
    대표 글·'X에서 보기'는 서버가 준 링크를 내가 누를 때만 열린다. [이걸로 글 쓰기] = 주제 칸에 넣기만 (AI 는 [초안 만들기]를 누를 때만 · 한 번 = 초안 묶음 하나).
    초안은 [복사] 해서 X 에 내가 올리고 [✓ 올렸어요] → 오늘 X 체크리스트에 '내 주제' 줄로 (10분 안 취소).
+   사진으로 글 쓰기 칸은 xphoto.js 가 그려 넣는다 (W.SBXPhoto.form — 초안은 같은 '내 초안' 목록에 사진·가린 곳 수와 같이).
    이 파일에 바깥 주소·innerHTML 없음. 쓰던 주제·메모·고친 초안은 이 기기에만 (localStorage xr1). */
 'use strict';
 (() => {
@@ -12,7 +13,7 @@ const CSS = '.xr .r{display:flex;align-items:center;gap:8px;min-height:40px;font
   '.xr .mv.up{color:var(--red)}.xr .mv.dn{color:var(--ac-ink)}.xr .sm{flex:none}.xr .kw{display:block;font-size:16px;margin:6px 0;overflow-wrap:anywhere}' +
   '.xr .p{display:block;font-size:13px;line-height:1.5;color:var(--ac-ink);text-decoration:none;padding:4px 0;overflow-wrap:anywhere}.xr .p i{font-style:normal;color:var(--sub)}' +
   '.xr .hd{opacity:.6;font-size:13px;margin:0 0 4px}.xr .opt{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px}.xr .opt .seg{flex:1 1 200px}' +
-  '.xr textarea.dr{min-height:150px}.xr .dn1{opacity:.55}.xr label.ck{display:inline-flex;align-items:center;gap:6px;min-height:44px;font-size:14px}' +
+  '.xr textarea.dr{min-height:150px}.xr .cap{display:block;width:100%;height:auto;border-radius:8px;margin:6px 0;border:1px solid var(--line,#ddd)}.xr .dn1{opacity:.55}.xr label.ck{display:inline-flex;align-items:center;gap:6px;min-height:44px;font-size:14px}' +
   '.xr label.ck input{width:22px;height:22px;margin:0}main[data-xr]>:not(#xrs){display:none!important}';
 const NW = {target: '_blank', rel: 'noopener'}, CARD_ROWS = 5;
 const SORTS = [['rank', '인기순'], ['views', '조회순'], ['replies', '댓글 많은 순'], ['move', '급상승']];
@@ -186,7 +187,7 @@ function form() {
     el('p', {class: 'note'}, `오늘 초안 ${ST.left}번 남음 · 초안 ${ST.model} · 내가 적은 주제·메모는 바깥 검색에 쓰지 않아요`));
 }
 function failBox() {  // 마지막 실패 (이 기기 것 또는 서버가 기억한 것 — 새로 고쳐도 남음, 그 뒤 초안이 생기면 사라짐)
-  const f = err || ST.fail;
+  const f = err || (ST.fail && !ST.fail.photo ? ST.fail : null);  // 사진으로 쓴 것의 실패는 그 칸(xphoto.js)에
   if (!f || busy.mk) return null;
   const wait = f.wait_s ? ` (${Math.ceil(f.wait_s / 60)}분 남음)` : '';
   return el('section', {class: 'box', role: 'alert', id: 'xrfail'}, el('p', {class: 'w'}, `✗ ${f.at ? f.at + ' · ' : ''}「${f.topic || F.topic}」 초안을 못 썼어요 — ${f.text}${wait}`),
@@ -238,11 +239,19 @@ function drawScr(force) {
     el('p', {class: 'note', style: 'margin:0 0 10px'}, '조회·답글 수는 주제마다 좋아요 20 넘는 X 글 20개까지 더한 값이에요 (X 전체 글 수 아님) · 오른 정도는 약 1시간 전 순위와 견줘요'),
     abroad(),
     el('p', {class: 'grp'}, '내 주제로 글 쓰기'), form(),
+    W.SBXPhoto ? W.SBXPhoto.form() : null,
     el('p', {class: 'grp', id: 'xrmine'}, `내 초안 · 오늘 ${mine.length}묶음`),
     mine.length ? null : el('p', {class: 'note'}, '아직 오늘 만든 초안이 없어요 — [초안 만들기]로 만든 초안은 여기 남아요 (새로 고쳐도 · 오늘 것)'),
-    mine.map(s => [el('p', {class: 'sub', id: 'xrm-' + s.id}, `${s.at} · ${s.topic}`), s.drafts.map((d, i) => draftCard(s, i, d))]),
+    mine.map(s => [el('p', {class: 'sub', id: 'xrm-' + s.id}, `${s.at} · ${s.topic}`), pics(s), s.drafts.map((d, i) => draftCard(s, i, d))]),
   ].flat(9).filter(Boolean));
   if (jump) toForm();
+}
+function pics(s) {  // 사진으로 쓴 묶음 (xphoto.py) — 모자이크본만 서버에 있음 · [사진 저장] 해서 초안과 같이 올림
+  const im = s.imgs || [];
+  if (!im.length) return null;
+  return el('section', {class: 'itm'}, im.map((src, i) => el('img', {class: 'cap', src, alt: `사진 ${i + 1} (가린 뒤)`, loading: 'lazy'})),
+    el('div', {class: 'rw'}, im.map((src, i) => el('a', {class: 'pb soft', href: src, download: `x-${s.id}-${i + 1}.jpg`}, im.length > 1 ? `사진 ${i + 1} 저장` : '사진 저장'))),
+    el('p', {class: 'an'}, `가린 곳 ${s.blur}곳${s.faces ? ' (얼굴 포함)' : ''} · 원본은 서버에서 지웠어요 — 올리기 전에 닉네임·아이디가 남았는지 한 번 봐 주세요`));
 }
 function abroad() {  // 외국어 주제 · 한국 기사 없음 (주인 11/17 — 순위에서 빼고 접어 둠, 기본 숨김)
   const ab = ST.abroad || [];
@@ -293,6 +302,6 @@ function start() {
   D.addEventListener('visibilitychange', () => { if (D.visibilityState === 'visible' && (onScr() || onX())) load(); });
   mount();
 }
-W.SBXTrend = {load, mount, pick, state: () => ST, form: () => F};
+W.SBXTrend = {load, mount, pick, state: () => ST, form: () => F, take, redraw: () => drawScr(true), busy: () => !!busy.mk, seg};
 if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

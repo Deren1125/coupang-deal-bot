@@ -904,6 +904,15 @@ class XCapConfig(BaseModel):
         return sorted(v)
 
 
+class XPhotoConfig(BaseModel):
+    """'사진으로 X 글 쓰기' · 초안에 붙일 사진 (주인 11/17 — dashboard/xphoto.py). 올린 사진은 모자이크본만 남기고 원본은 지움 · 서버는 X 에 올리지 않음."""
+
+    enabled: bool = True
+    photos_per_day: int = Field(24, ge=0, le=100)  # 하루에 글 쓰기에 쓰는 사진 장수 (한 번에 1~4장 · 초안 횟수는 xstudio 하루 몫과 같이 셈)
+    news: bool = True  # '오늘 X 글' 카드에 출처 기사 대표 사진(og:image) 한 장 — robots.txt 가 막으면 안 받음
+    news_per_day: int = Field(16, ge=0, le=60)  # 하루에 받는 기사 사진 수 (기사 화면 1번 + 사진 1번씩)
+
+
 class XTodayConfig(BaseModel):
     """'오늘 X 글' (주인 11/15 — 그날 올릴 X 초안을 (11/16 부터 하루 10개) 서버가 미리 만들어 대시보드 X 칸에 · dashboard/xtoday.py).
     글은 xstudio 와 같은 길(Opus 까지)로 쓰고, 올리기는 주인이 손으로 (자동 게시 없음)."""
@@ -964,6 +973,7 @@ class DashboardConfig(BaseModel):
     x_today: XTodayConfig = Field(default_factory=XTodayConfig)  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15)
     x_trend: XTrendConfig = Field(default_factory=XTrendConfig)  # 지금 뜨는 주제 · 내 주제로 글 쓰기 (주인 11/16)
     x_cap: XCapConfig = Field(default_factory=XCapConfig)  # X 커뮤 캡처 글 (주인 11/17)
+    x_photo: XPhotoConfig = Field(default_factory=XPhotoConfig)  # 사진으로 X 글 쓰기 · 초안에 붙일 사진 (주인 11/17)
     # 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 둘 다 숨김 (코드·API 는 그대로, true 면 예전 화면)
     x_helper: bool = False  # 'X 도우미' 책갈피 (static/xhelper.js) 설치 칸 · 받기. false 면 이미 깐 책갈피를 눌러도 '이제 안 써요' 한 줄만
     x_engage: bool = False  # X '반응 연속 모드' 카드·화면 (static/xengage.js · #/sns/xe). false 면 '오늘 X 글' 체크리스트의 '오늘 반응 할 것' 줄로

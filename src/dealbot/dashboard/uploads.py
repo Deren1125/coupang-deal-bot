@@ -218,6 +218,18 @@ class Uploads:
             for uid in ids:
                 self.db._conn.execute("UPDATE dash_uploads SET used_by = ? WHERE id = ?", (action_id, uid))
 
+    def discard(self, uid: str) -> bool:
+        """받은 파일을 지금 지운다 (파일·썸네일·표 — 사진으로 X 글 쓰기: 모자이크본을 만든 뒤 원본을 남기지 않게)."""
+        row = self.row(uid)
+        if row is None:
+            return False
+        for p in (self.files_dir / f"{uid}.{row['ext']}", self.base / "thumbs" / f"{uid}.jpg"):
+            with contextlib.suppress(OSError):
+                p.unlink()
+        with self.db._lock:
+            self.db._conn.execute("UPDATE dash_uploads SET deleted = 1 WHERE id = ?", (uid,))
+        return True
+
     # ------------------------------------------------------------ 정리
     def gc(self) -> int:
         """안 쓴 파일 24시간 · 쓴 파일은 그 일이 끝나고 72시간 · tmp 1시간."""
