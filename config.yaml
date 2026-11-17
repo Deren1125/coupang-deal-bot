@@ -675,6 +675,11 @@ dashboard:
     google: true                   # 구글 트렌드 '지금 뜨는 검색어' RSS (한국)
     fx_per_day: 200                # 하루 FxTwitter 요청 상한 (화면을 열 때만 · 15분 캐시 · 한 번에 5번까지 · 5초 간격 · 404·429 연속 2번이면 6시간 쉼)
     google_per_day: 100
+  x_cap:                           # X 커뮤 캡처 글 (주인 11/17 — dashboard/xcap.py · SNS 탭 X 칸 '커뮤 캡처 글' 카드 · 올리기는 주인 손)
+    enabled: true
+    per_day: 3                     # 하루 카드 수 (본문 캡처 1~2장 + 한 줄 초안)
+    times: ["11:40", "16:40", "20:40"]
+    sources: [bobaedream, ppomppu] # robots.txt 허용·로그인 없음·서버에서 열리는 곳만. dcinside 는 기본 끔 · 네이트판(robots 막음)·인스티즈(사람 확인)·클리앙·루리웹(서버 IP 막힘)은 없음
   x_today:                         # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15 — dashboard/xtoday.py · 화면 SNS 탭 X 칸)
     enabled: true
     morning: "07:40"               # 아침에 그날 X 초안을 만드는 시각 (한국시간)

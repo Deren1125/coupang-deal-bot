@@ -886,6 +886,24 @@ class XTrendConfig(BaseModel):
     google_per_day: int = Field(100, ge=0, le=300)  # 하루 구글 RSS 요청 상한 (새로 보기 한 번에 1번)
 
 
+class XCapConfig(BaseModel):
+    """'X 커뮤 캡처 글' (주인 11/17 — 공개 커뮤니티에서 반응 터진 글을 본문 캡처 1~2장 + 내 말투 한 줄 초안으로 · dashboard/xcap.py).
+    로그인 없이 열리고 robots.txt 가 허용한 곳만 · 막히면(403·429·사람 확인) 그 출처 7일 쉼 · 우회 없음 · 서버는 X 에 올리지 않음."""
+
+    enabled: bool = True
+    per_day: int = Field(3, ge=0, le=5)  # 하루 카드 수 (주인 '하루 2~3개')
+    times: list[str] = Field(default_factory=lambda: ["11:40", "16:40", "20:40"])  # 이 시각 뒤 처음 도는 1분 일에서 하나씩
+    # 쓸 출처 (xcap.SOURCES 이름). 기본 = 보배드림 베스트 · 뽐뿌 자유게시판 HOT. 'dcinside'(실시간 베스트)는 성별 갈등·혐오 글이 많아 기본 끔
+    sources: list[str] = Field(default_factory=lambda: ["bobaedream", "ppomppu"])
+
+    @field_validator("times")
+    @classmethod
+    def _times(cls, v: list[str]) -> list[str]:
+        if any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in v):
+            raise ValueError("dashboard.x_cap.times 는 'HH:MM' 목록")
+        return sorted(v)
+
+
 class XTodayConfig(BaseModel):
     """'오늘 X 글' (주인 11/15 — 그날 올릴 X 초안을 (11/16 부터 하루 10개) 서버가 미리 만들어 대시보드 X 칸에 · dashboard/xtoday.py).
     글은 xstudio 와 같은 길(Opus 까지)로 쓰고, 올리기는 주인이 손으로 (자동 게시 없음)."""
@@ -945,6 +963,7 @@ class DashboardConfig(BaseModel):
     farm_hub_url: str = ""
     x_today: XTodayConfig = Field(default_factory=XTodayConfig)  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15)
     x_trend: XTrendConfig = Field(default_factory=XTrendConfig)  # 지금 뜨는 주제 · 내 주제로 글 쓰기 (주인 11/16)
+    x_cap: XCapConfig = Field(default_factory=XCapConfig)  # X 커뮤 캡처 글 (주인 11/17)
     # 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 둘 다 숨김 (코드·API 는 그대로, true 면 예전 화면)
     x_helper: bool = False  # 'X 도우미' 책갈피 (static/xhelper.js) 설치 칸 · 받기. false 면 이미 깐 책갈피를 눌러도 '이제 안 써요' 한 줄만
     x_engage: bool = False  # X '반응 연속 모드' 카드·화면 (static/xengage.js · #/sns/xe). false 면 '오늘 X 글' 체크리스트의 '오늘 반응 할 것' 줄로

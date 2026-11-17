@@ -401,6 +401,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
                 xt.tick()
         except Exception as e:  # noqa: BLE001
             log.warning("x today failed: %s", type(e).__name__)
+        try:  # X 커뮤 캡처 글 (주인 11/17 — dashboard/xcap.py): 정한 시각 뒤 하나씩 · 뒤에서 (캡처·AI 가 몇 분 걸려도)
+            xc = getattr(getattr(getattr(bot, "dashboard", None), "api", None), "xcap", None)
+            if xc is not None:
+                xc.tick()
+        except Exception as e:  # noqa: BLE001
+            log.warning("x cap failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 
