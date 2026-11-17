@@ -909,7 +909,7 @@ class XPhotoConfig(BaseModel):
 
     enabled: bool = True
     photos_per_day: int = Field(24, ge=0, le=100)  # 하루에 글 쓰기에 쓰는 사진 장수 (한 번에 1~4장 · 초안 횟수는 xstudio 하루 몫과 같이 셈)
-    news: bool = True  # '오늘 X 글' 카드에 출처 기사 대표 사진(og:image) 한 장 — robots.txt 가 막으면 안 받음
+    news: bool = False  # 기본 끔 (보도 사진 저작권 — 메인 11/17 · 주인이 켤 수 있음). '오늘 X 글' 카드에 출처 기사 대표 사진(og:image) 한 장 — robots.txt 가 막으면 안 받음
     news_per_day: int = Field(16, ge=0, le=60)  # 하루에 받는 기사 사진 수 (기사 화면 1번 + 사진 1번씩)
 
 

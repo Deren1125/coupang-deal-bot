@@ -683,7 +683,7 @@ dashboard:
   x_photo:                         # 사진으로 X 글 쓰기 · 초안에 붙일 사진 (주인 11/17 — dashboard/xphoto.py · 화면 #/sns/xr/w '사진으로 글 쓰기')
     enabled: true
     photos_per_day: 24             # 하루에 쓰는 사진 장수 (한 번에 1~4장 · 모자이크본만 남기고 원본은 지움)
-    news: true                     # '오늘 X 글' 카드에 출처 기사 대표 사진 한 장 ('출처: 언론사' 같이 · robots.txt 가 막으면 안 받음)
+    news: false                    # '오늘 X 글' 카드에 출처 기사 대표 사진 한 장 — 기본 끔 (보도 사진 저작권 · 메인 11/17). true 면 받음 ('출처: 언론사' 같이 · robots.txt 가 막으면 안 받음)
     news_per_day: 16
   x_today:                         # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15 — dashboard/xtoday.py · 화면 SNS 탭 X 칸)
     enabled: true

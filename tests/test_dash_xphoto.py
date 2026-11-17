@@ -319,7 +319,7 @@ class Fetch:
 
 def news_desk(tmp_path: Any, pages: dict[str, tuple[int, str, bytes]], **cfg: Any) -> tuple[xp.XPhoto, Fetch]:
     f = Fetch(pages)
-    conf = XPhotoConfig(**cfg)
+    conf = XPhotoConfig(**{"news": True, **cfg})  # 기본은 꺼짐 (저작권) — 받는 길 시험이라 켬
     return xp.XPhoto(FakeDb(), None, None, None, cfg=lambda: conf, img_dir=tmp_path, fetcher=f, ua="dealbot", ocr=lambda _b: "", clock=lambda: 1_800_000_000.0), f  # type: ignore[arg-type]
 
 
@@ -348,6 +348,7 @@ async def test_news_photo_takes_one_og_image_with_credit_and_respects_robots(tmp
     d4, f4 = news_desk(tmp_path / "d", pages, news_per_day=0)
     assert await d4.news_photo(art) is None and f4.calls == []
     d5, f5 = news_desk(tmp_path / "e", pages, news=False)
+    assert XPhotoConfig().news is False  # 기본은 꺼짐 (보도 사진 저작권 — 주인이 켤 수 있음)
     assert await d5.news_photo(art) is None and f5.calls == []
     assert xp.og_image('<meta property="og:image" content="http://a.example/x.jpg"><meta name="twitter:image" content="https://a.example/y.jpg">', art) == "https://a.example/y.jpg"
     assert xp.og_image('<meta property="og:image" content="javascript:alert(1)">', art) == ""

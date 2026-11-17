@@ -13,7 +13,7 @@ A. 사진으로 글 쓰기 — POST draft {photos: [업로드 번호 1~4], memo,
      모자이크본만 data/xphoto/<묶음>-<n>.jpg 로 남기고 원본 업로드는 바로 지운다 (uploads.discard). 실패하면 원본은 업로드 규칙대로 24시간 뒤 지워짐.
 B. 기사 대표 사진 — '오늘 X 글' 카드용 (xtoday.photo 가 부른다). 출처 기사 한 곳의 og:image 를 한 번 받아 JPEG 로 다시 저장 (메타데이터 없음).
    robots.txt 가 막으면 안 받음 · 하루 cfg.news_per_day 장 · 프로그램 User-Agent 그대로 · 사설 주소 막음(xstudio.Fetcher) · 카드에 '출처: 언론사'.
-   dashboard.x_photo.news: false 면 끔.
+   dashboard.x_photo.news 기본 false (보도 사진 저작권 — 메인 11/17 · 켜면 받음).
 
   GET  /dashboard/api/xphoto/state            {on, lim, ocr, left}
   GET  /dashboard/api/xphoto/img/<이름>.jpg     모자이크본·기사 사진 (로그인 아래)
@@ -125,6 +125,15 @@ def send_jpeg(im: Image.Image) -> tuple[bytes, float]:
     return buf.getvalue(), k
 
 
+def _open_keep(raw: bytes) -> Image.Image:
+    """올린 사진 → RGB, 긴 변 KEEP_SIDE 까지 (어차피 그 크기로 남김 — 50MP 사진 4장을 통째로 메모리에 두지 않게)."""
+    with Image.open(io.BytesIO(raw)) as src:
+        src.draft("RGB", (KEEP_SIDE, KEEP_SIDE))  # JPEG 은 읽을 때부터 줄여 읽음
+        im = src.convert("RGB")
+    im.thumbnail((KEEP_SIDE, KEEP_SIDE))
+    return im
+
+
 def og_image(markup: str, base: str) -> str:
     """기사 HTML 의 대표 사진 주소 (og:image · twitter:image) — https 만."""
     from bs4 import BeautifulSoup
@@ -205,7 +214,7 @@ class XPhoto:
         if self._left("photos", cfg.photos_per_day, now) < len(ids):
             raise xs.StudioError(429, "day", f"오늘 사진은 {cfg.photos_per_day}장을 다 썼어요 — 내일 다시")
         try:
-            ims = await asyncio.to_thread(lambda: [Image.open(io.BytesIO(p.read_bytes())).convert("RGB") for p in paths])  # type: ignore[union-attr]
+            ims = await asyncio.to_thread(lambda: [_open_keep(p.read_bytes()) for p in paths])  # type: ignore[union-attr]
         except (OSError, ValueError) as e:
             raise xs.StudioError(400, "bad_upload", "사진을 읽을 수 없어요 — 다시 올려 주세요") from e
         if not self.studio._count("draft", xs.DRAFT_PER_DAY):
