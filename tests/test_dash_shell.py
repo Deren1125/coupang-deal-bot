@@ -285,10 +285,11 @@ async def test_shell_page_has_boot_json_and_no_inline_script(bot: DealBot, setti
     # · dashacct.js (연결 탭 '대시보드 로그인' 칸, 11/16 — accounts.js 다음)
     # · xtrend.js (지금 뜨는 주제·내 주제로 글 쓰기, 11/16 — xengage.js 다음)
     # · kwrun.js (키워드 글쓰기 결과 줄, 11/17 — xtrend.js 다음) · xcap.js (X 커뮤 캡처 글, 11/17 — kwrun.js 다음)
-    # · xphoto.js (사진으로 X 글 쓰기, 11/17 — xcap.js 다음)
-    assert len(scripts) == 19
+    # · xphoto.js (사진으로 X 글 쓰기, 11/17 — xcap.js 다음) · xaggro.js (X 어그로 후보, 11/17 — xphoto.js 다음)
+    assert len(scripts) == 20
     (th_attrs, th_body), (src_attrs, src_body), (tp_attrs, tp_body), (lg_attrs, lg_body), (ac_attrs, ac_body), (da_attrs, da_body), (rt_attrs, rt_body), (sr_attrs, sr_body), (kz_attrs, kz_body), \
-        (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (xt_attrs, xt_body), (xe_attrs, xe_body), (xr_attrs, xr_body), (kw_attrs, kw_body), (xc_attrs, xc_body), (xp_attrs, xp_body), (boot_attrs, _boot) = scripts
+        (ev_attrs, ev_body), (hub_attrs, hub_body), (xs_attrs, xs_body), (xt_attrs, xt_body), (xe_attrs, xe_body), (xr_attrs, xr_body), (kw_attrs, kw_body), (xc_attrs, xc_body), (xp_attrs, xp_body), (xa_attrs, xa_body), (boot_attrs, _boot) = scripts
+    assert re.fullmatch(r' defer src="/dashboard/static/xaggro\.js\?v=[0-9a-f]{10}"', xa_attrs) and xa_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xphoto\.js\?v=[0-9a-f]{10}"', xp_attrs) and xp_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/xcap\.js\?v=[0-9a-f]{10}"', xc_attrs) and xc_body == ""
     assert re.fullmatch(r' defer src="/dashboard/static/kwrun\.js\?v=[0-9a-f]{10}"', kw_attrs) and kw_body == ""
@@ -364,7 +365,7 @@ async def test_app_files_are_public_with_right_headers(bot: DealBot) -> None:
                         ("earn.js", "text/javascript"), ("xpost.js", "text/javascript"), ("lookbook.js", "text/javascript"),
                         ("logins.js", "text/javascript"), ("sns.js", "text/javascript"), ("routine.js", "text/javascript"),
                         ("ssalmuk.js", "text/javascript"), ("todohub.js", "text/javascript"), ("xstudio.js", "text/javascript"),
-                        ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript"), ("xengage.js", "text/javascript"), ("xtrend.js", "text/javascript"), ("kwrun.js", "text/javascript"), ("xcap.js", "text/javascript"), ("xphoto.js", "text/javascript"),
+                        ("xtoday.js", "text/javascript"), ("xgo.js", "text/javascript"), ("xengage.js", "text/javascript"), ("xtrend.js", "text/javascript"), ("kwrun.js", "text/javascript"), ("xcap.js", "text/javascript"), ("xphoto.js", "text/javascript"), ("xaggro.js", "text/javascript"),
                         ("seoires.js", "text/javascript"), ("accounts.js", "text/javascript"), ("dashacct.js", "text/javascript")):
         res = await bot.web.dispatch("GET", f"/dashboard/static/{name}", {})
         assert res[0] == 200 and res[2].startswith(ctype) and res[3]["X-Content-Type-Options"] == "nosniff", name

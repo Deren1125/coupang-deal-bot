@@ -54,6 +54,7 @@
   GET  /dashboard/api/kwruns   오늘 키워드 글쓰기 결과 줄 (kwrun.py — 주인 11/17)
   GET  /dashboard/api/xphoto/state · img/<이름>.jpg · POST xphoto/draft   사진으로 X 글 쓰기 · 초안에 붙일 사진 (xphoto.py — 주인 11/17)
   GET  /dashboard/api/xcap/state · img/<번호>-<n>.jpg · POST xcap/{make,skip}   X 커뮤 캡처 글 (xcap.py — 주인 11/17)
+  GET  /dashboard/api/xaggro/state · img/<번호>-<n>.jpg · POST xaggro/{make,skip,posted}   X 어그로 후보 (xaggro.py — 주인 11/17)
   GET  /dashboard/api/xengage/state · POST /dashboard/api/xengage/{add,handoff,open,step,draft}   X 반응 연속 모드 (xengage.py — 주인 11/15 · 반자동: 누르기는 주인)
   GET  /dashboard/api/xhelper · GET /dashboard/share · GET /dashboard/x   'X 도우미' 책갈피 코드 · 안드로이드 공유 시트 · 바로 가기 디딤돌 (xstudio.py —
                                         뒤 둘은 로그인 없이: 주소만 넘김)
@@ -140,6 +141,7 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "kwrun.js": "text/javascript; charset=utf-8",
              "xphoto.js": "text/javascript; charset=utf-8",  # xphoto.js: #/sns/xr/w '사진으로 글 쓰기' 칸 (11/17, 셸이 defer 로 — xcap.js 다음)
              "xcap.js": "text/javascript; charset=utf-8",  # xcap.js: SNS 탭 X 칸 '커뮤 캡처 글' 카드 (11/17, 셸이 defer 로 — 오늘 X 글 카드 아래)  # kwrun.js: 키워드 글쓰기 결과 줄 (11/17, 셸이 defer 로 — 인기 키워드·막 뜨는 중 단추 옆)
+             "xaggro.js": "text/javascript; charset=utf-8",  # xaggro.js: SNS 탭 X 칸 '어그로 후보' 카드 (11/17, 셸이 defer 로 — 커뮤 캡처 글 카드 아래)
              "xgo.js": "text/javascript; charset=utf-8"}  # xgo.js: X 도구 바로 가기 디딤돌 (/dashboard/x — 같은 사이트 안 이동으로 한 번 넘김)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -329,6 +331,10 @@ class DashApi:
         from dealbot.dashboard import xphoto
 
         self.xphoto = xphoto.register(web, self, self.xstudio, self.xtoday, self.xtrend)
+        # X 어그로 후보 (주인 11/17) — xcap 과 같은 출처·캡처(가림) 길 · 속도 점수로 고름 · 초안은 xstudio 길 · ✓ 는 오늘 X 체크리스트에 · scheduler 1분 일이 tick
+        from dealbot.dashboard import xaggro
+
+        self.xaggro = xaggro.register(web, self, self.xstudio, self.xtoday, self.xcap, self.xtrend)
 
         # 대시보드 로그인 보기·바꾸기 (주인 11/16) — 로그인 아래 · POST 는 guard + 로그인 세션만 · 값은 데이터 폴더 파일 (.env 는 그대로)
         from dealbot.dashboard import dashacct

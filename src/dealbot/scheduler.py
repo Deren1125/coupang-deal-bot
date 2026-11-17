@@ -407,6 +407,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
                 xc.tick()
         except Exception as e:  # noqa: BLE001
             log.warning("x cap failed: %s", type(e).__name__)
+        try:  # X 어그로 후보 (주인 11/17 — dashboard/xaggro.py): 정한 시각 뒤 한 번씩 · 뒤에서 · xcap 이 도는 중·메모리 부족이면 미룸
+            xa = getattr(getattr(getattr(bot, "dashboard", None), "api", None), "xaggro", None)
+            if xa is not None:
+                xa.tick()
+        except Exception as e:  # noqa: BLE001
+            log.warning("x aggro failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 

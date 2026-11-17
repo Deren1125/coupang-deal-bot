@@ -78,7 +78,7 @@ BAD_RE = re.compile(r"신상|박제|저격|폭로|실명|얼굴\s*공개|번호\
                     r"광고|홍보|협찬|이벤트|추첨|코인|주식\s*리딩|도박|토토|카지노|후방|ㅇㅎ|19금|노출", re.I)
 PII_JS = r"""(sel) => {
   const root = document.querySelector(sel); if (!root) return false;
-  const pat = [/01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}/g, /[\w.+-]+@[\w-]+\.[\w.-]+/g, /@[A-Za-z0-9_]{2,15}/g];
+  const pat = [/01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}/g, /[\w.+-]+@[\w-]+\.[\w.-]+/g, /@[A-Za-z0-9_]{2,15}/g, /\b\d{1,3}\.\d{1,3}\.(?:\d{1,3}|\*{1,3}|x{1,3})\.(?:\d{1,3}|\*{1,3}|x{1,3})(?![\d.])/g];
   const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n = w.nextNode(); n; n = w.nextNode()) { let t = n.nodeValue; for (const p of pat) t = t.replace(p, m => '●'.repeat(Math.min(m.length, 8))); n.nodeValue = t; }
   return true;
@@ -419,20 +419,7 @@ class XCap:
             log.info("xcap: AI 가 뺌 (%s)", xs.one_line(data.get("why"), 60))
             return None
         cid = "c" + hashlib.sha256(f"{now}:{c['url']}".encode()).hexdigest()[:9]
-        imgs: list[bytes] = []
-        blur = 0
-        if self.shoot is not None:
-            try:
-                shot = await self.shoot(c["url"], src)
-                png, spots, scale = shot if isinstance(shot, tuple) else (shot, [], 1.0)
-                if png:  # 글쓴이·닉네임·프로필·등급·IP·전화번호·이메일·@아이디 자리는 픽셀 모자이크 (주인 11/17) — 못 하면 그 캡처는 안 쓴다
-                    png, blur = xblur.blur_bytes(png, spots, scale=scale, faces=False)
-                imgs = compose(png, src.name) if png else []
-            except Exception as e:  # noqa: BLE001 — 글자 그림으로
-                log.warning("xcap 캡처 실패: %s", type(e).__name__)
-        if not imgs:
-            safe_t, safe_b = xblur.scrub(title), xblur.scrub(body)  # 글자 그림에도 전화번호·이메일·@아이디는 ●
-            imgs, blur = [text_card(safe_t, safe_b, src.name)], max(0, len(re.findall("●+", safe_t + "\n" + safe_b)) - len(re.findall("●+", title + "\n" + body)))
+        imgs, blur = await self.capture(src, c["url"], title, body)
         self.img_dir.mkdir(parents=True, exist_ok=True)
         for n, b in enumerate(imgs, 1):
             (self.img_dir / f"{cid}-{n}.jpg").write_bytes(b)
@@ -447,6 +434,24 @@ class XCap:
             log.warning("xcap checklist: %s", type(e).__name__)
         log.info("xcap: %s 카드 (사진 %d · 댓글 %d)", src.key, len(imgs), c["comments"])
         return item
+
+    async def capture(self, src: Source, url: str, title: str, body: str) -> tuple[list[bytes], int]:
+        """그 글의 캡처 그림(JPEG 1~2장 · 출처 띠)과 가린 곳 수 — 크롬이 못 찍으면 글자 그림 한 장. '어그로 후보'(xaggro.py)도 이 길로."""
+        imgs: list[bytes] = []
+        blur = 0
+        if self.shoot is not None:
+            try:
+                shot = await self.shoot(url, src)
+                png, spots, scale = shot if isinstance(shot, tuple) else (shot, [], 1.0)
+                if png:  # 글쓴이·닉네임·프로필·등급·IP·전화번호·이메일·@아이디 자리는 픽셀 모자이크 (주인 11/17) — 못 하면 그 캡처는 안 쓴다
+                    png, blur = xblur.blur_bytes(png, spots, scale=scale, faces=False)
+                imgs = compose(png, src.name) if png else []
+            except Exception as e:  # noqa: BLE001 — 글자 그림으로
+                log.warning("xcap 캡처 실패: %s", type(e).__name__)
+        if not imgs:
+            safe_t, safe_b = xblur.scrub(title), xblur.scrub(body)  # 글자 그림에도 전화번호·이메일·@아이디·IP 는 ●
+            imgs, blur = [text_card(safe_t, safe_b, src.name)], max(0, len(re.findall("●+", safe_t + "\n" + safe_b)) - len(re.findall("●+", title + "\n" + body)))
+        return imgs, blur
 
     # ---------------------------------------------------------- 1분 일 · 누르기
     def due(self, now: float) -> str:

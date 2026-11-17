@@ -680,6 +680,16 @@ dashboard:
     per_day: 3                     # 하루 카드 수 (본문 캡처 1~2장 + 한 줄 초안)
     times: ["11:40", "16:40", "20:40"]
     sources: [bobaedream, ppomppu] # robots.txt 허용·로그인 없음·서버에서 열리는 곳만. dcinside 는 기본 끔 · 네이트판(robots 막음)·인스티즈(사람 확인)·클리앙·루리웹(서버 IP 막힘)은 없음
+  x_aggro:                         # X 어그로 후보 (주인 11/17 — dashboard/xaggro.py · SNS 탭 X 칸 '어그로 후보' 카드 · 올리기는 주인 손)
+    enabled: true
+    per_day: 6                     # 하루 카드 수 (캡처 1~2장 + 훅·요약·'출처: 사이트' 초안)
+    per_run: 2                     # 한 번에 만드는 수 (캡처는 하나씩 차례로)
+    times: ["09:20", "13:20", "17:20", "21:20"]
+    sources: [bobaedream, ppomppu] # x_cap 과 같은 출처 이름 · 막힌 곳(403 등)은 7일 쉼 · 우회 없음
+    min_score: 15                  # 시간당 댓글×3 + 추천×2 + 조회/100 (뜨는 주제면 최대 +50%) 가 이보다 낮으면 안 만듦
+    max_age_h: 24
+    min_free_mb: 400               # 여유 메모리가 이보다 적으면 쉼
+    mem_pressure_path: /home/ubuntu/Blog-Auto/var/mem_pressure   # Blog-Auto 감시꾼의 메모리 부족 표시가 살아 있으면 쉼
   x_photo:                         # 사진으로 X 글 쓰기 · 초안에 붙일 사진 (주인 11/17 — dashboard/xphoto.py · 화면 #/sns/xr/w '사진으로 글 쓰기')
     enabled: true
     photos_per_day: 24             # 하루에 쓰는 사진 장수 (한 번에 1~4장 · 모자이크본만 남기고 원본은 지움)

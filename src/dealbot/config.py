@@ -904,6 +904,28 @@ class XCapConfig(BaseModel):
         return sorted(v)
 
 
+class XAggroConfig(BaseModel):
+    """'X 어그로 후보' (주인 11/17 — 막 반응이 붙는 커뮤니티 글을 캡처(가림) + X 에 올릴 초안 카드로 · dashboard/xaggro.py).
+    출처·읽기·캡처는 x_cap 과 같은 길 (robots.txt 허용·로그인 없음 · 막히면 7일 쉼 · 우회 없음) · 서버는 X 에 올리지 않음."""
+
+    enabled: bool = True
+    per_day: int = Field(6, ge=0, le=12)  # 하루 카드 수 (점수 큰 순으로 보임)
+    per_run: int = Field(2, ge=1, le=4)  # 한 번에 만드는 카드 수 (캡처는 하나씩 차례로 — 서버 메모리)
+    times: list[str] = Field(default_factory=lambda: ["09:20", "13:20", "17:20", "21:20"])  # 이 시각 뒤 처음 도는 1분 일에서 한 번씩 (x_cap 시각과 겹치지 않게)
+    sources: list[str] = Field(default_factory=lambda: ["bobaedream", "ppomppu"])  # xcap.SOURCES 이름 (막힌 출처는 알아서 쉼)
+    min_score: float = Field(15.0, ge=0)  # 속도 점수(시간당 댓글×3 + 추천×2 + 조회/100 · 뜨는 주제 가산)가 이보다 낮으면 안 만듦
+    max_age_h: float = Field(24.0, gt=0, le=72)  # 올린 지 이보다 오래된 글은 뺌 ('초반 속도')
+    min_free_mb: int = Field(400, ge=0, le=4000)  # 여유 메모리가 이보다 적으면 그 차례는 쉼 (0 = 안 봄)
+    mem_pressure_path: str = "/home/ubuntu/Blog-Auto/var/mem_pressure"  # Blog-Auto 감시꾼이 남기는 메모리 부족 표시 (10분 안 것만 · '' = 안 봄)
+
+    @field_validator("times")
+    @classmethod
+    def _times(cls, v: list[str]) -> list[str]:
+        if any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in v):
+            raise ValueError("dashboard.x_aggro.times 는 'HH:MM' 목록")
+        return sorted(v)
+
+
 class XPhotoConfig(BaseModel):
     """'사진으로 X 글 쓰기' · 초안에 붙일 사진 (주인 11/17 — dashboard/xphoto.py). 올린 사진은 모자이크본만 남기고 원본은 지움 · 서버는 X 에 올리지 않음."""
 
@@ -973,6 +995,7 @@ class DashboardConfig(BaseModel):
     x_today: XTodayConfig = Field(default_factory=XTodayConfig)  # 오늘 X 글 · 큰 사건 바로 알림 (주인 11/15)
     x_trend: XTrendConfig = Field(default_factory=XTrendConfig)  # 지금 뜨는 주제 · 내 주제로 글 쓰기 (주인 11/16)
     x_cap: XCapConfig = Field(default_factory=XCapConfig)  # X 커뮤 캡처 글 (주인 11/17)
+    x_aggro: XAggroConfig = Field(default_factory=XAggroConfig)  # X 어그로 후보 (주인 11/17 — 캡처(가림) + 초안 카드)
     x_photo: XPhotoConfig = Field(default_factory=XPhotoConfig)  # 사진으로 X 글 쓰기 · 초안에 붙일 사진 (주인 11/17)
     # 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 둘 다 숨김 (코드·API 는 그대로, true 면 예전 화면)
     x_helper: bool = False  # 'X 도우미' 책갈피 (static/xhelper.js) 설치 칸 · 받기. false 면 이미 깐 책갈피를 눌러도 '이제 안 써요' 한 줄만
