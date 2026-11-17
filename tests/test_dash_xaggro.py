@@ -394,3 +394,24 @@ const all = (n, f, out = []) => { if (f(n)) out.push(n); n.children.forEach(c =>
     assert out["clip"] == [v["items"][0]["text"]]
     assert out["calls"] == [["/dashboard/api/xaggro/posted", "tok", {"id": v["items"][0]["id"], "op": "add"}]] and out["today"] == ["load"]
     assert "오늘 X 체크리스트에 넣었어요" in out["toast"] and (out["text"].count("안 써요"), out["after"].count("안 써요")) == (2, 1)  # 올린 카드는 [안 써요] 단추가 빠짐 (확인 글의 한 번만 남음)
+
+
+# ---------------------------------------------------------------- 리뷰 (11/17): 훅 베끼기 · 글 주소 robots · xcap 도는 중 make
+def test_hook_copied_from_title_or_body_is_dropped() -> None:
+    src = "친구랑 동업하면 안 되는 이유\n" + STORY
+    assert xa.compose_text("친구랑 동업하면 안 되는 이유", "요약 한 줄", "보배드림", src) == ""
+    assert xa.compose_text("이거 보고 한참 생각함", "요약 한 줄", "보배드림", src) == "이거 보고 한참 생각함\n\n요약 한 줄\n\n출처: 보배드림"
+
+
+async def test_robots_is_checked_for_the_article_url_too(tmp_path: Any) -> None:
+    k = Desk(tmp_path, get=Get(robots=(200, "User-agent: *\nDisallow: /view\n")))
+    assert await k.d.run() == [] and k.ask.calls == [] and not any("No=" in u for u in k.get.calls)  # 목록은 되지만 글 주소는 막힘 → 안 엶
+
+
+async def test_make_waits_while_xcap_runs(tmp_path: Any) -> None:
+    k = Desk(tmp_path)
+    k.cap.bg = asyncio.ensure_future(asyncio.sleep(0.01))
+    with pytest.raises(xs.StudioError) as e:
+        k.d.make()
+    assert e.value.code == "busy"
+    await k.cap.bg

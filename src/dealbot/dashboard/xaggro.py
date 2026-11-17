@@ -6,7 +6,7 @@ xcap 은 '지금까지 쌓인 반응'이 큰 글 하나 + 한 줄 · 여기는 '
 서버는 X 에 올리지 않고 X 에 로그인하지도 않는다 — 주인이 사진 저장 → 글 복사 → X 앱에서 직접 → [✓ 올렸어요] (오늘 X 체크리스트에 한 줄 · xstudio posted).
 
 고르기 (run — 설정 times 마다 한 번 · 한 번에 per_run 장까지 · 하루 per_day 장):
-  1) 출처 목록 1번씩 (xcap.XCap._robots_ok · _read 그대로 — robots.txt 하루 캐시 · 403·429·사람 확인이면 7일 쉼 · 다시 부르지 않음 · 우회 없음.
+  1) 출처 목록 1번씩 (robots.txt 는 차례마다 출처당 한 번 읽어 목록·글 주소마다 봄 · 읽기는 xcap.XCap._read 그대로 · 403·429·사람 확인이면 7일 쉼 · 다시 부르지 않음 · 우회 없음.
      뽐뿌처럼 서버에서 403 인 곳은 첫 요청 뒤 알아서 쉰다) · 요청 사이 xcap.GAP_S 초 · User-Agent 는 프로그램 이름 그대로 · 쿠키 없음.
   2) 제목 규칙으로 빼기: xcap.bad_why (정치·사고·혐오·성인·비방/사생활/광고) + RISK_RE (미성년자 · 범죄 피해 · 특정 가게·사람을 지목한 고발).
   3) 속도 점수: 시간당 (댓글×3 + 추천×2 + 조회/100). 올린 때는 목록의 날짜 칸(WHEN)에서 — 못 읽으면 지난번 본 숫자와의 차이(처음 본 뒤 늘어난 만큼)로,
@@ -38,6 +38,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
+from urllib.robotparser import RobotFileParser
 
 from dealbot.dashboard import xcap as xc
 from dealbot.dashboard import xstudio as xs
@@ -209,7 +210,7 @@ def compose_text(hook: str, body: str, site: str, source: str) -> str:
     lines = [" ".join(ln.split())[:LINE_MAX] for ln in xs.clean(body).split("\n") if ln.strip()][:LINES_MAX]
     lines = [ln for ln in lines if not copied(ln, source) and ln != hook]
     tail = f"출처: {site}"
-    if not hook or re.match(r"출처\s*[:：]", hook):
+    if not hook or re.match(r"출처\s*[:：]", hook) or copied(hook, source):  # 훅도 원문(제목·본문)을 그대로 옮기면 안 씀
         return ""
     lines = [ln for ln in lines if not re.match(r"출처\s*[:：]", ln)]
     while True:
@@ -232,6 +233,29 @@ class XAggro:
         self.img_dir, self.trends, self.hold, self.clock, self.sleep = Path(img_dir), trends, hold, clock, sleep
         self.bg: asyncio.Task[Any] | None = None
         self.asked = 0.0
+        self.rps: dict[str, RobotFileParser | None] = {}  # 이번 차례에 읽은 robots.txt (출처마다 한 번)
+
+    async def _allowed(self, ss: dict[str, Any], src: xc.Source, url: str, now: float) -> bool:
+        """robots.txt 가 이 주소(목록·글)를 허용하나. xcap 의 하루 캐시는 목록 주소로만 낸 참·거짓이라 글 주소는 못 봄 →
+        이번 차례에 출처마다 robots.txt 를 한 번 읽어 주소마다 본다 · 403 등이면 7일 쉼 · 못 읽으면(200·404 아님) 안 씀."""
+        hit = ss["robots"].get(src.key)
+        if hit is not None and not hit[1]:
+            return False
+        if src.key not in self.rps:
+            status, text = 0, ""
+            try:
+                status, text = await self.cap.get(src.home + "/robots.txt")
+            except Exception as e:  # noqa: BLE001
+                log.info("xaggro robots %s: %s", src.key, type(e).__name__)
+            rp: RobotFileParser | None = None
+            if status in xc.BLOCK:
+                ss["off"][src.key] = now + xc.OFF_S
+            elif status in (200, 404):
+                rp = RobotFileParser()
+                rp.parse((text if status == 200 else "").splitlines())
+            self.rps[src.key] = rp
+        rp = self.rps[src.key]
+        return rp is not None and rp.can_fetch(self.cap.ua, url)
 
     # ---------------------------------------------------------- kv
     def _load(self, key: str) -> dict[str, Any]:
@@ -275,7 +299,7 @@ class XAggro:
             src = xc.SOURCES.get(key)
             if src is None or src.key in ss["off"]:
                 continue
-            if not await cap._robots_ok(ss, src, [src.list_url], now):
+            if not await self._allowed(ss, src, src.list_url, now):
                 log.info("xaggro %s: robots.txt 가 막음 — 안 씀", src.key)
                 continue
             html = await cap._read(ss, src, src.list_url, now)
@@ -307,6 +331,7 @@ class XAggro:
         now = self.clock() if now is None else now
         cfg, cap = self.cfg(), self.cap
         ss, st, seen = cap.src_state(now), self.plan(now), self.seen(now)
+        self.rps = {}
         made: list[dict[str, Any]] = []
         err = ""
         try:
@@ -323,7 +348,7 @@ class XAggro:
                 if why:  # 캡처(크롬) 바로 앞에서 한 번 더 — 메모리가 모자라면 남은 후보는 다음 차례에
                     err = why
                     break
-                if not await cap._robots_ok(ss, src, [c["url"]], now):
+                if not await self._allowed(ss, src, c["url"], now):
                     continue
                 html = await cap._read(ss, src, c["url"], now)
                 opened += 1
@@ -424,6 +449,8 @@ class XAggro:
             raise xs.StudioError(409, "off", "어그로 후보가 꺼져 있어요")
         if self.running():
             return 200, {"status": "ok", "started": False, **self.view()}
+        if self.cap.bg is not None and not self.cap.bg.done():  # 커뮤 캡처 글이 도는 중 — 같은 출처 상태(xcap_src)를 서로 덮어쓰지 않게
+            raise xs.StudioError(409, "busy", "커뮤 캡처 글을 만드는 중이에요 — 끝나면 다시")
         if len(self.plan(now)["items"]) >= cfg.per_day:
             raise xs.StudioError(409, "full", f"오늘 몫 {cfg.per_day}장을 다 만들었어요")
         why = self.hold()
