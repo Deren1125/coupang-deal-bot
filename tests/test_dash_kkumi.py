@@ -59,7 +59,7 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     assert "data-value='left'" not in js and "execCommand" not in js  # 왼쪽으로 바꾸지 않음 · 글자 고치기 없음
     assert kkumi.view() == {"code": kkumi.bookmarklet(), "len": len(kkumi.bookmarklet()), "steps": list(kkumi.STEPS),
                             "check": kkumi.check_line(), "use": kkumi.USE, "ver": kkumi.ver(), "version": kkumi.version()} and len(kkumi.STEPS) == 3
-    assert kkumi.check_line().endswith(f"맨 아래가 v{kkumi.version()} 이면 새 판이에요.") and "'\\nv' + V);" in kkumi.SRC.read_text(encoding="utf-8")  # 끝 알림 맨 아래 v7 (11/16)
+    assert kkumi.check_line().endswith(f"맨 아래가 v{kkumi.version()} 이면 새 판이에요.") and "'\\nv' + V);" in kkumi.SRC.read_text(encoding="utf-8")  # 끝 알림 맨 아래 v8 (11/17)
     assert [s.split()[0] for s in kkumi.STEPS] == ["사파리에서", "'책갈피", "책갈피"] and "공유 단추" in kkumi.STEPS[0] and "주소 칸" in kkumi.STEPS[2]  # 쉬운 3단계
     # 판 번호 (주인 11/14 — 끝 알림 'v5' · 지문은 코드가 바뀌면 달라짐) · 글꼴 살피기(나눔명조 — 주인이 취소)는 넣지 않음
     assert kkumi.version() >= 5 and f"const V={kkumi.version()};" in js and "'\\nv'+V" in js

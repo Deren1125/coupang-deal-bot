@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v7 (v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v8 (v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -18,15 +18,16 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 7;
+const V = 8;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => D.querySelectorAll(CARD).length;
 const raw = p => (p.textContent || '').replace(/[\u200b\ufeff]/g, '');
 const txt = p => raw(p).replace(/[\u2063\u2064\u200c\u200d]/g, '').trim();
 const isUrl = t => /^https?:\/\/[^\s]+$/i.test(t);
+const seen = e => e.offsetParent !== null;
 const vis = q => {
-  for (const s of q) for (const e of D.querySelectorAll(s)) if (e.offsetParent !== null) return e;
+  for (const s of q) for (const e of D.querySelectorAll(s)) if (seen(e)) return e;
   return null;
 };
 const fire = (e, types, p) => {
@@ -43,9 +44,10 @@ const wait = async (f, ms) => {
   while (Date.now() - t < ms) { const v = f(); if (v) return v; await S(250); }
   return null;
 };
+const nImg = () => D.querySelectorAll('.se-component.se-image').length;
 const content = () => D.querySelector('.se-content') || D.body;
 const host = () => content().closest('[contenteditable="true"]') || content().querySelector('[contenteditable="true"]') || D.querySelector('[contenteditable="true"]');
-const inTitle = e => !!e.closest('.se-documentTitle,.se-section-documentTitle');
+const TT = '.se-documentTitle,.se-section-documentTitle', inTitle = e => !!e.closest(TT);
 const body_ = () => [...D.querySelectorAll('.se-text-paragraph')].filter(p => !inTitle(p));
 const comps = () => [...content().querySelectorAll('.se-component')].filter(c => !inTitle(c) && !c.parentElement.closest('.se-component'));
 const lines = () => [...D.querySelectorAll('.se-component.se-horizontalLine')];
@@ -69,16 +71,19 @@ const setSel = p => {
 };
 // 글자 비교는 빈칸을 하나로 (11/14 라커룸 '글 안 들어감' — 에디터가 꾸민 숫자 앞 빈칸을 &nbsp; 로 바꿔 '타율 0.322' 를 못 찾음)
 const sp=t=>(t||'').replace(/\s+/g,' ');
+// v8: 포스트잇 안 확인은 빈칸·&nbsp;·안 보이는 글자를 모두 빼고 비교
+const tz=t=>(t||'').replace(/[\s\u200b-\u200d\u2060-\u2064]/g,'');
 const count = s_ => { const a=sp(content().textContent),s=sp(s_); let n = 0, i = 0; if (!s.trim()) return 0; while ((i = a.indexOf(s, i)) >= 0) { n++; i += s.length; } return n; };
 // at: 붙일 칸 (없으면 본문 끝 줄)
 const pasteIn = async (html, plain, probe, at) => {
-  const ps = body_(), before = count(probe), imgs = D.querySelectorAll('.se-component.se-image').length;
+  const ps = body_(), before = count(probe), imgs = nImg();
   setSel(at || ps[ps.length - 1]);
   const dt = new W.DataTransfer();
   dt.setData('text/html', html);
   dt.setData('text/plain', plain);
   host().dispatchEvent(new W.ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt}));
-  const ok = await wait(() => probe ? count(probe) > before : D.querySelectorAll('.se-component.se-image').length > imgs, 6000);
+// v8 (11/17 픽 글 '글 안 들어감: 사진' 14번): 사진 사이 빈 줄만 든 조각은 글도 사진도 없어 기다릴 것이 없음 → 붙이고 넘어감 (거짓 알림이었음)
+  const ok = probe || /<img/i.test(html) ? await wait(() => probe ? count(probe) > before : nImg() > imgs, 6000) : 1;
   await S(500);
   return !!ok;
 };
@@ -86,7 +91,7 @@ const pasteIn = async (html, plain, probe, at) => {
 // 받는 곳은 우리 공개 사진(/media/blog_*.jpg)만 · 쿠키 없이
 const PIC = /^https:\/\/[\w.-]+\/media\/blog_[a-z]+_\d+_\d+_[0-9a-f]{8}\.jpg$/;
 const pic = async u => {
-  const n = D.querySelectorAll('.se-component.se-image').length;
+  const n = nImg();
   try {
     if (!PIC.test(u)) throw 0;
     const b = await (await fetch(u, {credentials: 'omit'})).blob(), dt = new W.DataTransfer(), me = u.split('/')[2];
@@ -119,7 +124,7 @@ const align = async want => {
 };
 // 제목 가운데 (주인 11/06 '제목은 원래 가운데였잖아' — 서버가 올릴 땐 맞췄음): 본문이 가운데 글이면 끝에 제목 줄을 누르고 가운데 단추
 const titleMid = async () => {
-  const t = D.querySelector('.se-documentTitle .se-text-paragraph,.se-section-documentTitle .se-text-paragraph');
+  const t = [...D.querySelectorAll('.se-text-paragraph')].find(inTitle);
   if (!t || !txt(t)) return '제목 없음';
   if (centered(t)) return '';
   press(t); setSel(t); await S(400);
@@ -137,9 +142,7 @@ const card = async u => {
   const i = await wait(() => vis(['.se-popup-oglink input', "input[class*='oglink']", "input[placeholder*='URL']", "input[placeholder*='url']", "input[placeholder*='링크']"]), 3000);
   if (!i) return '주소 칸 없음';
   i.focus();
-  Object.getOwnPropertyDescriptor(W.HTMLInputElement.prototype, 'value').set.call(i, u);
-  i.dispatchEvent(new Event('input', {bubbles: true}));
-  i.dispatchEvent(new Event('change', {bubbles: true}));
+  put(i, u);
   await S(200);
   const s = vis(['button.se-popup-oglink-button', ".se-popup-oglink button[class*='search']", "button[class*='oglink'][class*='search']"]);
   if (s) press(s); else i.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 13, bubbles: true}));
@@ -198,28 +201,33 @@ const quote = async b => {
   const q = await wait(() => newOf(quotes, before), 3000);
   if (!q) return '안 생김';
   await S(300);
-  const probe = (b.lines[0] || '').slice(0, 20);
+  const probe = (b.lines[0] || '').slice(0, 20), P = tz(probe), i = R.quotes[1];
 // 11/16 드라마 표 인용구 (앞에 선 없이 글 다음): 본문 끝 줄이 포스트잇 밖(뒤 빈 줄)일 수 있음 → 포스트잇 안 칸을 눌러 거기에 붙임
 // 빈칸 비교는 sp (숫자 앞 &nbsp;) · 어디에도 안 들어갔으면 한 번 더 (밖에 들어갔으면 두 번 넣지 않음)
-  const at = q.querySelector('.se-quote .se-text-paragraph,.se-text-paragraph'), n = count(probe), has = () => sp(q.textContent).includes(sp(probe));
-  for (let k = 0; k < 2 && !(k && (!probe || has() || count(probe) > n)); k++) { if (at) press(at); await pasteIn(b.html, b.lines.join('\n'), probe, at || q); }
-  const inside = probe && has();
+// v8 (11/17 '글 밖' 잘못 봄): 붙인 뒤 에디터가 포스트잇을 새로 그릴 수 있어 새 포스트잇을 다시 찾아 tz 로 비교 · 1.5초까지 기다림
+  const Q = () => q.isConnected ? q : newOf(quotes, before) || q, has = () => tz(Q().textContent).includes(P);
+  const at = q.querySelector('.se-quote .se-text-paragraph,.se-text-paragraph'), n = count(probe);
+  for (let k = 0; k < 2 && !(k && (!P || has() || count(probe) > n)); k++) { if (at) press(at); await pasteIn(b.html, b.lines.join('\n'), probe, at || q); }
+  const inside = P && await wait(has, 1500);
   R.q.push('글 ' + (inside ? '안' : '밖'));
-  const bt = vis(BOTTOM);
-  if (bt) press(bt);
-  const out = await wait(() => { const cs = comps(), l = cs[cs.length - 1]; return l && l !== q && !!(q.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING) && /se-text\b/.test(l.className); }, 2500);
+// 빠져나오기 (v8 · 11/17 '못 나옴'): 맨 아래 '본문 추가' → 안 되면 포스트잇 다음 글 줄을 누름 → '본문 추가' 한 번 더 · 끝 줄이 포스트잇 다음 글 줄이면 나옴 → 그 줄을 눌러 커서를 둠
+  const fol = l => l && Q().compareDocumentPosition(l) & 4 && /se-text\b/.test(l.className);
+  let out = null, bt = null;
+  for (let k = 0; k < 3 && !out; k++) {
+    const nx = k === 1 && comps().find(fol), e = nx ? nx.querySelector('.se-text-paragraph') || nx : bt = vis(BOTTOM);
+    if (e) press(e);
+    out = await wait(() => { const l = comps().pop(); return fol(l) && l; }, 2500);
+  }
+  if (out) { const op = out.querySelector('.se-text-paragraph'); if (op) press(op); }
+  else R.stuck = [Q(), i];
   R.q.push(out ? '나옴' : '못 나옴' + (bt ? '' : ' (본문 추가 칸 없음)'));
   await S(300);
-  return inside ? (out ? '' : '포스트잇에서 못 나옴') : '글이 안 들어감';
+  return inside ? (out ? '' : i + " '" + probe + "'에서 못 나옴") : '글이 안 들어감';
 };
-const tagIn = () => {
-  for (const d of [document, D]) for (const e of d.querySelectorAll("input[class*='tag_input'],input[placeholder*='태그']")) if (e.offsetParent !== null) return e;
-  return null;
-};
-const pubBtn = () => {
-  for (const d of [document, D]) for (const e of d.querySelectorAll("button[class*='publish_btn']")) if (e.offsetParent !== null && !e.closest("[class*='layer']")) return e;
-  return null;
-};
+// 바깥 문서·에디터 문서에서 보이는 첫 칸 (qs 차례대로 · f 는 더 거르기)
+const any = (qs, f) => { for (const q of qs) for (const d of [document, D]) for (const e of d.querySelectorAll(q)) if (seen(e) && (!f || f(e))) return e; return null; };
+const tagIn = () => any(["input[class*='tag_input'],input[placeholder*='태그']"]);
+const pubBtn = () => any(["button[class*='publish_btn']"], e => !e.closest("[class*='layer']"));
 const chips = t => {
   let box = tagIn();
   for (let k = 0; box && k < 6 && !(box.innerText || '').includes('#'); k++) box = box.parentElement;
@@ -227,7 +235,7 @@ const chips = t => {
 };
 // 발행창 카테고리 고르기 (서버 업로더 _select_category 와 같은 칸 · 띄어쓰기·'하위 카테고리' 말 무시하고 비교)
 const nz = s => (s || '').replace(/하위\s*카테고리|카테고리|[\sㄴ└·>-]/g, '');
-const catBtn = () => { for (const q of ["[class*='option_category'] button", "button[aria-label*='카테고리']", "button[class*='selectbox_button']"]) for (const d of [document, D]) for (const e of d.querySelectorAll(q)) if (e.offsetParent !== null) return e; return null; };
+const catBtn = () => any(["[class*='option_category'] button", "button[aria-label*='카테고리']", "button[class*='selectbox_button']"]);
 const catIn = async c => {
   let b = catBtn();
   if (!b) return '칸 없음';
@@ -235,7 +243,7 @@ const catIn = async c => {
   press(b);
   // 하위 카테고리 항목은 <label><span 숨김>하위 카테고리</span>드라마 패션</label> — 글자가 자식 칸 밖에 있어 '맨 끝 칸만' 보면 못 찾음 (11/10 드라마 패션)
   // → 이름이 맞는 칸 중 가장 안쪽 (문서 순서라 뒤에 오는 자손이 덮음)
-  const it = await wait(() => { let f = null; for (const d of [document, D]) for (const e of d.querySelectorAll('[class*=category] *,[role=option]')) if (e.offsetParent !== null && e !== b && !b.contains(e) && !e.contains(b) && nz(e.innerText) === nz(c)) f = e; return f; }, 3000);
+  const it = await wait(() => { let f = null; for (const d of [document, D]) for (const e of d.querySelectorAll('[class*=category] *,[role=option]')) if (seen(e) && e !== b && !b.contains(e) && !e.contains(b) && nz(e.innerText) === nz(c)) f = e; return f; }, 3000);
   if (!it) return '목록에 없음 (' + c + ')';
   it.scrollIntoView && it.scrollIntoView({block: 'nearest'});
   press(it);
@@ -258,7 +266,7 @@ const tagsIn = async tags => {
     inp = tagIn() || inp;
     const IW = inp.ownerDocument.defaultView;
     inp.focus();
-    Object.getOwnPropertyDescriptor(IW.HTMLInputElement.prototype, 'value').set.call(inp, t);
+    setV(inp, t);
     inp.dispatchEvent(new IW.Event('input', {bubbles: true}));
     await S(150);
     const o = {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true};
@@ -276,7 +284,6 @@ const tagsIn = async tags => {
 const p2 = n => (n < 10 ? '0' : '') + n;
 const num = o => parseInt(/\d+|$/.exec(o.text + ' ' + o.value)[0], 10);
 const ymd = e => { const m = /(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/.exec(e.value || e.innerText || ''); return m ? m[1] * 372 + m[2] * 31 + m[3] * 1 : 0; };
-const seen = e => e.offsetParent !== null;
 // 발행을 끝내는 단추는 어떤 일이 있어도 누르지 않는다: 누를 것(또는 그것을 감싼 단추·링크)의 이름에 confirm·publish·submit 이 들었거나
 // 종류가 submit(종류를 안 적은 단추 포함)이거나 글자에 발행·확인·등록이 있으면 멈춤
 const tap = async e => {
@@ -285,8 +292,10 @@ const tap = async e => {
   press(e);
   await S(400 + Math.random() * 400);
 };
+// 칸 값 넣기: 그 칸 문서의 원래 value 설정 (에디터·발행창이 바뀐 값을 알아채게)
+const setV = (e, v) => Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value').set.call(e, v);
 const put = (s, v) => {
-  Object.getOwnPropertyDescriptor(s.ownerDocument.defaultView.HTMLSelectElement.prototype, 'value').set.call(s, v);
+  setV(s, v);
   for (const t of ['input', 'change']) s.dispatchEvent(new Event(t, {bubbles: true}));
 };
 const opt = (s, n) => {
@@ -468,7 +477,10 @@ try {
     if (p.k === 'text') {
       const probe = (p.lines[p.lines.length - 1] || '').slice(0, 20);
       if (!await pasteIn(p.html, p.lines.join('\n'), probe)) { R.bad.push('글 안 들어감: ' + (probe || '사진')); if (!R.done) break; }
-      if (!R.done && probe && [...D.querySelectorAll('.se-documentTitle,.se-section-documentTitle')].some(t => (t.textContent || '').includes(probe))) { R.bad.push('제목 칸에 들어감'); break; }
+      // v8: 못 나온 포스트잇 안에 다음 글이 들어갔으면 어느 포스트잇·어떤 글인지 알림 (에디터가 옮긴 글을 되돌릴 수 있어 직접 꺼냄)
+      if (R.stuck && probe && tz(R.stuck[0].textContent).includes(tz(probe))) R.bad.push('포스트잇 ' + R.stuck[1] + " 안에 든 글 '" + probe + "'");
+      R.stuck = 0;
+      if (!R.done && probe && [...D.querySelectorAll(TT)].some(t => (t.textContent || '').includes(probe))) { R.bad.push('제목 칸에 들어감'); break; }
       if (probe && !await align(p.align)) R.notes.push('가운데 못 함: ' + probe);
     } else if (p.k === 'img') {
       R.pics[1]++;
@@ -518,5 +530,5 @@ if (R.fx[0].some(Boolean)) { out.push('꾸밈 ' + fs(R.fx[0]) + ' → ' + fs(R.f
 else R.notes.push('꾸밈 없음');
 R.ok = R.shape === R.want && !R.bad.length;
 R.finished = true;
-alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + R.bad.join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.book ? '\n예약 ' + R.at + (R.why ? ' 못 채움 (' + R.why + ') — 직접 골라요' : ' 채움 — 발행은 직접') : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
+alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + [...new Set(R.bad)].map(x => (n => n > 1 ? x + ' ×' + n : x)(R.bad.filter(y => y === x).length)).join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.book ? '\n예약 ' + R.at + (R.why ? ' 못 채움 (' + R.why + ') — 직접 골라요' : ' 채움 — 발행은 직접') : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
 })().catch(e => alert('꾸미기 오류: ' + e));
