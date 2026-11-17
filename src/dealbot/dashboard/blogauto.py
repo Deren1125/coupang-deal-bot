@@ -547,6 +547,8 @@ def _export_post(v: Any) -> dict[str, Any] | None:
         **({"paste": True} if v.get("paste") is True else {}),
         # 비슷한 아이템 (주인 10/20 — Blog-Auto issue_similar, 선택 칸: Pick 패션 글만) → '비슷한 아이템 링크 넣기'
         **({"similar": sim} if (sim := _similar(v.get("similar"))) is not None else {}),
+        # 예상 조회 한 줄 (주인 11/17 23:5x — Blog-Auto trend_forecast, 선택 칸: 점수를 낸 글만) → 글 자세히 보기 note
+        **({"forecast": fc} if isinstance(v.get("forecast"), str) and (fc := _one_line(safe_text(v["forecast"], 240), 220)) else {}),
     }
 
 

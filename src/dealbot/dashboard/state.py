@@ -512,7 +512,9 @@ class StateBuilder:
                 "detail": {"needs": needs, "photo_request": (post or {}).get("photo_request"), "slots": slots,
                            "questions": questions, "deadline": (post or {}).get("deadline"),
                            "owner_edited": bool((post or {}).get("owner_edited")), "pics": pics, "ig": self._ig_view(blog, pid, post),
-                           "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else []},
+                           "open": [{"label": "네이버에서 보기", "url": post["naver_url"]}] if post and post.get("naver_url") else [],
+                           # 예상 조회 ↑ 이유 한 줄 (주인 11/17 23:5x — Blog-Auto trend_forecast · app.js 가 note 칸으로 그림)
+                           **({"note": post["forecast"]} if post and post.get("forecast") else {})},
                 "links": list((pr or {}).get("links") or [])[:LINKS_MAX] if "photos" in needs else [],
                 # 인기 예상 점수 (주인 11/04 '기다리는 글 옆에도 뜨게') — 블로그 화면 기다리는 글 줄에 '🔥 88점' · '62점'
                 "score": (post or {}).get("score"), "popular": bool((post or {}).get("popular")),
