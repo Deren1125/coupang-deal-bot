@@ -52,12 +52,16 @@ const alert = note;
 const confirm = t => { ONE.hop = 1; note(t); return true; };
 const prompt = t => { note(t); return null; };
 try {
-if (/(^|\.)stat\.naver\.com$/.test(L.hostname) || L.hostname === 'admin.blog.naver.com') {
+// 통계 화면: 통계 앱·관리 화면, 그리고 블로그 주소 안의 통계 화면(모바일 '내 통계' — 11/17: 11/16 통계가 서버에 하나도 없어 점검 ·
+// 블로그 주소의 통계 화면이 이웃 관리로 가던 길을 통계로 · 경로에 stat·statistics 가 한 마디로 있거나 제목이 '통계 :' 로 시작)
+if (/(^|\.)stat\.naver\.com$/.test(L.hostname)||L.hostname==='admin.blog.naver.com'||(/(^|\.)blog\.naver\.com$/.test(L.hostname)&&(/\/(stats?|statistics?)(\/|$|\.naver)/i.test(L.pathname)||/^통계\s*[:|]/.test(D.title)))) {
   show(TAG + '통계를 모아 보내요 — 이 탭을 켜 두세요');
   '@@STAT@@';
   const r = ONE.say[ONE.say.length - 1] || '통계 화면을 읽지 못했어요';
   if (ONE.hop) { show(TAG + '통계 화면으로 옮겨요 — 열리면 이 책갈피를 한 번 더 (처음 한 번만)'); return; }
-  show(TAG + r + NL + '곧 이웃새글 화면으로 옮겨요 — 열리면 이 책갈피를 한 번 더 누르면 서이추·들르기를 끝까지 해요');
+// 못 보냈으면 '통계 못 보냄:' 으로 · 이웃새글 끝 요약의 '통계:' 줄은 서버가 실제로 받은 수 (q.stats_line)
+  const ok=!r.indexOf('통계 보냄');
+  show(TAG+(ok?r:'통계 못 보냄: '+r)+NL+'곧 이웃새글 화면으로 옮겨요 — 열리면 이 책갈피를 한 번 더 누르면 서이추·들르기를 끝까지 해요');
   await sl(5000);
   L.href = FEED + '#sb1=' + encodeURIComponent(r.slice(0, 60));
   return;
@@ -86,7 +90,9 @@ if (ONE.ran && stop && ONE.line) o.push(ONE.line);
 if (!ONE.ran && ONE.say.length) o.push(ONE.say[ONE.say.length - 1]);
 let s1 = '';
 try { s1 = st ? decodeURIComponent(st) : ''; } catch (e) {}
-if (s1) o.push('통계: ' + s1);
+// 통계 줄은 서버가 실제로 받은 수 (11/17 — 책갈피가 보냈다고 여겨도 서버에 없던 일) · 이번 통계 화면에서 본 글은 덧붙임
+if (q&&q.stats_line) o.push('통계: '+q.stats_line+(s1?' · 이번: '+s1:''));
+else if (s1) o.push('통계: ' + s1);
 else if (q && q.stats === true) o.push('통계: 오늘 받았어요 ✓');
 else if (q && q.stats === false) o.push('통계: 오늘은 아직이에요 — 내 통계 화면에서 이 책갈피를 한 번');
 if (n.bad.length) o.push('안 된 것: ' + n.bad.slice(-5).join(' / '));

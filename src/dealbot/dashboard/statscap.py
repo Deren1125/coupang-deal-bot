@@ -114,9 +114,12 @@ def bookmarklet(endpoint: str, k: str) -> str:
     return "javascript:" + kkumi.encode(_code().replace("@@URL@@", endpoint).replace("@@KEY@@", k))
 
 
-def view(db: Any, public_url: str) -> dict[str, Any]:
+def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | None = None) -> dict[str, Any]:
     code = bookmarklet(public_url.rstrip("/") + PATH, key(db))
-    return {"code": code, "len": len(code), "steps": list(SENDING_STEPS)}
+    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(SENDING_STEPS)}
+    if tz is not None:  # 연결 탭 설치 칸 확인 한 줄 (11/17 — '통계 n개 받았어요 (블로그·화면 날짜)')
+        out["got"] = received(db, now or time.time(), tz)["line"]
+    return out
 
 
 # ---------------------------------------------------------------- 받기
@@ -248,3 +251,66 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
 def today_count(db: Any, now: float, tz: ZoneInfo) -> int:
     return len(db.kv_items(f"{PREFIX}{_day(now, tz)}:"))
 
+
+
+# ---------------------------------------------------------------- 받은 것 한 줄 · 못 받은 것 (11/17 점검)
+# 주인 11/17 '11/16 통계 다 보냈어' — 서버에는 11/13 뒤로 한 개도 없었음 (한 번에 책갈피 첫날). 받은 것은 블로그·화면 날짜로 한 줄,
+# 받지 않은 요청(열쇠·빈 화면·한도 …)은 kv statscap:fails 에 최근 FAIL_KEEP 개 (시각·까닭 코드·네이버 주소 앞부분만 — 글은 안 둠).
+FAIL_KV = "statscap:fails"
+FAIL_KEEP = 20
+
+
+def note_fail(db: Any, code: str, url: Any = "", *, now: float | None = None) -> None:
+    try:
+        old = json.loads(db.kv_get(FAIL_KV) or "[]")
+    except ValueError:
+        old = []
+    host = re.sub(r"[?#].*$", "", str(url or ""))[:80]
+    row = {"at": int(now or time.time()), "code": str(code)[:20], "u": host}
+    db.kv_set(FAIL_KV, json.dumps(([*old, row] if isinstance(old, list) else [row])[-FAIL_KEEP:], ensure_ascii=False, separators=(",", ":")))
+
+
+def received(db: Any, now: float, tz: ZoneInfo, *, days: int = 7) -> dict[str, Any]:
+    """최근 days 일 받은 통계: {today, n, by: {블로그 이름: {n, today, last, dates}}, line}. line = 대시보드 확인 한 줄."""
+    t = datetime.fromtimestamp(now, tz)
+    since = (t - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    today = t.strftime("%Y-%m-%d")
+    by: dict[str, dict[str, Any]] = {}
+    n = n_today = 0
+    for k, raw in db.kv_items(PREFIX):
+        sent = k[len(PREFIX):len(PREFIX) + 10]
+        if sent < since:
+            continue
+        try:
+            rec = json.loads(raw or "{}")
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("kind") == "주소 목록":
+            continue
+        name = str(rec.get("blog_name") or "블로그 모름")
+        b = by.setdefault(name, {"n": 0, "today": 0, "last": 0, "dates": set()})
+        b["n"] += 1
+        n += 1
+        if sent == today:
+            b["today"] += 1
+            n_today += 1
+        b["last"] = max(b["last"], int(rec.get("at") or 0))
+        if isinstance(rec.get("day"), str) and len(rec["day"]) == 10:
+            b["dates"].add(rec["day"])
+    md = lambda d: f"{int(d[5:7])}/{int(d[8:10])}"  # noqa: E731
+    parts, parts_today = [], []
+    for name, b in sorted(by.items(), key=lambda x: -x[1]["last"]):
+        ds = sorted(b["dates"])
+        b["dates"] = ds
+        b["last_at"] = datetime.fromtimestamp(b["last"], tz).strftime("%m/%d %H:%M") if b["last"] else "-"
+        span = (md(ds[0]) if ds[0] == ds[-1] else f"{md(ds[0])}~{md(ds[-1])}") if ds else "-"
+        parts.append(f"{name} {b['n']}개 · 화면 날짜 {span} · 받은 때 {b['last_at']}")
+        if b["today"]:
+            parts_today.append(f"{name} {b['today']}개 · 받은 때 {b['last_at']}")
+    if n_today:
+        line = f"오늘 통계 {n_today}개 받았어요 ({' / '.join(parts_today)})"
+    elif n:
+        line = f"오늘 받은 통계 0개 · 최근 {days}일 {n}개 ({' / '.join(parts)})"
+    else:
+        line = f"최근 {days}일 받은 통계 0개 — 네이버 내 통계 화면(blog.stat.naver.com)에서 책갈피"
+    return {"today": n_today, "n": n, "by": by, "line": line}

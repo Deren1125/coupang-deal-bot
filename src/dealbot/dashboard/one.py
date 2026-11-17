@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,7 @@ from zoneinfo import ZoneInfo
 from dealbot.dashboard import kkumi, seoi, statscap
 
 SRC = Path(__file__).resolve().parent / "static" / "one.js"
-LEN_MAX = 46000  # 통계 20KB + 이웃 관리 28KB 를 합쳐 줄인 것 (아이패드 사파리에서 돈 가장 긴 책갈피는 29KB — 저장이 안 되면 옛 두 책갈피로)
+LEN_MAX = 47000  # 통계 20KB + 이웃 관리 28KB 를 합쳐 줄인 것 (11/17 통계 길 고침 +0.6KB 로 46000 → 47000) (아이패드 사파리에서 돈 가장 긴 책갈피는 29KB — 저장이 안 되면 옛 두 책갈피로)
 # seoi.js 의 옛 줄 → 한 번에 책갈피 안에서만 바뀌는 줄 (줄 통째로 · 딱 한 번씩 나와야 함)
 PATCHES: tuple[tuple[str, str], ...] = (
     ("  if (!BL.some(x => x[1] === b)) b = await choose();\n",
@@ -115,4 +116,5 @@ def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | N
         for k in ("note", "go"):
             if sv.get(k):
                 out[k] = sv[k]
+        out["got"] = statscap.received(db, now or time.time(), tz)["line"]  # 11/17 통계 확인 한 줄 (블로그·화면 날짜)
     return out

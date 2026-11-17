@@ -265,6 +265,10 @@ async def test_api_code_needs_login_and_capture_takes_key_only(bot: DealBot) -> 
     res = await _post(bot, {**good, "via": "form"}, origin="null")
     assert res[0] == 200 and res[2].startswith("text/html") and "통계 보냄 ✓ (데런픽 · 조회수 순위" in res[1]
     assert (await bot.web.dispatch("GET", statscap.PATH, anon))[0] == 405
+    fails = json.loads(bot.db.kv_get(statscap.FAIL_KV))  # 11/17: 못 받은 것도 남김 (까닭 코드·주소 앞부분만)
+    assert [f["code"] for f in fails] == ["key"] and fails[0]["u"] == "https://blog.stat.naver.com/a"
+    status, v, _ = await get_json(bot, "/dashboard/api/statscap", session_headers(bot))
+    assert v["got"].startswith("오늘 통계 3개 받았어요 (데런픽 3개")
     assert routine.view(bot)["stats"] is None  # 할 일 줄은 없음 (주인 11/14 — 알림으로: tests/test_stats_remind.py)
 
 
@@ -538,3 +542,21 @@ def test_bookmarklet_two_steps_admin_frame_srcs_then_stat_app_then_one_tap() -> 
     # 목록이 없는 브라우저: 통계 앱 메뉴(동영상 빼고)로
     assert [s["n"] for s in step[3]][:2] == ["일간 현황", "일간 현황 · 방문횟수"] and "유입분석" in [s["n"] for s in step[3]]
     assert len(d) == 4
+
+
+def test_received_line_by_blog_with_screen_dates_and_fail_log() -> None:
+    """11/17 점검 ('11/16 통계 다 보냈어' — 서버엔 11/13 뒤로 없음): 대시보드 확인 한 줄 = 블로그별 수 · 화면 날짜 · 받은 때. 주소 목록은 안 셈."""
+    db = FakeDb()
+    assert statscap.received(db, NOW, TZ)["line"].startswith("최근 7일 받은 통계 0개")
+    statscap.save(db, form(db, u="https://blog.stat.naver.com/blog/rank/cv?blogId=derenlog", x="2026.11.09. 조회수 순위\n1 글 30"), now=NOW - 86400, tz=TZ)
+    statscap.save(db, form(db, n="주소 목록"), now=NOW - 86400, tz=TZ)
+    r = statscap.received(db, NOW, TZ)
+    assert r["today"] == 0 and r["n"] == 1 and r["line"] == "오늘 받은 통계 0개 · 최근 7일 1개 (드라마 1개 · 화면 날짜 11/9 · 받은 때 11/10 21:26)"
+    statscap.save(db, form(db), now=NOW, tz=TZ)
+    statscap.save(db, form(db, x="2026.11.11. 유입 경로\n네이버 검색 3"), now=NOW + 60, tz=TZ)
+    r = statscap.received(db, NOW + 120, TZ)
+    assert r["line"] == "오늘 통계 2개 받았어요 (데런픽 2개 · 받은 때 11/11 21:27)" and r["by"]["데런픽"]["dates"] == ["2026-11-10", "2026-11-11"]
+    for i in range(statscap.FAIL_KEEP + 3):
+        statscap.note_fail(db, "empty", "https://blog.stat.naver.com/x?blogId=derenpick#a", now=NOW + i)
+    f = json.loads(db.kv_get(statscap.FAIL_KV))
+    assert len(f) == statscap.FAIL_KEEP and f[-1] == {"at": int(NOW) + statscap.FAIL_KEEP + 2, "code": "empty", "u": "https://blog.stat.naver.com/x"}

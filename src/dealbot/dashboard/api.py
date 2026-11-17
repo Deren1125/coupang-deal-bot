@@ -685,10 +685,12 @@ class DashApi:
 
     async def statscap(self, query: dict[str, str]) -> Any:
         """'통계 보내기' 책갈피 코드 (주인 11/11 — 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
+        from zoneinfo import ZoneInfo
+
         from dealbot.dashboard import statscap
 
         try:
-            return jresp(200, statscap.view(self.bot.db, self.bot.settings.dashboard.public_url), {"Cache-Control": "no-store"})
+            return jresp(200, statscap.view(self.bot.db, self.bot.settings.dashboard.public_url, tz=ZoneInfo(self.bot.settings.app.timezone)), {"Cache-Control": "no-store"})
         except ValueError:
             return err(503, "failed", "대시보드 공개 주소가 이상해요")
 
@@ -711,10 +713,12 @@ class DashApi:
             return jresp(status, obj, cors)
 
         if not self.statscap_rate.hit(client_key(headers)):
+            statscap.note_fail(self.bot.db, "rate", form.get("u"))
             return answer(429, {"ok": False, "code": "rate", "text": "너무 자주 보냈어요 — 잠시 뒤 다시"})
         try:
             got = statscap.save(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone))
         except statscap.CaptureError as e:
+            statscap.note_fail(self.bot.db, e.code, form.get("u"))  # 11/17: 못 받은 것도 서버 보고에 (까닭 코드·주소 앞부분만)
             if e.code == "key":
                 log.info("stats_capture: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
             return answer(e.status, {"ok": False, "code": e.code, "text": e.text})
@@ -790,7 +794,7 @@ class DashApi:
         책갈피는 그 글만 보이고 아무것도 하지 않는다. 서버는 네이버를 열지 않고, 남의 글 본문은 기록하지 않는다. 응답 CORS 는 네이버 블로그 화면에만."""
         from zoneinfo import ZoneInfo
 
-        from dealbot.dashboard import seoi
+        from dealbot.dashboard import seoi, statscap
 
         origin = (headers.get("origin") or "").strip().rstrip("/")
         cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if SEOI_ORIGIN_RE.fullmatch(origin) else {"Vary": "Origin"}
@@ -821,7 +825,9 @@ class DashApi:
             try:
                 from dealbot.notify import stats_remind
 
-                got = {**got, "stats": got["blog"] not in stats_remind.missing(self.bot.db, time.time(), ZoneInfo(self.bot.settings.app.timezone))}
+                tz = ZoneInfo(self.bot.settings.app.timezone)
+                got = {**got, "stats": got["blog"] not in stats_remind.missing(self.bot.db, time.time(), tz),
+                       "stats_line": statscap.received(self.bot.db, time.time(), tz)["line"]}  # 11/17: 몇 개·어느 블로그·화면 날짜
             except Exception as e:  # noqa: BLE001
                 log.warning("seoi_act: stats flag failed: %s", type(e).__name__)
         if form.get("a") == "visit" and got.get("ok") and got.get("like") is not False:

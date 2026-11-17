@@ -120,7 +120,7 @@ function kkDraw() {
       k.check ? el('p', {class: 'note'}, k.check) : '', ack(KK), k.use ? el('p', {class: 'note'}, k.use) : '']
       : [KK.e ? el('button', {class: 'sm', type: 'button', onclick: () => { KK.e = 0; kkLoad(KK); kkDraw(); }}, '다시 불러오기') : el('p', {class: 'note'}, '불러오는 중…')])),
     ...BM.filter(shown).flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
-    b.o = !b.o; if (b.o && !b.d && b.api) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o || !b.api ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
+    b.o = !b.o; if (b.o && !b.d && b.api) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o || !b.api ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', b.d.got ? el('p', {class: 'note'}, '📊 ' + b.d.got) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
     cp(b), b.d.go ? el('a', {class: 'sm', href: b.d.go.h}, b.d.go.t) : '', ack(b)] : [el('p', {class: 'note'}, '불러오는 중…')])]));
 }
 async function kkLoad(b) {

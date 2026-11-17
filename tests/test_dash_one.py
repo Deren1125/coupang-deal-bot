@@ -271,7 +271,7 @@ async def test_one_press_does_requests_then_visits_ticks_rows_and_ends_with_a_su
     assert not seoi.is_new(bot.db)  # 이웃 관리 '다시 깔기' 안내도 같이 꺼짐
     card = run["last"]["card"].split("\n")
     assert card[0] == "한 번에 끝 ✓ · 오늘 여기서 서이추 3 · 들르기 1 · 건너뜀 0 · 안 된 것 0"
-    assert card[1] == f"오늘 데런픽 자동으로 할 것은 다 했어요 (서이추 3/{seoi.ADD_DAY_CAP} · 들르기 1)" and card[2] == "통계: 통계 보냄 ✓ 8개 화면"
+    assert card[1] == f"오늘 데런픽 자동으로 할 것은 다 했어요 (서이추 3/{seoi.ADD_DAY_CAP} · 들르기 1)" and card[2] == "통계: 최근 7일 받은 통계 0개 — 네이버 내 통계 화면(blog.stat.naver.com)에서 책갈피 · 이번: 통계 보냄 ✓ 8개 화면"  # 서버가 받은 수가 먼저 (11/17)
     assert card[-1] == "결과표는 대시보드 할 일 탭 · 이 칸은 누르면 닫혀요" and not any(ln.startswith(("폰에서 직접", "안 된 것:")) for ln in card)
     assert run["last"]["busy"] == 0 and run["last"]["frames"] == 0  # 끝나면 작은 창도 치움 · 다시 누를 수 있음
     assert got["card"][0] == "한 번에: 서이추·들르기를 차례로 해요 — 화면을 켜 둔 채 이 탭에 두세요"
@@ -390,3 +390,18 @@ def test_stats_screen_sends_everything_without_asking_and_moves_itself_to_the_fe
     assert got["end"].startswith(seoi.FEED_URL + "#sb1=") and unquote(got["end"].split("#sb1=")[1]).startswith("통계 보냄 ✓ 8개 화면")
     assert got["cards"][0] == "한 번에: 통계를 모아 보내요 — 이 탭을 켜 두세요"
     assert any(c.startswith("한 번에: 통계 보냄 ✓ 8개 화면") and "곧 이웃새글 화면으로 옮겨요" in c for c in got["cards"])
+
+
+@needs_node
+def test_stats_screen_on_a_blog_address_goes_to_stats_not_neighbours() -> None:
+    """11/17 점검 (11/16 통계가 서버에 하나도 없음): 블로그 주소 안의 통계 화면(모바일 '내 통계')도 통계로 — 이웃새글·블로그 글은 그대로 이웃 관리."""
+    src = one.SRC.read_text(encoding="utf-8")
+    cond = re.search(r"^if \((/\(\^\|\\\.\)stat.*)\) \{$", src, re.M)
+    assert cond, "통계 화면 조건 줄"
+    js = ("const f=(h,p,t)=>{const L={hostname:h,pathname:p},D={title:t};return !!(" + cond.group(1) + ")};"
+          "console.log(JSON.stringify([f('blog.stat.naver.com','/blog/user/referer/total',''),f('admin.blog.naver.com','/derenpick/stat/today',''),"
+          "f('m.blog.naver.com','/derenpick/stat',''),f('m.blog.naver.com','/Statistics.naver',''),f('m.blog.naver.com','/x','통계 : 네이버 블로그'),"
+          "f('m.blog.naver.com','/FeedList.naver',''),f('m.blog.naver.com','/statlover/2240',''),f('m.blog.naver.com','/derenpick/224','통계로 본 겨울 : 네이버 블로그'),"
+          "f('blog.naver.com','/derenpick','')]))")
+    res = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+    assert json.loads(res.stdout) == [True, True, True, True, True, False, False, False, False], res.stderr
