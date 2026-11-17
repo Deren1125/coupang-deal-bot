@@ -934,9 +934,56 @@ def _wait_text(s: float) -> str:
     return f"{s // 3600}시간 {s % 3600 // 60}분" if s >= 3600 else f"{s // 60}분 {s % 60}초" if s >= 60 else f"{s}초"
 
 
-def ai_error(e: Exception) -> StudioError:
+_RESET_IN = re.compile(r"resets?\s+in\s+(?:(\d+)\s*h\w*)?\s*(?:(\d+)\s*m\w*)?", re.I)
+_RESET_AT = re.compile(r"resets?\s+(?:at\s+)?(?:([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?", re.I)
+_RESET_24 = re.compile(r"resets?\s+(?:at\s+)?(\d{1,2}):(\d{2})(?!\s*[ap]\.?m)", re.I)
+_MONTHS = {m: i for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split(), 1)}
+
+
+def limit_until(msg: str, now: float) -> float:
+    """claude 한도 문구의 풀리는 때 → 시각 (KST 로 읽음 · 'resets 9pm' · 'resets Nov 17, 9pm' · 'resets 21:00' · 'resets in 2h 30m'). 모르면 0."""
+    m = _RESET_IN.search(msg or "")
+    if m and (m.group(1) or m.group(2)):
+        return now + int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60
+    base = datetime.fromtimestamp(now, KST)
+    m = _RESET_AT.search(msg or "")
+    if m:
+        h, mi = int(m.group(3)), int(m.group(4) or 0)
+        if not 1 <= h <= 12 or mi > 59:
+            return 0.0
+        h = h % 12 + (12 if m.group(5).lower() == "p" else 0)
+    else:
+        m = _RESET_24.search(msg or "")
+        if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+            return 0.0
+        h, mi = int(m.group(1)), int(m.group(2))
+    at = base.replace(hour=h, minute=mi, second=0, microsecond=0)
+    mon = m.group(1).lower()[:3] if m.re is _RESET_AT and m.group(1) else ""
+    if mon in _MONTHS:
+        try:
+            at = at.replace(month=_MONTHS[mon], day=int(m.group(2)))
+        except ValueError:
+            return 0.0
+    elif at.timestamp() <= now:
+        at += timedelta(days=1)
+    return at.timestamp() if at.timestamp() > now else 0.0
+
+
+def limit_error(until: float, now: float) -> StudioError:
+    """AI 사용량 한도 — 풀리는 시각을 알면 'HH:MM 이후 다시' (주인 11/17 '초안이 안 뜸 — 어디서 보는지 모름')."""
+    if until > now:
+        d, n = datetime.fromtimestamp(until, KST), datetime.fromtimestamp(now, KST)
+        when = f"{d:%H:%M}" if d.date() == n.date() else f"{'내일' if (d.date() - n.date()).days == 1 else f'{d.month}/{d.day}'} {d:%H:%M}"
+        return StudioError(429, "ai_limit", f"AI 사용량 한도가 다 찼어요 — {when} 이후에 다시 눌러 주세요", until=int(until))
+    return StudioError(429, "ai_limit", "AI 사용량 한도가 다 찼어요 — 한도가 풀린 뒤 다시 눌러 주세요 (보통 몇 시간)")
+
+
+def ai_error(e: Exception, now: float | None = None) -> StudioError:
     """AI 호출 실패 → 주인이 읽을 말 (자세한 것은 로그에 종류만)."""
     msg = str(e)
+    if "한도" in msg or "limit" in msg.lower():
+        now = time.time() if now is None else now
+        return limit_error(limit_until(msg, now), now)
     if "시간 초과" in msg:
         return StudioError(504, "ai_timeout", "AI가 오래 걸려서 멈췄어요 — 잠시 뒤 다시 눌러 주세요")
     if "로그인" in msg:
@@ -987,6 +1034,13 @@ class Studio:
         d[name] = int(d.get(name) or 0) + 1
         self._save(KV_DAY, d)
         return True
+
+    def _uncount(self, name: str) -> None:
+        """AI 가 아예 답하지 못한 한 번은 오늘 몫에서 돌려준다 (한도·로그인·시간 초과 — 주인 11/17)."""
+        d = self._load(KV_DAY, {})
+        if d.get("day") == _day(self.clock()) and int(d.get(name) or 0) > 0:
+            d[name] = int(d[name]) - 1
+            self._save(KV_DAY, d)
 
     def _left(self, name: str, cap: int) -> int:
         d = self._load(KV_DAY, {})
@@ -1232,7 +1286,7 @@ class Studio:
             data = await self._asker.ask(system, user, schema)
         except LLMError as e:
             log.warning("xstudio ai: %s", str(e)[:120])
-            raise ai_error(e) from e
+            raise ai_error(e, self.clock()) from e
         # 답을 실제로 쓴 모델도 본다 (CLI 가 알려 준 modelUsage): 환경 변수 말고 CLI 설정 파일(settings.json env·모델 바꿔치기)이
         # 별칭을 Fable 쪽으로 돌려놓았으면 그 답은 버린다 — 주인 '올라가는 글은 Opus 까지만'
         used = [m for m in getattr(self._asker, "last_cli_models", None) or [] if BANNED_MODEL_RE.search(m)]

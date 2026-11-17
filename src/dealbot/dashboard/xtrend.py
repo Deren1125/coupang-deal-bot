@@ -75,6 +75,7 @@ BODY_MAX = 8 * 1024
 KW_MAX = 40
 TOPIC_LO, TOPIC_HI, MEMO_MAX = 2, 80, 600
 MINE_KEEP = 6
+RUN_SHOW_S = 4 * 60  # '쓰는 중' 표시는 이만큼만 (CLI 시간 초과보다 조금 길게 — 그 뒤엔 실패나 초안이 남는다)
 LONG_HI = 1200
 TAGS_MAX = 3
 ROW_ID_RE = re.compile(r"^[0-9a-f]{8}$")
@@ -83,6 +84,11 @@ KW_BAD_RE = re.compile(r"[^\w#\s가-힣.&+'’·-]")
 TOKEN_RE = re.compile(r"#[\w가-힣]{2,30}|[가-힣]{2,12}")  # 해시태그 · 한글 낱말 (영문 낱말은 공지 글 틀에서만 겹쳐서 뺌)
 TOPIC_FAVES = 20  # 주제 검색은 좋아요 이만큼 넘는 글만 (반응이 붙은 글의 조회·답글 수를 보려고)
 HANGUL_RE = re.compile(r"[가-힣]")
+KO_MIN = 0.5  # 주제 이름 글자 중 한글이 이만큼 넘어야 한국어 주제 (주인 11/17 '외국어 주제가 섞임')
+KO_MIX = 0.2  # 한글이 조금이라도 섞인 이름은 이 비율까지 한국어로 ('BTS 진')
+KO_TITLE_MAX = 40  # 외국 화제를 한국 기사 제목으로 바꿀 때 길이
+ABROAD_MAX = 10  # '해외' 접기 칸 줄 수
+TITLE_TAIL_RE = re.compile(r"(?:\s+[-|]\s+[^-|]{1,20}|\s*\[[^\]]{1,20}\]|\s*<[^>]{1,20}>|\s*\((?:종합|속보|단독|영상|포토|사진)[^)]{0,8}\))\s*$")
 # 여러 글에 그냥 같이 나오는 말 (주제가 아님)
 STOP = frozenset("진짜 정말 너무 오늘 내일 어제 지금 이번 이거 그거 저거 이건 그건 우리 나는 내가 제가 저는 그냥 근데 그리고 그래서 하지만 아니 아니라 "
                  "있는 없는 하는 같은 같아 이런 저런 그런 어떤 무슨 사람 사람들 생각 때문 정도 다들 다시 계속 완전 약간 조금 많이 제발 이렇게 그렇게 "
@@ -172,6 +178,36 @@ def traffic(v: Any) -> int:
     except ValueError:
         return 0
     return int(n * {"만": 1e4, "천": 1e3, "k": 1e3, "m": 1e6}.get((m.group(2) or "").lower(), 1))
+
+
+def ko_share(text: str) -> float:
+    """글자(한글·영문·그 밖의 문자) 가운데 한글 비율 — 숫자·빈칸·#·기호는 세지 않음. 글자가 없으면 0."""
+    letters = [c for c in str(text or "") if c.isalpha()]
+    return sum(1 for c in letters if "가" <= c <= "힣") / len(letters) if letters else 0.0
+
+
+def is_korean(text: str) -> bool:
+    """한국어 주제인가 — 한글이 KO_MIN 넘게, 또는 한글이 들어 있고 KO_MIX 넘게 ('BTS 진' 같은 섞인 이름)."""
+    share = ko_share(text)
+    return share >= KO_MIN or (share >= KO_MIX and bool(HANGUL_RE.search(str(text or ""))))
+
+
+def ko_title(news: list[dict[str, Any]]) -> str:
+    """외국어 주제의 한국 기사 제목 (한글 비율 KO_MIN 넘는 첫 제목 · 매체 꼬리·[단독] 머리 뺌 · KO_TITLE_MAX 자). 없으면 ''."""
+    for n in news or []:
+        t = re.sub(r"^\s*(?:\[[^\]]{1,12}\]|【[^】]{1,12}】)\s*", "", xs.one_line((n or {}).get("title"), 160))
+        t = TITLE_TAIL_RE.sub("", t).strip(" .-·…\"'")
+        if is_korean(t) and len(norm(t)) >= 4:
+            return t if len(t) <= KO_TITLE_MAX else t[:KO_TITLE_MAX - 1].rstrip() + "…"
+    return ""
+
+
+def label(r: dict[str, Any]) -> tuple[str, str]:
+    """순위에 보일 이름과 원래 이름: 한국어 주제는 (이름, ''), 외국 화제는 (한국 기사 제목, 원래 이름), 기사도 없으면 ('', 원래 이름) = 해외 칸."""
+    kw = str(r.get("kw") or "")
+    if is_korean(kw):
+        return kw, ""
+    return ko_title(r.get("news") or []), kw
 
 
 def hidden_why(*texts: str) -> str:
@@ -448,13 +484,16 @@ class XTrend:
                     if len(ps) >= 2 and sum(1 for p in ps if p["sensitive"]) * 2 >= len(ps):
                         t.update(hidden="성인", posts=[], news=[])
                 rows.append(t)
-            show = sorted((r for r in rows if not r["hidden"]), key=lambda r: (-r["views"], -r["replies"], -r["traffic"], r["kw"]))
+            show = sorted((r for r in rows if not r["hidden"] and label(r)[0]), key=lambda r: (-r["views"], -r["replies"], -r["traffic"], r["kw"]))
+            abroad = [r for r in rows if not r["hidden"] and not label(r)[0]]  # 외국어 주제인데 한국 기사도 없음 → '해외' 칸 (순위 밖)
+            for r in abroad:
+                r["rank"], r["move"] = 0, None
             was = self._prev(st["hist"], now)
             for i, r in enumerate(show, 1):
                 r["rank"] = i
                 r["move"] = None if was is None else "new" if r["id"] not in was else int(was[r["id"]]) - i
             if rows or not st["rows"]:  # 출처가 다 막힌 때는 앞서 본 순위를 그대로 둔다
-                st["rows"], st["at"] = show + [r for r in rows if r["hidden"]], now
+                st["rows"], st["at"] = show + abroad + [r for r in rows if r["hidden"]], now
                 st["hist"] = (st["hist"] + [{"at": now, "rank": {r["id"]: r["rank"] for r in show}}])[-HIST_KEEP:]
             st.pop("fx_run", None)
             self._save(KV, st)
@@ -496,6 +535,16 @@ class XTrend:
                       and isinstance(s.get("drafts"), list)][-MINE_KEEP:]
         return st
 
+    def _mark(self, now: float, **kv: Any) -> None:
+        """그날 kv 에 '쓰는 중'(run)·'마지막 실패'(fail) 적기 (None 이면 지움)."""
+        st = self.mine(now)
+        for k, v in kv.items():
+            if v is None:
+                st.pop(k, None)
+            else:
+                st[k] = v
+        self._save(KV_MINE, st)
+
     async def draft(self, body: dict[str, Any]) -> dict[str, Any]:
         now = self.clock()
         topic, memo = xs.one_line(body.get("topic"), TOPIC_HI + 1), xs.clean(body.get("memo"))
@@ -522,13 +571,29 @@ class XTrend:
             xs.assert_writer_model(self.studio.model)
         except ValueError as e:
             raise xs.StudioError(503, "ai_off", "서버 AI 설정이 글 쓰는 모델 규칙과 달라요 — 메인 세션에 알려 주세요") from e
+        last = self.mine(now).get("fail") or {}
+        if last.get("code") == "ai_limit" and _int(last.get("until")) > now:  # 한도가 아직 안 풀림 — AI 를 부르지 않고 같은 답 (몫도 안 씀)
+            raise xs.limit_error(float(last["until"]), now)
         if not self.studio._count("draft", xs.DRAFT_PER_DAY):
             raise xs.StudioError(429, "day", f"오늘 글 초안은 {xs.DRAFT_PER_DAY}번을 다 썼어요 — 내일 다시")
         src_nums = set(xs.nums("\n".join([topic, memo, *refs])))
         started = time.monotonic()
-        async with self.studio.busy:
-            data = await self.studio.ask(mine_system(n, tone, length, tags), mine_prompt(topic, memo, refs), MINE_SCHEMA)
+        self._mark(now, run={"at": now, "topic": topic})
+        try:
+            async with self.studio.busy:
+                data = await self.studio.ask(mine_system(n, tone, length, tags), mine_prompt(topic, memo, refs), MINE_SCHEMA)
+        except xs.StudioError as e:  # 주인 11/17 '초안이 안 뜸': 실패를 화면에 남긴다 (새로 고쳐도 · 다시 단추) · AI 가 못 답한 한 번은 몫을 돌려줌
+            if e.code.startswith("ai_"):
+                self.studio._uncount("draft")
+            self._mark(now, run=None, fail={"at": now, "code": e.code, "text": e.text, "topic": topic, "until": int(e.extra.get("until") or 0)})
+            log.warning("xtrend draft: AI 실패 %s", e.code)
+            raise
+        except BaseException:
+            self._mark(now, run=None)
+            raise
         if data.get("ok") is False:
+            self._mark(now, run=None, fail={"at": now, "code": "declined", "text": "이 주제로는 초안을 쓰지 않았어요 — " +
+                                            (xs.one_line(data.get("why"), 120) or "주제 규칙"), "topic": topic, "until": 0})
             raise xs.StudioError(422, "declined", "이 주제로는 초안을 쓰지 않았어요 — " + (xs.one_line(data.get("why"), 120) or "주제 규칙"))
         out: list[dict[str, Any]] = []
         for d in (data.get("drafts") if isinstance(data.get("drafts"), list) else [])[:5]:
@@ -542,9 +607,13 @@ class XTrend:
         log.info("xtrend draft: topic=%s memo=%d refs=%d tone=%s len=%s tags=%s → %d (경고 %d) %.1fs", xs.sha(topic), len(memo), len(refs), tone,
                  length, tags, len(out), sum(1 for d in out if d["warn"]), time.monotonic() - started)
         if not out:
-            raise xs.StudioError(502, "ai_failed", "쓸 만한 초안이 나오지 않았어요 — 하고 싶은 말을 조금 더 적고 다시 눌러 주세요")
+            text = "쓸 만한 초안이 나오지 않았어요 — 하고 싶은 말을 조금 더 적고 다시 눌러 주세요"
+            self._mark(now, run=None, fail={"at": now, "code": "no_draft", "text": text, "topic": topic, "until": 0})
+            raise xs.StudioError(502, "ai_failed", text)
         out = sorted(out[:n], key=lambda d: bool(d["warn"]))
         st = self.mine(now)
+        st.pop("fail", None)
+        st.pop("run", None)
         sid = "m" + hashlib.sha256(f"{now}:{topic}:{len(st['sets'])}".encode()).hexdigest()[:9]
         st["sets"] = (st["sets"] + [{"id": sid, "at": now, "topic": topic, "long": length == "long", "drafts": out,
                                      "src_nums": sorted(src_nums)[:200]}])[-MINE_KEEP:]
@@ -572,12 +641,17 @@ class XTrend:
     def view(self) -> dict[str, Any]:
         now, cfg = self.clock(), self.cfg()
         st = self.state(now)
-        rows, hidden = [], []
+        rows, hidden, abroad = [], [], []
         for r in st["rows"]:
             if r.get("hidden"):
                 hidden.append({"kw": r["kw"], "why": str(r["hidden"])})
                 continue
-            rows.append({"id": r["id"], "kw": r["kw"], "rank": _int(r.get("rank")), "move": r.get("move") if r.get("move") == "new" or
+            show, orig = label(r)
+            if not show:  # 외국어 주제 · 한국 기사 없음 — 순위에 넣지 않고 '해외' 접기 칸 (기본 숨김)
+                if len(abroad) < ABROAD_MAX:
+                    abroad.append({"kw": r["kw"], "views": _int(r.get("views")), "traffic": _int(r.get("traffic")), "x": X_SEARCH + quote(r["kw"], safe="")})
+                continue
+            rows.append({"id": r["id"], "kw": show, "orig": orig, "rank": len(rows) + 1, "move": r.get("move") if r.get("move") == "new" or
                          isinstance(r.get("move"), int) else None, "src": [s for s in r.get("src") or [] if s in ("google", "x", "hot")],
                          "seen": r.get("seen") is True, "n": _int(r.get("n")), "views": _int(r.get("views")), "replies": _int(r.get("replies")),
                          "likes": _int(r.get("likes")), "traffic": _int(r.get("traffic")),
@@ -600,14 +674,22 @@ class XTrend:
                 ds.append({"text": str(d.get("text") or ""), "angle": str(d.get("angle") or ""), "warn": list(d.get("warn") or [])[:3],
                            "done": tid in done, "undo_s": max(0, int(xs.UNDO_WITHIN - (now - done[tid]))) if tid in done else 0})
             sets.append({"id": s["id"], "at": xt._hm(s.get("at") or 0), "topic": str(s.get("topic") or ""), "long": s.get("long") is True, "drafts": ds})
+        mst = self.mine(now)
+        fail, run = mst.get("fail") if isinstance(mst.get("fail"), dict) else None, mst.get("run") if isinstance(mst.get("run"), dict) else None
+        newest = max([float(x.get("at") or 0) for x in mst["sets"]] + [0.0])
+        fail_v = {"at": xt._hm(float(fail.get("at") or 0)), "code": str(fail.get("code") or ""), "text": str(fail.get("text") or "")[:200],
+                  "topic": str(fail.get("topic") or "")[:TOPIC_HI], "wait_s": max(0, int(_int(fail.get("until")) - now))} \
+            if fail and float(fail.get("at") or 0) > newest else None
+        run_v = {"topic": str(run.get("topic") or "")[:TOPIC_HI], "at": xt._hm(float(run.get("at") or 0))} \
+            if run and 0 <= now - float(run.get("at") or 0) <= RUN_SHOW_S else None
         off = [name for src, name in (("fx", "X 글 수(FxTwitter)"), ("google", "구글 검색어")) if now < st["off"].get(src, 0.0)]
         spent = [name for src, name in (("fx", "X 글 수"), ("google", "구글 검색어")) if getattr(cfg, src) and st[src] >= getattr(cfg, f"{src}_per_day")]
         till = max([st["off"].get(src, 0.0) for src in ("fx", "google")] + [0.0])
         note = " · ".join(([f"{'·'.join(off)} 출처를 못 읽어서 쉬고 있어요 ({xt._hm(till)} 까지)"] if off else []) + ([f"{'·'.join(spent)} 오늘 몫을 다 썼어요"] if spent else []))
         age = int(now - st["at"]) if st["at"] else -1
         return {"v": 1, "on": bool(cfg.enabled), "at": xt._hm(st["at"]) if st["at"] else "", "age_s": age, "stale": age < 0 or age >= CACHE_S,
-                "busy": self.busy(), "wait_s": max(0, int(REFRESH_MIN_S - (now - max(self.tried, st["at"])))), "rows": rows, "hidden": hidden, "note": note,
-                "src": {"fx": bool(cfg.fx), "google": bool(cfg.google)}, "mine": sets, "left": self.studio._left("draft", xs.DRAFT_PER_DAY),
+                "busy": self.busy(), "wait_s": max(0, int(REFRESH_MIN_S - (now - max(self.tried, st["at"])))), "rows": rows, "hidden": hidden, "abroad": abroad, "note": note,
+                "src": {"fx": bool(cfg.fx), "google": bool(cfg.google)}, "mine": sets, "fail": fail_v, "run": run_v, "left": self.studio._left("draft", xs.DRAFT_PER_DAY),
                 "model": xs.model_label(self.studio.model), "tones": [[k, v[0]] for k, v in TONES.items()],
                 "lengths": [[k, v[0]] for k, v in LENGTHS.items()],
                 "lim": {"topic": [TOPIC_LO, TOPIC_HI], "memo": MEMO_MAX, "x": xs.X_LIMIT, "url_len": xs.URL_LEN}}

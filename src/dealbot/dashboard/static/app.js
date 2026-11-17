@@ -343,7 +343,7 @@ function finish(s, p) {
   if (s.action === 'blog.kakao_auth_url' && ok && s.url) { KURL = s.url; toast('카카오 화면을 열어 주세요'); return; }
   if (/^blog\.(info|server_check)$/.test(s.action) && ok) { infoSheet(s.text); return; }
   if (s.action === 'blog.visit_done') { if (ok) return; GONE.delete(p.iid); }
-  let text = ok ? (s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : (!/move/.test(s.action) && MSG[s.code]) || s.text || MSG.failed;
+  let text = ok ? (s.text && !/\/[a-z]/.test(s.text) ? s.text : MSG[s.code] || MSG.done) : (!/move|issue|topic/.test(s.action) && MSG[s.code]) || s.text || MSG.failed;
   if (s.status === 'unknown') text = MSG.unknown;
   if (s.status === 'expired') text = MSG.expired;
   const a = p.args || {};

@@ -17,7 +17,7 @@ const CSS = '.xr .r{display:flex;align-items:center;gap:8px;min-height:40px;font
 const NW = {target: '_blank', rel: 'noopener'}, CARD_ROWS = 5;
 const SORTS = [['rank', '인기순'], ['views', '조회순'], ['replies', '댓글 많은 순'], ['move', '급상승']];
 const ONE = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
-let ST = null, at = 0, loading = false, card = null, scr = null, tt = null, poll = null, polls = 0, asked = 0, sort = 'rank', showHidden = false, jump = false;
+let ST = null, at = 0, loading = false, card = null, scr = null, tt = null, poll = null, polls = 0, asked = 0, sort = 'rank', showHidden = false, showAbroad = false, jump = false, err = null, made = '';
 const busy = {};
 let F = {topic: '', memo: '', tone: 'eum', length: 'normal', tags: false, trend: '', ed: {}};
 try { const o = JSON.parse(W.localStorage.getItem('xr1') || 'null'); if (o && typeof o === 'object') F = Object.assign(F, o, {ed: o.ed && typeof o.ed === 'object' ? o.ed : {}}); } catch (e) { /* 저장본 없음 */ }
@@ -75,7 +75,7 @@ async function call(path, body) {
 const take = d => { if (d && d.v && Array.isArray(d.rows)) { ST = d; at = Date.now(); for (const s of d.mine || []) for (const x of s.drafts) x.until = at + (x.undo_s || 0) * 1000; } };
 function watch() {  // 서버가 뒤에서 새로 보는 동안만 4초마다 (30번까지)
   clearTimeout(poll);
-  if (ST && ST.busy && polls < 30) poll = setTimeout(() => { polls++; load(); }, 4000);
+  if (ST && (ST.busy || (ST.run && !busy.mk)) && polls < 30) poll = setTimeout(() => { polls++; load(); }, 4000);
 }
 async function load() {
   if (loading) return;
@@ -141,8 +141,12 @@ async function make() {
     trend: F.trend && ST && ST.rows.some(x => x.id === F.trend && x.kw === topic) ? F.trend : ''});
   busy.mk = '';
   take(r.d);
-  toast(r.s === 200 ? '초안을 만들었어요 — 고쳐서 복사해 올리세요' : r.d.text || '초안을 쓰지 못했어요 — 잠시 뒤 다시');
+  // 주인 11/17 '초안이 안 뜸 — 어디서 보는지 모름': 실패는 칸 안에 남기고(다시 단추), 만든 초안은 아래 '내 초안'으로 내려가 보여 줌
+  err = r.s === 200 ? null : {text: r.d.text || '초안을 쓰지 못했어요 — 잠시 뒤 다시', topic, code: r.d.code || ''};
+  made = r.s === 200 ? r.d.made || '' : '';
+  toast(r.s === 200 ? '초안을 만들었어요 — 아래 「내 초안」에 있어요' : err.text);
   drawScr(true);
+  if (made) { const m = D.getElementById('xrm-' + made); if (m && m.scrollIntoView) m.scrollIntoView({block: 'start'}); }
 }
 const txt = (s, i, d) => { const v = F.ed[s.id + ':' + i]; return String(v != null ? v : d.text); };
 async function posted(s, i, d, ev) {
@@ -176,8 +180,18 @@ function form() {
       oninput: e => { F.memo = e.target.value; keep(); }}),
     el('div', {class: 'opt'}, seg('tone', ST.tones)), el('div', {class: 'opt'}, seg('length', ST.lengths),
       el('label', {class: 'ck'}, el('input', {type: 'checkbox', checked: !!F.tags, onchange: e => { F.tags = e.target.checked; keep(); }}), '해시태그')),
-    btn('pb', busy.mk ? '쓰는 중… 30초~1분 걸려요' : '초안 만들기', make, {disabled: !!busy.mk || ST.left <= 0 || null}),
+    btn('pb', busy.mk || ST.run ? '쓰는 중… 30초~1분 걸려요' : '초안 만들기', make, {disabled: !!busy.mk || !!ST.run || ST.left <= 0 || null}),
+    failBox(),
+    ST.run && !busy.mk ? el('p', {class: 'note'}, `「${ST.run.topic}」 초안을 쓰는 중이에요 (${ST.run.at} 시작) — 다 되면 아래 「내 초안」에 떠요`) : null,
     el('p', {class: 'note'}, `오늘 초안 ${ST.left}번 남음 · 초안 ${ST.model} · 내가 적은 주제·메모는 바깥 검색에 쓰지 않아요`));
+}
+function failBox() {  // 마지막 실패 (이 기기 것 또는 서버가 기억한 것 — 새로 고쳐도 남음, 그 뒤 초안이 생기면 사라짐)
+  const f = err || ST.fail;
+  if (!f || busy.mk) return null;
+  const wait = f.wait_s ? ` (${Math.ceil(f.wait_s / 60)}분 남음)` : '';
+  return el('section', {class: 'box', role: 'alert', id: 'xrfail'}, el('p', {class: 'w'}, `✗ ${f.at ? f.at + ' · ' : ''}「${f.topic || F.topic}」 초안을 못 썼어요 — ${f.text}${wait}`),
+    el('div', {class: 'rw'}, btn('pb soft', '다시 해 보기', () => { if (f.topic && !F.topic.trim()) F.topic = f.topic; err = null; make(); }, {disabled: f.code === 'ai_limit' && f.wait_s > 0 || null}),
+      btn('lnk', '닫기', () => { err = null; if (ST.fail) ST.fail = null; drawScr(true); })));
 }
 
 // -- 그리기
@@ -191,13 +205,15 @@ function drawCard() {
     rows.map(r => el('div', {class: 'r'}, el('b', {}, r.rank), mv(r), el('span', {class: 'k'}, r.kw), el('span', {class: 'm'}, r.n ? `조회 ${num(r.views)}` : r.traffic ? `검색 ${num(r.traffic)}+` : ''),
       btn('sm', '글 쓰기', () => pick(r), {'aria-label': `${r.kw} 이걸로 글 쓰기`}))),
     !ST.on ? el('p', {class: 'note'}, '지금 뜨는 주제가 꺼져 있어요') : rows.length ? null : el('p', {class: 'note'}, ST.busy || busy.rf ? '처음 보는 중이에요 — 1분쯤 걸려요' : '아직 볼 주제가 없어요'),
-    el('div', {class: 'rw'}, btn('pb soft', '내 주제로 글 쓰기', () => { jump = true; location.hash = '#/sns/xr/w'; })),
+    el('div', {class: 'rw'}, btn('pb soft', '내 주제로 글 쓰기', () => { jump = true; location.hash = '#/sns/xr/w'; }),
+      (ST.mine || []).length ? el('a', {class: 'lnk', href: '#/sns/xr/w'}, `내 초안 ${ST.mine.length}묶음 ›`) : null),
+    ST.fail ? el('p', {class: 'w'}, `✗ 초안 못 씀 — ${ST.fail.text}`) : ST.run ? el('p', {class: 'note'}, `「${ST.run.topic}」 초안 쓰는 중…`) : null,
     el('p', {class: 'note'}, `${ago()} · 주제를 골라 초안을 받고, 올리기는 X 에서 내가`)].flat(9).filter(Boolean));
 }
 function rowCard(r) {
   return el('section', {class: 'itm'},
     el('div', {class: 'ih'}, el('span', {class: 'cp info'}, `${r.rank}위`), mv(r), r.since ? el('span', {class: 'cp'}, `${r.since}부터`) : null),
-    el('b', {class: 'kw'}, r.kw),
+    el('b', {class: 'kw'}, r.kw), r.orig ? el('p', {class: 'hd'}, `해외 화제 「${r.orig}」 — 한국 기사 제목으로 보여요`) : null,
     el('p', {class: 'sf'}, [r.n ? `X 반응 큰 글 ${r.n}개 (24시간) · 조회 ${num(r.views)} · 답글 ${num(r.replies)} · ♥ ${num(r.likes)}` : r.seen ? 'X 반응 큰 글 없음' : 'X 글 수는 못 봤어요',
       r.traffic ? `구글 검색 ${num(r.traffic)}+` : ''].filter(Boolean).join(' · ')),
     (r.posts || []).map(p => el('a', Object.assign({class: 'p', href: p.url}, NW), el('i', {}, `@${p.author} · 조회 ${num(p.views)} · 답글 ${num(p.replies)} — `), p.text)),
@@ -220,10 +236,19 @@ function drawScr(force) {
     hid.length ? [btn('xl', `숨긴 주제 ${hid.length}개 (정치·사고·혐오·성인) ${showHidden ? '접기' : '보기'}`, () => { showHidden = !showHidden; drawScr(true); }),
       showHidden ? el('section', {class: 'box'}, hid.map(h => el('p', {class: 'hd'}, `${h.kw} · ${h.why} — 숨김`))) : null] : null,
     el('p', {class: 'note', style: 'margin:0 0 10px'}, '조회·답글 수는 주제마다 좋아요 20 넘는 X 글 20개까지 더한 값이에요 (X 전체 글 수 아님) · 오른 정도는 약 1시간 전 순위와 견줘요'),
+    abroad(),
     el('p', {class: 'grp'}, '내 주제로 글 쓰기'), form(),
-    mine.map(s => [el('p', {class: 'grp'}, `${s.at} · ${s.topic}`), s.drafts.map((d, i) => draftCard(s, i, d))]),
+    el('p', {class: 'grp', id: 'xrmine'}, `내 초안 · 오늘 ${mine.length}묶음`),
+    mine.length ? null : el('p', {class: 'note'}, '아직 오늘 만든 초안이 없어요 — [초안 만들기]로 만든 초안은 여기 남아요 (새로 고쳐도 · 오늘 것)'),
+    mine.map(s => [el('p', {class: 'sub', id: 'xrm-' + s.id}, `${s.at} · ${s.topic}`), s.drafts.map((d, i) => draftCard(s, i, d))]),
   ].flat(9).filter(Boolean));
   if (jump) toForm();
+}
+function abroad() {  // 외국어 주제 · 한국 기사 없음 (주인 11/17 — 순위에서 빼고 접어 둠, 기본 숨김)
+  const ab = ST.abroad || [];
+  if (!ab.length) return null;
+  return [btn('xl', `해외 화제 ${ab.length}개 (한국 기사 없음) ${showAbroad ? '접기' : '보기'}`, () => { showAbroad = !showAbroad; drawScr(true); }),
+    showAbroad ? el('section', {class: 'box'}, ab.map(a => el('a', Object.assign({class: 'p', href: a.x}, NW), el('i', {}, a.views ? `조회 ${num(a.views)} — ` : a.traffic ? `검색 ${num(a.traffic)}+ — ` : ''), a.kw))) : null];
 }
 function draw() { drawCard(); drawScr(); }
 

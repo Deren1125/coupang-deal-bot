@@ -413,7 +413,8 @@ def test_xtrend_js_is_local_safe_and_loaded_by_shell() -> None:
     for label in ("지금 뜨는 주제", "이걸로 글 쓰기", "내 주제로 글 쓰기", "초안 만들기", "댓글 많은 순", "조회순", "급상승", "숨긴 주제", "✓ 올렸어요", "복사", "X에서 보기", "새로 보기"):
         assert label in code, label
     raw = (STATIC / "xtrend.js").read_bytes()
-    assert len(raw) <= 24 * 1024 and len(gzip.compress(raw, 9)) <= 8 * 1024
+    # 11/17: 해외 화제 접기 · 초안 실패 칸(다시 해 보기) · '내 초안' 머리 · 쓰는 중 표시 → gzip 8.3 KB
+    assert len(raw) <= 24 * 1024 and len(gzip.compress(raw, 9)) <= 9 * 1024
     page = shell.page({})
     tag = f'<script defer src="{shell.asset_url("xtrend.js")}"></script>'
     assert shell.XTREND_JS == "xtrend.js" and tag in page and page.index(tag) > page.index(shell.asset_url("xengage.js"))

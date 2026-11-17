@@ -12,6 +12,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -22,6 +23,17 @@ from dealbot.config import posted_api_model, posted_cli_model
 from dealbot.summarize import _CLI_AUTH, CLI_AUTH_RETRY_SECONDS
 
 log = logging.getLogger(__name__)
+
+# claude CLI 사용량 한도 문구 (Blog-Auto llm_router.LIMIT_HINTS 와 같은 말들 — 예 "You've hit your weekly limit · resets 9pm (Asia/Seoul)")
+_CLI_LIMIT = re.compile(r"usage limit|rate limit|limit reached|hit your (?:session |weekly )?limit|(?:session|weekly|5-hour) limit|"
+                        r"resource_exhausted|quota|resets\s", re.I)
+LIMIT_TAG = "claude CLI 한도"  # LLMError 글 머리 — 부르는 쪽(xstudio.ai_error)이 이 말로 한도인지 안다
+
+
+def limit_text(detail: str) -> str:
+    """한도 문구에서 '풀리는 때' 부분만 (예 'resets 9pm (Asia/Seoul)') — 화면에 보일 말을 만들 때 쓴다. 없으면 ''."""
+    m = re.search(r"resets?\s+[^·|\n]{1,40}", detail or "", re.I)
+    return m.group(0).strip()[:60] if m else ""
 
 
 class LLMError(Exception):
@@ -148,6 +160,9 @@ class JsonAsker:
         if isinstance(payload, list):
             payload = next((m for m in reversed(payload) if isinstance(m, dict) and m.get("type") == "result"), None)
         if not isinstance(payload, dict) or not payload:
+            raw = (out.decode("utf-8", "replace") + "\n" + err.decode("utf-8", "replace"))[:2000]
+            if _CLI_LIMIT.search(raw):  # 한도면 CLI 가 JSON 대신 한 줄만 낼 때가 있다
+                raise LLMError(f"{LIMIT_TAG} ({limit_text(raw) or '풀리는 때 모름'})")
             log.warning("nl cli: unreadable output (exit %s): %s", proc.returncode if proc else "?", err.decode("utf-8", "replace")[:200])
             raise LLMError("claude CLI 응답을 읽지 못함")
         usage = payload.get("modelUsage")
@@ -157,6 +172,8 @@ class JsonAsker:
             if _CLI_AUTH.search(detail):
                 self._cli_down_until = time.monotonic() + CLI_AUTH_RETRY_SECONDS
                 raise LLMError("서버 claude CLI 로그인이 풀림")
+            if _CLI_LIMIT.search(detail):
+                raise LLMError(f"{LIMIT_TAG} ({limit_text(detail) or '풀리는 때 모름'})")
             raise LLMError(f"claude CLI 오류 ({detail[:80] or '내용 없음'})")
         data = payload.get("structured_output")
         if isinstance(data, dict):
