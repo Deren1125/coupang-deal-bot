@@ -895,6 +895,8 @@ class XCapConfig(BaseModel):
     times: list[str] = Field(default_factory=lambda: ["11:40", "16:40", "20:40"])  # 이 시각 뒤 처음 도는 1분 일에서 하나씩
     # 쓸 출처 (xcap.SOURCES 이름). 보배드림 베스트 · 뽐뿌 자유게시판 HOT · 디시 실시간 베스트 (주인 11/18 켜기 — strict: 갈등·혐오·정치·성적·피해·고발 더 세게 거름)
     sources: list[str] = Field(default_factory=lambda: ["bobaedream", "ppomppu", "dcinside"])
+    # 주인 11/18 'X 화면 단순하게' — '어그로 후보'(x_aggro)로 통일: '커뮤 캡처 글' 카드는 기본 숨김 (캡처 길·API 는 그대로 — xaggro 가 XCap.capture 를 씀). true 면 다시 보임
+    show_card: bool = False
 
     @field_validator("times")
     @classmethod

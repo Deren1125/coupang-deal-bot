@@ -681,6 +681,7 @@ dashboard:
     enabled: true
     per_day: 3                     # 하루 카드 수 (본문 캡처 1~2장 + 한 줄 초안)
     times: ["11:40", "16:40", "20:40"]
+    show_card: false               # '커뮤 캡처 글' 카드 (주인 11/18 — '어그로 후보'로 통일해 숨김 · 캡처 길은 xaggro 가 그대로 씀 · true 면 다시 보임)
     sources: [bobaedream, ppomppu, dcinside] # robots.txt 허용·로그인 없음·서버에서 열리는 곳만. 디시 실베는 11/18 켬(더 세게 거름) · 네이트판(robots 전부 막음)·더쿠·에펨(보안 화면)·오유(사람 확인)·엠팍(robots)·웃대(쿠키 필요)·82cook(연결 끊김)·인스티즈·클리앙·루리웹은 없음
   x_aggro:                         # X 어그로 후보 (주인 11/17 — dashboard/xaggro.py · SNS 탭 X 칸 '어그로 후보' 카드 · 올리기는 주인 손)
     enabled: true

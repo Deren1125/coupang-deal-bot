@@ -50,7 +50,7 @@ async function load() {
   const r = await call('state');
   loading = false; at = Date.now();
   if (r.s === 200) take(r.d);
-  draw(); watch();
+  mount(); draw(); watch();
 }
 function watch() { clearTimeout(poll); if (ST && ST.busy && polls < 40) poll = setTimeout(() => { polls++; load(); }, 6000); }
 async function make() {
@@ -100,7 +100,10 @@ function mount() {
   const m = D.getElementById('main');
   if (!m) return;
   if (!D.getElementById('xcp-css')) D.head.append(el('style', {id: 'xcp-css', text: CSS}));
-  if (onX()) {
+  if (onX() && !(ST && ST.show === true)) {  // 주인 11/18 — '어그로 후보'로 통일: 설정 dashboard.x_cap.show_card 가 켜졌을 때만 카드
+    if (card && card.parentNode) card.remove();
+    if (Date.now() - at > 120000) load();  // 처음(at 0)·2분 지났을 때만 (load 끝에 mount 를 다시 부르므로 !ST 로 부르면 돌고 돎)
+  } else if (onX()) {
     if (!card) { card = el('article', {id: 'xcc', class: 'itm xsc xcp', 'aria-label': '커뮤 캡처 글'}); draw(); }
     const a = D.getElementById('xrc') || D.getElementById('xec') || D.getElementById('xtc') || D.getElementById('snt');  // 지금 뜨는 주제 카드 아래
     if (a && a.nextSibling !== card) a.after(card);

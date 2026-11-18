@@ -598,7 +598,7 @@ class XCap:
                  for i in reversed(st["items"]) if i["id"] not in st["skip"]]
         off = [SOURCES[k].name for k in ss["off"] if k in SOURCES and k in cfg.sources]
         nxt = next((t for t in cfg.times if t not in st["runs"]), "")
-        return {"v": 1, "on": bool(cfg.enabled), "items": items, "made": len(st["items"]), "per_day": cfg.per_day, "busy": self.bg is not None and not self.bg.done(),
+        return {"v": 1, "on": bool(cfg.enabled), "show": bool(getattr(cfg, "show_card", False)), "items": items, "made": len(st["items"]), "per_day": cfg.per_day, "busy": self.bg is not None and not self.bg.done(),
                 "next": nxt if len(st["items"]) < cfg.per_day else "", "err": str(st.get("err") or ""),
                 "off": off, "sources": [SOURCES[k].name for k in cfg.sources if k in SOURCES]}
 

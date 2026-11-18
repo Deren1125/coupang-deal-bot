@@ -653,7 +653,9 @@ class XTrend:
             raise xs.limit_error(float(last["until"]), now)
         if not self.studio._count("draft", xs.DRAFT_PER_DAY):
             raise xs.StudioError(429, "day", f"오늘 글 초안은 {xs.DRAFT_PER_DAY}번을 다 썼어요 — 내일 다시")
-        src_nums = set(xs.nums("\n".join([topic, memo, *refs])))
+        # 한 번에 글은 기사 제목만 사실 재료 — X 글의 숫자·부풀린 말은 분위기라 '재료에 있음'으로 치지 않음
+        facts = "\n".join([topic, *news]) if aggro else "\n".join([topic, memo, *refs])
+        src_nums = set(xs.nums(facts))
         started = time.monotonic()
         self._mark(now, run={"at": now, "topic": topic, **mark})
         try:
@@ -682,7 +684,7 @@ class XTrend:
             text = xs.clean(d.get("text")).strip()
             drop, warn = lint_mine(text, src_nums, long=length == "long", tags=tags)
             if aggro:
-                drop += lint_aggro(text, "\n".join([topic, *refs]))
+                drop += lint_aggro(text, facts)
             if drop or any(text == x["text"] for x in out):
                 continue
             out.append({"text": text, "angle": xs.one_line(d.get("angle"), 100), "warn": warn})

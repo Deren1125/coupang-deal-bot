@@ -77,6 +77,10 @@ async def test_one_tap_drafts_drop_hype_group_splitting_and_flag_numbers_not_in_
     # 과장·집단 편 가르기·링크·머리말은 버리고, 재료에 없는 숫자는 빨간 경고를 달아 뒤로
     assert [x["angle"] for x in ds] == ["믿음과 발표의 차이", "없는 숫자"]
     assert ds[0]["warn"] == [] and "재료에 없는 숫자: 52" in ds[1]["warn"][0]
+    # X 글(분위기)에만 있는 숫자는 사실 재료가 아님 — '60만' 은 X 반응 글에만 있어 빨간 경고
+    d2, _g, _a, _n, row2 = await ranked(Ask([{"text": "수능 연기 반대 60만 명이 흔들림\n\n미루는 게 맞음 그대로가 맞음?", "angle": "X 글 숫자"}]))
+    w = (await d2.draft({"aggro": True, "trend": row2["id"]}))["mine"][0]["drafts"][0]["warn"]
+    assert w and "재료에 없는 숫자: 60" in w[0]
     assert xr.lint_aggro("충격적인 건 따로 있음", "기사 제목: 충격 발표") == []  # 재료(기사 제목)에 있는 말은 그대로 둠
     assert xr.lint_aggro("이건 충격임", "기사 제목: 발표") == ["부풀린 말"]
     assert xr.lint_aggro("찍먹 vs 부먹 어디임", "") == [] and xr.lint_aggro("아이폰 vs 갤럭시", "") == []  # 취향·물건 가르기는 됨
@@ -203,9 +207,9 @@ async def test_x_section_keeps_four_cards_in_order_and_cards_do_not_fight() -> N
         assert out["rounds"][1:] == [want] * 3, files  # 한 바퀴 뒤로는 그대로 (서로 밀어내지 않음)
         assert out["labels"][1:5] == ["지금 뜨는 주제", "어그로 후보", "오늘 X 글", "직접 쓰기"]
         assert out["scr"][0] == "xrs" and "xrc" not in out["scr"] and "xrd" not in out["scr"] and out["back"] == [want, want]
-    # 커뮤 캡처 글 카드(xcap.js — 안 고침)는 뜨는 주제와 어그로 후보 사이 · 반응 연속 모드(xengage.js, 기본 꺼짐)가 있어도 그대로
+    # 커뮤 캡처 글 카드(xcap.js)는 기본 숨김 (주인 11/18 '어그로 후보'로 통일 — dashboard.x_cap.show_card) · 반응 연속 모드(xengage.js, 기본 꺼짐)가 있어도 그대로
     out = run(ORDER_TAIL, "xtoday.js,xengage.js,xtrend.js,xcap.js,xaggro.js", d.view(), "#/sns/x")
-    assert out["rounds"][1:] == ["snt xrc xcc xag xtc xrd DIV"] * 3
+    assert out["rounds"][1:] == [want] * 3
     for name in ("x.js", "threads.js"):  # X 봇·스레드 담당 파일은 그대로 (이 일에서 고치지 않음)
         assert (STATIC / name).is_file()
 

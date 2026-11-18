@@ -222,7 +222,14 @@ const all = (n, f, out = []) => { if (f(n)) out.push(n); n.children.forEach(c =>
 })().catch(e => { console.error(e); process.exit(1); });
 """
     shim = SHIM.split("const clip = [];")[0] + tail
-    res = subprocess.run([NODE, "-e", shim, str(STATIC / "xcap.js"), "x", json.dumps(d.view(), ensure_ascii=False), "#/sns/x"], capture_output=True, text=True, timeout=30)
+    # 주인 11/18 — '어그로 후보'로 통일: 카드는 설정 dashboard.x_cap.show_card 가 켜졌을 때만 (기본 숨김 · 캡처 길·API 는 그대로)
+    assert d.view()["show"] is False and XCapConfig().show_card is False
+    hidden = subprocess.run([NODE, "-e", shim.replace("const c = byId(main, 'xcc');", "const c = byId(main, 'xcc') || main;"), str(STATIC / "xcap.js"), "x",
+                             json.dumps(d.view(), ensure_ascii=False), "#/sns/x"], capture_output=True, text=True, timeout=30)
+    assert hidden.returncode == 0, hidden.stderr
+    assert json.loads(hidden.stdout)["order"] == ["snt", "xsc", "xtc", "xrc", "DIV"]
+    res = subprocess.run([NODE, "-e", shim, str(STATIC / "xcap.js"), "x", json.dumps({**d.view(), "show": True}, ensure_ascii=False), "#/sns/x"],
+                         capture_output=True, text=True, timeout=30)
     assert res.returncode == 0, res.stderr
     out = json.loads(res.stdout)
     assert out["order"] == ["snt", "xsc", "xtc", "xrc", "xcc", "DIV"]
