@@ -1,6 +1,6 @@
 """연결 탭 '계정 정리 (구글·인스타)' (주인 11/15 — '구글 계정이 여러 개 필요할 듯한데, 계정별 사용처를 정리해서 대시보드에 간단한 페이지로').
 
-1) 표 상수 (accounts_map.py): 여섯 줄 · 규칙 셋 · 근거 한 줄 — 쓰임만, 이메일·웹 주소·토큰·비밀번호 꼴 없음 (섞인 줄은 view 가 뺌).
+1) 표 상수 (accounts_map.py): 여섯 줄 ('⑤ 쌀먹 전용 구글'은 dashboard.ssalmuk.show 참일 때만 — 주인 11/18) · 규칙 셋 · 근거 한 줄 — 쓰임만, 이메일·웹 주소·토큰·비밀번호 꼴 없음 (섞인 줄은 view 가 뺌).
 2) GET /dashboard/api/accounts: 로그인 아래 · 상수 그대로.
 3) 화면 (static/accounts.js — 가짜 DOM): 접힌 한 줄 → 펼치면 표 + 규칙 + 근거 · #/connect/accounts 는 펼치고 그 칸으로 · 글자는 텍스트 노드.
 """
@@ -34,7 +34,7 @@ def bot(settings: Settings, tmp_path: Path):  # type: ignore[no-untyped-def]
 
 # ---------------------------------------------------------------- 1) 표
 def test_table_has_the_six_accounts_three_rules_and_no_secret_shapes() -> None:
-    v = accounts_map.view()
+    v = accounts_map.view(show_ssalmuk=True)
     assert v["title"] == "계정 정리 (구글·인스타)" and v["cols"] == ["계정", "쓰는 곳", "누가·어디서 쓰나", "상태"]
     assert [r["name"][:1] for r in v["rows"]] == ["①", "②", "③", "④", "⑤", "인"] and v["hidden"] == 0
     assert all(set(r) == {"name", "use", "who", "status", "state"} and all(isinstance(x, str) and x for x in r.values()) for r in v["rows"])
@@ -50,6 +50,14 @@ def test_table_has_the_six_accounts_three_rules_and_no_secret_shapes() -> None:
     assert "gmail" not in whole.lower() and "://" not in whole and ".com" not in whole.lower()
 
 
+def test_ssalmuk_row_is_hidden_by_default_but_kept() -> None:
+    # 주인 11/18 '연결 탭 쌀먹 전용 구글 줄도 숨김' — 지우지 않고 스위치 뒤로
+    v = accounts_map.view()
+    assert [r["name"][:1] for r in v["rows"]] == ["①", "②", "③", "④", "인"] and v["hidden"] == 0
+    assert "쌀먹" not in json.dumps(v, ensure_ascii=False)
+    assert any(r["name"] == "⑤ 쌀먹 전용 구글" and r.get("only") == "ssalmuk" for r in accounts_map.ACCOUNTS)
+
+
 @pytest.mark.parametrize("bad", ["owner.name@gmail.com", "https://accounts.google.com/x", "www.youtube.com/@x",
                                  "ya29.A0AfH6SMBxxxxxxxxxxxxxxxxxxxxxxx", "비밀번호: hunter2", "token=abc"])
 def test_leak_shapes_are_caught_and_such_rows_never_reach_the_screen(bad: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,7 +67,7 @@ def test_leak_shapes_are_caught_and_such_rows_never_reach_the_screen(bad: str, m
     row = {"name": "⑥ 잘못 적은 줄", "use": bad, "who": "어딘가", "status": "사용 중", "state": "on"}
     monkeypatch.setattr(accounts_map, "ACCOUNTS", (*accounts_map.ACCOUNTS, row))
     monkeypatch.setattr(accounts_map, "RULES", (*accounts_map.RULES, bad))
-    v = accounts_map.view()
+    v = accounts_map.view(show_ssalmuk=True)
     assert len(v["rows"]) == 6 and v["hidden"] == 1 and len(v["rules"]) == 3 and bad not in json.dumps(v, ensure_ascii=False)
 
 
@@ -67,8 +75,12 @@ def test_leak_shapes_are_caught_and_such_rows_never_reach_the_screen(bad: str, m
 async def test_api_serves_the_table_behind_login(bot: DealBot) -> None:
     status, body, headers = await get_json(bot, "/dashboard/api/accounts", session_headers(bot))
     assert status == 200 and body == accounts_map.view() and headers["Cache-Control"] == "no-cache"
+    assert "⑤ 쌀먹 전용 구글" not in [r["name"] for r in body["rows"]]  # 기본 dashboard.ssalmuk.show: false
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     assert (await bot.web.dispatch("GET", "/dashboard/api/accounts", anon))[0] == 401
+    bot.settings.dashboard.ssalmuk.show = True  # true 면 되살아남
+    status, body, _ = await get_json(bot, "/dashboard/api/accounts", session_headers(bot))
+    assert status == 200 and body == accounts_map.view(show_ssalmuk=True) and "⑤ 쌀먹 전용 구글" in [r["name"] for r in body["rows"]]
 
 
 # ---------------------------------------------------------------- 3) 화면
@@ -161,7 +173,7 @@ const snap = () => {
 @needs_node
 def test_fold_opens_the_table_and_the_shortcut_jumps_to_it() -> None:
     evil = '<img src=x onerror="alert(1)">'
-    data = accounts_map.view()
+    data = accounts_map.view(show_ssalmuk=True)
     data["rows"] = [*data["rows"], {"name": evil, "use": evil, "who": 7, "status": None, "state": "x y"}, None, "junk"]
     out = subprocess.run([NODE, "-e", SHIM, str(STATIC / "accounts.js"), json.dumps(data, ensure_ascii=False)], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
@@ -174,7 +186,7 @@ def test_fold_opens_the_table_and_the_shortcut_jumps_to_it() -> None:
     o = got["opened"]
     assert got["calls1"] == [["/dashboard/api/accounts", "GET"]] * 2 and got["calls2"] == 2 and got["reclosed"] == "false"
     assert o["th"] == ["계정", "쓰는 곳", "누가·어디서 쓰나", "상태"] and len(o["rows"]) == 7
-    want = accounts_map.view()["rows"]
+    want = accounts_map.view(show_ssalmuk=True)["rows"]
     assert o["rows"][:6] == [[r["state"], r["name"], r["use"], r["who"], r["status"]] for r in want]
     assert o["rows"][6] == ["", evil, evil, "", ""]  # 이상한 값은 글자 그대로 (태그로 안 바뀜) · 모르는 상태는 색 없음
     assert o["rules"] == list(accounts_map.RULES) and o["notes"] == [accounts_map.SOURCE]

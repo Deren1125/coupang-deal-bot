@@ -15,6 +15,7 @@ TITLE = "계정 정리 (구글·인스타)"
 COLS = ("계정", "쓰는 곳", "누가·어디서 쓰나", "상태")
 
 # 한 줄 = 계정 하나. state: on = 사용 중 · todo = 주인이 만들 차례 · wait = 나중·진행 중 (화면 색만 가름)
+# only: "ssalmuk" 줄은 설정 dashboard.ssalmuk.show 가 참일 때만 보임 (주인 11/18 이벤트 참여 숨김과 같이 — 지우지 않음)
 ACCOUNTS: tuple[dict[str, str], ...] = (
     {"name": "① 본 구글 (주인 기존)",
      "use": "유튜브 창작 채널: 정부작전파일·시니어·지도 '왜'·진짜 사건 + 구글 클라우드(Gemini·Vertex 크레딧 결제) + 블로그 기존 연결",
@@ -30,7 +31,7 @@ ACCOUNTS: tuple[dict[str, str], ...] = (
      "who": "쇼츠 서버 · 로그인 1회 뒤 재로그인 0", "status": "사용 중", "state": "on"},
     {"name": "⑤ 쌀먹 전용 구글",
      "use": "쌀먹(이벤트 응모) — 숏폼 계정과 섞지 않음",
-     "who": "퍼프덱스 오라클 서버", "status": "11/18 이후 새로 만듦", "state": "wait"},
+     "who": "퍼프덱스 오라클 서버", "status": "11/18 이후 새로 만듦", "state": "wait", "only": "ssalmuk"},
     {"name": "인스타 (구글 아님)",
      "use": "@derenpick.look 룩북 · 채널별 인스타는 각 층과 같은 묶음",
      "who": "쇼츠 서버 Instagram 로그인 API", "status": "연결 진행 중", "state": "wait"},
@@ -58,9 +59,11 @@ def leaks(text: str) -> bool:
     return any(p.search(text) for p in SECRET_SHAPES)
 
 
-def view() -> dict[str, Any]:
-    """GET /dashboard/api/accounts 몸. 비밀 꼴이 섞인 줄은 통째로 뺀다 (누가 실수로 적어도 화면에 안 나감)."""
-    rows = [{k: r[k] for k in ("name", "use", "who", "status", "state")} for r in ACCOUNTS
+def view(show_ssalmuk: bool = False) -> dict[str, Any]:
+    """GET /dashboard/api/accounts 몸. 비밀 꼴이 섞인 줄은 통째로 뺀다 (누가 실수로 적어도 화면에 안 나감).
+    show_ssalmuk 가 거짓(설정 dashboard.ssalmuk.show 기본)이면 only=ssalmuk 줄('⑤ 쌀먹 전용 구글')도 뺀다 — hidden 수에는 안 셈 (비밀 꼴만 셈)."""
+    shown = [r for r in ACCOUNTS if show_ssalmuk or r.get("only") != "ssalmuk"]
+    rows = [{k: r[k] for k in ("name", "use", "who", "status", "state")} for r in shown
             if not any(leaks(str(v)) for v in r.values())]
     return {"title": TITLE, "cols": list(COLS), "rows": rows, "rules": [x for x in RULES if not leaks(x)],
-            "source": "" if leaks(SOURCE) else SOURCE, "hidden": len(ACCOUNTS) - len(rows)}
+            "source": "" if leaks(SOURCE) else SOURCE, "hidden": len(shown) - len(rows)}

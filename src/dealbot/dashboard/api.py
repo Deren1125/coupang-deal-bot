@@ -686,7 +686,8 @@ class DashApi:
         """계정 정리 표 (주인 11/15) — 어느 계정을 어디에 쓰는지 상수 표 (쓰임만 · 주소·비밀 없음 · 아무것도 읽거나 열지 않음)."""
         from dealbot.dashboard import accounts_map
 
-        return jresp(200, accounts_map.view(), {"Cache-Control": "no-cache"})
+        # '⑤ 쌀먹 전용 구글' 줄은 이벤트 참여 화면과 같은 스위치 (주인 11/18 숨김 · dashboard.ssalmuk.show)
+        return jresp(200, accounts_map.view(ssalmuk_show(self.bot)), {"Cache-Control": "no-cache"})
 
     async def routine(self, query: dict[str, str]) -> Any:
         """오늘 할 일 칸 (주인 10/27) — 블로그 프로그램 목록 + 그날 체크 (읽기만, 사이트를 열지 않음)."""
