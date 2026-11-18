@@ -1262,7 +1262,12 @@ def run_shim(scenario: str, state: str, extra: dict[str, Any] | None = None) -> 
 
 @needs_node
 def test_js_card_on_x_section_and_screen_takes_over_sns_tab() -> None:
+    # 주인 11/18 '답글·방문 추천 빼 줘': 기본(설정 x_react 끔)은 '오늘 할 X 일' 카드(답글 n/10 · 한 시간 n/15 · 답글 달기 · 자주 보는 계정)를 붙이지 않고
+    # 글쓰기 화면의 답글·계정 칸 단추도 숨긴다 (기록·API 는 그대로 — 켜면 아래처럼 예전대로)
     got = run_shim("card", view_json())
+    assert got["order"] == ["snt", "DIV"] and "답글" not in got["card"] and "@mad_dogdebt" not in got["card"]
+    assert got["scr"] == "xss" and "글쓰기도우미" in got["screen"] and "글쓰기답글" not in got["screen"] and "계정도우미" not in got["screen"]
+    got = run_shim("card", view_json(react=True))
     assert got["order"] == ["snt", "xsc", "DIV"]  # SNS 탭 칸 고르기 바로 아래 · X 칸 위
     for t in ("오늘 할 X 일", "글 1/8~10개", "답글 0/10개", "글쓰기", "답글 달기", "@mad_dogdebt"):
         assert t in got["card"], t

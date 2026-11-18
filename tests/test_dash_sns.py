@@ -25,7 +25,7 @@ def test_sns_js_is_lazy_local_and_safe() -> None:
     js = (STATIC / "sns.js").read_text(encoding="utf-8")
     assert "'use strict'" in js and "W.SBSns = {view, again}" in js
     assert "innerHTML" not in js and "eval(" not in js and "http://" not in js and "https://" not in js
-    for word in ("자동 반응 · 승인함", "직접 올리는 글", ".snb>.top:first-child", ".snx>.top:first-child", ".snb label.tg", ".snb .tc>.pb"):
+    for word in ("그 밖 — 예전 초안함 · 숫자 넣기", "st.react", ".snb>.top:first-child", ".snx>.top:first-child", ".snb label.tg", ".snb .tc>.pb"):
         assert word in js, word
     html = shell.page({"me": {}})
     assert f'<meta name="sb-sns" content="{shell.asset_url("sns.js")}">' in html
@@ -45,7 +45,7 @@ class E {
 }
 const ids = {};
 global.document = {getElementById: id => ids[id] || null, createElement: t => new E(t), head: {append: s => { ids[s.id] = s; }}};
-global.window = {};
+global.window = process.argv[2] === 'react' ? {SBXStudio: {state: () => ({react: true})}} : {};  // 설정 x_react 를 켠 서버 (xstudio.js 가 받은 값)
 require(process.argv[1]);
 const N = window.SBSns, log = [], FAIL = new Set();
 // 불러오기 실패 흉내: app.js mount 처럼 false 를 돌려줌 (그 화면 파일을 못 받았을 때)
@@ -53,7 +53,7 @@ const mount = (L, b) => { log.push(L + ':' + b.a.class); if (FAIL.has(L)) { FAIL
 const h = (nav, S, j) => ({el: (t, a, ...k) => { const e = new E(t, a); e.kids = k; return e; }, mount, NAV: nav, S, j,
   L: {threads: 'th', x: ['xb', 'xp'], lookbook: 'lb'}});
 const tick = () => new Promise(r => setTimeout(r, 0));
-const names = b => b.kids.map(k => k.tag === 'p' ? k.kids[0] + (/sng/.test(k.a.class) ? '^' : '') : k.a.class);
+const names = b => b.kids.map(k => k.tag === 'details' ? 'details>' + k.kids[0].kids[0] + '>' + k.kids[1].a.class : k.a.class);
 (async () => {
   const out = {};
   const b = new E('div');
@@ -97,11 +97,20 @@ def test_sns_boxes_remount_only_when_needed() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node 없음")
+    # 주인 11/18 '답글·방문 추천 빼 줘': 기본(x_react 끔)은 X 봇 반응 카드(x.js)를 받지도 붙이지도 않고, 예전 초안함은 맨 아래 접어 둔다
     res = subprocess.run([node, "-e", SHIM, str(STATIC / "sns.js")], capture_output=True, text=True)
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
+    assert got["first"] == ["xp:snp"] and got["kids"] == ["details>그 밖 — 예전 초안함 · 숫자 넣기>snp"]
+    assert got["nav"] == got["rf"] == ["xp:snp"] and "xb:snx" not in got["fail"]
+    assert got["jumpKids"] == ["snp"]  # 할 일 'X 숫자 넣기'로 오면 숫자 칸이 펴진 채로
+    assert got["th"] == ["th:snb"] and got["lb"] == ["lb:snl", "lb:snl"]
+    # 설정 x_react 를 켜면 예전대로 x.js 상자가 위에
+    res = subprocess.run([node, "-e", SHIM, str(STATIC / "sns.js"), "react"], capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    got = json.loads(res.stdout)
     assert got["first"] == ["xb:snx", "xp:snp"]
-    assert got["kids"] == ["자동 반응 · 승인함^", "snx", "직접 올리는 글", "snp"]  # 자동 반응 먼저, 직접 올리는 글 아래
+    assert got["kids"] == ["snx", "details>그 밖 — 예전 초안함 · 숫자 넣기>snp"]
     assert got["poll"] == ["xp:snp"]  # 고치던 X 댓글이 남게
     assert got["nav"] == ["xb:snx", "xp:snp"]
     assert got["rf"] == ["xb:snx", "xp:snp"] and got["rfAfter"] == ["xp:snp"]
@@ -109,7 +118,7 @@ def test_sns_boxes_remount_only_when_needed() -> None:
     assert got["lb"] == ["lb:snl", "lb:snl"]
     # 못 받은 x.js 는 다음 그릴 때 다시 (예전엔 칸이 빈 채로 남음) · 받은 뒤엔 20초 새로고침에 그대로
     assert got["fail"] == ["xb:snx", "xp:snp", "xb:snx", "xp:snp", "xp:snp"]
-    assert got["jumpKids"] == ["직접 올리는 글^", "snp", "자동 반응 · 승인함", "snx"]  # 숫자 넣는 칸이 위
+    assert got["jumpKids"] == ["snx", "snp"]
     assert got["css"] is True  # X 를 먼저 열어도 숫자 칸·알약 단추 모양 (threads.js 없이)
 
 

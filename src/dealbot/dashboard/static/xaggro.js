@@ -128,7 +128,8 @@ function mount() {
   if (onX()) {
     if (!card) { card = el('article', {id: 'xag', class: 'itm xsc xag', 'aria-label': '어그로 후보'}); draw(); }
     // 커뮤 캡처 글 카드(xcc) 아래 — xcap.js 가 같은 닻(xrc…) 바로 뒤에 제 카드를 다시 끼우므로, 그 카드가 있으면 그 뒤에 붙어야 서로 밀어내지 않는다
-    const a = D.getElementById('xcc') || D.getElementById('xrc') || D.getElementById('xec') || D.getElementById('xtc') || D.getElementById('snt');
+    // 주인 11/18 차례: 지금 뜨는 주제 → (커뮤 캡처) → 이 카드 → 오늘 X 글 (xtoday.js 가 이 카드 뒤에 붙으므로 그 카드를 닻으로 쓰지 않는다 — 서로 밀어냄)
+    const a = D.getElementById('xcc') || D.getElementById('xrc') || D.getElementById('snt');
     if (a && a.nextSibling !== card) a.after(card);
     if (!ST || Date.now() - at > 120000) load();
   } else if (card && card.parentNode) card.remove();

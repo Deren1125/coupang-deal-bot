@@ -1012,6 +1012,7 @@ class DashboardConfig(BaseModel):
     x_photo: XPhotoConfig = Field(default_factory=XPhotoConfig)  # 사진으로 X 글 쓰기 · 초안에 붙일 사진 (주인 11/17)
     # 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 둘 다 숨김 (코드·API 는 그대로, true 면 예전 화면)
     x_helper: bool = False  # 'X 도우미' 책갈피 (static/xhelper.js) 설치 칸 · 받기. false 면 이미 깐 책갈피를 눌러도 '이제 안 써요' 한 줄만
+    x_react: bool = False  # X 답글·방문 추천 (주인 11/18 뺌): '오늘 할 X 일' 카드(답글 n/10·한 시간 n/15·답글 달기) · 글쓰기 화면 답글·계정 칸 · 체크리스트 '오늘 반응 할 것' · X 봇 반응 카드(x.js). true 면 다시 보임 (기록·API 는 그대로)
     x_engage: bool = False  # X '반응 연속 모드' 카드·화면 (static/xengage.js · #/sns/xe). false 면 '오늘 X 글' 체크리스트의 '오늘 반응 할 것' 줄로
 
     @field_validator("public_url")

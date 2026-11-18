@@ -669,6 +669,7 @@ dashboard:
   actions_enabled: true            # false 면 대시보드는 보기만
   farm_hub_url: ""                 # 파밍 대시보드 주소 (/dashboard/farm/ 이 넘기는 곳 · https://….ts.net 만) — 보통 .env FARM_HUB_URL 로. 열쇠는 .env FARM_HUB_TOKEN
   x_helper: false                  # X 도우미 책갈피 설치 칸 (주인 11/16 — X 는 책갈피 말고 체크리스트만 · true 면 다시 보임)
+  x_react: false                   # X 답글·방문 추천 카드·숫자 (주인 11/18 뺌 — 화면만 숨김 · true 면 다시 보임)
   x_engage: false                  # X 반응 연속 모드 카드·화면 (주인 11/16 숨김 · true 면 다시 보임)
   x_trend:                         # 지금 뜨는 주제 · 내 주제로 글 쓰기 (주인 11/16 — dashboard/xtrend.py · 화면 SNS 탭 X 칸 → #/sns/xr)
     enabled: true

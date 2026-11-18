@@ -1,5 +1,6 @@
 /* X 글쓰기 · 답글 도구 (주인 11/14 20:2x '글 쓰는 툴, 댓글 다는 툴 … 완성된 퀄리티 높은 툴'). 셸이 defer 로 받음 (app.js 는 예산 끝) — xstudio.py.
-   SNS 탭 X 칸 맨 위에 '오늘 할 X 일' 카드 · 화면은 #/sns/xs (SNS 탭 안 — 다른 칸은 숨김) · 글쓰기 / 답글 / 계정 / 도우미.
+   화면은 #/sns/xs (SNS 탭 안 — 다른 칸은 숨김) · 글쓰기 / 도우미. 답글·방문 추천은 주인 11/18 뺌 (서버 값 react=false · 설정 dashboard.x_react):
+   '오늘 할 X 일' 카드는 안 붙이고 답글·계정 칸 단추는 숨김 — 직접 보낸 답글 주소(#/x/reply)만 그대로 열림.
    서버는 초안만 (Opus 까지) — '내 한마디'를 직접 써야 'X에서 올리기'가 켜지고, 올리기·답글은 X 글쓰기 화면에서 내가 누른다.
    바로 가기: #/x/reply?u=<X 글 주소> · #/x/write?u=<주소>&q=<글> (공유 시트 단축어 · 'X 도우미' 책갈피 static/xhelper.js) → 바로 초안
    (디딤돌 xgo.js 가 '직접 연 것'이라고 표시했거나 책갈피 열쇠가 맞을 때만 — 남의 링크로 왔으면 칸만 채우고 단추는 내가).
@@ -140,7 +141,7 @@ async function load() {
   const r = await call('state');
   loading = false;
   at = Date.now();
-  if (r.s === 200) { ST = r.d; okAt = Date.now() + ST.replies.wait_s * 1000; if (!ST.hot.some(h => h.id === V.hot)) V.hot = (ST.hot[0] || {}).id || ''; if (V.kind === 'hot' && !ST.hot.length) V.kind = 'paste'; }
+  if (r.s === 200) { ST = r.d; if (ST.react) mount(); okAt = Date.now() + ST.replies.wait_s * 1000; if (!ST.hot.some(h => h.id === V.hot)) V.hot = (ST.hot[0] || {}).id || ''; if (V.kind === 'hot' && !ST.hot.length) V.kind = 'paste'; }
   else if (!ST && r.d.text) toast(r.d.text);
   draw();
   if (ST && DL) runDeep();
@@ -415,7 +416,7 @@ function drawScr() {
   if (!scr) return;
   const top = el('div', {class: 'top'}, el('a', {class: 'lnk', href: '#/sns/x'}, '‹ X(트위터)'), el('span', {class: 'sub'}, ''), btn('lnk', '다시 보기', load));
   if (!ST) return scr.replaceChildren(top, el('p', {class: 'boot'}, '불러오는 중…'));
-  const tabs = seg(TABS, V.tab, k => { setTab(k); keep(); draw(true); });
+  const tabs = seg(TABS.filter(t => ST.react || !/reply|list/.test(t[0]) || t[0] === V.tab), V.tab, k => { setTab(k); keep(); draw(true); });
   scr.replaceChildren(...[top, tabs, V.tab === 'reply' ? replyTab() : V.tab === 'list' ? listTab() : V.tab === 'help' ? helpTab() : writeTab()].flat(9).filter(Boolean));
   clearInterval(tick);
   tick = V.tab === 'reply' && waitLeft() ? setInterval(() => { const b = D.getElementById('xsp'); if (!scr.parentNode || !b) return clearInterval(tick); if (!inField()) b.replaceWith(paceBox()); if (!waitLeft()) clearInterval(tick); }, 1000) : null;
@@ -453,7 +454,7 @@ function mount() {
     if (m.hasAttribute('data-xs')) m.removeAttribute('data-xs');
     if (scr && scr.parentNode) scr.remove();
   }
-  if (!onScr() && onX()) {
+  if (!onScr() && onX() && ST && ST.react) {  // 답글·방문 추천 카드 — 설정 x_react 를 켰을 때만 (주인 11/18)
     if (!card) { card = el('article', {id: 'xsc', class: 'itm xsc', 'aria-label': '오늘 할 X 일'}); drawCard(); }
     const s = D.getElementById('snt');
     if (s.nextSibling !== card) s.after(card);

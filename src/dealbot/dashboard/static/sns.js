@@ -4,7 +4,7 @@
 (() => {
 const D = document, W = window;
 const CSS = '.snb>.top:first-child .lnk{display:none}.snb>.top:first-child{min-height:0;margin:0 0 10px}'
-  + '.snb>.top:first-child h2{font-size:14px;font-weight:600;color:var(--sub)}.snx>.top:first-child{display:none}.sng{margin-top:4px}'
+  + '.snb>.top:first-child h2{font-size:14px;font-weight:600;color:var(--sub)}.snx>.top:first-child{display:none}'
   + '.snb label.tg,.snx label.tg{border-width:0 0 1px;border-radius:0;padding:0}.snb label.tg:last-child,.snx label.tg:last-child{border:0}.snb .tc>.pb{margin:0;padding:0 8px}'
   + '.snx .tq{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:6px;margin:0 0 6px}.snx .tq div{background:var(--grey);border-radius:10px;padding:8px 10px}'
   + '.snx .tq b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.snx .tq span{font-size:12px;color:var(--sub)}'
@@ -34,15 +34,14 @@ function box(h, id, L, key) {
 let SP = null;
 const shL = () => SP = SP || new Promise((ok, bad) => { const s = D.createElement('script'); s.src = D.querySelector('meta[name=sb-shorts]').content;
   s.onload = () => ok(W.SBShorts); s.onerror = () => { SP = null; bad(); }; D.head.append(s); });
-const grp = (h, t, first) => h.el('p', {class: 'grp' + (first ? ' sng' : '')}, t);
 function view(b, k, h) {
   css();
   LAST = [b, k, h];
   const L = h.L, at = h.NAV + '.' + RF;
   if (k === 'x') {
-    // 할 일 'X 숫자 넣기'(#/blog/x)로 왔으면 숫자 칸이 있는 '직접 올리는 글'이 위
-    const x = [grp(h, '자동 반응 · 승인함', !h.j), box(h, 'snx', L.x[0], at)], p = [grp(h, '직접 올리는 글', h.j), box(h, 'snp', L.x[1])];
-    b.replaceChildren(...(h.j ? p.concat(x) : x.concat(p)));
+    // 주인 11/18: X 봇 반응 카드(x.js)는 x_react 켤 때만 · 예전 초안함은 접음 ('X 숫자 넣기'로 오면 펴서)
+    const st = W.SBXStudio && W.SBXStudio.state(), x = st && st.react && box(h, 'snx', L.x[0], at), p = box(h, 'snp', L.x[1]);
+    b.replaceChildren(...[x, h.j ? p : h.el('details', {class: 'itm'}, h.el('summary', {class: 'sub'}, '그 밖 — 예전 초안함 · 숫자 넣기'), p)].filter(Boolean));
   } else if (k === 'shorts') b.replaceChildren(box(h, 'snu', shL, at));
   else b.replaceChildren(k === 'lookbook' ? box(h, 'snl', L.lookbook) : box(h, 'snb', L.threads, at + JSON.stringify((h.S || {}).thpost || 0)));
 }

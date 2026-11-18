@@ -710,8 +710,11 @@ async def test_endpoints_need_login_and_same_site_token(bot: DealBot) -> None:
     assert status == 200 and out["status"] == "ok" and out["items"] == []
     # '오늘 반응 할 것' (주인 11/16) — 자주 보는 계정 줄 체크 · 반응 목록은 xengage 와 같은 것 · 숨김 스위치 기본 끔
     assert v["react"] == [] and bot.dashboard.api.xtoday.engage is bot.dashboard.api.xengage  # type: ignore[union-attr]
-    assert (bot.settings.dashboard.x_helper, bot.settings.dashboard.x_engage) == (False, False)
+    assert (bot.settings.dashboard.x_helper, bot.settings.dashboard.x_engage, bot.settings.dashboard.x_react) == (False, False, False)
     bot.dashboard.api.xstudio.set_target({"handle": "abc"})  # type: ignore[union-attr]
+    # 주인 11/18 '답글·방문 추천 빼 줘' — 기본(x_react 끔)은 자주 보는 계정이 있어도 반응 줄이 없다 (설정을 켜면 예전대로)
+    assert (await get_json(bot, xt.STATE_PATH, h))[1]["react"] == [] and (await post_json(bot, xt.REACT_PATH, {"key": "habc", "done": True}, h))[0] == 400
+    bot.settings.dashboard.x_react = True
     assert (await post_json(bot, xt.REACT_PATH, {"key": "hnobody"}, h))[0] == 400
     status, out, _ = await post_json(bot, xt.REACT_PATH, {"key": "habc", "done": True}, h)
     assert status == 200 and out["react"] == [{"key": "habc", "label": "@abc 최근 글에 반응", "url": "https://x.com/abc", "done": True}]
@@ -938,7 +941,8 @@ async def test_js_card_is_a_checklist_progress_copy_tick_and_react_rows() -> Non
     got = await asyncio.to_thread(run_shim, "list", json.dumps(v, ensure_ascii=False), "#/sns/x")
     assert got["order"] == ["snt", "xsc", "xtc", "DIV"]
     n = len(v["slots"])
-    assert f"오늘 X 2/{n} 올림" in got["card"] and "오늘 반응 할 것 1/3" in got["card"] and "♥·리포스트·답글은 X 에서 내가 직접" in got["card"]
+    assert f"오늘 X 2/{n} 올림" in got["card"] and "오늘 반응 할 것 1/3" in got["card"] and "복사해서 X 에 올린 뒤 ✓" in got["card"]
+    assert "답글은 X 에서" not in got["card"]  # 주인 11/18 — 답글·방문 안내 글 뺌 (반응 줄은 설정 x_react 를 켠 서버 값일 때만 옴)
     assert got["lines"] == ["08:30쿠팡 과징금✓ 올렸어요", "12:00카카오 먹통복사✓ 올렸어요", "열기@someone 글에 반응✓ 했어요", "열기@bigacct 최근 글에 반응✓ 했어요"]
     # 링크는 서버 값 그대로 새 탭 (X 에서 누르는 건 나) — 자동 클릭 없음
     assert ["https://x.com/someone/status/1234567890", "_blank", "noopener"] in got["links"] and ["https://x.com/bigacct", "_blank", "noopener"] in got["links"]
@@ -952,6 +956,8 @@ async def test_react_rows_come_from_the_engage_queue_then_targets_and_ticks_last
     assert d.view()["react"] == []
     d.studio.set_target({"handle": "BigAcct", "memo": "AI"})
     d.studio.set_target({"handle": "other"})
+    assert d.view()["react"] == []  # 주인 11/18 — 기본은 계정·반응 목록이 있어도 줄 없음 (설정 dashboard.x_react)
+    d.studio.react_on = lambda: True
 
     class Eng:
         def _st(self) -> dict[str, Any]:
@@ -1003,7 +1009,7 @@ async def test_js_with_real_studio_screen_needs_my_line_then_posts_by_hand_with_
     v, state = await view_json()
     studio_view = xs.Studio(FakeDb(), ask=FakeAsk(), clock=lambda: at("09:00")).view()
     got = await asyncio.to_thread(run_shim, "both", state, "#/sns/x", json.dumps(studio_view, ensure_ascii=False))
-    assert got["order"] == ["snt", "xsc", "xtc", "DIV"] and got["scr"] == "xss" and got["hash"] == "#/sns/xs/write"
+    assert got["order"] == ["snt", "xtc", "DIV"] and got["scr"] == "xss" and got["hash"] == "#/sns/xs/write"  # '오늘 할 X 일' 카드는 기본 안 붙음 (주인 11/18)
     assert "원문에 없는 숫자: 1628" in got["card"] and "내 한마디 방향" in got["card"] and "첫 답글 복사" in got["card"]
     assert got["before"] == [None, "true"] and got["blocked"] is None  # 자동으로 올라가는 길 없음 — 내 한마디 + 숫자 확인 뒤에만 링크가 켜짐
     body = v["items"][1]["res"]["drafts"][0]["text"]

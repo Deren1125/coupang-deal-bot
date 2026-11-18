@@ -1,6 +1,6 @@
 /* 사진으로 X 글 쓰기 (주인 11/17 '사진(캡처·참고 사진)을 올리면 그걸 보고 X 글을 써 줘 · 작성자를 알아볼 수 있는 곳은 모자이크'). 셸이 defer 로 받음 — xphoto.py.
-   '지금 뜨는 주제' 화면(#/sns/xr/w)의 '내 주제로 글 쓰기' 아래에 칸 하나 (xtrend.js 가 W.SBXPhoto.form() 을 그려 넣음):
-   사진 1~4장 고르기 → (선택) 한 줄 메모 · 얼굴도 가리기 → [사진으로 초안 만들기]. 말투·길이는 위 칸에서 고른 것을 같이 씀.
+   '직접 쓰기' 화면(#/sns/xr/w)의 '내 주제로 글 쓰기' 아래에 칸 하나 (xtrend.js 가 W.SBXPhoto.form() 을 그려 넣음 · X 칸 '직접 쓰기' 카드의 [사진으로 글 쓰기] 로 바로 옴):
+   [사진 넣기 (1~4장)] 단추 → 고른 사진이 작은 그림으로 (주인 11/18 '흰 격자 그림이 뭔지 모르겠음' — 빈 그림 칸 대신 단추와 실제 사진, 못 그리면 파일 이름) → (선택) 한 줄 메모 · 얼굴도 가리기 → [사진으로 초안 만들기]. 말투·길이는 위 칸에서 고른 것을 같이 씀.
    사진은 기존 업로드 길(POST /dashboard/api/upload)로 올리고, 서버가 사진을 보고 초안 + 가릴 자리를 정해 모자이크본만 남김 (원본은 지움).
    초안·사진·실패 줄은 xtrend.js 의 '내 초안' 목록에 그대로 뜬다 — [복사]·[사진 저장]·[✓ 올렸어요]. 올리기는 내가 X 앱에서.
    이 파일에 바깥 주소·innerHTML 없음. 고른 사진 미리 보기는 이 기기 안 blob 주소. */
@@ -104,18 +104,22 @@ function form() {  // xtrend.js drawScr 가 부른다 — 그릴 때마다 새 �
   if (!PS || Date.now() - at > 120000) load();
   if (PS && !PS.on) return null;
   const max = (PS && PS.lim.photos) || 4, lim = (PS && PS.lim.memo) || 200, run = !!busy || !!ST.run || T().busy();
-  const inp = el('input', {type: 'file', accept: TYPES.join(','), multiple: true, hidden: true, onchange: pick});
+  const inp = el('input', {type: 'file', accept: TYPES.join(','), multiple: true, onchange: pick, 'aria-label': '사진 넣기', style: 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none'});
+  const TH = 'width:88px;height:88px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--tile);border:1px solid var(--line);font-size:12px;color:var(--sub);overflow:hidden;text-align:center;overflow-wrap:anywhere';
   return [el('p', {class: 'grp'}, '사진으로 글 쓰기'),
     el('section', {class: 'itm', id: 'xpf'},
       el('p', {class: 'note'}, `캡처나 사진을 올리면 그걸 보고 초안을 써요 (${max}장까지 · 말투·길이는 위에서 고른 대로). 닉네임·아이디·프로필은 모자이크해서 돌려드려요.`),
-      pics.length ? el('div', {class: 'rw'}, pics.map((p, i) => el('span', {style: 'position:relative;display:inline-block'},
-        el('img', {src: p.url, alt: `고른 사진 ${i + 1}`, style: 'width:76px;height:76px;object-fit:cover;border-radius:8px;display:block'}),
-        btn('sm', '✕', () => { drop(p); pics = pics.filter(x => x !== p); redraw(); }, {'aria-label': `사진 ${i + 1} 빼기`, disabled: !!busy || null,
-          style: 'position:absolute;top:-6px;right:-6px;min-width:28px;min-height:28px;padding:0'})))) : null,
-      busy || pics.length >= max ? null : el('div', {class: 'rw'}, el('label', {class: 'pb soft', style: 'cursor:pointer'}, pics.length ? '사진 더 고르기' : '사진 고르기', inp)),
+      busy || pics.length >= max ? null : el('label', {class: 'pb' + (pics.length ? ' soft' : ''), style: 'cursor:pointer;position:relative;margin:0 0 10px'},
+        pics.length ? `사진 더 넣기 (${pics.length}/${max}장)` : `사진 넣기 (1~${max}장)`, inp),
+      pics.length ? [el('p', {class: 'note'}, `넣은 사진 ${pics.length}장 — ✕ 를 누르면 빠져요`),
+        el('div', {style: 'display:flex;flex-wrap:wrap;gap:12px;margin:0 0 12px'}, pics.map((p, i) => el('span', {style: 'position:relative;display:inline-block'},
+          // 못 그리는 사진(기기가 못 여는 형식)은 빈 칸 대신 파일 이름을 보여 줌
+          el('img', {src: p.url, alt: `넣은 사진 ${i + 1}`, style: TH + ';object-fit:cover', onerror: e => e.target.replaceWith(el('span', {style: TH}, p.file.name || `사진 ${i + 1}`))}),
+          btn('sm', '✕', () => { drop(p); pics = pics.filter(x => x !== p); redraw(); }, {'aria-label': `사진 ${i + 1} 빼기`, disabled: !!busy || null,
+            style: 'position:absolute;top:-10px;right:-10px;min-width:36px;min-height:36px;padding:0;border-radius:18px'}))))] : null,
       el('input', {class: 'fl', type: 'text', maxlength: lim, placeholder: '한 줄 메모 (선택 — 하고 싶은 말)', 'aria-label': '사진 메모', value: memo, oninput: e => { memo = e.target.value; }}),
       el('label', {class: 'ck'}, el('input', {type: 'checkbox', checked: faces, onchange: e => { faces = e.target.checked; }}), '얼굴도 가리기 (일반인 얼굴 — 연예인·공식 사진은 그대로)'),
-      btn('pb', busy ? '사진 보고 쓰는 중… 1~2분 걸려요' : '사진으로 초안 만들기', make, {disabled: run || !pics.length || ST.left <= 0 || (PS && PS.left <= 0) || null}),
+      btn(pics.length ? 'pb' : 'pb soft', busy ? '사진 보고 쓰는 중… 1~2분 걸려요' : pics.length ? `사진 ${pics.length}장으로 초안 만들기` : '사진으로 초안 만들기', make, {disabled: run || !pics.length || ST.left <= 0 || (PS && PS.left <= 0) || null}),
       failBox(ST),
       el('p', {class: 'note'}, `오늘 사진 ${PS ? PS.left : '-'}장 남음 · 초안 횟수는 위와 같이 셈 · 원본은 초안이 나오면 바로 지우고 모자이크본만 남겨요${PS && PS.ocr ? '' : ' · 가릴 곳은 AI 가 찾아요 (놓칠 수 있으니 확인)'}`))];
 }

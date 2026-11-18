@@ -142,10 +142,12 @@ XR_TAIL = r"""
   const scr = () => main.children[0];
   out.text = text(scr());
   out.alert = text(byId(main, 'xrfail') || mk('x'));
-  click(find(scr(), n => n.tagName === 'BUTTON' && text(n).startsWith('해외 화제')));
-  out.abroad = text(scr()).includes('Dodgers');
   const retry = find(byId(main, 'xrfail'), n => n.tagName === 'BUTTON' && text(n) === '다시 해 보기');
   out.retryOff = 'disabled' in retry.attrs;
+  location.hash = '#/sns/xr'; window.SBXTrend.mount();  // 순위 화면 (11/18 — 직접 쓰기 칸과 따로)
+  out.rank = text(scr());
+  click(find(scr(), n => n.tagName === 'BUTTON' && text(n).startsWith('해외 화제')));
+  out.abroad = text(scr()).includes('Dodgers');
   console.log(JSON.stringify(out));
 })().catch(e => { console.error(e); process.exit(1); });
 """
@@ -166,7 +168,8 @@ async def test_js_shows_failure_with_reason_abroad_fold_and_my_drafts_header() -
     assert "✗ 13:50 · 「수능 연기 논란」 초안을 못 썼어요 — AI 사용량 한도가 다 찼어요 — 21:00 이후에 다시 눌러 주세요 (420분 남음)" in out["alert"]
     assert out["retryOff"] is True  # 한도가 풀리기 전엔 다시 단추가 꺼져 있음
     assert "내 초안 · 오늘 0묶음" in out["text"] and "만든 초안은 여기 남아요" in out["text"]
-    assert "해외 화제 「Chelsea」" in out["text"] and "Dodgers" not in out["text"].split("해외 화제 1개")[0] and out["abroad"] is True
+    assert "해외 화제 「Chelsea」" in out["rank"] and "Dodgers" not in out["rank"].split("해외 화제 1개")[0] and out["abroad"] is True
+    assert "1위" not in out["text"] and "내 초안 · 오늘" not in out["rank"]  # 11/18: 직접 쓰기 화면(#/sns/xr/w)에는 순위가, 순위 화면에는 글 쓰기 칸이 없음
 
 
 KW_SHIM = r"""

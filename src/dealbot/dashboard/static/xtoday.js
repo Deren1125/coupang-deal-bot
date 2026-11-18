@@ -202,7 +202,7 @@ function drawCard() {
       rl.length ? null : el('p', {class: 'note'}, '오늘 반응 다 했어요 ✓')] : null,
     ST.err ? el('p', {class: 'note'}, ST.err) : null,
     el('p', {class: 'note'}, !ST.on ? '오늘 X 글 만들기가 꺼져 있어요' : (wait ? `${wait}개는 아직 초안 전${ST.next ? ` — ${ST.next} 에 ${ST.ran ? '보충해요' : '만들어요'}` : ''} · ` : '') +
-      "복사해서 X 에 올린 뒤 ✓ · ♥·리포스트·답글은 X 에서 내가 직접")].flat(9).filter(Boolean));
+      '복사해서 X 에 올린 뒤 ✓')].flat(9).filter(Boolean));
 }
 function bigCard(ev) {
   const it = itemOf(ev), mk = busy.make === ev.id;
@@ -284,7 +284,8 @@ function mount() {
   }
   if (!onScr() && onX() && !/^#\/?sns\/xs/.test(location.hash)) {
     if (!card) { card = el('article', {id: 'xtc', class: 'itm xsc xtc', 'aria-label': '오늘 X 글'}); drawCard(); }
-    const x = D.getElementById('xsc'), a = x && x.parentNode === m ? x : D.getElementById('snt');  // '오늘 할 X 일' 카드 아래 (그 카드가 늘 칸 고르기 바로 밑)
+    // 주인 11/18: 어그로 후보 아래 (없으면 그 앞 카드)
+    const a = ['xag', 'xcc', 'xrc', 'xsc'].map(i => D.getElementById(i)).find(e => e && e.parentNode === m) || D.getElementById('snt');
     if (a.nextSibling !== card) a.after(card);
   } else if (card && card.parentNode) card.remove();
   if ((onScr() || onX()) && (!ST || Date.now() - at > 120000)) load();

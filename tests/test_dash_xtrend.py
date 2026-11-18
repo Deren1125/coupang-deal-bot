@@ -410,12 +410,13 @@ def test_xtrend_js_is_local_safe_and_loaded_by_shell() -> None:
     assert "innerHTML" not in code and "outerHTML" not in code and "eval(" not in code and "new Function" not in code and "document.write" not in code
     assert re.findall(r"https?://[^\s'\"`)]+", code) == []  # 바깥 주소 없음 — X 글·기사·검색 링크는 서버 값
     assert "/dashboard/api/xtrend/" in code and "X-Dash-Token" in code and "intent" not in code and ".click()" not in code  # 자동 게시·자동 클릭 없음
-    for label in ("지금 뜨는 주제", "이걸로 글 쓰기", "내 주제로 글 쓰기", "초안 만들기", "댓글 많은 순", "조회순", "급상승", "숨긴 주제", "✓ 올렸어요", "복사", "X에서 보기", "새로 보기"):
+    for label in ("지금 뜨는 주제", "이걸로 글 쓰기", "내 주제로 글 쓰기", "초안 만들기", "직접 쓰기", "사진으로 글 쓰기", "다시 쓰기", "aggro: true", "댓글 많은 순", "조회순", "급상승", "숨긴 주제", "✓ 올렸어요", "복사", "X에서 보기", "새로 보기"):
         assert label in code, label
     raw = (STATIC / "xtrend.js").read_bytes()
     # 11/17: 해외 화제 접기 · 초안 실패 칸(다시 해 보기) · '내 초안' 머리 · 쓰는 중 표시 → gzip 8.3 KB
     # 11/18: 연결이 끊겨도 서버 상태를 보며 기다림 · 쓰는 중 안내 · 입력 안내 한 줄 → 26 KB · gzip 9.7 KB
-    assert len(raw) <= 28 * 1024 and len(gzip.compress(raw, 9)) <= 10 * 1024
+    # 11/18 (주인 'X 화면 쓰기 어려움'): [글 쓰기] 한 번에 글 · 주제 줄 아래 쓰는 중·실패·초안 · '직접 쓰기' 카드·화면 나눔 → 30 KB · gzip 11 KB
+    assert len(raw) <= 31 * 1024 and len(gzip.compress(raw, 9)) <= 11 * 1024 + 512
     page = shell.page({})
     tag = f'<script defer src="{shell.asset_url("xtrend.js")}"></script>'
     assert shell.XTREND_JS == "xtrend.js" and tag in page and page.index(tag) > page.index(shell.asset_url("xengage.js"))
@@ -433,6 +434,7 @@ function mk0(tag) {
     append(...xs) { for (const x of xs) { const c = typeof x === 'string' ? Object.assign(mk('#text'), {_text: x}) : x; if (c.parentNode) c.remove(); c.parentNode = this; this.children.push(c); } },
     prepend(x) { if (x.parentNode) x.remove(); x.parentNode = this; this.children.unshift(x); },
     after(x) { if (x.parentNode) x.remove(); const p = this.parentNode; x.parentNode = p; p.children.splice(p.children.indexOf(this) + 1, 0, x); },
+    replaceWith(x) { const p = this.parentNode, i = p.children.indexOf(this); if (x.parentNode) x.remove(); p.children[i] = x; x.parentNode = p; this.parentNode = null; },
     remove() { const p = this.parentNode; if (p) { p.children.splice(p.children.indexOf(this), 1); this.parentNode = null; } },
     replaceChildren(...xs) { this.children.forEach(c => { c.parentNode = null; }); this.children = []; this.append(...xs); },
     contains(x) { while (x) { if (x === this) return true; x = x.parentNode; } return false; },
@@ -466,9 +468,13 @@ global.fetch = async (u, o) => {
   const body = JSON.parse(o.body);
   posts.push([path, o.headers['X-Dash-Token'], body]);
   if (path === 'refresh') { state.stale = false; state.busy = true; }
-  if (path === 'draft') { state.mine = [{id: 'm123456789', at: '14:01', topic: body.topic, long: false, drafts: [{text: '초안 글 하나', angle: '관점 하나', warn: ['재료에 없는 숫자: 60'], done: false, undo_s: 0}]}]; state.left -= 1; }
+  if (path === 'draft') {  // aggro = 순위 줄의 [글 쓰기] 한 번에 글 (주제는 서버가 그 줄에서) — 묶음에 trend 가 붙어 옴
+    const kw = body.aggro ? state.rows.find(r => r.id === body.trend).kw : body.topic;
+    state.mine = [{id: body.aggro ? 'm123456789' : 'm222222222', at: '14:01', topic: kw, long: false, trend: body.aggro ? body.trend : '',
+      drafts: [{text: '초안 글 하나', angle: '관점 하나', warn: ['재료에 없는 숫자: 60'], done: false, undo_s: 0}]}].concat(state.mine || []); state.left -= 1;
+  }
   if (path === 'posted') { const d = state.mine[0].drafts[body.i]; d.done = body.op === 'add'; d.undo_s = d.done ? 600 : 0; }
-  return {status: 200, json: async () => Object.assign({started: true}, state)};
+  return {status: 200, json: async () => Object.assign({started: true}, state, path === 'draft' ? {made: state.mine[0].id} : {})};
 };
 const clip = [];
 Object.defineProperty(global, 'navigator', {value: {clipboard: {writeText: async t => { clip.push(t); }}}, configurable: true, writable: true});
@@ -481,17 +487,30 @@ const byText = (root, tag, t) => find(root, n => n.tagName === tag && text(n) ==
 const click = n => n.listeners.click({currentTarget: n, target: n, preventDefault() {}, stopPropagation() {}});
 (async () => {
   const out = {};
+  if (scenario === 'card') xsc.remove();  // 기본: '오늘 할 X 일' 카드 없음 (주인 11/18 — 설정 x_react 끔)
   eval(fs.readFileSync(src, 'utf8'));
   await tick();
+  const dcOf = root => find(root, n => /^itm( dn1)?$/.test(n.className) && n.children.some(c => c.tagName === 'TEXTAREA'));
   if (scenario === 'card') {
     out.order = main.children.map(c => c.attrs.id || c.tagName);
     const card = byId(main, 'xrc');
-    out.rows = all(card, n => n.className === 'r').map(text); out.card = text(card);
+    out.rows = all(card, n => n.className === 'r').map(text); out.card = text(card); out.direct = text(byId(main, 'xrd'));
     out.auto = posts.map(p => p[0]);  // 15분 넘은 순위 → 새로 보기 한 번
     window.SBXTrend.load(); await tick(); out.again = posts.length;
     out.links = all(card, n => n.tagName === 'A').map(a => a.attrs.href);
-    click(all(byId(main, 'xrc'), n => n.tagName === 'BUTTON' && text(n) === '글 쓰기')[1]);
-    out.hash = location.hash; out.form = [window.SBXTrend.form().topic, window.SBXTrend.form().trend]; out.posted = posts.length;
+    const go = () => all(card, n => n.tagName === 'BUTTON' && /^(글 쓰기|다시 쓰기)$/.test(text(n)));
+    const p = click(go()[1]);  // [글 쓰기] 한 번 = 바로 초안 (칸·입력 없음)
+    out.during = [text(card), go().map(b => 'disabled' in b.attrs), location.hash];
+    await p; await tick();
+    out.draft = posts[posts.length - 1]; out.toast = text(toast); out.scrolled = scrolled.slice(-1)[0];
+    out.kids = card.children.map(c => (c.className === 'r' ? 'r:' + text(c) : c.attrs.id || c.className));
+    out.btns = go().map(text);
+    const dc = () => dcOf(card), ta = find(dc(), n => n.tagName === 'TEXTAREA');
+    out.dval = ta.value; out.warn = all(dc(), n => n.className === 'w').map(text);
+    await click(byText(dc(), 'BUTTON', '복사')); await tick(); out.copied = clip[clip.length - 1];
+    const ck = find(dc(), n => n.attrs.type === 'checkbox'); ck.checked = true; await ck.listeners.change({currentTarget: ck}); await tick();
+    out.add = posts[posts.length - 1]; out.after = [dc().className, text(toast), today.length];
+    click(byText(byId(main, 'xrd'), 'BUTTON', '사진으로 글 쓰기')); out.hash = location.hash;
   }
   if (scenario === 'screen') {
     const scr = () => main.children[0];
@@ -508,24 +527,28 @@ const click = n => n.listeners.click({currentTarget: n, target: n, preventDefaul
     click(find(scr(), n => n.tagName === 'BUTTON' && text(n).startsWith('숨긴 주제')));
     out.hid1 = all(scr(), n => n.className === 'hd').map(text);
     out.before = posts.length;  // 열기만 해서는 아무것도 보내지 않음 (순위가 새것일 때)
-    click(byText(all(scr(), n => n.tagName === 'SECTION' && n.className === 'itm')[1], 'BUTTON', '이걸로 글 쓰기'));
-    const f = () => byId(main, 'xrf'), topic = () => find(f(), n => n.attrs['aria-label'] === '주제'), memo = () => find(f(), n => n.attrs['aria-label'] === '하고 싶은 말');
-    out.picked = [topic().value, scrolled.includes('xrf'), posts.length - out.before];
-    memo().value = '내 생각은 이럼'; memo().listeners.input({target: memo()});
-    click(byText(f(), 'BUTTON', '존댓말')); click(byText(f(), 'BUTTON', '짧게'));
-    const tg = find(f(), n => n.attrs.type === 'checkbox'); tg.checked = true; tg.listeners.change({target: tg});
-    await click(byText(f(), 'BUTTON', '초안 만들기')); await tick();
-    out.draft = posts[posts.length - 1]; out.toast = text(toast);
-    const dc = () => find(scr(), n => n.className.startsWith('itm') && all(n, x => x.className === 'fl dr').length > 0), ta = () => find(dc(), n => n.tagName === 'TEXTAREA');
+    out.noform = !byId(main, 'xrf');  // 순위 화면에는 글 쓰기 칸이 없음 (직접 쓰기는 #/sns/xr/w)
+    await click(byText(all(scr(), n => n.tagName === 'SECTION' && n.className === 'itm')[1], 'BUTTON', '이걸로 글 쓰기')); await tick();
+    out.quick = posts[posts.length - 1]; out.toast = text(toast);
+    const row1 = () => all(scr(), n => n.tagName === 'SECTION' && n.className === 'itm' && n.children.some(c => c.className === 'kw'))[1];
+    const dc = () => dcOf(row1()), ta = () => find(dc(), n => n.tagName === 'TEXTAREA');
     out.dcard = text(dc()); out.dval = ta().value; out.warn = all(dc(), n => n.className === 'w').map(text);
     const t = ta(); t.value = '내가 고친 초안'; t.listeners.input({target: t});
     await click(byText(dc(), 'BUTTON', '복사')); await tick(); out.copied = clip[clip.length - 1];
     let ck = find(dc(), n => n.attrs.type === 'checkbox'); ck.checked = true; await ck.listeners.change({currentTarget: ck}); await tick();
     out.add = posts[posts.length - 1]; out.after = [dc().className, text(toast), today.length];
     ck = find(dc(), n => n.attrs.type === 'checkbox'); ck.checked = false; await ck.listeners.change({currentTarget: ck}); await tick();
-    out.undo = posts[posts.length - 1]; out.saved = JSON.parse(store.xr1).memo;
+    out.undo = posts[posts.length - 1];
+    // 직접 쓰기 화면 (#/sns/xr/w): 내 주제 칸 + 내 초안 (+ 사진 칸) — 순위는 없음
+    location.hash = '#/sns/xr/w'; window.SBXTrend.mount();
+    out.wtitle = ttl.textContent; out.wtext = text(scr());
+    const f = () => byId(main, 'xrf'), topic = () => find(f(), n => n.attrs['aria-label'] === '주제'), memo = () => find(f(), n => n.attrs['aria-label'] === '하고 싶은 말');
     topic().value = '내가 직접 쓴 주제'; topic().listeners.input({target: topic()});
-    await click(byText(f(), 'BUTTON', '초안 만들기')); await tick(); out.own = posts[posts.length - 1][2];
+    memo().value = '내 생각은 이럼'; memo().listeners.input({target: memo()});
+    click(byText(f(), 'BUTTON', '존댓말')); click(byText(f(), 'BUTTON', '짧게'));
+    const tg = find(f(), n => n.attrs.type === 'checkbox'); tg.checked = true; tg.listeners.change({target: tg});
+    await click(byText(f(), 'BUTTON', '초안 만들기')); await tick();
+    out.own = posts[posts.length - 1][2]; out.saved = JSON.parse(store.xr1).memo; out.wafter = text(scr()); out.wscroll = scrolled.slice(-1)[0];
     location.hash = '#/sns/threads'; snt.children[1].attrs['aria-pressed'] = 'false'; window.SBXTrend.mount();
     out.gone = ['data-xr' in main.attrs, main.children.map(c => c.attrs.id || c.tagName)];
   }
@@ -555,14 +578,29 @@ def run_shim(scenario: str, state: str, hash_: str) -> dict[str, Any]:
 
 
 @needs_node
-async def test_js_card_shows_top_rows_under_the_today_card_and_refreshes_once_when_stale() -> None:
+async def test_js_card_one_tap_writes_drafts_right_under_the_topic() -> None:
+    """주인 11/18 — '지금 뜨는 주제'가 X 칸 맨 위 · [글 쓰기] 한 번에 초안 (칸·입력 없음) · 쓰는 중·초안은 그 주제 바로 아래 · 맨 아래 '직접 쓰기' 카드."""
     v, state = await view_json(stale=True)
     out = run_shim("card", state, "#/sns/x")
-    assert out["order"] == ["snt", "xsc", "xtc", "xrc", "DIV"]  # 오늘 X 글 카드 아래
-    assert out["rows"] == ["1▲1수능 연기조회 40만글 쓰기", "2▼1용인반도체클러스터조회 1000글 쓰기"]
-    assert "지금 뜨는 주제" in out["card"] and "내 주제로 글 쓰기" in out["card"] and "올리기는 X 에서 내가" in out["card"]
+    assert out["order"] == ["snt", "xrc", "xtc", "xrd", "DIV"]  # 뜨는 주제 → (어그로 후보는 xaggro.js 가 끼움) → 오늘 X 글 → 직접 쓰기
+    assert out["rows"] == ["1▲1수능 연기글 쓰기", "2▼1용인반도체클러스터글 쓰기"]
+    assert "지금 뜨는 주제 → 바로 글" in out["card"] and "누르면 바로 초안 3개" in out["card"] and "올리기는 X 에서 내가" in out["card"]
+    assert "사실은 기사 제목에 있는 것만" in out["card"] and "답글" not in out["card"]
+    assert out["direct"] == "직접 쓰기내 주제로 글 쓰기사진으로 글 쓰기"
     assert out["auto"] == ["refresh"] and out["again"] == 1 and out["links"] == ["#/sns/xr"]  # 새로 보기는 한 번만 · 카드에 바깥 링크 없음
-    assert out["hash"] == "#/sns/xr/w" and out["form"] == ["용인반도체클러스터", v["rows"][1]["id"]] and out["posted"] == 1  # 고르기만 — AI 안 부름
+    text, off, hash_ = out["during"]
+    assert "⏳ 「용인반도체클러스터」 초안 쓰는 중" in text and off == [True, True] and hash_ == "#/sns/x"  # 화면을 옮기지 않고 그 자리에서 · 쓰는 동안 다른 단추는 꺼짐
+    path, tok, body = out["draft"]
+    assert (path, tok) == ("draft", "tok") and re.fullmatch(r"r[a-z0-9]{6,39}", body.pop("rid"))
+    assert body == {"aggro": True, "trend": v["rows"][1]["id"], "tone": "eum"}  # 주제·메모 글자는 안 보냄 — 서버가 그 순위 줄에서 꺼냄
+    assert "그 주제 바로 아래에 있어요" in out["toast"] and out["scrolled"] == "xrm-m123456789"
+    k = out["kids"]
+    assert k[1].startswith("r:1") and k[2].startswith("r:2") and k[3:5] == ["xrm-m123456789", "itm"]  # 둘째 주제 줄 바로 아래에 초안
+    assert out["btns"] == ["글 쓰기", "다시 쓰기"] and out["dval"] == "초안 글 하나" and out["warn"] == ["재료에 없는 숫자: 60"]
+    assert out["copied"] == "초안 글 하나"
+    assert out["add"] == ["posted", "tok", {"set": "m123456789", "i": 0, "text": "초안 글 하나", "op": "add"}]
+    assert out["after"] == ["itm dn1", "올렸어요 — 오늘 X 체크리스트에 넣었어요", 1]
+    assert out["hash"] == "#/sns/xr/w"  # 직접 쓰기 카드의 단추 → 직접 쓰기 화면
 
 
 @needs_node
@@ -577,14 +615,20 @@ async def test_js_screen_sorts_hides_writes_copies_and_ticks_only_on_taps() -> N
     assert out["links"] == [["https://x.com/kim/status/1000000011", "_blank", "noopener"], ["https://x.com/lee/status/1000000012", "_blank", "noopener"],
                             ["https://news.example/a1", "_blank", "noopener"], [v["rows"][0]["x"], "_blank", "noopener"]]
     assert out["hid0"] is False and out["hid1"] == ["국회 탄핵 표결 · 정치 — 숨김"]
-    assert out["before"] == 0 and out["picked"] == ["용인반도체클러스터", True, 0]
-    path, tok, body = out["draft"]
+    assert out["before"] == 0 and out["noform"] is True
+    # 11/18: [이걸로 글 쓰기] = 바로 초안 (예전엔 주제 칸에 넣기만) — 초안은 그 주제 카드 안에
+    path, tok, body = out["quick"]
     assert (path, tok) == ("draft", "tok") and re.fullmatch(r"r[a-z0-9]{6,39}", body.pop("rid"))
-    assert body == {"topic": "용인반도체클러스터", "memo": "내 생각은 이럼", "tone": "polite", "length": "short", "tags": True, "n": 3, "trend": v["rows"][1]["id"]}
+    assert body == {"aggro": True, "trend": v["rows"][1]["id"], "tone": "eum"}
     assert "초안을 만들었어요" in out["toast"] and "관점 · 관점 하나" in out["dcard"] and out["dval"] == "초안 글 하나" and out["warn"] == ["재료에 없는 숫자: 60"]
     assert out["copied"] == "내가 고친 초안"
     assert out["add"] == ["posted", "tok", {"set": "m123456789", "i": 0, "text": "내가 고친 초안", "op": "add"}]
     assert out["after"] == ["itm dn1", "올렸어요 — 오늘 X 체크리스트에 넣었어요", 1]
-    assert out["undo"][2]["op"] == "undo" and out["saved"] == "내 생각은 이럼"
-    assert out["own"]["topic"] == "내가 직접 쓴 주제" and out["own"]["trend"] == ""  # 내가 고친 주제에는 순위 참고를 붙이지 않음
+    assert out["undo"][2]["op"] == "undo"
+    # 직접 쓰기 화면: 순위 없음 · 내 주제 칸은 예전 그대로 (주제·메모·말투·길이·해시태그) · 순위 참고(trend)는 붙이지 않음
+    assert out["wtitle"] == "X 직접 쓰기" and "내 주제로 글 쓰기" in out["wtext"] and "1위" not in out["wtext"] and "내 초안 · 오늘 0묶음" in out["wtext"]
+    rid = out["own"].pop("rid")
+    assert re.fullmatch(r"r[a-z0-9]{6,39}", rid)
+    assert out["own"] == {"topic": "내가 직접 쓴 주제", "memo": "내 생각은 이럼", "tone": "polite", "length": "short", "tags": True, "n": 3}
+    assert out["saved"] == "내 생각은 이럼" and "내 초안 · 오늘 1묶음" in out["wafter"] and out["wscroll"] == "xrm-m222222222"
     assert out["gone"] == [False, ["snt", "xsc", "xtc", "DIV"]]

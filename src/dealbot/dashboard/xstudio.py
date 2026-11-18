@@ -1011,6 +1011,7 @@ class Studio:
         self.fetcher = fetcher
         self.hot = hot or (lambda: [])
         self.on_posted: Callable[[str, bool], None] | None = None  # (카드 번호, 올림/취소) — xtoday 가 건다
+        self.react_on: Callable[[], bool] = lambda: False  # 답글·방문 추천 화면 (주인 11/18 뺌) — register 가 설정 dashboard.x_react 를 건다 (기록·API 는 그대로)
         self.helper_on: Callable[[], bool] = lambda: True  # 'X 도우미' 책갈피 — register 가 설정 dashboard.x_helper 를 건다 (주인 11/16 기본 끔)
         self.busy = asyncio.Lock()  # claude CLI 는 한 번에 하나 (작은 서버 — 메모리)
         self.jobs: dict[str, tuple[float, asyncio.Task[dict[str, Any]]]] = {}
@@ -1269,7 +1270,8 @@ class Studio:
                            "post_text": POST_TEXT_MAX, "reply": [REPLY_LO, REPLY_HI], "long": [LONG_LO, LONG_HI], "long_max": LONG_MAX},
                 "left": {"draft": self._left("draft", DRAFT_PER_DAY), "reply": self._left("reply", REPLY_DRAFT_PER_DAY)},
                 "links": {"post": INTENT_POST, "reply": INTENT_REPLY, "profile": PROFILE, "compose": COMPOSE},
-                "model": model_label(self.model), "need": NEED, "hedge": list(HEDGE), "reply_goal": REPLY_GOAL, "helper": bool(self.helper_on())}
+                "model": model_label(self.model), "need": NEED, "hedge": list(HEDGE), "reply_goal": REPLY_GOAL, "helper": bool(self.helper_on()),
+                "react": bool(self.react_on())}
 
     # ---------------------------------------------------------- AI
     async def ask(self, system: str, user: str, schema: dict[str, Any], *, images: list[bytes] | None = None) -> dict[str, Any]:
@@ -1512,6 +1514,7 @@ def register(web: Any, api: Any) -> Studio:
 
     desk = Studio(api.dash.db, fetcher=Fetcher(api.bot.settings.http.user_agent), hot=hot)
     desk.helper_on = lambda: bool(getattr(api.bot.settings.dashboard, "x_helper", False))
+    desk.react_on = lambda: bool(getattr(api.bot.settings.dashboard, "x_react", False))
     view_rate, draft_rate, tap_rate = RateWindow(60, 60.0), RateWindow(DRAFT_PER_MIN, 60.0), RateWindow(60, 60.0)
     slow = _j(429, {"status": "error", "code": "rate", "text": "너무 자주 눌렀어요 — 1분 뒤 다시"})
 

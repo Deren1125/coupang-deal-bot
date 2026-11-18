@@ -905,6 +905,8 @@ class XToday:
 
     def react_rows(self, now: float) -> list[dict[str, Any]]:
         """'오늘 반응 할 것' 줄 — 반응 목록(xengage 큐) 글 먼저, 그다음 자주 보는 계정 프로필. 링크만 (누르기는 주인 · X 요청 없음)."""
+        if not self.studio.react_on():  # 주인 11/18 '답글·방문 추천 빼 줘' — 설정 dashboard.x_react (기본 끔) · 큐·계정 기록은 그대로
+            return []
         st = self._load(KV_REACT)
         done = set(st.get("done") or []) if st.get("day") == xs._day(now) else set()
         rows: list[dict[str, Any]] = []
