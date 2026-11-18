@@ -179,6 +179,12 @@ def device_label(ua: str) -> str:
     return "컴퓨터"
 
 
+def ssalmuk_show(bot: Any) -> bool:
+    """설정 dashboard.ssalmuk.show (주인 11/18 기본 숨김). 설정이 없으면 숨김."""
+    d = getattr(getattr(bot, "settings", None), "dashboard", None)
+    return bool(getattr(getattr(d, "ssalmuk", None), "show", False))
+
+
 def boot_json(state: dict[str, Any]) -> str:
     """<script type="application/json" id="boot"> 안에 넣을 글 ('</' 와 꺾쇠를 막아 페이지를 깨지 않게)."""
     raw = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
@@ -367,7 +373,10 @@ class DashApi:
     # ---------------------------------------------------------- 화면
     def state_body(self, headers: dict[str, str]) -> dict[str, Any]:
         caller, ident, _tok = self.caller(headers)
-        return self.bot.dash_state.state(session=caller.session, csrf=self.csrf.token(ident), logout_t=self.dash.form_token)
+        body = self.bot.dash_state.state(session=caller.session, csrf=self.csrf.token(ident), logout_t=self.dash.form_token)
+        # 이벤트 참여 화면 스위치 (주인 11/18 숨김 — 설정 dashboard.ssalmuk.show · ssalmuk.js·todohub.js 가 boot 에서 읽음 · API 는 그대로)
+        body["ssalmuk"] = {"show": ssalmuk_show(self.bot)}
+        return body
 
     def renew_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """세션이 7일 안에 끝나면 30일로 늘리고 쿠키도 다시."""

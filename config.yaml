@@ -663,6 +663,7 @@ dashboard:
   manual_max_days_back: 60         # 직접 입력 날짜는 오늘부터 60일 전까지
   blogauto_metrics_path: /home/ubuntu/Blog-Auto/var/metrics/blogauto.json   # Blog-Auto 가 한 시간마다 쓰는 활동 기록
   blogauto_stale_hours: 3          # 이보다 오래된 기록이면 블로그 활동은 '판단 불가'
+  ssalmuk: {show: false}           # 이벤트 참여(쌀먹) 화면·할 일 '이벤트'·카드 숨김 (주인 11/18 피클 주력 · true 면 다시 · API 는 그대로)
   write_bm: false                  # '글쓰기 한 번에' 책갈피 (주인 11/16 14시 접음 — 꾸미기 책갈피만 · true 면 설치 칸·write_act 다시)
   public_url: https://52-79-136-64.sslip.io   # 대시보드 앱 주소 (알림·카톡의 바로가기 링크 /dashboard/go/<항목>)
   actions_enabled: true            # false 면 대시보드는 보기만

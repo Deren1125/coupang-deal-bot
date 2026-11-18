@@ -242,6 +242,9 @@ TODOHUB_JS_GZIP_MAX = 4 * 1024
 # 11/14: 맨 위 알림 줄 (소식 N분째 없음·오늘 목록 아님 · 자동 점검 한 줄 · 꾸미기 새 판 · 못 전한 체크 · 멈춤/핫 시스템 알림) + 줄 순서 고정 · 종류 줄 '들르기 n' → 11.0 KB (11261 B / 4817 B)
 TODOHUB_JS_MAX = 11 * 1024
 TODOHUB_JS_GZIP_MAX = 4 * 1024 + 768
+# 11/18: '이벤트' 종류 숨김 스위치 (boot ssalmuk.show — 주인 11/18 피클 주력) → 11.2 KB
+TODOHUB_JS_MAX = 11 * 1024 + 256
+TODOHUB_JS_GZIP_MAX = 4 * 1024 + 832
 # 10/26: SNS 탭 상자 (스레드·인스타 · X · 룩북 릴스 칸 고르기 뒤 각 화면 파일을 담기만 · 옮기며 남은 머리 줄 숨김 CSS) — 처음 열 때만 받는 sns.js
 SNS_JS_MAX = 4 * 1024
 SNS_JS_GZIP_MAX = 2 * 1024

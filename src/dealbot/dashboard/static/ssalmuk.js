@@ -1,6 +1,7 @@
 /* 이벤트 참여 (쌀먹 — 돈좀요 이벤트 자동 응모, 주인 11/14 'Sns-board 에 합치자'). 셸이 defer 로 받음 (app.js 는 예산 끝).
    할 일 탭(#/todo) 맨 위 묶음에 카드 한 장 · 화면은 #/todo/ev (할 일 탭 안 — app.js 칸은 숨김).
    GET /dashboard/api/ssalmuk/state · POST …/act {op: run|done|profile|search_retry|trust_host|quiz_answer, args} · 연결 칸: GET …/key · POST …/rotate (ssalmuk.py).
+   숨김 (주인 11/18): boot ssalmuk.show 가 거짓(설정 dashboard.ssalmuk.show: false, 기본)이면 아무것도 붙이지 않음.
    쌀먹 서버가 1분마다 명령을 가져가 처리하고 상태를 다시 보낸다 — 20분 넘게 안 오면 '연결 끊김'. 바깥 주소·innerHTML 없음. */
 'use strict';
 (() => {
@@ -524,6 +525,10 @@ function start() {
   mount();
 }
 // 할 일 종류 목록(todohub.js)의 '이벤트' 칸: 확인 필요 수 · 오늘 마감·연결 끊김이면 급함
+// 숨김 스위치 (주인 11/18 '피클을 주력으로 쓸 거면 이벤트 참여 탭이 있을 필요가 없잖아'): boot ssalmuk.show (설정 dashboard.ssalmuk.show) 가
+// 참이 아니면 카드·#/todo/ev 화면(연결 칸 포함)을 붙이지 않고 상태도 읽지 않음 — 할 일 종류의 '이벤트'도 todohub.js 가 뺌. API 는 그대로
+function shown() { try { const b = JSON.parse(D.getElementById('boot').textContent); return !!(b && b.ssalmuk && b.ssalmuk.show); } catch (e) { return false; } }
 W.SBEvent = {load, mount, n: () => st() ? {n: cnt().left, u: (isNew() ? 0 : cnt().today) + (data.stale ? 1 : 0)} : null};
-if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
+if (!shown()) W.SBEvent = null;
+else if (D.readyState === 'loading') D.addEventListener('DOMContentLoaded', start); else start();
 })();

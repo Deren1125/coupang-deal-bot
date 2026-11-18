@@ -964,6 +964,13 @@ class XTodayConfig(BaseModel):
         return sorted({_hhmm(t, "dashboard.x_today.fills") for t in v or []})[:2]
 
 
+class SsalmukDashConfig(BaseModel):
+    """이벤트 참여(쌀먹) 화면 스위치 (주인 11/18 '피클을 주력으로 — 이벤트 참여 탭이 있을 필요가 없잖아').
+    show=false 면 할 일 탭 '이벤트' 종류·카드·#/todo/ev 화면(그 안 '연결' 칸 포함)을 숨김. /dashboard/api/ssalmuk/* 는 그대로 (쌀먹이 가끔 상태를 보냄)."""
+
+    show: bool = False
+
+
 class DashboardConfig(BaseModel):
     """채널 대시보드 (주인 요청 10/14): /dashboard 에 채널별 구독자·이웃·조회수와 목표를 한 화면에.
     페이지는 DASHBOARD_USER / DASHBOARD_PASSWORD 가 모두 있을 때만 열린다 (없으면 404)."""
@@ -987,6 +994,7 @@ class DashboardConfig(BaseModel):
     ssalmuk_llm_body_kb: int = Field(32, ge=1, le=512)
     ssalmuk_llm_gemini_models: list[str] = Field(default_factory=lambda: ["gemini-2.5-flash", "gemini-2.5-flash-lite"])  # 허용 목록 (gemini-* 만)
     ssalmuk_llm_gemini_max_output_tokens: int = Field(8192, ge=1)  # generationConfig.maxOutputTokens 상한 (없으면 이 값으로)
+    ssalmuk: SsalmukDashConfig = Field(default_factory=SsalmukDashConfig)  # 이벤트 참여 화면 (주인 11/18 숨김 · show: true 면 다시)
     blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
     # 주인 11/16 14시 "꾸미기 책갈피 코드만" — '글쓰기 한 번에' 책갈피(writebm.py) 설치 칸 숨김 · write_act 는 403 '이제 안 써요' (코드는 그대로, true 면 예전대로)
     write_bm: bool = False

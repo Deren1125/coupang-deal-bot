@@ -31,6 +31,7 @@ NODE = shutil.which("node")
 @pytest.fixture
 def bot(settings: Settings, tmp_path: Path):  # type: ignore[no-untyped-def]
     settings.dashboard.blogauto_metrics_path = str(tmp_path / "blogauto.json")
+    settings.dashboard.ssalmuk.show = True  # 이 파일은 '이벤트' 종류가 보일 때 (주인 11/18 기본 숨김 — 숨김 시험은 test_dash_ssalmuk)
     b = DealBot(push_settings(settings))
     yield b
     b.db.close()

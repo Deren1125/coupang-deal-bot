@@ -8,9 +8,11 @@
 'use strict';
 (() => {
 const D = document, W = window;
+// 11/18 숨김: boot ssalmuk.show
+const evOn = () => { try { return !!JSON.parse(D.getElementById('boot').textContent).ssalmuk.show; } catch (e) { return false; } };
 // [주소, 이름, part() 칸 이름] — 블로그 셋 → 딜 → SNS → 숏폼 → 기타 → 이벤트 (주인 11/14 '블로그가 맨 위 · 이벤트 참여는 맨 아래' — 늘 이 순서)
 const CATS = [['issue', '데런픽', 'issue'], ['finance', '드라마', 'finance'], ['hotdeal', '라커룸', 'hotdeal'], ['deals', '딜', 'deals'],
-  ['sns', 'SNS', 'sns'], ['shorts', '숏폼', 'shorts'], ['etc', '기타', ''], ['ev', '이벤트', null]];
+  ['sns', 'SNS', 'sns'], ['shorts', '숏폼', 'shorts'], ['etc', '기타', ''], ['ev', '이벤트', null]].filter(c => c[0] !== 'ev' || evOn());
 const BLOG3 = ['issue', 'finance', 'hotdeal'], STALE_MIN = 30;
 const KEYS = CATS.map(c => c[0]);
 const DOT = {issue: '#F2B400', finance: '#3B82F6', hotdeal: '#EF4444', deals: '#F97316', sns: '#10B981', shorts: '#A855F7', ev: '#0EA5E9', etc: '#94A3B8'};

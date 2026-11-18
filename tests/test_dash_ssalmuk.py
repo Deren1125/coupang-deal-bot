@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -368,7 +369,7 @@ function mk(tag) {
 }
 const main = mk('main'), ttl = mk('h1'), toast = mk('div'), head = mk('head');
 main.id = 'main'; ttl.textContent = '할 일 3개';
-const ids = {main, ttl, toast, boot: {textContent: JSON.stringify({me: {csrf: 'tok'}})}};
+const ids = {main, ttl, toast, boot: {textContent: JSON.stringify({me: {csrf: 'tok'}, ssalmuk: {show: !process.env.EV_HIDE}})}};
 const urgent = mk('div'); urgent.className = 'bn bad'; main.append(urgent);
 const rtp = mk('section'); rtp.id = 'rtp'; main.append(rtp);
 const other = mk('article'); other.className = 'itm'; main.append(other);
@@ -1661,3 +1662,59 @@ def test_naverhub_routes_match_blog_auto() -> None:
     assert naverhub.headers("i", "s", False) == {"X-Naver-Client-Id": "i", "X-Naver-Client-Secret": "s"}
     assert [naverhub.hub_refused(t, c) for t, c in (("blog", 401), ("news", 403), ("webkr", 404), ("blog", 404), ("blog", 429))] == [
         True, True, True, False, False]
+
+
+# ---------------------------------------------------------------- 11/18 숨김 스위치 (주인 '피클 주력 — 이벤트 참여 탭 필요 없음')
+async def test_hidden_by_config_but_machine_api_still_works(bot: DealBot) -> None:
+    """config.yaml dashboard.ssalmuk.show: false → boot ssalmuk.show 거짓 · push·commands·ack·화면 API 는 그대로."""
+    assert bot.settings.dashboard.ssalmuk.show is False
+    h = session_headers(bot)
+    status, body, _ = await get_json(bot, "/dashboard/api/state", h)
+    assert status == 200 and body["ssalmuk"] == {"show": False}
+    key = desk(bot).key()
+    assert await mpost(bot, ssalmuk.PUSH_PATH, sample(), key) == (200, {"ok": True})
+    assert (await mget(bot, ssalmuk.COMMANDS_PATH, key))[0] == 200
+    assert (await get_json(bot, ssalmuk.STATE_PATH, h))[0] == 200
+    bot.settings.dashboard.ssalmuk.show = True  # 되살리기
+    assert (await get_json(bot, "/dashboard/api/state", h))[1]["ssalmuk"] == {"show": True}
+
+
+HIDE_SHIM = SHIM.split("eval(fs.readFileSync(src, 'utf8'));", 1)[0] + r"""
+let calls = 0; const f0 = global.fetch; global.fetch = async (u, o) => { calls++; return f0(u, o); };
+eval(fs.readFileSync(src, 'utf8'));
+(async () => {
+  await new Promise(r => setImmediate(r));
+  const before = main.children.length;
+  location.hash = '#/todo/ev';
+  await new Promise(r => setImmediate(r));
+  console.log(JSON.stringify({ev: window.SBEvent, kids: main.children.map(c => c.attrs.id || c.id || c.className), before, calls, css: !!document.getElementById('ev-css')}));
+})();
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+def test_ssalmuk_js_hidden_attaches_nothing() -> None:
+    v = json.dumps(ssalmuk.Ssalmuk(FakeDb()).view(), ensure_ascii=False)
+    out = subprocess.run([NODE, "-e", HIDE_SHIM, str(STATIC / "ssalmuk.js"), v], capture_output=True, text=True, timeout=30,
+                         env={**os.environ, "EV_HIDE": "1"})
+    assert out.returncode == 0, out.stderr
+    r = json.loads(out.stdout)
+    assert r["ev"] is None and r["calls"] == 0 and not r["css"]  # 카드·화면·상태 읽기 없음 (할 일 '이벤트' 종류는 SBEvent 가 없어도 안 깨짐)
+    assert r["kids"] == ["bn bad", "rtp", "itm"] and r["before"] == 3
+
+
+@pytest.mark.skipif(NODE is None, reason="node 없음")
+@pytest.mark.parametrize("show", [False, True])
+def test_todohub_event_kind_follows_switch(show: bool) -> None:
+    js = r"""
+const [src, show] = process.argv.slice(1);
+const boot = {textContent: JSON.stringify({me: {csrf: 't'}, ssalmuk: {show: show === '1'}})};
+global.document = {readyState: 'loading', getElementById: id => (id === 'boot' ? boot : null), addEventListener() {}};
+global.window = global; global.location = {hash: '#/todo'};
+eval(require('fs').readFileSync(src, 'utf8'));
+console.log(JSON.stringify(window.SBHub.CATS.map(c => c[0])));
+"""
+    out = subprocess.run([NODE, "-e", js, str(STATIC / "todohub.js"), "1" if show else "0"], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    cats = json.loads(out.stdout)
+    assert ("ev" in cats) is show and cats[:7] == ["issue", "finance", "hotdeal", "deals", "sns", "shorts", "etc"]
