@@ -154,7 +154,7 @@ document.querySelector("[data-name='oglink']").onclick = () => {
   pop.querySelector('.se-popup-button-confirm').onclick = () => { const u = pop.querySelector('input').value; const c = comp('se-oglink', '<a>' + u + '</a>'); if (inPostit) { inPostit.after(c); inPostit = null; } else add(c); pop.remove(); };
 };
 document.querySelector('.se-canvas-bottom-button').onclick = () => { inPostit = null; add(comp('se-text', '<div class="se-section se-section-align-' + align + '"><p class="se-text-paragraph"></p></div>')); };
-document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<div class="option_category"><button>셀럽 패션</button></div><ul class="category_list" style="display:none"><li><span>셀럽 패션</span></li><li><span>ㄴ 하위 카테고리 셀럽 소식</span></li><li><label><span style=\"position:absolute;width:1px;height:1px;overflow:hidden\">하위 카테고리</span>드라마 패션</label></li><li><span>드라마, 예능</span></li></ul><span class="chips"></span><input class="tag_input">'; document.body.append(d);
+document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<div class="option_category"><button>셀럽 패션</button></div><ul class="category_list" style="display:none"><li><span>셀럽 패션</span></li><li><span>ㄴ 하위 카테고리 셀럽 소식</span></li><li><label><span style=\"position:absolute;width:1px;height:1px;overflow:hidden\">하위 카테고리</span>드라마 패션</label></li><li><span>드라마, 예능</span></li><li><span>레전드 다시 보기</span></li><li><label><span style=\"position:absolute;width:1px;height:1px;overflow:hidden\">하위 카테고리</span>배우의 레전드작</label></li><li><span>해외OTT 드라마</span></li><li><label><span style=\"position:absolute;width:1px;height:1px;overflow:hidden\">하위 카테고리</span>해외·OTT 드라마</label></li><li><label><span style=\"position:absolute;width:1px;height:1px;overflow:hidden\">하위 카테고리</span>스포츠·버라이어티 예능</label></li></ul><span class="chips"></span><input class="tag_input">'; document.body.append(d);
   const cb = d.querySelector('.option_category button'), ul = d.querySelector('.category_list');
   cb.onclick = () => { ul.style.display = ul.style.display === 'none' ? 'block' : 'none'; };  // 누르면 열고 한 번 더 누르면 닫힘
   ul.querySelectorAll('li').forEach(li => { li.onclick = () => { cb.textContent = li.textContent.replace(/ㄴ 하위 카테고리 |하위 카테고리/, ''); ul.style.display = 'none'; }; });
@@ -407,6 +407,22 @@ def test_bookmarklet_picks_a_sub_category_whose_label_has_a_hidden_prefix() -> N
         assert out.returncode == 0, out.stderr
         got = json.loads(out.stdout)
         assert got["cat"] == cat and f"카테고리 {cat}" in got["alert"] and "목록에 없음" not in got["alert"], got
+
+
+def test_bookmarklet_category_ignores_spaces_and_middle_dots_exact_first() -> None:
+    """주인 11/18 카테고리 화면: 실제 이름 '레전드 다시 보기'인데 글은 '레전드 다시보기' → 띄어쓰기·가운뎃점(ㆍ・ 등)을 빼고 비교 ·
+    하위 카테고리도 · 똑같은 이름이 있으면 그것 먼저 ('해외OTT 드라마' 와 '해외·OTT 드라마' 가 같이 있을 때)."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    for want, real in (("레전드 다시보기", "레전드 다시 보기"), ("배우의레전드작", "배우의 레전드작"),
+                       ("스포츠ㆍ버라이어티 예능", "스포츠·버라이어티 예능"), ("해외OTT 드라마", "해외OTT 드라마"),
+                       ("해외·OTT 드라마", "해외·OTT 드라마")):
+        pasted = '<p style="text-align:center">첫 글이에요.</p><p>끝 글이에요.</p>' + _tags_line(["도깨비"], want)
+        out = subprocess.run([NODE, "-e", RUN, INNER, code(), pasted], capture_output=True, text=True, timeout=120, env=env)
+        assert out.returncode == 0, out.stderr
+        got = json.loads(out.stdout)
+        assert got["cat"] == real and "목록에 없음" not in got["alert"] and "확인 못 함" not in got["alert"], (want, got)
 
 
 async def test_new_version_banner_until_installed_is_sent(bot: DealBot, tmp_path: Path) -> None:

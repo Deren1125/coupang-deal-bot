@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v9 (v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v10 (v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -20,7 +20,7 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 9;
+const V = 10;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => qa(D, CARD).length;
@@ -236,7 +236,9 @@ const chips = t => {
   return !!box && (box.innerText || '').replace(/\s/g, '').includes('#' + t);
 };
 // 발행창 카테고리 고르기 (서버 업로더 _select_category 와 같은 칸 · 띄어쓰기·'하위 카테고리' 말 무시하고 비교)
-const nz = s => (s || '').replace(/하위\s*카테고리|카테고리|[\sㄴ└·>-]/g, '');
+// v10 (11/18 실제 이름 '레전드 다시 보기' · 글은 '레전드 다시보기'): 띄어쓰기를 다 빼고 가운뎃점(· ㆍ ・ ･ • ‧ ∙ ⋅)도 같게 — 똑같은 이름이 먼저, 없으면 띄어쓰기·점을 뺀 이름 (하위 카테고리도)
+const ex = s => (s || '').replace(/하위\s*카테고리/g, '').trim();
+const nz = s => ex(s).replace(/카테고리|[\sㄴ└·\u318d\u30fb\uff65\u2022\u2027\u2219\u22c5>-]/g, '');
 const catBtn = () => any(["[class*='option_category'] button", "button[aria-label*='카테고리']", "button[class*='selectbox_button']"]);
 const catIn = async c => {
   let b = catBtn();
@@ -245,7 +247,7 @@ const catIn = async c => {
   // 하위 카테고리 항목은 <label><span 숨김>하위 카테고리</span>드라마 패션</label> — 글자가 자식 칸 밖에 있어 '맨 끝 칸만' 보면 못 찾음 (11/10 드라마 패션)
   // → 이름이 맞는 칸 중 가장 안쪽 (문서 순서라 뒤에 오는 자손이 덮음)
   // v9 (11/18 '목록에 없음' 뒤 예약 못 채움): 없으면 연 목록을 닫고(목록 칸 수가 늘었을 때만) 예약으로 넘어감
-  const ls = () => { let f = null, n = 0; for (const d of [document, D]) for (const e of qa(d, '[class*=category] *,[role=option]')) if (seen(e) && e !== b && !b.contains(e) && !e.contains(b)) { n++; if (nz(e.innerText) === nz(c)) f = e; } return [f, n]; }, n0 = ls()[1];
+  const ls = () => { let f = null, g = null, n = 0; for (const d of [document, D]) for (const e of qa(d, '[class*=category] *,[role=option]')) if (seen(e) && e !== b && !b.contains(e) && !e.contains(b)) { n++; if (nz(e.innerText) === nz(c)) f = e; if (ex(e.innerText) === ex(c)) g = e; } return [g || f, n]; }, n0 = ls()[1];
   press(b);
   const it = await wait(() => ls()[0], 3000);
   if (!it) { if (ls()[1] > n0) { press(b); await S(600); } return '목록에 없음 (' + c + ')'; }

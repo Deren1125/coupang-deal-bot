@@ -19,6 +19,7 @@ import pytest
 
 from dash_helpers import blogauto_status, push_settings, queued, session_headers
 from dealbot.app import DealBot
+from dealbot.dashboard import kkumi
 from dealbot.config import Settings
 from dealbot.dashboard import routine, webapp
 from test_dash_routine import item, tz_now, with_routine, SLOTS
@@ -287,7 +288,7 @@ async def test_hub_shows_staleness_gate_new_bookmark_and_system_stops(bot: DealB
     # 소식이 막 왔고 오늘 목록: 끊김 줄 없음 · 멈춤 알림 · 꾸미기 새 판(연결 탭으로) · 자동 점검 한 줄
     assert kinds("fresh") == ["w sys", "kn", "g gt"]
     assert "블로그 프로그램이 멈췄어요" in text("fresh", "w sys") and "멈춤" in text("fresh", "w sys")
-    assert text("fresh", "kn").startswith("꾸미기 새 판 v9 — 다시 깔아 주세요 (1분)") and got["fresh"][1][2] == "#/connect"
+    assert text("fresh", "kn").startswith(f"꾸미기 새 판 v{kkumi.version()} — 다시 깔아 주세요 (1분)") and got["fresh"][1][2] == "#/connect"
     assert text("fresh", "g gt") == "자동 점검: 1편 고치는 중 · 1편 통과 (17:40)"
     assert got["sysGo"] == "#/todo/etc" and got["sysCard"] == 1  # 누르면 기타 칸의 그 카드로
     # 줄 순서: 할 일이 라커룸에만 있어도 데런픽·드라마가 맨 위 (흐리게) · 이벤트가 맨 아래
