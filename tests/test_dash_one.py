@@ -45,7 +45,7 @@ def built(db: Any, base: str = DASH) -> str:
 def test_one_holds_both_bookmarklets_with_their_own_endpoints_and_keys() -> None:
     db = FakeDb()
     v = one.view(db, DASH)
-    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == list(one.STEPS) and v["version"] == 1
+    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 2
     js = built(db)
     assert f"U='{DASH}{seoi.PATH}',K='{seoi.key(db)}'" in js and f"U='{DASH}{statscap.PATH}',K='{statscap.key(db)}'" in js
     assert seoi.key(db) != statscap.key(db) and "@@" not in js and '["derenpick","issue","데런픽"]' in js
@@ -100,7 +100,7 @@ async def test_api_gives_the_code_under_login_only_and_queue_says_whether_stats_
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     assert (await bot.web.dispatch("GET", "/dashboard/api/one", anon))[0] == 401
     status, v, h = await get_json(bot, "/dashboard/api/one", session_headers(bot))
-    assert status == 200 and v["steps"] == list(one.STEPS) and h.get("Cache-Control") == "no-store"
+    assert status == 200 and v["steps"] == seoi.steps(one.STEPS) and h.get("Cache-Control") == "no-store"
     js = unquote(v["code"])
     assert seoi.key(bot.db) in js and statscap.key(bot.db) in js and seoi.PATH in js and statscap.PATH in js
     assert "note" in v  # 이웃 관리 칸과 같은 오늘 수 한 줄
@@ -288,14 +288,14 @@ async def test_limit_notice_stops_at_once_and_goes_to_by_hand_and_a_second_press
     assert [r["form"]["w"] for r in got["reqs"] if r["form"].get("a") == "stop"] != []
     card = a["last"]["card"].split("\n")
     assert card[0] == "한 번에 끝 — 다 하지는 못했어요 · 오늘 여기서 서이추 1 · 들르기 0 · 건너뜀 0 · 안 된 것 0"
-    assert any(ln.startswith("멈췄어요 — ") and ln.endswith("오늘은 쉬어요") for ln in card)
+    assert any(ln.startswith("멈췄어요 — ") and ln.endswith("오늘은 이웃 신청 한도 — 내일 다시 (데런픽)") for ln in card)  # 11/18 — 24시간
     hand = next(ln for ln in card if ln.startswith("폰에서 직접: "))
     assert hand.startswith("폰에서 직접: nb1 — ") and hand.endswith("남은 줄은 대시보드 할 일에서")
-    # 다시 누름 (새로 고침 뒤): 대시보드가 '오늘은 쉬어요' → 이웃추가 화면을 하나도 더 열지 않고 요약만 · 오늘 한 수는 이어서 보임
+    # 다시 누름 (새로 고침 뒤): 대시보드가 '오늘은 이웃 신청 한도 — 내일 다시' → 이웃추가 화면을 하나도 더 열지 않고 요약만 · 오늘 한 수는 이어서 보임
     opened = [d["u"] for d in got["docs"] if d["u"].startswith("/BuddyAddForm")]
     assert opened == ["/BuddyAddForm.naver?blogId=nb0", "/BuddyAddForm.naver?blogId=nb1"]
     card2 = b["last"]["card"].split("\n")
-    assert card2[0].startswith("한 번에 끝 — 다 하지는 못했어요 · 오늘 여기서 서이추 1 ·") and any("쉬어요" in ln for ln in card2)
+    assert card2[0].startswith("한 번에 끝 — 다 하지는 못했어요 · 오늘 여기서 서이추 1 ·") and any("오늘은 이웃 신청 한도 — 내일 다시 (데런픽)" in ln for ln in card2)
 
 
 async def test_second_press_after_a_reload_goes_on_with_the_rest_and_one_bad_page_is_skipped(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

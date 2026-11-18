@@ -1,4 +1,4 @@
-/* '한 번에' 책갈피 v1 (주인 11/16 — '책갈피 버튼 합치자 · 켜놓고 놔두면 한 번에' · '내가 누를 버튼이 없어야 한다 · 한 번 누르면 순차적으로 모든 게').
+/* '한 번에' 책갈피 v2 (11/18 v2: 안에 든 이웃 관리 v3 — 서이추 20~60초·10명마다 쉼·한도 안내 뒤 24시간 · 주인 11/16 — '책갈피 버튼 합치자 · 켜놓고 놔두면 한 번에' · '내가 누를 버튼이 없어야 한다 · 한 번 누르면 순차적으로 모든 게').
    '통계 보내기'(statscap.js)와 '이웃 관리'(seoi.js)의 코드를 그대로 안에 넣은 껍데기 — 딜봇 one.py 가 아래 두 자리('@@STAT@@'·'@@SEOI@@')에
    두 책갈피의 줄인 코드를 통째로 넣는다 (간격·상한·멈춤 규칙·공감·댓글 코드는 한 글자도 다시 쓰지 않음 · 옛 두 책갈피는 그대로 돎).
    누르는 화면을 보고:
@@ -15,7 +15,7 @@
    대시보드에는 옛 두 길만 쓴다 (통계 /dashboard/api/stats_capture · 이웃 /dashboard/api/seoi_act — 열쇠도 그대로 · 쿠키 없음).
    one.py 가 kkumi.minify 로 줄이고 한글 글은 Z('…') 로 바꾼다 — 줄마다 문장이 끝나게 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음 · 한글 글 안에 역슬래시 없음). */
 (async function () {
-const V1 = 1;
+const V1 = 2;
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
 const W = window, D = document, L = location, FEED = 'https://m.blog.naver.com/FeedList.naver', TAG = '한 번에: ', NL = String.fromCharCode(10);
 if (W.__sb1) return;

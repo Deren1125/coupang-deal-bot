@@ -13,7 +13,8 @@
           들르기 = 글을 열어 읽는 시간(20~60초 · 끝까지 천천히 내림) → 공감 → 댓글 초안(대시보드 a=visit) → '등록' → 내 댓글이 생겼는지 확인
         마지막 단추는 press(n, 1) 로만 (자동에서만 · 이웃추가 화면의 a.btn_ok '확인' · 댓글 칸의 .u_cbox_btn_upload '등록' 두 곳).
         다음까지 기다리는 시간은 대시보드가 정한다 (서이추·들르기 25~45초 · 둘을 합쳐 한 시간 40 · 하루 상한) — 책갈피는 그 초만큼 세고 다시 묻는다.
-        바로 멈춤: 네이버가 한도·제한·보호조치·잠시 후 다시 같은 글을 보이거나, 로그인 화면이 나오거나, 두 번 잇달아 안 되면 — 대시보드에 a=stop (그날 쉼).
+        바로 멈춤: 네이버가 한도·제한·보호조치·잠시 후 다시 같은 글을 보이거나, 로그인 화면이 나오거나, 두 번 잇달아 안 되면 — 대시보드에 a=stop
+        (v3 11/18: 한도·제한 안내·자동입력 방지 = w=add|visit → 그 블로그 그 종류 24시간 · 로그인·두 번 실패 = w=all 그날).
         자동입력 방지 칸([class*=captcha] — 보이고 크기가 있는 것)이 뜨면 어디서든 멈춤. 대시보드가 '방금 한 대상'(dup — 다른 탭·다시 시작)이라고 하면 그 대상은 건너뜀
         (같은 글에 댓글 두 번 막기 — 댓글 칸에서도 목록이 뜨기를 2.5초 기다려 내 댓글·같은 글이 있으면 넣지 않음).
         이미 이웃·신청 중·서로이웃을 받지 않는 블로그는 건너뜀 (세지 않음). 탭이 뒤로 가면 느려질 뿐 돌아오면 이어서 · 새로고침하면 책갈피를 다시.
@@ -34,7 +35,7 @@
    seoi.py 가 kkumi.minify 로 줄이고 한글이 든 글은 Z('…') 로 짧게 바꿔(pack — 책갈피 길이) javascript: 주소로 만든다
    — 줄마다 문장이 끝나게 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음 · 글 안에 역슬래시 없음). */
 (async function () {
-const V = 2;
+const V = 3;
 // 한글 글 풀기 (seoi.py pack 이 '…' → Z('…') 로 바꿈)
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
 const U = '@@URL@@', K = '@@KEY@@', BL = JSON.parse('@@BLOGS@@'), W = window, D = document, L = location, SB = '이웃 관리: ', MINE = ' — 마지막 단추는 직접 눌러 주세요';
@@ -47,7 +48,8 @@ let ov = null, au = 0, fr = null, fx = '', cur = {}, res = '', said = '', gc = '
 try {
 const NO = /확인|등록|신청|보내기|완료|다음|취소|삭제|차단|submit/i;
 const FULL = /하루|초과|비정상|보호조치|일시적|한도|제한|잠시후|스팸|차단|정지|자동입력|연속|도배|나중에|운영/;
-const HAVE = /상대방|이미(서로)?이웃|이미추가|신청중|진행중|이미신청/;
+const HAVE = /상대방|이미(서로)?이웃|이미추가|신청중|진행중|이미신청/, SENT = /신청(이|을)?(완료|하였|했|되었)/;
+const fc = t => (t.replace(/\s/g, '').match(RegExp(FULL.source, 'g')) || []).length;
 const LY = '#_alertLayer,.lyr_popup', BODY = '.se-main-container,#postViewArea,.post_ct,#viewTypeSelector';
 // 네이버가 보인 글: full = 한도·제한 안내 (그날 쉼) · have = 이미 이웃·신청 중·받지 않음 (건너뜀)
 const kind = t => { t = t.replace(/\s/g, ''); return !/상대방/.test(t) && FULL.test(t) ? 'full' : HAVE.test(t) ? 'have' : ''; };
@@ -219,13 +221,15 @@ const form = async () => {
     const ok = qa('a.btn_ok').filter(n => vis(n) && sq(tx(n)) === '확인');
     if ((r0 ? !r0.checked : alt.length) || !ta || ok.length !== 1) { A('신청 화면이 예상과 달라 누르지 않았어요 (' + did.join(' · ') + ' · 확인 단추 ' + ok.length + '개)'); return; }
     await sl(1500);
+// 11/18 — 누르기 전 화면의 한도·제한 낱말 수 (누른 뒤 화면 본문에 새로 생기면 안내 창이 아니어도 한도 안내로 봄)
+    const l0 = fc(page());
     press(ok[0], 1);
     for (let i = 0; i < 24; i++) {
       await sl(500);
       if (!wins().length) { res = 'login'; return; }
-      const t = sq(qa(LY).filter(vis).map(tx).concat(dl).join(' ')), k = kind(t);
+      const p = page(), t = sq(qa(LY).filter(vis).map(tx).concat(dl).join(' ')) || (fc(p) > l0 && !SENT.test(p.replace(/\s/g, '')) ? p : ''), k = kind(t);
       // 신청 완료 글은 화면에든 안내 창·알림에든 — 한도·이미 이웃 글이 먼저
-      if (!k && /신청(이|을)?(완료|하였|했|되었)/.test((page() + t).replace(/\s/g, ''))) { A(tg + ' 서로이웃 신청 ✓ (' + g.text + ')', 'ok'); return; }
+      if (!k && SENT.test((p + t).replace(/\s/g, ''))) { A(tg + ' 서로이웃 신청 ✓ (' + g.text + ')', 'ok'); return; }
       if (t) { A(k === 'full' ? '네이버가 한도·제한 안내를 보여요 (' + t.slice(0, 60) + ')' : k === 'have' ? '이미 이웃이거나 신청 중이에요' : '네이버 알림: ' + t.slice(0, 60), k === 'full' ? 'stop' : k === 'have' ? 'skip' : 'fail'); return; }
     }
     A('확인을 눌렀는데 신청 완료 글을 못 봤어요', 'unsure');
@@ -415,7 +419,8 @@ const auto = async () => {
         bad = /ok|skip/.test(res) ? 0 : bad + 1;
         // 바로 멈춤: 한도·제한 안내 · 로그인 화면 · 두 번 잇달아 안 됨 → 대시보드에 알려 그날 쉼 (첫 화면부터 로그인이면 쉼 없이 멈춤만)
         if (res === 'srv' || /stop|login/.test(res) || bad > 1) {
-          if (res !== 'srv' && (res !== 'login' || n)) { await ask({a: 'stop', b: fx, w: 'all'}); said += ' · 오늘은 쉬어요'; }
+// 11/18 — 한도·제한 안내(stop)는 그 종류만 24시간 (대시보드가 쉬는 글을 돌려줌) · 로그인·두 번 실패는 그날 모두
+          if (res !== 'srv' && (res !== 'login' || n)) { const g = await ask({a: 'stop', b: fx, w: res === 'stop' ? cur.no ? 'visit' : 'add' : 'all'}); said += ' · ' + (g ? g.text : ''); }
           say('멈췄어요 — ' + said);
           b1.remove();
           break;

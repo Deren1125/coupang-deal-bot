@@ -47,9 +47,10 @@ STEPS = (
     "왜 두 번인가요: 통계 화면과 블로그 화면은 네이버 주소가 달라 브라우저가 한 화면에서 둘을 못 하게 막아요 — 책갈피는 하나, 화면마다 한 번씩이에요. "
     "통계만·이웃만 하려면 그 화면에서만 누르면 돼요 (이웃새글이나 내 블로그 화면에서 바로 눌러도 돼요).",
     "멈추려면 탭을 닫거나 새로 고침 — 다시 누르면 남은 것부터 이어서 해요 (차례·간격·상한은 대시보드가 기억해요: "
-    f"{seoi.GAP['add'][0]}~{seoi.GAP['add'][1]}초 간격, 한 시간 {seoi.HOUR_CAP}개, "
-    f"하루 서이추 블로그마다 {seoi.ADD_DAY_CAP}개·들르기 합쳐 {seoi.VISIT_DAY_CAP}개).",
-    "네이버가 제한 안내·자동입력 방지·로그인 화면을 보이면 바로 멈추고 그날은 쉬어요 (돌아가지 않아요) — 요약의 '폰에서 직접'에 남은 것만 폰에서 하면 돼요. "
+    f"서이추 {seoi.GAP['add'][0]}~{seoi.GAP['add'][1]}초 간격·{seoi.ADD_BREAK_EVERY}명마다 {seoi.ADD_BREAK_S[0] // 60}~{seoi.ADD_BREAK_S[1] // 60}분 쉼, "
+    f"한 시간 {seoi.HOUR_CAP}개, 하루 서이추 블로그마다 @cap@개·들르기 합쳐 {seoi.VISIT_DAY_CAP}개).",
+    "네이버가 한도·제한 안내·자동입력 방지·로그인 화면을 보이면 바로 멈춰요 (돌아가지 않아요) — 한도 안내면 그 블로그의 서이추(또는 들르기)는 24시간 쉬고, "
+    "그동안 다시 눌러도 그것은 하지 않아요 ('오늘은 이웃 신청 한도 — 내일 다시'). 요약의 '폰에서 직접'에 남은 것만 폰에서 하면 돼요. "
     "블로그 계정이 여럿이면 계정마다 로그인해서 같은 식으로.",
 )
 
@@ -110,7 +111,7 @@ def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | N
     code = bookmarklet(base + seoi.PATH, seoi.key(db), base + statscap.PATH, statscap.key(db))
     if len(code) > LEN_MAX:
         raise ValueError("bookmarklet too long")
-    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS), "version": version()}
+    out: dict[str, Any] = {"code": code, "len": len(code), "steps": seoi.steps(STEPS), "version": version()}
     if tz is not None:
         sv = seoi.view(db, public_url, now=now, tz=tz)
         for k in ("note", "go"):

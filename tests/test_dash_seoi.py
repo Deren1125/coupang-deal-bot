@@ -67,7 +67,7 @@ def test_bookmarklet_is_one_javascript_url_within_safari_limit_and_has_endpoint_
     assert "'https://dash.example/dashboard/api/seoi_act'" in js and f"'{seoi.key(db)}'" in js and "@@" not in js
     assert seoi.blogs_json() in js and "/*" not in js and "\n//" not in js
     assert len(v["steps"]) == len(seoi.STEPS) == 7 and "확인" in v["steps"][3] and "등록" in v["steps"][4]
-    assert v["steps"][5].startswith("자동 (켜 두면 알아서)") and "멈춤" in v["steps"][5] and v["version"] == seoi.version() == 2 and v["new"] is True
+    assert v["steps"][5].startswith("자동 (켜 두면 알아서)") and "멈춤" in v["steps"][5] and v["version"] == seoi.version() == 3 and v["new"] is True
     with pytest.raises(ValueError):
         seoi.bookmarklet("https://x.example/a'b", "k")
 
@@ -102,7 +102,8 @@ def test_bookmarklet_never_submits_and_has_no_tricks() -> None:
 def test_bookmarklet_parses_and_matches_encode_uri_component() -> None:
     db = FakeDb()
     full = seoi.view(db, "https://dash.example")["code"]
-    chk = "const c=process.argv[1];new Function(c);process.stdout.write(String('javascript:'+encodeURIComponent(c)===process.argv[2]))"
+    # 11/18 v3 부터 encode_short (꾸미기·한 번에와 같게) — 사파리가 통째로 % 풀기 한 결과가 같은 코드
+    chk = "const c=process.argv[1];new Function(c);process.stdout.write(String('javascript:'+c===decodeURIComponent(process.argv[2])))"
     out = subprocess.run([NODE, "-e", chk, code(db), full], capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     assert out.stdout == "true"
@@ -590,12 +591,12 @@ async def test_add_gap_is_random_per_action_and_too_soon_does_nothing(nid: str, 
     assert 20 <= lo < hi and 20 <= vlo  # 사람 속도 — 서이추 사이는 20초 밑으로 내리지 않음
     db, rng = FakeDb(), Rng("lo")
     got = await seoi.act(db, add_form(db, blog), tz=TZ, now=NOW, rng=rng)
-    assert got == {"ok": True, "blog": blog, "again": False, "n": 1, "cap": 30, "msg": "", "text": f"오늘 {name} 서이추 1/30"} and rng.seen == [(lo, hi)]
+    assert got == {"ok": True, "blog": blog, "again": False, "n": 1, "cap": 20, "msg": "", "text": f"오늘 {name} 서이추 1/20"} and rng.seen == [(lo, hi)]
     # 같은 블로그(대상)를 10분 안에 다시 = 이어 하기 (① 이웃추가 → ② 신청 화면) — 다시 세지 않고 간격도 그대로
-    again = await seoi.act(db, add_form(db, blog), tz=TZ, now=NOW + 20, rng=rng)
+    again = await seoi.act(db, add_form(db, blog), tz=TZ, now=NOW + 10, rng=rng)
     assert again["again"] is True and again["n"] == 1 and rng.seen == [(lo, hi)]
-    e = await refused(db, add_form(db, blog, "neighbor2"), NOW + 20, rng=rng)
-    assert (e.status, e.code, e.text) == (429, "gap", f"조금 쉬었다가 — {lo - 20}초 뒤에 다시 눌러 주세요 (아무것도 하지 않았어요)")
+    e = await refused(db, add_form(db, blog, "neighbor2"), NOW + 10, rng=rng)
+    assert (e.status, e.code, e.text) == (429, "gap", f"조금 쉬었다가 — {lo - 10}초 뒤에 다시 눌러 주세요 (아무것도 하지 않았어요)")
     other = next(b for _i, b, _n in THREE if b != blog)
     assert (await refused(db, add_form(db, other, "neighbor2"), NOW + lo - 1, rng=rng)).code == "gap"  # 계정을 바꿔도 같은 종류면 같이 쉼
     assert seoi.today(db, NOW + lo - 1, TZ)["by"][blog]["add"] == 1 and seoi.today(db, NOW + lo - 1, TZ)["by"][other]["add"] == 0  # 거절은 안 셈
@@ -611,21 +612,21 @@ async def test_add_gap_is_random_per_action_and_too_soon_does_nothing(nid: str, 
 
 @pytest.mark.parametrize(("nid", "blog", "name"), THREE)
 async def test_add_day_cap_is_per_blog(nid: str, blog: str, name: str) -> None:
-    db, t = FakeDb(), NOW - 6 * 3600  # 아침부터 5분에 하나씩
+    db, t = FakeDb(), NOW - 6 * 3600  # 아침부터 8분에 하나씩 (10번마다 쉬는 3~7분보다 길게)
     for i in range(seoi.ADD_DAY_CAP):
-        got = await seoi.act(db, add_form(db, blog, f"neighbor{i}"), tz=TZ, now=t + i * 300)
+        got = await seoi.act(db, add_form(db, blog, f"neighbor{i}"), tz=TZ, now=t + i * 480)
         assert got["n"] == i + 1
-    late = t + seoi.ADD_DAY_CAP * 300
+    late = t + seoi.ADD_DAY_CAP * 480
     e = await refused(db, add_form(db, blog, "onemore"), late)
-    assert (e.status, e.code, e.text) == (429, "day", f"오늘 {name} 서이추 30개를 다 했어요 — 내일 다시")
+    assert (e.status, e.code, e.text) == (429, "day", f"오늘 {name} 서이추 20개를 다 했어요 — 내일 다시")
     other = next(b for _i, b, _n in THREE if b != blog)
     assert (await seoi.act(db, add_form(db, other, "onemore"), tz=TZ, now=late))["n"] == 1  # 다른 블로그는 제 몫대로
     view = seoi.today(db, late, TZ)
-    assert view["by"][blog]["add"] == 30 and view["by"][blog]["add_cap"] == 30 and "서이추 30/30" in view["by"][blog]["line"]
+    assert view["by"][blog]["add"] == 20 and view["by"][blog]["add_cap"] == 20 and "서이추 20/20" in view["by"][blog]["line"]
     assert (await seoi.act(db, add_form(db, blog, "tomorrow"), tz=TZ, now=late + 86400))["n"] == 1  # 다음 날은 다시
 
 
-async def test_day_turns_over_at_kst_midnight_but_gap_and_hour_carry_over() -> None:
+async def test_day_turns_over_at_kst_midnight_but_gap_and_hour_carry_over(monkeypatch: pytest.MonkeyPatch) -> None:
     """하루 상한은 한국 시각 자정에 새로 (UTC 자정 아님) · 간격·한 시간 상한은 자정을 넘어도 이어짐 (자정 직후에 몰아 하지 못하게)."""
     db, mid = FakeDb(), NOW + (5 * 3600 + 400)  # 11/15 00:00:00 KST = 11/14 15:00 UTC
     assert seoi._day(mid - 1, TZ) == "2026-11-14" and seoi._day(mid, TZ) == "2026-11-15"
@@ -634,10 +635,11 @@ async def test_day_turns_over_at_kst_midnight_but_gap_and_hour_carry_over() -> N
     seoi._put(db, "seoi:day:2026-11-14", c)
     assert (await refused(db, add_form(db), mid - 30)).code == "day"
     assert (await refused(db, visit_form(db), mid - 30, drafter=FakeDrafter())).code == "day"
-    assert (await seoi.act(db, add_form(db), tz=TZ, now=mid + 1, rng=Rng("hi")))["text"] == "오늘 데런픽 서이추 1/30"  # 자정이 지나면 다시 1부터
+    assert (await seoi.act(db, add_form(db), tz=TZ, now=mid + 1, rng=Rng("hi")))["text"] == "오늘 데런픽 서이추 1/20"  # 자정이 지나면 다시 1부터
     assert (await seoi.act(db, visit_form(db), tz=TZ, now=mid + 1, drafter=FakeDrafter()))["total"] == 1
-    assert seoi.today(db, mid - 1, TZ)["by"]["issue"]["add"] == 30 and seoi.today(db, mid + 2, TZ)["by"]["issue"]["add"] == 1
-    # 자정 앞에서 한 것의 간격·한 시간 상한은 자정 뒤에도 그대로
+    assert seoi.today(db, mid - 1, TZ)["by"]["issue"]["add"] == 20 and seoi.today(db, mid + 2, TZ)["by"]["issue"]["add"] == 1
+    # 자정 앞에서 한 것의 간격·한 시간 상한은 자정 뒤에도 그대로 (한 시간 상한만 보는 시험 — 서이추 10번마다 쉼은 test_every_tenth_add_gets_a_long_random_break)
+    monkeypatch.setattr(seoi, "ADD_BREAK_EVERY", 10**6)
     db = FakeDb()
     hi = seoi.GAP["add"][1]
     step, start = hi + 5, mid - (seoi.HOUR_CAP - 1) * (hi + 5) - 150  # 한 시간 상한을 다 채우고 마지막이 자정 2분 반 전
@@ -674,7 +676,8 @@ async def test_add_takes_the_message_from_that_blogs_todo_row(nid: str, blog: st
     assert seoi.row_for(None, blog, "neighbor1") is None and seoi.row_for(rows, blog, "") is None
 
 
-async def test_hour_cap_makes_a_longer_rest() -> None:
+async def test_hour_cap_makes_a_longer_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(seoi, "ADD_BREAK_EVERY", 10**6)  # 한 시간 상한만 보는 시험
     db = FakeDb()
     step = seoi.GAP["add"][1] + 5  # 간격은 늘 지나게
     blogs = [b for _i, b, _n in THREE]
@@ -702,8 +705,8 @@ async def test_visit_cap_is_shared_and_counted_per_blog() -> None:
     assert (e.code, e.text) == ("day", "오늘 이웃 들르기 40개를 다 했어요 — 내일 다시") and len(d.calls) == 40
     v = seoi.today(db, late, TZ)
     assert v["visit"] == 40 and {b: v["by"][b]["visit"] for b in v["by"]} == {"issue": 14, "finance": 13, "hotdeal": 13}
-    assert v["by"]["issue"]["line"] == "오늘 이웃 들르기 14 (세 블로그 합쳐 40/40) · 서이추 0/30"
-    assert v["note"] == "오늘 이웃 들르기 40/40 (데런픽 14 · 드라마 13 · 라커룸 13) · 서이추 데런픽 0/30 · 드라마 0/30 · 라커룸 0/30"
+    assert v["by"]["issue"]["line"] == "오늘 이웃 들르기 14 (세 블로그 합쳐 40/40) · 서이추 0/20"
+    assert v["note"] == "오늘 이웃 들르기 40/40 (데런픽 14 · 드라마 13 · 라커룸 13) · 서이추 데런픽 0/20 · 드라마 0/20 · 라커룸 0/20"
     assert seoi.today(db, late + 86400, TZ)["visit"] == 0
 
 
@@ -779,9 +782,10 @@ async def test_stop_rests_that_blog_for_the_day() -> None:
     db = FakeDb()
     assert (await seoi.act(db, {"k": seoi.key(db), "a": "stop", "b": "finance", "w": "add"}, tz=TZ, now=NOW))["ok"] is True
     e = await refused(db, add_form(db, "finance"), NOW + 1)
-    assert (e.code, e.text) == ("stopped", "오늘은 네이버가 제한 안내를 보여서 드라마 서이추를 쉬어요 — 내일 다시")
+    assert (e.code, e.text) == ("cool", "오늘은 이웃 신청 한도 — 내일 다시 (드라마)")  # 11/18 — 서이추 하나를 집은 멈춤 = 한도 안내 → 24시간
     assert (await seoi.act(db, add_form(db, "issue"), tz=TZ, now=NOW + 1))["n"] == 1
-    assert "네이버 제한 안내로 오늘 서이추 쉼" in seoi.today(db, NOW + 2, TZ)["by"]["finance"]["line"]
+    assert "오늘은 이웃 신청 한도 — 내일 다시 (드라마)" in seoi.today(db, NOW + 2, TZ)["by"]["finance"]["line"]
+    assert (await refused(db, add_form(db, "finance", "neighbor9"), NOW + 86399)).code == "cool"  # 자정이 지나도 24시간
     assert (await seoi.act(db, add_form(db, "finance", "neighbor9"), tz=TZ, now=NOW + 86400))["n"] == 1
     assert (await refused(db, {"k": seoi.key(db), "a": "stop", "b": "", "w": "everything"}, NOW)).code == "bad"
 
@@ -872,14 +876,14 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, monkeyp
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     assert (await bot.web.dispatch("GET", "/dashboard/api/seoi", anon))[0] == 401
     status, v, hd = await get_json(bot, "/dashboard/api/seoi", session_headers(bot))
-    assert status == 200 and v["steps"] == list(seoi.STEPS) and seoi.key(bot.db) in unquote(v["code"]) and hd["Cache-Control"] == "no-store"
-    new = "'이웃 관리' 책갈피가 바뀌었어요 (v2 · 서이추·들르기 자동) — 연결 탭에서 코드를 다시 복사해 깔아 주세요 · "
+    assert status == 200 and v["steps"] == seoi.steps(seoi.STEPS) and seoi.key(bot.db) in unquote(v["code"]) and hd["Cache-Control"] == "no-store"
+    new = "'이웃 관리' 책갈피가 바뀌었어요 (v3 · 서이추·들르기 자동) — 연결 탭에서 코드를 다시 복사해 깔아 주세요 · "
     assert v["note"].startswith(new + "오늘 이웃 들르기 0/40 (데런픽 0 · 드라마 0 · 라커룸 0)") and set(v["today"]["by"]) == {"issue", "finance", "hotdeal"}
-    assert v["new"] is True and v["version"] == 2
+    assert v["new"] is True and v["version"] == 3
     d = FakeDrafter()
     monkeypatch.setattr(seoi, "get_drafter", lambda: d)
     res = await _post(bot, add_form(bot.db, "hotdeal"), origin="https://m.blog.naver.com")
-    assert res[0] == 200 and json.loads(res[1])["text"] == "오늘 라커룸 서이추 1/30" and res[3]["Access-Control-Allow-Origin"] == "https://m.blog.naver.com"
+    assert res[0] == 200 and json.loads(res[1])["text"] == "오늘 라커룸 서이추 1/20" and res[3]["Access-Control-Allow-Origin"] == "https://m.blog.naver.com"
     assert json.loads(res[1])["msg"] == ""  # 오늘 할 일 줄이 없으면 멘트 없음 (아래 test_api_add_reads_todays_row)
     res = await _post(bot, add_form(bot.db, "hotdeal", "neighbor2"), origin="https://blog.naver.com")
     body = json.loads(res[1])
@@ -911,9 +915,9 @@ def test_routine_view_carries_todays_counts_per_blog(bot: DealBot, tmp_path: Pat
     seoi.gate(bot.db, "visit", "finance", "abc", now=now.timestamp(), tz=TZ)
     r = routine.view(bot, now=now.timestamp())["seoi"]
     assert r["by"]["hotdeal"]["add"] == 1 and r["by"]["finance"]["visit"] == 1 and r["visit"] == 1 and r["feed"] == seoi.FEED_URL
-    assert r["how"] == seoi.NEW.format(v=2) + " · " + seoi.HOW + " · " + seoi.HOW_AUTO  # 새 판 책갈피가 한 번 물어 오면 앞의 안내는 사라짐
+    assert r["how"] == seoi.NEW.format(v=3) + " · " + seoi.HOW + " · " + seoi.HOW_AUTO  # 새 판 책갈피가 한 번 물어 오면 앞의 안내는 사라짐
     assert r["by"]["hotdeal"]["auto"] == {"add": 0, "visit": 0, "min": 0}
-    assert r["by"]["finance"]["line"] == "오늘 이웃 들르기 1 (세 블로그 합쳐 1/40) · 서이추 0/30" and set(r["by"]) == {"issue", "finance", "hotdeal"}
+    assert r["by"]["finance"]["line"] == "오늘 이웃 들르기 1 (세 블로그 합쳐 1/40) · 서이추 0/20" and set(r["by"]) == {"issue", "finance", "hotdeal"}
 
 
 async def test_api_add_reads_todays_row(bot: DealBot, tmp_path: Path) -> None:
@@ -982,7 +986,7 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
     assert got["folded"] == 2 and got["folds"][0].startswith("이웃 한 번에 버튼 설치")  # 맨 위 = 꾸미기 카드 · 접기 첫째 = 이웃 한 번에 (11/16 14시)
     assert got["folds"][1] == "따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)" and got["folds"][2] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)"
     assert got["folds"][3:] == ["통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)", "Ably 랭킹 보내기 버튼 설치"]  # 글쓰기 한 번에·X 도우미는 설정을 켤 때만
-    assert sv["note"] in got["notes"] and got["steps"][-len(seoi.STEPS):] == list(seoi.STEPS)
+    assert sv["note"] in got["notes"] and got["steps"][-len(seoi.STEPS):] == seoi.steps(seoi.STEPS)
     assert got["clip"] == [sv["code"]] and got["toast"].startswith("복사했어요") and "null" not in got["text"] and "undefined" not in got["text"]
 
 
