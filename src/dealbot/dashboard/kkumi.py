@@ -52,8 +52,8 @@ def check_line() -> str:
 _WORD = re.compile(r"[A-Za-z0-9_$]")
 
 
-def _squeeze(line: str) -> str:
-    """따옴표 글 밖의 공백: 양쪽이 이름 글자면 하나만, 아니면 뺌. kkumi.js 는 정규식 안에 공백·따옴표를 쓰지 않아
+def _squeeze(line: str, let: bool = False) -> str:
+    """따옴표 글 밖의 공백: 양쪽이 이름 글자면 하나만, 아니면 뺌 · let=True 면 'const ' 는 'let ' 으로 (꾸미기만). kkumi.js 는 정규식 안에 공백·따옴표를 쓰지 않아
     따옴표만 따라가면 된다 (테스트가 new Function 으로 확인)."""
     out: list[str] = []
     q, i = "", 0
@@ -69,6 +69,11 @@ def _squeeze(line: str) -> str:
         elif c in "'\"`":
             q = c
             out.append(c)
+        elif let and line.startswith("const ", i) and not (out and _WORD.match(out[-1])):
+            # v9 (11/18): 따옴표 밖 'const' → 'let' (책갈피 안은 한 번 도는 async 함수라 뜻이 같음 · 29,500자 안으로 — 약 400자)
+            out.append("let")
+            i += 5
+            continue
         elif c.isspace():
             j = i
             while j < len(line) and line[j].isspace():
@@ -83,14 +88,14 @@ def _squeeze(line: str) -> str:
     return "".join(out)
 
 
-def minify(src: str) -> str:
+def minify(src: str, let: bool = False) -> str:
     """머리 /* */ 주석 · '//' 로 시작하는 줄 · 빈 줄을 빼고 줄마다 공백을 줄인다 (줄바꿈은 남김 — 문장 끝을 바꾸지 않게)."""
     src = re.sub(r"\A\s*/\*.*?\*/", "", src, count=1, flags=re.S)
     out = ""
     for line in src.splitlines():
         if (s := line.strip()) and not s.startswith("//"):
             # ';'·'{' 로 끝난 줄 다음은 줄바꿈 없이 (책갈피 주소에서 줄바꿈은 %0A 세 글자 — 11/09 사진 올리기 넣으며 26KB 안으로)
-            out += ("" if not out or out[-1] in ";{,([&|+?:=" else "\n") + _squeeze(s)
+            out += ("" if not out or out[-1] in ";{,([&|+?:=" else "\n") + _squeeze(s, let)
     return out
 
 
@@ -108,7 +113,7 @@ def encode_short(code: str) -> str:
 
 @lru_cache(maxsize=1)
 def bookmarklet() -> str:
-    return "javascript:" + encode_short(minify(SRC.read_text(encoding="utf-8")))
+    return "javascript:" + encode_short(minify(SRC.read_text(encoding="utf-8"), let=True))
 
 
 @lru_cache(maxsize=1)

@@ -186,19 +186,19 @@ def test_dashboard_texts_mention_the_auto_fill() -> None:
     assert "it.when ?" in rt and "도 채워 줘요" in rt and "발행 단추만 직접" in rt and "새로 고름" in rt
     assert "예약 시각 자동 채움" in (STATIC / "logins.js").read_text(encoding="utf-8")
     assert "예약 날짜·시각도 채워 줘요" in kkumi.USE and "발행 단추는 직접" in kkumi.USE
-    assert kkumi.version() == 8
+    assert kkumi.version() == 9
 
 
 def test_bookmarklet_never_names_or_presses_the_final_publish_button() -> None:
     js = code()
-    book = js[js.index("const p2="):js.index("const tagsOf=")]  # 예약 채움 코드
+    book = js[js.index("let p2="):js.index("let tagsOf=")]  # 예약 채움 코드
     # 발행을 끝내는 단추를 찾는 선택자가 없고, 누르는 곳은 모두 tap 을 거친다 — 누를 것이나 그것을 감싼 단추·링크의 이름에
     # confirm·publish·submit 이 들었거나 종류가 submit 이거나 글자에 발행·확인·등록이 있으면 멈춤
     for word in ("confirm_btn", "seOnePublishBtn", "button[class*='confirm']", "requestSubmit", ".submit(", ".click("):
         assert word not in js, word
-    assert ("const b=e.closest('button,a')||e;if(/confirm|publish|submit/i.test(b.className+b.getAttribute('data-testid')+b.type)"
+    assert ("let b=e.closest('button,a')||e;if(/confirm|publish|submit/i.test(b.className+b.getAttribute('data-testid')+b.type)"
             "||/발행|확인|등록/.test(b.innerText))throw 0;") in book
-    assert book.count("press(") == 2 and "press(e);" in book and "press(r0)" in book  # tap 안 한 번 + 되돌릴 때 '현재' 한 번
+    assert book.count("press(") == 2 and "press(e);" in book and "press(radio(box,'현재'))" in book  # tap 안 한 번 + 되돌릴 때 '현재' 한 번
     assert "'예약'" in book and "'현재'" in book and "fetch(" not in book
     assert "await S(400+Math.random()*400);" in book  # 클릭 사이 사람 속도
 
@@ -207,6 +207,9 @@ def test_bookmarklet_never_names_or_presses_the_final_publish_button() -> None:
 # 발행 설정창에 예약 칸을 더한다 (공개 자료로 아는 모양: 현재/예약 라디오 · 날짜 칸(읽기 전용, 누르면 달력) · 시 00~23 · 분 10분 단위 · 맨 아래 발행 단추).
 # MODE: full = 그대로 · nosel = 시·분이 고르기 칸(select)이 아님 · nocal = 날짜 칸을 눌러도 달력이 안 뜸 ·
 #   trap = 날짜 칸보다 먼저 날짜 글자가 든 단추가 있는데 누르면 발행됨 (이름에는 표시가 없고 글자에만 '발행').
+# v9 (11/18 다음 날 예약 '칸 못 찾음') — jQuery UI 달력처럼: jq = 달력이 발행창 밖(문서 끝 #ui-datepicker-div)에 붙고 날짜 칸에 커서가
+#   가면(focus) 뜸 · 누름은 칸(td)이 받음 · 다른 달 칸은 빈칸 · 날짜를 고르면 발행창이 시·분 고르기 칸과 라디오 글자를 새로 그림(시는 0) ·
+#   toggle = jq 인데 날짜 칸을 누르면 열림/닫힘이 바뀜 (커서로 열린 달력을 누름이 닫음) · wrongday = jq 인데 고른 날 다음 날이 들어감.
 RSV = r"""<script>
 window.rsvLog = {confirm: 0, radio: 0};
 document.querySelector('.publish_btn').addEventListener('click', () => {
@@ -222,7 +225,8 @@ document.querySelector('.publish_btn').addEventListener('click', () => {
     + (MODE === 'nosel' ? '<div class="hour_drop">09시</div><div class="min_drop">00분</div>' : '<select class="hour_option__J"></select>시 <select class="minute_option__V"></select>분')
     + '</div><div class="ui-datepicker" style="display:none"></div><button class="confirm_btn__W" data-testid="seOnePublishBtn">발행</button>';
   tg.append(w);
-  const q = s => w.querySelector(s), p2 = n => String(n).padStart(2, '0'), inp = q('.input_date__Q'), cal = q('.ui-datepicker');
+  const jq = /jq|toggle|wrongday/.test(MODE), q = s => w.querySelector(s), p2 = n => String(n).padStart(2, '0'), inp = q('.input_date__Q');
+  const cal = jq ? document.body.appendChild(Object.assign(document.createElement('div'), {id: 'ui-datepicker-div', className: 'ui-datepicker', style: 'display:none;position:absolute'})) : q('.ui-datepicker');
   const show = () => { inp.value = sel[0] + '. ' + p2(sel[1]) + '. ' + p2(sel[2]); if (MODE === 'trap') q('.date_view__k').innerHTML = inp.value + ' <b>에 발행</b>'; };
   if (MODE === 'trap') q('.date_view__k').onclick = () => { window.rsvLog.confirm++; };
   show();
@@ -233,6 +237,38 @@ document.querySelector('.publish_btn').addEventListener('click', () => {
   }
   for (const r of w.querySelectorAll('input[type=radio]')) r.addEventListener('change', () => { window.rsvLog.radio++; q('.time_setting__v').style.display = q('#radio_time2').checked ? 'block' : 'none'; });
   q('.confirm_btn__W').onclick = () => { window.rsvLog.confirm++; };
+  const opts = () => {
+    q('.hour_option__J').innerHTML = [...Array(24)].map((_, i) => '<option value="' + i + '">' + p2(i) + '</option>').join('');
+    q('.minute_option__V').innerHTML = [0, 10, 20, 30, 40, 50].map(i => '<option value="' + i + '">' + p2(i) + '</option>').join('');
+  };
+  // jq: 날짜를 고르면 시·분 고르기 칸을 새 칸으로 바꾸고(시 0) 라디오 글자도 새로 그림 (옛 칸을 붙잡고 있으면 못 씀)
+  const redraw = () => {
+    for (const c of w.querySelectorAll('select')) c.replaceWith(Object.assign(document.createElement('select'), {className: c.className}));
+    opts();
+    for (const l of w.querySelectorAll('label')) l.replaceWith(l.cloneNode(true));
+  };
+  const jqDraw = () => {
+    const [y, m] = view, first = new Date(y, m - 1, 1), start = new Date(y, m - 1, 1 - first.getDay()), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let h = '<div class="ui-datepicker-header"><a class="ui-datepicker-prev" data-handler="prev" title="이전달"><span>이전달</span></a><a class="ui-datepicker-next" data-handler="next" title="다음달"><span>다음달</span></a>'
+      + '<div class="ui-datepicker-title"><span class="ui-datepicker-year">' + y + '</span>년&nbsp;<span class="ui-datepicker-month">' + m + '월</span></div></div>'
+      + '<table class="ui-datepicker-calendar"><thead><tr>' + '일월화수목금토'.split('').map(x => '<th>' + x + '</th>').join('') + '</tr></thead><tbody>';
+    for (let r = 0; r < 6; r++) {
+      h += '<tr>';
+      for (let c = 0; c < 7; c++) {
+        const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + r * 7 + c);
+        h += d.getMonth() !== m - 1 ? '<td class="ui-datepicker-other-month ui-datepicker-unselectable ui-state-disabled">&nbsp;</td>'
+          : d < today ? '<td class="ui-datepicker-unselectable ui-state-disabled"><span class="ui-state-default">' + d.getDate() + '</span></td>'
+          : '<td class=" " data-handler="selectDay" data-event="click" data-month="' + (m - 1) + '" data-year="' + y + '"><a class="ui-state-default" href="#">' + d.getDate() + '</a></td>';
+      }
+      h += '</tr>';
+    }
+    cal.innerHTML = h + '</tbody></table>';
+    cal.querySelector('.ui-datepicker-next').onclick = () => { view = m === 12 ? [y + 1, 1] : [y, m + 1]; jqDraw(); };
+    for (const td of cal.querySelectorAll('td[data-handler]')) td.onclick = e => {
+      e.preventDefault();
+      sel = [y, m, +td.textContent + (MODE === 'wrongday' ? 1 : 0)]; show(); cal.style.display = 'none'; redraw();
+    };
+  };
   const draw = () => {
     const [y, m] = view, first = new Date(y, m - 1, 1), start = new Date(y, m - 1, 1 - first.getDay()), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     let h = '<div class="ui-datepicker-header"><a class="ui-datepicker-prev" title="이전">‹</a><div class="ui-datepicker-title"><span class="ui-datepicker-year">' + y + '</span>년 <span class="ui-datepicker-month">' + m + '월</span></div><a class="ui-datepicker-next" title="다음">›</a></div><table class="ui-datepicker-calendar"><tbody>';
@@ -249,9 +285,14 @@ document.querySelector('.publish_btn').addEventListener('click', () => {
     cal.querySelector('.ui-datepicker-prev').onclick = () => { view = m === 1 ? [y - 1, 12] : [y, m - 1]; draw(); };
     for (const a of cal.querySelectorAll('a[data-d]')) a.onclick = () => { sel = [y, m, +a.dataset.d]; show(); cal.style.display = 'none'; };
   };
-  inp.onclick = () => { if (MODE === 'nocal') return; view = [sel[0], sel[1]]; draw(); cal.style.display = 'block'; };
+  inp.onclick = () => { if (MODE === 'nocal' || MODE === 'jq') return; view = [sel[0], sel[1]]; (jq ? jqDraw : draw)(); cal.style.display = jq && cal.style.display === 'block' ? 'none' : 'block'; };
+  if (jq) {
+    inp.addEventListener('focus', () => { view = [sel[0], sel[1]]; jqDraw(); cal.style.display = 'block'; });
+    document.addEventListener('mousedown', e => { if (!cal.contains(e.target) && e.target !== inp) cal.style.display = 'none'; });
+  }
   window.rsvState = () => ({now: q('#radio_time1').checked, book: q('#radio_time2').checked, date: inp.value,
-    h: MODE === 'nosel' ? null : q('.hour_option__J').value, m: MODE === 'nosel' ? null : q('.minute_option__V').value, ...window.rsvLog});
+    h: MODE === 'nosel' ? null : q('.hour_option__J').value, m: MODE === 'nosel' ? null : q('.minute_option__V').value,
+    catOpen: document.querySelector('.category_list').style.display !== 'none', ...window.rsvLog});
 });
 </script></body></html>
 """
@@ -262,8 +303,8 @@ def _inner(mode: str) -> str:
     return INNER.replace("</body></html>", RSV.replace("__MODE__", mode))
 
 
-def _pasted(when: datetime | None) -> str:
-    line = _tags_line(["아일릿", "키링"], "셀럽 소식")
+def _pasted(when: datetime | None, cat: str = "셀럽 소식") -> str:
+    line = _tags_line(["아일릿", "키링"], cat)
     return '<p style="text-align:center">첫 글이에요.</p><p>끝 글이에요.</p>' + (kkumi.stamp(line, when.strftime("%Y-%m-%dT%H:%M")) if when else line)
 
 
@@ -329,7 +370,8 @@ def test_bookmarklet_changes_nothing_when_the_layer_looks_different() -> None:
     got = _go("nocal", when)
     r = got["rsv"]
     assert r["now"] is True and r["book"] is False and r["h"] == "9" and r["m"] == "0" and r["confirm"] == 0, r
-    assert r["date"] == _date(datetime.now()) and f"{hint} (칸 못 찾음) — 직접 골라요" in got["alert"], (r, got["alert"])
+    assert r["date"] == _date(datetime.now()) and f"날짜 칸 못 찾음 — {_lab(when)} 직접 골라요" in got["alert"], (r, got["alert"])
+    assert hint not in got["alert"] and " 채움 —" not in got["alert"], got["alert"]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
@@ -339,7 +381,7 @@ def test_bookmarklet_refuses_a_button_that_says_publish() -> None:
     got = _go("trap", when)
     r = got["rsv"]
     assert r["confirm"] == 0 and r["now"] is True and r["book"] is False and r["h"] == "9" and r["date"] == _date(datetime.now()), r
-    assert f"예약 {_lab(when)} 못 채움 (칸 못 찾음) — 직접 골라요" in got["alert"], got["alert"]
+    assert f"날짜 칸 못 찾음 — {_lab(when)} 직접 골라요" in got["alert"], got["alert"]  # v9: 날짜 칸을 누르다 멈춤
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
@@ -366,3 +408,52 @@ def test_bookmarklet_leaves_the_layer_alone_for_a_past_time_or_no_time() -> None
     got = _go("full", None)  # 시각이 안 실린 글 (발행 줄 · 옛 묶음) — 예약 칸을 건드리지 않고 알림에도 없음
     r = got["rsv"]
     assert r["now"] is True and r["radio"] == 0 and r["confirm"] == 0 and "예약" not in got["alert"], (r, got["alert"])
+
+
+# ── v9 (11/18 드라마 글 '예약 11/19 07:30 못 채움 (칸 못 찾음)' — 같은 날 예약은 됐고 다음 날만 안 됨) ─────────────────
+def _run(mode: str, when: datetime, cat: str = "셀럽 소식") -> dict:
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    out = subprocess.run([NODE, "-e", RSV_RUN, _inner(mode), code(), _pasted(when, cat)], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert "태그 2/2" in got["alert"] and got["tags"].split() == ["#아일릿", "#키링"], got["alert"]
+    return got
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_v9_fills_a_next_day_reservation_in_a_jquery_ui_like_picker() -> None:
+    """달력이 발행창 밖에 붙고 커서로 뜨며, 날짜를 고르면 시·분 칸을 새로 그려도 내일 07:30 을 채움 (주인 11/18 그대로)."""
+    when = (datetime.now() + timedelta(days=1)).replace(hour=7, minute=30, second=0, microsecond=0)
+    got = _run("jq", when)
+    r = got["rsv"]
+    assert r["book"] is True and r["now"] is False and r["date"] == _date(when) and r["h"] == "7" and r["m"] == "30" and r["confirm"] == 0, r
+    assert got["alert"].startswith("모두 됐어요") and f"예약 {_lab(when)} 채움 — 발행은 직접" in got["alert"] and "못 채움" not in got["alert"], got["alert"]
+    nxt = (datetime.now().replace(day=1) + timedelta(days=32)).replace(day=3, hour=21, minute=0, second=0, microsecond=0)  # 다음 달 (다음달 단추)
+    r = _run("jq", nxt)["rsv"]
+    assert r["book"] is True and r["date"] == _date(nxt) and r["h"] == "21" and r["m"] == "0" and r["confirm"] == 0, r
+    r = _run("toggle", when)["rsv"]  # 커서로 열린 달력을 누름이 닫음 → 한 번 더 눌러 엶
+    assert r["book"] is True and r["date"] == _date(when) and r["h"] == "7" and r["m"] == "30" and r["confirm"] == 0, r
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_v9_never_leaves_a_wrong_date() -> None:
+    """누른 날과 다른 날이 들어가면 예약을 '현재'로 되돌리고 '날짜 칸 못 찾음 — 11/19 07:30 직접 골라요' 만."""
+    when = (datetime.now() + timedelta(days=1)).replace(hour=7, minute=30, second=0, microsecond=0)
+    got = _run("wrongday", when)
+    r = got["rsv"]
+    assert r["now"] is True and r["book"] is False and r["confirm"] == 0, r
+    assert f"\n날짜 칸 못 찾음 — {_lab(when)} 직접 골라요" in got["alert"] and "채움 —" not in got["alert"] and "못 채움" not in got["alert"], got["alert"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_v9_missing_category_still_fills_the_reservation() -> None:
+    """카테고리가 목록에 없으면 연 목록을 닫고 알림은 그대로 · 예약은 채움 (11/18 '명작 다시 보기')."""
+    when = (datetime.now() + timedelta(days=1)).replace(hour=7, minute=30, second=0, microsecond=0)
+    got = _run("jq", when, cat="명작 다시 보기")
+    r = got["rsv"]
+    assert "카테고리 목록에 없음 (명작 다시 보기)" in got["alert"] and got["cat"] == "셀럽 패션", got["alert"]
+    assert r["catOpen"] is False, r  # 연 목록은 닫음
+    assert r["book"] is True and r["date"] == _date(when) and r["h"] == "7" and r["m"] == "30" and r["confirm"] == 0, r
+    assert f"예약 {_lab(when)} 채움 — 발행은 직접" in got["alert"], got["alert"]

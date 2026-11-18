@@ -41,7 +41,7 @@ def code() -> str:
 def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     src = kkumi.SRC.read_text(encoding="utf-8")
     js = code()
-    assert js == kkumi.minify(src) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
+    assert js == kkumi.minify(src, let=True) and len(js) < len(src) * 0.85 and "/*" not in js and "\n//" not in js
     # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB · 11/09 25.9KB 돎 → 카테고리 넣으며 28KB 안 · 주인 확인)
     # 11/14 v6 예약 시각 채움 +5.5KB → 33.4KB (32KB 를 넘는 길이는 아이패드에서 저장해 본 적 없음) → 11/15 마지막 검토: 주소에 그대로 써도 되는
     # 글자(; / ? : @ & = + $ ,)를 % 로 바꾸지 않아(encode_short) 29.1KB — 아이패드에서 돈 v5(27.9KB)보다 1.3KB 김 · 주인 확인 필요
@@ -62,16 +62,19 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     assert kkumi.check_line().endswith(f"맨 아래가 v{kkumi.version()} 이면 새 판이에요.") and "'\\nv' + V);" in kkumi.SRC.read_text(encoding="utf-8")  # 끝 알림 맨 아래 v8 (11/17)
     assert [s.split()[0] for s in kkumi.STEPS] == ["사파리에서", "'책갈피", "책갈피"] and "공유 단추" in kkumi.STEPS[0] and "주소 칸" in kkumi.STEPS[2]  # 쉬운 3단계
     # 판 번호 (주인 11/14 — 끝 알림 'v5' · 지문은 코드가 바뀌면 달라짐) · 글꼴 살피기(나눔명조 — 주인이 취소)는 넣지 않음
-    assert kkumi.version() >= 5 and f"const V={kkumi.version()};" in js and "'\\nv'+V" in js
+    assert kkumi.version() >= 5 and f"let V={kkumi.version()};" in js and "const " not in js and "'\\nv'+V" in js
     assert len(kkumi.ver()) == 10 and kkumi.ver() == __import__("hashlib").sha256(kkumi.bookmarklet().encode()).hexdigest()[:10]
     assert "se-ff-" not in js and "글꼴" not in js
 
 
 def test_minify_keeps_strings_and_word_gaps() -> None:
-    assert kkumi.minify("/* 머리 */\n  // 주석\nconst a = 'x  y' + \"p q\";\n\n  if (a) return b;\nawait  S(1);") == \
-        "const a='x  y'+\"p q\";if(a)return b;await S(1);"  # ';' 로 끝난 줄은 이어 붙임 (11/09)
+    assert kkumi.minify("/* 머리 */\n  // 주석\nconst a = 'x  y' + \"p q\";\n\n  if (a) return b;\nawait  S(1);", let=True) == \
+        "let a='x  y'+\"p q\";if(a)return b;await S(1);"  # ';' 로 끝난 줄은 이어 붙임 (11/09)
     assert kkumi.minify("if (a) {\n  b();\n}\nc();") == "if(a){b();}\nc();"  # '}' 뒤는 줄바꿈 그대로
-    assert kkumi.minify("const s = '\\' a';") == "const s='\\' a';"  # 따옴표 안 역슬래시
+    assert kkumi.minify("const s = '\\' a';", let=True) == "let s='\\' a';"  # 따옴표 안 역슬래시
+    # v9: 따옴표 밖 'const ' 만 'let ' 으로 (따옴표 안·이름 끝은 그대로)
+    assert kkumi.minify("const t = 'const a'; for (const k of x) myconst = 1;", let=True) == "let t='const a';for(let k of x)myconst=1;"
+    assert kkumi.minify("const a = 1;") == "const a=1;"  # 다른 책갈피(통계·한 번에·서이추 등)는 그대로
 
 
 @needs_node
@@ -153,7 +156,7 @@ document.querySelector("[data-name='oglink']").onclick = () => {
 document.querySelector('.se-canvas-bottom-button').onclick = () => { inPostit = null; add(comp('se-text', '<div class="se-section se-section-align-' + align + '"><p class="se-text-paragraph"></p></div>')); };
 document.querySelector('.publish_btn').onclick = () => { if (document.getElementById('tg')) return; const d = document.createElement('div'); d.id='tg'; d.innerHTML='<div class="option_category"><button>셀럽 패션</button></div><ul class="category_list" style="display:none"><li><span>셀럽 패션</span></li><li><span>ㄴ 하위 카테고리 셀럽 소식</span></li><li><label><span style=\"position:absolute;width:1px;height:1px;overflow:hidden\">하위 카테고리</span>드라마 패션</label></li><li><span>드라마, 예능</span></li></ul><span class="chips"></span><input class="tag_input">'; document.body.append(d);
   const cb = d.querySelector('.option_category button'), ul = d.querySelector('.category_list');
-  cb.onclick = () => { ul.style.display = 'block'; };
+  cb.onclick = () => { ul.style.display = ul.style.display === 'none' ? 'block' : 'none'; };  // 누르면 열고 한 번 더 누르면 닫힘
   ul.querySelectorAll('li').forEach(li => { li.onclick = () => { cb.textContent = li.textContent.replace(/ㄴ 하위 카테고리 |하위 카테고리/, ''); ul.style.display = 'none'; }; });
   d.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { d.querySelector('.chips').textContent += ' #' + e.target.value; e.target.value=''; } }); };
 </script></body></html>
