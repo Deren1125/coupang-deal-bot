@@ -18,7 +18,7 @@ const CSS = '.xr .r{display:flex;align-items:center;gap:8px;min-height:40px;font
 const NW = {target: '_blank', rel: 'noopener'}, CARD_ROWS = 5;
 const SORTS = [['rank', '인기순'], ['views', '조회순'], ['replies', '댓글 많은 순'], ['move', '급상승']];
 const ONE = [[0, 4351], [8192, 8205], [8208, 8223], [8242, 8247]];
-let ST = null, at = 0, loading = false, card = null, scr = null, tt = null, poll = null, polls = 0, asked = 0, sort = 'rank', showHidden = false, showAbroad = false, jump = false, err = null, made = '';
+let ST = null, at = 0, loading = false, card = null, scr = null, tt = null, poll = null, polls = 0, asked = 0, sort = 'rank', showHidden = false, showAbroad = false, jump = false, err = null, made = '', pend = null;
 const busy = {};
 let F = {topic: '', memo: '', tone: 'eum', length: 'normal', tags: false, trend: '', ed: {}};
 try { const o = JSON.parse(W.localStorage.getItem('xr1') || 'null'); if (o && typeof o === 'object') F = Object.assign(F, o, {ed: o.ed && typeof o.ed === 'object' ? o.ed : {}}); } catch (e) { /* 저장본 없음 */ }
@@ -73,10 +73,23 @@ async function call(path, body) {
     return {s: r.status, d};
   } catch (e) { return {s: 0, d: {text: '연결이 끊겼어요 — 다시 눌러 주세요'}}; }
 }
-const take = d => { if (d && d.v && Array.isArray(d.rows)) { ST = d; at = Date.now(); for (const s of d.mine || []) for (const x of s.drafts) x.until = at + (x.undo_s || 0) * 1000; } };
+const take = d => { if (d && d.v && Array.isArray(d.rows)) { ST = d; at = Date.now(); for (const s of d.mine || []) for (const x of s.drafts) x.until = at + (x.undo_s || 0) * 1000; settle(); } };
+function settle() {  // 연결이 끊긴 뒤(폰 화면 꺼짐·느린 서버) 서버가 계속 쓴 초안을 기다림 (주인 11/18 '눌렀는데 아무것도 안 나옴')
+  if (!pend || !ST) return;
+  const s = (ST.mine || []).find(x => !pend.ids.has(x.id));
+  if (s) { pend = null; err = null; made = s.id; toast('초안을 만들었어요 — 바로 아래 「내 초안」에 있어요'); return; }
+  if (ST.run) return;  // 아직 쓰는 중 — 4초마다 다시 봄
+  if (ST.fail && !ST.fail.photo && JSON.stringify(ST.fail) !== pend.fail) { pend = null; err = null; return; }  // 서버가 남긴 이번 실패 이유를 보여 줌
+  lost();
+}
+function lost() {  // 서버도 안 쓰고 있고 초안·실패 기록도 없음 = 부탁이 서버에 안 닿음
+  pend = null;
+  err = {text: '초안이 오지 않았어요 — [다시 해 보기]를 눌러 주세요', topic: F.topic.trim(), code: 'lost'};
+}
 function watch() {  // 서버가 뒤에서 새로 보는 동안만 4초마다 (30번까지)
   clearTimeout(poll);
-  if (ST && (ST.busy || (ST.run && !busy.mk)) && polls < 30) poll = setTimeout(() => { polls++; load(); }, 4000);
+  if (pend && (Date.now() > pend.until || polls >= 45)) { lost(); drawScr(true); }
+  if (ST && (ST.busy || (ST.run && !busy.mk) || pend) && polls < 45) poll = setTimeout(() => { polls++; load(); }, 4000);
 }
 async function load() {
   if (loading) return;
@@ -88,7 +101,9 @@ async function load() {
   // 15분 넘은 순위면 한 번 새로 보기 (이 화면에서 10분에 한 번만 부름 — 서버도 같은 사이로 막음)
   if (ST && ST.on && ST.stale && !ST.busy && !ST.wait_s && Date.now() - asked > 600000) { asked = Date.now(); refresh(true); }
   draw(); watch();
+  if (made && !busy.mk) jumpMade();
 }
+function jumpMade() { const m = D.getElementById('xrm-' + made); made = ''; if (m && m.scrollIntoView) m.scrollIntoView({block: 'start'}); }
 async function refresh(quiet) {
   if (busy.rf) return;
   busy.rf = true; draw();
@@ -134,6 +149,8 @@ function toForm() {
 // -- 초안
 async function make() {
   if (busy.mk) return;
+  const ids = new Set(((ST && ST.mine) || []).map(s => s.id)), prevFail = JSON.stringify((ST && ST.fail) || null);
+  pend = null; err = null;
   const lim = (ST && ST.lim) || {topic: [2, 80], memo: 600}, topic = F.topic.trim();
   if (topic.length < lim.topic[0] || topic.length > lim.topic[1]) return toast(`주제는 ${lim.topic[0]}~${lim.topic[1]}자로 적어 주세요`);
   if (F.memo.length > lim.memo) return toast(`하고 싶은 말은 ${lim.memo}자까지예요`);
@@ -143,11 +160,15 @@ async function make() {
   busy.mk = '';
   take(r.d);
   // 주인 11/17 '초안이 안 뜸 — 어디서 보는지 모름': 실패는 칸 안에 남기고(다시 단추), 만든 초안은 아래 '내 초안'으로 내려가 보여 줌
-  err = r.s === 200 ? null : {text: r.d.text || '초안을 쓰지 못했어요 — 잠시 뒤 다시', topic, code: r.d.code || ''};
+  // 서버가 이유를 준 실패(code 있음)는 그대로 · 연결이 끊긴 것(0·프록시 오류)은 서버가 아직 쓰는 중일 수 있어 상태를 다시 보며 기다림
+  const cut = r.s !== 200 && !r.d.code && r.s !== 401 && r.s !== 403;
+  err = r.s === 200 ? null : cut ? {text: '연결이 잠깐 끊겼어요 — 서버가 계속 쓰는 중인지 보고 있어요', topic, code: 'net'}
+    : {text: r.d.text || '초안을 쓰지 못했어요 — 잠시 뒤 다시', topic, code: r.d.code || ''};
   made = r.s === 200 ? r.d.made || '' : '';
-  toast(r.s === 200 ? '초안을 만들었어요 — 아래 「내 초안」에 있어요' : err.text);
+  if (!cut) toast(r.s === 200 ? '초안을 만들었어요 — 바로 아래 「내 초안」에 있어요' : err.text);
   drawScr(true);
-  if (made) { const m = D.getElementById('xrm-' + made); if (m && m.scrollIntoView) m.scrollIntoView({block: 'start'}); }
+  if (made) jumpMade();
+  if (cut) { pend = {ids, fail: prevFail, until: Date.now() + 240000}; polls = 0; ST && (ST.run = ST.run || {topic, at: ''}); load(); }
 }
 const txt = (s, i, d) => { const v = F.ed[s.id + ':' + i]; return String(v != null ? v : d.text); };
 async function posted(s, i, d, ev) {
@@ -181,14 +202,16 @@ function form() {
       oninput: e => { F.memo = e.target.value; keep(); }}),
     el('div', {class: 'opt'}, seg('tone', ST.tones)), el('div', {class: 'opt'}, seg('length', ST.lengths),
       el('label', {class: 'ck'}, el('input', {type: 'checkbox', checked: !!F.tags, onchange: e => { F.tags = e.target.checked; keep(); }}), '해시태그')),
-    btn('pb', busy.mk || ST.run ? '쓰는 중… 30초~1분 걸려요' : '초안 만들기', make, {disabled: !!busy.mk || !!ST.run || ST.left <= 0 || null}),
+    btn('pb', busy.mk || ST.run || pend ? '쓰는 중… 30초~1분 걸려요' : '초안 만들기', make, {disabled: !!busy.mk || !!ST.run || !!pend || ST.left <= 0 || null}),
     failBox(),
-    ST.run && !busy.mk ? el('p', {class: 'note'}, `「${ST.run.topic}」 초안을 쓰는 중이에요 (${ST.run.at} 시작) — 다 되면 아래 「내 초안」에 떠요`) : null,
+    busy.mk || ST.run || pend ? el('p', {class: 'note', role: 'status'}, `⏳ 「${(ST.run && ST.run.topic) || F.topic.trim()}」 초안을 쓰는 중이에요${ST.run && ST.run.at ? ` (${ST.run.at} 시작)` : ''}` +
+      ' — 화면을 닫아도 서버는 계속 써요 · 다 되면 바로 아래 「내 초안」에 떠요') : null,
+    ST.left <= 0 && !ST.run ? el('p', {class: 'w'}, '오늘 초안 횟수를 다 썼어요 — 내일 다시 쓸 수 있어요') : null,
     el('p', {class: 'note'}, `오늘 초안 ${ST.left}번 남음 · 초안 ${ST.model} · 내가 적은 주제·메모는 바깥 검색에 쓰지 않아요`));
 }
 function failBox() {  // 마지막 실패 (이 기기 것 또는 서버가 기억한 것 — 새로 고쳐도 남음, 그 뒤 초안이 생기면 사라짐)
   const f = err || (ST.fail && !ST.fail.photo ? ST.fail : null);  // 사진으로 쓴 것의 실패는 그 칸(xphoto.js)에
-  if (!f || busy.mk) return null;
+  if (!f || busy.mk || (f.code === 'net' && (pend || ST.run))) return null;  // 끊긴 뒤 서버가 아직 쓰는 중이면 '쓰는 중'만
   const wait = f.wait_s ? ` (${Math.ceil(f.wait_s / 60)}분 남음)` : '';
   return el('section', {class: 'box', role: 'alert', id: 'xrfail'}, el('p', {class: 'w'}, `✗ ${f.at ? f.at + ' · ' : ''}「${f.topic || F.topic}」 초안을 못 썼어요 — ${f.text}${wait}`),
     el('div', {class: 'rw'}, btn('pb soft', '다시 해 보기', () => { if (f.topic && !F.topic.trim()) F.topic = f.topic; err = null; make(); }, {disabled: f.code === 'ai_limit' && f.wait_s > 0 || null}),
@@ -238,11 +261,14 @@ function drawScr(force) {
       showHidden ? el('section', {class: 'box'}, hid.map(h => el('p', {class: 'hd'}, `${h.kw} · ${h.why} — 숨김`))) : null] : null,
     el('p', {class: 'note', style: 'margin:0 0 10px'}, '조회·답글 수는 주제마다 좋아요 20 넘는 X 글 20개까지 더한 값이에요 (X 전체 글 수 아님) · 오른 정도는 약 1시간 전 순위와 견줘요'),
     abroad(),
-    el('p', {class: 'grp'}, '내 주제로 글 쓰기'), form(),
-    W.SBXPhoto ? W.SBXPhoto.form() : null,
+    el('p', {class: 'grp'}, '내 주제로 글 쓰기'),
+    el('p', {class: 'note'}, '① 주제 한 줄 ② 하고 싶은 말(방향·내용) 적고 [초안 만들기] → 30초~1분 뒤 바로 아래 「내 초안」에 초안 3개가 떠요'),
+    form(),
+    // 주인 11/18: 초안이 '사진으로 글 쓰기' 칸 밑에 있어 안 보였음 → 글 쓰기 칸 바로 아래로
     el('p', {class: 'grp', id: 'xrmine'}, `내 초안 · 오늘 ${mine.length}묶음`),
     mine.length ? null : el('p', {class: 'note'}, '아직 오늘 만든 초안이 없어요 — [초안 만들기]로 만든 초안은 여기 남아요 (새로 고쳐도 · 오늘 것)'),
     mine.map(s => [el('p', {class: 'sub', id: 'xrm-' + s.id}, `${s.at} · ${s.topic}`), pics(s), s.drafts.map((d, i) => draftCard(s, i, d))]),
+    W.SBXPhoto ? W.SBXPhoto.form() : null,
   ].flat(9).filter(Boolean));
   if (jump) toForm();
 }

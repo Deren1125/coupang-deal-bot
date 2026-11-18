@@ -6,11 +6,8 @@ Claude Code CLI(`claude -p`, 한줄평과 같은 것)로 쓴다. 둘 다 없으�
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -18,7 +15,10 @@ from typing import Any
 
 import anthropic
 
-from dealbot import commentary  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+from dealbot import (  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+    cli_env,
+    commentary,
+)
 from dealbot.config import posted_api_model, posted_cli_model
 
 log = logging.getLogger(__name__)
@@ -278,20 +278,9 @@ class InfoSummarizer:
             return None, "서버 claude CLI 없음"
         args = [self.cli_bin, "-p", "--output-format", "json", "--model", posted_cli_model(self.cli_model, where="summarizer")]
         args += ["--system-prompt", system, "--tools", ""]
-        proc: asyncio.subprocess.Process | None = None
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env=os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
-            )
-            out, err = await asyncio.wait_for(proc.communicate(user.encode()), timeout=self.cli_timeout)
+        try:  # .env 구독 토큰이 끊겼으면 토큰 없이 한 번 더 (cli_env, 11/18)
+            rc, out, err = await cli_env.run(args, user.encode(), self.cli_timeout)
         except TimeoutError:
-            if proc is not None:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), timeout=5)
             self.last_error = f"claude CLI 시간 초과 ({self.cli_timeout:.0f}초)"
             log.warning("summarizer cli: timed out after %.0fs", self.cli_timeout)
             return None, self.last_error
@@ -299,10 +288,6 @@ class InfoSummarizer:
             self.last_error = f"claude CLI 실행 실패 ({e.strerror or e})"
             log.warning("summarizer cli: could not start: %s", e)
             return None, self.last_error
-        finally:
-            if proc is not None and proc.returncode is None:  # 취소(종료·스케줄러 정지)될 때도 CLI 가 남지 않게
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
         try:
             payload = json.loads(out.decode("utf-8", "replace") or "{}")
         except ValueError:
@@ -311,7 +296,7 @@ class InfoSummarizer:
             payload = next((m for m in reversed(payload) if isinstance(m, dict) and m.get("type") == "result"), None)
         if not isinstance(payload, dict) or not payload:
             self.last_error = "claude CLI 응답을 읽지 못함"
-            log.warning("summarizer cli: unreadable output (exit %s): %s", proc.returncode, err.decode("utf-8", "replace")[:200])
+            log.warning("summarizer cli: unreadable output (exit %s): %s", rc, err.decode("utf-8", "replace")[:200])
             return None, self.last_error
         result = payload.get("result")
         if payload.get("is_error"):

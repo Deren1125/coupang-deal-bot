@@ -7,18 +7,19 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
+import asyncio  # noqa: F401 — 시험이 llm_json.asyncio.create_subprocess_exec 를 갈아 끼움 (실행은 cli_env.spawn)
 import json
 import logging
-import os
 import re
 import time
 from typing import Any
 
 import anthropic
 
-from dealbot import commentary  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+from dealbot import (  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+    cli_env,
+    commentary,
+)
 from dealbot.config import posted_api_model, posted_cli_model
 from dealbot.summarize import _CLI_AUTH, CLI_AUTH_RETRY_SECONDS
 
@@ -141,24 +142,12 @@ class JsonAsker:
             args[2:4] = ["--output-format", "stream-json", "--input-format", "stream-json", "--verbose"]
             user = json.dumps({"type": "user", "message": {"role": "user", "content": [*image_blocks(images), {"type": "text", "text": user}]}},
                               ensure_ascii=False) + "\n"
-        proc: asyncio.subprocess.Process | None = None
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env=os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
-            )
-            out, err = await asyncio.wait_for(proc.communicate(user.encode()), timeout=self.timeout)
+        try:  # .env 구독 토큰이 끊겼으면 토큰 없이 한 번 더 (서버 claude 로그인 — cli_env, 11/18)
+            rc, out, err = await cli_env.run(args, user.encode(), self.timeout)
         except TimeoutError as e:
             raise LLMError(f"claude CLI 시간 초과 ({self.timeout:.0f}초)") from e
         except OSError as e:
             raise LLMError(f"claude CLI 실행 실패 ({e.strerror or e})") from e
-        finally:
-            if proc is not None and proc.returncode is None:  # 시간 초과·취소 때 CLI 가 남지 않게 (요약기와 같음)
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), timeout=5)
         try:
             payload = json.loads(out.decode("utf-8", "replace") or "{}")
         except ValueError:
@@ -169,7 +158,10 @@ class JsonAsker:
             raw = (out.decode("utf-8", "replace") + "\n" + err.decode("utf-8", "replace"))[:2000]
             if _CLI_LIMIT.search(raw):  # 한도면 CLI 가 JSON 대신 한 줄만 낼 때가 있다
                 raise LLMError(f"{LIMIT_TAG} ({limit_text(raw) or '풀리는 때 모름'})")
-            log.warning("nl cli: unreadable output (exit %s): %s", proc.returncode if proc else "?", err.decode("utf-8", "replace")[:200])
+            if cli_env.AUTH_HINTS.search(raw):  # 인증 오류를 JSON 없이 한 줄로 낼 때 — '읽지 못함' 대신 로그인 풀림으로
+                self._cli_down_until = time.monotonic() + CLI_AUTH_RETRY_SECONDS
+                raise LLMError("서버 claude CLI 로그인이 풀림")
+            log.warning("nl cli: unreadable output (exit %s): %s", rc, err.decode("utf-8", "replace")[:200])
             raise LLMError("claude CLI 응답을 읽지 못함")
         usage = payload.get("modelUsage")
         self.last_cli_models = [str(k)[:80] for k in usage] if isinstance(usage, dict) else []

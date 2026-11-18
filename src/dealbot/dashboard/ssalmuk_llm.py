@@ -225,7 +225,7 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
         return _j(200, {"ok": True, "model": model, "response": data})
 
     async def claude(body: dict[str, Any]) -> Any:
-        from dealbot import commentary
+        from dealbot import cli_env, commentary
         from dealbot.dashboard.xstudio import alias_env_problem
         from dealbot.summarize import _CLI_AUTH, CLI_AUTH_RETRY_SECONDS
 
@@ -261,10 +261,10 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
                 return limit
             sys_text = (system.strip() if isinstance(system, str) and system.strip() else DEFAULT_SYSTEM) + (JSON_SUFFIX if want_json else "")
             args = [str(cli), "-p", "--output-format", "json", "--model", model, "--system-prompt", sys_text, *CLI_FLAGS, "--tools", ""]
-            env = os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_tokens)}
             left = max(5.0, TIMEOUT - (time.monotonic() - t0))
             try:
-                code, out, _err = await run_cli(args, prompt.encode("utf-8"), left, env)
+                code, out, _err = await cli_env.with_fallback(lambda e: run_cli(args, prompt.encode("utf-8"), left, e),  # 끊긴 .env 토큰 (11/18)
+                                                              cli_env.cli_env({"CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_tokens)}))
             except TimeoutError:
                 note("claude", model, "timeout", body, 0, t0)
                 return _j(502, {"code": "claude_error", "status": 0, "text": "claude CLI 시간 초과"})

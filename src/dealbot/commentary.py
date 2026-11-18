@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from dealbot import cli_env
 from dealbot.config import posted_cli_model
 from dealbot.models import Deal
 from dealbot.utils.text import clean_name
@@ -376,36 +377,26 @@ class Commentator:
 
     async def _ask(self, user: str) -> dict[str, Any] | None:
         """CLI 를 불러 정해진 칸(dict)을 돌려준다. 실패(실행 안 됨·시간 초과·오류 응답)는 None, 칸 없이 말로만 답하면 {}."""
-        proc = None
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                self.bin, "-p", "--output-format", "json", "--model", posted_cli_model(self.model, where="commentary"),
-                "--system-prompt", SYSTEM, "--tools", "", "--json-schema", json.dumps(SCHEMA, ensure_ascii=False),
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env=os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
-            )
-            out, err = await asyncio.wait_for(proc.communicate(user.encode()), timeout=self.timeout)
+        args = [self.bin, "-p", "--output-format", "json", "--model", posted_cli_model(self.model, where="commentary"),
+                "--system-prompt", SYSTEM, "--tools", "", "--json-schema", json.dumps(SCHEMA, ensure_ascii=False)]
+        try:  # .env 구독 토큰이 끊겼으면 토큰 없이 한 번 더 (cli_env, 11/18)
+            rc, out, err = await cli_env.run(args, user.encode(), self.timeout)
         except TimeoutError:
-            await self._kill(proc)
             return self._fail(f"TimeoutError ({self.timeout:g}초 안에 답이 없음)")
         except OSError as e:
             return self._fail(f"{type(e).__name__}: {e}")
-        finally:
-            if proc is not None and proc.returncode is None:  # 취소될 때도 CLI 가 남지 않게
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
         text = out.decode(errors="replace").strip()
         why = err.decode(errors="replace").strip()[:300]
         if not text:
-            return self._fail(f"exit {proc.returncode}, 출력 없음: {why or '-'}")
+            return self._fail(f"exit {rc}, 출력 없음: {why or '-'}")
         try:
             payload = json.loads(text)
         except ValueError:
-            return self._fail(f"exit {proc.returncode}, JSON 아님: {(why or text)[:300]}")
+            return self._fail(f"exit {rc}, JSON 아님: {(why or text)[:300]}")
         if isinstance(payload, list):  # verbose 설정이면 메시지 목록으로 나옴 → 마지막 result 만 본다
             payload = next((m for m in reversed(payload) if isinstance(m, dict) and m.get("type") == "result"), None)
         if not isinstance(payload, dict):
-            return self._fail(f"exit {proc.returncode}, 모르는 출력 모양: {text[:200]}")
+            return self._fail(f"exit {rc}, 모르는 출력 모양: {text[:200]}")
         if payload.get("is_error"):
             return self._fail(f"오류 응답: {str(payload.get('result'))[:200]}")
         self._ok()
