@@ -679,13 +679,17 @@ dashboard:
     enabled: true
     per_day: 3                     # 하루 카드 수 (본문 캡처 1~2장 + 한 줄 초안)
     times: ["11:40", "16:40", "20:40"]
-    sources: [bobaedream, ppomppu] # robots.txt 허용·로그인 없음·서버에서 열리는 곳만. dcinside 는 기본 끔 · 네이트판(robots 막음)·인스티즈(사람 확인)·클리앙·루리웹(서버 IP 막힘)은 없음
+    sources: [bobaedream, ppomppu, dcinside] # robots.txt 허용·로그인 없음·서버에서 열리는 곳만. 디시 실베는 11/18 켬(더 세게 거름) · 네이트판(robots 전부 막음)·더쿠·에펨(보안 화면)·오유(사람 확인)·엠팍(robots)·웃대(쿠키 필요)·82cook(연결 끊김)·인스티즈·클리앙·루리웹은 없음
   x_aggro:                         # X 어그로 후보 (주인 11/17 — dashboard/xaggro.py · SNS 탭 X 칸 '어그로 후보' 카드 · 올리기는 주인 손)
     enabled: true
     per_day: 6                     # 하루 카드 수 (캡처 1~2장 + 훅·요약·'출처: 사이트' 초안)
     per_run: 2                     # 한 번에 만드는 수 (캡처는 하나씩 차례로)
     times: ["09:20", "13:20", "17:20", "21:20"]
-    sources: [bobaedream, ppomppu] # x_cap 과 같은 출처 이름 · 막힌 곳(403 등)은 7일 쉼 · 우회 없음
+    sources: [bobaedream, ppomppu, dcinside] # x_cap 과 같은 출처 이름 · 막힌 곳(403 등)은 7일 쉼 · 우회 없음
+    pann_news: true                # 네이트판 화제 기사 — 판 글은 열지 않고(robots 막음) 네이버 뉴스 검색으로 판 화제를 다룬 기사만 (출처 = 언론사). 폰에서 본 판 글은 '사진으로 글 쓰기'
+    pann_queries: ["네이트판 화제", "네이트판 사연", "네이트판 글 누리꾼"]
+    pann_per_day: 8                # 하루 뉴스 검색 수
+    pann_per_run: 1                # 한 번에 기사 카드 수
     min_score: 15                  # 시간당 댓글×3 + 추천×2 + 조회/100 (뜨는 주제면 최대 +50%) 가 이보다 낮으면 안 만듦
     max_age_h: 24
     min_free_mb: 400               # 여유 메모리가 이보다 적으면 쉼

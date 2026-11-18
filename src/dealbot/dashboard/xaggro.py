@@ -14,6 +14,12 @@ xcap 은 '지금까지 쌓인 반응'이 큰 글 하나 + 한 줄 · 여기는 '
   4) 주제 가산: '지금 뜨는 주제'(xtrend) 순위의 낱말이 제목에 있으면 1위 +50% … 10위 +5% (xtrend 는 읽기만 — 새로 부르지 않음 · 6시간 넘은 순위는 안 씀).
   5) 점수 큰 순으로 글을 열어(한 번에 per_run + 2 개까지) 본문 규칙을 한 번 더 보고 → AI(Studio.ask — Opus 까지 · Fable 이면 안 부름 · DRAFT_PER_DAY 같이 셈)가
      한 번 더 판단(ok=false 면 버림) + 초안 → 캡처 (XCap.capture — 본문 칸만 · 닉네임·프로필·등급·IP·전화번호·이메일·@아이디 모자이크).
+  6) strict 출처(디시 실베 — 주인 11/18 켜기)는 제목·본문 규칙에 xcap.STRICT_RE·말머리까지 · AI 에 디시 전용 규칙 + sure=true 일 때만 (애매하면 버림).
+네이트판 화제 기사 (주인 11/18 '네이트판은 꼭' — 규칙 안에서): pann.nate.com 의 robots.txt 는 'User-agent: * Disallow: /' (검색봇 몇 개에만 일부 허용 ·
+  랭킹·톡 주소 모두 금지 · RSS 도 없음) → 판 글은 열지 않는다. 대신 네이버 뉴스 검색 API(xtoday.NaverNews — 키만, 계정 로그인 아님)로
+  '네이트판' 화제 글을 다룬 기사를 찾아 (cfg.pann_queries · 하루 pann_per_day 번 · 한 번에 pann_per_run 장) 기사 제목·검색 요약만 AI 에 주고 초안 —
+  카드의 출처·링크는 그 기사(언론사)다. 기사 페이지·판 페이지는 열지 않고, 그림은 초안 글로 만든 글자 그림 한 장 (기사 문장을 옮기지 않음).
+  주인이 폰에서 본 판 글은 폰으로 캡처해서 '사진으로 글 쓰기'(xphoto · #/sns/xr/w)에 올리면 모자이크 + 초안 — 그 길이 판 글을 쓰는 길이다.
 메모리: 크롬은 한 번에 하나 (register 가 xcap 과 같은 자물쇠로 묶음) · xcap 이 도는 중이면 미룸 · Blog-Auto 감시꾼의 var/mem_pressure 표시가 살아 있거나
   여유 메모리가 min_free_mb 아래면 그 차례는 쉰다 (표시가 풀리면 다음 1분 일에서).
 가림은 어림이다 (xblur 머리말) — 카드에 '올리기 전에 확인'을 늘 보여 준다.
@@ -37,9 +43,10 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urlsplit
 from urllib.robotparser import RobotFileParser
 
+from dealbot.dashboard import xblur
 from dealbot.dashboard import xcap as xc
 from dealbot.dashboard import xstudio as xs
 from dealbot.dashboard import xtoday as xt
@@ -62,6 +69,9 @@ KEEP_S = 3 * 86400
 HOOK_MAX = 60
 LINE_MAX = 90
 LINES_MAX = 3
+PANN_RE = re.compile(r"네이트\s*판|판\s*(?:게시판|커뮤니티)|'판'|‘판’|\"판\"")  # 기사가 네이트판 글을 다룬다는 표시
+PANN_SITE = "네이트판 화제 기사"
+KV_PANN = "xaggro_pann"  # {"day", "calls": 오늘 뉴스 검색 수}
 COPY_RUN = 20  # 초안 한 줄이 원문과 이만큼(빈칸 뺀 글자) 이어서 같으면 베낀 줄로 보고 뺌
 ID_RE = re.compile(r"^a[0-9a-f]{9}$")
 IMG_RE = re.compile(r"^(a[0-9a-f]{9})-([12])\.jpg$")
@@ -90,14 +100,32 @@ SYSTEM = """너는 한국 X(트위터) 계정 주인의 글 초안 담당이다.
 - 해시태그·@·링크 금지, 이모지는 0~1개. 좋아요·리포스트·팔로우 부탁 금지. 출처 줄은 쓰지 않는다 (서버가 '출처: 사이트 이름'을 붙인다).
 - angle: 이 글에 왜 반응이 붙는지 한 줄 (주인이 볼 설명).
 JSON 만 답한다: {"ok": true, "why": "", "hook": "첫 줄", "body": "요약 줄들 (줄바꿈으로)", "angle": "왜 뜰까 한 줄"}"""
+PANN_NOTE = """[네이트판 화제 기사] 이 [글] 은 네이트판 글이 아니라, 판에서 화제가 된 글을 다룬 뉴스 기사의 제목·검색 요약이다.
+- 기사에 있는 내용만 쓴다 (판 원문을 본 것처럼 쓰지 않는다 · 지어내지 않는다). 기사 문장을 그대로 옮기지 않는다.
+- 판 글은 시댁·남편·연애 갈등, 특정인 고발이 많다 — 위 [먼저 판단] 기준을 그대로, 애매하면 ok=false."""
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}, "why": {"type": "string"}, "hook": {"type": "string"}, "body": {"type": "string"},
                                            "angle": {"type": "string"}}, "required": ["ok", "why", "hook", "body", "angle"]}
 
 
-def risk_why(*texts: str) -> str:
-    """후보에서 뺄 글이면 까닭 (xcap.bad_why + 미성년자·범죄 피해·지목 고발), 아니면 ''."""
+def risk_why(*texts: str, strict: bool = False) -> str:
+    """후보에서 뺄 글이면 까닭 (xcap.bad_why + 미성년자·범죄 피해·지목 고발 · strict 면 디시 규칙까지), 아니면 ''."""
     t = "\n".join(x for x in texts if x)
-    return xc.bad_why(t) or ("미성년자·범죄 피해·고발" if RISK_RE.search(t) else "")
+    return xc.bad_why(*texts, strict=strict) or ("미성년자·범죄 피해·고발" if RISK_RE.search(t) else "")
+
+
+def pann_article(x: Any, now: float, max_age_h: float) -> dict[str, Any] | None:
+    """뉴스 검색 한 줄 → 네이트판 화제 기사 {title, desc, link, outlet, at} · 언론사 기사가 아니거나(판·커뮤·블로그 주소) 판 이야기가 아니거나
+    오래됐거나 규칙에 걸리면 None."""
+    a = xt.article(x, now)
+    if a is None:
+        return None
+    host = (urlsplit(a["link"]).hostname or "").lower()
+    if not host or host.endswith("pann.nate.com") or xt.not_outlet(host) or not a["outlet"]:
+        return None  # 판 주소는 열지도 싣지도 않음 · 기사만
+    text = a["title"] + "\n" + a["desc"]
+    if not PANN_RE.search(text) or now - a["at"] > max_age_h * 3600 or risk_why(a["title"], a["desc"]):
+        return None
+    return a
 
 
 def post_ts(text: str, now: float) -> float | None:
@@ -141,7 +169,7 @@ def when_map(src: xc.Source, html: str, now: float) -> dict[str, float]:
             continue
         ts = post_ts(str(el.get("title") or ""), now) or post_ts(el.get_text(" ", strip=True), now)
         if ts is not None:
-            out.setdefault(urljoin(src.list_url, str(a["href"])), ts)
+            out.setdefault(xc.link_of(src, str(a["href"])), ts)
     return out
 
 
@@ -228,8 +256,8 @@ class XAggro:
 
     def __init__(self, db: Any, studio: xs.Studio, today: Any, cap: xc.XCap, *, cfg: Callable[[], Any], img_dir: Path,
                  trends: Callable[[float], list[tuple[int, str]]] = lambda now: [], hold: Callable[[], str] = lambda: "",
-                 clock: Callable[[], float] = time.time, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
-        self.db, self.studio, self.today, self.cap, self.cfg = db, studio, today, cap, cfg
+                 news: Any = None, clock: Callable[[], float] = time.time, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
+        self.db, self.studio, self.today, self.cap, self.cfg, self.news = db, studio, today, cap, cfg, news
         self.img_dir, self.trends, self.hold, self.clock, self.sleep = Path(img_dir), trends, hold, clock, sleep
         self.bg: asyncio.Task[Any] | None = None
         self.asked = 0.0
@@ -311,7 +339,7 @@ class XAggro:
                 k = xc.key_of(c["url"])
                 first = seen.get(k)
                 seen.setdefault(k, [now, c["comments"], c["rec"], c["views"]])
-                if k in used or risk_why(c["title"]) or (c["comments"] < 10 and c["rec"] < 20):
+                if k in used or risk_why(c["title"], strict=src.strict) or (c["comments"] < 10 and c["rec"] < 20):
                     continue
                 posted = when.get(c["url"])
                 if posted is not None and now - posted > cfg.max_age_h * 3600:
@@ -338,9 +366,12 @@ class XAggro:
             cands = await self.candidates(ss, seen, now)
             st["pool"] = len(cands)
             room = max(0, min(cfg.per_run, cfg.per_day - len(st["items"])))
+            pann_first = room >= 2  # 네이트판 화제 기사 몫을 먼저 (크롬 없음 · 기사 있을 때만 한 자리) — 한 자리뿐이면 커뮤 글 다음에
+            if pann_first:
+                made, err = await self.pann(ss, st, now, room)
             opened = 0
             for src, c in cands:
-                if len(made) >= room or opened >= cfg.per_run + 2 or c["score"] < cfg.min_score:
+                if err or len(made) >= room or opened >= cfg.per_run + 2 or c["score"] < cfg.min_score:
                     break
                 if src.key in ss["off"]:
                     continue
@@ -358,7 +389,7 @@ class XAggro:
                 vt, body = xc.view_text(src, html[:xc.BODY_CAP])
                 title = vt or c["title"]
                 ss["used"].append({"k": xc.key_of(c["url"]), "at": now})  # 버려도 다시 보지 않게 먼저 (xcap 과 같은 목록 — 같은 글을 두 카드로 만들지 않음)
-                if len(body) < xc.BODY_MIN or risk_why(title, body):
+                if len(body) < xc.BODY_MIN or risk_why(title, body, strict=src.strict):
                     continue
                 card, stop = await self._card(st, src, c, title, body, now)
                 if card is not None:
@@ -366,6 +397,10 @@ class XAggro:
                 if stop:
                     err = stop
                     break
+            if not pann_first and not err and len(made) < room:  # 네이트판 화제 기사 (판 글은 열지 않음 · 기사만)
+                got, stop = await self.pann(ss, st, now, room - len(made))
+                made += got
+                err = stop
             if not made and not err:
                 err = "" if cands else "고를 글이 없었어요 (출처가 쉬거나 · 속도를 잴 글이 아직 없거나 · 규칙에 걸림)"
             return made
@@ -385,12 +420,15 @@ class XAggro:
                             f"[반응] 댓글 {c['comments']} · 추천 {c['rec']} · 조회 {c['views']} (1시간에 댓글 {_n(v['c'])} · 추천 {_n(v['r'])})"])
         try:
             async with self.studio.busy:
-                data = await self.studio.ask(SYSTEM, prompt, SCHEMA)
+                system, schema = xc.ai_rules(src, SYSTEM, SCHEMA)
+                data = await self.studio.ask(system, prompt, schema)
         except xs.StudioError as e:
             if e.code.startswith("ai_"):
                 self.studio._uncount("draft")
             return None, e.text
-        text = compose_text(str(data.get("hook") or ""), str(data.get("body") or ""), src.name, title + "\n" + body) if data.get("ok") is True else ""
+        text = compose_text(str(data.get("hook") or ""), str(data.get("body") or ""), src.name, title + "\n" + body) if xc.ai_ok(src, data) else ""
+        if text and src.strict and risk_why(text, strict=True):
+            text = ""
         if not text:
             log.info("xaggro: AI 가 뺌 (%s)", xs.one_line(data.get("why"), 60) or "쓸 수 없는 초안")
             return None, ""
@@ -407,6 +445,85 @@ class XAggro:
         self._save(KV, cur)
         st["items"], st["skip"] = cur["items"], cur["skip"]
         log.info("xaggro: %s 카드 (점수 %.1f · 사진 %d)", src.key, c["score"], len(imgs))
+        return item, ""
+
+    # ---------------------------------------------------------- 네이트판 화제 기사 (뉴스 검색만 · 판 글은 열지 않음)
+    async def pann(self, ss: dict[str, Any], st: dict[str, Any], now: float, room: int) -> tuple[list[dict[str, Any]], str]:
+        """cfg.pann_queries 로 뉴스 검색 (하루 pann_per_day 번) → 판 이야기를 다룬 언론사 기사 → 카드 (한 번에 pann_per_run 장). → (카드들, 멈출 까닭)"""
+        cfg = self.cfg()
+        if not cfg.pann_news or self.news is None or room <= 0:
+            return [], ""
+        kv = self._load(KV_PANN)
+        if kv.get("day") != xs._day(now):
+            kv = {"day": xs._day(now), "calls": 0}
+        used = {u.get("k") for u in ss["used"]}
+        seen_t: set[str] = set()
+        arts: list[dict[str, Any]] = []
+        try:
+            for q in cfg.pann_queries:
+                if int(kv.get("calls") or 0) >= cfg.pann_per_day:
+                    break
+                kv["calls"] = int(kv.get("calls") or 0) + 1
+                try:
+                    rows = await self.news.search(q)
+                except Exception as e:  # noqa: BLE001 — 키·주소는 로그에 안 남김
+                    log.info("xaggro pann: %s", type(e).__name__)
+                    rows = None
+                if rows is None:
+                    break  # 키 없음·막힘 — 이번 차례는 그만
+                for x in rows:
+                    a = pann_article(x, now, cfg.max_age_h)
+                    t = "t:" + _squash(a["title"])[:18] if a else ""
+                    if a is None or xc.key_of(a["link"]) in used or t in used or t in seen_t:  # 다른 매체의 같은 이야기도 한 번만
+                        continue
+                    seen_t.add(t)
+                    arts.append(a)
+                await self.sleep(xc.GAP_S)
+        finally:
+            self._save(KV_PANN, kv)
+        made: list[dict[str, Any]] = []
+        for a in sorted(arts, key=lambda a: -a["at"]):
+            if len(made) >= min(room, cfg.pann_per_run):
+                break
+            ss["used"] += [{"k": xc.key_of(a["link"]), "at": now}, {"k": "t:" + _squash(a["title"])[:18], "at": now}]
+            card, stop = await self._pann_card(st, a, now)
+            if card is not None:
+                made.append(card)
+            if stop:
+                return made, stop
+        return made, ""
+
+    async def _pann_card(self, st: dict[str, Any], a: dict[str, Any], now: float) -> tuple[dict[str, Any] | None, str]:
+        if not self.studio._count("draft", xs.DRAFT_PER_DAY):
+            return None, "오늘 글 초안 몫을 다 썼어요"
+        prompt = "\n".join(["[글]", f"[사이트] {a['outlet']} 기사 (네이트판 화제 글을 다룬 뉴스 — 판 글 원문은 없음)", f"[제목] {xs._fence(a['title'])}",
+                            "[본문]", "<<<", xs._fence(a["desc"]), ">>>"])
+        try:
+            async with self.studio.busy:
+                data = await self.studio.ask(SYSTEM + "\n\n" + PANN_NOTE, prompt, SCHEMA)
+        except xs.StudioError as e:
+            if e.code.startswith("ai_"):
+                self.studio._uncount("draft")
+            return None, e.text
+        site = f"{a['outlet']} ({PANN_SITE})"
+        text = compose_text(str(data.get("hook") or ""), str(data.get("body") or ""), site, a["title"] + "\n" + a["desc"]) if data.get("ok") is True else ""
+        if not text:
+            log.info("xaggro pann: AI 가 뺌 (%s)", xs.one_line(data.get("why"), 60) or "쓸 수 없는 초안")
+            return None, ""
+        aid = "a" + hashlib.sha256(f"{now}:{a['link']}".encode()).hexdigest()[:9]
+        hook, *rest = text.split("\n\n")
+        img = xc.text_card(xblur.scrub(hook), xblur.scrub("\n".join(r for r in rest if not r.startswith("출처:"))), site)  # 기사 문장 말고 초안 글로 만든 그림
+        self.img_dir.mkdir(parents=True, exist_ok=True)
+        (self.img_dir / f"{aid}-1.jpg").write_bytes(img)
+        h = max(0.0, (now - a["at"]) / 3600)
+        item = {"id": aid, "src": "pann_news", "site": site, "title": a["title"], "url": a["link"], "text": text, "news": True,
+                "why": f"{PANN_SITE} · {a['outlet']} · {h:.0f}시간 전 기사 (판 글은 열지 않음)", "angle": xs.one_line(data.get("angle"), 100),
+                "n": 1, "at": now, "blur": 0, "score": float(self.cfg().min_score), "react": {"comments": 0, "rec": 0, "views": 0}}
+        cur = self.plan(now)
+        cur["items"].append(item)
+        self._save(KV, cur)
+        st["items"], st["skip"] = cur["items"], cur["skip"]
+        log.info("xaggro: 네이트판 화제 기사 카드 (%s)", a["outlet"])
         return item, ""
 
     # ---------------------------------------------------------- 1분 일 · 누르기
@@ -525,14 +642,14 @@ class XAggro:
                           "at": xt._hm(float(i.get("at") or 0)), "score": float(i.get("score") or 0),
                           "imgs": [f"{IMG_PREFIX}{i['id']}-{n}.jpg" for n in range(1, min(2, int(i.get("n") or 1)) + 1)],
                           "blur": int(i.get("blur") or 0),
-                          "react": {k: int((i.get("react") or {}).get(k) or 0) for k in ("comments", "rec", "views")},
+                          "react": {k: int((i.get("react") or {}).get(k) or 0) for k in ("comments", "rec", "views")}, "news": bool(i.get("news")),
                           "done": tid in done, "undo_s": max(0, int(xs.UNDO_WITHIN - (now - done[tid]))) if tid in done else 0})
         full = len(st["items"]) >= cfg.per_day
         return {"v": 1, "on": bool(cfg.enabled), "items": items, "made": len(st["items"]), "per_day": cfg.per_day, "busy": self.running(),
                 "next": "" if full else next((t for t in cfg.times if t not in st["runs"]), ""), "err": str(st.get("err") or ""),
                 "hold": self.hold() if cfg.enabled else "", "pool": int(st.get("pool") or 0),
                 "off": [xc.SOURCES[k].name for k in ss["off"] if k in xc.SOURCES and k in cfg.sources],
-                "sources": [xc.SOURCES[k].name for k in cfg.sources if k in xc.SOURCES]}
+                "sources": [xc.SOURCES[k].name for k in cfg.sources if k in xc.SOURCES] + ([PANN_SITE] if cfg.pann_news and self.news is not None else [])}
 
 
 def mem_hold(flag: str, min_free_mb: int, *, clock: Callable[[], float] = time.time, free_mb: Callable[[], int | None] | None = None) -> str:
@@ -577,7 +694,7 @@ def register(web: Any, api: Any, studio: xs.Studio, today: Any, cap: xc.XCap, tr
         return bot.settings.dashboard.x_aggro
 
     desk = XAggro(api.dash.db, studio, today, cap, cfg=cfg, img_dir=Path(bot.settings.data_dir) / "xaggro", trends=trends,
-                  hold=lambda: mem_hold(cfg().mem_pressure_path, cfg().min_free_mb))
+                  hold=lambda: mem_hold(cfg().mem_pressure_path, cfg().min_free_mb), news=getattr(today, "news", None))  # 오늘 X 글의 뉴스 검색 그대로 (키만)
     view_rate, tap_rate = RateWindow(60, 60.0), RateWindow(20, 60.0)
     slow = xs._j(429, {"status": "error", "code": "rate", "text": "너무 자주 눌렀어요 — 1분 뒤 다시"})
 

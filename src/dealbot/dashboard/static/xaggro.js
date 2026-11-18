@@ -86,17 +86,18 @@ async function posted(it, ev) {
 const n = v => (v >= 1e4 ? (v / 1e4).toFixed(1).replace(/\.0$/, '') + '만' : String(v || 0));
 function item(it) {
   return el('section', {class: 'itm' + (it.done ? ' dn' : '')},
-    el('div', {class: 'ih'}, el('span', {class: 'cp info'}, it.site), el('span', {class: 'cp'}, it.at), el('span', {class: 'cp hot'}, `속도 ${n(Math.round(it.score))}점`),
-      el('span', {class: 'n'}, `댓글 ${n(it.react.comments)} · 추천 ${n(it.react.rec)} · 조회 ${n(it.react.views)}`)),
+    el('div', {class: 'ih'}, el('span', {class: 'cp info'}, it.site), el('span', {class: 'cp'}, it.at),
+      it.news ? el('span', {class: 'cp hot'}, '기사') : el('span', {class: 'cp hot'}, `속도 ${n(Math.round(it.score))}점`),
+      it.news ? null : el('span', {class: 'n'}, `댓글 ${n(it.react.comments)} · 추천 ${n(it.react.rec)} · 조회 ${n(it.react.views)}`)),
     el('p', {class: 'an'}, `왜 뜰까 · ${[it.why, it.angle].filter(Boolean).join(' — ')}`),
     it.imgs.map((src, i) => el('img', {class: 'cap', src, alt: `캡처 ${i + 1} — ${it.title}`, loading: 'lazy'})),
-    el('p', {class: 'an'}, `가린 곳 ${it.blur}곳 (닉네임·프로필·IP·전화번호·이메일 모자이크)`),
+    it.news ? el('p', {class: 'an'}, '그림은 초안 글로 만든 글자 그림 (기사·판 글은 찍지 않음) · 출처는 그 기사') : el('p', {class: 'an'}, `가린 곳 ${it.blur}곳 (닉네임·프로필·IP·전화번호·이메일 모자이크)`),
     el('div', {class: 'rw'}, it.imgs.map((src, i) => el('a', {class: 'pb soft', href: src, download: `${it.site}-${it.id}-${i + 1}.jpg`}, it.imgs.length > 1 ? `사진 ${i + 1} 저장` : '사진 저장'))),
     el('p', {class: 'dr'}, it.text),
     el('p', {class: 'chk'}, CHECK),
     el('div', {class: 'rw'}, btn('pb soft', '글 복사', () => copy(it.text)),
       el('label', {class: 'ck'}, el('input', {type: 'checkbox', checked: !!it.done, disabled: chk === it.id || null, 'aria-label': `${it.title} 올렸어요`, onchange: e => posted(it, e)}), '✓ 올렸어요'),
-      it.url ? el('a', Object.assign({class: 'lnk', href: it.url}, NW), '원글 ›') : null,
+      it.url ? el('a', Object.assign({class: 'lnk', href: it.url}, NW), it.news ? '기사 ›' : '원글 ›') : null,
       it.done ? null : btn('lnk', '안 써요', () => skip(it))));
 }
 function draw() {
@@ -112,6 +113,8 @@ function draw() {
     ST.err ? el('p', {class: 'w'}, ST.err) : null,
     ST.off.length ? el('p', {class: 'note'}, `${ST.off.join('·')} 은 막혀서 쉬는 중 (7일 · 우회 안 함)`) : null,
     el('p', {class: 'note'}, `출처: ${ST.sources.join('·')} (로그인 없는 공개 글 · 본문 칸만 찍고 닉네임·프로필은 모자이크) · 서버는 X 에 올리지 않아요`),
+    el('p', {class: 'note'}, '네이트판은 robots.txt 가 막아서 판 글을 열지 않아요 — 폰에서 본 판 글은 캡처해서 ',
+      el('a', {class: 'lnk', href: '#/sns/xr/w'}, '사진으로 글 쓰기'), ' 에 올리면 가림 + 초안 (판 화제 기사는 위 카드로)'),
   ].flat(9).filter(Boolean));
 }
 function onX() {

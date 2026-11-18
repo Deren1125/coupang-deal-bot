@@ -8,14 +8,21 @@ H @hmmmmmm1458 '친구랑 동업을 하면 안 되는 이유' = 커뮤 글 캡�
 출처 (11/17 확인 — 로그인 없이 열림 · robots.txt 가 목록·글 주소를 허용 · 서버가 열 수 있는 곳만):
   · bobaedream  보배드림 베스트글 (www.bobaedream.co.kr/list?code=best · robots 'User-agent: * Allow: /')
   · ppomppu     뽐뿌 자유게시판 HOT (zboard.php?id=freeboard&hotlist_flag=999 · robots 'Allow: /zboard/' — 핫딜 수집기가 서버에서 이미 읽는 곳)
-  · dcinside    디시 실시간 베스트 (robots '*' Allow · 기본 끔 — 성별 갈등·혐오 글이 많음. 설정 dashboard.x_cap.sources 에 넣을 때만)
-  쓰지 않는 곳: 네이트판(robots 'User-agent: * Disallow: /') · 인스티즈(사람 확인 화면) · 클리앙·루리웹·알구몬(서버 IP 막힘 기록 —
-  수집기 꺼 둠, 클리앙은 쿼리 주소도 robots 금지) · 더쿠(사람 확인·외부 반출 금지 글이 많음) · 엠팍(robots 막음) · 에펨(검색봇 말고는 /best 만).
+  · dcinside    디시 실시간 베스트 (gall.dcinside.com/board/lists/?id=dcbest · robots '*' Allow: / — dcbest 는 막힌 갤러리 목록에 없음).
+                주인 11/18 '켜기' — 대신 더 세게 거름 (Source.strict): 낱말 규칙 STRICT_RE(성별·세대·지역·국적 갈등 · 혐오 멸칭 · 정치·시사 ·
+                성적인 글 · 피해자·아이 · 실명 고발·논란·폭로) + AI 에 디시 전용 규칙(STRICT_NOTE)을 더 주고 sure=true 일 때만 씀 (애매하면 버림) ·
+                정치·시사 말머리([국갤]·[정갤] …) 글은 뺌 · 공지·설문 줄은 안 읽음 · 본문 사진·영상은 찍지 않음(AI 가 못 본 그림이라서 — 글만).
+  쓰지 않는 곳 (11/18 이 컨테이너에서 robots.txt·목록을 프로그램 이름으로 한 번씩 읽어 확인 · 서버에서는 다를 수 있음 — 막히면 7일 쉼이 맡음):
+    네이트판(robots 'User-agent: * Disallow: /' — 검색봇 몇 개만 허용 · 랭킹·톡 주소 모두 금지 → 글은 열지 않고 '네이트판 화제 기사'(xaggro — 네이버 뉴스 검색)로만,
+    주인이 폰에서 본 판 글은 캡처해서 '사진으로 글 쓰기'(xphoto · #/sns/xr/w)) · 더쿠(robots 는 허용이지만 목록이 403 '보안 검사중' 화면) ·
+    에펨코리아(robots '*' 는 /best·/humor 만 허용인데 목록이 430 '보안 시스템' 화면) · 오늘의유머(robots.txt 부터 403 Cloudflare 사람 확인) ·
+    엠팍(robots 'User-agent: * Disallow: /') · 웃긴대학(robots 는 /board/best/ 금지 · 다른 목록은 쿠키를 켜라는 화면으로 넘어감 — 쿠키 안 씀) ·
+    82cook(연결이 끊겨 robots.txt 를 못 읽음 — 못 읽으면 안 씀) · 인스티즈(사람 확인 화면) · 클리앙·루리웹·알구몬(서버 IP 막힘 기록 — 수집기 꺼 둠, 클리앙은 쿼리 주소도 robots 금지).
   돌 때마다 robots.txt 를 다시 읽어(하루 캐시) 막혀 있으면 그 출처는 쉰다. 403·429·451·사람 확인 화면이면 7일 쉼 (돌려 가며 다시 부르지 않음 ·
   User-Agent 는 프로그램 이름 그대로 · 쿠키 없음 · 우회 없음). 한 번에 목록 1번 + 글 3개까지, 요청 사이 GAP_S 초.
 
 고르기: 제목·본문 규칙(정치·사고·혐오·성인 — xtrend.hidden_why · 특정인 비방·사생활·신상 낱말 BAD_RE · 광고) → 반응 점수(댓글×3 + 추천×2 + 조회/100) 큰 순 ·
-  7일 안에 쓴 글은 빼고 · AI 도 한 번 더 본다 (ok=false 면 버림 — 성인·혐오·특정인 비방·사생활·정치).
+  7일 안에 쓴 글은 빼고 · AI 도 한 번 더 본다 (ok=false 면 버림 — 성인·혐오·특정인 비방·사생활·정치). strict 출처(디시)는 STRICT_RE 도 · AI 는 sure=true 까지.
 캡처: 쿠키 없는 새 크롬 창 하나로 그 글의 본문 칸만 찍는다 (글쓴이 칸·댓글 닉네임은 안 찍힘) — 찍기 전에 본문 안의 전화번호·이메일·@아이디는 ●로,
   프로필 사진·서명은 숨김. 11/17 밤부터 더 세게: 찍는 칸과 겹치는 글쓴이·댓글 닉네임·프로필·등급 아이콘·IP 요소(Source.who + 흔한 이름)와
   ● 로 바꾼 글자 자리를 크롬에서 재서(xblur.WHO_JS · DOT_JS) 그 픽셀을 모자이크하고 카드에 '가린 곳 n곳' (댓글 칸을 찍게 되어도 같은 길). 위에 '출처 · 사이트 이름' 띠 (PIL). 길면 두 장으로 나눔(그 뒤는 버림). 크롬이 없으면 본문 글자로 만든 그림 한 장.
@@ -76,6 +83,20 @@ CHALLENGE_RE = re.compile(r"Just a moment|cf-chl|challenge-platform|captcha|접�
 BAD_RE = re.compile(r"신상|박제|저격|폭로|실명|얼굴\s*공개|번호\s*공개|주소\s*공개|사생활|불륜|외도|바람\s*핀|고소|소송|전과|"
                     r"병신|씨발|시발|ㅅㅂ|ㅂㅅ|좆|존나|개새|미친놈|미친년|틀딱|한남|김치녀|페미|메갈|일베|"
                     r"광고|홍보|협찬|이벤트|추첨|코인|주식\s*리딩|도박|토토|카지노|후방|ㅇㅎ|19금|노출", re.I)
+# strict 출처(디시 실베 — 주인 11/18 '갈등·혐오 걸러서 켜기')에만 더: 성별·세대·지역·국적 갈등 · 혐오 멸칭(~충) · 정치·시사 · 성적인 글 ·
+# 피해자·아이 · 특정인 고발·논란·폭로·조롱 · 욕. 애매해도 뺀다 (재미있는 글을 조금 놓치는 편이 낫다).
+STRICT_RE = re.compile(
+    r"여자|남자|여성|남성|남녀|여초|남초|여혐|남혐|한녀|한남|김치녀|된장녀|페미|메갈|워마드|일베|여가부|여성가족부|군\s*가산|"
+    r"남친|여친|남사친|여사친|남편|아내|와이프|시댁|시어머니|처가|장모|며느리|맘충|대치동맘|맘카페|임신|출산|결혼|이혼|연애|소개팅|"
+    r"틀딱|꼰대|잼민|급식충|MZ|엠지|[가-힣]충(?:이|들|아|새끼)?(?![가-힣])|"
+    r"전라도|홍어|경상도|과메기|지역감정|중국인|조선족|짱깨|짱개|중국산|쪽바리|왜놈|흑인|흑형|동남아|외노자|난민|무슬림|이슬람|"
+    r"선거|투표|총리|장관|국회|대통령|여당|야당|민주당|국힘|국민의힘|공화당|좌파|우파|좌빨|수꼴|개딸|대깨|빨갱이|탄핵|계엄|시위|집회|조국|이재명|윤석열|김건희|한동훈|트럼프|전쟁|"
+    r"[12]\s*심|재판|판결|법원|소송|고소|검찰|경찰|구속|"
+    r"섹스|야스|떡정|가슴|몸매|비키니|속옷|노브라|꼴리|꼴림|ㅗㅜㅑ|야짤|(?<![a-z])av(?![a-z])|성인|미인계|"
+    r"\d{1,2}\s*살|아이(?:가|를|는|들|랑|한테|에게|의)|아기|애기|딸(?!기)|아들|학생|피해|사망|숨진|참사|"
+    r"논란|폭로|저격|박제|글삭|해명|사과문|입장\s*발표|갑질|먹튀|배신|선동|조롱|참교육|욕먹|비난|비판|발작|정병|정신병|"
+    r"새끼|씹|좆|병신|ㅂㅅ|ㅅㅂ|느금", re.I)
+STRICT_TAG_RE = re.compile(r"^\[(?:국갤|정갤|정치|이갤|시갤|윤갤|민갤|한갤|조갤|여갤|남갤|페갤|헬갤|코갤|주식|비트)\]")  # 정치·시사·갈등으로 알려진 말머리
 PII_JS = r"""(sel) => {
   const root = document.querySelector(sel); if (!root) return false;
   const pat = [/01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}/g, /[\w.+-]+@[\w-]+\.[\w.-]+/g, /@[A-Za-z0-9_]{2,15}/g, /\b\d{1,3}\.\d{1,3}\.(?:\d{1,3}|\*{1,3}|x{1,3})\.(?:\d{1,3}|\*{1,3}|x{1,3})(?![\d.])/g];
@@ -104,6 +125,13 @@ CAP_SYSTEM = """너는 한국 X(트위터) 계정 주인의 글 초안 담당이
 - 글 내용을 다 말하지 않는다 (사진을 보게). 제목을 그대로 베끼지 않는다. 사실·숫자는 [글] 에 있는 것만.
 - 해시태그·@·링크·이모지 금지 (이모지는 0~1개까지만). 좋아요·리포스트·팔로우 부탁 금지. 글쓴이를 놀리지 않는다.
 JSON 만 답한다: {"ok": true, "why": "", "line": "한 줄", "angle": "왜 반응이 터졌는지 한 줄"}"""
+# strict 출처(디시)일 때 AI 에 더 주는 규칙 (주인 11/18 — 갈등·혐오·정치·성적·피해·미성년·특정인 고발은 빼고, 애매하면 뺀다)
+STRICT_NOTE = """[디시인사이드 글 — 더 엄격하게] 이 글은 디시인사이드 실시간 베스트에서 왔다. 위 기준에 더해 아래 중 하나라도 '조금이라도' 있으면 ok=false:
+- 성별 갈등(남녀 비교·여초/남초·남친/여친·남편/아내 흉) · 세대 갈등(틀딱·급식·MZ) · 지역·국적·인종 비하 · '~충' 같은 멸칭이나 혐오 표현
+- 정치·시사 논쟁 (정당·정치인·선거·정책 찬반 · 뉴스 퍼 온 글에 편 가르는 댓글이 붙을 것)
+- 성적인 암시 (몸매·노출·19금 농담·연애 수위) · 범죄·사고 피해자 · 미성년자·아이가 나오는 글
+- 실명·닉네임·연예인·유튜버·기업 등 특정인을 지목한 비난·의혹·논란·폭로·조롱 · 욕설이 섞인 글 · 댓글 싸움을 부를 글
+순수한 웃긴 이야기·생활 썰·취미·정보 글만 ok 이다. sure: 위에 하나도 걸리지 않는다고 확실할 때만 true, 조금이라도 애매하면 false (sure=false 면 쓰지 않는다)."""
 CAP_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}, "why": {"type": "string"}, "line": {"type": "string"},
                                                "angle": {"type": "string"}}, "required": ["ok", "why", "line", "angle"]}
 
@@ -124,6 +152,8 @@ class Source:
     hide: tuple[str, ...] = field(default_factory=tuple)  # 본문 안에서 숨길 것 (서명·프로필·광고)
     link_re: str = ""  # 글 주소 모양 (아니면 버림)
     who: str = ""  # 글쓴이·댓글 닉네임·프로필·등급·IP 요소 (찍는 칸과 겹치면 그 자리를 모자이크 — xblur.WHO_JS 가 흔한 이름도 같이 찾는다)
+    strict: bool = False  # 더 세게 거름 (STRICT_RE · 말머리 · AI 디시 규칙 + sure) — 주인 11/18 디시
+    canon: bool = False  # 글 주소를 link_re 까지만 (바뀌는 쿼리 꼬리 뗌)
 
 
 SOURCES: dict[str, Source] = {
@@ -137,11 +167,13 @@ SOURCES: dict[str, Source] = {
                       body="td.board-contents", view_title="h1, .view_title2, font.view_title2", hide=("iframe", "script", ".han_sign"),
                       link_re=r"^https://www\.ppomppu\.co\.kr/zboard/view\.php\?id=freeboard&(?:[^#]*&)?no=\d+",
                       who=".baseList-name, .topTitle-name, .com_name, .han_sign, .mem_icon, img[src*='/nick/']"),
+    # 공지·설문 줄(tr.ub-content 인데 us-post 아님)은 안 읽음 · 본문 그림·영상은 숨기고 글만 찍음 (AI 가 못 본 그림 — 주인 11/18 '디시는 세게')
     "dcinside": Source("dcinside", "디시인사이드", "https://gall.dcinside.com", "https://gall.dcinside.com/board/lists/?id=dcbest",
-                       row="tr.ub-content", title="td.gall_tit a", comments="span.reply_num", rec="td.gall_recommend", views="td.gall_count",
-                       body="div.write_div", view_title="span.title_subject", hide=("iframe", "script", ".gall_writer"),
+                       row="tr.ub-content.us-post", title="td.gall_tit a:not(.reply_numbox)", comments="span.reply_num", rec="td.gall_recommend",
+                       views="td.gall_count", body="div.write_div", view_title="span.title_subject",
+                       hide=("iframe", "script", ".gall_writer", "img", "video", "embed", "object"),
                        link_re=r"^https://gall\.dcinside\.com/board/view/\?id=dcbest&no=\d+",
-                       who=".gall_writer, .nickname, .writer_nikcon, span.ip, .cmt_nickbox"),
+                       who=".gall_writer, .nickname, .writer_nikcon, span.ip, .cmt_nickbox", strict=True, canon=True),
 }
 
 Getter = Callable[[str], Awaitable[tuple[int, str]]]
@@ -158,12 +190,41 @@ def score(c: dict[str, Any]) -> float:
     return c["comments"] * 3 + c["rec"] * 2 + c["views"] / 100
 
 
-def bad_why(*texts: str) -> str:
-    """버릴 글이면 까닭 (정치·사고·혐오·성인·비방/사생활/광고), 아니면 ''."""
+def strict_why(*texts: str) -> str:
+    """strict 출처(디시)에서 더 뺄 글이면 까닭, 아니면 ''."""
+    t = "\n".join(x for x in texts if x)
+    if any(STRICT_TAG_RE.match(x.strip()) for x in texts if x):
+        return "정치·갈등 말머리"
+    return "갈등·혐오·성적·피해·고발 (디시 규칙)" if STRICT_RE.search(t) else ""
+
+
+def bad_why(*texts: str, strict: bool = False) -> str:
+    """버릴 글이면 까닭 (정치·사고·혐오·성인·비방/사생활/광고 · strict 면 디시 규칙까지), 아니면 ''."""
     from dealbot.dashboard.xtrend import hidden_why
 
     t = "\n".join(x for x in texts if x)
-    return hidden_why(t) or ("비방·사생활·광고" if BAD_RE.search(t) else "")
+    return hidden_why(t) or ("비방·사생활·광고" if BAD_RE.search(t) else "") or (strict_why(*texts) if strict else "")
+
+
+def ai_rules(src: Source, system: str, schema: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """strict 출처면 AI 에 디시 전용 규칙을 더 주고 sure(확실히 괜찮음)를 꼭 받는다 — sure 가 true 가 아니면 쓰지 않는다."""
+    if not src.strict:
+        return system, schema
+    props = {**schema["properties"], "sure": {"type": "boolean"}}
+    return system + "\n\n" + STRICT_NOTE, {**schema, "properties": props, "required": [*schema["required"], "sure"]}
+
+
+def ai_ok(src: Source, data: dict[str, Any]) -> bool:
+    return data.get("ok") is True and (not src.strict or data.get("sure") is True)
+
+
+def link_of(src: Source, href: str) -> str:
+    """목록 링크 → 글 주소. canon 출처는 주소 모양(link_re)까지만 (디시의 &_dcbest=1&page=1 처럼 바뀌는 꼬리를 떼서 같은 글을 같은 키로)."""
+    url = urljoin(src.list_url, href)
+    if src.canon and src.link_re:
+        m = re.match(src.link_re, url)
+        return m.group(0) if m else url
+    return url
 
 
 def list_rows(src: Source, html: str) -> list[dict[str, Any]]:
@@ -175,7 +236,7 @@ def list_rows(src: Source, html: str) -> list[dict[str, Any]]:
         a = row.select_one(src.title)
         if a is None or not a.get("href"):
             continue
-        url = urljoin(src.list_url, str(a["href"]))
+        url = link_of(src, str(a["href"]))
         title = " ".join(a.get_text(" ", strip=True).split())[:120]
         if not title or (src.link_re and not re.match(src.link_re, url)) or url in seen:
             continue
@@ -364,7 +425,7 @@ class XCap:
             if html is None:
                 continue
             for c in list_rows(src, html[:BODY_CAP]):
-                if key_of(c["url"]) in used or bad_why(c["title"]) or (c["comments"] < 10 and c["rec"] < 20):
+                if key_of(c["url"]) in used or bad_why(c["title"], strict=src.strict) or (c["comments"] < 10 and c["rec"] < 20):
                     continue
                 out.append((src, c))
             await self.sleep(GAP_S)
@@ -387,7 +448,7 @@ class XCap:
                 vt, body = view_text(src, html[:BODY_CAP])
                 title = vt or c["title"]
                 ss["used"].append({"k": key_of(c["url"]), "at": now})  # 버려도 다시 보지 않게 먼저
-                if len(body) < BODY_MIN or bad_why(title, body):  # 글이 있는 이야기만 (사진·영상만 퍼 온 글은 뺌)
+                if len(body) < BODY_MIN or bad_why(title, body, strict=src.strict):  # 글이 있는 이야기만 (사진·영상만 퍼 온 글은 뺌)
                     continue
                 card = await self._card(st, src, c, title, body, now)
                 if card is not None:
@@ -408,14 +469,15 @@ class XCap:
                             f"[반응] 댓글 {c['comments']} · 추천 {c['rec']} · 조회 {c['views']}"])
         try:
             async with self.studio.busy:
-                data = await self.studio.ask(CAP_SYSTEM, prompt, CAP_SCHEMA)
+                system, schema = ai_rules(src, CAP_SYSTEM, CAP_SCHEMA)
+                data = await self.studio.ask(system, prompt, schema)
         except xs.StudioError as e:
             if e.code.startswith("ai_"):
                 self.studio._uncount("draft")
             st["err"] = e.text
             return None
         line = " ".join(xs.clean(data.get("line")).split())[:80]
-        if data.get("ok") is not True or not line or "@" in line or xs.URL_RE.search(line) or "#" in line or bad_why(line):
+        if not ai_ok(src, data) or not line or "@" in line or xs.URL_RE.search(line) or "#" in line or bad_why(line, strict=src.strict):
             log.info("xcap: AI 가 뺌 (%s)", xs.one_line(data.get("why"), 60))
             return None
         cid = "c" + hashlib.sha256(f"{now}:{c['url']}".encode()).hexdigest()[:9]

@@ -1,0 +1,34 @@
+User-agent: *
+Disallow: /
+
+User-agent: Twitterbot
+User-agent: Googlebot
+User-agent: Yeti
+User-agent: bingbot
+User-agent: Daum
+User-agent: facebookexternalhit
+User-agent: ZumBot
+User-agent: HappyWing
+Disallow: /main
+Disallow: /*reply
+Disallow: /*Advertising
+Disallow: /*Popup
+Disallow: /*ThemeImage
+Disallow: /*themeImage
+Disallow: /info
+Disallow: /pann/poll
+Disallow: /attach
+Disallow: /cultwo
+Disallow: /api
+Disallow: /*bookmark
+Disallow: /video
+Disallow: /box/video
+Disallow: /my
+Disallow: /ptalk
+
+User-agent: bingbot
+Crawl-delay: 30
+
+User-agent: GPTBot
+User-agent: ClaudeBot
+Disallow: /

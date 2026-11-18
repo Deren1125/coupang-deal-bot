@@ -893,8 +893,8 @@ class XCapConfig(BaseModel):
     enabled: bool = True
     per_day: int = Field(3, ge=0, le=5)  # 하루 카드 수 (주인 '하루 2~3개')
     times: list[str] = Field(default_factory=lambda: ["11:40", "16:40", "20:40"])  # 이 시각 뒤 처음 도는 1분 일에서 하나씩
-    # 쓸 출처 (xcap.SOURCES 이름). 기본 = 보배드림 베스트 · 뽐뿌 자유게시판 HOT. 'dcinside'(실시간 베스트)는 성별 갈등·혐오 글이 많아 기본 끔
-    sources: list[str] = Field(default_factory=lambda: ["bobaedream", "ppomppu"])
+    # 쓸 출처 (xcap.SOURCES 이름). 보배드림 베스트 · 뽐뿌 자유게시판 HOT · 디시 실시간 베스트 (주인 11/18 켜기 — strict: 갈등·혐오·정치·성적·피해·고발 더 세게 거름)
+    sources: list[str] = Field(default_factory=lambda: ["bobaedream", "ppomppu", "dcinside"])
 
     @field_validator("times")
     @classmethod
@@ -912,11 +912,16 @@ class XAggroConfig(BaseModel):
     per_day: int = Field(6, ge=0, le=12)  # 하루 카드 수 (점수 큰 순으로 보임)
     per_run: int = Field(2, ge=1, le=4)  # 한 번에 만드는 카드 수 (캡처는 하나씩 차례로 — 서버 메모리)
     times: list[str] = Field(default_factory=lambda: ["09:20", "13:20", "17:20", "21:20"])  # 이 시각 뒤 처음 도는 1분 일에서 한 번씩 (x_cap 시각과 겹치지 않게)
-    sources: list[str] = Field(default_factory=lambda: ["bobaedream", "ppomppu"])  # xcap.SOURCES 이름 (막힌 출처는 알아서 쉼)
+    sources: list[str] = Field(default_factory=lambda: ["bobaedream", "ppomppu", "dcinside"])  # xcap.SOURCES 이름 (막힌 출처는 알아서 쉼 · 디시는 strict)
     min_score: float = Field(15.0, ge=0)  # 속도 점수(시간당 댓글×3 + 추천×2 + 조회/100 · 뜨는 주제 가산)가 이보다 낮으면 안 만듦
     max_age_h: float = Field(24.0, gt=0, le=72)  # 올린 지 이보다 오래된 글은 뺌 ('초반 속도')
     min_free_mb: int = Field(400, ge=0, le=4000)  # 여유 메모리가 이보다 적으면 그 차례는 쉼 (0 = 안 봄)
     mem_pressure_path: str = "/home/ubuntu/Blog-Auto/var/mem_pressure"  # Blog-Auto 감시꾼이 남기는 메모리 부족 표시 (10분 안 것만 · '' = 안 봄)
+    # 네이트판 화제 기사 (주인 11/18 — pann.nate.com robots 'User-agent: * Disallow: /' 라 판 글은 열지 않음 → 네이버 뉴스 검색으로 판 화제를 다룬 기사만 · 출처 = 언론사)
+    pann_news: bool = True
+    pann_queries: list[str] = Field(default_factory=lambda: ["네이트판 화제", "네이트판 사연", "네이트판 글 누리꾼"])
+    pann_per_day: int = Field(8, ge=0, le=40)  # 하루 뉴스 검색 수 (오늘 X 글과 같은 키 — 빌린 블로그 키 하루 몫 안)
+    pann_per_run: int = Field(1, ge=0, le=2)  # 한 번에 만드는 기사 카드 수
 
     @field_validator("times")
     @classmethod
