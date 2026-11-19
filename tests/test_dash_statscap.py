@@ -551,11 +551,20 @@ def test_received_line_by_blog_with_screen_dates_and_fail_log() -> None:
     statscap.save(db, form(db, u="https://blog.stat.naver.com/blog/rank/cv?blogId=derenlog", x="2026.11.09. 조회수 순위\n1 글 30"), now=NOW - 86400, tz=TZ)
     statscap.save(db, form(db, n="주소 목록"), now=NOW - 86400, tz=TZ)
     r = statscap.received(db, NOW, TZ)
-    assert r["today"] == 0 and r["n"] == 1 and r["line"] == "오늘 받은 통계 0개 · 최근 7일 1개 (드라마 1개 · 화면 날짜 11/9 · 받은 때 11/10 21:26)"
+    assert r["today"] == 0 and r["n"] == 1 and r["line"] == "오늘 받은 통계 0개 · 최근 7일 1개 (드라마 1개 · 화면 날짜 11/9 · 받은 때 11/10 21:26) · 세 화면: 드라마 11/9 유입분석 (없음: 조회수 순위·검색 유입)"
     statscap.save(db, form(db), now=NOW, tz=TZ)
     statscap.save(db, form(db, x="2026.11.11. 유입 경로\n네이버 검색 3"), now=NOW + 60, tz=TZ)
     r = statscap.received(db, NOW + 120, TZ)
-    assert r["line"] == "오늘 통계 2개 받았어요 (데런픽 2개 · 받은 때 11/11 21:27)" and r["by"]["데런픽"]["dates"] == ["2026-11-10", "2026-11-11"]
+    assert r["line"] == ("오늘 통계 2개 받았어요 (데런픽 2개 · 받은 때 11/11 21:27) · 세 화면: 데런픽 11/10 유입분석 (없음: 조회수 순위·검색 유입) / "
+                         "데런픽 11/11 유입분석 (없음: 조회수 순위·검색 유입) / 드라마 11/9 유입분석 (없음: 조회수 순위·검색 유입)") and r["by"]["데런픽"]["dates"] == ["2026-11-10", "2026-11-11"]
+    # 11/18 세 화면 (한 번에 v3): 날짜 d · JSON 표 줄 · user-info 의 blogId 로 블로그 (주소에 blogId 가 없어도 — '블로그 모름' 이던 것)
+    ui = "https://blog.stat.naver.com/api/blog/user-info\n" + json.dumps({"baUserKey": "x", "blogId": "demiyum"})
+    for v in statscap.VIEWS:
+        out = statscap.save(db, form(db, u="https://blog.stat.naver.com/m/blog/user/hour/hourCv", n=v, d="2026-11-10", b="", j=ui), now=NOW + 90, tz=TZ)
+        assert out["blog"] == "hotdeal" and out["day"] == "2026-11-10"
+    assert statscap.save(db, form(db, d="2099-01-01"), now=NOW, tz=TZ)["day"] == "2026-11-10"  # 이상한 날짜는 화면에서 짐작
+    assert "라커룸 11/10 조회수 순위·유입분석·검색 유입 ✓" in statscap.received(db, NOW + 120, TZ)["line"]
+    assert statscap.json_rows("u\n{}\n\nhttps://x\n" + json.dumps({"result": {"statDataList": [{"data": {"columnInfo": ["a", "b"], "rows": [[1, None]]}}]}})) == [[["a", "b"], ["1", ""]]]
     for i in range(statscap.FAIL_KEEP + 3):
         statscap.note_fail(db, "empty", "https://blog.stat.naver.com/x?blogId=derenpick#a", now=NOW + i)
     f = json.loads(db.kv_get(statscap.FAIL_KV))

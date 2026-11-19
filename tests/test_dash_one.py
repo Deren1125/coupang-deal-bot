@@ -4,7 +4,7 @@
 2) 대시보드: GET /dashboard/api/one (로그인 아래) · a=queue 답의 stats 칸 · 연결 탭 설치 칸 맨 위 + 옛 둘은 '따로 쓰고 싶을 때' 아래.
 3) 가짜 네이버 화면 (진짜 크롬 · playwright 가 있을 때만 · test_dash_seoi_auto 의 화면·가짜 시계 그대로): 한 번 누르고 아무것도 누르지 않음 —
    서이추 → 들르기 → 줄 체크 → 끝 요약 · 알림·묻기 창 0 · 보이는 단추 0 · 간격은 seoi.GAP 그대로 · 한도 안내는 바로 멈추고 '폰에서 직접' · 다시 누르면 이어서.
-4) 가짜 통계 화면 (test_dash_statscap 의 화면): 한 번 누르면 묻지 않고 다 보내고 스스로 이웃새글로 · 관리 화면은 묻지 않고 통계 화면으로.
+4) 가짜 통계 앱 (11/18 v3): 한 번 누르면 묻지 않고 조회수 순위·유입분석·검색 유입을 블로그·날짜와 함께 보내고 스스로 이웃새글로 · 우리 블로그가 아니면 안 보냄 · 관리 화면은 통계 앱으로.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from test_dash_nbvisit import list_for, visit_row
 from test_dash_routine import tz_now
 from test_dash_seoi import NODE, nb_row, needs_node
 from test_dash_seoi_auto import BUDDY, HOME, LOGIN, POST, POST_NO, POST_TEXT_LONG, Clock, SeqDrafter, _no_live_threads, bot, q  # noqa: F401
-from test_dash_statscap import ADMIN, STATS, FakeDb, S
+from test_dash_statscap import FakeDb
 
 STATIC = Path(one.SRC).parent
 DASH = "https://dash.example"
@@ -45,7 +45,7 @@ def built(db: Any, base: str = DASH) -> str:
 def test_one_holds_both_bookmarklets_with_their_own_endpoints_and_keys() -> None:
     db = FakeDb()
     v = one.view(db, DASH)
-    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 2
+    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 3
     js = built(db)
     assert f"U='{DASH}{seoi.PATH}',K='{seoi.key(db)}'" in js and f"U='{DASH}{statscap.PATH}',K='{statscap.key(db)}'" in js
     assert seoi.key(db) != statscap.key(db) and "@@" not in js and '["derenpick","issue","데런픽"]' in js
@@ -328,40 +328,41 @@ async def test_unknown_account_ends_with_a_line_instead_of_a_chooser(bot: DealBo
 
 
 # ---------------------------------------------------------------- 4) 가짜 통계 화면
-PW1 = r"""
+# 11/18 v3 (홈판 분석 세션: 받은 통계가 시간대·기기·이웃뿐 · 모두 '블로그 모름') — 통계 앱(blog.stat.naver.com/m/…)에서 한 번:
+# user-info 의 blogId 로 블로그를 알아보고 조회수 순위·유입분석(일간 · 어제·오늘)은 화면이 부르는 JSON 주소로,
+# 검색 유입은 유입분석 화면의 탭을 한 번 눌러 배운 주소로 → 날짜마다 하나씩 보냄 → 스스로 이웃새글로. 못 알아보면 하나도 안 보냄.
+ST = "https://blog.stat.naver.com"
+SD = lambda did, cols, rows: json.dumps({"statusCode": 200, "message": "", "result": {"statDataList": [{"dataId": did, "data": {"columnInfo": cols, "rows": rows}}]}}, ensure_ascii=False)  # noqa: E731
+STAT_APP = ("<!doctype html><html><head><meta charset='utf-8'><title>블로그 통계</title></head><body><div id='c'>불러오는 중</div>__TAB__"
+            "<script>const d=new Date(Date.now()-864e5),p=n=>String(n).padStart(2,'0'),day=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());"
+            "fetch('/api/blog/user-info').then(()=>fetch('/api/blog/user/referer/total?timeDimension=DATE&startDate='+day+'&exclude=&_=1'))"
+            ".then(r=>r.json()).then(()=>{document.getElementById('c').textContent='네이버 통합검색_모바일 82%';});"
+            "const t=document.getElementById('st');if(t)t.onclick=()=>fetch('/api/blog/user/referer/search?timeDimension=WEEK&startDate=2026-11-09&exclude=&_=2');</script></body></html>")
+PW3 = r"""
 const {chromium} = require('playwright');
 (async () => {
-  const [code, pages] = process.argv.slice(1), P = JSON.parse(pages), out = {dialogs: [], bodies: [], cards: [], asked: []};
+  const [code, sj] = process.argv.slice(1), S = JSON.parse(sj), out = {dialogs: [], bodies: [], cards: [], api: []};
   const b = await chromium.launch(), c = await b.newContext(), p = await c.newPage();
   await p.route('**/*', async r => {
-    const u = r.request().url(), k = u.split('?')[0].split('#')[0];
-    if (u.startsWith('https://dash.example/')) { out.bodies.push([new URL(u).pathname, r.request().postData() || '']);
+    const u = new URL(r.request().url());
+    if (u.hostname === 'dash.example') { out.bodies.push(r.request().postData() || '');
       return r.fulfill({status: 200, contentType: 'application/json', headers: {'Access-Control-Allow-Origin': '*'}, body: JSON.stringify({ok: true, label: 'x'})}); }
-    if (k.endsWith('/api/rank.json')) return r.fulfill({status: 200, contentType: 'application/json', body: '{"rank":[{"title":"에이티즈","pv":10}]}'});
-    if (P[k]) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: P[k]});
+    if (u.pathname.startsWith('/api/')) { out.api.push(u.pathname + u.search);
+      const j = S.api[u.pathname];
+      return j ? r.fulfill({status: 200, contentType: 'application/json', body: j}) : r.fulfill({status: 404, contentType: 'text/html', body: 'no'}); }
+    if (u.hostname === 'blog.stat.naver.com' && u.pathname.endsWith('/blog/user/referer/total')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: S.page});
     return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: '<p>다른 화면</p>'});
   });
   p.on('dialog', async d => { out.dialogs.push(d.type() + ':' + d.message()); await d.accept(); });
-  const watch = async host => {
-    let last = '';
-    for (let i = 0; i < 1500 && new URL(p.url()).hostname !== host; i++) {
-      const v = await p.evaluate(() => { const cd = document.getElementById('sb1card'), vis = n => getComputedStyle(n).display !== 'none' && n.getClientRects().length > 0;
-        return [cd ? cd.textContent : '', Array.from(document.querySelectorAll('button')).filter(n => vis(n) && n.closest('#sb1card,[style*="2147483647"]')).length]; }).catch(() => ['', 0]);
-      if (v[0] && v[0] !== last) out.cards.push(last = v[0]);
-      if (v[1]) out.asked.push(v[1]);
-      await p.waitForTimeout(100);
-    }
-    await p.waitForLoadState('domcontentloaded');
-  };
-  // 처음: 관리 화면에서 한 번 → 묻지 않고 통계 화면으로
-  await p.goto('https://admin.blog.naver.com/derenpick/stat/today');
+  await p.goto(S.start);
+  await p.waitForTimeout(500);
   p.evaluate(code).catch(() => {});
-  await watch('blog.stat.naver.com');
-  out.hop = p.url();
-  out.n1 = out.bodies.length;
-  // 통계 화면에서 한 번 → 다 보내고 스스로 이웃새글로
-  p.evaluate(code).catch(() => {});
-  await watch('m.blog.naver.com');
+  let last = '';
+  for (let i = 0; i < 900 && new URL(p.url()).hostname === new URL(S.start).hostname; i++) {
+    const v = await p.evaluate(() => { const cd = document.getElementById('sb1card'); return cd ? cd.textContent : ''; }).catch(() => '');
+    if (v && v !== last) out.cards.push(last = v);
+    await p.waitForTimeout(100);
+  }
   out.end = p.url();
   console.log(JSON.stringify(out));
   await b.close();
@@ -369,27 +370,69 @@ const {chromium} = require('playwright');
 """
 
 
-@needs_node
-def test_stats_screen_sends_everything_without_asking_and_moves_itself_to_the_feed() -> None:
+def _pw3(db: Any, blog_id: str, *, tab: bool = True, start: str = ST + "/m/blog/user/referer/total") -> dict[str, Any]:
     env = _playwright_env()
     if env is None:
         pytest.skip("node playwright·크롬 없음")
-    db = FakeDb()
-    res = subprocess.run([NODE, "-e", PW1, built(db), json.dumps({**ADMIN, **STATS})], capture_output=True, text=True, timeout=400, env=env)
+    api = {"/api/blog/user-info": json.dumps({"baUserKey": "x", "blogId": blog_id}),
+           "/api/blog/rank/cvContentPc": SD("rankCv", ["date", "uri", "cv", "rank", "title"],
+                                           {"date": ["2026-11-17"], "uri": ["https://blog.naver.com/derenpick/224"], "cv": [30], "rank": [1], "title": ["에이티즈 3년 연속 대상 받은 이유"]}),
+           "/api/blog/user/referer/total": SD("refererTotal", ["date", "referrerDomain", "cv_p"], {"date": ["2026-11-17"], "referrerDomain": ["네이버 통합검색_모바일"], "cv_p": [82.1]}),
+           "/api/blog/user/referer/search": SD("refererSearch", ["date", "keyword", "cv"], {"date": ["2026-11-17"], "keyword": ["에이티즈 대상"], "cv": [7]})}
+    page = STAT_APP.replace("__TAB__", "<ul><li><a href='#' id='st' role='tab'>검색 유입</a></li></ul>" if tab else "")
+    res = subprocess.run([NODE, "-e", PW3, built(db), json.dumps({"api": api, "page": page, "start": start})], capture_output=True, text=True, timeout=300, env=env)
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
-    assert got["dialogs"] == [] and got["asked"] == []  # 묻는 창·알림 창·단추 0
-    assert got["hop"].startswith(S + "referer/total?blogId=derenpick") and "#sc=" in got["hop"]
-    sent = [(p, dict(parse_qsl(b, keep_blank_values=True))) for p, b in got["bodies"]]
-    assert {p for p, _f in sent} == {statscap.PATH} and all(f["k"] == statscap.key(db) for _p, f in sent)  # 통계 길·통계 열쇠로만
-    assert sent[0][1]["n"] == "주소 목록" and got["n1"] == 1
-    names = [f["n"] for _p, f in sent[1:]]
-    assert names == ["유입분석", "유입분석 · 전날", "일간 현황", "일간 현황 · 방문횟수", "일간 현황 · 성별,연령별 분포", "일간 현황 · 전날", "시간대 분석", "조회수 순위"], names
-    for _p, f in sent[1:]:
-        assert statscap.save(db, f, now=1_794_000_000, tz=ZoneInfo("Asia/Seoul"))["blog"] == "issue"
-    assert got["end"].startswith(seoi.FEED_URL + "#sb1=") and unquote(got["end"].split("#sb1=")[1]).startswith("통계 보냄 ✓ 8개 화면")
+    got["sent"] = [dict(parse_qsl(x, keep_blank_values=True)) for x in got["bodies"]]
+    return got
+
+
+@needs_node
+def test_stats_app_sends_rank_referer_and_search_by_day_with_the_blog_and_moves_to_the_feed() -> None:
+    db = FakeDb()
+    got = _pw3(db, "derenpick")
+    assert got["dialogs"] == []
+    sent = got["sent"]
+    assert [f["n"] for f in sent] == ["조회수 순위"] * 2 + ["유입분석"] * 2 + ["검색 유입"] * 2, sent
+    days = [f["d"] for f in sent[:2]]
+    assert days[0] < days[1] and [f["d"] for f in sent] == days * 3
+    assert all(f["k"] == statscap.key(db) and f["b"] == "derenpick" for f in sent)
+    # 화면이 부르는 같은 출처 JSON 주소 그대로 · 일간 · 그날 · 검색 유입은 탭을 눌러 배운 주소 (주간 → 일간)
+    assert sent[0]["u"] == f"{ST}/api/blog/rank/cvContentPc?timeDimension=DATE&startDate={days[0]}&exclude="
+    assert sent[4]["u"] == f"{ST}/api/blog/user/referer/search?timeDimension=DATE&startDate={days[0]}&exclude="
+    assert not any("rank" in a and "WEEK" in a for a in got["api"]) and sum(a.startswith("/api/blog/user/referer/search") for a in got["api"]) == 3
+    recs = [statscap.save(db, f, now=1_795_000_000, tz=ZoneInfo("Asia/Seoul")) for f in sent]
+    assert {r["blog"] for r in recs} == {"issue"} and [r["day"] for r in recs] == days * 3
+    rank = json.loads(next(v for k, v in sorted(db.kv.items()) if k.startswith(statscap.PREFIX) and "조회수 순위" in v))
+    assert rank["rows"][0][0] == ["date", "uri", "cv", "rank", "title"] and rank["rows"][0][1][4] == "에이티즈 3년 연속 대상 받은 이유"
+    md = lambda d: f"{int(d[5:7])}/{int(d[8:10])}"  # noqa: E731
+    assert got["end"].startswith(seoi.FEED_URL + "#sb1=")
+    end = unquote(got["end"].split("#sb1=")[1])
+    assert end == f"통계 보냄 ✓ 데런픽 6개 — 조회수 순위 {md(days[0])}·{md(days[1])}, 유입분석 {md(days[0])}·{md(days[1])}, 검색 유입 {md(days[0])}·{md(days[1])}", end
     assert got["cards"][0] == "한 번에: 통계를 모아 보내요 — 이 탭을 켜 두세요"
-    assert any(c.startswith("한 번에: 통계 보냄 ✓ 8개 화면") and "곧 이웃새글 화면으로 옮겨요" in c for c in got["cards"])
+    line = statscap.received(db, 1_795_000_000, ZoneInfo("Asia/Seoul"))["line"]
+    assert f"세 화면: 데런픽 {md(days[0])} 조회수 순위·유입분석·검색 유입 ✓ / 데런픽 {md(days[1])} 조회수 순위·유입분석·검색 유입 ✓" in line, line
+
+
+@needs_node
+def test_stats_app_sends_nothing_when_the_blog_is_not_ours_and_says_which_view_failed() -> None:
+    db = FakeDb()
+    got = _pw3(db, "someoneelse")
+    assert got["sent"] == [] and not any(a.startswith("/api/blog/rank") for a in got["api"])
+    end = unquote(got["end"].split("#sb1=")[1])
+    assert end.startswith("어느 블로그인지 못 알아봐서 안 보냈어요 (someoneelse) — 데런픽·드라마·라커룸 계정으로"), end
+    assert any(c.startswith("한 번에: 통계 못 보냄: 어느 블로그인지 못 알아봐서") for c in got["cards"]), got["cards"]
+    # 검색 유입 탭이 없으면 그것만 '못 읽음'으로 (나머지는 보냄)
+    got = _pw3(FakeDb(), "demiyum", tab=False)
+    assert [f["n"] for f in got["sent"]] == ["조회수 순위"] * 2 + ["유입분석"] * 2 and all(f["b"] == "demiyum" for f in got["sent"])
+    end = unquote(got["end"].split("#sb1=")[1])
+    assert end.startswith("통계 보냄 ✓ 라커룸 4개 — ") and end.endswith(" · 못 읽음: 검색 유입 새 주소 없음"), end  # 탭이 없으면 '통합검색' 줄을 눌러 봄 — 새 주소가 없으면 그렇게
+
+
+@needs_node
+def test_admin_stats_screen_moves_itself_to_the_stats_app() -> None:
+    got = _pw3(FakeDb(), "derenpick", start="https://admin.blog.naver.com/derenpick/stat/today")
+    assert got["dialogs"] == [] and got["sent"] == [] and got["end"] == ST + "/m/blog/user/referer/total"
 
 
 @needs_node

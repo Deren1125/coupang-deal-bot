@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 from dealbot.dashboard import kkumi
 
 SRC = Path(__file__).resolve().parent / "static" / "statscap.js"
+DAY_SRC = SRC.parent / "statday.js"  # 11/18 한 번에 v3 의 통계 자리 (조회수 순위·유입분석·검색 유입 · 블로그 이름)
 KV_SECRET = "statscap_secret"
 PREFIX = "stats_capture:"
 KEEP_DAYS = 30
@@ -77,6 +78,11 @@ _SCRIPTY = re.compile(r"(?i)javascript:|on[a-z]{3,20}\s*=")
 _DATE = re.compile(r"(20\d\d)\s*[.\-/년]\s*(\d{1,2})\s*[.\-/월]\s*(\d{1,2})")
 _DATE8 = re.compile(r"(?<!\d)(20\d\d)(\d\d)(\d\d)(?!\d)")
 _BLOGID = re.compile(r"blogId=([A-Za-z0-9_-]{3,30})")
+_JSON_BLOGID = re.compile(r'"blogId"\s*:\s*"([A-Za-z0-9_-]{3,30})"')
+_DAY = re.compile(r"20\d\d-\d\d-\d\d")
+JSON_RAW_MAX = 400_000  # 표 줄로 바꾸기 전 책갈피가 보낸 JSON (저장은 JSON_MAX 까지만)
+# 11/18 '한 번에' v3 가 보내는 세 화면 (홈판 분석 세션 — 블로그·날짜마다 어느 화면이 왔는지 연결 탭 한 줄)
+VIEWS = ("조회수 순위", "유입분석", "검색 유입")
 
 
 class CaptureError(Exception):
@@ -164,6 +170,36 @@ def _rows(raw: str) -> list[list[list[str]]]:
     return out
 
 
+def json_rows(raw: str) -> list[list[list[str]]]:
+    """책갈피가 보낸 JSON 묶음('주소\n본문' 을 빈 줄로 이음) → 표 [[머리 칸, …], [칸, …], …] 들.
+    통계 앱 꼴 {result: {statDataList: [{data: {columnInfo: [이름…], rows: {이름: [값…]} 또는 [[값…]]}}]}} 만 — 그 밖은 건너뜀."""
+    out: list[list[list[str]]] = []
+    for part in re.split(r"\n\n(?=https://)", raw or ""):
+        body = part.split("\n", 1)[1] if part.startswith("https://") and "\n" in part else part
+        try:
+            o = json.loads(body)
+        except ValueError:
+            continue
+        res = o.get("result") if isinstance(o, dict) else None
+        for sd in (res.get("statDataList") if isinstance(res, dict) else None) or []:
+            data = sd.get("data") if isinstance(sd, dict) else None
+            cols = data.get("columnInfo") if isinstance(data, dict) else None
+            if not isinstance(cols, list) or not cols:
+                continue
+            cols = [str(c) for c in cols][:CELLS_MAX]
+            rs = data.get("rows")
+            if isinstance(rs, dict):
+                n = max((len(v) for v in rs.values() if isinstance(v, list)), default=0)
+                body_rows = [[rs.get(c)[i] if isinstance(rs.get(c), list) and i < len(rs[c]) else "" for c in cols] for i in range(min(n, ROWS_MAX))]
+            elif isinstance(rs, list):
+                body_rows = [r[:CELLS_MAX] for r in rs[:ROWS_MAX] if isinstance(r, list)]
+            else:
+                continue
+            if body_rows:
+                out.append([cols, *[["" if v is None else str(v) for v in r] for r in body_rows]])
+    return out
+
+
 def guess_blog(url: str, frames: str, ids: str, text: str) -> tuple[str | None, str]:
     """(Blog-Auto 블로그 | None, 네이버 블로그 주소). 주소의 blogId → 책갈피가 찾은 후보 → 글 속 우리 블로그 주소."""
     cands = [m.group(1) for m in _BLOGID.finditer(url + "\n" + frames)]
@@ -232,10 +268,16 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
     rows = _rows(str(form.get("r") or "")[:200_000])
     if not text and not rows and not frames:  # 11/12: 메뉴만 읽힌 화면도 iframe 주소(f)는 남김
         raise CaptureError(400, "empty", "화면 글을 못 읽었어요 — 통계가 다 뜬 뒤 다시 눌러 주세요")
-    blog, bid = guess_blog(url, frames, str(form.get("b") or "")[:400], text)
+    raw_j = str(form.get("j") or "")[:JSON_RAW_MAX]
+    if not rows:  # 11/18: 통계 앱 JSON(statDataList — columnInfo + 칸별 줄)을 표 줄로 (조회수 순위·유입분석·검색 유입)
+        rows = _rows(json.dumps(json_rows(raw_j), ensure_ascii=False))
+    ids = ",".join([str(form.get("b") or "")[:400], *_JSON_BLOGID.findall(raw_j[:200_000])[:3]])  # 11/18: 화면이 부른 user-info 의 blogId
+    blog, bid = guess_blog(url, frames, ids, text)
     tab = clean(form.get("n"), KIND_MAX * 3)[:KIND_MAX]
     kind = tab or guess_kind(url, sel, title, text)
     day = guess_date(url, sel, text, sent)
+    if (d := str(form.get("d") or "")) and _DAY.fullmatch(d) and guess_date(d, "", "", sent) == d:  # 11/18 책갈피가 받은 날짜 (일간 · 어제·오늘)
+        day = d
     name = BLOG_NAMES.get(blog or "", bid or "블로그 모름")
     rec = {"at": int(now), "sent": sent, "day": day, "blog": blog, "blog_id": bid, "blog_name": name, "kind": kind,
            "url": url, "frames": frames, "title": title, "sel": sel, "text": text, "rows": rows}
@@ -297,8 +339,11 @@ def received(db: Any, now: float, tz: ZoneInfo, *, days: int = 7) -> dict[str, A
         b["last"] = max(b["last"], int(rec.get("at") or 0))
         if isinstance(rec.get("day"), str) and len(rec["day"]) == 10:
             b["dates"].add(rec["day"])
+            v = _view(rec.get("kind"))
+            if v:
+                b.setdefault("views", {}).setdefault(rec["day"], set()).add(v)
     md = lambda d: f"{int(d[5:7])}/{int(d[8:10])}"  # noqa: E731
-    parts, parts_today = [], []
+    parts, parts_today, views_line = [], [], []
     for name, b in sorted(by.items(), key=lambda x: -x[1]["last"]):
         ds = sorted(b["dates"])
         b["dates"] = ds
@@ -307,10 +352,23 @@ def received(db: Any, now: float, tz: ZoneInfo, *, days: int = 7) -> dict[str, A
         parts.append(f"{name} {b['n']}개 · 화면 날짜 {span} · 받은 때 {b['last_at']}")
         if b["today"]:
             parts_today.append(f"{name} {b['today']}개 · 받은 때 {b['last_at']}")
+        vw = b.pop("views", {})
+        b["views"] = {d: [v for v in VIEWS if v in vw[d]] for d in sorted(vw)}
+        for d in sorted(vw)[-2:]:  # 블로그·화면 날짜마다 세 화면 중 온 것 (최근 두 날)
+            miss = [v for v in VIEWS if v not in vw[d]]
+            views_line.append(f"{name} {md(d)} " + ("·".join(v for v in VIEWS if v in vw[d])) + (f" (없음: {'·'.join(miss)})" if miss else " ✓"))
     if n_today:
         line = f"오늘 통계 {n_today}개 받았어요 ({' / '.join(parts_today)})"
     elif n:
         line = f"오늘 받은 통계 0개 · 최근 {days}일 {n}개 ({' / '.join(parts)})"
     else:
         line = f"최근 {days}일 받은 통계 0개 — 네이버 내 통계 화면(blog.stat.naver.com)에서 책갈피"
+    if n:
+        line += " · 세 화면: " + (" / ".join(views_line) if views_line else "아직 없음 (조회수 순위·유입분석·검색 유입 — 한 번에 v3)")
     return {"today": n_today, "n": n, "by": by, "line": line}
+
+
+def _view(kind: Any) -> str | None:
+    """화면 종류 → VIEWS 중 하나 (옛 이름 '유입 분석'·'검색어' 도) · 전날·안쪽 탭 꼬리(' · …')는 뺌."""
+    k = re.sub(r"\s+", "", str(kind or "").split(" · ")[0])
+    return {"조회수순위": VIEWS[0], "유입분석": VIEWS[1], "검색유입": VIEWS[2], "검색어": VIEWS[2]}.get(k)

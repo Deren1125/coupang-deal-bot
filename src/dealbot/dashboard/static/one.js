@@ -1,8 +1,9 @@
-/* '한 번에' 책갈피 v2 (11/18 v2: 안에 든 이웃 관리 v3 — 서이추 20~60초·10명마다 쉼·한도 안내 뒤 24시간 · 주인 11/16 — '책갈피 버튼 합치자 · 켜놓고 놔두면 한 번에' · '내가 누를 버튼이 없어야 한다 · 한 번 누르면 순차적으로 모든 게').
-   '통계 보내기'(statscap.js)와 '이웃 관리'(seoi.js)의 코드를 그대로 안에 넣은 껍데기 — 딜봇 one.py 가 아래 두 자리('@@STAT@@'·'@@SEOI@@')에
+/* '한 번에' 책갈피 v3 (11/18 v3: 통계 자리가 statday.js — 조회수 순위(일간)·유입분석(일간)·검색 유입을 블로그 이름과 같이 · 못 알아보면 안 보냄 · 11/18 v2: 안에 든 이웃 관리 v3 — 서이추 20~60초·10명마다 쉼·한도 안내 뒤 24시간 · 주인 11/16 — '책갈피 버튼 합치자 · 켜놓고 놔두면 한 번에' · '내가 누를 버튼이 없어야 한다 · 한 번 누르면 순차적으로 모든 게').
+   '통계 보내기'(v3 부터 세 화면 statday.js)와 '이웃 관리'(seoi.js)의 코드를 그대로 안에 넣은 껍데기 — 딜봇 one.py 가 아래 두 자리('@@STAT@@'·'@@SEOI@@')에
    두 책갈피의 줄인 코드를 통째로 넣는다 (간격·상한·멈춤 규칙·공감·댓글 코드는 한 글자도 다시 쓰지 않음 · 옛 두 책갈피는 그대로 돎).
    누르는 화면을 보고:
-     내 통계 (blog.stat.naver.com · admin.blog.naver.com) → 통계 화면을 모두 모아 보냄 → 끝나면 스스로 이웃새글(m.blog.naver.com)로 옮김
+     내 통계 (blog.stat.naver.com) → 조회수 순위·유입분석·검색 유입 (어제·오늘) 을 보냄 → 끝나면 스스로 이웃새글(m.blog.naver.com)로 옮김
+     관리 화면·블로그 주소의 통계 (admin.blog.naver.com …) → 스스로 blog.stat.naver.com 으로 옮김 (열리면 한 번 더)
      m.blog.naver.com (이웃새글·내 블로그·아무 블로그 화면)   → 이웃 관리 자동을 바로 시작: 서이추 → 들르기(공감·댓글 등록) → 결과 기록 → 할 일 줄 체크
      PC 블로그 화면 (blog.naver.com)                       → 스스로 모바일 이웃새글로 옮김
    통계 화면과 블로그 화면은 출처(주소 앞부분)가 달라 브라우저가 한 화면에서 둘을 못 읽게 막는다 — 화면을 옮기면 책갈피 코드는 사라지므로
@@ -15,7 +16,7 @@
    대시보드에는 옛 두 길만 쓴다 (통계 /dashboard/api/stats_capture · 이웃 /dashboard/api/seoi_act — 열쇠도 그대로 · 쿠키 없음).
    one.py 가 kkumi.minify 로 줄이고 한글 글은 Z('…') 로 바꾼다 — 줄마다 문장이 끝나게 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음 · 한글 글 안에 역슬래시 없음). */
 (async function () {
-const V1 = 2;
+const V1 = 3;
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
 const W = window, D = document, L = location, FEED = 'https://m.blog.naver.com/FeedList.naver', TAG = '한 번에: ', NL = String.fromCharCode(10);
 if (W.__sb1) return;
@@ -63,7 +64,7 @@ if (/(^|\.)stat\.naver\.com$/.test(L.hostname)||L.hostname==='admin.blog.naver.c
   const ok=!r.indexOf('통계 보냄');
   show(TAG+(ok?r:'통계 못 보냄: '+r)+NL+'곧 이웃새글 화면으로 옮겨요 — 열리면 이 책갈피를 한 번 더 누르면 서이추·들르기를 끝까지 해요');
   await sl(5000);
-  L.href = FEED + '#sb1=' + encodeURIComponent(r.slice(0, 60));
+  L.href = FEED + '#sb1=' + encodeURIComponent(r.slice(0, 160));
   return;
 }
 if (!/(^|\.)blog\.naver\.com$/.test(L.hostname)) {

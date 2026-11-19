@@ -1,7 +1,7 @@
 """'한 번에' 책갈피 (주인 11/16 — '책갈피 버튼 합칠 수 있는 거 합치자 · 켜놓고 놔두면 한 번에 처리되게' · '내가 누를 버튼이 없어야 한다').
 
 '통계 보내기'(statscap.js)와 '이웃 관리'(seoi.js) 두 책갈피를 하나로 묶는다 — 두 파일의 코드를 다시 쓰지 않고 껍데기(static/one.js) 안에 통째로 넣는다:
-  one.js 의 '@@STAT@@'; 자리 ← 줄인 statscap.js (주소·열쇠는 통계 것)
+  one.js 의 '@@STAT@@'; 자리 ← 줄인 statday.js (주소·열쇠는 통계 것 · 11/18 v3: 옛 statscap.js 대신 세 화면 — 조회수 순위·유입분석·검색 유입 + 블로그 이름)
   one.js 의 '@@SEOI@@'; 자리 ← 줄인 seoi.js (주소·열쇠·블로그 표는 이웃 관리 것) + 아래 PATCHES 네 군데 (사람이 누를 것을 없애는 것만):
     ① 블로그 고르기 창을 띄우지 않음 ② 한 명·한 편이 끝날 때마다 껍데기에 알림 ③ [시작]·[멈춤]을 숨기고 바로 돌고 끝나면 껍데기에 알림
     ④ 화면이 무엇이든 자동으로 (한 단계 모드 없음 — 한 단계는 마지막 단추를 주인이 눌러야 하므로)
@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 from dealbot.dashboard import kkumi, seoi, statscap
 
 SRC = Path(__file__).resolve().parent / "static" / "one.js"
-LEN_MAX = 47000  # 통계 20KB + 이웃 관리 28KB 를 합쳐 줄인 것 (11/17 통계 길 고침 +0.6KB 로 46000 → 47000) (아이패드 사파리에서 돈 가장 긴 책갈피는 29KB — 저장이 안 되면 옛 두 책갈피로)
+LEN_MAX = 47000  # (11/18 v3: 통계 자리가 statday.js 라 약 30KB) · 통계 20KB + 이웃 관리 28KB 를 합쳐 줄인 것 (11/17 통계 길 고침 +0.6KB 로 46000 → 47000) (아이패드 사파리에서 돈 가장 긴 책갈피는 29KB — 저장이 안 되면 옛 두 책갈피로)
 # seoi.js 의 옛 줄 → 한 번에 책갈피 안에서만 바뀌는 줄 (줄 통째로 · 딱 한 번씩 나와야 함)
 PATCHES: tuple[tuple[str, str], ...] = (
     ("  if (!BL.some(x => x[1] === b)) b = await choose();\n",
@@ -41,7 +41,8 @@ STEPS = (
     "아래 '코드 복사'를 눌러요.",
     "사파리에서 아무 페이지나 연 뒤 공유 단추 → '책갈피 추가' → 이름을 '한 번에'로 저장해요.",
     "책갈피 목록 → '편집' → '한 번에'의 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'. (코드가 길어요 — 저장이 안 되면 아래 '따로 쓰고 싶을 때'의 두 버튼을 쓰세요)",
-    "쓰는 법: 네이버에 로그인한 사파리에서 내 통계 화면(즐겨찾기해 둔 blog.stat.naver.com)을 열고 '한 번에' → 통계를 다 보내면 스스로 이웃새글 화면으로 옮겨 가요 → "
+    "쓰는 법: 네이버에 로그인한 사파리에서 내 통계 화면(즐겨찾기해 둔 blog.stat.naver.com)을 열고 '한 번에' → 조회수 순위·유입분석·검색 유입(어제·오늘)을 "
+    "어느 블로그 것인지 붙여 보내면 스스로 이웃새글 화면으로 옮겨 가요 (블로그를 못 알아보면 보내지 않고 그렇게 적어요) → "
     "거기서 '한 번에'를 한 번 더 → 서로이웃 신청·이웃 글 들르기(공감·댓글 등록)·결과 기록·할 일 줄 체크까지 끝까지 스스로 해요. "
     "누른 뒤에는 누를 단추도 확인 창도 없어요 — 화면을 켜 둔 채 그 탭에 두세요. 끝나면 화면 아래 칸에 요약이 남아요.",
     "왜 두 번인가요: 통계 화면과 블로그 화면은 네이버 주소가 달라 브라우저가 한 화면에서 둘을 못 하게 막아요 — 책갈피는 하나, 화면마다 한 번씩이에요. "
@@ -75,7 +76,7 @@ def _inner(code: str) -> str:
 @lru_cache(maxsize=1)
 def _code() -> str:
     one = kkumi.minify(SRC.read_text(encoding="utf-8"))
-    st = kkumi.minify(statscap.SRC.read_text(encoding="utf-8")).replace("@@URL@@", "@@SURL@@").replace("@@KEY@@", "@@SKEY@@")
+    st = kkumi.minify(statscap.DAY_SRC.read_text(encoding="utf-8")).replace("@@URL@@", "@@SURL@@").replace("@@KEY@@", "@@SKEY@@")
     so = kkumi.minify(_patched_seoi())
     zl = "const Z=" + one.split("const Z=", 1)[1].split(";", 1)[0] + ";" if "const Z=" in one else ""
     if not zl or so.count(zl) != 1:
