@@ -225,7 +225,7 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
         return _j(200, {"ok": True, "model": model, "response": data})
 
     async def claude(body: dict[str, Any]) -> Any:
-        from dealbot import cli_env, commentary
+        from dealbot import api_credit, cli_env, commentary
         from dealbot.dashboard.xstudio import alias_env_problem
         from dealbot.summarize import _CLI_AUTH, CLI_AUTH_RETRY_SECONDS
 
@@ -237,16 +237,18 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
         if (prompt is None or (system is not None and (not isinstance(system, str) or "\x00" in system)) or not isinstance(want_json, bool)
                 or not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or not 1 <= max_tokens <= MAX_TOKENS_MAX):
             return bad("bad_body", "messages(마지막이 user) 또는 prompt · system(글) · max_tokens(1~2000) · json(참/거짓) 을 확인해 주세요")
+        # API 키 방식 먼저 (주인 11/22 '쌀먹 대리 포함 API 키로 · 하루 상한은 그대로') — 키 없음·키 오류·달 상한이면 아래 CLI 그대로
+        use_api = api_credit.route("ssalmuk")
         cli = commentary.find_claude()
-        if not cli:
+        if not cli and not use_api:
             return _j(503, {"code": "no_cli", "text": "서버에 claude CLI 가 없어요"})
-        if time.monotonic() < rt["cli_down_until"]:  # 로그인이 풀린 걸 본 뒤 10분은 다시 부르지 않음 (로그인은 주인 몫)
+        if not use_api and time.monotonic() < rt["cli_down_until"]:  # 로그인이 풀린 걸 본 뒤 10분은 다시 부르지 않음 (로그인은 주인 몫)
             return _j(503, {"code": "cli_login", "text": "서버 claude CLI 로그인이 풀렸어요"})
-        bad_env = alias_env_problem() or alias_problem()
+        bad_env = None if use_api else (alias_env_problem() or alias_problem())
         if bad_env:  # 별칭이 Fable·Opus 쪽으로 돌려져 있으면 부르지 않음 (이름만 적음)
             log.error("ssalmuk llm: %s 가 모델 별칭을 규칙 밖 모델로 돌려놓음 → 부르지 않음", bad_env)
             return _j(503, {"code": "ai_off", "text": "서버 AI 설정이 모델 규칙과 달라요"})
-        if mem_low():  # 서버 메모리가 바닥이면 CLI 를 더 띄우지 않음 (횟수도 안 셈)
+        if not use_api and mem_low():  # 서버 메모리가 바닥이면 CLI 를 더 띄우지 않음 (횟수도 안 셈)
             log.warning("ssalmuk llm: 여유 메모리 %dMB 아래 → CLI 를 띄우지 않음", MEM_MIN_MB)
             return _j(429, {"code": "busy", "text": "서버 메모리가 모자라요 — 잠시 뒤 다시"})
         if not minute.hit("key"):
@@ -260,6 +262,26 @@ def register(web: Any, api: Any, desk: Any, machine: Any, blog_keys: Any, _j: An
             if not desk.llm_day_hit("claude", sonnet=model == "sonnet"):
                 return limit
             sys_text = (system.strip() if isinstance(system, str) and system.strip() else DEFAULT_SYSTEM) + (JSON_SUFFIX if want_json else "")
+            if use_api:  # 같은 모델(haiku·sonnet)·같은 하루 횟수 — 안 되면 CLI 로 (CLI 도 없으면 오류)
+                am = model  # haiku·sonnet 별칭 그대로 (실제 id 는 api_credit.resolve)
+                try:
+                    text = await api_credit.ask("ssalmuk", am, sys_text, prompt, effort="low", max_tokens=max_tokens + 4000,
+                                                timeout=max(5.0, TIMEOUT - (time.monotonic() - t0)))
+                except api_credit.ApiError as e:
+                    log.warning("ssalmuk llm api → CLI: %s", e)
+                    text = None
+                if text is not None:
+                    if want_json:
+                        text = _strip_fence(text)
+                        try:
+                            json.loads(text)
+                        except ValueError:
+                            note("claude", model, "bad_json", body, len(text), t0)
+                            return _j(502, {"code": "bad_json", "text": "답이 JSON 이 아니에요"})
+                    note("claude", model, 200, body, len(text), t0)
+                    return _j(200, {"ok": True, "text": text, "model_used": am})
+                if not cli or time.monotonic() < rt["cli_down_until"] or alias_env_problem() or alias_problem():
+                    return _j(502, {"code": "claude_error", "status": 0, "text": "API 가 답하지 않았어요 (CLI 로도 못 부름)"})
             args = [str(cli), "-p", "--output-format", "json", "--model", model, "--system-prompt", sys_text, *CLI_FLAGS, "--tools", ""]
             left = max(5.0, TIMEOUT - (time.monotonic() - t0))
             try:

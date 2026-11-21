@@ -543,6 +543,8 @@ class DealBot:
                 model=nc.model or sm.model,
                 cli_model=nc.cli_model or settings.publish.commentary.model,
                 timeout=nc.timeout_seconds,
+                task="nl",  # 말 명령(분류·경로) — API 키 방식 먼저 (주인 11/22) · 올라가는 글이 아님
+                posted=False,
             ),
             relay=self.relay_to_blog,
             parse_post=lambda text: parse_manual_post(text, self.registry),

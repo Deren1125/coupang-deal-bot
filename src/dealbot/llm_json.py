@@ -17,6 +17,7 @@ from typing import Any
 import anthropic
 
 from dealbot import (  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+    api_credit,
     cli_env,
     commentary,
 )
@@ -52,11 +53,18 @@ class JsonAsker:
         timeout: float = 30,
         effort: str = "low",
         max_tokens: int = 2000,
+        task: str | None = None,
+        posted: bool = True,
     ) -> None:
+        # task: API 크레딧 일 이름 (주인 11/21 — 'xstudio'·'nl' …). 주면 키(.env CLAUDE_API_CREDIT_KEY)·예산이 될 때 API 먼저, 안 되면 CLI.
+        # posted: 올라가는 글이면 API 에서도 Fable·Mythos·Haiku 안 씀 (→ Sonnet)
+        self.task = task
+        self.posted = posted
         self.api_key = api_key
         model = posted_api_model(model, where="llm_json")
         self.model = model  # API 모델 이름 (서버 .env). 없거나 Fable 이면 키가 있어도 API 는 안 씀
-        self.cli_bin = cli_bin if cli_bin is not None else (None if (api_key and model) else commentary.find_claude())
+        # API 가 있어도 찾아 둔다 — 예산·오류 때 CLI 로 (주인 11/21)
+        self.cli_bin = cli_bin if cli_bin is not None else commentary.find_claude()
         # 늘 --model 을 넘긴다 (주인 11/14 — config.posted_cli_model: 비었거나 Fable 이면 CLI 별칭 'sonnet') · 칸은 정해 준 이름 그대로 (없으면 None)
         self.cli_model = posted_cli_model(cli_model, where="llm_json") if cli_model else None
         self.timeout = timeout
@@ -86,13 +94,33 @@ class JsonAsker:
             raise LLMError("AI 없음 (ANTHROPIC_API_KEY·서버 claude CLI 둘 다 없음)")
         if self.disabled_reason:
             raise LLMError(self.disabled_reason)
-        if self.backend == "cli":
-            if time.monotonic() < self._cli_down_until:
-                raise LLMError("서버 claude CLI 로그인이 풀림")
-            data = await self._ask_cli(system, user, schema, images)
-        else:
-            data = await self._ask_api(system, user, schema, images)
-        self.last_backend = self.backend
+        prov = api_credit.provider(self.task) if self.task else "cli"
+        if prov == "gemini" and not images and api_credit.gemini_allow(self.task or "")[0]:
+            try:  # B 층 (주인 11/22 — 분류·경로는 Gemini 싼 모델): 안 되면 Claude API → CLI
+                data = await api_credit.ask_gemini(self.task or "", system, user, schema, timeout=max(self.timeout, 30))
+                self.last_backend, self.last_cli_models = "gemini", []
+                return data
+            except api_credit.ApiError as e:
+                log.warning("llm_json %s gemini → Claude: %s", self.task, e)
+        if self.backend == "api":  # .env 키 + API 모델 (예전 길) — 예산 안에서만 (CLI 가 없으면 그대로)
+            if api_credit.allow(self.task or "nl", key=self.api_key)[0] or not self.cli_bin:
+                data = await self._ask_api(system, user, schema, images)
+                self.last_backend = "api"
+                return data
+        elif prov in ("api", "gemini") and api_credit.allow(self.task or "")[0]:
+            # Claude API (주인 11/21·11/22): CLI 와 같은 모델로 API 먼저 · 안 되면 CLI
+            model = api_credit.api_model(self.cli_model, posted=self.posted)
+            try:
+                data = await api_credit.ask(self.task or "", model, system, user, schema=schema, images=images, effort=self.effort,
+                                            max_tokens=max(self.max_tokens, 8000), timeout=max(self.timeout, 60))
+                self.last_backend, self.last_cli_models = "api", [model]
+                return data
+            except api_credit.ApiError as e:
+                log.warning("llm_json %s api → CLI: %s", self.task, e)
+        if time.monotonic() < self._cli_down_until:
+            raise LLMError("서버 claude CLI 로그인이 풀림")
+        data = await self._ask_cli(system, user, schema, images)
+        self.last_backend = "cli"
         return data
 
     def _get_client(self) -> anthropic.AsyncAnthropic:
@@ -128,6 +156,7 @@ class JsonAsker:
             raise LLMError("API 연결 실패") from e
         except Exception as e:  # noqa: BLE001
             raise LLMError(f"{type(e).__name__}: {e}") from e
+        api_credit.record(self.task or "nl", str(getattr(response, "model", "") or self.model), getattr(response, "usage", None))
         stop = getattr(response, "stop_reason", None)
         if stop in ("refusal", "max_tokens"):
             raise LLMError(f"답을 받지 못함 ({stop})")

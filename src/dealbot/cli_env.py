@@ -40,7 +40,10 @@ def without_token(env: dict[str, str]) -> dict[str, str]:
 
 def cli_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """claude CLI 에 넘길 환경: os.environ + extra (토큰이 끊긴 걸 본 뒤 24시간은 토큰 빼고)."""
-    env = os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"} | (extra or {})
+    from dealbot import api_credit
+
+    # API 크레딧 키는 CLI 에 넘기지 않는다 — 넘기면 구독 대신 API 로 청구 (예산 장부 밖 · 주인 11/21)
+    env = api_credit.strip_cli_env(os.environ | {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"} | (extra or {}))
     return without_token(env) if dropped() else env
 
 

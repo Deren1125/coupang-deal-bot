@@ -40,6 +40,18 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _api_credit_isolated(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """API 크레딧 장부는 시험마다 빈 임시 폴더 · 키·예산 값은 지움 (주인 11/21 — 진짜 장부·키를 건드리지 않게)."""
+    monkeypatch.setenv("API_CREDIT_DIR", str(tmp_path_factory.mktemp("api_credit")))
+    for k in ("CLAUDE_API_CREDIT_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "API_CREDIT_MONTHLY_USD",
+              "API_CREDIT_DAILY_USD", "DEALBOT_API_TASKS"):
+        monkeypatch.delenv(k, raising=False)
+    from dealbot import api_credit
+
+    api_credit._warned_mem.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_page_fetch(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """테스트는 인터넷을 타지 않는다: 상품 페이지·게시글 읽기는 기본적으로 '못 읽음'.
     필요한 테스트는 직접 가짜를 끼우거나, 가짜 HTTP 를 쓰는 테스트는 @pytest.mark.real_fetch 로 이 차단을 끈다."""

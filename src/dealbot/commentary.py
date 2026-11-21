@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from dealbot import cli_env
+from dealbot import api_credit, cli_env
 from dealbot.config import posted_cli_model
 from dealbot.models import Deal
 from dealbot.utils.text import clean_name
@@ -283,6 +283,7 @@ def validate(data: dict[str, Any], facts: str, shown: Iterable[str | None], name
     return {k: v for k, v in got.items() if v}
 
 
+API_TASK = "commentary"  # API 크레딧 일 이름 (api_credit.DEFAULT_TASKS)
 BREAK_AFTER = 3  # 이만큼 연달아 실패하면
 BREAK_SECONDS = 15 * 60  # 이 동안은 CLI 를 안 부르고 한줄평 없이 올린다
 _PROMPT_TAG = hashlib.sha1((SYSTEM + json.dumps(SCHEMA)).encode()).hexdigest()[:8]  # 지시문을 바꾸면 저장된 답을 다시 안 씀
@@ -308,7 +309,8 @@ class Commentator:
 
     @property
     def available(self) -> bool:
-        return bool(self.enabled and self.bin)
+        # API 크레딧으로 옮김 (주인 11/21): CLI 가 없어도 키가 있고 한줄평이 api 일이면 된다
+        return bool(self.enabled and (self.bin or (api_credit.api_key() and api_credit.provider(API_TASK) == "api")))
 
     def _key(self, deal: Deal, facts: str = "", shown: Iterable[str | None] = ()) -> str:
         """상품 ID 전체(옵션 vendorItemId·URL 해시까지) + 이름·가격·넘긴 정보·지시문이 모두 같을 때만 같은 키."""
@@ -376,7 +378,18 @@ class Commentator:
         return got
 
     async def _ask(self, user: str) -> dict[str, Any] | None:
-        """CLI 를 불러 정해진 칸(dict)을 돌려준다. 실패(실행 안 됨·시간 초과·오류 응답)는 None, 칸 없이 말로만 답하면 {}."""
+        """정해진 칸(dict)을 돌려준다. API 크레딧(주인 11/21)이 되면 API 먼저 — 안 되면(키 없음·예산·오류) CLI 로.
+        실패(실행 안 됨·시간 초과·오류 응답)는 None, 칸 없이 말로만 답하면 {}."""
+        if api_credit.route(API_TASK):
+            try:
+                data = await api_credit.ask(API_TASK, api_credit.api_model(self.model), SYSTEM, user, schema=SCHEMA,
+                                            effort="low", max_tokens=2000, timeout=self.timeout)
+                self._ok()
+                return data if any(k in data for k in FIELDS) else {}
+            except api_credit.ApiError as e:
+                log.warning("commentary api → CLI: %s", e)
+        if not self.bin:
+            return self._fail("claude CLI 없음 (API 도 안 됨)")
         args = [self.bin, "-p", "--output-format", "json", "--model", posted_cli_model(self.model, where="commentary"),
                 "--system-prompt", SYSTEM, "--tools", "", "--json-schema", json.dumps(SCHEMA, ensure_ascii=False)]
         try:  # .env 구독 토큰이 끊겼으면 토큰 없이 한 번 더 (cli_env, 11/18)

@@ -16,12 +16,14 @@ from typing import Any
 import anthropic
 
 from dealbot import (  # find_claude 는 모듈째로 불러 쓴다 (테스트가 갈아 끼울 수 있게)
+    api_credit,
     cli_env,
     commentary,
 )
 from dealbot.config import posted_api_model, posted_cli_model
 
 log = logging.getLogger(__name__)
+API_TASK = "summarize"  # API 크레딧 일 이름 (주인 11/21 — api_credit.DEFAULT_TASKS)
 
 SKIP_TOKEN = "SKIP"
 
@@ -164,7 +166,8 @@ class InfoSummarizer:
         self.max_chars = max_chars
         self.timeout = timeout
         # 키·모델이 없으면 서버에 로그인된 claude CLI 로 (한줄평 Commentator 와 같은 실행 파일). 요약기를 설정에서 끄면 use_cli=False
-        self.cli_bin = commentary.find_claude() if (use_cli and not self._api_ready) else None
+        # API 가 있어도 찾아 둔다 — API 예산·오류 때 CLI 로 (API 크레딧 주인 11/21)
+        self.cli_bin = commentary.find_claude() if use_cli else None
         # 늘 --model 을 넘긴다 (주인 11/14 — config.posted_cli_model: 비었거나 Fable 이면 CLI 별칭 'sonnet') · 칸은 정해 준 이름 그대로 (없으면 None)
         self.cli_model = posted_cli_model(cli_model, where="summarizer") if cli_model else None
         self.cli_timeout = cli_timeout if cli_timeout is not None else max(timeout, 120)  # CLI 는 처음 뜰 때 느리다
@@ -219,10 +222,17 @@ class InfoSummarizer:
             return Summary(error="본문이 거의 없음")
         system = SYSTEM_PROMPT.format(max_chars=self.max_chars)
         user = self._user_message(title=title, source=source, text=text, links=links or [])
-        if self.backend == "cli":
-            answer, error = await self._ask_cli(system, user)
-        else:
+        answer, error = None, None
+        if self.backend == "api" and api_credit.allow(API_TASK, key=self.api_key)[0]:  # .env 키 + 모델 (예전 길) — 예산 안에서만
             answer, error = await self._ask_api(system, user)
+        elif self.backend == "cli" and api_credit.route(API_TASK):  # API 크레딧 (주인 11/21): CLI 와 같은 모델로 API 먼저
+            try:
+                answer = await api_credit.ask(API_TASK, api_credit.api_model(self.cli_model), system, user, effort=None,
+                                              max_tokens=4000, timeout=self.timeout)
+            except api_credit.ApiError as e:
+                log.warning("summarizer api → CLI: %s", e)
+        if answer is None and self.cli_bin and not (time.monotonic() < self._cli_down_until):
+            answer, error = await self._ask_cli(system, user)
         if error or answer is None:
             return Summary(error=error or "요약을 만들지 못함")
         return self._finish(answer, title)
@@ -266,6 +276,7 @@ class InfoSummarizer:
             log.warning("summarizer failed: %s", self.last_error)
             return None, self.last_error
 
+        api_credit.record(API_TASK, str(getattr(response, "model", "") or self.model), getattr(response, "usage", None))
         answer = "".join(getattr(block, "text", "") for block in response.content if getattr(block, "type", "") == "text").strip()
         if getattr(response, "stop_reason", None) == "max_tokens":
             self.last_error = "답이 길어서 잘림"

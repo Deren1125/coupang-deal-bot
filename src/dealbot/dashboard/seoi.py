@@ -736,7 +736,7 @@ class Drafter:
         self.model = model or comment_model()
         if _MODEL_NO.search(self.model):
             raise ValueError("댓글 초안에 쓸 수 없는 모델")
-        self.asker = JsonAsker(None, cli_model=self.model, timeout=timeout)
+        self.asker = JsonAsker(None, cli_model=self.model, timeout=timeout, task="seoi")  # API 키 방식 먼저 (주인 11/22)
 
     async def draft(self, blog: str, title: str, text: str, recent: list[str]) -> dict[str, Any]:
         system = SYSTEM.format(voice=VOICE[blog], comment_max=COMMENT_MAX - 20)

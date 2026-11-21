@@ -430,3 +430,45 @@ async def test_no_prompt_answer_or_key_in_logs_or_kv(bot: DealBot, monkeypatch: 
     dump = json.dumps([tuple(r) for r in rows], ensure_ascii=False)
     for secret in (SECRET_Q, SECRET_A, "비밀 지시문", GKEY, "010-9999-8888"):
         assert secret not in dump, secret
+
+
+async def test_claude_api_key_first_same_caps_then_cli(bot: DealBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    """주인 11/22 '쌀먹 대리 포함 API 키 방식으로 · 하루 상한은 지금처럼': 키가 있으면 API 먼저 (같은 별칭·같은 하루 횟수),
+    API 가 안 되면 CLI 그대로. 키 값은 CLI 에 안 넘어감."""
+    from types import SimpleNamespace as NS
+
+    import anthropic
+
+    from dealbot import api_credit
+
+    sent: list[dict[str, Any]] = []
+    state = {"fail": False}
+
+    class C:
+        def __init__(self, **kw: Any) -> None:
+            self.models = NS(list=self._list)
+            self.messages = NS(create=self._create)
+
+        async def _list(self, **kw: Any) -> Any:
+            return NS(data=[NS(id=mid("sonnet-9-9")), NS(id=mid("haiku-9-9"))])
+
+        async def _create(self, **kw: Any) -> Any:
+            sent.append(kw)
+            if state["fail"]:
+                raise RuntimeError("down")
+            return NS(stop_reason="end_turn", model=kw["model"], content=[NS(type="text", text=SECRET_A)],
+                      usage=NS(input_tokens=10, output_tokens=5, cache_creation_input_tokens=0, cache_read_input_tokens=0, server_tool_use=None))
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", C)
+    api_credit._resolved.clear()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k-secret")
+    calls = fake_cli(monkeypatch)
+    key = desk(bot).key()
+    status, out = await call(bot, cbody(model="haiku", system="퀴즈 풀이", max_tokens=300), key)
+    assert status == 200 and out["text"] == SECRET_A and out["model_used"] == "haiku" and not calls
+    assert sent[-1]["model"] == mid("haiku-9-9") and sent[-1]["system"][0]["text"] == "퀴즈 풀이"
+    assert desk(bot).llm_view()["claude"]["today"] == 1  # 하루 횟수는 그대로 셈
+    state["fail"] = True
+    status, out = await call(bot, cbody(model="sonnet"), key)
+    assert status == 200 and len(calls) == 1 and "k-secret" not in json.dumps(calls[0]["env"])
+    assert desk(bot).llm_view()["claude"] == {"today": 2, "cap": 150, "sonnet": 1, "sonnet_cap": 50}

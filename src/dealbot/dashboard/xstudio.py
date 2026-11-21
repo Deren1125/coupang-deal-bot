@@ -1286,11 +1286,12 @@ class Studio:
             log.error("xstudio: %s 가 글 쓰는 모델을 Fable 쪽으로 돌려놓음 → 초안을 쓰지 않음", bad_env)
             raise StudioError(503, "ai_off", "서버 AI 설정이 글 쓰는 모델 규칙과 달라요 — 메인 세션에 알려 주세요")
         if self._asker is None:  # 서버에 로그인된 claude CLI 로만 (한줄평과 같은 실행 파일) — 모델은 늘 이름으로 넘긴다
-            self._asker = JsonAsker(None, cli_model=self.model, timeout=CLI_TIMEOUT)
+            # API 키 방식 먼저 (주인 11/22 — task='xstudio', 같은 모델 · 하루 초안 상한 DRAFT_PER_DAY 그대로) · 안 되면 CLI
+            self._asker = JsonAsker(None, cli_model=self.model, timeout=CLI_TIMEOUT, task="xstudio", effort="medium")
         asker = self._asker
         if images:  # 사진을 읽을 때는 오래 걸린다 — 시간만 넉넉한 같은 호출기 (모델 이름은 같음)
             if self._vision is None:
-                self._vision = JsonAsker(None, cli_model=self.model, timeout=VISION_TIMEOUT)
+                self._vision = JsonAsker(None, cli_model=self.model, timeout=VISION_TIMEOUT, task="xstudio", effort="medium")
             asker = self._vision
         assert_writer_model(asker.cli_model)
         try:
