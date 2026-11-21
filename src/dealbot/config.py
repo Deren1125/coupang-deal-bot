@@ -973,6 +973,56 @@ class SsalmukDashConfig(BaseModel):
     show: bool = False
 
 
+class JobprepConfig(BaseModel):
+    """취준 탭 (주인 11/22 — /dashboard/jobprep/ · dashboard/jobprep/ · docs/jobprep_plan.md). 데이터는 data_dir (git 밖 · 700/600).
+    false 면 경로·주기 일·아래 탭 링크 모두 꺼짐. AI 상한은 모두 여기 값 (코드에 박지 않음)."""
+
+    enabled: bool = True
+    data_dir: str = "~/jobprep-data"  # 환경변수 JOBPREP_DATA_DIR 가 이김
+    collect_time: str = "06:00"
+    recheck_times: list[str] = Field(default_factory=lambda: ["06:00", "18:00"])
+    # Claude (ANTHROPIC_API_KEY · '클로드에게 묻기' 단추만) — 예산 나눔이 정해질 때까지 (11/22): 달 $10 · 하루 $1 · 처음 7일은 하루 $0.5
+    claude_monthly_usd: float = Field(10.0, ge=0)
+    claude_daily_usd: float = Field(1.0, ge=0)
+    claude_first_week_daily_usd: float = Field(0.5, ge=0)
+    claude_first_week_days: int = Field(7, ge=0)
+    claude_model: str = "sonnet"
+    gemini_fast: str = "gemini-2.5-flash-lite"
+    gemini_good: str = "gemini-2.5-flash"
+    gemini_calls_per_day: dict[str, int] = Field(default_factory=lambda: {"fast": 400, "good": 60})
+    gemini_monthly_usd: float = Field(3.0, ge=0)  # 공용 GEMINI_API_KEY 를 쓸 때 취준 몫 (추정액) — 넘으면 그달은 쉼
+    gemini_key_env: str = "JOBPREP_GEMINI_API_KEY"  # 있으면 이 키 (없으면 공용 GEMINI_API_KEY)
+    discharge: str = "2027-07-13"
+    book_finish_by: str = "2027-08-31"
+    apply_windows: list[dict[str, str]] = Field(default_factory=lambda: [
+        {"label": "해외 2027 여름 지원", "start": "2026-11-01", "end": "2027-01-31", "guess": "1"},
+        {"label": "국내 여름 인턴", "start": "2027-04-01", "end": "2027-05-31", "guess": "1"},
+        {"label": "국내 겨울 인턴", "start": "2027-10-01", "end": "2027-11-30", "guess": "1"}])
+    retake_max_grade: str = "A0"  # 재수강 성적 상한 (주인 확인 필요)
+    sandbox_mode: Literal["auto", "systemd", "rlimit", "off"] = "auto"
+    pron_min_free_mb: int = Field(1000, ge=0)
+    min_free_mb: int = Field(400, ge=0)  # 뒤 작업·코드 돌리기 전 여유 메모리
+    fetch_gap_s: float = Field(3.0, ge=0)
+    fetch_max_bytes: int = Field(20 * 1024 * 1024, ge=1024)
+    use_proxy: bool = False
+    speech_channel_url: str = "https://www.youtube.com/@JimmyCarr/videos"
+    cases_pages_per_week: int = Field(30, ge=0)
+
+    @field_validator("collect_time")
+    @classmethod
+    def _hm(cls, v: str) -> str:
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", v):
+            raise ValueError("dashboard.jobprep.collect_time 는 'HH:MM'")
+        return v
+
+    @field_validator("recheck_times")
+    @classmethod
+    def _hms(cls, v: list[str]) -> list[str]:
+        if any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in v):
+            raise ValueError("dashboard.jobprep.recheck_times 는 'HH:MM' 목록")
+        return sorted(v)
+
+
 class DashboardConfig(BaseModel):
     """채널 대시보드 (주인 요청 10/14): /dashboard 에 채널별 구독자·이웃·조회수와 목표를 한 화면에.
     페이지는 DASHBOARD_USER / DASHBOARD_PASSWORD 가 모두 있을 때만 열린다 (없으면 404)."""
@@ -1012,6 +1062,7 @@ class DashboardConfig(BaseModel):
     x_cap: XCapConfig = Field(default_factory=XCapConfig)  # X 커뮤 캡처 글 (주인 11/17)
     x_aggro: XAggroConfig = Field(default_factory=XAggroConfig)  # X 어그로 후보 (주인 11/17 — 캡처(가림) + 초안 카드)
     x_photo: XPhotoConfig = Field(default_factory=XPhotoConfig)  # 사진으로 X 글 쓰기 · 초안에 붙일 사진 (주인 11/17)
+    jobprep: JobprepConfig = Field(default_factory=JobprepConfig)  # 취준 탭 (주인 11/22 — dashboard/jobprep/)
     # 주인 11/16 "X 는 책갈피 굳이 안 쓰는 게 나을 것 같아. 그냥 체크리스트 느낌으로만" — 둘 다 숨김 (코드·API 는 그대로, true 면 예전 화면)
     x_helper: bool = False  # 'X 도우미' 책갈피 (static/xhelper.js) 설치 칸 · 받기. false 면 이미 깐 책갈피를 눌러도 '이제 안 써요' 한 줄만
     x_react: bool = False  # X 답글·방문 추천 (주인 11/18 뺌): '오늘 할 X 일' 카드(답글 n/10·한 시간 n/15·답글 달기) · 글쓰기 화면 답글·계정 칸 · 체크리스트 '오늘 반응 할 것' · X 봇 반응 카드(x.js). true 면 다시 보임 (기록·API 는 그대로)

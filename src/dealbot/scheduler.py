@@ -413,6 +413,12 @@ async def dashboard_loop(bot: DealBot, stop: asyncio.Event) -> None:
                 xa.tick()
         except Exception as e:  # noqa: BLE001
             log.warning("x aggro failed: %s", type(e).__name__)
+        try:  # 취준 (주인 11/22 — dashboard/jobprep/): 정한 시각 뒤 하나씩 · 뒤에서 · 도는 중·메모리 부족이면 미룸 · 발음 채점 줄 세움
+            jpp = getattr(getattr(getattr(bot, "dashboard", None), "api", None), "jobprep", None)
+            if jpp is not None:
+                jpp.tick()
+        except Exception as e:  # noqa: BLE001
+            log.warning("jobprep failed: %s", type(e).__name__)
         await _sleep_or_stop(stop, 60)
 
 

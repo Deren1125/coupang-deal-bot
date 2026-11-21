@@ -377,15 +377,16 @@ async def test_other_dashboard_routes_untouched(bot: DealBot, hub: Hub) -> None:
 
 
 # ------------------------------------------------------------------ 화면 · 이름 · 아이콘
-async def test_bottom_tab_has_farm_as_seventh(bot: DealBot) -> None:
+async def test_bottom_tab_has_farm_as_seventh_and_jobprep_eighth(bot: DealBot) -> None:
     html = (await bot.web.dispatch("GET", "/dashboard/", session_headers(bot)))[1]
     nav = re.search(r'<nav class="tabs"[^>]*>(.*?)</nav>', html, re.S).group(1)  # type: ignore[union-attr]
     tabs = re.findall(r'<a class="tab" href="([^"]+)"[^>]*>.*?<span>([^<]+)</span></a>', nav, re.S)
-    assert len(tabs) == 7 and tabs[-1] == ("/dashboard/farm/", "파밍") and tabs[3] == ("#/sns", "SNS")
-    assert nav.count("<svg") == 7 and 'target="' not in nav  # 같은 탭 안 이동
+    # 11/22 취준 탭이 여덟째 (파밍은 일곱째 그대로)
+    assert len(tabs) == 8 and tabs[6] == ("/dashboard/farm/", "파밍") and tabs[7] == ("/dashboard/jobprep/", "취준") and tabs[3] == ("#/sns", "SNS")
+    assert nav.count("<svg") == 8 and 'target="' not in nav  # 같은 탭 안 이동
     css = (webapp.STATIC_DIR / "app.css").read_text(encoding="utf-8")
-    assert ".tabs{" in css and "grid-template-columns:repeat(7,minmax(0,1fr))" in css
-    assert max(len(lab) for _href, lab in tabs) <= 3  # 320px 폭(한 칸 45px)에 12px 글자 세 자까지
+    assert ".tabs{" in css and "grid-template-columns:repeat(8,minmax(0,1fr))" in css
+    assert max(len(lab) for _href, lab in tabs) <= 3  # 320px 폭(한 칸 40px)에 12px 글자 세 자까지 ('취준' 두 자)
     assert shell.FARM_URL == farm.HOME
 
 

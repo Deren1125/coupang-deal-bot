@@ -1,0 +1,69 @@
+/* 취준 (주인 11/22) — app.css 의 :root 색 토큰만 씀. 휴대폰 먼저 (세로 한 줄) */
+body.jp{padding-bottom:calc(72px + var(--bot))}
+.jp-hd{display:flex;align-items:center;gap:12px}
+.jp-back{color:var(--ac-ink);text-decoration:none;font-weight:600;font-size:15px;min-height:44px;display:flex;align-items:center}
+.jp-tabs{position:sticky;top:0;z-index:15;display:flex;gap:4px;overflow-x:auto;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--line);
+scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.jp-tabs::-webkit-scrollbar{display:none}
+.jp-tab{flex:0 0 auto;padding:8px 12px;border-radius:999px;color:var(--sub);text-decoration:none;font-size:14px;font-weight:600;white-space:nowrap}
+.jp-tab[aria-current=page]{background:var(--ac);color:var(--ac-on)}
+.jp-card{margin:12px 0;padding:14px 16px;border-radius:14px;background:var(--card);border:1px solid var(--line)}
+details.jp-card>summary{cursor:pointer;font-weight:700;min-height:28px}
+.jp-h{font-size:16px;margin:0 0 8px}.jp-h3{font-size:14px;margin:10px 0 4px}
+.jp-sub{color:var(--sub);font-size:13px;margin:4px 0}
+.jp-warn{color:var(--or);background:var(--or-soft);padding:6px 10px;border-radius:8px;font-size:13px}
+.jp-text{white-space:pre-wrap;line-height:1.55;font-size:15px;margin:6px 0}
+.jp-pre{white-space:pre-wrap;word-break:break-word;background:var(--tile);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;margin:6px 0}
+.jp-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.jp-btn{min-height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--ac);background:var(--ac);color:var(--ac-on);font-weight:600;font-size:14px}
+.jp-btn.ghost{background:var(--card);color:var(--ac-ink);border-color:var(--fline)}
+.jp-btn.on{background:var(--gr-soft);color:var(--gr);border-color:var(--gr)}
+.jp-btn:disabled{opacity:.5}
+.jp-mini{border:0;background:none;color:var(--sub);font-size:12px;padding:4px 0}
+.jp-in{display:block;width:100%;box-sizing:border-box;margin:6px 0;padding:10px 12px;border-radius:10px;border:1px solid var(--fline);background:var(--field);color:var(--text);font-size:16px}
+.jp-in.sm{width:auto;min-width:0;flex:1;padding:6px 8px;font-size:14px}
+.jp-code{font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4;white-space:pre}
+.jp-sel{min-height:36px;border-radius:8px;border:1px solid var(--fline);background:var(--field);color:var(--text);font-size:14px}
+.jp-field{display:block;margin:6px 0}.jp-field>span{display:block;font-size:13px;color:var(--sub)}
+.jp-chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.jp-chips .jp-btn{min-height:32px;padding:0 10px;font-size:13px;flex:0 0 auto}
+.jp-job{padding:10px 0;border-top:1px solid var(--line)}
+.jp-job-h{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.jp-tag{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--grey);color:var(--ac-ink)}
+.jp-tag.on{background:var(--gr-soft);color:var(--gr)}
+.jp-fit{font-size:13px;color:var(--ac-ink);margin:4px 0}
+.jp-board{display:flex;gap:8px;overflow-x:auto}
+.jp-col{flex:0 0 150px;background:var(--tile);border-radius:10px;padding:8px}
+.jp-mini-card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px;margin:6px 0;font-size:13px}
+.jp-watch{padding:8px 0;border-top:1px solid var(--line)}
+.jp-case{padding:8px 0;border-top:1px solid var(--line)}
+.jp-kv{display:flex;gap:8px;font-size:14px}.jp-kv>span:first-child{flex:0 0 72px;color:var(--sub)}
+.jp-list{margin:4px 0;padding-left:18px}.jp-list li{margin:4px 0}
+.jp-check{list-style:none;margin:0;padding:0}
+.jp-check li a{display:flex;gap:10px;align-items:center;min-height:44px;color:var(--text);text-decoration:none}
+.jp-check li.done a{color:var(--sub);text-decoration:line-through}
+.jp-box{display:inline-flex;width:22px;height:22px;border-radius:6px;border:1.5px solid var(--fline);align-items:center;justify-content:center;color:var(--gr);font-weight:800}
+.jp-dday{display:flex;flex-direction:column;gap:6px}.jp-dday b{font-size:22px}
+.jp-bar{display:grid;grid-template-columns:minmax(0,1.4fr) 2fr auto;gap:8px;align-items:center;margin:6px 0;font-size:13px}
+.jp-bar-t{height:10px;border-radius:5px;background:var(--grey);overflow:hidden}
+.jp-bar-f{height:100%;background:var(--chart);border-radius:5px}.jp-bar-f.me{background:var(--gr)}
+.jp-bar-n{color:var(--sub);font-variant-numeric:tabular-nums}
+.jp-item{padding:8px 0;border-top:1px solid var(--line)}
+.jp-hint{background:var(--ac-soft);border-radius:8px;padding:8px 10px}
+.jp-result .ok{color:var(--gr)}.jp-result .bad{color:var(--red)}
+.jp-quote{font-size:15px;line-height:1.5;margin:4px 0}.jp-quote.twist{font-weight:700}
+.jp-fix{padding:8px 0;border-top:1px solid var(--line)}.jp-mine{color:var(--red);text-decoration:line-through}.jp-better{color:var(--gr);font-weight:600}
+.jp-sent{padding:10px 0;border-top:1px solid var(--line)}
+.jp-rec{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}.jp-rec audio{max-width:100%;height:36px}
+.jp-table .jp-trow{display:flex;gap:4px;align-items:center}
+.jp-chart{width:100%;height:auto}.jp-chart .ln{fill:none;stroke:var(--chart);stroke-width:2}.jp-chart .ax{stroke:var(--line)}
+.jp-chart text{fill:var(--sub);font-size:11px}
+.jp-chatbar{position:fixed;left:0;right:0;bottom:0;z-index:20;padding:8px 12px calc(8px + var(--bot));background:var(--card);border-top:1px solid var(--line)}
+.jp-chat-open{width:100%;min-height:44px;border-radius:22px;border:1px solid var(--fline);background:var(--field);color:var(--sub);text-align:left;padding:0 16px;font-size:15px}
+.jp-sheet{position:fixed;inset:0;z-index:30;background:var(--bd);display:flex;align-items:flex-end}
+.jp-sheet[hidden]{display:none}
+.jp-sheet-in{width:100%;max-height:85vh;overflow:auto;background:var(--card);border-radius:16px 16px 0 0;padding:14px 16px calc(14px + var(--bot));box-sizing:border-box}
+.jp-sheet-h{display:flex;justify-content:space-between;align-items:center}
+.jp-msgs{max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:8px;margin:8px 0}
+.jp-msg{max-width:85%;padding:8px 12px;border-radius:14px;white-space:pre-wrap;line-height:1.5;font-size:15px}
+.jp-msg.me{align-self:flex-end;background:var(--ac);color:var(--ac-on)}.jp-msg.ai{align-self:flex-start;background:var(--ac-soft);color:var(--text)}

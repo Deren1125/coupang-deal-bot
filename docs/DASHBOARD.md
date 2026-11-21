@@ -440,3 +440,26 @@ class YouTubeSource(Source):
   원격 화면 터널 응답에는 이 머리글이 안 붙는다 → 완전히 가르려면 파밍을 다른 호스트 이름(출처)으로 옮기거나 허브가 페이지 안 스크립트를 없애 `'unsafe-inline'` 을 뺀다.
 - 허브의 서비스 워커(`/dashboard/farm/sw.js`, 알림용)는 범위가 `/dashboard/farm/` 까지라 대시보드 것(`/dashboard/`)과 따로 돈다.
 - 아이콘(오리 그림, 11/15 — perpfarm/hub_static 의 icon-1024.jpg 에서): `python tools/app_icons.py <그림 폴더>` — static 아이콘 다섯 개와 `tests/fixtures/dash_icons.json` 을 같이 바꾼다.
+
+## 취준 (아래 탭 '취준' — 주인 11/22)
+
+아래 탭 여덟째 '취준'을 누르면 `/dashboard/jobprep/` — 따로 된 화면 한 장 (맨 위 '← 대시보드'). 계획·까닭은 `docs/jobprep_plan.md`.
+코드는 `dashboard/jobprep/` · 화면은 `static/jobprep.js`(틀·오늘·대화창) + 처음 열 때 받는 `jp_jobs.js`(공고·합격 사례) `jp_code.js`(코딩)
+`jp_talk.js`(스피치·영어·녹음) `jp_misc.js`(내 소개·학사·자료함·설정) · `jobprep.css`. static 파일에는 데이터가 없다 (로그인 없이 열리는 파일).
+
+- 경로: 화면 `/dashboard/jobprep/` · API `/dashboard/api/jobprep/…` (모두 대시보드 로그인 아래 · 답은 no-store · POST 는 같은 사이트 + X-Dash-Token ·
+  GET 1분 120번 · POST 1분 30번 · 올리기 `POST …/upload` 머리글 `X-Jp-Kind: acad|pron|speech|human` 사진 8MB·소리 3MB). CSP 는 대시보드와 같고 `media-src 'self' blob:` 만 더함.
+- 데이터: `~/jobprep-data/` (설정 `dashboard.jobprep.data_dir` · 환경변수 `JOBPREP_DATA_DIR` 가 이김 · 폴더 700 · 파일 600 · git 밖) —
+  `jobprep.db` · `ctci/`(책 PDF·목록·문제 글 — 로그인 아래 API 로만) · `models/`(발음 모델) · `acad/`·`audio`(녹음 90일 뒤 지움) · `cache/` · `tmp/`.
+- 주기 일 (scheduler 1분 일이 `Jobprep.tick()` · 한 번에 하나 · 여유 메모리 400MB 아래면 미룸 · kv `runs` 로 하루 한 번 · 3시간 안 놓친 건 따라잡음):
+  06:00 공고 모으기 → 06:20 새 공고 뽑기·적합도(Gemini fast 10개 묶음) · 18:00 다시 확인만 · 03:30 다음 CtCI 3문제 사다리 · 04:00 지우기 ·
+  월 05:30 영어 상대 7일·스피치 카드·인문학 7주제·약한 소리 문장 · 월 05:50 성장 목록(DefiLlama·CoinGecko·YC)·합격 사례(주 30쪽).
+- AI: Gemini 키 `JOBPREP_GEMINI_API_KEY` → 없으면 공용 `GEMINI_API_KEY` (공용일 때만 취준 몫 달 추정 $3 · 공용 장부에 `jobprep.*`) · 하루 횟수 fast 400·good 60.
+  Claude 는 '클로드에게 묻기' 단추만 — 달 $10 · 하루 $1 · 처음 7일 하루 $0.5 (설정값 · 취준 장부와 공용 장부 `jobprep.*` 줄 중 큰 값) · 넘으면 429 · CLI 로 안 넘어감.
+  캐시(`llm_cache`): 같은 입력은 다시 안 부름 (사다리는 문제마다 한 번). 로그에는 해시 8자·글자 수·모델·상태만.
+- 코드 채점: `sudo -n systemd-run --version` 이 되면 DynamicUser·PrivateNetwork·ProtectHome·ProtectSystem=strict·256MB·12초 임시 단위,
+  안 되면 rlimit + 감사 훅 (⑤·⑨에 '격리: 약함'). 사용자 코드는 표준 입력으로만. 사다리 시험은 참고 풀이를 돌려 기대값이 같은 경우만 씀.
+- 발음: `pron_worker` 를 그때그때 띄움 (nice 19 · 여유 1000MB 아래면 '채점 기다림' · 60초 · systemd 가 되면 메모리 1200MB scope) — 모델이 없으면 '준비 중'.
+- 한 번 할 일 (서버 · `nice -n 19` · 백그라운드): `python tools/jobprep_ctci_extract.py` (CtCI 189문제 · 검증 실패면 종료 코드 1 → `ctci/overrides.json`) ·
+  `python tools/jobprep_setup.py` (발음 모델 318MB·vocab·CMUdict).
+- 끄기: `dashboard.jobprep.enabled: false` — 경로·주기 일 모두 꺼지고 아래 탭 링크도 숨김 (코드를 되돌리지 않고).

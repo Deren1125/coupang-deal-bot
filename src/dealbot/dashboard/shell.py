@@ -49,6 +49,7 @@ XPHOTO_JS = "xphoto.js"  # 사진으로 X 글 쓰기 (11/17) — 지금 뜨는 �
 KWRUN_JS = "kwrun.js"  # 키워드 글쓰기 결과 줄 (11/17) — 블로그 탭 인기 키워드·할 일 탭 막 뜨는 중 단추 옆. 셸이 defer 로 (xtrend.js 다음)
 SEOIRES_JS = "seoires.js"  # 오늘 자동 결과 표 (11/15) — 할 일 탭 블로그 칸의 이웃 들르기 줄 아래 접는 칸. routine.js 가 예산 끝이라 셸이 defer 로 (routine.js 다음)
 FARM_URL = "/dashboard/farm/"  # 파밍 대시보드 (11/15, farm.py)
+JOBPREP_URL = "/dashboard/jobprep/"  # 취준 (11/22, dashboard/jobprep/) — 설정 dashboard.jobprep.enabled 가 false 면 링크 숨김
 ROUTINE_JS = "routine.js"  # 오늘 할 일 (10/27) — 할 일 탭 맨 위 칸. logins.js 와 같이 셸이 defer 로 받고, 칸은 스스로 할 일 탭에 붙는다
 
 
@@ -70,6 +71,10 @@ def _tabs() -> str:
     # 파밍 (주인 11/15 'sns 대시보드랑 파밍 대시보드 합치기'): 일곱째 칸 — 해시 화면이 아니라 /dashboard/farm/ 로 넘어감 (같은 탭 안 이동).
     # data-tab 이 없어 app.js 가 고른 탭으로 칠하지 않는다. 돌아오기는 파밍 화면의 '← SNS'
     out.append(f'<a class="tab" href="{FARM_URL}">{icons.TAB_FARM}<span>파밍</span></a>')
+    from dealbot.dashboard import jobprep  # 취준 (11/22): 여덟째 칸 — 파밍과 같은 꼴 (data-tab 없음 · 같은 탭 안 이동)
+
+    if jobprep.enabled():
+        out.append(f'<a class="tab" href="{JOBPREP_URL}">{icons.TAB_JOBPREP}<span>취준</span></a>')
     return "".join(out)
 
 

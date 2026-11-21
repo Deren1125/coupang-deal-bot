@@ -20,6 +20,11 @@ dependencies = [
     "cryptography>=42,<50",
     # 막힌 네이버 스토어 페이지를 발행 직전 한 번 실제 크롬으로 (10/10). 서버는 블로그 봇과 같은 버전 → 같은 크롬(chromium-1243)을 함께 씀
     "playwright==1.63.0",
+    # 취준 탭 (주인 11/22 — dashboard/jobprep/): CtCI 한 번 뽑기(pypdf) · 발음 채점 일꾼(numpy·onnxruntime — 따로 뜨는 프로세스에서만 import) · 스피치 자막(yt-dlp)
+    "pypdf>=4",
+    "numpy>=1.26",
+    "onnxruntime>=1.17",
+    "yt-dlp",
 ]
 
 [project.optional-dependencies]

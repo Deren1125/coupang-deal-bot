@@ -142,6 +142,9 @@ APP_FILES = {"app.js": "text/javascript; charset=utf-8", "app.css": "text/css; c
              "xphoto.js": "text/javascript; charset=utf-8",  # xphoto.js: #/sns/xr/w '사진으로 글 쓰기' 칸 (11/17, 셸이 defer 로 — xcap.js 다음)
              "xcap.js": "text/javascript; charset=utf-8",  # xcap.js: SNS 탭 X 칸 '커뮤 캡처 글' 카드 (11/17, 셸이 defer 로 — 오늘 X 글 카드 아래)  # kwrun.js: 키워드 글쓰기 결과 줄 (11/17, 셸이 defer 로 — 인기 키워드·막 뜨는 중 단추 옆)
              "xaggro.js": "text/javascript; charset=utf-8",  # xaggro.js: SNS 탭 X 칸 '어그로 후보' 카드 (11/17, 셸이 defer 로 — 커뮤 캡처 글 카드 아래)
+             "jobprep.js": "text/javascript; charset=utf-8", "jobprep.css": "text/css; charset=utf-8",  # 취준 (11/22) 틀 · 데이터 없음
+             "jp_jobs.js": "text/javascript; charset=utf-8", "jp_code.js": "text/javascript; charset=utf-8",
+             "jp_talk.js": "text/javascript; charset=utf-8", "jp_misc.js": "text/javascript; charset=utf-8",
              "xgo.js": "text/javascript; charset=utf-8"}  # xgo.js: X 도구 바로 가기 디딤돌 (/dashboard/x — 같은 사이트 안 이동으로 한 번 넘김)
 SW_PATH = "/dashboard/sw.js"
 ACTION_BODY_MAX = 64 * 1024
@@ -346,6 +349,10 @@ class DashApi:
         from dealbot.dashboard import dashacct
 
         dashacct.register(web, self)
+        # 취준 탭 (주인 11/22 — dashboard/jobprep/ · docs/jobprep_plan.md) — /dashboard/jobprep/ · /dashboard/api/jobprep/… 모두 로그인 아래
+        from dealbot.dashboard import jobprep
+
+        self.jobprep = jobprep.register(web, self)
 
         # 원격 로그인 화면 (주인 10/23): 대시보드 로그인 뒤, 세션이 살아 있을 때만 127.0.0.1:6080(websockify)로 잇는다
         web.route_tunnel(remote_login.PREFIX, lambda: remote_login.port(self.bot.db))
