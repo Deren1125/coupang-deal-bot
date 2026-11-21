@@ -298,7 +298,7 @@ class Fetcher:
             if body2 is not None:
                 meta["at"] = self.clock()
                 self.store.write("cache", meta_name, json.dumps(meta).encode())
-                return Resp(200, body2, True)
+                return Resp(200, body2, False)  # 304 = 방금 서버가 '그대로'라고 답함 → 새로 읽은 것으로 침 (miss 를 셈)
         if status == 200 and use_cache:
             self.store.write("cache", body_name, body)
             self.store.write("cache", meta_name, json.dumps({"at": self.clock(), "etag": rh.get("etag", ""), "lm": rh.get("last-modified", ""),
@@ -336,23 +336,32 @@ def why_of(status: int) -> str:
     return f"HTTP {status}"
 
 
-async def read_board(f: Fetcher, ats: str, token: str) -> tuple[bool, list[dict[str, Any]], str]:
-    """ATS 보드 하나 → (성공?, 줄들, 까닭). 성공해야만 닫힘(miss)을 센다."""
+def _parse_rows(body: bytes, ats: str, token: str, filt: Callable[[dict[str, Any]], tuple[bool, str]] | None) -> list[dict[str, Any]]:
+    rows = PARSERS[ats](json.loads(body), token)
+    if filt is not None:
+        for r in rows:
+            r["_pass"], r["_why"] = filt(r)
+    return rows
+
+
+async def read_board(f: Fetcher, ats: str, token: str, filt: Callable[[dict[str, Any]], tuple[bool, str]] | None = None
+                     ) -> tuple[bool, list[dict[str, Any]], str, bool]:
+    """ATS 보드 하나 → (성공?, 줄들, 까닭, 새로 읽음?). 파싱과 규칙 거르기(filt)는 같은 스레드에서 (큰 JSON 이 이벤트 루프를 막지 않게).
+    성공해야만 닫힘(miss)을 세고, 캐시(TTL) 저장본이면 새로 읽음=False (miss 를 안 셈 · 304 는 새로 읽은 것)."""
     src = f"{ats}:{token}"
     if ats not in URLS or f.is_off(src):
-        return False, [], "쉼"
+        return False, [], "쉼", False
     r = await f.get(URLS[ats].format(token=token))
     if r.status != 200:
         f.note(src, False, why_of(r.status))
-        return False, [], why_of(r.status)
+        return False, [], why_of(r.status), False
     try:
-        data = await asyncio.to_thread(json.loads, r.body)
-        rows = PARSERS[ats](data, token)
+        rows = await asyncio.to_thread(_parse_rows, r.body, ats, token, filt)
     except (ValueError, TypeError, AttributeError) as e:
         f.note(src, False, "parse")
-        return False, [], f"읽기 실패 {type(e).__name__}"
+        return False, [], f"읽기 실패 {type(e).__name__}", False
     f.note(src, True)
-    return True, rows, ""
+    return True, rows, "", not r.cached
 
 
 async def read_page(f: Fetcher, url: str, src: str) -> tuple[int, str]:

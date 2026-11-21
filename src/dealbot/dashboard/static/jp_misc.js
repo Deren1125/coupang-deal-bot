@@ -154,7 +154,7 @@
           (s.gemini.month_cap !== null ? ' / $' + s.gemini.month_cap + ' (공용 키)' : ' (취준 키)') + (s.gemini.key === 'none' ? ' · 키 없음' : '') })));
       box.appendChild(JP.card('지원 창 (추정 — 설정 파일)', d.windows.map(function (w) { return h('div', { text: w.label + ': ' + w.start + ' ~ ' + w.end + (w.guess === '1' ? ' (추정)' : '') }); }),
         h('p', { cls: 'jp-sub', text: '전역 ' + d.discharge + ' · 책 끝내기 ' + d.book_finish_by + ' · 재수강 상한 ' + d.retake_max })));
-      box.appendChild(JP.card('서버', h('p', { text: '코드 격리: ' + (d.sandbox.strong ? 'systemd (강함)' : d.sandbox.mode === 'off' ? '꺼짐' : 'rlimit (약함)') }),
+      box.appendChild(JP.card('서버', h('p', { text: '코드 격리: ' + (d.sandbox.strong ? 'systemd (강함)' : d.sandbox.mode === 'off' ? '꺼짐' : d.sandbox.mode === 'rlimit' ? 'rlimit (약함 · 시험 설정)' : '못 씀 — 코드 채점 멈춤 (systemd-run 확인)') }),
         h('p', { text: '발음 모델: ' + (d.pron_ready ? '준비됨' : '준비 중 (tools/jobprep_setup.py)') }), d.busy ? h('p', { cls: 'jp-sub', text: '지금 도는 일: ' + d.busy }) : null));
       var src = Object.keys(d.sources || {}).map(function (k) { var x = d.sources[k]; return h('div', { cls: 'jp-sub', text: k + ': ' + (x.until && x.until * 1000 > Date.now() ? '쉼 (' + x.why + ')' : x.why ? '실패 ' + x.n + '번 (' + x.why + ')' : '정상') }); });
       var last = d.collect_last || {};

@@ -18,7 +18,7 @@
       var svc = h('input', { type: 'checkbox', checked: d.service_mode, onchange: function (ev) { JP.api('code/mode', { service: ev.target.checked }).then(function () { JP.rerender(); }, JP.fail); } });
       box.appendChild(JP.card('오늘 몫', h('p', { text: '하루 ' + q.per_day + '문제 · 이번 주 ' + q.week_done + '/' + q.per_week + ' · 남은 ' + q.remain + '/' + q.total }),
         h('label', { cls: 'jp-row' }, svc, ' 복무 중 모드 (개념 + 종이 풀이 · 자기 채점)'),
-        d.sandbox && !d.sandbox.strong ? h('p', { cls: 'jp-warn', text: '격리: 약함 — 서버가 systemd 격리를 못 써서 제한(rlimit)만 걸고 돌려요' }) : null));
+        d.sandbox && !d.sandbox.strong ? h('p', { cls: 'jp-warn', text: d.sandbox.mode === 'rlimit' ? '격리: 약함 — 제한(rlimit)만 걸고 돌려요 (시험 설정)' : '격리를 쓸 수 없어 코드를 돌리지 않아요 — 자기 채점으로 (서버 systemd-run 확인 필요)' }) : null));
       box.appendChild(JP.card('새 문제', d.new.map(function (r) {
         return h('div', { cls: 'jp-row' }, JP.link(r.qid + ' ' + r.title, '#/code/' + r.qid), h('span', { cls: 'jp-sub', text: r.kind === 'code' ? ' 코드' : ' 설명' + (r.ladder ? '' : ' · 준비 전') }));
       })));

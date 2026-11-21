@@ -1,6 +1,6 @@
 """⑤ 코드 돌리기 (격리). 사용자 글은 표준 입력 JSON 으로만 (명령줄에 안 들어감) · 답은 표준 출력 JSON 한 줄.
 
-방식 A (sandbox_mode auto 이고 `sudo -n systemd-run --version` 이 되면): systemd-run 임시 단위 — DynamicUser(다른 사용자)·
+방식 A (sandbox_mode systemd·auto — 기본 · 안 되면 돌리지 않음(503), 5분 뒤 다시 확인 · 이고 `sudo -n systemd-run --version` 이 되면): systemd-run 임시 단위 — DynamicUser(다른 사용자)·
 PrivateNetwork(네트워크 없음)·ProtectHome(/home 안 보임 → .env 못 읽음)·ProtectSystem=strict·PrivateTmp·NoNewPrivileges·메모리 256MB·
 CPU 60%·nice 19·작업 16개·12초. 특권 사용자로 사용자 코드를 돌리지 않는다 (DynamicUser).
 방식 B (A 가 안 될 때): python3 -I -S -B 하위 프로세스 · env={} · 새 임시 폴더 · setsid·nice 19·RLIMIT(AS 256MB·CPU 5초·FSIZE 1MB·
@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 CODE_MAX = 50 * 1024
 OUT_MAX = 64 * 1024
 TOTAL_S = 10.0
+PROBE_RETRY_S = 300.0
 CASE_S = 2
 PY = "/usr/bin/python3"
 BOOT = "import sys,json;D=json.loads(sys.stdin.read());exec(compile(D['runner'],'<runner>','exec'),{'D':D,'__name__':'__runner__'})"
@@ -149,12 +150,11 @@ try:
         codec = T.get("codec") or "none"; mode = T.get("compare") or "exact"
         for c in T["cases"]:
             args = [enc(codec, copy.deepcopy(a)) for a in (c.get("args") or [])]
-            t0 = __import__("time").perf_counter(); ok = False; got = None; err = ""
+            t0 = __import__("time").perf_counter(); got = None; err = ""
             try:
                 signal.alarm(%(case_s)d)
                 got = dec(codec, fn(*args))
                 signal.alarm(0)
-                ok = same(mode, got, c.get("expected"))
             except Timeout:
                 err = "시간 초과 (%(case_s)d초)"
             except MemoryError:
@@ -164,9 +164,10 @@ try:
             except BaseException as e:
                 signal.alarm(0); err = type(e).__name__ + ": " + str(e)[:160]
             ms = int((__import__("time").perf_counter() - t0) * 1000)
-            try: gs = json.dumps(got, default=repr)[:200]
-            except Exception: gs = repr(got)[:200]
-            res["cases"].append({"ok": ok, "got": gs, "ms": ms, "err": err})
+            try: full = json.dumps(got)
+            except Exception: full = None
+            if full is not None and len(full) > 4000: full = None; err = err or "답이 너무 커요"
+            res["cases"].append({"val": full, "ms": ms, "err": err})
 except Timeout:
     res["error"] = "시간 초과"
 except BaseException as e:
@@ -174,7 +175,23 @@ except BaseException as e:
     res["error"] = type(e).__name__ + ": " + str(e)[:300]
 res["stdout"] = buf.getvalue()[:2048]
 OUT.write(NONCE + json.dumps(res, ensure_ascii=False) + "\n"); OUT.flush()
+os._exit(0)
 ''' % {"case_s": CASE_S}
+
+
+def same(mode: str, got: Any, exp: Any) -> bool:
+    """맞고 틀림은 부모(이 프로세스)가 정한다 — 기대값은 하위 프로세스로 넘기지 않는다 (사용자 코드가 결과를 꾸며도 기대값을 모름)."""
+    if mode == "unordered" and isinstance(got, list) and isinstance(exp, list):
+        k = lambda x: json.dumps(x, sort_keys=True, default=repr)  # noqa: E731
+        return sorted(map(k, got)) == sorted(map(k, exp))
+    if mode == "float":
+        try:
+            return abs(float(got) - float(exp)) <= 1e-6 * max(1.0, abs(float(exp)))
+        except (TypeError, ValueError):
+            return False
+    if mode == "any_of" and isinstance(exp, list):
+        return any(got == e for e in exp)
+    return bool(got == exp)
 
 
 class SandboxError(Exception):
@@ -214,19 +231,23 @@ class Sandbox:
     def __init__(self, mode: str = "auto", tmp_root: str | None = None) -> None:
         self.want = mode
         self._mode: str | None = None
+        self._probed = 0.0
         self.tmp_root = tmp_root
         self.lock = asyncio.Lock()
 
     def mode(self) -> str:
-        if self._mode is None:
-            if self.want == "off":
-                self._mode = "off"
-            elif self.want == "rlimit":
-                self._mode = "rlimit"
-            elif self.want in ("auto", "systemd"):
-                self._mode = "systemd" if systemd_ok() else ("off" if self.want == "systemd" else "rlimit")
-            else:
-                self._mode = "rlimit"
+        """systemd(기본 · 'auto' 도 같음) 가 안 되면 'unavailable' — 약한 방식으로 몰래 내려가지 않는다 (fail closed).
+        rlimit 은 설정에 직접 적었을 때만 (시험 환경). 실패한 확인은 PROBE_RETRY_S 뒤 다시 본다."""
+        if self.want == "off":
+            return "off"
+        if self.want == "rlimit":
+            return "rlimit"
+        now = time.monotonic()
+        if self._mode == "systemd":
+            return "systemd"
+        if self._mode is None or now - self._probed >= PROBE_RETRY_S:
+            self._probed = now
+            self._mode = "systemd" if systemd_ok() else "unavailable"
         return self._mode
 
     def strong(self) -> bool:
@@ -239,6 +260,8 @@ class Sandbox:
         mode = self.mode()
         if mode == "off":
             raise SandboxError(503, "off", "코드 돌리기가 꺼져 있어요")
+        if mode == "unavailable":
+            raise SandboxError(503, "no_sandbox", "서버에서 격리(systemd-run)를 쓸 수 없어 코드를 돌리지 않아요 — 자기 채점으로 해 주세요")
         async with self.lock:
             return await self._run(mode, code, tests)
 
@@ -246,7 +269,8 @@ class Sandbox:
         nonce = "@@" + secrets.token_hex(8) + "@@"
         tmp = tempfile.mkdtemp(prefix="jpsb-", dir=self.tmp_root if mode == "rlimit" else None)
         os.chmod(tmp, 0o700)
-        payload = {"runner": RUNNER, "code": code, "tests": tests, "nonce": nonce, "tmp": "/tmp" if mode == "systemd" else tmp}
+        blind = {**tests, "cases": [{"args": c.get("args") or []} for c in tests.get("cases") or []]}
+        payload = {"runner": RUNNER, "code": code, "tests": blind, "nonce": nonce, "tmp": "/tmp" if mode == "systemd" else tmp}
         data = json.dumps(payload).encode()
         t0 = time.monotonic()
         try:
@@ -274,7 +298,21 @@ class Sandbox:
             res = None
         if not isinstance(res, dict):
             res = {"cases": [], "stdout": "", "error": "코드가 끝나지 않았어요 (메모리·시간 상한일 수 있어요)"}
-        res["passed"] = sum(1 for c in res.get("cases") or [] if c.get("ok"))
+        mode_c = tests.get("compare") or "exact"
+        exp = [c.get("expected") for c in tests.get("cases") or []]
+        cases = []
+        for i, c in enumerate((res.get("cases") or [])[:len(exp)]):
+            c = c if isinstance(c, dict) else {}
+            val, ok = c.get("val"), False
+            if isinstance(val, str) and not c.get("err"):
+                try:
+                    ok = same(mode_c, json.loads(val), exp[i])
+                except ValueError:
+                    ok = False
+            cases.append({"ok": ok, "got": (val or "null")[:200], "ms": int(c.get("ms") or 0) if isinstance(c.get("ms"), (int, float)) else 0,
+                          "err": str(c.get("err") or "")[:200]})
+        res["cases"] = cases
+        res["passed"] = sum(1 for c in cases if c["ok"])
         res["total"] = len(tests.get("cases") or [])
         res["mode"] = mode
         res["ms"] = int((time.monotonic() - t0) * 1000)

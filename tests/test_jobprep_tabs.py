@@ -98,6 +98,44 @@ async def test_chat_send_gemini_stores_history(jp, monkeypatch: pytest.MonkeyPat
     assert [m["role"] for m in h] == ["user", "assistant"]
 
 
+def test_failed_slot_retries_once(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from dealbot.dashboard.jobprep import store
+
+    jp.fake_clock.t = datetime(2026, 11, 24, 18, 5, tzinfo=ZoneInfo("Asia/Seoul")).timestamp()  # 화요일 18:05 — recheck 만
+    monkeypatch.setattr(store, "mem_free_mb", lambda meminfo=None: 3000)
+    calls: list[str] = []
+
+    async def boom(name: str) -> None:
+        calls.append(name)
+        raise RuntimeError("x")
+
+    jp._work = boom  # type: ignore[method-assign]
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        for _ in range(3):
+            if jp.tick():
+                loop.run_until_complete(jp.task)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+    assert calls == ["recheck:18:00", "recheck:18:00"]  # 처음 + 한 번 더 · 그 뒤엔 그날 쉼
+    assert jp.store.kv_get("runs")["recheck:18:00"]["state"] == "started"
+
+
+def test_deadlines_and_chat_context_respect_exclusions(jp) -> None:  # type: ignore[no-untyped-def]
+    cid = jp.store.x("INSERT INTO companies (name, norm, cat, on_) VALUES ('NoCo','noco','ib',1)")
+    jp.store.x("INSERT INTO jobs (ukey, company_id, title, deadline, state, auto_out, cat) VALUES ('a', ?, 'Hidden Intern', '2026-11-20', 'open', 0, 'ib')", (cid,))
+    assert today.view(jp)["deadlines"] and "Hidden Intern" in chat.context(jp, "jobs", "")
+    from dealbot.dashboard.jobprep import jobs
+
+    jobs.exclude(jp, {"scope": "company", "key": str(cid)})
+    assert today.view(jp)["deadlines"] == [] and "Hidden Intern" not in chat.context(jp, "jobs", "")
+
+
 def test_tick_runs_due_slot_once_and_waits_on_low_memory(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -109,10 +147,10 @@ def test_tick_runs_due_slot_once_and_waits_on_low_memory(jp, monkeypatch: pytest
     assert jp.due(jp.clock()) == "collect"
     ran: list[str] = []
 
-    async def fake_run(name: str) -> None:
+    async def fake_work(name: str) -> None:
         ran.append(name)
 
-    jp._run = fake_run  # type: ignore[method-assign]
+    jp._work = fake_work  # type: ignore[method-assign]
     monkeypatch.setattr(store, "mem_free_mb", lambda meminfo=None: 100)
     loop = asyncio.new_event_loop()
     try:
@@ -123,6 +161,7 @@ def test_tick_runs_due_slot_once_and_waits_on_low_memory(jp, monkeypatch: pytest
         loop.run_until_complete(jp.task)
         assert ran == ["collect"] and jp.due(jp.clock()) not in ("collect", "")  # 같은 날 두 번 안 돎 · 다음은 놓친 03:30~05:50 일들
         runs = jp.store.kv_get("runs")
+        assert runs["collect"]["state"] == "done" and runs["collect"]["tries"] == 1
         jp.store.kv_set("runs", {**runs, "ladder": runs["collect"], "clean": runs["collect"], "weekly": runs["collect"], "growth": runs["collect"]})
         assert jp.due(jp.clock()) == ""
         jp.fake_clock.t += 19 * 60  # 06:20

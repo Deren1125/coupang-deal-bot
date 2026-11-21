@@ -31,6 +31,10 @@ INTERVALS = [1, 3, 7, 21]
 QID_RE = re.compile(r"^(\d{1,2})\.(\d{1,2})$")
 MIN_TESTS = 8
 LADDER_VER = 1
+LADDER_THINKING = 1024  # Gemini 생각 토큰 상한 (출력이 잘리지 않게 — 리뷰 11/22)
+LADDER_RETRY_S = 3600
+RUN_PER_MIN = 6
+RUN_PER_DAY = 300
 FOOT_RE = re.compile(r"^(Chapter \d.*|\d+ Cracking the Coding Interview.*|CrackingTheCoding.*|Cracking the Coding Interview, 6th Edition\s*|"
                      r"Solutions to Chapter.*)$")
 HINTS_RE = re.compile(r"^\s*H[il1]nts\s*[:;]?\s*#")
@@ -358,14 +362,14 @@ async def make_ladder(jp: Any, qid: str) -> dict[str, Any]:
     if q["kind"] != "code":
         out = await jp.llm.gemini(f"ctci.ladder:{qid}:v{LADDER_VER}", "good", LADDER_SYSTEM,
                                   f"CtCI {qid} {q['title']}\n문제:\n{(text.get('question') or '')[:2500]}\n\n설명 문제다. concept·hints 3개·twist·"
-                                  "rubric(좋은 답에 꼭 들어갈 요점 4~6개)을 만들어 줘.", schema=EXPLAIN_SCHEMA, ver=LADDER_VER)
+                                  "rubric(좋은 답에 꼭 들어갈 요점 4~6개)을 만들어 줘.", schema=EXPLAIN_SCHEMA, ver=LADDER_VER, thinking=LADDER_THINKING, max_tokens=8000)
         lad = {"kind": "explain", **out}
         jp.store.kv_set(f"ladder:{qid}", lad)
         return lad
     best: dict[str, Any] | None = None
     for attempt in range(2):
         raw = await jp.llm.gemini(f"ctci.ladder:{qid}:v{LADDER_VER}", "good", LADDER_SYSTEM, ladder_prompt(q, text), schema=LADDER_SCHEMA,
-                                  ver=LADDER_VER + attempt * 100, max_tokens=16000)
+                                  ver=LADDER_VER + attempt * 100, max_tokens=16000, thinking=LADDER_THINKING)
         book = dict(raw.get("book") or {})
         book["tests"] = await _valid_tests(jp, book)
         warm = []
@@ -391,10 +395,16 @@ def ladder(jp: Any, qid: str) -> dict[str, Any] | None:
     return jp.store.kv_get(f"ladder:{qid}")
 
 
+def ladder_err(jp: Any, qid: str) -> dict[str, Any] | None:
+    """최근(LADDER_RETRY_S 안) 만들기 실패 {at, why} — 그동안은 다시 부르지 않음."""
+    e = jp.store.kv_get(f"ladder_err:{qid}")
+    return e if isinstance(e, dict) and jp.clock() - float(e.get("at") or 0) < LADDER_RETRY_S else None
+
+
 def start_ladder(jp: Any, qid: str) -> bool:
-    """뒤에서 만들기 (도는 중이면 그대로). True = 시작함."""
+    """뒤에서 만들기 (도는 중이거나 1시간 안에 실패했으면 그대로). True = 시작함."""
     busy = jp.bg.get(f"ladder:{qid}")
-    if busy is not None and not busy.done():
+    if (busy is not None and not busy.done()) or ladder_err(jp, qid):
         return False
 
     async def go() -> None:
@@ -411,9 +421,12 @@ def start_ladder(jp: Any, qid: str) -> bool:
 async def pregen(jp: Any, n: int = 3) -> int:
     made = 0
     for r in next_new(jp, n):
-        if ladder(jp, r["qid"]) is None:
-            await make_ladder(jp, r["qid"])
-            made += 1
+        if ladder(jp, r["qid"]) is None and not ladder_err(jp, r["qid"]):
+            try:
+                await make_ladder(jp, r["qid"])
+                made += 1
+            except Exception as e:  # noqa: BLE001
+                jp.store.kv_set(f"ladder_err:{r['qid']}", {"at": jp.clock(), "why": getattr(e, "text", type(e).__name__)})
     return made
 
 
@@ -450,8 +463,9 @@ def q_view(jp: Any, qid: str) -> dict[str, Any]:
     prog = jp.store.one("SELECT * FROM ctci_progress WHERE qid=?", (qid,)) or {}
     if lad is None:
         started = start_ladder(jp, qid)
-        err = jp.store.kv_get(f"ladder_err:{qid}")
-        return {"q": q, "question": text.get("question") or "", "making": True, "started": started, "err": (err or {}).get("why", "")}
+        err = ladder_err(jp, qid)
+        return {"q": q, "question": text.get("question") or "", "making": True, "started": started,
+                "err": (err["why"] + " · 1시간 뒤 다시 만들어요") if err else ""}
     shown = prog.get("warmups_shown")
     if shown is None:
         shown = warmups_to_show(jp, q["ch"])
@@ -502,6 +516,24 @@ def _item(lad: dict[str, Any], item: str) -> dict[str, Any] | None:
     return ws[int(m.group(1))] if m and int(m.group(1)) < len(ws) else None
 
 
+def run_gate(jp: Any) -> None:
+    """코드 돌리기 상한: 1분 6번 · 하루 300번 · 여유 메모리 min_free_mb(400MB) 아래면 거절."""
+    from dealbot.dashboard.jobprep import store as storemod
+
+    now = jp.clock()
+    recent = [t for t in getattr(jp, "_run_times", []) if now - t < 60]
+    if len(recent) >= RUN_PER_MIN:
+        raise JpError(429, "rate", f"채점은 1분에 {RUN_PER_MIN}번까지예요 — 잠깐 뒤 다시")
+    day = datetime.fromtimestamp(now, KST).strftime("%Y-%m-%d")
+    r = jp.store.one("SELECT n FROM usage WHERE day=? AND kind='sandbox'", (day,))
+    if r and int(r["n"]) >= RUN_PER_DAY:
+        raise JpError(429, "rate", f"오늘 채점 {RUN_PER_DAY}번을 다 썼어요 — 내일 다시")
+    if storemod.mem_free_mb() < int(jp.cfg().min_free_mb):
+        raise JpError(503, "low_mem", "서버 메모리가 모자라요 — 잠깐 뒤 다시")
+    jp._run_times = [*recent, now]
+    jp.store.x("INSERT INTO usage (day, kind, n, usd) VALUES (?, 'sandbox', 1, 0) ON CONFLICT(day, kind) DO UPDATE SET n=n+1", (day,))
+
+
 async def run(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     qid, item, code = str(body.get("qid") or ""), str(body.get("item") or "book"), body.get("code")
     if not isinstance(code, str) or not code.strip():
@@ -511,6 +543,7 @@ async def run(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     if it is None or not it.get("tests"):
         raise JpError(409, "no_tests", "시험이 준비되지 않았어요 — 자기 채점으로 해 주세요")
     tests = {"fn": it["fn"], "cases": it["tests"], "compare": it.get("compare") or "exact", "codec": it.get("codec") or "none"}
+    run_gate(jp)
     res = await jp.sandbox.run(code, tests)
     fail = None
     for c, r in zip(it["tests"], res.get("cases") or [], strict=False):

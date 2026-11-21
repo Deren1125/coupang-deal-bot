@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 import types
@@ -184,3 +185,41 @@ async def test_ladder_with_too_few_valid_tests_retries_then_self_grade(jp, monke
     lad = await ctci.make_ladder(jp, "1.1")
     assert not lad["tests_ready"] and len([c for c in jp.fake_http.calls if c[0] == "POST"]) == 2
     assert ctci.q_view(jp, "1.1")["tests_ready"] is False
+
+
+async def test_run_limits_per_minute_day_and_memory(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    from dealbot.dashboard.jobprep import store
+    from dealbot.dashboard.jobprep.store import JpError
+
+    jp.store.kv_set("ladder:1.1", {"kind": "code", "book": {"fn": "f", "tests": [{"args": [1], "expected": 1}], "compare": "exact", "codec": "none"}})
+    monkeypatch.setattr(store, "mem_free_mb", lambda meminfo=None: 3000)
+    for _ in range(ctci.RUN_PER_MIN):
+        await ctci.run(jp, {"qid": "1.1", "item": "book", "code": "def f(x):\n    return x\n"})
+    with pytest.raises(JpError) as e:
+        await ctci.run(jp, {"qid": "1.1", "item": "book", "code": "def f(x):\n    return x\n"})
+    assert e.value.status == 429
+    jp.fake_clock.t += 61
+    monkeypatch.setattr(store, "mem_free_mb", lambda meminfo=None: 100)
+    with pytest.raises(JpError) as e:
+        await ctci.run(jp, {"qid": "1.1", "item": "book", "code": "def f(x):\n    return x\n"})
+    assert e.value.status == 503
+    monkeypatch.setattr(store, "mem_free_mb", lambda meminfo=None: 3000)
+    jp.store.x("UPDATE usage SET n=? WHERE kind='sandbox'", (ctci.RUN_PER_DAY,))
+    with pytest.raises(JpError) as e:
+        await ctci.run(jp, {"qid": "1.1", "item": "book", "code": "def f(x):\n    return x\n"})
+    assert e.value.status == 429 and "오늘" in e.value.text
+
+
+async def test_ladder_failure_waits_an_hour(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("JOBPREP_GEMINI_API_KEY", "k")
+    jp.fake_http.gemini = ["not json"]
+    jp.fake_clock.t += 86400  # 목요일 — 다음 새 문제가 1.1
+    v = ctci.q_view(jp, "1.1")
+    assert v["making"] and v["started"]
+    await asyncio.wait_for(jp.bg["ladder:1.1"], 10)
+    v = ctci.q_view(jp, "1.1")
+    assert not v["started"] and "1시간" in v["err"]
+    n = len(jp.fake_http.calls)
+    assert await ctci.pregen(jp, 1) == 0 and len(jp.fake_http.calls) == n  # 미리 만들기도 쉼
+    jp.fake_clock.t += ctci.LADDER_RETRY_S + 1
+    assert ctci.start_ladder(jp, "1.1") is True

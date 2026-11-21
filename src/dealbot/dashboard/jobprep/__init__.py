@@ -31,8 +31,10 @@ IMAGE_TYPES = ("image/jpeg", "image/png", "image/webp")
 AUDIO_TYPES = ("audio/webm", "audio/mp4", "audio/ogg", "audio/wav", "audio/x-wav", "audio/mpeg", "audio/aac", "video/webm", "video/mp4",
                "audio/x-m4a")
 FILE_RE = re.compile(r"^(acad|pron|speech|human)/([A-Za-z0-9_-]{1,40}\.(?:jpg|wav))$")
+UA = "jobprep-reader/1.0 (public job listings; no login)"
 COLLECT_NOW_PER_DAY = 2
 CATCHUP_S = 3 * 3600
+SLOT_TRIES = 2  # 처음 + 한 번 더 (리뷰 11/22)
 AUDIO_KEEP_S = 90 * 86400
 _on = False
 
@@ -78,9 +80,28 @@ class Jobprep:
                 continue
             h, m = (int(x) for x in hm.split(":"))
             at = dt.replace(hour=h, minute=m, second=0, microsecond=0).timestamp()
-            if at <= now <= at + CATCHUP_S and runs.get(name) != day:
+            if at <= now <= at + CATCHUP_S and not self._done_today(runs.get(name), day):
                 return name
         return ""
+
+    @staticmethod
+    def _done_today(entry: Any, day: str) -> bool:
+        """그날 끝났나 — 'started' 로 남은 것(실패·재시작)은 3시간 안에 한 번 더 (tries 2 까지)."""
+        if isinstance(entry, str):
+            return entry == day
+        if not isinstance(entry, dict) or entry.get("day") != day:
+            return False
+        return entry.get("state") == "done" or int(entry.get("tries") or 0) >= SLOT_TRIES
+
+    def _mark(self, name: str, state: str) -> None:
+        runs = self.store.kv_get("runs", {}) or {}
+        day = datetime.fromtimestamp(self.clock(), KST).strftime("%Y-%m-%d")
+        cur = runs.get(name) if isinstance(runs.get(name), dict) and runs[name].get("day") == day else {"day": day, "tries": 0}
+        if state == "started":
+            cur["tries"] = int(cur.get("tries") or 0) + 1
+        cur["state"] = state
+        runs[name] = cur
+        self.store.kv_set("runs", runs)
 
     def tick(self) -> bool:
         if not self.cfg().enabled:
@@ -88,7 +109,7 @@ class Jobprep:
         from dealbot.dashboard.jobprep import pron, store
 
         try:
-            if self.store.one("SELECT id FROM pron_takes WHERE state='queued' LIMIT 1"):
+            if self.store.one("SELECT id FROM pron_takes WHERE state IN ('queued','running') LIMIT 1"):
                 pron.pump(self)
         except Exception as e:  # noqa: BLE001
             log.info("jobprep pron pump: %s", type(e).__name__)
@@ -100,52 +121,56 @@ class Jobprep:
             return False
         if store.mem_free_mb() < int(self.cfg().min_free_mb):
             return False
-        runs = self.store.kv_get("runs", {}) or {}
-        runs[name] = datetime.fromtimestamp(now, KST).strftime("%Y-%m-%d")
-        self.store.kv_set("runs", runs)
+        self._mark(name, "started")
         self.task_name = name
         self.task = asyncio.ensure_future(self._run(name))
         return True
 
     async def _run(self, name: str) -> None:
-        from dealbot.dashboard.jobprep import cases, ctci, english, jobs, pron, speech
-
+        """한 슬롯 — 끝까지 가면 'done', 오류면 'started' 그대로 (3시간 안 한 번 더)."""
         t0 = self.clock()
-        result: Any = None
         try:
-            if name == "collect":
-                async with self.collect_lock:
-                    result = await jobs.collect(self)
-                result = {"boards": len(result.get("boards") or {})}
-            elif name.startswith("recheck"):
-                async with self.collect_lock:
-                    result = await jobs.collect(self, recheck_only=True)
-                result = {"boards": len(result.get("boards") or {})}
-            elif name == "extract":
-                result = await jobs.extract_pending(self)
-            elif name == "ladder":
-                result = await ctci.pregen(self)
-            elif name == "clean":
-                result = self.clean()
-            elif name == "weekly":
-                result = {}
-                for key, fn in (("eng", english.make_week), ("speech", speech.weekly), ("human", speech.human_week), ("pron", pron.weekly_practice)):
-                    try:
-                        result[key] = await fn(self)
-                    except Exception as e:  # noqa: BLE001
-                        result[key] = getattr(e, "text", type(e).__name__)
-            elif name == "growth":
-                result = {"growth": await jobs.growth(self)}
-                try:
-                    result["cases"] = await cases.collect(self)
-                except Exception as e:  # noqa: BLE001
-                    result["cases"] = getattr(e, "text", type(e).__name__)
+            result = await self._work(name)
+            self._mark(name, "done")
         except Exception as e:  # noqa: BLE001
             result = {"error": getattr(e, "text", type(e).__name__)}
             log.warning("jobprep %s: %s", name, type(e).__name__)
         log_ = self.store.kv_get("run_log", []) or []
         log_.insert(0, {"name": name, "at": t0, "s": round(self.clock() - t0, 1), "result": json.loads(json.dumps(result, default=str))})
         self.store.kv_set("run_log", log_[:30])
+
+    async def _work(self, name: str) -> Any:
+        from dealbot.dashboard.jobprep import cases, ctci, english, jobs, pron, speech
+
+        result: Any = None
+        if name == "collect":
+            async with self.collect_lock:
+                result = await jobs.collect(self)
+            result = {"boards": len(result.get("boards") or {})}
+        elif name.startswith("recheck"):
+            async with self.collect_lock:
+                result = await jobs.collect(self, recheck_only=True)
+            result = {"boards": len(result.get("boards") or {})}
+        elif name == "extract":
+            result = await jobs.extract_pending(self)
+        elif name == "ladder":
+            result = await ctci.pregen(self)
+        elif name == "clean":
+            result = self.clean()
+        elif name == "weekly":
+            result = {}
+            for key, fn in (("eng", english.make_week), ("speech", speech.weekly), ("human", speech.human_week), ("pron", pron.weekly_practice)):
+                try:
+                    result[key] = await fn(self)
+                except Exception as e:  # noqa: BLE001
+                    result[key] = getattr(e, "text", type(e).__name__)
+        elif name == "growth":
+            result = {"growth": await jobs.growth(self)}
+            try:
+                result["cases"] = await cases.collect(self)
+            except Exception as e:  # noqa: BLE001
+                result["cases"] = getattr(e, "text", type(e).__name__)
+        return result
 
     def clean(self) -> dict[str, int]:
         now = self.clock()
@@ -237,6 +262,25 @@ class Jobprep:
         return data, "image/jpeg" if m.group(2).endswith(".jpg") else "audio/wav"
 
 
+def make_client() -> Any:
+    """취준 전용 http (리뷰 11/22): 딜봇 공용 client 와 쿠키 통을 나누지 않고, 쿠키는 아예 안 받음 · 시간 상한 · 넘겨주기 안 따라감 ·
+    User-Agent 는 프로그램 이름만 (개인 정보 없음)."""
+    import http.cookiejar
+
+    import httpx
+
+    class NoJar(http.cookiejar.CookieJar):
+        def set_cookie(self, cookie: Any) -> None:
+            return None
+
+        def extract_cookies(self, response: Any, request: Any) -> None:
+            return None
+
+    jar = NoJar()
+    return httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0), follow_redirects=False, cookies=jar,
+                             headers={"User-Agent": UA}, limits=httpx.Limits(max_connections=4, max_keepalive_connections=2))
+
+
 def _to_jpeg(path: Path) -> bytes | None:
     import io
 
@@ -294,7 +338,7 @@ def register(web: Any, api: Any) -> Jobprep | None:
     from dealbot.dashboard.jobprep.llm import CapError, LlmError
     from dealbot.dashboard.jobprep.store import JpError, PathError
 
-    jp = Jobprep(cfg, http=bot.http, ua=bot.settings.http.user_agent)
+    jp = Jobprep(cfg, http=make_client(), ua=UA)
     get_routes, post_routes = _routes(jp)
     get_rate, post_rate, up_rate = RateWindow(120, 60.0), RateWindow(30, 60.0), RateWindow(20, 600.0)
     ns = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}

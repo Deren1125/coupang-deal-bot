@@ -999,7 +999,8 @@ class JobprepConfig(BaseModel):
         {"label": "국내 여름 인턴", "start": "2027-04-01", "end": "2027-05-31", "guess": "1"},
         {"label": "국내 겨울 인턴", "start": "2027-10-01", "end": "2027-11-30", "guess": "1"}])
     retake_max_grade: str = "A0"  # 재수강 성적 상한 (주인 확인 필요)
-    sandbox_mode: Literal["auto", "systemd", "rlimit", "off"] = "auto"
+    # 코드 채점 격리 (리뷰 11/22): 기본 systemd — 안 되면 돌리지 않음(503 · 5분 뒤 다시 확인). rlimit(약함)은 직접 적을 때만 (시험 환경). auto = systemd
+    sandbox_mode: Literal["auto", "systemd", "rlimit", "off"] = "systemd"
     pron_min_free_mb: int = Field(1000, ge=0)
     min_free_mb: int = Field(400, ge=0)  # 뒤 작업·코드 돌리기 전 여유 메모리
     fetch_gap_s: float = Field(3.0, ge=0)

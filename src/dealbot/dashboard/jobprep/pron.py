@@ -209,11 +209,33 @@ async def run_worker(cmd: list[str], timeout: float = WORKER_S) -> int:
         return -9
 
 
+STALE_S = 120
+PRON_TRIES = 2
+
+
+def reset_stale(jp: Any) -> int:
+    """일꾼이 없는데 'running' 으로 STALE_S(2분) 넘게 남은 것 (재시작 등) → 한 번 더 기다림, 이미 두 번 해 봤으면 오류."""
+    t = jp.bg.get("pron")
+    if t is not None and not t.done():
+        return 0
+    n = 0
+    for r in jp.store.q("SELECT id, tries, started_at FROM pron_takes WHERE state='running'"):
+        if jp.clock() - float(r["started_at"] or 0) < STALE_S:
+            continue
+        if int(r["tries"] or 0) < PRON_TRIES:
+            jp.store.x("UPDATE pron_takes SET state='queued' WHERE id=?", (r["id"],))
+        else:
+            jp.store.x("UPDATE pron_takes SET state='error', heard='채점이 두 번 끊겼어요 — 다시 녹음해 주세요' WHERE id=?", (r["id"],))
+        n += 1
+    return n
+
+
 def pump(jp: Any, *, meminfo: str | None = None) -> str:
     """기다리는 채점 하나를 일꾼에게 (도는 중·메모리 부족·모델 없음이면 그대로). 돌려줌: started|busy|low_mem|not_ready|idle."""
     t = jp.bg.get("pron")
     if t is not None and not t.done():
         return "busy"
+    reset_stale(jp)
     r = jp.store.one("SELECT * FROM pron_takes WHERE state='queued' ORDER BY at LIMIT 1")
     if r is None:
         return "idle"
@@ -221,7 +243,7 @@ def pump(jp: Any, *, meminfo: str | None = None) -> str:
         return "not_ready"
     if storemod.mem_free_mb(meminfo) < int(jp.cfg().pron_min_free_mb):
         return "low_mem"
-    jp.store.x("UPDATE pron_takes SET state='running' WHERE id=?", (r["id"],))
+    jp.store.x("UPDATE pron_takes SET state='running', started_at=?, tries=COALESCE(tries,0)+1 WHERE id=?", (jp.clock(), r["id"]))
     jp.bg["pron"] = asyncio.ensure_future(_score(jp, r))
     return "started"
 

@@ -38,6 +38,18 @@ def test_miss_twice_closes_and_failed_read_does_not_count(jp) -> None:  # type: 
     assert st["reopened"] == 1 and s.one("SELECT state FROM jobs WHERE src_id='2'")["state"] == "open"
 
 
+def test_rule_out_is_not_a_miss_and_cache_does_not_count(jp) -> None:  # type: ignore[no-untyped-def]
+    s, c = jp.store, jp.comp
+    jobs.apply_board(s, c, "greenhouse", "acme", [post("1"), post("2", "Data Intern")], ok=True, now=1)
+    # 2번이 'Senior' 로 바뀜: 보드에는 있으니 '목록에서 사라짐' 이 아니라 규칙 밖으로 닫힘
+    st = jobs.apply_board(s, c, "greenhouse", "acme", [post("1"), post("2", "Senior Data Engineer")], ok=True, now=2)
+    assert st["closed"] == 1 and s.one("SELECT closed_why FROM jobs WHERE src_id='2'")["closed_why"].startswith("규칙 밖")
+    assert s.one("SELECT miss FROM jobs WHERE src_id='1'")["miss"] == 0
+    # 캐시 저장본(count_miss=False)은 빠져도 miss 를 안 셈
+    jobs.apply_board(s, c, "greenhouse", "acme", [], ok=True, now=3, count_miss=False)
+    assert s.one("SELECT miss, state FROM jobs WHERE src_id='1'") == {"miss": 0, "state": "open"}
+
+
 def test_reappear_resets_miss(jp) -> None:  # type: ignore[no-untyped-def]
     s, c = jp.store, jp.comp
     jobs.apply_board(s, c, "greenhouse", "acme", [post("1")], ok=True, now=1)

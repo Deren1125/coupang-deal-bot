@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from dealbot.dashboard.jobprep import sandbox as sb
@@ -82,3 +84,43 @@ def test_systemd_command_is_fixed_text() -> None:
     for p in ("DynamicUser=yes", "PrivateNetwork=yes", "ProtectHome=yes", "MemoryMax=256M", "RuntimeMaxSec=12", "NoNewPrivileges=yes"):
         assert p in joined
     assert sb.SYSTEMD_ARGS[:2] == ["sudo", "-n"] and "--uid" not in joined  # 사용자 코드는 동적 사용자로만
+
+
+async def test_user_code_cannot_forge_results(box: sb.Sandbox) -> None:
+    """기대값은 하위 프로세스로 안 넘어가고, 맞고 틀림은 부모가 정한다 — nonce 를 훔쳐 가짜 줄을 써도(지금·atexit) 통과 안 됨."""
+    forge = (
+        "import sys, json, atexit\n"
+        "def f(x):\n"
+        "    fr = sys._getframe(1)\n"
+        "    while fr is not None and 'D' not in fr.f_globals: fr = fr.f_back\n"
+        "    D = fr.f_globals['D']\n"
+        "    assert 'expected' not in json.dumps(D['tests'])\n"
+        "    fake = D['nonce'] + json.dumps({'cases': [{'ok': True, 'val': '999', 'err': ''}] * 2, 'stdout': '', 'error': ''})\n"
+        "    sys.__stdout__.write(fake + '\\n'); sys.__stdout__.flush()\n"
+        "    atexit.register(lambda: (sys.__stdout__.write(fake + '\\n'), sys.__stdout__.flush()))\n"
+        "    return -1\n")
+    r = await box.run(forge, T)
+    assert r["passed"] == 0 and r["total"] == 2
+
+
+def test_fails_closed_without_systemd(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(sb, "systemd_ok", lambda: calls.append(1) or False)
+    for want in ("systemd", "auto"):
+        s = sb.Sandbox(want)
+        assert s.mode() == "unavailable" and not s.strong()
+        assert s.mode() == "unavailable"
+        with pytest.raises(sb.SandboxError) as e:
+            asyncio.run(s.run("def f(x):\n    return x\n", T))
+        assert e.value.status == 503 and e.value.code == "no_sandbox"
+        n = len(calls)
+        s._probed -= sb.PROBE_RETRY_S + 1  # 몇 분 뒤 다시 확인
+        monkeypatch.setattr(sb, "systemd_ok", lambda: calls.append(1) or True)
+        assert s.mode() == "systemd" and len(calls) == n + 1
+        monkeypatch.setattr(sb, "systemd_ok", lambda: calls.append(1) or False)
+
+
+def test_default_config_is_systemd() -> None:
+    from dealbot.config import JobprepConfig
+
+    assert JobprepConfig().sandbox_mode == "systemd"

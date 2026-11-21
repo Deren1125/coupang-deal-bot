@@ -458,7 +458,9 @@ class YouTubeSource(Source):
   Claude 는 '클로드에게 묻기' 단추만 — 달 $10 · 하루 $1 · 처음 7일 하루 $0.5 (설정값 · 취준 장부와 공용 장부 `jobprep.*` 줄 중 큰 값) · 넘으면 429 · CLI 로 안 넘어감.
   캐시(`llm_cache`): 같은 입력은 다시 안 부름 (사다리는 문제마다 한 번). 로그에는 해시 8자·글자 수·모델·상태만.
 - 코드 채점: `sudo -n systemd-run --version` 이 되면 DynamicUser·PrivateNetwork·ProtectHome·ProtectSystem=strict·256MB·12초 임시 단위,
-  안 되면 rlimit + 감사 훅 (⑤·⑨에 '격리: 약함'). 사용자 코드는 표준 입력으로만. 사다리 시험은 참고 풀이를 돌려 기대값이 같은 경우만 씀.
+  안 되면 **돌리지 않음** (503 · 5분 뒤 다시 확인 · ⑤·⑨에 안내) — rlimit(약함)은 설정에 직접 적을 때만(시험). 사용자 코드는 표준 입력으로만, 기대값은 하위 프로세스에 안 넘기고
+  맞고 틀림은 딜봇 프로세스가 정함 · 1분 6번·하루 300번·여유 메모리 400MB 아래면 거절. 사다리 시험은 참고 풀이를 돌려 기대값이 같은 경우만 씀 (실패하면 1시간 쉼).
+- http: 취준 전용 client (쿠키 안 받음 · 30초 · 넘겨주기 안 따라감 · UA `jobprep-reader/1.0`). TTL 캐시 저장본은 닫힘 miss 로 안 셈 (304 는 셈).
 - 발음: `pron_worker` 를 그때그때 띄움 (nice 19 · 여유 1000MB 아래면 '채점 기다림' · 60초 · systemd 가 되면 메모리 1200MB scope) — 모델이 없으면 '준비 중'.
 - 한 번 할 일 (서버 · `nice -n 19` · 백그라운드): `python tools/jobprep_ctci_extract.py` (CtCI 189문제 · 검증 실패면 종료 코드 1 → `ctci/overrides.json`) ·
   `python tools/jobprep_setup.py` (발음 모델 318MB·vocab·CMUdict).

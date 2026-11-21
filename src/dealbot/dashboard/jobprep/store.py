@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS eng_sessions (id INTEGER PRIMARY KEY, day TEXT, text_
 CREATE TABLE IF NOT EXISTS eng_fix (id INTEGER PRIMARY KEY, session_id INTEGER, mine TEXT, better TEXT, why TEXT, kind TEXT, at REAL);
 CREATE TABLE IF NOT EXISTS eng_expr (day TEXT PRIMARY KEY, text TEXT, used INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS pron_sents (id INTEGER PRIMARY KEY, text TEXT UNIQUE, focus TEXT, src TEXT, at REAL);
-CREATE TABLE IF NOT EXISTS pron_takes (id INTEGER PRIMARY KEY, sent_id INTEGER, at REAL, score REAL, per_phone TEXT, state TEXT, file TEXT, heard TEXT);
+CREATE TABLE IF NOT EXISTS pron_takes (id INTEGER PRIMARY KEY, sent_id INTEGER, at REAL, score REAL, per_phone TEXT, state TEXT, file TEXT, heard TEXT,
+  started_at REAL, tries INTEGER DEFAULT 0);
 """
 KINDS = ("acad", "pron", "speech", "human", "tmp", "cache", "ctci", "models")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")
@@ -69,6 +70,7 @@ class Store:
         self.root = Path(os.path.expanduser(str(data_dir))).resolve()
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.RLock()
+        self._batch = 0
 
     # ── 연결 ──
     def conn(self) -> sqlite3.Connection:
@@ -107,8 +109,26 @@ class Store:
         with self._lock:
             c = self.conn()
             cur = c.execute(sql, tuple(args))
-            c.commit()
+            if not self._batch:
+                c.commit()
             return int(cur.lastrowid or cur.rowcount or 0)
+
+    @contextlib.contextmanager
+    def batch(self) -> Any:
+        """안에서 쓴 것을 한 번에 commit (공고 보드 한 번 = 쓰기 한 번). 오류면 되돌림."""
+        with self._lock:
+            c = self.conn()
+            self._batch += 1
+            try:
+                yield self
+            except BaseException:
+                self._batch -= 1
+                if not self._batch:
+                    c.rollback()
+                raise
+            self._batch -= 1
+            if not self._batch:
+                c.commit()
 
     def kv_get(self, k: str, default: Any = None) -> Any:
         r = self.one("SELECT v FROM kv WHERE k=?", (k,))

@@ -137,3 +137,41 @@ async def test_claude_without_key_is_refused_without_call(jp) -> None:  # type: 
     with pytest.raises(llmmod.CapError) as e:
         await jp.llm.claude("chat", "s", "u")
     assert e.value.code == "no_key" and fake.calls == 0
+
+
+class _Block:
+    type = "text"
+
+    def __init__(self, t: str) -> None:
+        self.text = t
+
+
+class _Msgs:
+    def __init__(self, stop: str) -> None:
+        self.stop, self.kw = stop, {}
+
+    async def create(self, **kw):  # type: ignore[no-untyped-def]
+        self.kw = kw
+        return type("R", (), {"model": "test-sonnet-x", "stop_reason": self.stop, "content": [_Block("긴 답 …")],
+                              "usage": {"input_tokens": 1000, "output_tokens": 4000}})()
+
+
+async def test_claude_call_returns_truncated_text_with_note(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEALBOT_API_MODEL_SONNET", "test-sonnet-x")
+    client = type("C", (), {"messages": _Msgs("max_tokens")})()
+    out = await llmmod.claude_call("jobprep.chat", "sonnet", "s", "u", client=client)
+    assert out.startswith("긴 답") and "(잘림" in out and client.messages.kw["max_tokens"] == llmmod.CLAUDE_MAX_TOKENS == 4000
+    assert api_credit.totals()["month"] > 0  # 값은 장부에
+    client = type("C", (), {"messages": _Msgs("refusal")})()
+    with pytest.raises(api_credit.ApiError):
+        await llmmod.claude_call("jobprep.chat", "sonnet", "s", "u", client=client)
+
+
+async def test_gemini_sets_thinking_budget(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("JOBPREP_GEMINI_API_KEY", KEY)
+    jp.fake_http.gemini = [{"a": 1}, "글"]
+    await jp.llm.gemini("t", "good", "s", "u", schema={"type": "object", "properties": {}, "required": []}, cache=False)
+    await jp.llm.gemini("t", "good", "s", "u2", cache=False, thinking=1024)
+    bodies = [c[3] for c in jp.fake_http.calls if c[0] == "POST"]
+    assert bodies[0]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
+    assert bodies[1]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 1024}

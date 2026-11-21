@@ -100,19 +100,34 @@ def find_dupe(store: Any, company_id: int, title: str, region: str, deadline: st
     return None
 
 
-def apply_board(store: Any, company: dict[str, Any], src: str, token: str, rows: list[dict[str, Any]], *, ok: bool, now: float) -> dict[str, int]:
-    """보드 한 번 읽은 결과 → jobs 표. ok=False (읽기 실패) 면 아무것도 닫지 않음."""
+def apply_board(store: Any, company: dict[str, Any], src: str, token: str, rows: list[dict[str, Any]], *, ok: bool, now: float,
+                count_miss: bool = True) -> dict[str, int]:
+    """보드 한 번 읽은 결과 → jobs 표. ok=False (읽기 실패) 면 아무것도 닫지 않음 · count_miss=False (캐시 저장본) 면 miss 를 안 셈.
+    규칙에서 떨어진 줄도 '보드에 있음'으로 친다 (목록에서 사라진 것과 섞이지 않게) — 열려 있던 공고가 규칙에서 떨어지면 '규칙 밖' 으로 닫음."""
     st = {"new": 0, "seen": 0, "rule_out": 0, "closed": 0, "reopened": 0, "merged": 0}
     if not ok:
         return st
+    with store.batch():
+        return _apply(store, company, src, token, rows, now, count_miss, st)
+
+
+def _apply(store: Any, company: dict[str, Any], src: str, token: str, rows: list[dict[str, Any]], now: float, count_miss: bool,
+           st: dict[str, int]) -> dict[str, int]:
     seen: set[str] = set()
     for p in rows:
-        good, _why = rule_pass(p["title"], p.get("text") or "", company.get("cat") or "", p.get("loc") or "")
-        if not good:
-            st["rule_out"] += 1
-            continue
         ukey = f"{src}:{token}:{p['src_id']}"
         seen.add(ukey)
+        if "_pass" in p:
+            good, why = bool(p["_pass"]), str(p.get("_why") or "")
+        else:
+            good, why = rule_pass(p["title"], p.get("text") or "", company.get("cat") or "", p.get("loc") or "")
+        if not good:
+            st["rule_out"] += 1
+            cur = store.one("SELECT id FROM jobs WHERE ukey=? AND state='open'", (ukey,))
+            if cur:
+                close(store, cur["id"], f"규칙 밖 ({why})", now)
+                st["closed"] += 1
+            continue
         dh = hashlib.sha256((p["title"] + "\n" + (p.get("text") or "")).encode()).hexdigest()[:16]
         region = region_of(p.get("loc") or "")
         cur = store.one("SELECT id, state, closed_why, desc_hash FROM jobs WHERE ukey=?", (ukey,))
@@ -143,6 +158,8 @@ def apply_board(store: Any, company: dict[str, Any], src: str, token: str, rows:
                        (p.get("text") or "")[:collectors.TEXT_MAX], p.get("deadline"), now, now, company.get("cat") or ""))
         event(store, jid, "new", f"{company['name']} · {p['title']}", now)
         st["new"] += 1
+    if not count_miss:
+        return st
     prefix = f"{src}:{token}:"
     for r in store.q("SELECT id, ukey, miss, title FROM jobs WHERE state='open' AND ukey LIKE ?", (prefix + "%",)):
         if r["ukey"] in seen:
@@ -281,6 +298,12 @@ def excluded(store: Any) -> tuple[set[int], set[int], set[str]]:
         elif e["scope"] == "cat":
             cats.add(str(e["key"]))
     return jobs_, comps, cats
+
+
+def visible(store: Any, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """'관심 없음'(이 공고·회사·분야)으로 뺀 줄을 거름 (오늘 탭·대화 맥락도 같은 기준)."""
+    ex_jobs, ex_comps, ex_cats = excluded(store)
+    return [r for r in rows if r["id"] not in ex_jobs and r.get("company_id") not in ex_comps and (r.get("cat") or "") not in ex_cats]
 
 
 def card(r: dict[str, Any], cases_n: dict[str, int]) -> dict[str, Any]:
@@ -431,9 +454,11 @@ async def collect(jp: Any, *, recheck_only: bool = False) -> dict[str, Any]:
         companies.seed(store)
     res: dict[str, Any] = {"at": now, "boards": {}, "watch": {}, "recheck_only": recheck_only}
     for c in store.q("SELECT * FROM companies WHERE on_=1 AND ats IN ('greenhouse','lever','ashby','workable','smartrecruiters') AND token<>''"):
-        ok, rows, why = await collectors.read_board(f, c["ats"], c["token"])
-        st = apply_board(store, c, c["ats"], c["token"], rows, ok=ok, now=jp.clock())
-        res["boards"][f"{c['name']}"] = {"ok": ok, "why": why, **st}
+        cat = c["cat"] or ""
+        ok, rows, why, fresh = await collectors.read_board(
+            f, c["ats"], c["token"], lambda p, cat=cat: rule_pass(p["title"], p.get("text") or "", cat, p.get("loc") or ""))
+        st = apply_board(store, c, c["ats"], c["token"], rows, ok=ok, now=jp.clock(), count_miss=fresh)
+        res["boards"][f"{c['name']}"] = {"ok": ok, "why": why, "fresh": fresh, **st}
     res["deadline_closed"] = close_past_deadlines(store, jp.clock())
     for j in store.q("SELECT id, url FROM jobs WHERE state='open' AND src='manual' LIMIT 40"):
         status, html = await collectors.read_page(f, j["url"], "manual:" + (j["url"].split("/")[2] if j["url"].count("/") >= 2 else "x"))
@@ -484,8 +509,9 @@ async def growth(jp: Any) -> dict[str, Any]:
 
 def deadlines_soon(store: Any, today: str, days: int = 7, limit: int = 5) -> list[dict[str, Any]]:
     end = date.fromordinal(date.fromisoformat(today).toordinal() + days).isoformat()
-    rows = store.q("SELECT j.id, j.title, j.deadline, j.user_status, c.name company FROM jobs j LEFT JOIN companies c ON c.id=j.company_id "
+    rows = store.q("SELECT j.id, j.title, j.deadline, j.user_status, j.company_id, j.cat, c.name company FROM jobs j LEFT JOIN companies c ON c.id=j.company_id "
                    "WHERE j.state='open' AND j.auto_out=0 AND j.deadline>=? AND j.deadline<=? AND j.deadline LIKE '____-__-__'", (today, end))
+    rows = visible(store, rows)
     rank = {"interest": 0, "applied": 0, "doc_pass": 0, "interview": 0}
     rows.sort(key=lambda r: (rank.get(r["user_status"] or "", 1), r["deadline"]))
     return rows[:limit]

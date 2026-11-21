@@ -77,11 +77,11 @@ async def test_fetcher_cap_fail_off_and_etag(tmp_path: Path, monkeypatch: pytest
     r = await jp.fetcher.get(url, max_bytes=1000)
     assert r.status == -1  # 상한 넘음
     for _ in range(3):
-        ok, _rows, why = await co.read_board(jp.fetcher, "greenhouse", "missing")
+        ok, _rows, why, _fresh = await co.read_board(jp.fetcher, "greenhouse", "missing")
         assert not ok
     assert jp.fetcher.is_off("greenhouse:missing")  # 3번 실패 → 24시간 쉼
     n = len(jp.fake_http.calls)
-    ok, _r, why = await co.read_board(jp.fetcher, "greenhouse", "missing")
+    ok, _r, why, _f = await co.read_board(jp.fetcher, "greenhouse", "missing")
     assert why == "쉼" and len(jp.fake_http.calls) == n  # 쉬는 동안 부르지 않음
     # 403 은 한 번에 쉼
     u2 = co.URLS["lever"].format(token="blk")
@@ -91,8 +91,10 @@ async def test_fetcher_cap_fail_off_and_etag(tmp_path: Path, monkeypatch: pytest
     # ETag: 캐시가 오래되면 If-None-Match 로 묻고 304 면 저장본
     u3 = co.URLS["greenhouse"].format(token="e")
     jp.fake_http.routes[u3] = (200, json.dumps(GH).encode(), {"etag": '"v1"'})
-    ok, rows, _ = await co.read_board(jp.fetcher, "greenhouse", "e")
-    assert ok and len(rows) == 2
+    ok, rows, _, fresh = await co.read_board(jp.fetcher, "greenhouse", "e", lambda p: (p["title"].startswith("Software"), "x"))
+    assert ok and len(rows) == 2 and fresh and [r["_pass"] for r in rows] == [True, False]  # 거르기는 파싱과 같은 스레드에서
+    ok, rows, _, fresh = await co.read_board(jp.fetcher, "greenhouse", "e")
+    assert ok and not fresh  # TTL 캐시 저장본 → miss 를 세지 않음
     jp.fake_clock.t += co.CACHE_S + 1
     seen = {}
 
@@ -101,8 +103,8 @@ async def test_fetcher_cap_fail_off_and_etag(tmp_path: Path, monkeypatch: pytest
         return (304, b"")
 
     jp.fake_http.routes[u3] = answer
-    ok, rows, _ = await co.read_board(jp.fetcher, "greenhouse", "e")
-    assert ok and len(rows) == 2 and seen.get("If-None-Match") == '"v1"'
+    ok, rows, _, fresh = await co.read_board(jp.fetcher, "greenhouse", "e")
+    assert ok and len(rows) == 2 and seen.get("If-None-Match") == '"v1"' and fresh  # 304 는 새로 읽은 것
     assert all(c[2].get("User-Agent") == "dealbot-test/1" and "Cookie" not in c[2] for c in jp.fake_http.calls)
 
 

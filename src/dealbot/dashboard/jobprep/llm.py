@@ -28,6 +28,34 @@ log = logging.getLogger(__name__)
 SHARED_GEMINI_ENV = "GEMINI_API_KEY"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 KST = ZoneInfo("Asia/Seoul")
+CLAUDE_MAX_TOKENS = 4000
+CUT_NOTE = "\n\n(잘림 — 답이 길어 여기까지)"
+
+
+async def claude_call(task: str, model: str, system: str, user: str, *, max_tokens: int = CLAUDE_MAX_TOKENS, timeout: float = 90,
+                      client: Any = None, **_kw: Any) -> str:
+    """Claude API 한 번 (api_credit.ask 와 같은 장부·키·모델 고르기 — api_credit.py 는 고치지 않음).
+    다른 점: 답이 max_tokens 로 잘리면 오류 대신 잘린 글 + '(잘림)' (이미 값을 냈으므로). 거절·빈 답·연결 실패는 ApiError."""
+    import anthropic
+
+    client = client or anthropic.AsyncAnthropic(api_key=api_credit.api_key(), timeout=timeout, max_retries=1)
+    kw: dict[str, Any] = {"max_tokens": max_tokens, "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                          "messages": [{"role": "user", "content": user}]}
+    try:
+        kw["model"] = model = await api_credit.resolve(model, client)
+        r = await client.messages.create(**kw)
+    except api_credit.ApiError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        if api_credit.is_key_error(e):
+            api_credit.mark_failed(type(e).__name__)
+        raise api_credit.ApiError(f"API {type(e).__name__}") from None
+    api_credit.record(task, str(getattr(r, "model", "") or model), getattr(r, "usage", None))
+    stop = getattr(r, "stop_reason", None)
+    text = "".join(getattr(b, "text", "") for b in r.content if getattr(b, "type", "") == "text").strip()
+    if stop == "refusal" or not text:
+        raise api_credit.ApiError(f"API 답 없음 ({stop})")
+    return text + CUT_NOTE if stop == "max_tokens" else text
 
 
 class CapError(Exception):
@@ -50,7 +78,7 @@ class Llm:
     def __init__(self, store: Any, cfg: Callable[[], Any], *, http: Any = None, clock: Callable[[], float] = time.time,
                  claude_ask: Callable[..., Awaitable[Any]] | None = None) -> None:
         self.store, self.cfg, self.http, self.clock = store, cfg, http, clock
-        self.claude_ask = claude_ask or api_credit.ask
+        self.claude_ask = claude_ask or claude_call
 
     # ── 날짜 ──
     def _now(self) -> datetime:
@@ -181,6 +209,7 @@ class Llm:
 
     async def gemini(self, kind: str, tier: str, system: str, user: str, *, schema: dict[str, Any] | None = None,
                      images: list[tuple[bytes, str]] | None = None, ver: int = 1, cache: bool = True, max_tokens: int = 4096,
+                     thinking: int | None = None,
                      timeout: float = 60) -> Any:
         """Gemini 한 번 (tier: fast|good). schema 가 있으면 dict, 없으면 글. 캐시에 있으면 부르지 않음."""
         cfg = self.cfg()
@@ -195,7 +224,9 @@ class Llm:
         key, src = self.gemini_key()
         parts: list[dict[str, Any]] = [{"inlineData": {"mimeType": mt, "data": base64.b64encode(b).decode("ascii")}} for b, mt in (images or [])]
         parts.append({"text": user})
-        gen: dict[str, Any] = {"maxOutputTokens": max_tokens}
+        gen: dict[str, Any] = {"maxOutputTokens": max_tokens,
+                               # 생각 토큰이 출력 몫을 먹어 JSON 이 잘리지 않게 (리뷰 11/22): JSON 은 0, 글은 작게
+                               "thinkingConfig": {"thinkingBudget": int(thinking if thinking is not None else (0 if schema is not None else 512))}}
         if schema is not None:
             gen.update({"responseMimeType": "application/json", "responseJsonSchema": schema})
         body = {"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": parts}], "generationConfig": gen}
@@ -264,7 +295,7 @@ class Llm:
         if spent["month"] >= float(cfg.claude_monthly_usd):
             raise CapError("cap", f"이번 달 Claude 몫(${cfg.claude_monthly_usd:g})을 다 썼어요 · Gemini 로 물을 수 있어요")
 
-    async def claude(self, kind: str, system: str, user: str, *, max_tokens: int = 1500) -> str:
+    async def claude(self, kind: str, system: str, user: str, *, max_tokens: int = CLAUDE_MAX_TOKENS) -> str:
         self.claude_check()
         cfg = self.cfg()
         if not self.store.kv_get("claude_first_day"):
@@ -272,7 +303,7 @@ class Llm:
         before = self.ledger_jobprep()["month"]
         model = api_credit.api_model(cfg.claude_model, posted=False)
         try:
-            text = await self.claude_ask(f"jobprep.{kind}"[:60], model, system, user, effort="low", max_tokens=max_tokens)
+            text = await self.claude_ask(f"jobprep.{kind}"[:60], model, system, user, max_tokens=max_tokens)
         except api_credit.ApiError:
             log.info("jobprep claude %s hash=%s: api error", kind[:30], h8(user))
             raise LlmError("Claude 가 답하지 않았어요 (구독으로 넘기지 않음)") from None

@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from dealbot.dashboard.jobprep import ctci, english, profile
+from dealbot.dashboard.jobprep import ctci, english, jobs, profile
 from dealbot.dashboard.jobprep.store import JpError, clip
 
 TABS = ("today", "me", "acad", "jobs", "cases", "code", "lib", "speech", "eng", "set")
@@ -31,8 +31,9 @@ def context(jp: Any, tab: str, ctx: str) -> str:
     prof, _ = profile.get(jp.store)
     parts = ["[내 스펙] " + profile.summary(prof)]
     if tab == "jobs":
-        rows = jp.store.q("SELECT j.title, j.loc, j.fit, j.fit_why, j.deadline, c.name company FROM jobs j LEFT JOIN companies c ON c.id=j.company_id "
-                          "WHERE j.state='open' AND j.auto_out=0 ORDER BY COALESCE(j.fit,0) DESC LIMIT 20")
+        rows = jp.store.q("SELECT j.id, j.company_id, j.cat, j.title, j.loc, j.fit, j.fit_why, j.deadline, c.name company FROM jobs j "
+                          "LEFT JOIN companies c ON c.id=j.company_id WHERE j.state='open' AND j.auto_out=0 ORDER BY COALESCE(j.fit,0) DESC LIMIT 200")
+        rows = jobs.visible(jp.store, rows)[:20]
         parts.append("[보이는 공고] " + " / ".join(f"{r['company']}·{r['title']}·{r['loc']}·★{r['fit'] or '-'}·마감 {r['deadline'] or '-'}" for r in rows))
     elif tab == "code" and ctx:
         q = next((r for r in ctci.load_index(jp) if r["qid"] == ctx), None)

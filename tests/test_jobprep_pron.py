@@ -103,3 +103,17 @@ async def test_worker_result_is_saved(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_not_ready_without_models(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     jp = make_jp(tmp_path, monkeypatch)
     assert pron.view_set(jp) == {"ready": False, "sentences": [], "weak": [], "queued": 0}
+
+
+def test_stale_running_is_requeued_once_then_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    jp = make_jp(tmp_path, monkeypatch)
+    sid = jp.store.x("INSERT INTO pron_sents (text, focus, src, at) VALUES ('hello', '', 'seed', 0)")
+    a = pron.enqueue(jp, sid, "a.wav")
+    b = pron.enqueue(jp, sid, "b.wav")
+    now = jp.clock()
+    jp.store.x("UPDATE pron_takes SET state='running', started_at=?, tries=1 WHERE id=?", (now - 300, a))
+    jp.store.x("UPDATE pron_takes SET state='running', started_at=?, tries=2 WHERE id=?", (now - 300, b))
+    assert pron.reset_stale(jp) == 2
+    assert pron.take_view(jp, a)["state"] == "queued" and pron.take_view(jp, b)["state"] == "error"
+    jp.store.x("UPDATE pron_takes SET state='running', started_at=? WHERE id=?", (now - 30, a))
+    assert pron.reset_stale(jp) == 0  # 2분 안이면 그대로
