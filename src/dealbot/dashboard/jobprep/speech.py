@@ -1,10 +1,10 @@
 """⑦ 스피치·인문학.
 
 스피치 카드 (주 3장): 지미 카 공식 채널 공개 영상의 **자막만** (영상 내려받기 없음 — yt-dlp --skip-download --write-auto-subs json3).
-Gemini good 이 자막에서 농담 3개 {setup, twist, t_start} 를 고르고, 쉼(초)은 코드가 낱말 시각의 빈틈으로 잰다. 카드에는 짧은 인용 + youtu.be 링크만.
+Claude(good) 이 자막에서 농담 3개 {setup, twist, t_start} 를 고르고, 쉼(초)은 코드가 낱말 시각의 빈틈으로 잰다. 카드에는 짧은 인용 + youtu.be 링크만.
 유튜브가 서버를 막으면 그 주는 쉬고 한 줄 ('영상 주소 붙여 넣기' 로 주인이 고른 영상 자막을 시도). 프록시·로그인 없음.
 따라 말하기: 녹음 → audio.measure → 말 빠르기·twist 앞 쉼·쉼 수를 원본과 나란히. AI 없음.
-인문학: 하루 1주제 (주 1번 7개 묶음 · 3분 읽기 900~1100자) + '30초로 설명' (받아쓴 글이 있으면 Gemini fast 가 한 번 봐 줌).
+인문학: 하루 1주제 (주 1번 7개 묶음 · 3분 읽기 900~1100자) + '30초로 설명' (받아쓴 글이 있으면 Claude(fast) 가 한 번 봐 줌).
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ async def make_cards(jp: Any, vid: str, *, n: int = 3) -> list[int]:
     words = await subtitle_words(vid)
     if len(words) < 50:
         raise JpError(422, "short", "자막이 너무 짧아요")
-    out = await jp.llm.gemini(f"speech.jokes:{vid}", "good", "너는 스탠드업 코미디 코치다. 자막에서 짧고 구조가 분명한 농담만 고른다.",
+    out = await jp.llm.ask(f"speech.jokes:{vid}", "good", "너는 스탠드업 코미디 코치다. 자막에서 짧고 구조가 분명한 농담만 고른다.",
                               "자막 ([초] 표시):\n" + transcript(words) + f"\n\n농담 {n}개: setup(앞부분 원문 그대로), twist(반전 원문 그대로), t_start(setup 시작 초).",
                               schema=JOKES_SCHEMA)
     ids = []
@@ -170,7 +170,7 @@ async def human_week(jp: Any) -> int:
     if jp.store.one("SELECT day FROM human_topics WHERE week=?", (wk,)):
         return 0
     seen = [r["title"] for r in jp.store.q("SELECT title FROM human_topics ORDER BY day DESC LIMIT 40")]
-    out = await jp.llm.gemini(f"human.week:{wk}", "good", "너는 교양 강의 작가다. 대학생이 3분에 읽을 한국어 글을 쓴다. 사실만, 출처가 분명한 내용만.",
+    out = await jp.llm.ask(f"human.week:{wk}", "good", "너는 교양 강의 작가다. 대학생이 3분에 읽을 한국어 글을 쓴다. 사실만, 출처가 분명한 내용만.",
                               "인문학·역사·철학·경제사·과학사 주제 7개. 각 title 과 body(900~1100자, 이야기처럼 · 마지막 줄은 '30초로 말해 보기' 질문 하나). "
                               f"이미 다룬 것 피함: {', '.join(seen)}", schema=HUMAN_SCHEMA, max_tokens=12000)
     n = 0
@@ -197,7 +197,7 @@ async def human_say(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
         raise JpError(404, "none", "오늘 주제가 아직 없어요")
     review = ""
     if said:
-        review = await jp.llm.gemini("human.say", "fast", "너는 말하기 코치다. 한국어로 3줄: 빠진 핵심 · 군말 · 더 짧게 말하는 법.",
+        review = await jp.llm.ask("human.say", "fast", "너는 말하기 코치다. 한국어로 3줄: 빠진 핵심 · 군말 · 더 짧게 말하는 법.",
                                      f"주제 글:\n{h['body'][:2500]}\n\n내가 30초로 말한 것(받아쓰기):\n{said}")
     else:
         review = "받아쓰기가 없어요 — 스스로 점검: ① 핵심 한 문장 ② 예 하나 ③ 30초 안에 끝났나"

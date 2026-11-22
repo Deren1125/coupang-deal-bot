@@ -89,11 +89,18 @@ def test_chat_context_capped(jp) -> None:  # type: ignore[no-untyped-def]
     assert chat.tokens(ctx) <= chat.CTX_TOKENS and ctx.startswith("[내 스펙]")
 
 
-async def test_chat_send_gemini_stores_history(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("JOBPREP_GEMINI_API_KEY", "k")
-    jp.fake_http.gemini = ["코치 답"]
-    out = await chat.send(jp, {"tab": "jobs", "ctx": "", "text": "어디 지원할까?"})
-    assert out["reply"] == "코치 답" and out["model"] == "gemini"
+async def test_chat_send_is_claude_and_stores_history(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("JOBPREP_GEMINI_API_KEY", "free")  # 무료 키가 있어도 대화는 Claude
+    seen = []
+
+    async def fake(task: str, model: str, system: str, user: str, **kw: object) -> str:
+        seen.append(model)
+        return "코치 답"
+
+    jp.llm.claude_ask = fake
+    out = await chat.send(jp, {"tab": "jobs", "ctx": "", "text": "어디 지원할까?", "model": "gemini"})
+    assert out["reply"] == "코치 답" and out["model"] == "claude" and seen == ["sonnet"] and jp.fake_http.calls == []
     h = chat.history(jp, "jobs", "")
     assert [m["role"] for m in h] == ["user", "assistant"]
 

@@ -281,7 +281,7 @@ async def weekly_practice(jp: Any) -> int:
     if not weak or not ready(jp):
         return 0
     cmu = load_cmu(models_dir(jp) / CMU)
-    out = await jp.llm.gemini(f"pron.practice:{','.join(weak)}", "good", "You write short, natural English practice sentences using only common words.",
+    out = await jp.llm.ask(f"pron.practice:{','.join(weak)}", "good", "You write short, natural English practice sentences using only common words.",
                               f"Write 10 sentences (6-12 words) that contain many of these sounds: {', '.join(weak)}.", schema=PRACTICE_SCHEMA)
     n = 0
     for s in out.get("sentences") or []:

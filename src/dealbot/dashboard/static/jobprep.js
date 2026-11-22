@@ -136,9 +136,8 @@
   var sheet = document.getElementById('jp-sheet');
   function spendLine(s) {
     if (!s) return '';
-    var c = s.claude, g = s.gemini;
-    return 'Claude 오늘 $' + c.today.toFixed(2) + '/$' + c.day_cap + ' · 이번 달 $' + c.month.toFixed(2) + '/$' + c.month_cap +
-      ' · Gemini 오늘 ' + g.fast + '/' + g.caps.fast + '·' + g.good + '/' + g.caps.good;
+    var c = s.claude;
+    return 'AI(Claude) 오늘 $' + c.today.toFixed(2) + '/$' + c.day_cap + ' · 이번 달 $' + c.month.toFixed(2) + '/$' + c.month_cap;
   }
   function openChat() {
     sheet.hidden = false; sheet.textContent = '';
@@ -152,15 +151,15 @@
         m.role !== 'user' ? h('button', { type: 'button', cls: 'jp-mini', text: '자료함에', onclick: function () { addToLib({ kind: 'card', title: m.text.slice(0, 40), body: m.text, src_tab: tab, tags: [tab] }); } }) : null));
       list.scrollTop = list.scrollHeight;
     }
-    function send(model) {
+    function send() {
       var t = ta.value.trim(); if (!t) return;
       show({ role: 'user', text: t }); ta.value = '';
       var wait = h('div', { cls: 'jp-msg ai', text: '…' }); list.appendChild(wait);
-      api('chat', { tab: tab, ctx: ctx, text: t, model: model }).then(function (d) { wait.remove(); show({ role: 'assistant', text: d.reply }); spend.textContent = spendLine(d.spend); },
+      api('chat', { tab: tab, ctx: ctx, text: t }).then(function (d) { wait.remove(); show({ role: 'assistant', text: d.reply }); spend.textContent = spendLine(d.spend); },
         function (e) { wait.remove(); show({ role: 'assistant', text: e.message }); });
     }
     sheet.appendChild(h('div', { cls: 'jp-sheet-in' }, head, spend, list, ta,
-      h('div', { cls: 'jp-row' }, btn('보내기 (Gemini)', function () { send('gemini'); }), btn('클로드에게 묻기', function () { send('claude'); }, 'ghost'))));
+      h('div', { cls: 'jp-row' }, btn('보내기', function () { send(); }))));
     api('chat?tab=' + encodeURIComponent(tab) + '&ctx=' + encodeURIComponent(ctx)).then(function (d) { d.messages.forEach(show); spend.textContent = spendLine(d.spend); }, fail);
     ta.focus();
   }

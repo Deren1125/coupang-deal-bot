@@ -1,6 +1,6 @@
 """⑧ 영어 — 통화는 주인 폰의 Gemini 앱 Live. 대시보드는 오늘의 상대·상황 프롬프트(복사 한 번) + 통화 뒤 정리 + 리얼클래스 표현 칸.
 
-주 1번 Gemini good 한 번으로 7일치 상대·상황 · 하루 프롬프트는 **코드가 조립** (AI 없음): 고정 규칙 + 그날 상대 + 어제 자주 틀린 것 3개 + 오늘 표현.
+주 1번 Claude(good) 한 번으로 7일치 상대·상황 · 하루 프롬프트는 **코드가 조립** (AI 없음): 고정 규칙 + 그날 상대 + 어제 자주 틀린 것 3개 + 오늘 표현.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ async def make_week(jp: Any) -> int:
     start = t - timedelta(days=t.weekday())
     if jp.store.one("SELECT day FROM eng_week WHERE week=?", (start.isoformat(),)):
         return 0
-    out = await jp.llm.gemini(f"eng.week:{start}", "good", "You design realistic English conversation partners for a Korean university student.",
+    out = await jp.llm.ask(f"eng.week:{start}", "good", "You design realistic English conversation partners for a Korean university student.",
                               "Make 7 days. Each: name, personality, accent(US|UK|AU|SG|IN), situation (one concrete scene, 1-2 sentences), "
                               f"kind (one of {', '.join(SITUATIONS)} — mix them evenly; 면접 at most 2 times), opener (their first line).",
                               schema=WEEK_SCHEMA)
@@ -96,7 +96,7 @@ async def after(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
         raise JpError(400, "short", "대화 글을 붙여 넣어 주세요")
     day = day_of(jp.clock())
     ex = jp.store.one("SELECT text FROM eng_expr WHERE day=?", (day,))
-    out = await jp.llm.gemini("eng.after", "good", "You are an English tutor for a Korean student. Only judge the student's lines (not the AI partner).",
+    out = await jp.llm.ask("eng.after", "good", "You are an English tutor for a Korean student. Only judge the student's lines (not the AI partner).",
                               f"Transcript:\n{text}\n\nToday's expression: {ex['text'] if ex else '(none)'}\n"
                               "Return: fixes (student's sentence -> natural native sentence -> why in Korean, kind=grammar|word|phrase|pron), "
                               "new_expr (useful expressions from the call), frequent (patterns I repeat wrong), expr_used.", schema=AFTER_SCHEMA)

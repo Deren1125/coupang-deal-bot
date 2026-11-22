@@ -1,7 +1,7 @@
 """④ 합격 사례 — 공개 글만 (로그인 벽·이웃 공개 글은 버림). 글 전체는 저장하지 않고 요약 칸 + 링크만 · 이름·연락처는 지움.
 
 모으기 (월 05:50 · 주 cases_pages_per_week 쪽까지): 네이버 검색 API(서버 키 — 로그인 아님)로 "<회사> 인턴 합격 후기" → 공개 글 한 쪽 →
-Gemini fast 로 칸 뽑기. 이력서 본보기는 RESUME_SOURCES (학교·회사 공식 본보기 링크만).
+Claude(fast) 로 칸 뽑기. 이력서 본보기는 RESUME_SOURCES (학교·회사 공식 본보기 링크만).
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ async def read_one(jp: Any, url: str, company: str, cat: str) -> bool:
     text = collectors.strip_html(html)
     if len(text) < 300 or WALL_RE.search(text[:3000]):
         return False
-    data = await jp.llm.gemini("cases.extract", "fast", "합격 후기 글에서 정해진 칸만 뽑는다. 글에 없으면 빈 글자. 이름·연락처는 쓰지 않는다.",
+    data = await jp.llm.ask("cases.extract", "fast", "합격 후기 글에서 정해진 칸만 뽑는다. 글에 없으면 빈 글자. 이름·연락처는 쓰지 않는다.",
                                f"회사(찾던 곳): {company}\n글:\n{text[:6000]}", schema=CASE_SCHEMA)
     if not data.get("is_case"):
         return False
@@ -139,7 +139,7 @@ async def compare(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
         raise JpError(404, "none", "비교할 사례가 아직 없어요")
     prof, _ver = profile.get(jp.store)
     pack = [{k: it.get(k) for k in ("company", "role", *FIELDS)} for it in items]
-    out = await jp.llm.gemini("cases.compare", "good", "너는 취업 준비 코치다. 주어진 사례와 지원자 스펙만 보고 말한다. 없는 사실은 만들지 않는다.",
+    out = await jp.llm.ask("cases.compare", "good", "너는 취업 준비 코치다. 주어진 사례와 지원자 스펙만 보고 말한다. 없는 사실은 만들지 않는다.",
                               f"지원자: {profile.summary(prof)}\n합격 사례: {json.dumps(pack, ensure_ascii=False)}\n"
                               "지원자에게 부족한 것 3가지(무엇·왜·할 일)와 강점 2가지를 한국어로.", schema=COMPARE_SCHEMA)
     return {"similar": data["similar"], **out}

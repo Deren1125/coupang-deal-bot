@@ -1,4 +1,4 @@
-"""⑥ 학습 자료함 — 링크·메모·파일 이름 + 꼬리표. 다른 탭의 '자료함에 넣기'도 여기로. AI 는 '요약' 단추만 (Gemini fast)."""
+"""⑥ 학습 자료함 — 링크·메모·파일 이름 + 꼬리표. 다른 탭의 '자료함에 넣기'도 여기로. AI 는 '요약' 단추만 (Claude(fast))."""
 
 from __future__ import annotations
 
@@ -54,5 +54,5 @@ async def summarize(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     r = jp.store.one("SELECT * FROM library WHERE id=?", (i,)) if isinstance(i, int) else None
     if r is None or not (r["body"] or "").strip():
         raise JpError(404, "gone", "요약할 글이 없어요")
-    text = await jp.llm.gemini("lib.summary", "fast", "주어진 글을 한국어 3줄로 요약한다. 없는 내용은 쓰지 않는다.", r["body"][:6000])
+    text = await jp.llm.ask("lib.summary", "fast", "주어진 글을 한국어 3줄로 요약한다. 없는 내용은 쓰지 않는다.", r["body"][:6000])
     return {"summary": text}

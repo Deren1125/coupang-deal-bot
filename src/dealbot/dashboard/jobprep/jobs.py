@@ -1,4 +1,4 @@
-"""③ 공고 — 규칙 거르기 · 겹침 합치기 · 닫힘 판정 · Gemini 뽑기(적합도) · 화면·보드·제외·지켜보는 회사.
+"""③ 공고 — 규칙 거르기 · 겹침 합치기 · 닫힘 판정 · AI 뽑기(적합도) · 화면·보드·제외·지켜보는 회사.
 
 닫힘 (06:00·18:00): ATS 보드를 **성공적으로** 읽었는데 id 가 없으면 miss+1, 2번 연속이면 닫힘 · 읽기 실패는 miss 아님 ·
 마감일 지남은 바로 닫힘 · HTML(주인이 넣은 공고) 404/410 은 바로, 마감 문구는 2번 · 지원한 건 보드에 남음 · 다시 나타나면 열림.
@@ -35,7 +35,7 @@ GROUPS = (("2027 여름", ("2027_summer_june", "2027_summer_july")), ("2027 겨�
           ("2028 여름", ("2028_summer",)), ("미정", ("other", "", None)))
 TAGS = {"2027_summer_june": "6월 시작", "2027_summer_july": "7/14 뒤 시작"}
 BATCH = 10
-EXTRACT_PER_RUN = 12  # 한 번 돌 때 Gemini 묶음 수 (≤120 공고)
+EXTRACT_PER_RUN = 12  # 한 번 돌 때 AI 묶음 수 (≤120 공고)
 REFIT_PER_DAY = 50
 
 
@@ -233,7 +233,7 @@ def watch_update(store: Any, company_id: int, url: str, html: str, now: float) -
     return diff
 
 
-# ── Gemini 뽑기 ──
+# ── AI 뽑기 ──
 EXTRACT_SCHEMA = {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object", "properties": {
     "id": {"type": "integer"}, "start": {"type": ["string", "null"]}, "deadline": {"type": ["string", "null"]},
     "conversion": {"type": ["boolean", "null"]}, "bachelor_ok": {"type": ["boolean", "null"]}, "grad_ok": {"type": ["boolean", "null"]},
@@ -266,7 +266,7 @@ async def extract_pending(jp: Any, *, max_batches: int = EXTRACT_PER_RUN) -> int
                        (ver, BATCH))
         if not rows:
             break
-        out = await jp.llm.gemini("jobs.extract", "fast", EXTRACT_SYSTEM, extract_prompt(summ, rows), schema=EXTRACT_SCHEMA)
+        out = await jp.llm.ask("jobs.extract", "fast", EXTRACT_SYSTEM, extract_prompt(summ, rows), schema=EXTRACT_SCHEMA)
         got = {int(i.get("id")): i for i in (out.get("items") or []) if isinstance(i, dict) and isinstance(i.get("id"), int)}
         for r in rows:
             it = got.get(r["id"])

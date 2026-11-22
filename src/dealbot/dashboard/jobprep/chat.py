@@ -1,4 +1,4 @@
-"""아래 대화창 (모든 탭) — 그 탭에 보이는 것을 짧게 묶어(≤ CTX_TOKENS) + 그 탭·맥락 대화 최근 12개 → Gemini(기본) 또는 Claude(단추).
+"""아래 대화창 (모든 탭) — 그 탭에 보이는 것을 짧게 묶어(≤ CTX_TOKENS) + 그 탭·맥락 대화 최근 12개 → Claude API (무료 취준 Gemini 키를 넣었을 때만 Gemini).
 대화는 탭·맥락별로 DB 에. 프롬프트·답 글은 로그에 안 남김."""
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def view(jp: Any, query: dict[str, str]) -> dict[str, Any]:
 
 async def send(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     tab, ctx, text = clip(body.get("tab"), 10), clip(body.get("ctx"), 40), clip(body.get("text"), 4000)
-    model = "claude" if body.get("model") == "claude" else "gemini"
+    model = "claude"  # 주인 11/23: 대화는 늘 Claude API (단추 하나)
     if tab not in TABS:
         raise JpError(400, "bad", "탭을 알 수 없어요")
     if not text:
@@ -79,10 +79,7 @@ async def send(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     hist = history(jp, tab, ctx)
     convo = "\n".join(f"{'나' if m['role'] == 'user' else '코치'}: {m['text'][:1200]}" for m in hist)
     user = f"[지금 화면]\n{context(jp, tab, ctx)}\n\n[지난 대화]\n{convo}\n\n나: {text}"
-    if model == "claude":
-        reply = await jp.llm.claude("chat", SYSTEM, user)
-    else:
-        reply = await jp.llm.gemini("chat", "fast", SYSTEM, user, cache=False, max_tokens=2048)
+    reply = await jp.llm.claude("chat", SYSTEM, user)
     now = jp.clock()
     jp.store.x("INSERT INTO chat (tab, ctx, role, model, text, at) VALUES (?,?,?,?,?,?)", (tab, ctx, "user", model, text, now))
     jp.store.x("INSERT INTO chat (tab, ctx, role, model, text, at) VALUES (?,?,?,?,?,?)", (tab, ctx, "assistant", model, reply, now + 0.001))

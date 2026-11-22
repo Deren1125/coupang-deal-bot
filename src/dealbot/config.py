@@ -981,17 +981,18 @@ class JobprepConfig(BaseModel):
     data_dir: str = "~/jobprep-data"  # 환경변수 JOBPREP_DATA_DIR 가 이김
     collect_time: str = "06:00"
     recheck_times: list[str] = Field(default_factory=lambda: ["06:00", "18:00"])
-    # Claude (ANTHROPIC_API_KEY · '클로드에게 묻기' 단추만) — 예산 나눔이 정해질 때까지 (11/22): 달 $10 · 하루 $1 · 처음 7일은 하루 $0.5
-    claude_monthly_usd: float = Field(10.0, ge=0)
-    claude_daily_usd: float = Field(1.0, ge=0)
-    claude_first_week_daily_usd: float = Field(0.5, ge=0)
-    claude_first_week_days: int = Field(7, ge=0)
-    claude_model: str = "sonnet"
+    # AI (주인 11/23): 취준은 Claude API 만 (ANTHROPIC_API_KEY · Max API 크레딧) — 달 $30 · 하루 $2. 유료 Gemini 0원 (공용 GEMINI_API_KEY 안 씀)
+    claude_monthly_usd: float = Field(30.0, ge=0)
+    claude_daily_usd: float = Field(2.0, ge=0)
+    claude_fast: str = "haiku"  # 분류·적합도·정리·짧은 피드백 (별칭 → api_credit.resolve 가 실제 id)
+    claude_good: str = "sonnet"  # 사다리·힌트·설명·교정·그림 읽기·대화
+    ladder_prebuild_daily_usd: float = Field(1.0, ge=0)  # 밤 03:30 사다리 미리 만들기 하루 몫 (열 때 만드는 것은 하루 상한 안에서)
+    ladder_prebuild_max: int = Field(3, ge=0)
+    # 무료 Gemini 키 (JOBPREP_GEMINI_API_KEY) 를 넣었을 때만 Gemini — 기본 꺼짐 · 하루 횟수 상한
     gemini_fast: str = "gemini-2.5-flash-lite"
     gemini_good: str = "gemini-2.5-flash"
     gemini_calls_per_day: dict[str, int] = Field(default_factory=lambda: {"fast": 400, "good": 60})
-    gemini_monthly_usd: float = Field(3.0, ge=0)  # 공용 GEMINI_API_KEY 를 쓸 때 취준 몫 (추정액) — 넘으면 그달은 쉼
-    gemini_key_env: str = "JOBPREP_GEMINI_API_KEY"  # 있으면 이 키 (없으면 공용 GEMINI_API_KEY)
+    gemini_key_env: str = "JOBPREP_GEMINI_API_KEY"
     discharge: str = "2027-07-13"
     book_finish_by: str = "2027-08-31"
     apply_windows: list[dict[str, str]] = Field(default_factory=lambda: [

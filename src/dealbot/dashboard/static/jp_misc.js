@@ -26,7 +26,7 @@
         });
       }
       if (d.intro) show(d.intro);
-      box.appendChild(JP.card('소개 만들기', out, JP.btn(d.intro ? '다시 만들기' : '만들기 (Gemini)', function () {
+      box.appendChild(JP.card('소개 만들기', out, JP.btn(d.intro ? '다시 만들기' : '만들기 (AI)', function () {
         out.textContent = '만드는 중…'; JP.api('profile/intro', {}).then(function (r) { show(r.intro); }, function (e) { out.textContent = e.message; });
       }, 'ghost')));
     }, function (e) { JP.busy(box, e.message); });
@@ -89,7 +89,7 @@
     });
     c.appendChild(out);
     var sug = h('div');
-    c.appendChild(JP.btn('과목 제안 받기 (Gemini)', function () {
+    c.appendChild(JP.btn('과목 제안 받기 (AI)', function () {
       sug.textContent = '만드는 중…';
       JP.api('acad/plan', { action: 'suggest' }).then(function (r) {
         sug.textContent = '';
@@ -150,8 +150,8 @@
       var s = d.spend, c = d.caps;
       box.appendChild(JP.card('AI 쓴 양 (상한은 설정 파일 값)',
         h('p', { text: 'Claude 오늘 $' + s.claude.today.toFixed(2) + ' / $' + s.claude.day_cap + ' · 이번 달 $' + s.claude.month.toFixed(2) + ' / $' + c.claude_month + (s.claude.key ? '' : ' · 키 없음') }),
-        h('p', { text: 'Gemini 오늘 fast ' + s.gemini.fast + '/' + c.gemini_calls.fast + ' · good ' + s.gemini.good + '/' + c.gemini_calls.good + ' · 이번 달 추정 $' + s.gemini.month_usd.toFixed(2) +
-          (s.gemini.month_cap !== null ? ' / $' + s.gemini.month_cap + ' (공용 키)' : ' (취준 키)') + (s.gemini.key === 'none' ? ' · 키 없음' : '') })));
+        h('p', { cls: 'jp-sub', text: '모델: 빠른 일 ' + d.models.fast + ' · 깊은 일 ' + d.models.good + ' · 사다리 미리 만들기 하루 $' + c.ladder_day }),
+        s.gemini.key === 'own' ? h('p', { text: '무료 Gemini 키 사용 중 · 오늘 fast ' + s.gemini.fast + '/' + c.gemini_calls.fast + ' · good ' + s.gemini.good + '/' + c.gemini_calls.good }) : null));
       box.appendChild(JP.card('지원 창 (추정 — 설정 파일)', d.windows.map(function (w) { return h('div', { text: w.label + ': ' + w.start + ' ~ ' + w.end + (w.guess === '1' ? ' (추정)' : '') }); }),
         h('p', { cls: 'jp-sub', text: '전역 ' + d.discharge + ' · 책 끝내기 ' + d.book_finish_by + ' · 재수강 상한 ' + d.retake_max })));
       box.appendChild(JP.card('서버', h('p', { text: '코드 격리: ' + (d.sandbox.strong ? 'systemd (강함)' : d.sandbox.mode === 'off' ? '꺼짐' : d.sandbox.mode === 'rlimit' ? 'rlimit (약함 · 시험 설정)' : '못 씀 — 코드 채점 멈춤 (systemd-run 확인)') }),

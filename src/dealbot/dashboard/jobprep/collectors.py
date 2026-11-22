@@ -137,7 +137,7 @@ PARSERS: dict[str, Callable[[Any, str], list[dict[str, Any]]]] = {
 
 
 def parse_html_list(html: str, base: str, link_re: str, token: str) -> list[dict[str, Any]]:
-    """회사 채용 페이지 HTML 에서 목록 링크 (link_re 에 맞는 href) → 줄. 글은 링크 글자만 (본문은 Gemini 단계에서 안 씀)."""
+    """회사 채용 페이지 HTML 에서 목록 링크 (link_re 에 맞는 href) → 줄. 글은 링크 글자만 (본문은 AI 단계에서 안 씀)."""
     out, seen = [], set()
     for m in re.finditer(r'(?is)<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html or ""):
         href, label = m.group(1), strip_html(m.group(2))

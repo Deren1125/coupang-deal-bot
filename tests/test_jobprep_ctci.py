@@ -219,7 +219,30 @@ async def test_ladder_failure_waits_an_hour(jp, monkeypatch: pytest.MonkeyPatch)
     await asyncio.wait_for(jp.bg["ladder:1.1"], 10)
     v = ctci.q_view(jp, "1.1")
     assert not v["started"] and "1시간" in v["err"]
-    n = len(jp.fake_http.calls)
-    assert await ctci.pregen(jp, 1) == 0 and len(jp.fake_http.calls) == n  # 미리 만들기도 쉼
+    await ctci.pregen(jp, 1)
+    assert ctci.ladder(jp, "1.1") is None and ctci.ladder_err(jp, "1.1")  # 미리 만들기도 1.1 은 쉬고 다음 문제로
     jp.fake_clock.t += ctci.LADDER_RETRY_S + 1
     assert ctci.start_ladder(jp, "1.1") is True
+
+
+async def test_nightly_prebuild_stays_under_daily_budget(jp, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    from dealbot import api_credit
+
+    monkeypatch.delenv("JOBPREP_GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    jp.fake_clock.t += 86400  # 목요일 — 코드 문제만
+    ref = "def is_unique(s):\n    return len(set(s)) == len(s)\n"
+    import json as _json
+
+    calls = []
+
+    async def fake(task: str, model: str, system: str, user: str, **kw: object) -> str:
+        calls.append(model)
+        api_credit.record(task, "sonnet", {"input_tokens": int(0.6 / 3.0 * 1e6), "output_tokens": 0})  # 사다리 하나 $0.6
+        return _json.dumps(ladder_answer([{"args": ["ab"], "expected": True}] * 9, ref))
+
+    jp.llm.claude_ask = fake
+    assert jp.conf.ladder_prebuild_daily_usd == 1.0 and jp.conf.ladder_prebuild_max == 3
+    made = await ctci.pregen(jp)
+    assert made == 2 and set(calls) == {"sonnet"}  # $0.6 → $1.2 에서 멈춤 (3개 몫이 남아도)
+    assert ctci.ladder(jp, "1.1") is not None

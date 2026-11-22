@@ -1,4 +1,4 @@
-"""② 학사·졸업 — 성적표·졸업 자가진단 화면 올리기 → Gemini good 이 읽음 → **주인이 고치고 '맞아요' 해야 저장** → 남은 학점 막대 ·
+"""② 학사·졸업 — 성적표·졸업 자가진단 화면 올리기 → Claude(good) 이 읽음 → **주인이 고치고 '맞아요' 해야 저장** → 남은 학점 막대 ·
 3학기 수강 계획 · 재수강 평점 계산 (화면 JS 와 같은 셈 — retake_gpa). 졸업 기준은 주인이 폼에서 확정 (전과생 기준이 달라서).
 요람: 포털 로그인 절대 없음 — 공개 PDF 주소를 주인이 넣을 때만 (find_yoram 은 지금은 안내만).
 """
@@ -90,7 +90,7 @@ async def parse(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
             imgs.append((data, "image/jpeg"))
     if not imgs:
         raise JpError(400, "no_doc", "읽을 그림을 먼저 올려 주세요")
-    out = await jp.llm.gemini("acad.parse", "good", "너는 대학 성적표·졸업 자가진단 화면을 읽어 표로 옮긴다. 화면에 있는 것만 적고, 안 보이면 비운다.",
+    out = await jp.llm.ask("acad.parse", "good", "너는 대학 성적표·졸업 자가진단 화면을 읽어 표로 옮긴다. 화면에 있는 것만 적고, 안 보이면 비운다.",
                               "그림의 과목(이름·학점·성적·영역(교양|전필|전선|기타)·학기·재수강 여부)과 영역별 이수 합계·남은 학점을 JSON 으로.",
                               schema=PARSE_SCHEMA, images=imgs)
     return {"draft": out, "note": "확인 전에는 저장하지 않아요 — 고친 뒤 '맞아요'"}
@@ -145,7 +145,7 @@ async def plan(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     v = view(jp)
     if body.get("action") == "suggest":
         prof, _ = profile.get(jp.store)
-        out = await jp.llm.gemini("acad.plan", "good", "너는 대학 수강 계획 도우미다. 남은 학점을 채우되 전필을 먼저, 4-2 는 가볍게. 과목 이름은 일반 이름으로.",
+        out = await jp.llm.ask("acad.plan", "good", "너는 대학 수강 계획 도우미다. 남은 학점을 채우되 전필을 먼저, 4-2 는 가볍게. 과목 이름은 일반 이름으로.",
                                   f"학생: {profile.summary(prof)}\n남은 학점: {json.dumps(v['bars'], ensure_ascii=False)}\n들은 과목: "
                                   f"{', '.join(c['name'] for c in v['courses'])[:3000]}\n학기: {', '.join(TERMS)} (겨울 계절학기 없음 · 여름 계절은 선택). "
                                   f"학기 최대 {v['term_max']}학점.", schema=PLAN_SCHEMA)

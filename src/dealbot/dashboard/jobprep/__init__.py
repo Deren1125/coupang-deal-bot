@@ -215,8 +215,9 @@ class Jobprep:
                 "cases_last": self.store.kv_get("cases_last", {}), "runs": self.store.kv_get("run_log", [])[:10],
                 "service_mode": bool(self.store.kv_get("service_mode", True)), "retake_max": c.retake_max_grade,
                 "exclusions": jobs.view(self, {})["exclusions"], "busy": self.task_name if self.task is not None and not self.task.done() else "",
-                "caps": {"claude_month": c.claude_monthly_usd, "claude_day": c.claude_daily_usd, "claude_first_week": c.claude_first_week_daily_usd,
-                         "gemini_calls": dict(c.gemini_calls_per_day), "gemini_month": c.gemini_monthly_usd}}
+                "caps": {"claude_month": c.claude_monthly_usd, "claude_day": c.claude_daily_usd, "ladder_day": c.ladder_prebuild_daily_usd,
+                         "gemini_calls": dict(c.gemini_calls_per_day)},
+                "models": {"fast": self.llm.model_of("fast"), "good": self.llm.model_of("good"), "provider": self.llm.provider()}}
 
     # ── 올리기 ──
     async def upload(self, kind: str, ref: str, ctype: str, path: Path) -> dict[str, Any]:

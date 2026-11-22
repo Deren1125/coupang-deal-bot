@@ -1,4 +1,4 @@
-"""⑤ 코딩 (CtCI) — 문제 목록(한 번 뽑기) · 사다리(문제마다 딱 한 번 · Gemini good) · 시험 정답 맞추기(샌드박스) · 간격 복습 · 주간 몫.
+"""⑤ 코딩 (CtCI) — 문제 목록(한 번 뽑기) · 사다리(문제마다 딱 한 번 · Claude(good)) · 시험 정답 맞추기(샌드박스) · 간격 복습 · 주간 몫.
 
 책 글은 git·로그·static 에 안 들어감 — jobprep-data/ctci/ 에만, API 답은 no-store (로그인 아래).
 뽑기 순수 함수(split_questions·find_solutions·verify·apply_overrides)는 tools/jobprep_ctci_extract.py 가 PDF 글로 부른다.
@@ -360,7 +360,7 @@ async def make_ladder(jp: Any, qid: str) -> dict[str, Any]:
         raise JpError(404, "no_q", "그 문제가 목록에 없어요")
     text = load_text(jp, qid)
     if q["kind"] != "code":
-        out = await jp.llm.gemini(f"ctci.ladder:{qid}:v{LADDER_VER}", "good", LADDER_SYSTEM,
+        out = await jp.llm.ask(f"ctci.ladder:{qid}:v{LADDER_VER}", "good", LADDER_SYSTEM,
                                   f"CtCI {qid} {q['title']}\n문제:\n{(text.get('question') or '')[:2500]}\n\n설명 문제다. concept·hints 3개·twist·"
                                   "rubric(좋은 답에 꼭 들어갈 요점 4~6개)을 만들어 줘.", schema=EXPLAIN_SCHEMA, ver=LADDER_VER, thinking=LADDER_THINKING, max_tokens=8000)
         lad = {"kind": "explain", **out}
@@ -368,7 +368,7 @@ async def make_ladder(jp: Any, qid: str) -> dict[str, Any]:
         return lad
     best: dict[str, Any] | None = None
     for attempt in range(2):
-        raw = await jp.llm.gemini(f"ctci.ladder:{qid}:v{LADDER_VER}", "good", LADDER_SYSTEM, ladder_prompt(q, text), schema=LADDER_SCHEMA,
+        raw = await jp.llm.ask(f"ctci.ladder:{qid}:v{LADDER_VER}", "good", LADDER_SYSTEM, ladder_prompt(q, text), schema=LADDER_SCHEMA,
                                   ver=LADDER_VER + attempt * 100, max_tokens=16000, thinking=LADDER_THINKING)
         book = dict(raw.get("book") or {})
         book["tests"] = await _valid_tests(jp, book)
@@ -418,9 +418,16 @@ def start_ladder(jp: Any, qid: str) -> bool:
     return True
 
 
-async def pregen(jp: Any, n: int = 3) -> int:
+async def pregen(jp: Any, n: int | None = None) -> int:
+    """밤 03:30 — 다음 문제 사다리를 조금씩 (하루 ladder_prebuild_daily_usd(~$1) · 최대 ladder_prebuild_max 개). 나머지는 열 때 만듦.
+    한 번 만든 사다리는 캐시 · 실패한 문제는 1시간 쉼."""
+    cfg = jp.cfg()
+    n = int(cfg.ladder_prebuild_max if n is None else n)
+    budget = float(cfg.ladder_prebuild_daily_usd)
     made = 0
-    for r in next_new(jp, n):
+    for r in next_new(jp, 30):
+        if made >= n or jp.llm.kind_spent_today("ctci.ladder") >= budget:
+            break
         if ladder(jp, r["qid"]) is None and not ladder_err(jp, r["qid"]):
             try:
                 await make_ladder(jp, r["qid"])
@@ -575,7 +582,7 @@ async def feedback(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     ok = a["passed"] == a["total"]
     ask = ("통과했다. 시간/공간 복잡도와 더 나은 길만 3줄로." if ok else
            "실패했다. 왜 틀렸나(실패 입력·기대값·내 값) · 시간/공간 복잡도 · 고칠 점 · 다음 힌트 한 줄 (풀이는 말하지 않음).")
-    reply = await jp.llm.gemini("code.feedback", "fast", FEEDBACK_SYSTEM,
+    reply = await jp.llm.ask("code.feedback", "fast", FEEDBACK_SYSTEM,
                                 f"문제 {a['qid']} {q.get('title', '')}: {(text.get('question') or '')[:1200]}\n내 코드:\n{a['code'][:6000]}\n"
                                 f"결과: {a['passed']}/{a['total']} · 실패한 경우: {a['fail_case'] or '-'}\n{ask}")
     jp.store.x("INSERT INTO chat (tab, ctx, role, model, text, at) VALUES ('code', ?, 'assistant', 'gemini', ?, ?)", (a["qid"], reply, jp.clock()))
@@ -588,7 +595,7 @@ async def compare(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     if not text.get("solution"):
         raise JpError(404, "no_sol", "책 풀이 글이 없어요")
     last = jp.store.one("SELECT code FROM attempts WHERE qid=? AND item='book' ORDER BY at DESC LIMIT 1", (qid,))
-    reply = await jp.llm.gemini(f"code.compare:{qid}", "good", FEEDBACK_SYSTEM.replace("정답 코드나 풀이 전체는 말하지 않는다.", "책 풀이와 비교해 준다."),
+    reply = await jp.llm.ask(f"code.compare:{qid}", "good", FEEDBACK_SYSTEM.replace("정답 코드나 풀이 전체는 말하지 않는다.", "책 풀이와 비교해 준다."),
                                 f"책 풀이 요점:\n{text['solution'][:8000]}\n\n내 코드:\n{(last or {}).get('code', '(없음)')[:6000]}\n"
                                 "책 풀이의 핵심 생각·복잡도와 내 코드의 차이를 한국어로 5줄 안에.")
     return {"text": reply}
@@ -608,7 +615,7 @@ async def self_grade(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     answer = clip(body.get("text"), 6000)
     lad = ladder(jp, qid) or {}
     text = load_text(jp, qid)
-    reply = await jp.llm.gemini("code.explain", "good", FEEDBACK_SYSTEM,
+    reply = await jp.llm.ask("code.explain", "good", FEEDBACK_SYSTEM,
                                 f"설명 문제 {qid}. 요점: {json.dumps(lad.get('rubric') or [], ensure_ascii=False)}\n책 풀이 요점:\n{(text.get('solution') or '')[:5000]}\n"
                                 f"내 답:\n{answer}\n빠진 요점·좋은 점·고칠 점을 한국어로 짧게.")
     return {"text": reply}

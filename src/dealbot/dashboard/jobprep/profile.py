@@ -83,7 +83,7 @@ INTRO_SCHEMA = {"type": "object", "properties": {"one_liner_ko": {"type": "strin
 
 async def intro(jp: Any, body: dict[str, Any]) -> dict[str, Any]:
     p, ver = get(jp.store)
-    out = await jp.llm.gemini("profile.intro", "good", "너는 취업 준비생의 자기소개를 돕는다. 주어진 사실만 쓰고 지어내지 않는다.",
+    out = await jp.llm.ask("profile.intro", "good", "너는 취업 준비생의 자기소개를 돕는다. 주어진 사실만 쓰고 지어내지 않는다.",
                               "프로필:\n" + summary(p, 1200) + "\n\n한 줄 소개(한/영)와 1분 자기소개(한 300~400자 / 영 120~150 words)를 써 줘.",
                               schema=INTRO_SCHEMA)
     jp.store.kv_set(f"intro:{ver}", out)

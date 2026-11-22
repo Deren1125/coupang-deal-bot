@@ -452,10 +452,12 @@ class YouTubeSource(Source):
 - 데이터: `~/jobprep-data/` (설정 `dashboard.jobprep.data_dir` · 환경변수 `JOBPREP_DATA_DIR` 가 이김 · 폴더 700 · 파일 600 · git 밖) —
   `jobprep.db` · `ctci/`(책 PDF·목록·문제 글 — 로그인 아래 API 로만) · `models/`(발음 모델) · `acad/`·`audio`(녹음 90일 뒤 지움) · `cache/` · `tmp/`.
 - 주기 일 (scheduler 1분 일이 `Jobprep.tick()` · 한 번에 하나 · 여유 메모리 400MB 아래면 미룸 · kv `runs` 로 하루 한 번 · 3시간 안 놓친 건 따라잡음):
-  06:00 공고 모으기 → 06:20 새 공고 뽑기·적합도(Gemini fast 10개 묶음) · 18:00 다시 확인만 · 03:30 다음 CtCI 3문제 사다리 · 04:00 지우기 ·
+  06:00 공고 모으기 → 06:20 새 공고 뽑기·적합도(Claude 빠른 모델 · 10개 묶음) · 18:00 다시 확인만 · 03:30 다음 CtCI 사다리 조금씩 (하루 ~$1 · 3개까지) · 04:00 지우기 ·
   월 05:30 영어 상대 7일·스피치 카드·인문학 7주제·약한 소리 문장 · 월 05:50 성장 목록(DefiLlama·CoinGecko·YC)·합격 사례(주 30쪽).
-- AI: Gemini 키 `JOBPREP_GEMINI_API_KEY` → 없으면 공용 `GEMINI_API_KEY` (공용일 때만 취준 몫 달 추정 $3 · 공용 장부에 `jobprep.*`) · 하루 횟수 fast 400·good 60.
-  Claude 는 '클로드에게 묻기' 단추만 — 달 $10 · 하루 $1 · 처음 7일 하루 $0.5 (설정값 · 취준 장부와 공용 장부 `jobprep.*` 줄 중 큰 값) · 넘으면 429 · CLI 로 안 넘어감.
+- AI (주인 11/23): **모두 Claude API** (`ANTHROPIC_API_KEY` · Max API 크레딧) — 빠른 일(공고 분류·적합도·사례 정리·짧은 피드백·요약) = `claude_fast`(haiku),
+  깊은 일(사다리·개념·몸풀기·시험·힌트·설명 견주기·영어 상대·교정·스피치 카드·인문학·성적표 그림 읽기·대화) = `claude_good`(sonnet). 별칭은 api_credit.resolve 가 실제 id 로.
+  상한: 달 $30 · 하루 $2 (설정값 · 취준 장부와 공용 장부 `jobprep.*` 줄 중 큰 값) · 넘으면 429 · CLI 로 안 넘어감. 대화창은 '보내기' 하나 (늘 Claude).
+  유료 Gemini 0원: 공용 `GEMINI_API_KEY` 는 안 씀 · 무료 `JOBPREP_GEMINI_API_KEY` 를 넣었을 때만 Gemini (하루 횟수 fast 400·good 60).
   캐시(`llm_cache`): 같은 입력은 다시 안 부름 (사다리는 문제마다 한 번). 로그에는 해시 8자·글자 수·모델·상태만.
 - 코드 채점: `sudo -n systemd-run --version` 이 되면 DynamicUser·PrivateNetwork·ProtectHome·ProtectSystem=strict·256MB·12초 임시 단위,
   안 되면 **돌리지 않음** (503 · 5분 뒤 다시 확인 · ⑤·⑨에 안내) — rlimit(약함)은 설정에 직접 적을 때만(시험). 사용자 코드는 표준 입력으로만, 기대값은 하위 프로세스에 안 넘기고
