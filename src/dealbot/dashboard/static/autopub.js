@@ -260,6 +260,8 @@ const one = async (it, at) => {
   for (;;) {
     if (!P.length) {
       // 발행을 누르기 전에 대시보드에 '해 봄'을 먼저 남김 — 발행 뒤 화면이 닫혀도 같은 글을 또 주지 않게 (두 번 발행 막기)
+      const h0 = wall(root());
+      if (h0) return {r: 'wall', n: h0};
       if (!held) { const h = await ask({a: 'done', b: BLOG, id: it.id, r: 'hold'}); if (!h || !h.ok) return {r: 'fail', n: (h && h.text) || '대시보드에 닿지 못했어요 (발행 전)'}; held = 1; }
       const b = fin();
       if (!b) P = ['마지막 발행 단추를 못 찾았어요'];

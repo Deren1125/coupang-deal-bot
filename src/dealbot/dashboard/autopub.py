@@ -23,6 +23,7 @@ POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv a
       블로그 프로그램에 pasted · u = 글 번호) · unsure(눌렀는데 확인 못 함 — 체크하지 않고 다시 주지 않음) · stop(점검에 걸려 발행하지 않음 · n = 걸린 것 —
       다시 누르면 같은 글부터 · 같은 글이 두 번 멈추면 오늘은 주지 않음) · fail(못 넣음) · wall(네이버 보호·제한 안내 → 그 블로그 24시간 쉼 · id 없어도 됨).
 kv: "autopub:day:<날 KST>" = {tried: {줄 id: r}, stops: {줄 id: 수}, last: {블로그: 시각}, gap: {블로그: 초}, run: {블로그: {n, last}}, res: [{id, b, r, n, u, at}]} (그날·전날만) ·
+    "autopub:held" = {줄 id: {r, at}} (발행을 눌러 본 글 — 14일 · 날이 바뀌어도 다시 주지 않음 · 이미 있으면 hold 는 409 dup — 두 탭 동시 발행 막기) ·
     "autopub:cool" = {블로그: {until, at, why}} (쉬는 것 — until 을 남김 · CLAUDE.md '딜봇이 스스로 쉬기 시작하면').
 today() = 할 일 탭 블로그 카드의 진행 한 줄 (routine.view 의 autopub) · 연결 탭 설치 칸의 한 줄.
 """
@@ -51,6 +52,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 SRC = STATIC / "autopub.js"
 KV_SECRET = "autopub_secret"
 KV_COOL = "autopub:cool"
+KV_HELD = "autopub:held"  # 발행을 눌러 본 글 {줄 id: {r, at}} — 날이 바뀌어도 다시 주지 않음 (두 번 발행 막기 · 검토 11/23)
+HELD_S = 14 * 86400.0
 DAY_KEY = "autopub:day:"
 PATH = "/dashboard/api/autopub_act"
 OFF_TEXT = "하루치 한 번에는 꺼져 있어요 — 꾸미기 책갈피를 쓰세요"
@@ -213,6 +216,26 @@ def _run_n(c: dict[str, Any], blog: str, now: float) -> int:
     return r["n"] if r and now - r["last"] <= RUN_IDLE_S else 0
 
 
+def held(db: Any, now: float) -> dict[str, str]:
+    """발행을 눌러 본 글 (hold·ok·unsure) — HELD_S 동안. 그날 기록(autopub:day)은 이틀만 남아, 확인 못 한 글이 다음 날 다시 나오는 것을 막는다."""
+    try:
+        v = json.loads(db.kv_get(KV_HELD) or "{}")
+    except (TypeError, ValueError):
+        v = {}
+    return {str(k): str(x.get("r")) for k, x in (v if isinstance(v, dict) else {}).items()
+            if isinstance(x, dict) and isinstance(x.get("at"), int | float) and now - x["at"] < HELD_S}
+
+
+def _held_add(db: Any, rid: str, r: str, now: float) -> None:
+    try:
+        v = json.loads(db.kv_get(KV_HELD) or "{}")
+    except (TypeError, ValueError):
+        v = {}
+    v = {k: x for k, x in (v if isinstance(v, dict) else {}).items() if isinstance(x, dict) and isinstance(x.get("at"), int | float) and now - x["at"] < HELD_S}
+    v[rid] = {"r": r, "at": int(now)}
+    db.kv_set(KV_HELD, json.dumps(v, separators=(",", ":")))
+
+
 # ── 쉼 (네이버 보호·제한 안내 뒤 24시간)
 def cooled(db: Any, now: float) -> dict[str, float]:
     try:
@@ -309,14 +332,14 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
     """오늘 한 것 {by: {블로그: {ok, unsure, stop, ready, cool, line}}, note} — line·note 는 보일 것이 없으면 ''. rv = routine.view 값 (준비된 글 수)."""
     c = _load(db, _day(now, tz))
     last = {str(r.get("id")): r for r in c["res"] if r.get("id")}  # 같은 글은 마지막 결과만
-    cl = cooled(db, now)
+    cl, hd = cooled(db, now), held(db, now)
     by: dict[str, dict[str, Any]] = {}
     for b, name in NAMES.items():
         mine = [r for r in last.values() if r.get("b") == b]
         ok = sum(1 for r in mine if r.get("r") == "ok")
         unsure = sum(1 for r in mine if r.get("r") in ("unsure", "hold"))
         stop = [r for r in mine if r.get("r") == "stop"]
-        n = len(ready(rv, b, c["tried"])) if rv is not None else 0
+        n = len(ready(rv, b, {**hd, **c["tried"]})) if rv is not None else 0
         bits = []
         if ok or unsure or stop:
             bits.append(f"올린 글 {ok}")
@@ -373,7 +396,7 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
             return {"ok": True, "next": None, "weekend": True, "left": 0, "wait": 0,
                     "text": "주말은 쉬는 날이에요 (토·일 21시 전) — 그래도 올리려면 아래 '주말에도 시작'을 눌러 주세요"}
         c = _load(db, day)
-        rows, n = ready(rv, blog, c["tried"]), _run_n(c, blog, now)
+        rows, n = ready(rv, blog, {**held(db, now), **c["tried"]}), _run_n(c, blog, now)
         name = NAMES[blog]
         if not rows:
             fresh = isinstance(rv, dict) and rv.get("today")
@@ -398,11 +421,14 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
         note = " ".join("".join(ch for ch in str(form.get("n") or "") if ch.isprintable()).split())[:NOTE_MAX]
         c = _load(db, day)
         out: dict[str, Any] = {"ok": True, "checked": False, "text": ""}
-        known = bool(m) and (rid in c["tried"] or any(i["id"] == rid for i in ready(rv, blog)))
+        hd = held(db, now)
+        known = bool(m) and (rid in c["tried"] or rid in hd or any(i["id"] == rid for i in ready(rv, blog)))
         if m and not known:  # 오늘 그 블로그의 올려도 되는 줄(또는 이미 해 본 줄)만 — 열쇠가 있어도 아무 줄이나 적지 못함
             raise CaptureError(400, "bad", "오늘 올릴 글이 아니에요")
-        if r == "ok" and c["tried"].get(rid) == "ok":  # 같은 확인이 두 번 와도 한 번만
+        if r == "ok" and "ok" in (c["tried"].get(rid), hd.get(rid)):  # 같은 확인이 두 번 와도 한 번만
             return out
+        if r == "hold" and (c["tried"].get(rid) in TRIED or rid in hd):  # 다른 탭·창이 이미 발행을 누른 글 — 두 번 발행 막기 (검토 11/23)
+            raise CaptureError(409, "dup", "이미 발행을 눌러 본 글이에요 — 두 번 올리지 않아요 (블로그에서 확인해 주세요)")
         if r == "hold" and blog in cl:  # 쉬는 중에는 발행 단추를 누르게 두지 않는다 (책갈피는 hold 가 ok 일 때만 누름)
             raise CaptureError(429, "cool", cool_text(blog, cl[blog], tz))
         if r == "ok" and m and any(i["id"] == rid for i in ready(rv, blog)):
@@ -418,9 +444,10 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
         if m:
             if r in TRIED:
                 c["tried"][rid] = r
+                _held_add(db, rid, r, now)
             if r == "stop":
                 c["stops"][rid] = c["stops"].get(rid, 0) + 1
-                if c["stops"][rid] >= STOP_MAX:
+                if c["stops"][rid] >= STOP_MAX and rid not in c["tried"]:  # hold(발행을 눌러 봄)을 덮지 않음
                     c["tried"][rid] = "stop"
             if r in ("ok", "unsure"):
                 c["run"][blog] = {"n": _run_n(c, blog, now) + 1, "last": now}

@@ -174,6 +174,9 @@ def test_act_serves_only_fit_posts_in_slot_order_with_their_reserve_times(bot: D
     # 발행 직전 '해 봄' → 그 글은 다시 주지 않음 (확인을 못 해도 두 번 발행하지 않게) · 확인되면 할 일 줄 체크 + 블로그 프로그램에 pasted + 글 번호
     assert _go(bot, t + 5, a="done", b="issue", id="pub:issue:13", r="hold") == {"ok": True, "checked": False, "text": ""}
     assert _go(bot, t + 6, a="next", b="issue")["next"]["id"] == "rsv:issue:12"
+    with pytest.raises(autopub.CaptureError) as e:  # 다른 탭·창이 같은 글의 발행을 또 누르려 하면 거절 (두 번 발행 막기)
+        _go(bot, t + 7, a="done", b="issue", id="pub:issue:13", r="hold")
+    assert e.value.status == 409 and e.value.code == "dup"
     d = _go(bot, t + 10, a="done", b="issue", id="pub:issue:13", r="ok", u="223000000001")
     assert d == {"ok": True, "checked": True, "text": "할 일 줄 체크 ✓", "left": 2} and "pub:issue:13" in routine.done_ids(bot.db, DAY)
     assert [(r["name"], r["args"], r["rid"]) for r in routine.relay_rows(bot.db)] == [("pasted", {"blog": "issue", "pid": 13, "done": True}, "pub:issue:13")]
@@ -227,6 +230,24 @@ def test_first_post_with_a_past_slot_goes_now_and_a_live_slot_stays_reserved(bot
     bot.db.kv_set(autopub.DAY_KEY + DAY, "{}")
     q = _go(bot, t, a="next", b="issue")
     assert q["n"] == 1 and q["next"]["id"] == "rsv:issue:11" and q["next"]["at"].startswith("2026-11-18T19:")
+
+
+def test_a_post_whose_publish_was_pressed_is_never_served_again_even_after_the_day_record_is_gone(bot: DealBot, tmp_path: Path) -> None:
+    rows = _rows(DAY)
+    rows["items"] = [i for i in rows["items"] if i["id"] in ("rsv:issue:11", "rsv:issue:12")]
+    with_routine(tmp_path, rows)
+    t = at(bot, DAY, "10:00")
+    assert _go(bot, t, a="next", b="issue")["next"]["id"] == "rsv:issue:12"
+    _go(bot, t + 1, a="done", b="issue", id="rsv:issue:12", r="hold")
+    _go(bot, t + 2, a="done", b="issue", id="rsv:issue:12", r="stop", n="네이버 안내")
+    _go(bot, t + 3, a="done", b="issue", id="rsv:issue:12", r="stop", n="네이버 안내")  # 두 번 멈춰도 '눌러 봄'은 그대로
+    assert json.loads(bot.db.kv_get(autopub.DAY_KEY + DAY))["tried"]["rsv:issue:12"] == "hold"
+    bot.db.kv_set(autopub.DAY_KEY + DAY, "{}")  # 날이 바뀌어 그날 기록이 없어도 (확인 못 한 글이 다음 날 목록에 남아 있어도)
+    assert _go(bot, t + 10, a="next", b="issue")["next"]["id"] == "rsv:issue:11"
+    with pytest.raises(autopub.CaptureError) as e:
+        _go(bot, t + 11, a="done", b="issue", id="rsv:issue:12", r="hold")
+    assert e.value.code == "dup"
+    assert _go(bot, t + 12, a="done", b="issue", id="rsv:issue:12", r="ok")["checked"] is True  # 늦게 온 확인은 받음
 
 
 def test_run_cap_weekend_pause_and_protection_cooldown(bot: DealBot, tmp_path: Path) -> None:
