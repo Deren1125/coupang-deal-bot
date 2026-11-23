@@ -14,8 +14,8 @@ POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv a
   a=next b=블로그 [w=1]  {ok, next: {id, title, html, text, at, label, photos, disc} | None, n, m, left, wait(초), text, weekend?}
       그 블로그의 오늘 할 일 발행·예약 줄 가운데 '올려도 되는 글'만 (ready): 체크 안 됨 · 다 만든 묶음 · 올리기 전 자동 점검 통과(gate.ok 참 — 점검에 걸린 글·점검 안 된 글·
       새 방향과 안 맞는다고 적힌 글(Blog-Auto direction.fit 거짓 — 주인 11/23 · 줄 글 '새 방향' 도)은 주지 않음) · 제휴 링크가 있는데 고지 줄이 없는 글 뺌 · 오늘 이미 해 본 글(ok·unsure·hold·두 번 멈춘 글) 뺌. 차례는 예약 시각 → 화면 차례.
-      예약 시각: 그 줄의 계획 시각(routine.view 의 when — kkumi.when_plan · 사람처럼 흔든 값). 이번 판(run)의 첫 글이고 그 자리가 이미 지났으면(when.rule · 바로 발행 줄)
-        '지금 발행'(at '' — 태그 줄의 시각 칸을 뺌) · 나머지는 계획 시각대로 (지난 자리는 규칙으로 고른 다음 칸 — 같은 블로그끼리 3시간쯤 · 흔들림).
+      예약 시각 (v5 · 주인 11/23 13:45): 누른 때 기준 계획 schedule() — 첫 글 20~45분 뒤 · 다음은 70~160분씩 · 분은 10·20·40·50 · 07:30~23:00 · 토·일은 월요일로 ·
+        이미 한 그 블로그 시각과 40분 넘게 · kv autopub:plan 에 남겨 다시 눌러도 같은 계획 (지났거나 없는 글만 새로) · plan = 맨 위 한 줄 '오늘 예약 14:20 · 16:10'.
       wait = 앞 글 뒤 40~120초(GAP · 무작위)가 되기까지 남은 초. 한 판(RUN_IDLE_S 안에 이어진 글)에 RUN_MAX(5)편까지 — 넘으면 next 없음.
       주말(토 00:00~일 21:00 · Blog-Auto 주말 쉼과 같은 때)에는 w=1(주인이 화면에서 '주말에도 시작'을 누름)일 때만 · 아니면 {next: None, weekend: True}.
       네이버 보호·제한 안내 뒤 24시간(kv autopub:cool)은 429 cool.
@@ -24,6 +24,7 @@ POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv a
       다시 누르면 같은 글부터 · 같은 글이 두 번 멈추면 오늘은 주지 않음) · fail(못 넣음) · wall(네이버 보호·제한 안내 → 그 블로그 24시간 쉼 · id 없어도 됨).
 kv: "autopub:day:<날 KST>" = {tried: {줄 id: r}, stops: {줄 id: 수}, last: {블로그: 시각}, gap: {블로그: 초}, run: {블로그: {n, last}}, res: [{id, b, r, n, u, at}]} (그날·전날만) ·
     "autopub:held" = {줄 id: {r, at}} (발행을 눌러 본 글 — 14일 · 날이 바뀌어도 다시 주지 않음 · 이미 있으면 hold 는 409 dup — 두 탭 동시 발행 막기) ·
+    "autopub:plan" = {블로그: {slots: {줄 id: 시각}, used: [발행을 눌러 본 글의 시각]}} ·
     "autopub:cool" = {블로그: {until, at, why}} (쉬는 것 — until 을 남김 · CLAUDE.md '딜봇이 스스로 쉬기 시작하면').
 today() = 할 일 탭 블로그 카드의 진행 한 줄 (routine.view 의 autopub) · 연결 탭 설치 칸의 한 줄.
 """
@@ -52,6 +53,7 @@ STATIC = Path(__file__).resolve().parent / "static"
 SRC = STATIC / "autopub.js"
 KV_SECRET = "autopub_secret"
 KV_COOL = "autopub:cool"
+KV_PLAN = "autopub:plan"  # 누른 때 기준 예약 계획 {블로그: {slots: {줄 id: 'YYYY-MM-DDTHH:MM'}, used: [시각…]}} (주인 11/23 13:45)
 KV_HELD = "autopub:held"  # 발행을 눌러 본 글 {줄 id: {r, at}} — 날이 바뀌어도 다시 주지 않음 (두 번 발행 막기 · 검토 11/23)
 HELD_S = 14 * 86400.0
 DAY_KEY = "autopub:day:"
@@ -84,8 +86,21 @@ PATCHES: tuple[tuple[str, str], ...] = (
     ("const got = await ask();\n", "const got = GOT;\n"),
     ("try { window.__kkumiReport = R; } catch (e) {}\n", "if (!await PRE({" + TOOLS + "})) return;\n"),
     ("})().catch(e => alert('꾸미기 오류: ' + e));\n", "}\n"),
+    # v5 (11/23 아이패드 '포스트잇 글이 안 들어감'): 안 확인을 4초까지 · 새로 그린 맨 끝 포스트잇도 봄 (꾸미기 차례·붙여넣기는 그대로 — 확인만 넓힘)
+    # v5 (11/23 13:40 아이패드 '글 안 들어감' 첫 조각): 첫 조각이 안 들어가면 진행기(GOT.re — 본문이 비었을 때만 주인이 본문을 한 번 더 누름)로 다시
+    ("      if (!await pasteIn(p.html, p.lines.join('\\n'), probe)) { R.bad.push('글 안 들어감: ' + (probe || '사진')); if (!R.done) break; }\n",
+     "      let ok_ = await pasteIn(p.html, p.lines.join('\\n'), probe);\n"
+     "      for (let r_ = 0; !ok_ && !R.done && GOT.re && r_ < 2 && await GOT.re(); r_++) ok_ = await pasteIn(p.html, p.lines.join('\\n'), probe);\n"
+     "      if (!ok_) { R.bad.push('글 안 들어감: ' + (probe || '사진')); if (!R.done) break; }\n"),
+    # v5: 글자 꾸밈 세기(끝 알림에만 쓰던 것)도 뺌 — 주소를 짧게
+    ("const fx = h => [/background-color/gi, /[^-]color\\s*:/gi, /<(b|strong)[\\s>]|font-weight:\\s*(bold|[6-9]00)|class=\"[^\"]*bold/gi].map(x => (h.match(x) || []).length);\n", ""),
+    ("R.fx = [fx(ps.filter(p => p.k === 'text').map(p => p.html).join('')), [0, 0, 0]];\n", ""),
+    ("  R.fx[1] = fx(body_().map(p => p.innerHTML).join(''));\n", ""),
+    ("  const inside = P && await wait(has, 1500);\n", "  const inside = P && await wait(() => has() || tz((quotes().pop() || q).textContent).includes(P), 4000);\n"),
 )
 CUT = ("const ask = () => new Promise(res => {\n", "  setTimeout(() => box.focus(), 50);\n});\n")  # ⑤ 붙여넣기 칸 — 처음 줄부터 끝 줄까지 뺌
+# v5: 꾸미기 끝 알림 글(진행기는 그 알림을 쓰지 않음 — 점검은 R 과 화면에서) 도 뺌 · 주소를 짧게 (49.5KB → 포스트잇 점검을 넣을 자리)
+CUTS = (CUT, ("const nm = (a, label) =>", "else R.notes.push('꾸밈 없음');\n"), ("alert((R.ok ? '모두 됐어요'", "'\\nv' + V);\n"))
 SLOT = "'@@KKUMI@@'"
 STEPS = (
     "아래 '코드 복사'를 눌러요.",
@@ -97,7 +112,7 @@ STEPS = (
     f"{GAP[0]}~{GAP[1]}초 쉬고 다음 글 → 한 번에 {RUN_MAX}편까지 → 끝나면 할 일 줄이 체크되고 화면에 요약이 남아요. 화면을 켜 둔 채 그 탭에 두세요.",
     "점검에 하나라도 걸리면 (사진 빠짐 · 제목/본문이 원고와 다름 · 포스트잇 · 카테고리 못 찾음 · 예약 시각 못 채움 · 제휴 고지 · 태그) 그 글은 발행하지 않고 멈춰요 — "
     "화면에 적힌 것을 고친 뒤 '고쳤어요 — 다시 점검하고 발행' 단추(또는 책갈피 한 번 더)를 누르면 다시 점검하고 이어 가요. 멈추려면 탭을 닫으면 돼요.",
-    "예약 시각은 글마다 대시보드에 보이는 그 시각이에요 (정각·30분을 피한 들쭉날쭉한 시각). 첫 글의 자리가 이미 지났으면 첫 글만 지금 발행하고 나머지는 다음 자리로 예약해요.",
+    "예약 시각은 책갈피를 누른 때 기준으로 나눠요 — 첫 글은 20~45분 뒤, 다음 글은 1시간 10분~2시간 40분씩 들쭉날쭉 (분은 10·20·40·50 · 07:30~23:00 · 넘치면 다음 날 아침 · 토·일은 월요일). 화면 맨 위에 '오늘 예약 14:20 · 16:10 …'이 보여요. 멈춘 뒤 새 글쓰기 화면에서 다시 눌러도 남은 글은 같은 시각 그대로 (지난 시각만 새로).",
     "이 브라우저에서 스스로 이어가기가 안 되면 화면을 다시 열고 '글마다 한 번'으로 바꿔요 — 그때는 글 하나가 올라갈 때마다 '다음 글 N/M — 책갈피 한 번 더'가 뜨고, "
     "새 글쓰기 화면이 열리면 한 번씩만 눌러 주면 돼요 (나머지는 그대로 자동).",
     "토·일(일요일 21시 전)에는 스스로 올리지 않아요 — 화면의 '주말에도 시작'을 눌렀을 때만. 대시보드 점검에 걸린 글·새 방향과 안 맞는 글·이미 체크한 글은 올리지 않아요.",
@@ -141,10 +156,10 @@ def _core() -> str:
         if src.count(old) != 1:
             raise ValueError(f"kkumi.js 에 없는 줄: {old.strip()[:40]}")
         src = src.replace(old, new)
-    a, b = CUT
-    if src.count(a) != 1 or src.count(b) != 1 or src.index(a) > src.index(b):
-        raise ValueError("kkumi.js 에 붙여넣기 칸 줄이 없음")
-    src = src[:src.index(a)] + src[src.index(b) + len(b):]
+    for a, b in CUTS:
+        if src.count(a) != 1 or src.count(b) != 1 or src.index(a) > src.index(b):
+            raise ValueError(f"kkumi.js 에 뺄 줄이 없음: {a.strip()[:40]}")
+        src = src[:src.index(a)] + src[src.index(b) + len(b):]
     return src.rstrip().rstrip(";")
 
 
@@ -167,7 +182,20 @@ def _code() -> str:
     shell = seoi.pack(kkumi.minify(_shell()))
     if shell.count(SLOT) != 1:
         raise ValueError("autopub.js 에 꾸미기 자리가 없음")
-    return HEAD + shell.replace(SLOT, kkumi.minify(_core())) + TAIL
+    return HEAD + shell.replace(SLOT, _zcore(kkumi.minify(_core()))) + TAIL
+
+
+# v5: 꾸미기 코드의 한글 '…' 글도 Z('…') 로 (주소에서 한 자 9자 → 3자 · 포스트잇·본문 다시 누름·예약 계획을 넣을 자리) — 정규식 안 따옴표가 있어 seoi.pack 은 못 씀 →
+# 문법상 값 자리( ( , = : ? + [ ! return 뒤)에서 시작하고 안에 따옴표·역슬래시·줄바꿈이 없고 ] 가 바로 뒤따르지 않는 작은따옴표 글만 (kkumi.js 정규식에는 따옴표·공백 없음 — kkumi.py 머리말)
+_ZLIT = re.compile(r"(^|[(,=:?+\[!]|return)'([^'\"\\\n]*[가-힣][^'\"\\\n]*)'(?!\])")  # 선택자 안 '…'] (큰따옴표 글 속) 는 그대로
+
+
+def _zcore(core: str) -> str:
+    def sub(m: re.Match[str]) -> str:
+        z = seoi.pack_text(m.group(2))
+        head = m.group(1) + (" " if m.group(1) == "return" else "")  # return'…' → return Z('…') (붙이면 returnZ — 이름이 됨)
+        return head + (f"Z('{z}')" if z is not None else f"'{m.group(2)}'")
+    return _ZLIT.sub(sub, core)
 
 
 def bookmarklet(endpoint: str, k: str) -> str:
@@ -315,25 +343,130 @@ def ready(rv: Any, blog: str, tried: dict[str, str] | None = None) -> list[dict[
     return sorted(out, key=lambda i: str((i.get("when") or {}).get("at") or "") if isinstance(i.get("when"), dict) else "")
 
 
-def _plan(rows: list[dict[str, Any]], blog: str, first: bool, now: float, tz: ZoneInfo) -> tuple[str, str]:
-    """rows[0] 의 예약 시각 (at 'YYYY-MM-DDTHH:MM', label) — ('', '지금') 이면 지금 발행.
-    계획 시각(when)이 살아 있으면 그대로 · 자리가 지났거나(when.rule) 시각이 없는 줄(바로 발행)은 이번 판 첫 글이면 지금, 아니면 규칙으로 고른 다음 자리."""
-    i = rows[0]
-    w = i.get("when") if isinstance(i.get("when"), dict) else None
-    if first and (w is None or w.get("rule")):
-        return "", "지금"
-    if w is not None:
-        return str(w["at"]), str(w.get("label") or w["at"])
-    n = datetime.fromtimestamp(now, tz).replace(tzinfo=None)
-    taken = []
-    for x in rows[1:]:
-        try:
-            taken.append(datetime.fromisoformat(str(x["when"]["at"])))
-        except (KeyError, TypeError, ValueError):
+# ── 누른 때 기준 예약 계획 (주인 11/23 13:45 — "예약 시간이 다 똑같은 거 같다. 내가 책갈피를 언제 누를지 모르니까, 한 번에 넣기 누른 시간 기준으로 적당히 시간 분배해서 세팅해줘")
+# 그 판의 첫 누름에 그 블로그의 남은 글 모두: 첫 글 = 누른 때 + 20~45분 · 다음은 70~160분씩 들쭉날쭉 · 분은 네이버 예약 칸(10분 단위) 10·20·40·50 (정각·30분 없음 ·
+# 이웃 글과 같은 분 자리 피함) · 사람 시간 07:30~23:00 (넘으면 다음 날 아침 · 토·일은 월요일로 — 주인이 '주말에도 시작'을 눌렀을 때만 주말 자리) ·
+# 이미 예약·발행한 그 블로그 시각과 40분 넘게 · kv 에 남겨 새 글쓰기 화면에서 다시 눌러도 같은 계획 (자리가 지났거나 없는 글만 새로) · 블로그마다 따로.
+FIRST_MIN, NEXT_MIN, CLASH_MIN, LATE_MIN = (20, 45), (70, 160), 40, 12
+DAY_H = ((7, 30), (22, 50))  # 끝은 10분 자리로 올려도 23:00 을 넘지 않게
+MINUTES = (10, 20, 40, 50)
+
+
+def _plans(db: Any) -> dict[str, dict[str, Any]]:
+    try:
+        v = json.loads(db.kv_get(KV_PLAN) or "{}")
+    except (TypeError, ValueError):
+        v = {}
+    out: dict[str, dict[str, Any]] = {}
+    for b, x in (v if isinstance(v, dict) else {}).items():
+        if b in NAMES and isinstance(x, dict):
+            sl = x.get("slots") if isinstance(x.get("slots"), dict) else {}
+            us = x.get("used") if isinstance(x.get("used"), list) else []
+            out[b] = {"slots": {str(k): str(t) for k, t in sl.items() if _dt(t)}, "used": [str(t) for t in us if _dt(t)]}
+    return out
+
+
+def _dt(t: Any) -> datetime | None:
+    try:
+        return datetime.strptime(str(t), "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+
+
+def _fit(d: datetime, wk: bool, rng: Any = random) -> datetime:
+    """사람 시간·주말 밖이면 다음 아침 (07:30 + 0~50분)으로."""
+    (h0, m0), (h1, m1) = DAY_H
+    for _ in range(10):
+        start, end = d.replace(hour=h0, minute=m0), d.replace(hour=h1, minute=m1)
+        if d < start:
+            d = start + timedelta(minutes=rng.randint(0, 50))
             continue
-    soon = n + timedelta(minutes=kkumi.WHEN_SOON_MIN)
-    d = kkumi.humanize(kkumi.pick_when(blog, n + timedelta(minutes=kkumi.WHEN_LEAD_MIN), taken), str(i["id"]), soon)
-    return d.strftime("%Y-%m-%dT%H:%M"), f"{d.month}/{d.day} {d:%H:%M}"
+        if d > end:
+            d = (d + timedelta(days=1)).replace(hour=h0, minute=m0) + timedelta(minutes=rng.randint(0, 50))
+            continue
+        if not wk and d.weekday() >= 5:  # 토·일은 월요일 아침으로 (주말 쉼 · Blog-Auto weekend_pause)
+            d = (d + timedelta(days=7 - d.weekday())).replace(hour=h0, minute=m0) + timedelta(minutes=rng.randint(0, 50))
+            continue
+        break
+    return d
+
+
+def _round(d: datetime, avoid: set[int]) -> datetime:
+    """분을 10·20·40·50 가운데 d 뒤 가장 가까운 자리로 (네이버 예약 칸 10분 단위 · 정각·30분 없음 · avoid 분 자리는 건너뜀)."""
+    d = d.replace(second=0, microsecond=0)
+    for k in range(0, 120):
+        x = d + timedelta(minutes=k)
+        if x.minute in MINUTES and (x.minute not in avoid or k >= 60):
+            return x
+    return d
+
+
+def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: ZoneInfo, *, wk: bool = False,
+             taken: list[str] | None = None, rng: Any = random) -> dict[str, str]:
+    """그 블로그의 남은 글 rows 의 예약 시각 {줄 id: 'YYYY-MM-DDTHH:MM'} — 살아 있는 계획은 그대로, 지났거나 없는 글만 새로 (kv 에 남김)."""
+    allp = _plans(db)
+    pl = allp.get(blog, {"slots": {}, "used": []})
+    n = datetime.fromtimestamp(now, tz).replace(tzinfo=None, second=0, microsecond=0)
+    late = n + timedelta(minutes=LATE_MIN)
+    ids = [str(i["id"]) for i in rows]
+    keep = {k: t for k, t in pl["slots"].items() if k in ids and (d := _dt(t)) is not None and d > late}
+    used = [t for t in pl["used"] if (d := _dt(t)) is not None and d > n - timedelta(days=1)]
+    busy = [d for t in (*used, *(taken or []), *keep.values()) if (d := _dt(t)) is not None]
+    new = [k for k in ids if k not in keep]
+    if new:
+        base = max([d for t in keep.values() if (d := _dt(t))], default=None)
+        cur = base + timedelta(minutes=rng.randint(*NEXT_MIN)) if base else n + timedelta(minutes=rng.randint(*FIRST_MIN))
+        last_m = base.minute if base else -1
+        for k in new:
+            d = cur
+            for _ in range(40):
+                d = _round(_fit(d, wk, rng), {last_m})
+                if all(abs((d - b).total_seconds()) > CLASH_MIN * 60 for b in busy):
+                    break
+                d += timedelta(minutes=CLASH_MIN + 10)
+            keep[k] = d.strftime("%Y-%m-%dT%H:%M")
+            busy.append(d)
+            last_m = d.minute
+            cur = d + timedelta(minutes=rng.randint(*NEXT_MIN))
+    allp[blog] = {"slots": keep, "used": used}
+    db.kv_set(KV_PLAN, json.dumps(allp, separators=(",", ":")))
+    return keep
+
+
+def _used(db: Any, blog: str, rid: str) -> None:
+    """발행을 눌러 본 글의 예약 시각은 계획에서 빼 '쓴 시각'으로 (다른 글이 그 시각 40분 안에 오지 않게)."""
+    allp = _plans(db)
+    pl = allp.get(blog)
+    if pl and rid in pl["slots"]:
+        pl["used"] = [*pl["used"], pl["slots"].pop(rid)][-20:]
+        db.kv_set(KV_PLAN, json.dumps(allp, separators=(",", ":")))
+
+
+def _label(t: str, now: float, tz: ZoneInfo) -> str:
+    d, n = _dt(t), datetime.fromtimestamp(now, tz).replace(tzinfo=None)
+    if d is None:
+        return t
+    k = (d.date() - n.date()).days
+    return f"{'오늘' if k == 0 else '내일' if k == 1 else f'{d.month}/{d.day}'} {d:%H:%M}"
+
+
+def plan_text(slots: dict[str, str], now: float, tz: ZoneInfo) -> str:
+    """'오늘 예약 14:20 · 16:10 · 내일 07:50' — 진행기 맨 위 한 줄."""
+    out, day = [], None
+    for t in sorted(slots.values()):
+        lab = _label(t, now, tz)
+        head, hm = lab.rsplit(" ", 1)
+        out.append(hm if head == day else (f"{head} 예약 {hm}" if day is None else f"{head} {hm}"))
+        day = head
+    return " · ".join(out)
+
+
+def _taken(rv: Any, blog: str) -> list[str]:
+    """이미 한(체크된) 그 블로그 예약 줄의 시각 — 겹치지 않게."""
+    if not isinstance(rv, dict):
+        return []
+    return [str(i["when"]["at"]) for s in rv.get("slots") or [] for i in s.get("items") or []
+            if i.get("blog") == blog and i.get("done") and isinstance(i.get("when"), dict) and i["when"].get("at")]
 
 
 def _stamped(text: str, at: str) -> str:
@@ -422,11 +555,13 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
         if n >= RUN_MAX:
             return {"ok": True, "next": None, "left": len(rows), "wait": 0,
                     "text": f"{name}: 한 번에 {RUN_MAX}편까지만 올려요 (남은 글 {len(rows)}) — {int(RUN_IDLE_S // 60)}분쯤 뒤에 다시 눌러 주세요"}
-        i, p = rows[0], rows[0]["paste"]
-        at, label = _plan(rows, blog, n == 0, now, tz)
+        slots = schedule(db, blog, rows, now, tz, wk=weekend(now, tz), taken=_taken(rv, blog))
+        i = min(rows, key=lambda x: slots.get(str(x["id"]), "~"))  # 계획 시각이 이른 글부터
+        p, at = i["paste"], slots[str(i["id"])]
+        label = _label(at, now, tz)
         html = _stamped(str(p["html"]), at)
         last, gap = c["last"].get(blog, 0.0), c["gap"].get(blog, 0.0)
-        return {"ok": True, "left": len(rows), "n": n + 1, "m": n + min(len(rows), RUN_MAX - n),
+        return {"ok": True, "left": len(rows), "n": n + 1, "plan": plan_text(slots, now, tz), "m": n + min(len(rows), RUN_MAX - n),
                 "wait": max(0, math.ceil(last + gap - now)) if last else 0, "text": f"{name}: 남은 글 {len(rows)}",
                 "next": {"id": i["id"], "title": p["title"], "html": html, "text": _stamped(str(p.get("text") or ""), at), "at": at, "label": label,
                          "photos": html.count("<img"), "disc": bool(DISC_RE.search(_TAG.sub("", html)))}}
@@ -462,12 +597,14 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
             if r in TRIED:
                 c["tried"][rid] = r
                 _held_add(db, rid, r, now)
+                _used(db, blog, rid)
             if r == "stop":
                 c["stops"][rid] = c["stops"].get(rid, 0) + 1
                 if c["stops"][rid] >= STOP_MAX and rid not in c["tried"]:  # hold(발행을 눌러 봄)을 덮지 않음
                     c["tried"][rid] = "stop"
             if r in ("ok", "unsure"):
-                c["run"][blog] = {"n": _run_n(c, blog, now) + 1, "last": now}
+                # v5 (주인 11/23 14:35 '5편까지만 … 올린 글 0' — 실제로 올라간 건 3): 한 판 상한은 발행 확인(ok)된 글만 셈 · 멈춘·못 넣은·확인 못 한 글은 안 셈
+                c["run"][blog] = {"n": _run_n(c, blog, now) + (r == "ok"), "last": now}
                 c["last"][blog], c["gap"][blog] = now, float(rng.randint(*GAP))
         u = str(form.get("u") or "")
         c["res"] = [*c["res"], {"id": rid, "b": blog, "r": r, "n": note, "u": u if U_RE.fullmatch(u) else "", "at": int(now)}][-RES_MAX:]

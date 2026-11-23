@@ -98,10 +98,10 @@ def test_bookmarklet_carries_the_whole_runner_and_fetches_no_code() -> None:
     v = autopub.view(db, "https://dash.example")
     js = unquote(v["code"][len("javascript:"):])
     assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= autopub.LEN_MAX == 50000 and v["steps"] == list(autopub.STEPS)
-    assert v["version"] == autopub.version() == 4 and "지금 판 v4" in v["note"]
+    assert v["version"] == autopub.version() == 5 and "지금 판 v5" in v["note"]
     assert "#" not in v["code"] and v["code"] == "javascript:" + kkumi.encode_short(js)
     assert "u:'https://dash.example/dashboard/api/autopub_act'" in js and f"k:'{autopub.key(db)}'" in js and "@@" not in js
-    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and kkumi.minify(autopub._core()) in js
+    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and autopub._zcore(kkumi.minify(autopub._core())) in js
     # 원격 코드 실행 없음: 받은 글을 코드로 돌리는 길이 없고, 대시보드에 코드를 달라고 하지 않음 · 쿠키를 읽지 않음
     for word in ("new Function", "Function(", "eval(", "a:'code'", "import(", "createElement('script')", "prompt(", "cookie"):
         assert word not in js, word
@@ -133,6 +133,9 @@ def test_runner_reuses_kkumi_whole_and_kkumi_itself_is_untouched() -> None:
     for word in (".click(", "requestSubmit", ".submit(", "alert(", "confirm(", "prompt(", "eval(", "document.cookie"):
         assert word not in shell, word
     assert shell.count("K.press(b)") == 1 and shell.index("r: 'hold'") < shell.index("K.press(b)") and shell.count("const b = fin();") == 1
+    # v5 (주인 11/23 14:22): 발행 단추 바로 전 '예약'/'현재'를 다시 읽어 계획과 다르면 누르지 않음 (예약을 못 채운 글이 지금 발행되지 않게)
+    g = shell.index("else if (!!it.at !== booked())")
+    assert shell.index("await S(300);\n      if (tt() !== sp(it.title))") < g < shell.index("r: 'hold'") < shell.index("K.press(b)")
     assert "keepalive: true" in shell and "credentials: 'omit'" in shell and "sandbox" in shell
     assert autopub.ROW_RE.pattern == actions.PASTE_ROW_RE.pattern
     assert autopub.DISC_RE.pattern == r"수수료를\s*(받|제공|지급)" and "const DISC = /수수료를\\s*(받|제공|지급)/;" in shell
@@ -169,10 +172,13 @@ def test_act_serves_only_fit_posts_in_slot_order_with_their_reserve_times(bot: D
     why = {i["id"]: autopub.unfit(i) for s in rv["slots"] for i in s["items"] if i["blog"] == "issue" and i["group"] != "이웃"}
     assert why["rsv:issue:14"] and why["rsv:issue:15"].startswith("올리기 전 자동 점검") and why["rsv:issue:16"].startswith("대시보드에 올리지 않는")
     assert why["rsv:issue:17"].startswith("제휴 링크가 있는데") and why["rsv:issue:19"] and not why["rsv:issue:11"]
-    # 첫 글: 바로 발행 줄 → 지금 발행 (예약 시각 칸 없음)
+    # 첫 글 (v5 · 주인 11/23 13:45 '누른 시간 기준으로 나눠'): 누른 때(10:00) + 20~45분 → 10분 자리(10·20·40·50)로 예약 · 맨 위 한 줄에 남은 글 셋의 계획
     q = _go(bot, t, a="next", b="issue")
     assert (q["n"], q["m"], q["left"], q["wait"]) == (1, 3, 3, 0) and q["next"]["id"] == "pub:issue:13" and q["next"]["title"] == "글 바로"
-    assert q["next"]["at"] == "" and q["next"]["label"] == "지금" and kkumi.stamped(q["next"]["html"]) == "" and q["next"]["disc"] is False and q["next"]["photos"] == 0
+    d13 = datetime.fromisoformat(q["next"]["at"])
+    assert datetime(2026, 11, 18, 10, 20) <= d13 <= datetime(2026, 11, 18, 10, 55) and d13.minute in autopub.MINUTES and q["next"]["label"] == f"오늘 {d13:%H:%M}"
+    assert kkumi.stamped(q["next"]["html"]) == q["next"]["at"] and q["next"]["disc"] is False and q["next"]["photos"] == 0
+    assert q["plan"].startswith(f"오늘 예약 {d13:%H:%M} · ") and q["plan"].count(" · ") == 2
     # 발행 직전 '해 봄' → 그 글은 다시 주지 않음 (확인을 못 해도 두 번 발행하지 않게) · 확인되면 할 일 줄 체크 + 블로그 프로그램에 pasted + 글 번호
     assert _go(bot, t + 5, a="done", b="issue", id="pub:issue:13", r="hold") == {"ok": True, "checked": False, "text": ""}
     assert _go(bot, t + 6, a="next", b="issue")["next"]["id"] == "rsv:issue:12"
@@ -183,12 +189,12 @@ def test_act_serves_only_fit_posts_in_slot_order_with_their_reserve_times(bot: D
     assert d == {"ok": True, "checked": True, "text": "할 일 줄 체크 ✓", "left": 2} and "pub:issue:13" in routine.done_ids(bot.db, DAY)
     assert [(r["name"], r["args"], r["rid"]) for r in routine.relay_rows(bot.db)] == [("pasted", {"blog": "issue", "pid": 13, "done": True}, "pub:issue:13")]
     assert json.loads(bot.db.kv_get(autopub.DAY_KEY + DAY))["res"][-1]["u"] == "223000000001"
-    # 둘째 글: 자리가 지난 예약 글 — 첫 글이 아니므로 지금이 아니라 규칙으로 고른 다음 자리 (정각·30분 아님) · 앞 글 뒤 77초가 될 때까지 쉼
+    # 둘째 글: 같은 계획의 다음 자리 (70~160분 뒤 · 분 자리가 앞 글과 다름) · 앞 글 뒤 77초가 될 때까지 쉼
     q = _go(bot, t + 20, a="next", b="issue")
     nx = q["next"]
     assert (q["n"], q["m"], q["wait"]) == (2, 3, 67) and nx["id"] == "rsv:issue:12" and kkumi.stamped(nx["html"]) == nx["at"] != ""
     d12 = datetime.fromisoformat(nx["at"])
-    assert d12 > datetime(2026, 11, 18, 10, 20) and d12.minute % 30 >= 10 and nx["label"] == f"11/18 {d12:%H:%M}"
+    assert timedelta(minutes=60) <= d12 - d13 <= timedelta(minutes=180) and d12.minute in autopub.MINUTES and d12.minute != d13.minute and nx["label"] == f"오늘 {d12:%H:%M}"
     assert _go(bot, t + 100, a="next", b="issue")["wait"] == 0
     # 점검에 걸려 멈춘 글: 발행하지 않았으므로 다시 누르면 같은 글부터 · 두 번 멈추면 오늘은 주지 않음 (직접)
     _go(bot, t + 110, a="done", b="issue", id="rsv:issue:12", r="stop", n="사진 0/1 — 빠진 사진을 넣어 주세요")
@@ -198,8 +204,8 @@ def test_act_serves_only_fit_posts_in_slot_order_with_their_reserve_times(bot: D
     _go(bot, t + 130, a="done", b="issue", id="rsv:issue:12", r="stop", n="사진 0/1")
     q = _go(bot, t + 140, a="next", b="issue")
     assert q["next"]["id"] == "rsv:issue:11" and (q["n"], q["m"]) == (2, 2)
-    d11 = datetime.fromisoformat(q["next"]["at"])  # 살아 있는 계획 시각 19:30 을 글마다 정해진 만큼 흔든 값 (정각·30분 아님)
-    assert abs((d11 - datetime(2026, 11, 18, 19, 30)).total_seconds()) / 60 <= 45 and d11.minute % 30 >= 10
+    d11 = datetime.fromisoformat(q["next"]["at"])  # 계획의 셋째 자리 (멈춘 글의 자리와 겹치지 않음)
+    assert d11 - d12 > timedelta(minutes=40) and d11.minute in autopub.MINUTES
     # 확인 못 한 글: 체크하지 않고 다시 주지 않음 · 모르는 줄·다른 블로그 줄·모르는 결과는 거절
     assert _go(bot, t + 150, a="done", b="issue", id="rsv:issue:11", r="unsure")["checked"] is False
     q = _go(bot, t + 160, a="next", b="issue")
@@ -216,22 +222,24 @@ def test_act_serves_only_fit_posts_in_slot_order_with_their_reserve_times(bot: D
     assert note == "오늘 하루치 한 번에: 데런픽 1 · 확인 필요 1 · 멈춘 글 1" and autopub.view(bot.db, "https://dash.example", now=t + 200, tz=TZ)["note"].endswith(note)
 
 
-def test_first_post_with_a_past_slot_goes_now_and_a_live_slot_stays_reserved(bot: DealBot, tmp_path: Path) -> None:
+def test_slots_come_from_the_tap_time_and_a_retap_keeps_the_plan(bot: DealBot, tmp_path: Path) -> None:
+    # v5 (주인 11/23 13:45 — 예전엔 대시보드 계획 시각(같은 자리 · 지난 자리는 다음 날 아침 08:50)을 써 '다 똑같은 것 같다'): 누른 때 기준
     rows = _rows(DAY)
     rows["items"] = [i for i in rows["items"] if i["id"] in ("rsv:issue:11", "rsv:issue:12")]
     with_routine(tmp_path, rows)
-    t = at(bot, DAY, "10:00")
-    q = _go(bot, t, a="next", b="issue")  # 첫 글의 자리(09:00)가 이미 지남 → 첫 글만 지금
-    assert q["next"]["id"] == "rsv:issue:12" and q["next"]["at"] == "" and kkumi.stamped(q["next"]["html"]) == ""
+    t = at(bot, DAY, "14:00")
+    q = _go(bot, t, a="next", b="issue")
+    a12 = q["next"]["at"]
+    assert q["next"]["id"] == "rsv:issue:12" and datetime(2026, 11, 18, 14, 20) <= datetime.fromisoformat(a12) <= datetime(2026, 11, 18, 14, 55)
     _go(bot, t + 1, a="done", b="issue", id="rsv:issue:12", r="ok")
     q = _go(bot, t + 2, a="next", b="issue")
-    assert q["next"]["id"] == "rsv:issue:11" and q["next"]["at"].startswith("2026-11-18T19:") and q["wait"] == 76
-    # 첫 글이어도 자리가 살아 있으면 그 시각으로 예약 (지금 올리지 않음)
-    rows["items"] = [i for i in rows["items"] if i["id"] == "rsv:issue:11"]
-    with_routine(tmp_path, rows)
+    a11 = q["next"]["at"]
+    assert q["next"]["id"] == "rsv:issue:11" and a11.startswith("2026-11-18T") and q["wait"] == 76  # 오늘 안 (다음 날 아침으로 밀지 않음)
+    assert timedelta(minutes=60) <= datetime.fromisoformat(a11) - datetime.fromisoformat(a12) <= timedelta(minutes=180) and q["plan"] == f"오늘 예약 {a11[11:]}"
+    # 새 글쓰기 화면에서 다시 눌러도 (그날 기록이 없어도) 남은 글은 같은 시각
     bot.db.kv_set(autopub.DAY_KEY + DAY, "{}")
-    q = _go(bot, t, a="next", b="issue")
-    assert q["n"] == 1 and q["next"]["id"] == "rsv:issue:11" and q["next"]["at"].startswith("2026-11-18T19:")
+    q = _go(bot, t + 600, a="next", b="issue")
+    assert q["n"] == 1 and q["next"]["id"] == "rsv:issue:11" and q["next"]["at"] == a11
 
 
 def test_a_post_whose_publish_was_pressed_is_never_served_again_even_after_the_day_record_is_gone(bot: DealBot, tmp_path: Path) -> None:
@@ -257,11 +265,13 @@ def test_run_cap_weekend_pause_and_protection_cooldown(bot: DealBot, tmp_path: P
         item(f"pub:issue:{n}", "s1", group="발행", blog="issue", title=f"데런픽 발행 · {n}", paste=_paste(f"글 {n}"), gate=OK) for n in range(1, 8)]}
     with_routine(tmp_path, rows)
     t = at(bot, DAY, "10:00")
+    ats = []
     for n in range(1, 6):  # 한 판에 5편까지
         q = _go(bot, t + n * 200, a="next", b="issue")
         assert q["next"]["id"] == f"pub:issue:{n}" and (q["n"], q["m"]) == (n, 5)
-        assert (q["next"]["at"] == "") is (n == 1)  # 지금 발행은 첫 글만 — 나머지는 다음 자리로 예약
+        ats.append(q["next"]["at"])
         _go(bot, t + n * 200 + 1, a="done", b="issue", id=f"pub:issue:{n}", r="ok")
+    assert all(ats) and ats == sorted(ats) and len(set(ats)) == 5  # 다섯 글 모두 다른 예약 자리 (차례대로)
     q = _go(bot, t + 1300, a="next", b="issue")
     assert q["next"] is None and q["left"] == 2 and q["text"] == "데런픽: 한 번에 5편까지만 올려요 (남은 글 2) — 30분쯤 뒤에 다시 눌러 주세요"
     q = _go(bot, t + 1001 + autopub.RUN_IDLE_S + 60, a="next", b="issue")  # 한참 뒤 다시 누르면 새 판
@@ -308,7 +318,7 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
     assert (await bot.web.dispatch("GET", "/dashboard/api/autopub", anon))[0] == 401
     status, v, hd = await get_json(bot, "/dashboard/api/autopub", session_headers(bot))
     k = autopub.key(bot.db)
-    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 4
+    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 5
     res = await _post(bot, {"k": k, "a": "code", "b": "issue"}, origin="https://blog.naver.com")
     assert res[0] == 400 and json.loads(res[1])["code"] == "bad" and res[3]["Access-Control-Allow-Origin"] == "https://blog.naver.com"
     res = await _post(bot, {"k": k, "a": "next", "b": "issue"}, origin="https://blog.naver.com")
@@ -416,13 +426,16 @@ const {chromium} = require('playwright');
     if (fresh) out.bars.push(bar);
     // v4: 주인 손 (Playwright 누름 = 진짜 누름 isTrusted) — 진행기가 '① 제목 칸' · '② 본문' 을 누르라고 하면 그 칸을 한 번 누름
     const ed = () => p.frames().filter(x => x.url().includes('PostWriteForm') && !x.isDetached()).pop();
-    if (fresh && opt.hands !== false && /① 제목 칸을 한 번 눌러/.test(bar)) { out.hands = (out.hands || 0) + 1; await ed().click(opt.wrongtap ? '.se-content .se-text-paragraph' : '.se-documentTitle .se-text-paragraph'); continue; }
-    if (fresh && opt.hands !== false && /② 본문을 한 번 눌러/.test(bar)) { out.hands = (out.hands || 0) + 1; out.broken = out.broken || await ed().evaluate(() => window.__se1b ? window.__se1b() : 0); await ed().click('.se-content .se-text-paragraph'); continue; }
+    // v5: 본문에 든 제목 줄을 주인이 지움 (unbody — 진짜 지우기는 시험에서 못 만들어 본문 글 줄을 비움) → 다시 제목 칸
+    if (fresh && /본문에 들어간 제목 줄을 지운 뒤/.test(bar)) { out.unbody_bar = bar; if (opt.unbody) await ed().evaluate(() => { for (const p of document.querySelectorAll('.se-content .se-text-paragraph')) p.innerHTML = '<br>'; }); continue; }
+    if (fresh && opt.hands !== false && /① 제목 칸을 한 번 눌러|큰 글씨 칸\)을 눌러/.test(bar)) { out.hands = (out.hands || 0) + 1; if (opt.wrongtap) { await ed().click('.se-content .se-text-paragraph'); if (opt.wrongtap !== 'once') continue; await p.waitForTimeout(1500); } await ed().click('.se-documentTitle .se-text-paragraph'); continue; }
+    if (fresh && opt.hands !== false && /본문을 한 번 더 눌러/.test(bar)) { out.hands = (out.hands || 0) + 1; out.again = (out.again || 0) + 1; await ed().click('.se-content .se-text-paragraph'); continue; }
+    if (fresh && opt.hands !== false && /② 본문을 한 번 눌러|넓은 칸\)을 눌러/.test(bar)) { out.hands = (out.hands || 0) + 1; out.broken = out.broken || await ed().evaluate(() => window.__se1b ? window.__se1b() : 0); await ed().click('.se-content .se-text-paragraph'); continue; }
     // 제목이 안 들어감: 주인이 「제목 복사」 → 제목 칸을 길게 눌러 붙여넣기 (진짜 붙여넣기는 시험에서 못 만들어 __ownerPaste 표시로 대신)
     if (fresh && /「제목 복사」 → 제목 칸을 길게 눌러 붙여넣기/.test(bar)) { out.hands = (out.hands || 0) + 1; await f.click('#apb button:nth-of-type(2)'); const e = ed(); await e.click('.se-documentTitle .se-text-paragraph'); await e.evaluate(t => { window.__ownerPaste = 1; const dt = new DataTransfer(); dt.setData('text/plain', t); document.activeElement.dispatchEvent(new ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt})); window.__ownerPaste = 0; }, queue.find(x => bar.includes(x.title)).title); continue; }
     out.lines = lines;
     if (/화면을 다시 열게요/.test(bar)) out.reload = 1;
-    if (/ · v\d+$/.test(bar) || /(?<!① 제목 칸을 한 번 )눌러 주세요$|아무것도 하지 않았어요$/.test(bar)) { out.end = bar; break; }
+    if (/ · v\d+$/.test(bar) || /(?<!① 제목 칸을 한 번 |큰 글씨 칸\)을 |넓은 칸\)을 )눌러 주세요$|아무것도 하지 않았어요$/.test(bar)) { out.end = bar; break; }
     if (btn) {
       out.btn = btn;
       if (/주말/.test(btn)) { await f.click('#apb button'); continue; }
@@ -433,11 +446,13 @@ const {chromium} = require('playwright');
         if (opt.fix === 'photo') await ed.evaluate(() => { for (const i of document.querySelectorAll('.se-image img')) i.src = 'https://blogfiles.pstatic.net/fixed.jpg'; });
         // 주인: 제목 칸을 손으로 누르고(진짜 누름) 붙여넣기 → 책갈피 한 번 더
         if (opt.fix === 'title') { await ed.click('.se-documentTitle .se-text-paragraph'); await ed.evaluate(t => { const dt = new DataTransfer(); dt.setData('text/plain', t); document.activeElement.dispatchEvent(new ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt})); }, queue[0].title); await p.waitForTimeout(1200); out.title_at_fix = await ed.evaluate(() => document.querySelector('.se-documentTitle').textContent); p.evaluate(loader).catch(() => {}); continue; }
+        // v5 '포스트잇 글 복사': 주인이 복사 단추 → 빈 포스트잇 안을 누름(진짜 누름) → 붙여넣기(__ownerPaste 표시로 대신) → 초록 단추
+        if (opt.fix === 'postit') { out.cp_at_stop = out.cp; out.stop_bar = bar; await f.click('#apb button:nth-of-type(2)'); const qs = await ed.$$('.se-quotation'); for (let i = 0; i < qs.length; i++) { if (await qs[i].evaluate(q => q.textContent.trim())) continue; await (await qs[i].$('.se-text-paragraph')).click(); await ed.evaluate(t => { window.__ownerPaste = 1; const dt = new DataTransfer(); dt.setData('text/plain', t); document.activeElement.dispatchEvent(new ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt})); window.__ownerPaste = 0; }, opt.pit[i]); } await f.click('#apb button'); continue; }
         if (opt.fix === 'retap') { p.evaluate(loader).catch(() => {}); await p.waitForTimeout(1500); out.retap_bar = (await ui())[1]; break; }
         await f.click('#apb button');
         continue;
       }
-      if (!opt.fix) { out.end = bar; break; }
+      if (!opt.fix || (out.fixed && fresh)) { out.end = bar; break; }
     }
   }
   for (const x of p.frames()) { try { const v = await x.evaluate(() => window.__se1b ? window.__se1b() : 0); if (v) out.broken = v; } catch (e) {} }
@@ -543,13 +558,52 @@ window.addEventListener('paste', e => {
 </script></body></html>"""
 
 
+# v5 (주인 11/23 13시 아이패드 v4 — 제목·본문·발행창(카테고리·태그·예약)은 다 됐는데 '포스트잇 글이 안 들어감'으로 멈춤 · 드라마 글 「굿파트너2 2회」):
+# 같은 꾸미기 코드(v10 — 하루치는 kkumi.js 를 통째로 씀)가 꾸미기 책갈피로는 실기기 포스트잇이 되므로 다른 것은 손의 자리뿐.
+#   · 꾸미기: 주인이 본문을 누름 → 책갈피 → 붙여넣기 칸(편집 칸 밖)에 포커스·붙여넣기 → 칸이 사라짐 = 주인 손이 편집 칸에서 빠진 뒤 시작
+#   · 하루치 v4: 주인이 본문을 누른 채(편집 칸에 손이 남음) 바로 시작
+# 꾸미기 v7 (11/16 드라마 표 인용구 — 글 바로 다음 포스트잇은 뒤에 빈 글 줄이 따라와 에디터 커서가 그 줄): 포스트잇 안 칸을 고르고(setSel) 붙여 넣으면 안으로 · 그 고르기는
+#   주인 손이 편집 칸에 남아 있는 동안에는 에디터가 받지 않음 (모형 · 진짜 누름은 늘 받음) → v4 는 표 포스트잇 글이 아래 빈 줄로 = '포스트잇 글이 안 들어감' (차례·사진·글은 그대로라 그 한 줄만).
+# realpidrop = 주인 11/23 13:40 v4 3/4 (본문을 눌렀는데 첫 조각이 안 들어감 — 빈 본문 안내 글 앞 커서): 본문 첫 붙여넣기 하나를 버림
+# realpi = SE1R + 위 규칙 · realpint = 포스트잇이 스크립트 붙여넣기를 아예 안 받음 (끝까지 안 되면 주인이 「포스트잇 글 복사」로 직접 — 그 길 시험).
+PI_INNER = (
+    ("let inPostit = null, selected = null, align = 'left';\n",
+     "let inPostit = null, selected = null, align = 'left';\n"
+     "document.addEventListener('pointerdown', e => { if (e.isTrusted && e.target.closest && e.target.closest('.se-content')) inPostit = e.target.closest('.se-quotation'); }, true);\n"),
+    ("C.addEventListener('paste', e => {\n  e.preventDefault();",
+     "C.addEventListener('paste', e => {\n  e.preventDefault();\n"
+     "  if (window.__drop > 0 && !e.clipboardData.files.length) { window.__drop--; return; }\n"
+     "  if (!window.__sess) { const a = getSelection().anchorNode, el = a && (a.nodeType === 1 ? a : a.parentElement); inPostit = (el && el.closest('.se-quotation')) || null; }\n"
+     "  if (inPostit && window.__pint && !window.__ownerPaste && !e.clipboardData.files.length) return;"),
+    ("const c = add(comp('se-quotation se-l-quotation_postit', '<div class=\"qbox\"></div>')); inPostit = c;",
+     "const prev = C.lastElementChild; const c = add(comp('se-quotation se-l-quotation_postit', '<div class=\"qbox\"><p class=\"se-text-paragraph\" style=\"min-height:1em\"></p></div>')); inPostit = c;"
+     " if (prev && /se-text/.test(prev.className) && prev.textContent.trim()) { add(comp('se-text', '<div class=\"se-section se-section-align-left\"><p class=\"se-text-paragraph\"></p></div>')); inPostit = null; }"),
+    ("text: document.querySelector('.se-content').innerText,",
+     "text: document.querySelector('.se-content').innerText, postits: [...document.querySelectorAll('.se-quotation')].map(q => q.textContent.trim()), outside: [...document.querySelectorAll('.se-content > .se-component:not(.se-quotation)')].map(c => c.textContent).join(' '),"),
+)
+PI = r"""<script>
+(() => {
+window.__pint = __PINT__; window.__drop = __DROP__; window.__sess = 0;
+const host = document.querySelector('.se-content').parentElement;
+for (const ty of ['pointerdown', 'mousedown', 'touchstart']) document.addEventListener(ty, e => { if (e.isTrusted && host.contains(e.target)) window.__sess = 1; }, true);
+host.addEventListener('focusout', () => { window.__sess = 0; });
+})();
+</script></body></html>"""
+
+
 def _editor(rsv: str = "full", se1: str = "") -> str:
     h = INNER.replace("</body></html>", RSV.replace("__MODE__", rsv)).replace("</body></html>", EXTRA).replace("</body></html>", PRE_WALL)
     if se1 in ("real", "realnt"):
         return h.replace("</body></html>", SE1R.replace("__NT__", "1" if se1 == "realnt" else "0"))
+    if se1 in ("realpi", "realpint", "realpidrop"):
+        for a, b in PI_INNER:
+            assert h.count(a) == 1, a
+            h = h.replace(a, b)
+        return h.replace("</body></html>", SE1R.replace("__NT__", "0")).replace("</body></html>", PI.replace("__PINT__", "1" if se1 == "realpint" else "0").replace("__DROP__", "1" if se1 == "realpidrop" else "0"))
     return h.replace("</body></html>", SE1.replace("__STEAL__", {"steal": "1", "stuck": "2", "ipad": "3", "ipadbody": "4"}.get(se1, "0"))) if se1 else h
 
 
+V4_SRC = Path(__file__).resolve().parent / "fixtures" / "autopub_v4.js"  # 주인 아이패드에서 '포스트잇 글이 안 들어감'으로 멈춘 v4 진행기 (fad77bf) 그대로
 V3_SRC = Path(__file__).resolve().parent / "fixtures" / "autopub_v3.js"  # 주인 아이패드에서 실패한 v3 진행기 (0b36e28) 그대로 — 모형이 그 화면을 재현하는지
 
 
@@ -617,7 +671,7 @@ def test_one_tap_fills_checks_and_publishes_two_posts() -> None:
     assert b["book"] is True and (b["h"], b["m"]) == ("19", "40") and b["date"] == f"{when.year}. {when.month:02d}. {when.day:02d}"
     assert any("1/2 「첫 글 제목이에요」 지금 발행을 눌렀어요" in x for x in got["bars"]) and any("2/2 「둘째 글 제목」 예약 " in x and "19:40 발행을 눌렀어요" in x for x in got["bars"])
     assert any("다음 글 2/2 — 1초 쉬어요" in x for x in got["bars"])
-    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v4"), got["end"]
+    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v5"), got["end"]
     assert len(got["lines"]) == 2 and all(x.startswith("✓ 올렸어요") and "할 일 줄 체크 ✓" in x for x in got["lines"]) and "글 번호 223000000001" in got["lines"][0]
     # 네이버 화면이 맨 위 창을 글 주소로 옮기려 했지만 진행기는 누른 화면에 그대로 (sandbox) · 끝나면 글쓰기 창을 치움
     assert got["url"] == "https://blog.naver.com/derenpick/postwrite" and got["frames"] == 0 and got["next"] == ["", "", ""] and got["taps"] == 1
@@ -736,11 +790,16 @@ def test_se_one_like_editor_reproduces_the_v1_title_in_body_bug() -> None:
 
 
 @needs_node
-def test_v4_never_cleans_a_title_that_landed_in_the_body_and_never_publishes() -> None:
-    # steal: 첫 붙여넣기는 무조건 본문으로 → v4 는 지우지 않고(스크립트로 지우면 에디터가 망가짐 — v3) 그 자리에서 멈춤 · 발행·'해 봄' 0
-    got = _flow(_posts(_tomorrow())[:1], se1="steal")
-    assert got["pub"] == [] and [d["r"] for d in got["done"]] == ["fail"], got
-    assert "제목이 본문 칸에 들어갔어요" in got["done"][0]["n"] and "발행된 것은 없어요" in got["end"]
+def test_v5_title_that_landed_in_the_body_waits_for_the_owner_to_delete_it_and_carries_on_in_the_same_window() -> None:
+    # steal: 첫 붙여넣기는 무조건 본문으로 (주인 11/23 13:58 '제목이 본문 칸에 들어갔어요 — 이 글쓰기 화면은 닫고…') → v5 는 지우지 않고(스크립트로 지우면 에디터가 망가짐 — v3)
+    # '본문에 들어간 제목 줄을 지운 뒤 제목 칸을' → 주인이 지우면 같은 화면에서 ① 다시 → 제목 → 본문 → 발행 (창을 닫지 않음)
+    got = _flow(_posts(_tomorrow())[:1], se1="steal", unbody=True)
+    assert [d["r"] for d in got["done"]] == ["hold", "ok"] and got["pub"][0]["title"] == "첫 글 제목이에요", got
+    assert "첫 글 제목" not in got["pub"][0]["text"] and "(길게 눌러 선택 → 삭제) 제목 칸을 눌러 주세요" in got["unbody_bar"]
+    assert any(x.endswith("제목 칸(위 큰 글씨 칸)을 눌러 주세요") for x in got["bars"]) and got["taps"] == 1
+    # 주인이 지우지 않으면 기다리기만 (발행·'해 봄' 0 · 스크립트가 지우지 않음)
+    got = _flow(_posts(_tomorrow())[:1], se1="steal", give_up=25, timeout=120)
+    assert got["pub"] == [] and got["done"] == [] and "unbody_bar" in got, got
 
 
 # v2 가 제목을 넣던 차례 (포커스 → 제목 줄 누름 → 붙여넣기 → 안 되면 글 넣기 명령) — 진짜 아이패드 같은 화면(ipad)에서 주인 11/23 11:36 화면처럼 제목은 빈 칸
@@ -820,7 +879,7 @@ def test_v4_on_the_real_model_two_owner_taps_per_post_then_publishes_by_itself()
     assert b["title"] == "둘째 글 제목" and "둘째 글 제목" not in b["text"] and b["book"] is True and (b["h"], b["m"]) == ("19", "40")
     assert got["hands"] == 4 and not got.get("broken") and "cp" not in got  # 글마다 제목 칸 한 번 + 본문 한 번 · 에디터 글을 스크립트로 고친 적 없음
     assert any("1/2 「첫 글 제목이에요」 ① 제목 칸을 한 번 눌러 주세요" == x[len("하루치 한 번에 · "):] for x in got["bars"])
-    assert any("② 본문을 한 번 눌러 주세요" in x for x in got["bars"]) and got["end"].endswith(" · v4") and "올린 글 2" in got["end"]
+    assert any("② 본문을 한 번 눌러 주세요" in x for x in got["bars"]) and got["end"].endswith(" · v5") and "올린 글 2" in got["end"]
 
 
 @needs_node
@@ -866,3 +925,179 @@ def test_real_model_also_reproduces_the_v1_v2_title_in_body_screens() -> None:
         assert out.returncode == 0, out.stderr
         got = json.loads(out.stdout)
         assert got["body"] == "첫 글 제목이에요" and got["title"] == "제목" and got["cur"] == "body", got
+
+
+# ── v5: 포스트잇 (주인 11/23 13시 아이패드 v4 — '포스트잇 글이 안 들어감') ─────────────────────
+PIT_A, PIT_B = "장면 하나 — 법정 앞", "1회 · 4.0%"
+
+
+def _drama() -> list[dict]:
+    """드라마 글 꼴: 글 · 선 · 소제목 포스트잇 · 글 · 표 포스트잇(앞에 선 없이 글 바로 다음) · 글 · 태그 줄 (지금 발행)."""
+    return [{"id": "pub:finance:21", "title": "굿파트너2 2회 이야기", "at": "", "label": "지금", "photos": 0, "disc": False, "text": "",
+             "html": f"<p>드라마 첫 문단.</p><p>\u2063</p><blockquote><p>{PIT_A}</p></blockquote><p>표 앞 문단이에요.</p>"
+                     f"<blockquote><p>{PIT_B}</p><p>2회 · 5.1%</p></blockquote><p>드라마 끝 문단.</p>" + _tags_line(["굿파트너2"], "셀럽 소식")}]
+
+
+def _flow_issue(posts: list[dict], **kw: Any) -> dict:
+    return _flow([{**x, "id": x["id"].replace("finance", "issue")} for x in posts], **kw)
+
+
+@needs_node
+def test_real_postit_model_reproduces_the_owners_v4_stop_exactly() -> None:
+    # 주인 화면: '1/4 「굿파트너2 2회, …」 멈췄어요 — 발행하지 않았어요. 아래를 고친 뒤 단추를 눌러 주세요: 포스트잇 글이 안 들어감' (발행창은 다 채움 · 발행 0)
+    got = _flow_issue(_drama(), se1="realpi", src=V4_SRC)
+    assert got["pub"] == [] and [d["r"] for d in got["done"]] == ["stop"] and not got.get("broken"), got
+    stop = next(x for x in got["bars"] if "멈췄어요" in x)
+    assert stop.endswith("「굿파트너2 2회 이야기」 멈췄어요 — 발행하지 않았어요. 아래를 고친 뒤 단추를 눌러 주세요: 포스트잇 글이 안 들어감"), stop
+    assert got["done"][0]["n"] == "포스트잇 글이 안 들어감" and got["hands"] == 2
+
+
+@needs_node
+def test_real_postit_model_kkumi_still_does_both_postits() -> None:
+    # 대조: 같은 모형에서 꾸미기 책갈피 (주인이 본문을 누른 뒤 → 붙여넣기 칸) — 소제목·표 포스트잇 모두 안에
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    # 실기기 차례 그대로: 본문 누름 → 책갈피 → 붙여넣기 칸을 길게 누름(진짜 누름 — 손이 편집 칸 밖으로) → 붙여넣기
+    run = KK_RUN.replace("await frame.waitForSelector('.se-content');", "await frame.waitForSelector('.se-content'); await frame.click('.se-content .se-text-paragraph');").replace(
+        "await frame.waitForSelector('[aria-label=\"여기에 붙여넣기\"]');", "await frame.click('[aria-label=\"여기에 붙여넣기\"]');")
+    assert run.count("await frame.click(") == 2
+    html = _drama()[0]["html"]
+    out = subprocess.run([NODE, "-e", run, _editor(se1="realpi"), kkumi_code(), html], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["alert"].startswith("모두 됐어요") and "포스트잇 2/2" in got["alert"] and "글 안 → 나옴 → 글 안 → 나옴" in got["alert"], got["alert"]
+    pits = [c for c in got["comps"] if c.startswith("POSTIT")]
+    assert len(pits) == 2 and PIT_A[:10] in pits[0] and "1회" in pits[1], got["comps"]
+
+
+@needs_node
+def test_v5_on_the_real_postit_model_puts_both_postits_inside_and_publishes() -> None:
+    got = _flow_issue(_drama(), se1="realpi")
+    assert [d["r"] for d in got["done"]] == ["hold", "ok"] and got["hands"] == 2 and not got.get("broken") and "cp" not in got, got
+    a = got["pub"][0]
+    assert a["title"] == "굿파트너2 2회 이야기" and a["tags"].split() == ["#굿파트너2"] and a["cat"] == "셀럽 소식"
+    assert len(a["postits"]) == 2 and PIT_A in a["postits"][0] and "1회 · 4.0%" in a["postits"][1].replace("\xa0", " ") and "2회 · 5.1%" in a["postits"][1]
+    assert "1회" not in a["outside"] and PIT_A not in a["outside"] and "표 앞 문단이에요." in a["outside"]  # 포스트잇 밖(본문)에는 없음
+    assert got["end"].endswith(" · v5") and "올린 글 1" in got["end"]
+
+
+@needs_node
+def test_v5_postit_that_never_takes_text_names_it_offers_copy_and_publishes_after_owner_paste() -> None:
+    # realpint: 포스트잇이 스크립트 붙여넣기를 끝내 안 받음 → 발행하지 않고 어느 포스트잇·어떤 글인지 + 「포스트잇 글 복사」 →
+    # 주인이 빈 포스트잇 안을 눌러 붙여넣고 초록 단추 → 화면을 다시 읽어 두 포스트잇 다 들어간 것을 보고 발행
+    got = _flow_issue(_drama(), se1="realpint", fix="postit", pit=[PIT_A, PIT_B + "\n2회 · 5.1%"], timeout=420)
+    stop = got["stop_bar"]
+    assert "발행하지 않았어요" in stop and "포스트잇 글이 안 들어감" not in stop, stop
+    assert "포스트잇 1 「장면 하나 — 법정 앞」 글이 안 들어갔어요 — 「포스트잇 글 복사」 → 빈 포스트잇 안을 눌러 붙여넣기" in stop
+    assert "포스트잇 2 「1회 · 4.0%」 글이 안 들어갔어요" in stop and got["cp_at_stop"] == "포스트잇 글 복사"
+    assert [(d["r"], d["pub"]) for d in got["done"]] == [("stop", 0), ("hold", 0), ("ok", 1)], got["done"]
+    a = got["pub"][0]
+    assert len(a["postits"]) == 2 and PIT_A in a["postits"][0] and "2회 · 5.1%" in a["postits"][1] and "1회" not in a["outside"]
+
+
+@needs_node
+def test_v5_never_publishes_while_a_postit_is_still_empty_after_the_green_button() -> None:
+    # 주인이 고치지 않고 초록 단추만 → 다시 읽어도 포스트잇이 비어 있어 또 멈춤 (발행 0 · v4 는 다시 점검에서 포스트잇 글을 안 봤음)
+    got = _flow_issue(_drama(), se1="realpint", fix="nothing", timeout=420)
+    assert got["pub"] == [] and [d["r"] for d in got["done"]] == ["stop", "stop"], got
+
+
+@needs_node
+def test_v5_first_body_chunk_that_does_not_land_asks_for_one_more_body_tap_and_carries_on() -> None:
+    # 주인 11/23 13:40 v4 3/4: 제목은 들어갔는데 본문은 빈 칸('글 안 들어감: …' 등 배너 여섯) → v5 는 본문이 비었으니 지우지 않고 '본문을 한 번 더' → 이어서 발행
+    got = _flow_issue(_drama(), se1="realpidrop")
+    assert [d["r"] for d in got["done"]] == ["hold", "ok"] and got["again"] == 1 and got["hands"] == 3 and not got.get("broken"), got
+    assert any("본문에 글이 안 들어갔어요 — 본문을 한 번 더 눌러 주세요 (아무것도 지우지 않았어요)" in x for x in got["bars"])
+    a = got["pub"][0]
+    assert a["text"].lstrip().startswith("드라마 첫 문단.") and a["text"].count("드라마 첫 문단.") == 1 and len(a["postits"]) == 2 and "1회" not in a["outside"]
+    # 대조: v4 는 같은 화면에서 첫 조각이 안 들어가자 그 글을 멈춤 (주인 13:40 배너 그대로 — 글 안 들어감 · 태그 줄이 없어 · 본문이 원고와 달라요 · 글 차례) · 발행 0
+    got = _flow_issue(_drama(), se1="realpidrop", src=V4_SRC)
+    assert got["pub"] == [] and [d["r"] for d in got["done"]] == ["stop"], got
+    for want in ("글 안 들어감: 드라마 첫 문단.", "태그 줄이 없어 발행창을 못 채웠어요", "본문이 원고와 달라요 (드라마 첫 문단.…)", "글 차례가 원고와 달라요"):
+        assert want in got["done"][0]["n"], (want, got["done"][0]["n"])
+
+
+def test_retapping_after_a_stopped_post_resumes_the_unpublished_ones_and_never_the_published_one(bot: DealBot, tmp_path: Path) -> None:
+    # 주인 11/23 13:40: 2/4 올림(ok) · 3/4 못 넣음(fail) → 새 글쓰기 화면에서 책갈피를 다시 누르면 3/4 부터 (2/4 는 다시 주지 않음)
+    with_routine(tmp_path, _rows(DAY))
+    t = at(bot, DAY, "10:00")
+    first = _go(bot, t, a="next", b="issue")["next"]["id"]
+    _go(bot, t + 1, a="done", b="issue", id=first, r="hold")
+    _go(bot, t + 2, a="done", b="issue", id=first, r="ok")
+    second = _go(bot, t + 200, a="next", b="issue")["next"]["id"]
+    assert second != first
+    _go(bot, t + 201, a="done", b="issue", id=second, r="fail", n="글 안 들어감: 첫 문단")
+    for k in range(2):  # 몇 번을 다시 눌러도 못 넣은 글부터 · 올린 글은 안 줌
+        q = _go(bot, t + 400 + k * 300, a="next", b="issue")
+        assert q["next"]["id"] == second and first not in [q["next"]["id"]]
+    with pytest.raises(autopub.CaptureError):  # 올린 글을 또 발행하려는 '해 봄'은 막음
+        _go(bot, t + 1000, a="done", b="issue", id=first, r="hold")
+
+
+@needs_node
+def test_v5_owner_tapping_the_body_first_at_step_one_then_the_title_still_goes_on_in_the_same_window() -> None:
+    # 주인 11/23 13:58: ① 에서 본문을 먼저 누름 → 붙이지 않고 그대로 기다림 → 제목 칸을 누르면 그 자리에 제목 → 본문 → 발행 (창을 닫지 않음 · 에디터 글을 건드리지 않음)
+    got = _flow_issue(_drama(), se1="realpi", wrongtap="once")
+    assert [d["r"] for d in got["done"]] == ["hold", "ok"] and not got.get("broken") and got["taps"] == 1, got
+    a = got["pub"][0]
+    assert a["title"] == "굿파트너2 2회 이야기" and "굿파트너2 2회 이야기" not in a["text"] and len(a["postits"]) == 2
+
+
+@needs_node
+def test_v5_reserve_fields_that_render_late_still_get_the_next_day_date() -> None:
+    # 주인 11/23 14:00 '예약 11/24 08:50 못 채움 (날짜 칸 못 찾음)' (발행창은 '현재'): '예약'을 고른 뒤 날짜·시·분 칸이 1.2초 · 달력이 0.9초 늦게 떠도 채움 (꾸미기 v9 차례 그대로)
+    when = _tomorrow()
+    got = _flow(_posts(when)[1:], rsv="late")
+    assert [d["r"] for d in got["done"]] == ["hold", "ok"], got
+    b = got["pub"][0]
+    assert b["book"] is True and (b["h"], b["m"]) == ("19", "40") and b["date"] == f"{when.year}. {when.month:02d}. {when.day:02d}"
+    # 그래도 날짜를 못 채우면 (달력이 안 뜸) 발행하지 않고 직접 고르라고 함
+    got = _flow(_posts(when)[1:], rsv="nocal")
+    assert got["pub"] == [] and [d["r"] for d in got["done"]] == ["stop"] and "그 날짜를 직접 고른 뒤 초록 단추" in got["done"][0]["n"], got
+
+
+def _unz(s: str) -> str:
+    """autopub.js Z 와 같은 풀기 (시험용)."""
+    import re as _re
+
+    def f(m: Any) -> str:
+        a, b, c, d = m.groups()
+        if a:
+            return chr(44032 + (ord(a) - 65) * 1296 + int(b, 36))
+        return chr(int(c or d, 16)) if (c or d) else " "
+    return _re.sub(r"([A-I])(..)|J(....)|\.(..)|_", f, s)
+
+
+def test_kkumi_core_korean_literals_are_packed_and_unpack_to_the_same_code() -> None:
+    # v5: 꾸미기 코드의 한글 글을 Z('…') 로 줄임 — 풀면 줄이기 전 코드와 한 글자도 같고, 선택자 속 '…'] 는 건드리지 않음
+    import re as _re
+
+    raw = kkumi.minify(autopub._core())
+    z = autopub._zcore(raw)
+    assert len(kkumi.encode_short(z)) < len(kkumi.encode_short(raw)) - 1000 and z.count("Z('") > 40
+    assert "returnZ(" not in z and "return Z('" in z and not _re.search(r"[\w$]Z\('", z)  # 이름에 붙지 않음
+    back = _re.sub(r"(return )?Z\('([^']*)'\)", lambda m: ("return" if m.group(1) else "") + "'" + _unz(m.group(2)) + "'", z)
+    assert back == raw
+    assert "input[placeholder*='링크']" in z and "button[aria-label*='카테고리']" in z
+
+
+def test_run_cap_counts_only_confirmed_publishes(bot: DealBot, tmp_path: Path) -> None:
+    # 주인 11/23 14:35 라커룸 '한 번에 5편까지만 올려요 (남은 글 3) · 올린 글 0' — 실제로 올라간 건 3편: 멈춘·못 넣은·확인 못 한 글은 상한에 안 셈
+    rows = {"day": DAY, "slots": SLOTS, "overflow": 0, "items": [
+        item(f"pub:issue:{n}", "s1", group="발행", blog="issue", title=f"데런픽 발행 · {n}", paste=_paste(f"글 {n}"), gate=OK) for n in range(1, 10)]}
+    with_routine(tmp_path, rows)
+    t = at(bot, DAY, "10:00")
+    for k, r in enumerate(("ok", "stop", "fail", "ok", "unsure", "stop", "ok")):
+        q = _go(bot, t + k * 200, a="next", b="issue")
+        assert q["next"] is not None, (k, q)
+        if r != "stop" or k == 1:
+            _go(bot, t + k * 200 + 1, a="done", b="issue", id=q["next"]["id"], r="hold" if r in ("ok", "unsure") else r)
+        if r in ("ok", "unsure"):
+            _go(bot, t + k * 200 + 2, a="done", b="issue", id=q["next"]["id"], r=r)
+        elif r == "stop" and k != 1:
+            _go(bot, t + k * 200 + 1, a="done", b="issue", id=q["next"]["id"], r="stop")
+    c = json.loads(bot.db.kv_get(autopub.DAY_KEY + DAY))
+    assert c["run"]["issue"]["n"] == 3  # 확인된 발행 3편만
+    q = _go(bot, t + 1600, a="next", b="issue")
+    assert q["next"] is not None and q["n"] == 4 and "5편까지만" not in q["text"]

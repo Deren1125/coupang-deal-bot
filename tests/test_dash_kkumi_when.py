@@ -245,7 +245,7 @@ def test_bookmarklet_never_names_or_presses_the_final_publish_button() -> None:
 
 # ---------------------------------------------------------------- 4) 가짜 발행 설정창
 # 발행 설정창에 예약 칸을 더한다 (공개 자료로 아는 모양: 현재/예약 라디오 · 날짜 칸(읽기 전용, 누르면 달력) · 시 00~23 · 분 10분 단위 · 맨 아래 발행 단추).
-# MODE: full = 그대로 · nosel = 시·분이 고르기 칸(select)이 아님 · nocal = 날짜 칸을 눌러도 달력이 안 뜸 ·
+# MODE: full = 그대로 · late = 예약 칸·달력이 늦게 그려짐 · nosel = 시·분이 고르기 칸(select)이 아님 · nocal = 날짜 칸을 눌러도 달력이 안 뜸 ·
 #   trap = 날짜 칸보다 먼저 날짜 글자가 든 단추가 있는데 누르면 발행됨 (이름에는 표시가 없고 글자에만 '발행').
 # v9 (11/18 다음 날 예약 '칸 못 찾음') — jQuery UI 달력처럼: jq = 달력이 발행창 밖(문서 끝 #ui-datepicker-div)에 붙고 날짜 칸에 커서가
 #   가면(focus) 뜸 · 누름은 칸(td)이 받음 · 다른 달 칸은 빈칸 · 날짜를 고르면 발행창이 시·분 고르기 칸과 라디오 글자를 새로 그림(시는 0) ·
@@ -275,7 +275,8 @@ document.querySelector('.publish_btn').addEventListener('click', () => {
     q('.minute_option__V').innerHTML = [0, 10, 20, 30, 40, 50].map(i => '<option value="' + i + '">' + p2(i) + '</option>').join('');
     q('.hour_option__J').value = '9';
   }
-  for (const r of w.querySelectorAll('input[type=radio]')) r.addEventListener('change', () => { window.rsvLog.radio++; q('.time_setting__v').style.display = q('#radio_time2').checked ? 'block' : 'none'; });
+  // late (하루치 v5 · 주인 11/23 14:00 '예약 11/24 08:50 못 채움 (날짜 칸 못 찾음)' — 발행창은 '현재'): '예약'을 골라도 날짜·시·분 칸이 1.2초 뒤에 그려지고 달력도 0.9초 뒤에 뜸
+  for (const r of w.querySelectorAll('input[type=radio]')) r.addEventListener('change', () => { window.rsvLog.radio++; const on = q('#radio_time2').checked, f = () => { q('.time_setting__v').style.display = on ? 'block' : 'none'; }; if (MODE === 'late' && on) setTimeout(f, 1200); else f(); });
   q('.confirm_btn__W').onclick = () => { window.rsvLog.confirm++; };
   const opts = () => {
     q('.hour_option__J').innerHTML = [...Array(24)].map((_, i) => '<option value="' + i + '">' + p2(i) + '</option>').join('');
@@ -325,7 +326,7 @@ document.querySelector('.publish_btn').addEventListener('click', () => {
     cal.querySelector('.ui-datepicker-prev').onclick = () => { view = m === 1 ? [y - 1, 12] : [y, m - 1]; draw(); };
     for (const a of cal.querySelectorAll('a[data-d]')) a.onclick = () => { sel = [y, m, +a.dataset.d]; show(); cal.style.display = 'none'; };
   };
-  inp.onclick = () => { if (MODE === 'nocal' || MODE === 'jq') return; view = [sel[0], sel[1]]; (jq ? jqDraw : draw)(); cal.style.display = jq && cal.style.display === 'block' ? 'none' : 'block'; };
+  inp.onclick = () => { if (MODE === 'nocal' || MODE === 'jq') return; view = [sel[0], sel[1]]; const f = () => { (jq ? jqDraw : draw)(); cal.style.display = jq && cal.style.display === 'block' ? 'none' : 'block'; }; if (MODE === 'late') setTimeout(f, 900); else f(); };
   if (jq) {
     inp.addEventListener('focus', () => { view = [sel[0], sel[1]]; jqDraw(); cal.style.display = 'block'; });
     document.addEventListener('mousedown', e => { if (!cal.contains(e.target) && e.target !== inp) cal.style.display = 'none'; });
