@@ -178,3 +178,33 @@ def test_tick_runs_due_slot_once_and_waits_on_low_memory(jp, monkeypatch: pytest
     finally:
         loop.close()
         asyncio.set_event_loop(None)
+
+
+def test_retake_plan_candidates_counts_and_load(jp) -> None:  # type: ignore[no-untyped-def]
+    rows = [{"name": "공수2", "credits": 3, "grade": "A-", "area": "교양", "term": "2024-2", "retake": 1},
+            {"name": "대중음악", "credits": 3, "grade": "B0", "area": "교양", "term": "2023-1"},
+            {"name": "디지털", "credits": 3, "grade": "B+", "area": "전필", "term": "2024-1"},
+            {"name": "전자회로", "credits": 3, "grade": "B+", "area": "전필", "term": "2024-2"},
+            {"name": "채플", "credits": 1, "grade": "P", "area": "교양", "term": "2023-1"},
+            {"name": "철회", "credits": 3, "grade": "W", "area": "전선", "term": "2024-1"},
+            {"name": "낙제", "credits": 3, "grade": "F", "area": "전선", "term": "2024-1"},
+            {"name": "비통과", "credits": 1, "grade": "NP", "area": "기타", "term": "2024-1"}]
+    academic.save_courses(jp, {"courses": rows})
+    academic.save_req(jp, {"총": 130})
+    v = academic.view(jp)
+    bars = {b["area"]: b["done"] for b in v["bars"]}
+    assert bars["총"] == 13.0 and bars["전선"] == 0.0  # W·F·NP 는 학점 아님 (P 는 학점)
+    r = v["retake"]
+    assert (r["total"], r["used"], r["left"], r["max"]) == (6, 1, 5, "A0") and "sc/279" in r["src"]
+    assert [c["name"] for c in r["b0"]["cands"]] == ["낙제", "대중음악"]  # 기본 B0 이하 · F 가 이득 가장 큼
+    assert [c["name"] for c in r["bplus"]["cands"]][:2] == ["낙제", "대중음악"] and len(r["bplus"]["cands"]) == 4
+    assert r["bplus"]["after"] > r["b0"]["after"] > r["now"]
+    load = r["b0"]["load"]
+    assert load["left_credits"] == 117.0 and load["retake_credits"] == 6.0 and load["per_term"] == 41.0 and load["over"]
+
+
+def test_retake_top_n_limited_by_left(jp) -> None:  # type: ignore[no-untyped-def]
+    rows = [{"name": f"C{i}", "credits": 3, "grade": "C0", "area": "전선", "term": "x", "retake": 1 if i < 5 else 0} for i in range(8)]
+    academic.save_courses(jp, {"courses": rows})
+    r = academic.view(jp)["retake"]
+    assert r["left"] == 1 and len(r["b0"]["top"]) == 1

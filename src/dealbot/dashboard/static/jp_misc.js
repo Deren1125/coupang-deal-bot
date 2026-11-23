@@ -117,7 +117,25 @@
       out.textContent = '지금 ' + (now === null ? '-' : now + ' (4.5 환산 ' + (Math.round(now * 4.5 / 4.3 * 100) / 100) + ')') + ' → 재수강 뒤 ' + (next === null ? '-' : next + ' (4.5 환산 ' + (Math.round(next * 4.5 / 4.3 * 100) / 100) + ')');
     }
     calc();
-    return JP.card('⑤ 재수강 평점 계산 (재수강 상한 ' + d.retake_max + ' — 확인 필요)', list, out);
+    var r = d.retake, auto = h('div');
+    var plus = h('input', { type: 'checkbox', onchange: drawAuto });
+    function drawAuto() {
+      var x = plus.checked ? r.bplus : r.b0, L = x.load;
+      auto.textContent = '';
+      auto.appendChild(h('p', { text: '추천 (평점 이득 = 학점 × (' + r.max + ' − 지금) 큰 순) · 위 ' + x.top.length + '과목을 ' + r.max + ' 로 → 평점 ' +
+        (x.after === null ? '-' : x.after + ' (4.5 환산 ' + x.after45 + ')') + ' (지금 ' + (r.now === null ? '-' : r.now) + ')' }));
+      if (!x.cands.length) auto.appendChild(h('p', { cls: 'jp-sub', text: '후보 없음' }));
+      x.cands.forEach(function (c) {
+        auto.appendChild(h('div', { cls: 'jp-row' + (x.top.indexOf(c.id) >= 0 ? '' : ' jp-sub') }, h('span', { text: (x.top.indexOf(c.id) >= 0 ? '✓ ' : '') + c.name + ' ' + c.grade + ' · ' + c.credits + '학점 · +' + c.gain }))); 
+      });
+      if (L.per_term !== null) auto.appendChild(h('p', { cls: L.over ? 'jp-warn' : 'jp-sub', text: '재수강은 학점이 늘지 않아요: 졸업까지 남은 ' + L.left_credits + '학점 + 재수강 ' + L.retake_credits +
+        '학점 ÷ ' + L.terms + '학기 = 학기당 ' + L.per_term + '학점' + (L.over ? ' — ' + L.term_max + '학점 넘음' : '') }));
+    }
+    drawAuto();
+    return JP.card('⑤ 재수강 (' + r.used + '회 씀 · ' + r.left + '회 남음 / ' + r.total + '회 · 최고 ' + r.max + ')',
+      h('p', { cls: 'jp-sub' }, r.note + ' · ', JP.link('학교 안내', r.src)),
+      h('label', { cls: 'jp-row' }, plus, ' B+ 도 후보에 넣기 (기본 B0 이하)'), auto,
+      h('details', null, h('summary', { text: '직접 골라 계산' }), list, out));
   }
 
   // ── ⑥ 자료함 ──

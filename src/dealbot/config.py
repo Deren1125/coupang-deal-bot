@@ -999,7 +999,9 @@ class JobprepConfig(BaseModel):
         {"label": "해외 2027 여름 지원", "start": "2026-11-01", "end": "2027-01-31", "guess": "1"},
         {"label": "국내 여름 인턴", "start": "2027-04-01", "end": "2027-05-31", "guess": "1"},
         {"label": "국내 겨울 인턴", "start": "2027-10-01", "end": "2027-11-30", "guess": "1"}])
-    retake_max_grade: str = "A0"  # 재수강 성적 상한 (주인 확인 필요)
+    # 재수강 (확인됨 11/23 — yonsei.ac.kr/sc/279/subview.do: 졸업까지 6회 · 최고 A0 · 13학번 이후 모든 성적 · 이전 성적 소거)
+    retake_max_grade: str = "A0"
+    retake_total: int = Field(6, ge=0)
     # 코드 채점 격리 (리뷰 11/22): 기본 systemd — 안 되면 돌리지 않음(503 · 5분 뒤 다시 확인). rlimit(약함)은 직접 적을 때만 (시험 환경). auto = systemd
     sandbox_mode: Literal["auto", "systemd", "rlimit", "off"] = "systemd"
     pron_min_free_mb: int = Field(1000, ge=0)

@@ -17,6 +17,10 @@ AREAS = ("교양", "전필", "전선", "기타")
 GRADES = {"A+": 4.3, "A0": 4.0, "A": 4.0, "A-": 3.7, "B+": 3.3, "B0": 3.0, "B": 3.0, "B-": 2.7, "C+": 2.3, "C0": 2.0, "C": 2.0, "C-": 1.7,
           "D+": 1.3, "D0": 1.0, "D": 1.0, "D-": 0.7, "F": 0.0}
 TERMS = ("2027-2", "2028-1", "2028-2")
+NOT_EARNED = {"W", "F", "NP", "U", "I", ""}  # 학점으로 안 침 (철회·낙제·비통과·미완)
+RETAKE_SRC = "https://www.yonsei.ac.kr/sc/279/subview.do"
+RETAKE_NOTE = "졸업까지 6회 · 최고 A0 · 모든 성적 가능(13학번~) · 이전 성적 소거"
+B0, BPLUS = 3.0, 3.3
 TERM_MAX = 18
 PARSE_SCHEMA = {"type": "object", "properties": {
     "courses": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "credits": {"type": "number"},
@@ -28,6 +32,43 @@ PLAN_SCHEMA = {"type": "object", "properties": {"terms": {"type": "array", "item
     "term": {"type": "string"}, "courses": {"type": "array", "items": {"type": "object", "properties": {
         "name": {"type": "string"}, "credits": {"type": "number"}, "area": {"type": "string"}, "why": {"type": "string"}},
         "required": ["name", "credits", "area", "why"]}}}, "required": ["term", "courses"]}}}, "required": ["terms"]}
+
+
+def earned(c: dict[str, Any]) -> bool:
+    return str(c.get("grade") or "").strip().upper() not in NOT_EARNED and float(c.get("credits") or 0) > 0
+
+
+def candidates(courses: list[dict[str, Any]], *, max_grade: str = "A0", upto: float = B0) -> list[dict[str, Any]]:
+    """재수강 후보 — 성적이 upto(B0, 단추로 B+) 이하이고 A0 보다 낮은 것, 평점 이득(학점 × (A0 − 지금)) 큰 순."""
+    cap = GRADES.get(max_grade, 4.0)
+    out = []
+    for c in courses:
+        g = GRADES.get(str(c.get("grade") or "").strip().upper())
+        if g is None or g >= cap or g > upto:
+            continue
+        cr = float(c.get("credits") or 0)
+        out.append({"id": c.get("id"), "name": c.get("name"), "grade": c.get("grade"), "credits": cr, "gain": round(cr * (cap - g), 2)})
+    out.sort(key=lambda x: (-x["gain"], str(x["name"])))
+    return out
+
+
+def retake_plan(courses: list[dict[str, Any]], *, cfg: Any, need_total: float, earned_total: float, term_max: int) -> dict[str, Any]:
+    used = sum(1 for c in courses if int(c.get("retake") or 0))
+    total = int(cfg.retake_total)
+    left = max(0, total - used)
+    out: dict[str, Any] = {"total": total, "used": used, "left": left, "max": cfg.retake_max_grade, "src": RETAKE_SRC, "note": RETAKE_NOTE,
+                           "now": gpa(courses)}
+    for key, upto in (("b0", B0), ("bplus", BPLUS)):
+        cands = candidates(courses, max_grade=cfg.retake_max_grade, upto=upto)
+        top = cands[:left]
+        after = retake_gpa(courses, {str(c["id"]): cfg.retake_max_grade for c in top}, cfg.retake_max_grade)
+        rest = max(0.0, need_total - earned_total) if need_total else None
+        extra = sum(c["credits"] for c in top)
+        per = round((rest + extra) / len(TERMS), 1) if rest is not None else None
+        out[key] = {"cands": cands, "top": [c["id"] for c in top], "after": after["new"], "after45": after["new45"],
+                    "load": {"left_credits": rest, "retake_credits": extra, "terms": len(TERMS), "per_term": per,
+                             "over": per is not None and per > term_max, "term_max": term_max}}
+    return out
 
 
 def gpa(courses: list[dict[str, Any]]) -> float | None:
@@ -63,7 +104,7 @@ def view(jp: Any) -> dict[str, Any]:
     req = json.loads(req_r["body"]) if req_r else {}
     done = {a: 0.0 for a in AREAS}
     for c in courses:
-        if GRADES.get(str(c["grade"]).upper()) != 0.0:
+        if earned(c):
             done[c["area"] if c["area"] in AREAS else "기타"] += float(c["credits"] or 0)
     total_done = sum(done.values())
     bars = []
@@ -72,7 +113,9 @@ def view(jp: Any) -> dict[str, Any]:
         got = total_done if a == "총" else done.get(a, 0.0)
         bars.append({"area": a, "done": got, "need": need, "left": max(0.0, need - got) if need else None})
     plans = {r["term"]: json.loads(r["body"]) for r in jp.store.q("SELECT * FROM acad_plan")}
-    return {"courses": courses, "gpa": gpa(courses), "bars": bars, "req": req, "plans": plans, "terms": TERMS, "term_max": int(req.get("term_max") or TERM_MAX),
+    term_max = int(req.get("term_max") or TERM_MAX)
+    retake = retake_plan(courses, cfg=jp.cfg(), need_total=float(req.get("총") or 0), earned_total=total_done, term_max=term_max)
+    return {"retake": retake, "courses": courses, "gpa": gpa(courses), "bars": bars, "req": req, "plans": plans, "terms": TERMS, "term_max": int(req.get("term_max") or TERM_MAX),
             "retake_max": jp.cfg().retake_max_grade, "grades": GRADES, "docs": jp.store.q("SELECT id, at FROM acad_docs ORDER BY at DESC LIMIT 20")}
 
 
