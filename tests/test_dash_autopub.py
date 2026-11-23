@@ -96,7 +96,7 @@ def test_bookmarklet_carries_the_whole_runner_and_fetches_no_code() -> None:
     v = autopub.view(db, "https://dash.example")
     js = unquote(v["code"][len("javascript:"):])
     assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= autopub.LEN_MAX == 50000 and v["steps"] == list(autopub.STEPS)
-    assert v["version"] == autopub.version() == 2 and "지금 판 v2" in v["note"]
+    assert v["version"] == autopub.version() == 3 and "지금 판 v3" in v["note"]
     assert "#" not in v["code"] and v["code"] == "javascript:" + kkumi.encode_short(js)
     assert "u:'https://dash.example/dashboard/api/autopub_act'" in js and f"k:'{autopub.key(db)}'" in js and "@@" not in js
     assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and kkumi.minify(autopub._core()) in js
@@ -306,7 +306,7 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
     assert (await bot.web.dispatch("GET", "/dashboard/api/autopub", anon))[0] == 401
     status, v, hd = await get_json(bot, "/dashboard/api/autopub", session_headers(bot))
     k = autopub.key(bot.db)
-    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 2
+    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 3
     res = await _post(bot, {"k": k, "a": "code", "b": "issue"}, origin="https://blog.naver.com")
     assert res[0] == 400 and json.loads(res[1])["code"] == "bad" and res[3]["Access-Control-Allow-Origin"] == "https://blog.naver.com"
     res = await _post(bot, {"k": k, "a": "next", "b": "issue"}, origin="https://blog.naver.com")
@@ -397,7 +397,7 @@ const {chromium} = require('playwright');
   const tap = async () => { out.taps++; await p.goto(write); await p.frames()[1].waitForSelector('.se-content'); if (opt.dir) await p.evaluate(() => localStorage.setItem('apbd', '1')); p.evaluate(loader).catch(() => {}); };
   await tap();
   // 우리 한 줄 (#apb) 은 이어가기 길에서는 맨 위 문서에, '글마다 한 번' 길에서는 글쓰기 문서에 있음
-  const ui = async () => { for (const f of p.frames()) { try { const t = await f.evaluate(() => { const e = document.querySelector('#apb'); return e ? [e.children[0].textContent, e.children[2].style.display !== 'none' ? e.children[2].textContent : '', [...e.children[1].children].map(x => x.textContent)] : null; }); if (t) return [f, ...t]; } catch (e) {} } return null; };
+  const ui = async () => { for (const f of p.frames()) { try { const t = await f.evaluate(() => { const e = document.querySelector('#apb'); return e ? [e.children[0].textContent, e.children[2].style.display !== 'none' ? e.children[2].textContent : '', [...e.children[1].children].map(x => x.textContent), e.children[3] && e.children[3].style.display !== 'none' ? e.children[3].textContent : ''] : null; }); if (t) return [f, ...t]; } catch (e) {} } return null; };
   for (let i = 0; i < 1300; i++) {
     await p.waitForTimeout(200);
     const u = await ui();
@@ -407,7 +407,8 @@ const {chromium} = require('playwright');
       if ((opt.dir || opt.noframe) && !/postwrite/.test(p.url())) { out.moved = (out.moved || 0) + 1; out.last_url = p.url(); if (out.done.filter(d => d.r === 'ok').length < queue.length && out.taps < 4) { await tap(); continue; } break; }
       continue;
     }
-    const [f, bar, btn, lines] = u;
+    const [f, bar, btn, lines, cp] = u;
+    if (cp) out.cp = cp;
     if (out.bars[out.bars.length - 1] !== bar) out.bars.push(bar);
     out.lines = lines;
     if (/화면을 다시 열게요/.test(bar)) out.reload = 1;
@@ -420,6 +421,8 @@ const {chromium} = require('playwright');
         out.pub_at_stop = out.pub.length;
         const ed = p.frames().filter(x => x.url().includes('PostWriteForm') && !x.isDetached()).pop();
         if (opt.fix === 'photo') await ed.evaluate(() => { for (const i of document.querySelectorAll('.se-image img')) i.src = 'https://blogfiles.pstatic.net/fixed.jpg'; });
+        // 주인: 제목 칸을 손으로 누르고(진짜 누름) 붙여넣기 → 책갈피 한 번 더
+        if (opt.fix === 'title') { await ed.click('.se-documentTitle .se-text-paragraph'); await ed.evaluate(t => { const dt = new DataTransfer(); dt.setData('text/plain', t); document.activeElement.dispatchEvent(new ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt})); }, queue[0].title); await p.waitForTimeout(1200); out.title_at_fix = await ed.evaluate(() => document.querySelector('.se-documentTitle').textContent); p.evaluate(loader).catch(() => {}); continue; }
         if (opt.fix === 'retap') { p.evaluate(loader).catch(() => {}); await p.waitForTimeout(1500); out.retap_bar = (await ui())[1]; break; }
         await f.click('#apb button');
         continue;
@@ -439,28 +442,35 @@ const {chromium} = require('playwright');
 # SE ONE 처럼 (주인 11/23 아이패드 — v1 제목이 본문 첫 줄에 들어감): 제목·본문이 한 편집 칸(contenteditable) 안 · 에디터 커서는 누른 곳(pointer/mouse down)을 따르고,
 # 누르지 않고 편집 칸에 포커스만 오면 본문 끝 커서를 되살림 (본문이 포커스를 가져감) · 붙여넣기 신호는 DOM 선택이 아니라 에디터 커서 자리에 들어감.
 # steal = 첫 붙여넣기는 무조건 본문으로 (본문에 들어간 제목을 지우고 다른 길로 한 번 더 하는지) · stuck = 거기에 글 넣기 명령도 듣지 않음 (둘 다 안 되면 멈춤).
+# v3 (주인 11/23 11:36 아이패드 — v2 도 '제목을 넣지 못했어요'): ipad = 진짜 아이패드처럼 스크립트로 누른 것(isTrusted 아님)은 커서를 옮기지 않음 (꾸미기 10/29) ·
+#   편집 칸 포커스는 커서를 본문 끝으로 · 처음 커서는 제목 · 제목에 붙인 글은 0.5초 뒤 span(__se-node) 안에 다시 그림 · 글 넣기 명령으로 바뀐 제목 칸은 0.3초 뒤 에디터가
+#   원래대로 되돌림 (에디터 모형에 없는 글) → v2 의 차례(포커스 → 누름 → 붙여넣기 → 글 넣기 명령)로는 본문에 들어갔다 지워지고 제목은 빈 칸 = 주인 화면 그대로.
+#   ipadbody = 같은데 처음 커서도 본문 (어느 길로도 제목에 못 감 → 본문만 넣고 발행 전에 멈춤 · '제목 복사' → 주인이 제목 칸을 눌러 붙여넣고 다시 누르면 발행).
 SE1 = r"""<script>
 (() => {
 const STEAL = __STEAL__;
-if (STEAL > 1) { const ex = document.execCommand.bind(document); document.execCommand = (c, ...a) => c === 'insertText' ? false : ex(c, ...a); }
+if (STEAL === 2) { const ex = document.execCommand.bind(document); document.execCommand = (c, ...a) => c === 'insertText' ? false : ex(c, ...a); }
 wbFocus = 'body';
 const C = document.querySelector('.se-content'), TB = document.querySelector('.se-documentTitle'), TP = TB.querySelector('.se-text-paragraph');
 const host = document.createElement('div');
 host.setAttribute('contenteditable', 'true');
 TB.before(host); host.append(TB, C); C.removeAttribute('contenteditable');
-let cur = 'title', fwd = 0, n = 0;
+const IPAD = STEAL > 2;
+let cur = STEAL === 4 ? 'body' : 'title', fwd = 0, n = 0, model = '', tap = 0;
 window.__se1 = () => cur;
 const where = t => t && t.closest ? (t.closest('.se-documentTitle') ? 'title' : t.closest('.se-content') ? 'body' : null) : null;
-for (const ty of ['pointerdown', 'mousedown']) document.addEventListener(ty, e => { const w = where(e.target); if (w) cur = w; }, true);
-host.addEventListener('focus', () => { cur = 'body'; });
+for (const ty of ['pointerdown', 'mousedown']) document.addEventListener(ty, e => { const w = where(e.target); if (w && (!IPAD || e.isTrusted)) { cur = w; tap = Date.now(); } }, true);
+host.addEventListener('focus', () => { if (!IPAD || Date.now() - tap > 300) cur = 'body'; });
+const draw = () => { TP.innerHTML = model ? '' : '<span class="se-placeholder __se_placeholder">제목</span>'; if (model) { const s = document.createElement('span'); s.className = 'se-ff-nanumgothic se-fs32 __se-node'; s.textContent = model; TP.append(s); } };
+if (IPAD) { draw(); host.addEventListener('input', () => setTimeout(draw, 300)); }
 document.querySelector('.se-canvas-bottom-button').addEventListener('click', () => { cur = 'body'; });
 const unph = () => { for (const s of TP.querySelectorAll('.se-placeholder')) s.replaceWith(s.textContent.replace('제목', '')); };
-host.addEventListener('input', () => { if (TP.textContent !== '제목') unph(); });
+if (!IPAD) host.addEventListener('input', () => { if (TP.textContent !== '제목') unph(); });
 window.addEventListener('paste', e => {
   if (fwd) return;
   e.stopImmediatePropagation(); e.preventDefault();
-  const dt = e.clipboardData, to = STEAL && !n++ ? 'body' : cur;
-  if (to === 'title' && !dt.files.length) { unph(); TP.textContent += dt.getData('text/plain'); return; }
+  const dt = e.clipboardData, to = STEAL && STEAL < 3 && !n++ ? 'body' : cur;
+  if (to === 'title' && !dt.files.length) { if (IPAD) { model += dt.getData('text/plain'); setTimeout(draw, 500); return; } unph(); TP.textContent += dt.getData('text/plain'); return; }
   let d2 = dt;
   if (!dt.files.length && !dt.getData('text/html')) { d2 = new DataTransfer(); const p = document.createElement('p'); p.textContent = dt.getData('text/plain'); d2.setData('text/html', p.outerHTML); }
   fwd = 1; try { C.dispatchEvent(new ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: d2})); } finally { fwd = 0; }
@@ -471,7 +481,7 @@ window.addEventListener('paste', e => {
 
 def _editor(rsv: str = "full", se1: str = "") -> str:
     h = INNER.replace("</body></html>", RSV.replace("__MODE__", rsv)).replace("</body></html>", EXTRA).replace("</body></html>", PRE_WALL)
-    return h.replace("</body></html>", SE1.replace("__STEAL__", {"steal": "1", "stuck": "2"}.get(se1, "0"))) if se1 else h
+    return h.replace("</body></html>", SE1.replace("__STEAL__", {"steal": "1", "stuck": "2", "ipad": "3", "ipadbody": "4"}.get(se1, "0"))) if se1 else h
 
 
 def _flow(posts: list[dict], *, rsv: str = "full", timeout: int = 300, se1: str = "", **opt: Any) -> dict:
@@ -523,7 +533,7 @@ def test_one_tap_fills_checks_and_publishes_two_posts() -> None:
     assert b["book"] is True and (b["h"], b["m"]) == ("19", "40") and b["date"] == f"{when.year}. {when.month:02d}. {when.day:02d}"
     assert any("1/2 「첫 글 제목이에요」 지금 발행을 눌렀어요" in x for x in got["bars"]) and any("2/2 「둘째 글 제목」 예약 " in x and "19:40 발행을 눌렀어요" in x for x in got["bars"])
     assert any("다음 글 2/2 — 1초 쉬어요" in x for x in got["bars"])
-    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v2"), got["end"]
+    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v3"), got["end"]
     assert len(got["lines"]) == 2 and all(x.startswith("✓ 올렸어요") and "할 일 줄 체크 ✓" in x for x in got["lines"]) and "글 번호 223000000001" in got["lines"][0]
     # 네이버 화면이 맨 위 창을 글 주소로 옮기려 했지만 진행기는 누른 화면에 그대로 (sandbox) · 끝나면 글쓰기 창을 치움
     assert got["url"] == "https://blog.naver.com/derenpick/postwrite" and got["frames"] == 0 and got["next"] == ["", "", ""] and got["taps"] == 1
@@ -642,17 +652,17 @@ def test_se_one_like_editor_reproduces_the_v1_title_in_body_bug() -> None:
 
 
 @needs_node
-def test_v2_puts_the_title_in_the_title_field_of_an_se_one_like_editor() -> None:
+def test_v3_puts_the_title_in_the_title_field_of_an_se_one_like_editor() -> None:
     got = _flow(_posts(_tomorrow()), se1="focus")
     assert got["dialogs"] == [] and [d["r"] for d in got["done"]] == ["hold", "ok", "hold", "ok"], got
     a, b = got["pub"]
     assert a["title"] == "첫 글 제목이에요" and "첫 글 제목" not in a["text"] and "첫 글 첫 문단." in a["text"] and a["imgs"] == 1
     assert b["title"] == "둘째 글 제목" and "둘째 글 제목" not in b["text"] and "둘째 글 끝 문단." in b["text"]
-    assert got["end"].endswith(" · v2") and "올린 글 2" in got["end"]
+    assert got["end"].endswith(" · v3") and "올린 글 2" in got["end"]
 
 
 @needs_node
-def test_v2_removes_a_title_that_landed_in_the_body_and_retries_the_other_way() -> None:
+def test_v3_removes_a_title_that_landed_in_the_body_and_retries_the_other_way() -> None:
     # 첫 붙여넣기가 본문으로 감 → 본문 줄을 지우고 글 넣기 명령으로 한 번 더 → 제목 칸에 · 본문은 원고 그대로 · 발행
     got = _flow(_posts(_tomorrow())[:1], se1="steal")
     assert [d["r"] for d in got["done"]] == ["hold", "ok"], got
@@ -661,7 +671,78 @@ def test_v2_removes_a_title_that_landed_in_the_body_and_retries_the_other_way() 
 
 
 @needs_node
-def test_v2_stops_safely_when_neither_way_reaches_the_title() -> None:
+def test_v3_reaches_the_title_where_v2_stopped() -> None:
+    # stuck: 첫 붙여넣기는 본문으로 · 글 넣기 명령은 안 먹음 (v2 는 여기서 '제목을 넣지 못했어요'로 멈춤) → v3 는 본문에 든 제목을 지우고,
+    # 편집 칸 포커스 다음에 제목 줄을 눌러(커서가 누른 곳으로) 붙여넣기 → 제목 칸 · 본문은 원고 그대로 · 발행
     got = _flow(_posts(_tomorrow())[:1], se1="stuck")
-    assert got["pub"] == [] and [(d["r"], d["n"]) for d in got["done"]] == [("fail", "제목을 넣지 못했어요 (제목이 본문 칸에 들어갔어요)")], got
-    assert "글을 넣지 못해 멈췄어요" in got["end"] and "발행된 것은 없어요" in got["end"] and got["end"].endswith(" · v2")
+    assert [d["r"] for d in got["done"]] == ["hold", "ok"] and "cp" not in got, got
+    a = got["pub"][0]
+    assert a["title"] == "첫 글 제목이에요" and "첫 글 제목" not in a["text"] and a["text"].lstrip().startswith("첫 글 첫 문단."), a
+
+
+# v2 가 제목을 넣던 차례 (포커스 → 제목 줄 누름 → 붙여넣기 → 안 되면 글 넣기 명령) — 진짜 아이패드 같은 화면(ipad)에서 주인 11/23 11:36 화면처럼 제목은 빈 칸
+V2_TITLE = r"""
+const {chromium} = require('playwright');
+(async () => {
+  const b = await chromium.launch(); const p = await b.newPage();
+  await p.setContent(process.argv[1]);
+  const out = await p.evaluate(async () => {
+    const t = document.querySelector('.se-documentTitle .se-text-paragraph'), h = t.closest('[contenteditable="true"]'), S = m => new Promise(r => setTimeout(r, m)), o = {};
+    h.focus();
+    for (const ty of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) t.dispatchEvent(new MouseEvent(ty, {bubbles: true, cancelable: true}));
+    const r = document.createRange(); r.selectNodeContents(t); r.collapse(false); getSelection().removeAllRanges(); getSelection().addRange(r);
+    const dt = new DataTransfer(); dt.setData('text/plain', '첫 글 제목이에요');
+    h.dispatchEvent(new ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt}));
+    await S(800);
+    o.body = document.querySelector('.se-content').textContent;
+    const r2 = document.createRange(); r2.selectNodeContents(t); r2.collapse(false); getSelection().removeAllRanges(); getSelection().addRange(r2);
+    document.execCommand('insertText', false, '첫 글 제목이에요');
+    o.now = t.textContent;
+    await S(1000);
+    o.title = t.textContent; o.cur = window.__se1();
+    return o;
+  });
+  console.log(JSON.stringify(out)); await b.close();
+})().catch(e => { console.error(String(e)); process.exit(2); });
+"""
+
+
+@needs_node
+def test_ipad_like_editor_reproduces_the_v2_failure() -> None:
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    out = subprocess.run([NODE, "-e", V2_TITLE, _editor(se1="ipad")], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    # 붙여넣기는 본문으로 · 글 넣기 명령은 잠깐 제목 칸에 보였다가(v2 가 바로 읽으면 '됨') 에디터가 지움 → 제목은 안내 글 '제목' 그대로
+    assert got["body"] == "첫 글 제목이에요" and "첫 글 제목이에요" in got["now"] and got["title"] == "제목" and got["cur"] == "body", got
+
+
+@needs_node
+def test_v3_title_goes_in_on_an_ipad_like_editor_before_anything_moves_the_cursor() -> None:
+    got = _flow(_posts(_tomorrow()), se1="ipad")
+    assert got["dialogs"] == [] and [d["r"] for d in got["done"]] == ["hold", "ok", "hold", "ok"], got
+    a, b = got["pub"]
+    assert a["title"] == "첫 글 제목이에요" and "첫 글 제목" not in a["text"] and "첫 글 첫 문단." in a["text"] and a["imgs"] == 1
+    assert b["title"] == "둘째 글 제목" and "둘째 글 제목" not in b["text"]
+    assert got["end"].endswith(" · v3") and "올린 글 2" in got["end"] and "cp" not in got
+
+
+@needs_node
+def test_v3_owner_pastes_the_title_and_taps_again_then_it_publishes() -> None:
+    # ipadbody: 처음 커서도 본문 — 스크립트로는 제목에 못 감 → 본문만 넣고 멈춤 ('해 봄' 전 · 발행 0) → 주인이 제목 칸을 눌러 붙여넣고 책갈피 한 번 더 → 다시 점검 → 발행
+    got = _flow(_posts(_tomorrow())[:1], se1="ipadbody", fix="title")
+    assert got["pub_at_stop"] == 0 and got["cp"] == "제목 복사" and got["title_at_fix"] == "첫 글 제목이에요", got
+    assert [d["r"] for d in got["done"]] == ["stop", "hold", "ok"], got["done"]
+    a = got["pub"][0]
+    assert a["title"] == "첫 글 제목이에요" and "첫 글 제목" not in a["text"] and a["text"].lstrip().startswith("첫 글 첫 문단.") and a["imgs"] == 1
+    assert got["end"].endswith(" · v3") and "올린 글 1" in got["end"]
+
+
+@needs_node
+def test_v3_never_publishes_with_an_empty_title_and_offers_the_title_copy_button() -> None:
+    got = _flow(_posts(_tomorrow())[:1], se1="ipadbody")
+    assert got["pub"] == [] and [d["r"] for d in got["done"]] == ["stop"], got  # '해 봄'도 남기지 않음 (다시 누르면 같은 글)
+    assert "제목 칸이 비었어요" in got["done"][0]["n"] and got["cp"] == "제목 복사" and got["btn"].startswith("고쳤어요")
+    assert "멈췄어요 — 발행하지 않았어요" in got["end"] and "제목 칸을 누르고 붙여넣은 뒤 책갈피를 다시 눌러 주세요" in got["end"]
