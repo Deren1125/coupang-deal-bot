@@ -13,7 +13,7 @@
 POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv autopub_secret) · CORS 는 https://*.blog.naver.com 만 · 데이터만):
   a=next b=블로그 [w=1]  {ok, next: {id, title, html, text, at, label, photos, disc} | None, n, m, left, wait(초), text, weekend?}
       그 블로그의 오늘 할 일 발행·예약 줄 가운데 '올려도 되는 글'만 (ready): 체크 안 됨 · 다 만든 묶음 · 올리기 전 자동 점검 통과(gate.ok 참 — 점검에 걸린 글·점검 안 된 글·
-      새 방향과 안 맞는다고 적힌 글은 주지 않음) · 제휴 링크가 있는데 고지 줄이 없는 글 뺌 · 오늘 이미 해 본 글(ok·unsure·hold·두 번 멈춘 글) 뺌. 차례는 예약 시각 → 화면 차례.
+      새 방향과 안 맞는다고 적힌 글(Blog-Auto direction.fit 거짓 — 주인 11/23 · 줄 글 '새 방향' 도)은 주지 않음) · 제휴 링크가 있는데 고지 줄이 없는 글 뺌 · 오늘 이미 해 본 글(ok·unsure·hold·두 번 멈춘 글) 뺌. 차례는 예약 시각 → 화면 차례.
       예약 시각: 그 줄의 계획 시각(routine.view 의 when — kkumi.when_plan · 사람처럼 흔든 값). 이번 판(run)의 첫 글이고 그 자리가 이미 지났으면(when.rule · 바로 발행 줄)
         '지금 발행'(at '' — 태그 줄의 시각 칸을 뺌) · 나머지는 계획 시각대로 (지난 자리는 규칙으로 고른 다음 칸 — 같은 블로그끼리 3시간쯤 · 흔들림).
       wait = 앞 글 뒤 40~120초(GAP · 무작위)가 되기까지 남은 초. 한 판(RUN_IDLE_S 안에 이어진 글)에 RUN_MAX(5)편까지 — 넘으면 next 없음.
@@ -278,6 +278,9 @@ def unfit(i: dict[str, Any]) -> str:
     p = i.get("paste")
     if not isinstance(p, dict) or p.get("stale") or not p.get("html"):
         return "만드는 중이거나 점검에 걸린 글"
+    d = i.get("direction")
+    if isinstance(d, dict) and d.get("fit") is False:  # Blog-Auto 새 한 분야 방향 판정 (주인 11/23 — 옛 방향 대기 글은 스스로 올리지 않음)
+        return f"새 방향과 안 맞음 — 올리지 않음 ({d.get('why') or '까닭 모름'})"
     g = i.get("gate")
     if not isinstance(g, dict) or g.get("ok") is not True:
         return "올리기 전 자동 점검을 통과하지 않은 글"
@@ -287,6 +290,15 @@ def unfit(i: dict[str, Any]) -> str:
     if any(h in html for h in AFF_HOSTS) and not DISC_RE.search(_TAG.sub("", html)):
         return "제휴 링크가 있는데 고지 줄이 없는 글"
     return ""
+
+
+def misfits(rv: Any, blog: str) -> list[dict[str, Any]]:
+    """그 블로그의 아직 안 한 발행·예약 줄 가운데 새 방향과 안 맞는 줄 (direction.fit 거짓 — 화면 한 줄용)."""
+    if not isinstance(rv, dict) or not rv.get("today"):
+        return []
+    return [i for s in rv.get("slots") or [] for i in s.get("items") or []
+            if i.get("group") in GROUPS and i.get("blog") == blog and not i.get("done")
+            and isinstance(i.get("direction"), dict) and i["direction"].get("fit") is False]
 
 
 def ready(rv: Any, blog: str, tried: dict[str, str] | None = None) -> list[dict[str, Any]]:
@@ -340,6 +352,7 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
         unsure = sum(1 for r in mine if r.get("r") in ("unsure", "hold"))
         stop = [r for r in mine if r.get("r") == "stop"]
         n = len(ready(rv, b, {**hd, **c["tried"]})) if rv is not None else 0
+        mf = misfits(rv, b) if rv is not None else []
         bits = []
         if ok or unsure or stop:
             bits.append(f"올린 글 {ok}")
@@ -351,7 +364,10 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
             bits.append(cool_text(b, cl[b], tz))
         elif n:
             bits.append(f"준비된 글 {n}편 — 글쓰기 화면에서 책갈피 한 번" + (" (주말 — '주말에도 시작'을 눌러야 해요)" if weekend(now, tz) else ""))
-        by[b] = {"name": name, "ok": ok, "unsure": unsure, "stop": len(stop), "ready": n, "cool": b in cl,
+        if mf:  # 주인 11/23 — 왜 안 올리는지 알게
+            bits.append(f"새 방향과 안 맞아 올리지 않는 글 {len(mf)}편 ({str(mf[0]['direction'].get('why') or '')[:40]}"
+                        + (f" 외 {len(mf) - 1}" if len(mf) > 1 else "") + ")")
+        by[b] = {"name": name, "ok": ok, "unsure": unsure, "stop": len(stop), "ready": n, "cool": b in cl, "misfit": len(mf),
                  "line": "하루치 한 번에: " + " · ".join(bits) if bits else ""}
     done = [f"{v['name']} {v['ok']}" for v in by.values() if v["ok"]]
     sums = {k: sum(v[k] for v in by.values()) for k in ("unsure", "stop")}

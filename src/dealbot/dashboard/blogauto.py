@@ -1402,6 +1402,9 @@ GATE_CODES_MAX = 10
 GATE_KO = {"G1": "글에 날것 표시가 보여서", "G3F": "글꼴이 지정돼서", "G4": "같은 사진이 두 번 들어가서", "G5": "사진 파일이 없어서",
            "G12": "글이 너무 커서", "G14": "글 쓴 모델을 바꾸느라"}  # 막는 코드만 (Blog-Auto post_gate.BLOCK_CODES) — 모르는 코드는 '자동 점검에 걸려서'
 GATE_KO_ELSE = "자동 점검에 걸려서"
+# 새 한 분야 방향 판정 (Blog-Auto direction.py — 주인 11/23): 줄마다 {fit, why} · 맞지 않으면 note 앞에 이 말 (하루치 한 번에가 주지 않음)
+DIRECTION_NOTE = "새 방향과 안 맞음 — 올리지 않음"
+DIRECTION_WHY_MAX = 60
 
 
 def _paste_tags(v: Any) -> list[str]:
@@ -1462,6 +1465,21 @@ def _gate(v: Any) -> dict[str, Any] | None:
     return {"ok": v["ok"], "codes": codes, "text": text}
 
 
+def _direction(v: Any) -> dict[str, Any] | None:
+    """줄의 방향 판정 {fit, why} — fit 이 참/거짓이 아니면 None (칸 없음). why 는 맞지 않을 때만 (주인이 읽는 한마디 · 한글이 없으면 '까닭 모름')."""
+    if not isinstance(v, dict) or not isinstance(v.get("fit"), bool):
+        return None
+    if v["fit"]:
+        return {"fit": True, "why": ""}
+    why = _rt_line(v.get("why"), DIRECTION_WHY_MAX)
+    return {"fit": False, "why": why if re.search("[가-힣]", why) else "까닭 모름"}
+
+
+def direction_line(d: dict[str, Any] | None) -> str:
+    """'새 방향과 안 맞음 — 올리지 않음 (야구 아님)' — 맞거나 칸이 없으면 ''."""
+    return f"{DIRECTION_NOTE} ({d['why']})" if isinstance(d, dict) and d.get("fit") is False else ""
+
+
 def _gate_summary(v: Any) -> dict[str, Any] | None:
     """목록의 검사 요약 {checked, ok, blocked: 막힌 줄 수, at: ISO 시각 | None} — 모양이 틀리면 None."""
     if not isinstance(v, dict) or not isinstance(v.get("ok"), bool):
@@ -1483,7 +1501,9 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
     스레드 세션 몫(나중에 routine.threads_items)도 같은 모양이라 이 함수 하나로 거른다.
     paste (발행·예약 줄만): _paste 가 거른 붙여 넣기 글 · 없거나 틀리면 None · 공개 주소가 없으면 None 에 note 끝에 PASTE_NO_BASE.
     note 가 '꾸밈 새 원고 만드는 중' 으로 시작하면 (예전 Blog-Auto — 옛 묶음 html 을 그대로 실음) 그 묶음도 stale 로 바꿔 html 을 버린다 (주인 11/14).
-    gate (있을 때만): 올리기 전 검사 {ok, codes, text} — 틀린 모양이면 칸을 뺀다. ok 가 거짓이면 그 묶음도 stale (why failed · reason = gate.text) 로 바꿔 html 을 버린다."""
+    gate (있을 때만): 올리기 전 검사 {ok, codes, text} — 틀린 모양이면 칸을 뺀다. ok 가 거짓이면 그 묶음도 stale (why failed · reason = gate.text) 로 바꿔 html 을 버린다.
+    direction (있을 때만): 새 한 분야 방향 판정 {fit, why} (Blog-Auto direction.py — 주인 11/23). fit 이 거짓이면 note 앞에 '새 방향과 안 맞음 — 올리지 않음 (why)' ·
+    묶음은 그대로 (주인이 직접 올릴 수는 있음 — 하루치 한 번에(autopub)만 주지 않음)."""
     if not isinstance(x, dict) or not isinstance(x.get("id"), str) or not ROUTINE_ID_RE.match(x["id"]):
         return None
     if x.get("slot") not in slot_keys or x.get("group") not in ROUTINE_GROUPS or not (title := _rt_line(x.get("title"), ROUTINE_TITLE_MAX)):
@@ -1506,12 +1526,16 @@ def _routine_item(x: Any, slot_keys: tuple[str, ...] | set[str] = ROUTINE_SLOT_K
         paste = _paste_stale(paste["title"], {"tags": paste["tags"], "photos": paste["photos"]}, why="building", reason=PASTE_BUILDING)
     sc = _count(x.get("score"), top=100) if x["group"] in PASTE_GROUPS else None  # 발행·예약 줄 인기 예상 점수 (주인 11/10 — 선택 칸)
     gate = _gate(x.get("gate")) if x["group"] in PASTE_GROUPS else None
+    dr = _direction(x.get("direction")) if x["group"] in PASTE_GROUPS else None
+    if dr is not None and not dr["fit"] and DIRECTION_NOTE not in note:  # 화면에 까닭이 꼭 보이게 (Blog-Auto 가 이미 앞에 붙임)
+        note = " · ".join(t for t in (direction_line(dr), note) if t)[:ROUTINE_NOTE_MAX]
     if gate is not None and not gate["ok"] and paste is not None and not paste["stale"]:
         # 점검에 걸린 묶음도 html 을 싣지 않는다 (11/14 마지막 검토 — 화면이 단추를 막아도, 열어 둔 옛 화면·캐시된 옛 routine.js 는 그대로 복사함)
         paste = _paste_stale(paste["title"], {"tags": paste["tags"], "photos": paste["photos"]}, why="failed", reason=gate["text"])
     return {"id": x["id"], "slot": x["slot"], "group": x["group"], "blog": x.get("blog") if x.get("blog") in ROUTINE_BLOGS else "",
             "title": title, "note": note, "min": mins, "copy": copy, "links": links, "paste": paste,
             **({"score": sc, "popular": x.get("popular") is True} if sc is not None else {}), **({"gate": gate} if gate is not None else {}),
+            **({"direction": dr} if dr is not None else {}),  # 새 방향 판정 (주인 11/23 — 없으면 칸 없음)
             **({"pubnow": True} if x.get("pubnow") is True and x["group"] in PASTE_GROUPS else {})}  # 지금 바로 발행 줄 (주인 11/16 · 없으면 칸 없음)
 
 
