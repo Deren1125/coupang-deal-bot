@@ -1,0 +1,435 @@
+"""'하루치 한 번에 (발행까지)' 책갈피 (주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지 가능하게 만들자").
+
+주인이 그 블로그로 로그인한 자기 사파리의 PC 글쓰기 화면에서 한 번 누르면: 그 블로그의 준비된 대기 글을 차례로 — 제목·본문·꾸미기·사진·태그·카테고리·예약 시각
+(꾸미기 kkumi.js 통째) → 스스로 점검 → 깨끗하면 마지막 발행 단추까지 누름 → 발행 확인 → 할 일 줄 ✓ → 40~120초 쉬고 다음 글 (한 번에 5편까지).
+서버는 네이버를 열지도 로그인하지도 않는다 (모든 일은 주인 브라우저에서 · 서버는 글과 차례·간격·상한·쉼만 정해 줌).
+옛 '글쓰기 한 번에'(writebm.py — 11/16 접음 · 발행은 주인이 누름)와 다른 점: 마지막 발행 단추를 책갈피가 누른다 · 그래서 점검에 하나라도 걸리면 그 글에서 멈춘다.
+
+책갈피 = 진행기 코드 통째 (원격 코드 실행 금지 — 메인 11/16): static/autopub.js (껍데기) 의 '@@KKUMI@@' 자리에 static/kkumi.js 를 통째로 (PATCHES 다섯 줄만 바꿈 —
+  ①~④ writebm 과 같은 넷 (머리 → 함수 · 붙여넣기 칸 대신 받은 글 · 글 넣기 전 제목 넣기 + 도구 넘기기 · 꼬리) ⑤ 붙여넣기 칸(ask) 코드는 뺌 — 쓰지 않음 · 주소를 짧게).
+  kkumi.js 에서 그 줄이 사라지면 ValueError (test_dash_autopub 이 지킴 — kkumi.js 를 고칠 때 같이). 꾸미기 책갈피는 그대로 따로 돈다.
+  대시보드는 코드를 내려 주지 않는다 (new Function·eval 없음) · autopub_act 는 데이터만. 고치면 책갈피를 다시 깔아야 함 (판 번호 V · 끝 줄 'v<n>').
+
+POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv autopub_secret) · CORS 는 https://*.blog.naver.com 만 · 데이터만):
+  a=next b=블로그 [w=1]  {ok, next: {id, title, html, text, at, label, photos, disc} | None, n, m, left, wait(초), text, weekend?}
+      그 블로그의 오늘 할 일 발행·예약 줄 가운데 '올려도 되는 글'만 (ready): 체크 안 됨 · 다 만든 묶음 · 올리기 전 자동 점검 통과(gate.ok 참 — 점검에 걸린 글·점검 안 된 글·
+      새 방향과 안 맞는다고 적힌 글은 주지 않음) · 제휴 링크가 있는데 고지 줄이 없는 글 뺌 · 오늘 이미 해 본 글(ok·unsure·hold·두 번 멈춘 글) 뺌. 차례는 예약 시각 → 화면 차례.
+      예약 시각: 그 줄의 계획 시각(routine.view 의 when — kkumi.when_plan · 사람처럼 흔든 값). 이번 판(run)의 첫 글이고 그 자리가 이미 지났으면(when.rule · 바로 발행 줄)
+        '지금 발행'(at '' — 태그 줄의 시각 칸을 뺌) · 나머지는 계획 시각대로 (지난 자리는 규칙으로 고른 다음 칸 — 같은 블로그끼리 3시간쯤 · 흔들림).
+      wait = 앞 글 뒤 40~120초(GAP · 무작위)가 되기까지 남은 초. 한 판(RUN_IDLE_S 안에 이어진 글)에 RUN_MAX(5)편까지 — 넘으면 next 없음.
+      주말(토 00:00~일 21:00 · Blog-Auto 주말 쉼과 같은 때)에는 w=1(주인이 화면에서 '주말에도 시작'을 누름)일 때만 · 아니면 {next: None, weekend: True}.
+      네이버 보호·제한 안내 뒤 24시간(kv autopub:cool)은 429 cool.
+  a=done b id r [n] [u]  r: hold(발행 단추를 누르기 직전 — '해 봄'으로 적어 같은 글을 다시 주지 않음 · 두 번 발행 막기) · ok(발행·예약 확인 — 할 일 줄 체크 +
+      블로그 프로그램에 pasted · u = 글 번호) · unsure(눌렀는데 확인 못 함 — 체크하지 않고 다시 주지 않음) · stop(점검에 걸려 발행하지 않음 · n = 걸린 것 —
+      다시 누르면 같은 글부터 · 같은 글이 두 번 멈추면 오늘은 주지 않음) · fail(못 넣음) · wall(네이버 보호·제한 안내 → 그 블로그 24시간 쉼 · id 없어도 됨).
+kv: "autopub:day:<날 KST>" = {tried: {줄 id: r}, stops: {줄 id: 수}, last: {블로그: 시각}, gap: {블로그: 초}, run: {블로그: {n, last}}, res: [{id, b, r, n, u, at}]} (그날·전날만) ·
+    "autopub:cool" = {블로그: {until, at, why}} (쉬는 것 — until 을 남김 · CLAUDE.md '딜봇이 스스로 쉬기 시작하면').
+today() = 할 일 탭 블로그 카드의 진행 한 줄 (routine.view 의 autopub) · 연결 탭 설치 칸의 한 줄.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import math
+import random
+import re
+import secrets
+import time
+from datetime import datetime, timedelta
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from dealbot.dashboard import kkumi, seoi
+from dealbot.dashboard.statscap import CaptureError
+
+STATIC = Path(__file__).resolve().parent / "static"
+SRC = STATIC / "autopub.js"
+KV_SECRET = "autopub_secret"
+KV_COOL = "autopub:cool"
+DAY_KEY = "autopub:day:"
+PATH = "/dashboard/api/autopub_act"
+OFF_TEXT = "하루치 한 번에는 꺼져 있어요 — 꾸미기 책갈피를 쓰세요"
+GAP = (40, 120)  # 글 사이 쉬는 초 (주인 11/23)
+RUN_MAX = 5  # 한 판에 블로그마다 올리는 글 수
+RUN_IDLE_S = 1800.0  # 마지막 글 뒤 이만큼 지나면 새 판
+COOL_S = 86400.0  # 네이버 보호·제한 안내 뒤 쉬는 시간 (이웃 관리 seoi.COOL_S 와 같게)
+STOP_MAX = 2  # 같은 글이 점검에서 이만큼 멈추면 오늘은 주지 않음 (꾸미기 책갈피로 직접)
+RESULTS = ("hold", "ok", "unsure", "stop", "fail", "wall")
+TRIED = ("hold", "ok", "unsure")  # 오늘은 다시 주지 않는 결과
+RES_MAX = 80
+NOTE_MAX = 300
+GROUPS = ("발행", "예약")
+ROW_RE = re.compile(r"^(?:pub|rsv):(finance|issue|hotdeal):(\d{1,9})$")  # actions.PASTE_ROW_RE 와 같게 (test_dash_autopub 이 지킴)
+NAMES = seoi.NAMES
+WEEKEND_BACK_H = 21  # 일요일 이 시각부터는 주말 쉼이 아님 (월 아침 예약 글 — Blog-Auto config/weekend_pause.yaml 과 같게)
+# 올리면 안 되는 글 (대시보드 표시): 줄의 한마디·제목에 이런 말이 있으면 주지 않는다 (새 방향과 안 맞는 글 · 주인이 건너뛴 글 · 보류)
+UNFIT_RE = re.compile(r"새 방향|방향과 안|안 맞|건너뛰|건너뜀|올리지 마|올리지 않|보류|안 올림")
+DISC_RE = re.compile(r"수수료를\s*(받|제공|지급)")  # static/autopub.js DISC 와 같게
+AFF_HOSTS = ("link.coupang.com", "coupa.ng", "s.zigzag.kr", "a-bly.com", "ably.link", "naver.me")  # 주소만 봐도 제휴 링크 (Blog-Auto issue_similar.AFF_HOSTS + 쇼핑커넥트 짧은 주소)
+_TAG = re.compile(r"<[^>]+>")
+U_RE = re.compile(r"\d{6,20}")
+# kkumi.js 의 옛 줄 → 진행기 안에서만 바뀌는 줄 (딱 한 번씩 나와야 함)
+TOOLS = ("D, W, R, S, vis, press, tap, wait, real, comps, body_, host, setSel, count, tagIn, pubBtn, BOTTOM, any, nImg, quotes, cards, shape, "
+         "tagsIn, catIn, bookIn")
+PATCHES: tuple[tuple[str, str], ...] = (
+    ("(async () => {\n", "async (document, alert, confirm, GOT, PRE) => {\n"),
+    ("const got = await ask();\n", "const got = GOT;\n"),
+    ("try { window.__kkumiReport = R; } catch (e) {}\n", "if (!await PRE({" + TOOLS + "})) return;\n"),
+    ("})().catch(e => alert('꾸미기 오류: ' + e));\n", "}\n"),
+)
+CUT = ("const ask = () => new Promise(res => {\n", "  setTimeout(() => box.focus(), 50);\n});\n")  # ⑤ 붙여넣기 칸 — 처음 줄부터 끝 줄까지 뺌
+SLOT = "'@@KKUMI@@'"
+STEPS = (
+    "아래 '코드 복사'를 눌러요.",
+    "사파리에서 아무 페이지나 연 뒤 공유 단추 → '책갈피 추가' → 이름을 '하루치 한 번에'로 저장해요.",
+    "책갈피 목록 → '편집' → '하루치 한 번에'의 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'. (코드가 길어요 — 저장이 안 되면 예전처럼 꾸미기 책갈피로)",
+    "쓰는 법: 그 블로그로 로그인한 사파리 프로필에서 PC 글쓰기 화면(blog.naver.com/GoBlogWrite.naver)을 열고 '하루치 한 번에'를 한 번 → "
+    "그 블로그의 준비된 글을 차례로 가져와 제목·본문·꾸미기·사진·태그·카테고리·예약 시각까지 채우고, 스스로 점검한 뒤 깨끗하면 발행(예약)까지 눌러요 → "
+    f"{GAP[0]}~{GAP[1]}초 쉬고 다음 글 → 한 번에 {RUN_MAX}편까지 → 끝나면 할 일 줄이 체크되고 화면에 요약이 남아요. 화면을 켜 둔 채 그 탭에 두세요.",
+    "점검에 하나라도 걸리면 (사진 빠짐 · 제목/본문이 원고와 다름 · 포스트잇 · 카테고리 못 찾음 · 예약 시각 못 채움 · 제휴 고지 · 태그) 그 글은 발행하지 않고 멈춰요 — "
+    "화면에 적힌 것을 고친 뒤 '고쳤어요 — 다시 점검하고 발행' 단추(또는 책갈피 한 번 더)를 누르면 다시 점검하고 이어 가요. 멈추려면 탭을 닫으면 돼요.",
+    "예약 시각은 글마다 대시보드에 보이는 그 시각이에요 (정각·30분을 피한 들쭉날쭉한 시각). 첫 글의 자리가 이미 지났으면 첫 글만 지금 발행하고 나머지는 다음 자리로 예약해요.",
+    "이 브라우저에서 스스로 이어가기가 안 되면 화면을 다시 열고 '글마다 한 번'으로 바꿔요 — 그때는 글 하나가 올라갈 때마다 '다음 글 N/M — 책갈피 한 번 더'가 뜨고, "
+    "새 글쓰기 화면이 열리면 한 번씩만 눌러 주면 돼요 (나머지는 그대로 자동).",
+    "토·일(일요일 21시 전)에는 스스로 올리지 않아요 — 화면의 '주말에도 시작'을 눌렀을 때만. 대시보드 점검에 걸린 글·새 방향과 안 맞는 글·이미 체크한 글은 올리지 않아요.",
+    "네이버가 자동입력 방지·보호조치·이용 제한·한도 안내를 보이면 풀지 않고 바로 멈추고, 그 블로그의 하루치 한 번에는 24시간 쉬어요 (그동안 다시 눌러도 하지 않아요). "
+    "다른 블로그는 그 블로그 프로필에서 같은 식으로 (한 번에 로그인된 블로그 하나의 글만 해요).",
+)
+LEN_MAX = 50000  # '글쓰기 한 번에'(writebm.LEN_MAX)와 같은 한도 — 꾸미기(29KB) + 껍데기 · 넘으면 ValueError (연결 탭이 503)
+HEAD = "(async()=>{const W=window;if(W.__apr){W.__apb&&W.__apb();return}W.__apr=1;try{await("
+TAIL = (")({u:'@@URL@@',k:'@@KEY@@',bl:JSON.parse('@@BLOGS@@')})}catch(e){const o=document.createElement('div');"
+        "o.style.cssText='position:fixed;left:8px;right:8px;top:8px;z-index:2147483647;padding:14px;border-radius:12px;background:#111;color:#fff;"
+        "font:16px/1.5 sans-serif;text-align:center';o.textContent='하루치 한 번에 오류: '+e;(document.body||document.documentElement).appendChild(o)}W.__apr=0})()")
+
+
+def _secret(db: Any) -> bytes:
+    k = db.kv_get(KV_SECRET)
+    if not k:
+        k = secrets.token_hex(32)
+        db.kv_set(KV_SECRET, k)
+    return bytes.fromhex(k)
+
+
+def key(db: Any) -> str:
+    mac = hmac.new(_secret(db), b"autopub", hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).decode().rstrip("=")
+
+
+def key_ok(db: Any, given: str | None) -> bool:
+    return bool(given) and hmac.compare_digest(key(db).encode(), str(given).encode())
+
+
+@lru_cache(maxsize=1)
+def version() -> int:
+    m = re.search(r"^const V = (\d+);", SRC.read_text(encoding="utf-8"), re.M)
+    return int(m.group(1)) if m else 0
+
+
+def _core() -> str:
+    """꾸미기 책갈피 코드 → 진행기가 부르는 함수 (머리 주석 뺌 · PATCHES · 붙여넣기 칸 뺌)."""
+    src = re.sub(r"\A\s*/\*.*?\*/\s*", "", kkumi.SRC.read_text(encoding="utf-8"), count=1, flags=re.S)
+    for old, new in PATCHES:
+        if src.count(old) != 1:
+            raise ValueError(f"kkumi.js 에 없는 줄: {old.strip()[:40]}")
+        src = src.replace(old, new)
+    a, b = CUT
+    if src.count(a) != 1 or src.count(b) != 1 or src.index(a) > src.index(b):
+        raise ValueError("kkumi.js 에 붙여넣기 칸 줄이 없음")
+    src = src[:src.index(a)] + src[src.index(b) + len(b):]
+    return src.rstrip().rstrip(";")
+
+
+def _shell() -> str:
+    shell = re.sub(r"\A\s*/\*.*?\*/\s*", "", SRC.read_text(encoding="utf-8"), count=1, flags=re.S)
+    if shell.count(SLOT) != 1:
+        raise ValueError("autopub.js 에 꾸미기 자리가 없음")
+    return shell.rstrip().rstrip(";")
+
+
+@lru_cache(maxsize=1)
+def runner() -> str:
+    """진행기 코드 (함수 식 하나 — 'async CFG => {…}' · 줄이기 전 · 시험·읽기용)."""
+    return _shell().replace(SLOT, _core())
+
+
+@lru_cache(maxsize=1)
+def _code() -> str:
+    """줄인 진행기: 껍데기는 한글 글을 Z('…') 로 (seoi.pack — 주소에서 한글 한 자가 9자 → 3자) · 꾸미기 코드는 줄이기만 (정규식 안에 따옴표가 있어 pack 하지 않음)."""
+    shell = seoi.pack(kkumi.minify(_shell()))
+    if shell.count(SLOT) != 1:
+        raise ValueError("autopub.js 에 꾸미기 자리가 없음")
+    return HEAD + shell.replace(SLOT, kkumi.minify(_core())) + TAIL
+
+
+def bookmarklet(endpoint: str, k: str) -> str:
+    """javascript: 주소 — 진행기 통째 + 주소·열쇠·블로그 표 (따옴표·역슬래시 없는 글자만)."""
+    if not re.fullmatch(r"https://[A-Za-z0-9.\-:]+/[A-Za-z0-9_/\-]+", endpoint) or not re.fullmatch(r"[A-Za-z0-9_\-]+", k):
+        raise ValueError("bad endpoint or key")
+    return "javascript:" + kkumi.encode_short(_code().replace("@@URL@@", endpoint).replace("@@KEY@@", k).replace("@@BLOGS@@", seoi.blogs_json()))
+
+
+# ── 그날 기록
+def _day(now: float, tz: ZoneInfo) -> str:
+    return datetime.fromtimestamp(now, tz).strftime("%Y-%m-%d")
+
+
+def _num(v: Any) -> float:
+    return float(v) if isinstance(v, int | float) and not isinstance(v, bool) else 0.0
+
+
+def _load(db: Any, day: str) -> dict[str, Any]:
+    try:
+        v = json.loads(db.kv_get(DAY_KEY + day) or "{}")
+    except (TypeError, ValueError):
+        v = {}
+    v = v if isinstance(v, dict) else {}
+
+    def d(k: str) -> dict[str, Any]:
+        return v[k] if isinstance(v.get(k), dict) else {}
+
+    return {"tried": {str(k): str(x) for k, x in d("tried").items()}, "stops": {str(k): int(_num(x)) for k, x in d("stops").items()},
+            "last": {str(k): _num(x) for k, x in d("last").items()}, "gap": {str(k): _num(x) for k, x in d("gap").items()},
+            "run": {str(k): {"n": int(_num(x.get("n"))), "last": _num(x.get("last"))} for k, x in d("run").items() if isinstance(x, dict)},
+            "res": [r for r in (v.get("res") if isinstance(v.get("res"), list) else []) if isinstance(r, dict)][-RES_MAX:]}
+
+
+def _save(db: Any, day: str, v: dict[str, Any]) -> None:
+    db.kv_set(DAY_KEY + day, json.dumps(v, ensure_ascii=False, separators=(",", ":")))
+    try:
+        prev = (datetime.strptime(day, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        db.kv_delete_prefix(DAY_KEY, keep=lambda k, _v: k in (DAY_KEY + day, DAY_KEY + prev))
+    except (ValueError, AttributeError):
+        pass
+
+
+def _run_n(c: dict[str, Any], blog: str, now: float) -> int:
+    """이번 판에 그 블로그에서 올린(누른) 글 수 — 마지막 글 뒤 RUN_IDLE_S 가 지났으면 새 판(0)."""
+    r = c["run"].get(blog)
+    return r["n"] if r and now - r["last"] <= RUN_IDLE_S else 0
+
+
+# ── 쉼 (네이버 보호·제한 안내 뒤 24시간)
+def cooled(db: Any, now: float) -> dict[str, float]:
+    try:
+        v = json.loads(db.kv_get(KV_COOL) or "{}")
+    except (TypeError, ValueError):
+        v = {}
+    return {b: float(x["until"]) for b, x in (v if isinstance(v, dict) else {}).items()
+            if b in NAMES and isinstance(x, dict) and isinstance(x.get("until"), int | float) and x["until"] > now}
+
+
+def cool(db: Any, blog: str, why: str, *, now: float) -> float:
+    """그 블로그를 COOL_S 쉼 (이미 쉬는 중이면 늘리지 않음 — 처음 본 때부터 24시간). 돌려줌: 끝나는 시각."""
+    have = cooled(db, now)
+    if blog in have:
+        return have[blog]
+    try:
+        v = json.loads(db.kv_get(KV_COOL) or "{}")
+    except (TypeError, ValueError):
+        v = {}
+    v = {b: x for b, x in (v if isinstance(v, dict) else {}).items() if b in have}  # 지난 것은 지움
+    v[blog] = {"until": now + COOL_S, "at": now, "why": why[:60]}
+    db.kv_set(KV_COOL, json.dumps(v, ensure_ascii=False, separators=(",", ":")))
+    return now + COOL_S
+
+
+def cool_text(blog: str, until: float, tz: ZoneInfo) -> str:
+    d = datetime.fromtimestamp(until, tz)
+    return f"네이버 보호·제한 안내로 {NAMES.get(blog, blog)} 하루치 한 번에는 {d.month}/{d.day} {d:%H:%M}까지 쉬어요 — 그동안은 직접 올려 주세요"
+
+
+def weekend(now: float, tz: ZoneInfo) -> bool:
+    """주말 쉼 (토 00:00 ~ 일 21:00 — Blog-Auto 주말 쉼과 같은 때 · 일 21시부터는 월 아침 글)."""
+    d = datetime.fromtimestamp(now, tz)
+    return d.weekday() == 5 or (d.weekday() == 6 and d.hour < WEEKEND_BACK_H)
+
+
+# ── 올려도 되는 글
+def unfit(i: dict[str, Any]) -> str:
+    """그 줄을 스스로 올리면 안 되는 까닭 ('' = 올려도 됨). 대시보드가 막은 글은 절대 올리지 않는다 (주인 11/23)."""
+    p = i.get("paste")
+    if not isinstance(p, dict) or p.get("stale") or not p.get("html"):
+        return "만드는 중이거나 점검에 걸린 글"
+    g = i.get("gate")
+    if not isinstance(g, dict) or g.get("ok") is not True:
+        return "올리기 전 자동 점검을 통과하지 않은 글"
+    if UNFIT_RE.search(f"{i.get('title') or ''} {i.get('note') or ''}"):
+        return "대시보드에 올리지 않는 글로 적힌 글"
+    html = str(p["html"])
+    if any(h in html for h in AFF_HOSTS) and not DISC_RE.search(_TAG.sub("", html)):
+        return "제휴 링크가 있는데 고지 줄이 없는 글"
+    return ""
+
+
+def ready(rv: Any, blog: str, tried: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """routine.view() 값에서 그 블로그의 '스스로 올려도 되는' 대기 글 — 예약 시각 차례 (없는 것은 화면 차례 그대로 앞에). 오늘 목록이 아니면 []."""
+    if not isinstance(rv, dict) or not rv.get("today"):
+        return []
+    out = []
+    for s in rv.get("slots") or []:
+        for i in s.get("items") or []:
+            if (i.get("group") in GROUPS and i.get("blog") == blog and not i.get("done") and (m := ROW_RE.match(str(i.get("id") or "")))
+                    and m.group(1) == blog and i["id"] not in (tried or {}) and not unfit(i)):
+                out.append(i)
+    return sorted(out, key=lambda i: str((i.get("when") or {}).get("at") or "") if isinstance(i.get("when"), dict) else "")
+
+
+def _plan(rows: list[dict[str, Any]], blog: str, first: bool, now: float, tz: ZoneInfo) -> tuple[str, str]:
+    """rows[0] 의 예약 시각 (at 'YYYY-MM-DDTHH:MM', label) — ('', '지금') 이면 지금 발행.
+    계획 시각(when)이 살아 있으면 그대로 · 자리가 지났거나(when.rule) 시각이 없는 줄(바로 발행)은 이번 판 첫 글이면 지금, 아니면 규칙으로 고른 다음 자리."""
+    i = rows[0]
+    w = i.get("when") if isinstance(i.get("when"), dict) else None
+    if first and (w is None or w.get("rule")):
+        return "", "지금"
+    if w is not None:
+        return str(w["at"]), str(w.get("label") or w["at"])
+    n = datetime.fromtimestamp(now, tz).replace(tzinfo=None)
+    taken = []
+    for x in rows[1:]:
+        try:
+            taken.append(datetime.fromisoformat(str(x["when"]["at"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    soon = n + timedelta(minutes=kkumi.WHEN_SOON_MIN)
+    d = kkumi.humanize(kkumi.pick_when(blog, n + timedelta(minutes=kkumi.WHEN_LEAD_MIN), taken), str(i["id"]), soon)
+    return d.strftime("%Y-%m-%dT%H:%M"), f"{d.month}/{d.day} {d:%H:%M}"
+
+
+def _stamped(text: str, at: str) -> str:
+    return kkumi.stamp(kkumi.unstamp(text), at) if at else kkumi.unstamp(text)
+
+
+# ── 화면 한 줄
+def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
+    """오늘 한 것 {by: {블로그: {ok, unsure, stop, ready, cool, line}}, note} — line·note 는 보일 것이 없으면 ''. rv = routine.view 값 (준비된 글 수)."""
+    c = _load(db, _day(now, tz))
+    last = {str(r.get("id")): r for r in c["res"] if r.get("id")}  # 같은 글은 마지막 결과만
+    cl = cooled(db, now)
+    by: dict[str, dict[str, Any]] = {}
+    for b, name in NAMES.items():
+        mine = [r for r in last.values() if r.get("b") == b]
+        ok = sum(1 for r in mine if r.get("r") == "ok")
+        unsure = sum(1 for r in mine if r.get("r") in ("unsure", "hold"))
+        stop = [r for r in mine if r.get("r") == "stop"]
+        n = len(ready(rv, b, c["tried"])) if rv is not None else 0
+        bits = []
+        if ok or unsure or stop:
+            bits.append(f"올린 글 {ok}")
+        if unsure:
+            bits.append(f"확인 필요 {unsure} (블로그에서 확인)")
+        if stop:
+            bits.append(f"멈춘 글 {len(stop)} — {str(stop[-1].get('n') or '점검에 걸림')[:60]}")
+        if b in cl:
+            bits.append(cool_text(b, cl[b], tz))
+        elif n:
+            bits.append(f"준비된 글 {n}편 — 글쓰기 화면에서 책갈피 한 번" + (" (주말 — '주말에도 시작'을 눌러야 해요)" if weekend(now, tz) else ""))
+        by[b] = {"name": name, "ok": ok, "unsure": unsure, "stop": len(stop), "ready": n, "cool": b in cl,
+                 "line": "하루치 한 번에: " + " · ".join(bits) if bits else ""}
+    done = [f"{v['name']} {v['ok']}" for v in by.values() if v["ok"]]
+    sums = {k: sum(v[k] for v in by.values()) for k in ("unsure", "stop")}
+    extra = [f"{t} {sums[k]}" for t, k in (("확인 필요", "unsure"), ("멈춘 글", "stop")) if sums[k]]
+    return {"by": by, "note": "오늘 하루치 한 번에: " + " · ".join([*(done or ["올린 글 0"]), *extra]) if last else ""}
+
+
+def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | None = None) -> dict[str, Any]:
+    """연결 탭 설치 칸 (로그인 아래에서만 — 열쇠가 든 코드)."""
+    code = bookmarklet(public_url.rstrip("/") + PATH, key(db))
+    if len(code) > LEN_MAX:
+        raise ValueError("bookmarklet too long")
+    out: dict[str, Any] = {"code": code, "len": len(code), "steps": list(STEPS), "version": version(),
+                           "note": f"지금 판 v{version()} — 끝 요약 맨 끝이 v{version()} 이면 새 판이에요"}
+    if tz is not None:
+        t = today(db, now or time.time(), tz)
+        cools = [cool_text(b, u, tz) for b, u in cooled(db, now or time.time()).items()]
+        if extra := " · ".join(x for x in (t["note"], *cools) if x):
+            out["note"] += " · " + extra
+    return out
+
+
+# ── 책갈피가 묻는 곳
+def _blog(form: dict[str, str]) -> str:
+    b = str(form.get("b") or "")
+    if b not in NAMES:
+        raise CaptureError(400, "who", "어느 블로그인지 몰라요 — 우리 블로그 계정으로 로그인한 글쓰기 화면에서 눌러 주세요")
+    return b
+
+
+def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None, rv: Any = None, rng: Any = random) -> dict[str, Any]:
+    """책갈피가 보낸 폼 하나 (데이터만 — 코드는 내려 주지 않음). rv = routine.view() 값 (호출하는 쪽이 열쇠를 본 뒤 읽어 넘김)."""
+    if not key_ok(db, form.get("k")):
+        raise CaptureError(403, "key", "열쇠가 맞지 않아요 — 대시보드 연결 탭에서 '하루치 한 번에' 책갈피를 다시 설치해 주세요")
+    now = now or time.time()
+    a, blog, day = str(form.get("a") or ""), _blog(form), _day(now, tz)
+    cl = cooled(db, now)
+    if a == "next":
+        if blog in cl:
+            raise CaptureError(429, "cool", cool_text(blog, cl[blog], tz))
+        if weekend(now, tz) and str(form.get("w") or "") != "1":
+            return {"ok": True, "next": None, "weekend": True, "left": 0, "wait": 0,
+                    "text": "주말은 쉬는 날이에요 (토·일 21시 전) — 그래도 올리려면 아래 '주말에도 시작'을 눌러 주세요"}
+        c = _load(db, day)
+        rows, n = ready(rv, blog, c["tried"]), _run_n(c, blog, now)
+        name = NAMES[blog]
+        if not rows:
+            fresh = isinstance(rv, dict) and rv.get("today")
+            return {"ok": True, "next": None, "left": 0, "wait": 0,
+                    "text": f"{name}: 지금 올릴 준비된 글이 없어요" if fresh else "오늘 할 일 목록이 아직 없어요 — 잠시 뒤 다시 눌러 주세요"}
+        if n >= RUN_MAX:
+            return {"ok": True, "next": None, "left": len(rows), "wait": 0,
+                    "text": f"{name}: 한 번에 {RUN_MAX}편까지만 올려요 (남은 글 {len(rows)}) — {int(RUN_IDLE_S // 60)}분쯤 뒤에 다시 눌러 주세요"}
+        i, p = rows[0], rows[0]["paste"]
+        at, label = _plan(rows, blog, n == 0, now, tz)
+        html = _stamped(str(p["html"]), at)
+        last, gap = c["last"].get(blog, 0.0), c["gap"].get(blog, 0.0)
+        return {"ok": True, "left": len(rows), "n": n + 1, "m": n + min(len(rows), RUN_MAX - n),
+                "wait": max(0, math.ceil(last + gap - now)) if last else 0, "text": f"{name}: 남은 글 {len(rows)}",
+                "next": {"id": i["id"], "title": p["title"], "html": html, "text": _stamped(str(p.get("text") or ""), at), "at": at, "label": label,
+                         "photos": html.count("<img"), "disc": bool(DISC_RE.search(_TAG.sub("", html)))}}
+    if a == "done":
+        rid, r = str(form.get("id") or ""), str(form.get("r") or "")
+        m = ROW_RE.match(rid)
+        if r not in RESULTS or (r != "wall" and not m) or (m and m.group(1) != blog):
+            raise CaptureError(400, "bad", "모르는 요청이에요")
+        note = " ".join("".join(ch for ch in str(form.get("n") or "") if ch.isprintable()).split())[:NOTE_MAX]
+        c = _load(db, day)
+        out: dict[str, Any] = {"ok": True, "checked": False, "text": ""}
+        known = bool(m) and (rid in c["tried"] or any(i["id"] == rid for i in ready(rv, blog)))
+        if m and not known:  # 오늘 그 블로그의 올려도 되는 줄(또는 이미 해 본 줄)만 — 열쇠가 있어도 아무 줄이나 적지 못함
+            raise CaptureError(400, "bad", "오늘 올릴 글이 아니에요")
+        if r == "ok" and c["tried"].get(rid) == "ok":  # 같은 확인이 두 번 와도 한 번만
+            return out
+        if r == "hold" and blog in cl:  # 쉬는 중에는 발행 단추를 누르게 두지 않는다 (책갈피는 hold 가 ok 일 때만 누름)
+            raise CaptureError(429, "cool", cool_text(blog, cl[blog], tz))
+        if r == "ok" and m and any(i["id"] == rid for i in ready(rv, blog)):
+            # 오늘 그 블로그의 올려도 되는 대기 줄일 때만 체크 (열쇠가 있어도 아무 줄이나 못 건드림) — 손으로 체크할 때와 같은 길
+            from dealbot.dashboard import routine
+
+            routine.set_done(db, str(rv["day"]), rid, True)
+            routine.relay_add(db, "pasted", {"blog": blog, "pid": int(m.group(2)), "done": True}, rid, now)
+            out.update(checked=True, text="할 일 줄 체크 ✓")
+        if r == "wall":
+            until = cool(db, blog, note, now=now)
+            out.update(until=until, text=cool_text(blog, until, tz))
+        if m:
+            if r in TRIED:
+                c["tried"][rid] = r
+            if r == "stop":
+                c["stops"][rid] = c["stops"].get(rid, 0) + 1
+                if c["stops"][rid] >= STOP_MAX:
+                    c["tried"][rid] = "stop"
+            if r in ("ok", "unsure"):
+                c["run"][blog] = {"n": _run_n(c, blog, now) + 1, "last": now}
+                c["last"][blog], c["gap"][blog] = now, float(rng.randint(*GAP))
+        u = str(form.get("u") or "")
+        c["res"] = [*c["res"], {"id": rid, "b": blog, "r": r, "n": note, "u": u if U_RE.fullmatch(u) else "", "at": int(now)}][-RES_MAX:]
+        _save(db, day, c)
+        if r == "ok":
+            left = len(ready(rv, blog, c["tried"]))
+            out["left"] = min(left, max(0, RUN_MAX - _run_n(c, blog, now)))
+        return out
+    raise CaptureError(400, "bad", "모르는 요청이에요")

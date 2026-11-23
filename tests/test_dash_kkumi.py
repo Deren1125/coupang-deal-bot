@@ -341,8 +341,9 @@ def test_connect_tab_install_section_copies_the_code(bot: DealBot, tmp_path: Pat
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     v = kkumi.version()
-    assert got["head"] == [f"꾸미기 책갈피 (v{v})"] and got["folds"][0].startswith("이웃 한 번에 버튼 설치") and len(got["folds"]) == 2
-    assert got["folds"][1] == "따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)"
+    assert got["head"] == [f"꾸미기 책갈피 (v{v})"] and got["folds"][1].startswith("이웃 한 번에 버튼 설치") and len(got["folds"]) == 3
+    assert got["folds"][0].startswith("하루치 한 번에 (발행까지) 버튼 설치")  # 주인 11/23 — 접기 첫째
+    assert got["folds"][2] == "따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)"
     assert got["steps"] == list(kkumi.STEPS) and got["clip"] == [kkumi.bookmarklet()] and got["toast"].startswith("복사했어요")
     assert got["notes"][1:] == [kkumi.check_line(), kkumi.USE] and f"맨 아래가 v{v}" in got["notes"][1]
     assert [o.split(":")[0] for o in got["order"]] == ["H3", "P", "BUTTON", "OL", "P", "BUTTON", "P"] and got["order"][2] == "BUTTON:코드 복사"  # 코드 복사 → 3단계 → 판 확인

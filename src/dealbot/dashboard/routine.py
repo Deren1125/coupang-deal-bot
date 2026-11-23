@@ -8,6 +8,7 @@ GET /dashboard/api/routine (할 일 탭을 열 때만 — 첫 상태 값 예산 
      stats = 늘 None ('오늘 통계 보내기' 할 일 줄은 11/14 에 뺌 — 알림: notify/stats_remind) ·
      seoi = '이웃 관리' 책갈피의 오늘 수 (seoi.today — {visit, visit_cap, add_cap, how, feed, note, by: {블로그: {name, add, add_cap, visit, line, res, auto?}}} · 주인 11/14 ·
        auto = {add, visit, min} 그 블로그에서 자동(11/15)으로 할 수 있는 수 — line 끝에 한 줄 · how 에 책갈피 새 판 안내)
+     "autopub": {블로그: 한 줄} (있을 때만 — '하루치 한 번에 (발행까지)' 책갈피의 오늘 진행: 올린 글·확인 필요·멈춘 글·준비된 글·쉼 · autopub.today · 주인 11/23)
   목록이 없으면 slots 가 빈 칸 · total 0 → 칸을 숨긴다 (에이블리 링크 부탁이 있으면 그 칸만).
   주인 11/14 ('오류가 다시 안 나게 · 주인이 보기 전에 걸러지게') — 늘 실리는 칸:
     age_min = 블로그 프로그램 기록 파일이 쓰인 지 몇 분 (모르면 None) → 30분 넘거나 today 가 거짓이면 화면이 '소식이 N분째 없어요' ·
@@ -430,6 +431,14 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
                 i["when"] = w
     except Exception as e:  # noqa: BLE001 — 시각을 못 실어도 글은 그대로 복사됨 (책갈피가 예약 칸을 건드리지 않을 뿐)
         log.warning("routine when failed: %s", type(e).__name__)
+    try:  # '하루치 한 번에 (발행까지)' 책갈피의 오늘 진행 한 줄 (주인 11/23 — 블로그 카드에 · 준비된 글 수는 오늘 목록일 때만)
+        from dealbot.dashboard import autopub
+
+        if getattr(bot.settings.dashboard, "auto_pub", True):
+            rv = {"today": r["day"] == today(bot, now), "slots": slots}
+            ex["autopub"] = {b: v["line"] for b, v in autopub.today(bot.db, now, _tz(bot), rv)["by"].items() if v["line"]}
+    except Exception as e:  # noqa: BLE001 — 못 읽어도 할 일은 보이게
+        log.warning("routine autopub failed: %s", type(e).__name__)
     try:  # 이웃 글 들르기 줄 ↔ '이웃 관리' 책갈피 (주인 11/14 — 블로그마다 다음에 열 글 · 오늘 책갈피로 체크한 수)
         from dealbot.dashboard import nbvisit
 

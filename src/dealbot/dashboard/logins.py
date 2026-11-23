@@ -366,6 +366,7 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
            "cancel": s["target"] in remote_login.CANCELABLE} if s else None
     return {"rows": rs, "need": sum(1 for r in rs if r["bad"]), "at": round(now, 1), "vnc": vnc, "visits": visits(bot),
             "xhelper": bool(getattr(getattr(getattr(bot, "settings", None), "dashboard", None), "x_helper", False)),  # X 도우미 설치 칸 (주인 11/16 기본 숨김)
+            "autopub": bool(getattr(getattr(getattr(bot, "settings", None), "dashboard", None), "auto_pub", True)),  # 하루치 한 번에 설치 칸 (주인 11/23)
             "writebm": bool(getattr(getattr(getattr(bot, "settings", None), "dashboard", None), "write_bm", False)),  # 글쓰기 한 번에 설치 칸 (주인 11/16 14시 접음)
             "qr": {"img": f"/dashboard/api/naver_qr.png?t={int(q['at'])}", "left_s": max(1, int(float(q["until"]) - now)), "how": QR_HOW}
             if q and qr_png(bot, now) is not None else None}

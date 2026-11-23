@@ -231,7 +231,60 @@ def when_plan(items: list[dict[str, Any]], day: str, now: datetime) -> dict[str,
             taken = [x for k, x in known.items() if k != i["id"] and x >= soon and _blog_of(rows, k) == blog]
             taken += [x for k, (x, r) in picked.items() if r and _blog_of(rows, k) == blog]
             picked[i["id"]] = (pick_when(blog, now + timedelta(minutes=WHEN_LEAD_MIN), taken), True)
-    return {k: {"at": d.strftime("%Y-%m-%dT%H:%M"), "label": f"{d.month}/{d.day} {d:%H:%M}", "rule": r} for k, (d, r) in picked.items()}
+    # 사람처럼 (주인 11/23): 정각·30분 금지 — 글마다 정해진 흔들림(±10~25분) · 같은 블로그의 이웃한 글끼리 간격·분 자리(10분 단위)가 같지 않게
+    times = {k: humanize(d, k, soon) for k, (d, _r) in picked.items()}
+    for blog in {_blog_of(rows, k) for k in times}:
+        _uneven(times, sorted((k for k in times if _blog_of(rows, k) == blog), key=lambda k: (times[k], k)))
+    return {k: {"at": times[k].strftime("%Y-%m-%dT%H:%M"), "label": f"{times[k].month}/{times[k].day} {times[k]:%H:%M}", "rule": r} for k, (_d, r) in picked.items()}
+
+
+# ── 예약 시각을 사람처럼 (주인 11/23 — '예약 시각이 정각·30분이면 안 됨 · 07:13, 08:47, 10:22 처럼 · 글 사이 간격도 들쭉날쭉')
+# 네이버 발행창의 분 고르기 칸은 10분 단위로 알고 있다 (가짜 화면도 00·10·…·50) — 책갈피(bookIn)는 그 칸에 있는 값 중 '넣을 분보다 크지 않은 가장 큰 값'을
+# 고르므로 1분 단위 칸이면 07:13 그대로, 10분 단위 칸이면 07:10 이 된다. 그래서 분은 늘 10~29 · 40~59 안에서만 고른다 (내려도 :00·:30 이 되지 않게).
+JIT_MIN = (10, 25)  # 추천·규칙 시각에서 앞뒤로 흔드는 분
+
+
+def _round(d: datetime) -> bool:
+    """10분 단위로 내리면 정각·30분이 되는 시각인가 (:00~:09 · :30~:39)."""
+    return d.minute % 30 < 10
+
+
+def _f10(d: datetime) -> datetime:
+    return d.replace(minute=d.minute - d.minute % 10)
+
+
+def _step(d: datetime) -> datetime:
+    """10분 뒤로 (정각·30분 자리는 건너뜀)."""
+    d += timedelta(minutes=10)
+    return d + timedelta(minutes=10) if _round(d) else d
+
+
+def humanize(d: datetime, key: str, earliest: datetime | None = None) -> datetime:
+    """시각 d 를 글(key)마다 정해진 만큼 흔든다 — 같은 글·같은 시각이면 늘 같은 값 (볼 때마다 바뀌지 않게).
+    ±JIT_MIN 분 안에서 정각·30분 자리를 피하고 earliest 보다 이르지 않게 · 그런 자리가 없으면 뒤로 민다."""
+    h = int(hashlib.sha256(f"{key}|{d:%Y-%m-%dT%H:%M}".encode()).hexdigest()[:8], 16)
+    n = JIT_MIN[0] + h % (JIT_MIN[1] - JIT_MIN[0] + 1)
+    s = -1 if (h >> 12) & 1 else 1
+    for off in (s * n, s * n + 10, s * n - 10, -s * n, -s * n + 10, -s * n - 10):
+        c = d + timedelta(minutes=off)
+        if JIT_MIN[0] <= abs(off) <= JIT_MIN[1] and not _round(c) and (earliest is None or c >= earliest):
+            return c
+    c = max(d, earliest or d) + timedelta(minutes=n)
+    return _step(c - timedelta(minutes=10)) if _round(c) else c
+
+
+def _uneven(times: dict[str, datetime], ids: list[str]) -> None:
+    """한 블로그의 예약 시각(이른 차례 ids)을 차례로 보며, 앞 글과 분 자리(10분 단위)가 같거나 앞 간격과 같은 간격이면 10분씩 뒤로 민다."""
+    prev: datetime | None = None
+    gap: timedelta | None = None
+    for k in ids:
+        d = times[k]
+        for _ in range(8):
+            g = _f10(d) - _f10(prev) if prev is not None else None
+            if prev is None or (g is not None and g > timedelta(0) and g != gap and d.minute // 10 != prev.minute // 10):
+                break
+            d = _step(d)
+        times[k], gap, prev = d, (_f10(d) - _f10(prev) if prev is not None else None), d
 
 
 def _blog_of(rows: list[dict[str, Any]], iid: str) -> str:
@@ -263,6 +316,15 @@ def stamp(text: str, at: str) -> str:
         parts = data.split("\x01")
         cat, tags = (parts[0] if len(parts) > 1 else ""), parts[-1]
         return MARK_TAGS + _bits(f"{cat}\x01@{at}\x01{tags}")
+
+    return _TAGS_LINE.sub(swap, text)
+
+
+def unstamp(text: str) -> str:
+    """태그 줄의 예약 시각 칸을 뺀다 ('<카테고리>\x01<태그들>') — '하루치 한 번에'가 지금 바로 발행할 글 (autopub)."""
+    def swap(m: re.Match[str]) -> str:
+        parts = (_unbits(m.group(0)) or "").split("\x01")
+        return MARK_TAGS + _bits(f"{parts[0]}\x01{parts[2]}") if len(parts) == 3 and _AT.match(parts[1]) else m.group(0)
 
     return _TAGS_LINE.sub(swap, text)
 

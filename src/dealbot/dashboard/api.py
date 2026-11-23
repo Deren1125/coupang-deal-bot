@@ -41,6 +41,9 @@
                                         → seoi.act: 간격·하루·한 시간 상한 (넘으면 429 + 알릴 글) · 이웃 글이면 댓글 초안 (claude CLI) · 서버는 네이버를 열지 않음
   GET  /dashboard/api/writebm           '글쓰기 한 번에' 책갈피 {code, len, steps, note?} (writebm.view — 열쇠가 든 진행기 통째 · 연결 탭 설치 칸을 펼칠 때만 · 주인 11/16)
                                         주인 11/16 14시 접음: 설정 dashboard.write_bm 이 false(기본)면 이것·write_act 둘 다 403 off '이제 안 써요 — 꾸미기 책갈피를 쓰세요'
+  GET  /dashboard/api/autopub           '하루치 한 번에 (발행까지)' 책갈피 {code, len, steps, version, note} (autopub.view — 열쇠가 든 진행기 통째 · 주인 11/23 · 설정 dashboard.auto_pub 을 끄면 403 off)
+  POST /dashboard/api/autopub_act       그 책갈피가 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · CORS 는 https://*.blog.naver.com 만) → autopub.act (데이터만): a=next 다음에 올릴 준비된 글·예약 시각·쉴 초 ·
+                                        a=done 결과 (hold·ok·unsure·stop·fail·wall — ok 면 할 일 줄 체크 · wall 이면 그 블로그 24시간 쉼) · 서버는 네이버를 열지 않음
   POST /dashboard/api/write_act         그 책갈피가 묻는 곳 (로그인 없이 — 열쇠 k · 폼 · 교차 사이트 허용 · CORS 는 https://*.blog.naver.com 만)
                                         → writebm.act (데이터만 — 코드는 책갈피 안에 통째): a=next 그 블로그의 다음 붙여넣기 대기 글 · a=done 결과 (발행 확인이면 할 일 줄 체크) · 서버는 네이버를 열지 않음
                                         · 들른 글이 오늘 할 일의 이웃 글 들르기 줄이면 그 줄도 체크 (nbvisit.tick — 응답에 row · 블로그마다 하루 5번)
@@ -209,6 +212,7 @@ class DashApi:
         self.statscap_rate = RateWindow(120, 600.0)  # 통계 보내기 (손님마다 10분에 120번 — 11/12 한 번 누르면 40개까지)
         self.ablyrank_rate = RateWindow(20, 600.0)  # Ably 랭킹 보내기 (손님마다 10분에 20번)
         self.writebm_rate = RateWindow(WRITEBM_RATE_N, 600.0)
+        self.autopub_rate = RateWindow(WRITEBM_RATE_N, 600.0)  # 하루치 한 번에 책갈피 (글 하나에 next·hold·done 세 번쯤)
         self.seoi_rate = RateWindow(SEOI_RATE_N, 600.0)  # 이웃 관리 책갈피 (손님마다 10분에 SEOI_RATE_N 번 — 진짜 간격·상한은 seoi.gate 가 kv 로)
         self.test_rate = RateWindow(5, 600.0)  # /api/push/test 와 /api/action push.test 가 같이 센다
         self.desk = ActionDesk(bot, outbox=bot.actions_out, uploads=self.uploads, key=key, audit=self.audit,
@@ -305,6 +309,8 @@ class DashApi:
         web.route(f"{API}/naver_qr.png", self.naver_qr)
         web.route(f"{API}/writebm", self.writebm)
         web.route_post(f"{API}/write_act", self.write_act, max_body=4000, with_headers=True, cross_site=True)
+        web.route(f"{API}/autopub", self.autopub)
+        web.route_post(f"{API}/autopub_act", self.autopub_act, max_body=4000, with_headers=True, cross_site=True)
         web.route(f"{API}/deal/hot", self.deal_hot)
         web.route(f"{API}/deal/find", self.deal_find)
         web.route(f"{API}/stats.html", self.stats_html)
@@ -374,6 +380,7 @@ class DashApi:
         return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture",
                 f"{API}/ably_rank_capture", f"{API}/seoi_act",  # stats_capture·ably_rank_capture·seoi_act: 열쇠로 직접 확인
                 f"{API}/write_act",  # 글쓰기 한 번에 책갈피: 열쇠로 직접 확인
+                f"{API}/autopub_act",  # 하루치 한 번에 책갈피: 열쇠로 직접 확인
                 *SSALMUK_PUBLIC,  # 이벤트 참여 push·commands·ack: X-Ssalmuk-Key 로 직접 확인
                 *XSTUDIO_PUBLIC]  # X 도구 바로 가기 디딤돌·공유 시트: 주소만 넘김 (데이터 없음 — 그다음 화면은 로그인 아래)
 
@@ -924,6 +931,53 @@ class DashApi:
             return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
         if form.get("a") == "done":
             log.info("write_act: done blog=%s r=%s checked=%s", form.get("b"), form.get("r"), got.get("checked"))
+        return jresp(200, got, cors)
+
+    async def autopub(self, query: dict[str, str]) -> Any:
+        """'하루치 한 번에 (발행까지)' 책갈피 코드 (주인 11/23 — 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import autopub
+
+        if not self.bot.settings.dashboard.auto_pub:
+            return err(403, "off", autopub.OFF_TEXT)
+        try:
+            return jresp(200, autopub.view(self.bot.db, self.bot.settings.dashboard.public_url, tz=ZoneInfo(self.bot.settings.app.timezone)),
+                         {"Cache-Control": "no-store"})
+        except ValueError:
+            return err(503, "failed", "대시보드 공개 주소가 이상해요")
+
+    async def autopub_act(self, form: dict[str, str], headers: dict[str, str]) -> Any:
+        """'하루치 한 번에' 책갈피가 묻는 곳 (주인 11/23). 열쇠 → 다음에 올릴 준비된 글 · 결과 (발행 확인이면 할 일 줄 체크 · 네이버 안내면 24시간 쉼).
+        서버는 네이버를 열지 않는다 — 글은 주인 브라우저가 가져가 넣고 발행한다. 응답 CORS 는 네이버 블로그 화면에만 (이 길만)."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import autopub
+
+        origin = (headers.get("origin") or "").strip().rstrip("/")
+        cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if SEOI_ORIGIN_RE.fullmatch(origin) else {"Vary": "Origin"}
+        cors["Cache-Control"] = "no-store"
+        if not self.autopub_rate.hit(client_key(headers)):
+            return jresp(429, {"ok": False, "code": "rate", "text": "너무 자주 눌렀어요 — 잠시 뒤 다시"}, cors)
+        if not self.bot.settings.dashboard.auto_pub:  # 끄면 이미 깐 책갈피를 눌러도 한 줄만 (열쇠·목록을 읽지 않음)
+            return jresp(403, {"ok": False, "code": "off", "text": autopub.OFF_TEXT}, cors)
+        rv = None
+        if form.get("a") in ("next", "done") and autopub.key_ok(self.bot.db, form.get("k")):  # 오늘 할 일 (열쇠가 맞을 때만 읽음)
+            try:
+                from dealbot.dashboard import routine
+
+                rv = routine.view(self.bot)
+            except Exception as e:  # noqa: BLE001 — 못 읽으면 '목록이 아직 없어요'
+                log.warning("autopub_act: routine view failed: %s", type(e).__name__)
+        try:
+            got = autopub.act(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone), rv=rv)
+        except autopub.CaptureError as e:
+            if e.code == "key":
+                log.info("autopub_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
+            return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
+        if form.get("a") == "done":
+            lv = log.warning if form.get("r") == "wall" else log.info
+            lv("autopub_act: done blog=%s id=%s r=%s u=%s checked=%s", form.get("b"), form.get("id"), form.get("r"), form.get("u"), got.get("checked"))
         return jresp(200, got, cors)
 
     async def deal_hot(self, query: dict[str, str]) -> Any:

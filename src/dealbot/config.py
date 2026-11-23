@@ -1052,6 +1052,8 @@ class DashboardConfig(BaseModel):
     blogauto_stale_hours: float = Field(3.0, gt=0)  # 이보다 오래된 기록은 '판단 불가'
     # 주인 11/16 14시 "꾸미기 책갈피 코드만" — '글쓰기 한 번에' 책갈피(writebm.py) 설치 칸 숨김 · write_act 는 403 '이제 안 써요' (코드는 그대로, true 면 예전대로)
     write_bm: bool = False
+    # 주인 11/23 '하루치 한 번에 (발행까지)' 책갈피(autopub.py) — false 면 설치 칸 숨김 · autopub_act 는 403 (이미 깐 책갈피도 멈춤)
+    auto_pub: bool = True
     cards: list[DashboardCardConfig] = Field(default_factory=list)
     # 대시보드 앱(Sns-board) 주소 — 푸시·카톡의 바로가기 링크(/dashboard/go/<항목>), 같은 사이트 확인(Origin), VAPID sub 에 씀
     public_url: str = "https://52-79-136-64.sslip.io"

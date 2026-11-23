@@ -102,11 +102,11 @@ function row(r) {
 // 주인 11/16 14시 '꾸미기 책갈피 코드만': 맨 위 꾸미기(KK — 늘 펼침 · 코드 복사 + 쉬운 3단계 + 판 확인) · 그 아래 이웃 한 번에 ·
 // 나머지는 '따로 쓰고 싶을 때'(MORE) 안. 글쓰기 한 번에(w)는 설정 write_bm, X 도우미(x)는 x_helper 를 켤 때만
 const KK = {api: 'kkumi'}, MORE = {t: '따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)'};
-const BM = [{api: 'one', t: '이웃 한 번에 버튼 설치 (이웃 서이추·들르기 + 통계 · 누를 단추 없음)'}, MORE,
+const BM = [{api: 'autopub', a: 1, t: '하루치 한 번에 (발행까지) 버튼 설치 — 글 여러 개 넣고 예약 발행까지'}, {api: 'one', t: '이웃 한 번에 버튼 설치 (이웃 서이추·들르기 + 통계 · 누를 단추 없음)'}, MORE,
   {api: 'seoi', old: 1, t: '이웃 관리 버튼 설치 (서이추·이웃 들르기)'}, {api: 'statscap', old: 1, t: '통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)'},
   {api: 'ablyrank', old: 1, t: 'Ably 랭킹 보내기 버튼 설치'}, {api: 'xhelper', old: 1, x: 1, t: 'X 도우미 버튼 설치'},
   {api: 'writebm', old: 1, w: 1, t: '글쓰기 한 번에 버튼 설치 (글마다 발행만 누름)'}];
-const shown = b => (!b.old || MORE.o) && (!b.x || (data && data.xhelper)) && (!b.w || (data && data.writebm));
+const shown = b => (!b.old || MORE.o) && (!b.x || (data && data.xhelper)) && (!b.w || (data && data.writebm)) && (!b.a || !data || data.autopub !== false);
 function kkDraw() {
   const n = W.navigator, c = t => (n && n.clipboard ? n.clipboard.writeText(t) : Promise.reject(t))
     .then(() => toast('복사했어요 — 책갈피 주소 칸에 붙여 넣어요'), () => toast('복사하지 못했어요 — 다시 눌러 주세요'));
@@ -120,7 +120,7 @@ function kkDraw() {
       k.check ? el('p', {class: 'note'}, k.check) : '', ack(KK), k.use ? el('p', {class: 'note'}, k.use) : '']
       : [KK.e ? el('button', {class: 'sm', type: 'button', onclick: () => { KK.e = 0; kkLoad(KK); kkDraw(); }}, '다시 불러오기') : el('p', {class: 'note'}, '불러오는 중…')])),
     ...BM.filter(shown).flatMap(b => [el('button', {class: 'fold kf', type: 'button', 'aria-expanded': b.o ? 'true' : 'false', onclick: () => {
-    b.o = !b.o; if (b.o && !b.d && b.api) kkLoad(b); kkDraw(); }}, b.t), ...(!b.o || !b.api ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', b.d.got ? el('p', {class: 'note'}, '📊 ' + b.d.got) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
+    b.o = !b.o; if (b.o && !b.d && b.api) kkLoad(b); kkDraw(); }}, b.t + (b.a && b.d && b.d.version ? ` (v${b.d.version})` : '')), ...(!b.o || !b.api ? [] : b.d ? [b.d.note ? el('p', {class: 'note'}, b.d.note) : '', b.d.got ? el('p', {class: 'note'}, '📊 ' + b.d.got) : '', el('ol', {}, b.d.steps.map(x => el('li', {text: x}))),
     cp(b), b.d.go ? el('a', {class: 'sm', href: b.d.go.h}, b.d.go.t) : '', ack(b)] : [el('p', {class: 'note'}, '불러오는 중…')])]));
 }
 async function kkLoad(b) {
@@ -131,7 +131,7 @@ async function kkLoad(b) {
 
 function draw() {
   if (!box) return;
-  const kf = String([data && data.xhelper, data && data.writebm]);  // 설정으로 숨긴 칸이 바뀌면 다시
+  const kf = String([data && data.xhelper, data && data.writebm, data && data.autopub]);  // 설정으로 숨긴 칸이 바뀌면 다시
   if (!kk) { kk = el('div', {class: 'box kk', style: 'padding:0 14px'}); kkLoad(KK); }
   if (kk.f !== kf) { kk.f = kf; kkDraw(); }
   const rows = (data && data.rows) || [], q = data && data.qr, v = data && data.vnc;

@@ -121,10 +121,10 @@ def test_install_box_puts_one_first_and_folds_the_two_old_buttons() -> None:
     lg = (STATIC / "logins.js").read_text(encoding="utf-8")
     bm = lg.split("const BM = [", 1)[1].split("];", 1)[0]
     apis = re.findall(r"api: '(\w+)'", bm)
-    assert apis == ["one", "seoi", "statscap", "ablyrank", "xhelper", "writebm"]  # 꾸미기는 BM 밖 맨 위 카드 (KK — 주인 11/16 14시)
+    assert apis == ["autopub", "one", "seoi", "statscap", "ablyrank", "xhelper", "writebm"]  # 하루치 한 번에(발행까지 · 11/23)가 접기 첫째 · 꾸미기는 BM 밖 맨 위 카드 (KK — 주인 11/16 14시)
     assert re.findall(r"api: '(\w+)', old: 1", bm) == ["seoi", "statscap", "ablyrank", "xhelper", "writebm"] and bm.index("MORE") < bm.index("seoi")
     assert "const KK = {api: 'kkumi'}, MORE = {t: '따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)'}" in lg
-    assert "const shown = b => (!b.old || MORE.o) && (!b.x || (data && data.xhelper)) && (!b.w || (data && data.writebm));" in lg
+    assert "const shown = b => (!b.old || MORE.o) && (!b.x || (data && data.xhelper)) && (!b.w || (data && data.writebm)) && (!b.a || !data || data.autopub !== false);" in lg
     assert "이웃 한 번에 버튼 설치 (이웃 서이추·들르기 + 통계 · 누를 단추 없음)" in bm
 
 

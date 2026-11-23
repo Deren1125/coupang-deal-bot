@@ -61,6 +61,13 @@ def row(i: str, when: str | None, *, blog: str = "issue", **kw: object) -> dict:
             "paste": {"stale": False, "html": "<p>글</p>", "text": "글"}, **kw}
 
 
+def near(at: str, base: str, rule: bool | None = None, got: dict | None = None) -> bool:
+    """사람처럼 흔든 시각 (주인 11/23): 계획 시각 base 에서 45분 안 (흔들림 ±10~25 뒤 간격 맞추기로 10분씩 밀릴 수 있음) · 10분 단위로 내려도 정각·30분이 아님 · 초 없음."""
+    d, b = D.fromisoformat(at), D.fromisoformat(base)
+    ok = abs((d - b).total_seconds()) / 60 <= 45 and d.minute % 30 >= 10 and len(at) == 16
+    return ok and (got is None or (got["at"] == at and got["label"] == f"{d.month}/{d.day} {d:%H:%M}" and got["rule"] is rule))
+
+
 def test_when_plan_keeps_the_recommended_time_and_falls_back_to_the_rule() -> None:
     now = D(2026, 11, 14, 10, 0)
     rows = [row("rsv:issue:1", "12:30"), row("rsv:issue:2", "16:00"), row("rsv:issue:3", "내일 09:00"),
@@ -69,15 +76,46 @@ def test_when_plan_keeps_the_recommended_time_and_falls_back_to_the_rule() -> No
             row("rsv:finance:6", None, blog="finance"),  # 다른 블로그는 따로 셈
             {**row("pub:issue:7", "12:30"), "group": "발행"}]  # 발행 줄(바로 올리는 글)은 채우지 않음
     got = kkumi.when_plan(rows, "2026-11-14", now)
-    assert got["rsv:issue:1"] == {"at": "2026-11-14T12:30", "label": "11/14 12:30", "rule": False}
-    assert got["rsv:issue:2"]["at"] == "2026-11-14T16:00" and got["rsv:issue:3"] == {"at": "2026-11-15T09:00", "label": "11/15 09:00", "rule": False}
-    assert got["rsv:issue:4"] == {"at": "2026-11-14T19:30", "label": "11/14 19:30", "rule": True}
-    assert got["rsv:issue:5"] == {"at": "2026-11-14T22:30", "label": "11/14 22:30", "rule": True}
-    assert got["rsv:finance:6"] == {"at": "2026-11-14T12:10", "label": "11/14 12:10", "rule": True}
+    # 11/23 부터 계획 시각(추천·규칙) 그대로가 아니라 글마다 정해진 만큼 흔든 시각 — 정각·30분 금지
+    for k, base, rule in (("rsv:issue:1", "12:30", False), ("rsv:issue:2", "16:00", False), ("rsv:issue:4", "19:30", True), ("rsv:issue:5", "22:30", True),
+                          ("rsv:finance:6", "12:10", True)):
+        assert near(got[k]["at"], f"2026-11-14T{base}", rule, got[k]), (k, got[k])
+    assert near(got["rsv:issue:3"]["at"], "2026-11-15T09:00", False, got["rsv:issue:3"])
     assert "pub:issue:7" not in got and len(got) == 6
-    # 같은 블로그 예약끼리는 모두 3시간 넘게
+    assert kkumi.when_plan(rows, "2026-11-14", now) == got  # 볼 때마다 같은 값 (글마다 정해진 흔들림)
+    # 같은 블로그 예약끼리는 3시간쯤 (흔들림만큼 줄 수 있음) · 이웃한 글끼리 간격도 분 자리(10분 단위)도 같지 않게
     ts = sorted(D.fromisoformat(v["at"]) for k, v in got.items() if ":issue:" in k)
-    assert all((b - a) >= timedelta(minutes=kkumi.WHEN_GAP_MIN) for a, b in zip(ts, ts[1:], strict=False))
+    gaps = [(b.replace(minute=b.minute // 10 * 10) - a.replace(minute=a.minute // 10 * 10)) for a, b in zip(ts, ts[1:], strict=False)]
+    assert all(g >= timedelta(minutes=kkumi.WHEN_GAP_MIN - 50) for g in gaps) and all(a != b for a, b in zip(gaps, gaps[1:], strict=False))
+    assert all(a.minute // 10 != b.minute // 10 for a, b in zip(ts, ts[1:], strict=False))
+
+
+def test_humanize_avoids_round_times_and_keeps_gaps_uneven() -> None:
+    """주인 11/23 '예약 시각이 정각·30분이면 안 됨 — 07:13, 08:47, 10:22 처럼 · 간격도 들쭉날쭉'. 발행창 분 칸이 10분 단위여도(내림) :00·:30 이 되지 않는다."""
+    seen = set()
+    for n in range(400):
+        base = D(2026, 11, 16, 6, 0) + timedelta(minutes=10 * n)
+        d = kkumi.humanize(base, f"rsv:issue:{n}")
+        off = (d - base).total_seconds() / 60
+        assert d.minute % 30 >= 10 and 10 <= abs(off) <= 29 and d == kkumi.humanize(base, f"rsv:issue:{n}"), (base, d)
+        seen.add(d.minute)
+    assert len(seen) >= 30  # 분이 골고루 (늘 같은 자리가 아님)
+    # 지금 바로 뒤로는 당기지 않음 (earliest)
+    soon = D(2026, 11, 16, 10, 20)
+    assert all(kkumi.humanize(D(2026, 11, 16, 10, 30), f"k{n}", soon) >= soon for n in range(50))
+    # 같은 간격으로 늘어선 다섯 글 (90분마다): 예약 시각의 이웃 간격이 모두 다르고 분 자리도 이웃끼리 다름
+    for seed in range(20):
+        rows = [row(f"rsv:issue:{seed * 10 + i}", t) for i, t in enumerate(["07:00", "08:30", "10:00", "11:30", "13:00"])]
+        got = kkumi.when_plan(rows, "2026-11-16", D(2026, 11, 16, 5, 0))
+        ts = [D.fromisoformat(got[r["id"]]["at"]) for r in rows]
+        f10 = [t.replace(minute=t.minute // 10 * 10) for t in ts]
+        gaps = [b - a for a, b in zip(f10, f10[1:], strict=False)]
+        assert ts == sorted(ts) and all(t.minute % 30 >= 10 for t in ts), ts
+        assert all(a != b for a, b in zip(gaps, gaps[1:], strict=False)) and all(a.minute != b.minute for a, b in zip(f10, f10[1:], strict=False)), ts
+    # 지금 발행할 글: 태그 줄의 시각 칸을 뺌 (unstamp) — 다시 실으면 그대로
+    line = kkumi.MARK_TAGS + kkumi._bits("셀럽 소식\x01가 나")
+    st = kkumi.stamp("<p>글</p>" + line, "2026-11-16T07:13")
+    assert kkumi.stamped(st) == "2026-11-16T07:13" and kkumi.unstamp(st) == "<p>글</p>" + line and kkumi.unstamp("<p>글</p>" + line) == "<p>글</p>" + line
 
 
 def test_when_plan_skips_rows_that_cannot_be_pasted_but_avoids_their_times() -> None:
@@ -90,8 +128,8 @@ def test_when_plan_skips_rows_that_cannot_be_pasted_but_avoids_their_times() -> 
             row("rsv:issue:6", "10:15")]  # 20분 안으로 다가옴 → 규칙
     got = kkumi.when_plan(rows, "2026-11-14", now)
     assert set(got) == {"rsv:issue:4", "rsv:issue:6"}
-    assert got["rsv:issue:4"]["at"] == "2026-11-14T22:30" and got["rsv:issue:4"]["rule"] is True  # 12:30·16:00·19:30 은 잡힘
-    assert got["rsv:issue:6"]["at"] == "2026-11-15T09:00" and got["rsv:issue:6"]["rule"] is True  # 오늘 칸이 다 차 내일
+    assert near(got["rsv:issue:4"]["at"], "2026-11-14T22:30", True, got["rsv:issue:4"])  # 12:30·16:00·19:30 은 잡힘
+    assert near(got["rsv:issue:6"]["at"], "2026-11-15T09:00", True, got["rsv:issue:6"])  # 오늘 칸이 다 차 내일
     assert kkumi.when_plan([], "2026-11-14", now) == {} and kkumi.when_plan([{"id": "x"}, "글"], "2026-11-14", now) == {}  # type: ignore[list-item]
 
 
@@ -149,10 +187,10 @@ def test_view_stamps_reserve_rows_only(bot: DealBot, tmp_path: Path) -> None:
     v = routine.view(bot, now=at(bot, day, "10:00"))
     got = {i["id"]: i for s in v["slots"] for i in s["items"]}
     a, b, c, d = (got[k] for k in ("rsv:issue:11", "rsv:issue:12", "rsv:issue:13", "pub:finance:14"))
-    assert a["when"] == {"at": "2026-11-14T19:30", "label": "11/14 19:30", "rule": False}
-    assert kkumi.stamped(a["paste"]["html"]) == "2026-11-14T19:30" == kkumi.stamped(a["paste"]["text"])
-    assert b["when"] == {"at": "2026-11-14T12:30", "label": "11/14 12:30", "rule": True}  # 추천 시각이 없는 줄 → 규칙 (19:30 과 3시간 넘게)
-    assert kkumi.stamped(b["paste"]["html"]) == "2026-11-14T12:30"
+    assert near(a["when"]["at"], "2026-11-14T19:30", False, a["when"])  # 추천 시각을 글마다 정해진 만큼 흔든 값 (11/23 — 정각·30분 금지)
+    assert kkumi.stamped(a["paste"]["html"]) == a["when"]["at"] == kkumi.stamped(a["paste"]["text"])
+    assert near(b["when"]["at"], "2026-11-14T12:30", True, b["when"])  # 추천 시각이 없는 줄 → 규칙 (19:30 과 3시간 넘게)
+    assert kkumi.stamped(b["paste"]["html"]) == b["when"]["at"]
     assert "when" not in c and kkumi.stamped(c["paste"]["html"]) == ""  # 태그 줄이 없는 글은 실을 곳이 없음 — 줄에도 안 보임
     assert "when" not in d and kkumi.stamped(d["paste"]["html"]) == ""  # 발행 줄은 그대로
     # 다음에 읽어도 같은 값 (기록 파일에서 읽은 줄을 고쳐 쓰지 않음 — 스탬프가 겹쳐 쌓이지 않음)
@@ -161,8 +199,8 @@ def test_view_stamps_reserve_rows_only(bot: DealBot, tmp_path: Path) -> None:
     assert a2["paste"]["html"] == a["paste"]["html"] and kkumi._unbits(a2["paste"]["html"]).count("@") == 1
     # 추천 시각이 지난 뒤에 보면 규칙으로 (다음 빈 칸)
     late = {i["id"]: i for s in routine.view(bot, now=at(bot, day, "19:25"))["slots"] for i in s["items"]}
-    assert late["rsv:issue:11"]["when"]["rule"] is True and late["rsv:issue:11"]["when"]["at"] == "2026-11-14T22:30"
-    assert late["rsv:issue:12"]["when"]["at"] == "2026-11-15T09:00"
+    assert late["rsv:issue:11"]["when"]["rule"] is True and near(late["rsv:issue:11"]["when"]["at"], "2026-11-14T22:30")
+    assert near(late["rsv:issue:12"]["when"]["at"], "2026-11-15T09:00")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
@@ -174,11 +212,13 @@ def test_routine_js_tells_the_time_the_bookmarklet_will_fill(bot: DealBot, tmp_p
         item("rsv:issue:11", "s1", group="예약", blog="issue", title="데런픽 예약 · 글", copy=[{"label": "예약 시각", "text": "19:30"}], paste=_paste("글 11")),
         item("rsv:issue:12", "s1", group="예약", blog="issue", title="데런픽 예약 · 둘", paste=_paste("글 12")),
         item("pub:finance:14", "s1", group="발행", title="아카이브 발행 · 글", paste=_paste("글 14"))]})
-    got = _run(shutil.which("node"), routine.view(bot, now=at(bot, day, "10:00")), "rich")
+    v = routine.view(bot, now=at(bot, day, "10:00"))
+    w = {i["id"]: i["when"]["label"] for s in v["slots"] for i in s["items"] if i.get("when")}
+    got = _run(shutil.which("node"), v, "rich")
     hints = sorted(h for hs in got["hint"] for h in hs)
     assert len(hints) == 3 and sum("예약" in h for h in hints) == 2, hints
-    assert any(h.endswith("(태그도 저절로) · 예약 11/14 19:30 도 채워 줘요 — 발행 단추만 직접") for h in hints), hints
-    assert any(h.endswith("(태그도 저절로) · 예약 11/14 12:30 (새로 고름) 도 채워 줘요 — 발행 단추만 직접") for h in hints), hints
+    assert any(h.endswith(f"(태그도 저절로) · 예약 {w['rsv:issue:11']} 도 채워 줘요 — 발행 단추만 직접") for h in hints), hints
+    assert any(h.endswith(f"(태그도 저절로) · 예약 {w['rsv:issue:12']} (새로 고름) 도 채워 줘요 — 발행 단추만 직접") for h in hints), hints
 
 
 def test_dashboard_texts_mention_the_auto_fill() -> None:

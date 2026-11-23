@@ -284,6 +284,11 @@ https 주소만, 새 탭·`rel="noopener noreferrer"`), 그리고 링크 칸 + `
   '태그 복사'(`#태그 #태그` — 네이버 글쓰기 태그 칸이 '#'로 나눔, 태그 안 공백은 뺌). `cards > 0` 이면 "링크 카드 N개 — 붙여 넣은 뒤 책갈피 '꾸미기'를 눌러요".
 - 딜봇은 html 을 믿지 않는다 (`blogauto._paste`): 허용한 태그·속성만 다시 쓰고, `media:<파일>` 사진은 `<공개 주소>/media/<파일>` 로, https 가
   아닌 사진은 뺌. 공개 주소(public_domain)가 없으면 단추 대신 줄 글에 '본문 복사 꺼짐' 안내.
+- '하루치 한 번에 (발행까지)' 책갈피 (주인 11/23 · `dashboard/autopub.py` · `static/autopub.js` + kkumi.js 통째): 연결 탭 맨 위 접는 칸에서 코드 복사 →
+  그 블로그로 로그인한 사파리의 PC 글쓰기 화면에서 한 번 → 준비된 글(자동 점검 통과한 줄만)을 차례로 넣고·점검하고·예약 발행까지 (40~120초 간격 · 한 판 5편 ·
+  주말은 '주말에도 시작' · 점검에 걸리면 발행하지 않고 멈춤 · 네이버 보호·제한 안내면 바로 멈추고 24시간 쉼 kv `autopub:cool`). `GET /dashboard/api/autopub` ·
+  `POST /dashboard/api/autopub_act`(열쇠 · 데이터만). 할 일 블로그 카드에 진행 한 줄 (`routine.view` 의 `autopub`). 끄기: `dashboard.auto_pub: false`.
+  예약 시각은 `kkumi.when_plan` 이 정각·30분을 피해 글마다 흔든 값 (11/23 — 꾸미기 한 편 예약도 같음).
 - 링크 카드는 붙여 넣기로 안 옮겨진다 → 연결 탭 '꾸미기 버튼 설치'(펼치면 4단계 + '코드 복사', `GET /dashboard/api/kkumi`)로 사파리 책갈피를 만든다.
   원본은 `static/kkumi.js`, `dashboard/kkumi.py` 가 줄여 `javascript:` 주소로. 글쓰기 화면에서 누르면 주소만 있는 줄마다(이미 아래에 카드가 있으면
   건너뜀) 툴바 링크 단추 → 주소 → 검색 → 미리보기(15초) → 확인 → 카드 수 확인(8초). 그다음 붙여 넣으며 긴 선이 된 구분선은 짧은 선(se-l-default)·

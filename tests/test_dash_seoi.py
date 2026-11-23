@@ -963,10 +963,10 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
   out.folds = folds().map(f => f.textContent);
   out.folded = folds().length;  // 11/16: 통계·이웃 관리 옛 버튼은 '따로 쓰고 싶을 때' 아래 — 펼쳐야 보임
   await tick(); await tick();  // 꾸미기 카드(맨 위 · 늘 펼침 — 11/16 14시)는 note·check 가 없어도 'null' 글자가 끼지 않아야
-  folds()[1].click();
+  folds()[2].click();
   await tick();
   out.folds = folds().map(f => f.textContent);
-  const kf = () => folds()[2];
+  const kf = () => folds()[3];
   kf().click();
   await tick(); await tick();
   out.notes = box().all(c => c.tagName === 'P' && c.className === 'note').map(c => c.textContent);
@@ -983,9 +983,10 @@ def test_connect_tab_install_section_shows_today_and_copies_the_code(bot: DealBo
                          capture_output=True, text=True, timeout=30)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
-    assert got["folded"] == 2 and got["folds"][0].startswith("이웃 한 번에 버튼 설치")  # 맨 위 = 꾸미기 카드 · 접기 첫째 = 이웃 한 번에 (11/16 14시)
-    assert got["folds"][1] == "따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)" and got["folds"][2] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)"
-    assert got["folds"][3:] == ["통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)", "Ably 랭킹 보내기 버튼 설치"]  # 글쓰기 한 번에·X 도우미는 설정을 켤 때만
+    # 맨 위 = 꾸미기 카드 · 접기 첫째 = 하루치 한 번에 (발행까지 — 주인 11/23) · 둘째 = 이웃 한 번에 (11/16 14시)
+    assert got["folded"] == 3 and got["folds"][0].startswith("하루치 한 번에 (발행까지) 버튼 설치") and got["folds"][1].startswith("이웃 한 번에 버튼 설치")
+    assert got["folds"][2] == "따로 쓰고 싶을 때 (옛 이웃 관리 · 통계 보내기 · Ably 랭킹)" and got["folds"][3] == "이웃 관리 버튼 설치 (서이추·이웃 들르기)"
+    assert got["folds"][4:] == ["통계 보내기 버튼 설치 (네이버 내 통계 → 대시보드)", "Ably 랭킹 보내기 버튼 설치"]  # 글쓰기 한 번에·X 도우미는 설정을 켤 때만
     assert sv["note"] in got["notes"] and got["steps"][-len(seoi.STEPS):] == seoi.steps(seoi.STEPS)
     assert got["clip"] == [sv["code"]] and got["toast"].startswith("복사했어요") and "null" not in got["text"] and "undefined" not in got["text"]
 

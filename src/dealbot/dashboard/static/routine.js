@@ -318,6 +318,9 @@ const cnt = {};
 const seoiRow = (k, sv, v) => el('div', {class: 'it mi', 'data-id': 'seoi:' + k}, el('span', {class: 'cb', style: 'opacity:.35'}),
   el('div', {class: 'grow'}, el('span', {class: 't'}, sv.line), el('span', {class: 's'}, v.how), el('div', {class: 'bt'},
     v.feed ? el('a', {class: 'sm', href: sf(v.feed), target: '_blank', rel: 'noopener noreferrer'}, '이웃새글 열기 ↗') : null, el('a', {class: 'sm', href: '#/connect'}, '책갈피 설치'))));
+// 하루치 한 번에 (발행까지) 진행 한 줄 (주인 11/23 — routine.view autopub · 체크 없음 · 남은 일에 안 셈)
+const apRow = (k, t) => el('div', {class: 'it mi', 'data-id': 'autopub:' + k}, el('span', {class: 'cb', style: 'opacity:.35'}),
+  el('div', {class: 'grow'}, el('span', {class: 't'}, t), el('div', {class: 'bt'}, el('a', {class: 'sm', href: '#/connect'}, '책갈피 설치'))));
 function part(k, label, extra, hot) {
   hot = hot || [];
   const ur = k === 'shorts' ? urows() : [], ul = ur.filter(x => x.gate && !x.done), yt = k === 'shorts' && by() ? ytc() : null, yl = yt && yt.kind === 'login' ? 1 : 0;
@@ -337,6 +340,7 @@ function part(k, label, extra, hot) {
     if (hot.length) body.push(sh('급한 것', hot.length), hot);
     if (yt) body.push(ytcard(yt));
     Object.keys(UG).forEach(g => { const r = ur.filter(x => x.g === g); if (r.length) body.push(sh(UG[g], r.filter(x => x.gate && !x.done).length || '끝'), r.map(vid)); });
+    if (data && data.autopub && data.autopub[k]) body.push(apRow(k, data.autopub[k]));
     sec(...SEC[0]);
     if (extra.length) body.push(sh('확인할 것', extra.length), extra);
     SEC.slice(1).forEach((x, i) => sec(x[0], x[1], i ? null : () => nbv(k)));

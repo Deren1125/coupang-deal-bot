@@ -384,6 +384,11 @@ LOGINS_JS_GZIP_MAX += 96
 # 11/16 14시: 맨 위 꾸미기 카드(코드 복사 + 쉬운 3단계 + 판 확인 · 늘 펼침) · 글쓰기 한 번에·X 도우미 숨김 스위치 — 주인 '꾸미기 책갈피만'
 LOGINS_JS_MAX += 1280
 LOGINS_JS_GZIP_MAX += 448
+# 11/23: '하루치 한 번에 (발행까지)' 책갈피 (주인 '책갈피로 글 여러 개 넣고 발행까지') — logins.js 설치 칸 한 줄 + 판 번호 · routine.js 블로그 카드 진행 한 줄 (apRow)
+LOGINS_JS_MAX += 256
+LOGINS_JS_GZIP_MAX += 128
+ROUTINE_JS_MAX += 512
+ROUTINE_JS_GZIP_MAX += 128
 
 
 def test_asset_budgets() -> None:
