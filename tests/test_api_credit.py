@@ -1,5 +1,5 @@
 """API 크레딧 (주인 11/21·11/22 — 'Sns-board 의 Claude 호출(분류·경로·글쓰기, 쌀먹 대리 포함)을 API 키 방식으로 · 하루 상한은 지금처럼',
-블로그 서버 합계 월 $120 · 넘거나 키가 없거나 틀리면 claude CLI(구독)로)."""
+블로그 서버 합계 월 $95 · 넘거나 키가 없거나 틀리면 claude CLI(구독)로)."""
 
 from __future__ import annotations
 
@@ -60,10 +60,10 @@ def test_ledger_shared_with_blogauto_and_month_cap(monkeypatch: pytest.MonkeyPat
     api_credit.record("commentary", mid("sonnet-9-9"), {"input_tokens": 1_000_000}, now=NOW)  # 갈래 값(넉넉히) $3
     # Blog-Auto(blogauto/api_credit.py)가 같은 파일에 적는 줄 — 합계로 본다
     with open(api_credit.ledger_dir() / "2026-11.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps({"at": "2026-11-03T09:00:00", "src": "blogauto", "job": "photos.pick", "usd": 116.5}) + "\n")
+        f.write(json.dumps({"at": "2026-11-03T09:00:00", "src": "blogauto", "job": "photos.pick", "usd": 91.5}) + "\n")
     t = api_credit.totals(NOW)
-    assert t["month"] == 119.5 and t["today"] == 3.0
-    assert api_credit.monthly_budget() == 120.0 and api_credit.allow("commentary", NOW) == (True, "ok")  # 하루 몫은 안 봄
+    assert t["month"] == 94.5 and t["today"] == 3.0
+    assert api_credit.monthly_budget() == 95.0 and api_credit.allow("commentary", NOW) == (True, "ok")  # 하루 몫은 안 봄
     api_credit.record("commentary", mid("sonnet-9-9"), {"output_tokens": 100_000}, now=NOW)
     assert api_credit.allow("commentary", NOW) == (False, "month_cap")
     row = json.loads((api_credit.ledger_dir() / "2026-11.jsonl").read_text(encoding="utf-8").splitlines()[0])

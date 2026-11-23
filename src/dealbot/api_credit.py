@@ -30,7 +30,7 @@ DIR_ENV = "API_CREDIT_DIR"
 MONTHLY_ENV = "API_CREDIT_MONTHLY_USD"
 DAILY_ENV = "API_CREDIT_DAILY_USD"
 TASKS_ENV = "DEALBOT_API_TASKS"
-MONTHLY_DEFAULT = 120.0  # 블로그 서버 합계 (Blog-Auto + 딜봇 · 장부 하나) — 주인 11/22: 키 하나·$200 = 블로그 $120·쇼츠 $40·퍼프덱스 $20·남김 $20
+MONTHLY_DEFAULT = 95.0  # 블로그 서버 합계 (Blog-Auto + 딜봇 · 장부 하나) — 주인 11/23: 총 $167 = 블로그 $95·쇼츠 $30·기타 $12·취준 $30
 FAIL_HOURS = 24
 # 주인 11/22 'Sns-board 의 Claude 호출(분류·경로·글쓰기, 쌀먹 대리 포함)을 API 키 방식으로 — 하루 호출·비용 상한은 지금처럼':
 # 한줄평·정보 글 요약·X 초안(xstudio — xaggro·xtrend·xphoto 도 이 길)·말 명령(분류·경로)·쌀먹 대리·이웃 댓글 초안 = 모두 api 먼저
