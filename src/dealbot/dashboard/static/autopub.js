@@ -1,4 +1,4 @@
-/* '하루치 한 번에 (발행까지)' 진행기 v1 (주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지"). autopub.py 가 줄여 책갈피 주소에 통째로 넣는다
+/* '하루치 한 번에 (발행까지)' 진행기 v2 (v2: 11/23 아이패드 — 제목이 본문에 들어가던 것 · 주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지"). autopub.py 가 줄여 책갈피 주소에 통째로 넣는다
    (대시보드에서 코드를 받지 않음 — 데이터만 · 화면에서 바로 받지 않는 파일). 서버는 네이버를 열지도 로그인하지도 않는다 — 모두 주인이 로그인한 자기 사파리에서.
    한 번 누르면: 그 블로그(로그인한 아이디 — 우리 블로그가 아니면 거절)의 준비된 글을 차례로 받아 → 새 글쓰기 화면 → 제목 → 본문·꾸미기·사진·태그·카테고리·예약 시각
    (아래 CORE = 꾸미기 책갈피 kkumi.js 그대로) → 스스로 점검 → 깨끗하면 '해 봄'을 먼저 남기고 마지막 발행 단추를 누름 → 발행 확인(저장 요청 답 · 글 주소 · 끝 알림)
@@ -11,7 +11,7 @@
    네이버가 자동입력 방지·보호조치·이용 제한·한도 안내를 보이면 풀지 않고 그 자리에서 멈춘다 → 대시보드가 그 블로그를 24시간 쉬게 함.
    알림·확인·입력 창은 쓰지 않는다 (사파리에서 멈춤 — 모두 화면의 한 줄과 단추 하나로). */
 async CFG => {
-const V = 1;
+const V = 2;
 const W = window, D0 = document, S = m => new Promise(r => setTimeout(r, m));
 // 한글 글은 autopub.py 가 Z('…') 로 줄여 넣는다 (seoi.pack — 한 번에 책갈피 one.js 와 같은 Z · 껍데기만 · 정규식 안에 따옴표 없음 · 한글 글 안에 역슬래시 없음)
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
@@ -154,7 +154,9 @@ const arm = d => {
   w.addEventListener('error', er);
   w.addEventListener('unhandledrejection', er);
 };
-const ttl = () => K.D.querySelector('.se-documentTitle .se-text-paragraph,.se-section-documentTitle .se-text-paragraph');
+// 제목 칸 (v2: .se-title-text · 안내 글 '제목' 으로도 찾음)
+const TTL = '.se-documentTitle,.se-section-documentTitle,.se-title-text';
+const ttl = () => { const d = K.D, t = d.querySelector('.se-documentTitle .se-text-paragraph,.se-section-documentTitle .se-text-paragraph,.se-title-text .se-text-paragraph,.se-title-text'), h = t || [...d.querySelectorAll('[class*=placeholder]')].find(e => sp(e.textContent) === '제목'); return h && (t || h.closest('p') || h.parentElement); };
 // ── 글 넣기 전 (CORE 가 부름 — k = 꾸미기의 도구들): 이어 쓰기 창 닫기 → 제목 → 커서를 본문으로 (v1 '글쓰기 한 번에'의 제목이 본문에 들어가던 일 — 넣은 뒤 제목 칸에 있는지 확인)
 const pre = it => async k => {
   K = k;
@@ -169,24 +171,44 @@ const pre = it => async k => {
   }
   const hp = k.vis(['.se-help-panel-close-button', 'button.se-help-close']);
   if (hp) { k.press(hp); await S(400); }
-  const head = sp(it.title).slice(0, 12), has = () => { const t = ttl(); return !!t && sp(k.real(t)).includes(head); };
-  const inBody = () => k.body_().some(p => sp(p.textContent).includes(head));
+  const T0 = sp(it.title), has = () => { const t = ttl(); return !!t && sp(k.real(t)) === T0; };
   const t = ttl();
   if (!t) { K.why = '제목 칸을 못 찾았어요'; return false; }
   if (k.real(t) || k.comps().some(c => k.real(c))) { K.why = '글쓰기 화면에 쓰던 글이 있어요 — 빈 글쓰기 화면에서 눌러 주세요'; return false; }
-  // 제목: 제목 줄을 누르고 글자만 붙여넣기 신호 → 안 되면 글 넣기 명령
-  k.press(t);
-  k.setSel(t);
-  await S(300);
-  const dt = new k.W.DataTransfer();
-  dt.setData('text/plain', it.title);
-  (t.closest('[contenteditable="true"]') || k.host() || k.D.body).dispatchEvent(new k.W.ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt}));
-  if (!await k.wait(() => has() || inBody(), 2500)) {
-    k.setSel(t);
-    try { k.D.execCommand('insertText', false, it.title); } catch (e) {}
-    await k.wait(() => has() || inBody(), 1500);
+  // v2 (주인 11/23 아이패드 — v1 은 제목이 본문 첫 줄에 들어감): 꾸미기 setSel 은 본문 칸에 포커스를 줘 에디터 커서가 본문으로 감 → 제목 칸만 사람처럼 누르고 그 안에 커서
+  // 붙여넣기 신호(꾸미기와 같은 길) → 안 되면 글 넣기 명령 · 넣을 때마다 제목 칸 = 제목, 본문 그대로인지 봄 · 본문에 들어갔으면 되돌리고(취소 → 그 줄 지움) 다른 길로 한 번 더
+  const bs = () => k.body_().map(k.real).filter(Boolean).join(' '), b0 = bs(), c0 = k.comps(), D = k.D;
+  for (const how of ['paste', 'insertText']) {
+    const p = ttl(), e = p.closest('[contenteditable="true"]') || p, g = k.W.getSelection();
+    // 주인 커서가 이미 제목 칸에 있으면 그대로 (다시 할 때는 늘 눌러 둠)
+    if (how !== 'paste' || !(g.rangeCount && (p.closest(TTL) || p).contains(g.anchorNode))) {
+      if (D.activeElement !== e) e.focus();
+      k.press(p);
+      const r = D.createRange();
+      r.selectNodeContents(p);
+      r.collapse(false);
+      g.removeAllRanges();
+      g.addRange(r);
+      D.dispatchEvent(new Event('selectionchange'));
+      await S(300);
+    }
+    if (how === 'paste') {
+      const dt = new k.W.DataTransfer();
+      dt.setData('text/plain', it.title);
+      e.dispatchEvent(new k.W.ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt}));
+    } else try { D.execCommand(how, false, it.title); } catch (x) {}
+    await k.wait(() => has() || bs() !== b0, 2500);
+    if (bs() !== b0) {
+      try { D.execCommand('undo'); } catch (x) {}
+      await S(400);
+      for (const c of k.comps()) if (!c0.includes(c) && sp(k.real(c)).includes(T0)) c.remove();
+      for (const q of k.body_()) if (sp(q.textContent).includes(T0)) q.textContent = sp(q.textContent).replace(T0, '');
+      if (bs() !== b0) { K.why = '제목이 본문 칸에 들어갔어요 — 본문 첫 줄을 지워 주세요'; return false; }
+      if (has() || sp(k.real(ttl()))) break;
+    }
+    if (has()) break;
   }
-  if (!has()) { K.why = inBody() ? '제목이 본문 칸에 들어갔어요' : '제목을 넣지 못했어요'; return false; }
+  if (!has()) { K.why = sp(k.real(ttl())) ? '제목 칸이 원고와 달라요' : '제목을 넣지 못했어요 (제목이 본문 칸에 들어갔어요)'; return false; }
   // 본문으로: 본문 줄을 누르고, 맨 아래 '본문 추가'(아이패드에서 스크립트로 커서가 옮겨지는 단 하나의 길 — 꾸미기 10/29)도 누름
   const n0 = k.comps().length, last = k.body_().slice(-1)[0], bt = k.vis(k.BOTTOM);
   if (last) { k.press(last); k.setSel(last); await S(300); }
