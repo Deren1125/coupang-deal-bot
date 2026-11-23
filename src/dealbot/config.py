@@ -1002,6 +1002,20 @@ class JobprepConfig(BaseModel):
     # 재수강 (확인됨 11/23 — yonsei.ac.kr/sc/279/subview.do: 졸업까지 6회 · 최고 A0 · 13학번 이후 모든 성적 · 이전 성적 소거)
     retake_max_grade: str = "A0"
     retake_total: int = Field(6, ge=0)
+    # 졸업 점검 (11/23 — jobprep-data/acad/yonsei_ee_rules.md): 군강좌(GD · P/NP) 학기당 6·총 24 · 3000/4000단위 45 · 교양 6영역 중 4
+    military_per_term: int = Field(6, ge=0)
+    military_total: int = Field(24, ge=0)
+    upper_level_min: int = Field(45, ge=0)
+    ge_areas_required: int = Field(4, ge=0)
+    required_low_level: dict[str, float] = Field(default_factory=lambda: {"EEE2113": 3, "EEE2060": 3})  # 남은 필수 중 2000단위 (3000+ 로 못 채움)
+    # 전공기초·전필 (23학번 표) — 빠진 것을 보여 줌 · 주인 11/23: EEE2113 면제는 모름 → 필수로 두고 '확인 필요'
+    required_courses: dict[str, str] = Field(default_factory=lambda: {
+        "EEE2113": "전기전자공학전공101", "EEE2020": "데이터구조", "EEE2010": "기초회로이론", "EEE2030": "전자기학(1)", "EEE2040": "디지털논리회로",
+        "EEE2050": "전자회로(1)", "EEE2060": "신호및시스템", "EEE2111": "기초아날로그실험", "EEE3313": "기초디지털실험", "EEE4610": "전기전자종합설계"})
+    confirm_courses: dict[str, str] = Field(default_factory=lambda: {"EEE2113": "확인 필요 (학과 사무실)"})
+    # 주인 11/23: 소속변경 전 EEE 과목도 전공 인정 · CEE 과목은 전선 인정 없음 (최소 이수 학기 없음)
+    major_prefixes: list[str] = Field(default_factory=lambda: ["EEE"])
+    not_major_prefixes: list[str] = Field(default_factory=lambda: ["CEE"])
     # 코드 채점 격리 (리뷰 11/22): 기본 systemd — 안 되면 돌리지 않음(503 · 5분 뒤 다시 확인). rlimit(약함)은 직접 적을 때만 (시험 환경). auto = systemd
     sandbox_mode: Literal["auto", "systemd", "rlimit", "off"] = "systemd"
     pron_min_free_mb: int = Field(1000, ge=0)

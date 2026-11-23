@@ -54,7 +54,13 @@
         draftBox.textContent = '';
         var t = h('div', { cls: 'jp-table' });
         function row(c) {
-          var r = h('div', { cls: 'jp-trow' }, ['name', 'credits', 'grade', 'area', 'term'].map(function (k) { var i = h('input', { cls: 'jp-in sm', value: c[k] === undefined ? '' : c[k], 'data-k': k }); return i; }),
+          var st = h('select', { cls: 'jp-sel', 'data-k': 'status' }, [['done', '끝'], ['in_progress', '수강 중'], ['planned', '계획']].map(function (o) {
+            var e = h('option', { value: o[0], text: o[1] }); if ((c.status || 'done') === o[0]) e.selected = true; return e; }));
+          var ge = h('select', { cls: 'jp-sel', 'data-k': 'ge_area' }, [''].concat(d.ge6).map(function (g) { var e = h('option', { value: g, text: g || '6영역 —' }); if ((c.ge_area || '') === g) e.selected = true; return e; }));
+          var r = h('div', { cls: 'jp-trow', 'data-id': c.id === undefined ? '' : c.id }, ['name', 'credits', 'grade', 'area', 'term'].map(function (k) { var i = h('input', { cls: 'jp-in sm', value: c[k] === undefined ? '' : c[k], 'data-k': k }); return i; }),
+            st, ge, h('label', { cls: 'jp-sub' }, h('input', { type: 'checkbox', 'data-k': 'military', checked: !!c.military }), '군'),
+            h('label', { cls: 'jp-sub' }, h('input', { type: 'checkbox', 'data-k': 'no_retake', checked: !!c.no_retake }), '재수강 안 함'),
+            h('input', { type: 'hidden', 'data-k': 'retake', value: c.retake ? '1' : '' }),
             JP.btn('×', function () { r.remove(); }, 'ghost'));
           t.appendChild(r);
         }
@@ -62,12 +68,26 @@
         draftBox.appendChild(h('p', { cls: 'jp-sub', text: '읽은 표 — 틀린 곳을 고친 뒤 "맞아요" (그 전엔 저장하지 않아요)' }));
         draftBox.appendChild(t);
         draftBox.appendChild(h('div', { cls: 'jp-row' }, JP.btn('줄 더하기', function () { row({}); }, 'ghost'), JP.btn('맞아요', function () {
-          var cs = Array.prototype.map.call(t.querySelectorAll('.jp-trow'), function (r) { var o = {}; Array.prototype.forEach.call(r.querySelectorAll('input'), function (i) { o[i.getAttribute('data-k')] = i.value; }); o.credits = +o.credits || 0; return o; });
+          var cs = Array.prototype.map.call(t.querySelectorAll('.jp-trow'), function (r) {
+            var o = {}; Array.prototype.forEach.call(r.querySelectorAll('input,select'), function (i) { var k = i.getAttribute('data-k'); if (!k) return; o[k] = i.type === 'checkbox' ? (i.checked ? 1 : 0) : i.value; });
+            o.credits = +o.credits || 0; o.retake = o.retake ? 1 : 0; var id = r.getAttribute('data-id'); if (id) o.id = +id; return o; });
           JP.api('acad/courses', { courses: cs }).then(function () { JP.toast('저장했어요'); JP.rerender(); }, JP.fail);
         })));
       }
       box.appendChild(JP.card('② 들은 과목 ' + d.courses.length + ' · 평점 ' + (d.gpa === null ? '-' : d.gpa + ' / 4.3'), JP.btn('고치기', function () { edit(d.courses); window.scrollTo(0, 0); }, 'ghost')));
-      box.appendChild(JP.card('③ 남은 학점', d.bars.map(function (b) { return JP.bar(b.done, b.need, b.area + (b.left !== null ? ' (남은 ' + b.left + ')' : '')); }), reqForm(d)));
+      var u = d.upper, g = d.ge, m = d.military;
+      box.appendChild(JP.card('③ 남은 학점 (진하게 = 끝 · 옅게 = 수강 중·계획)', d.bars.map(function (b) { return JP.bar(b.done, b.need, b.area + (b.left !== null ? ' (남은 ' + b.left + ')' : ''), b.pending); }),
+        JP.bar(u.done, u.need, '3000·4000단위' + (u.short ? ' (모자람 ' + u.short + ')' : ''), u.pending),
+        u.extra ? h('p', { cls: 'jp-warn', text: '3000·4000단위 때문에 ' + u.extra + '학점 더 필요 — 남은 과목은 되도록 3000/4000단위로' }) : null,
+        h('p', { text: '실제로 남은 학점 ' + d.real_left + ' (칸별 남은 것 + 3000·4000 모자람)' }),
+        d.required_missing.length ? h('div', null, h('b', { text: '아직 안 들은 전공기초·전필' }), d.required_missing.map(function (r) {
+          return h('div', { cls: r.note ? 'jp-warn' : 'jp-sub', text: r.code + ' ' + r.name + (r.pending ? ' (예정)' : '') + (r.note ? ' — ' + r.note : '') }); })) : null,
+        h('p', { cls: 'jp-sub', text: '소속변경 전 EEE 과목은 전공 인정 · CEE 과목은 전선 아님(일반선택) · 최소 이수 학기 없음 (주인 확인 11/23)' }), reqForm(d)));
+      box.appendChild(JP.card('교양 6영역 (' + g.need + '영역 필요 · 끝 ' + g.done + ' · 예정 포함 ' + g.with_pending + (g.planned_unknown ? ' + 영역 미정 계획 ' + g.planned_unknown : '') + ')',
+        h('div', { cls: 'jp-chips' }, g.areas.map(function (a) { return h('span', { cls: 'jp-tag' + (a.state === 'done' ? ' on' : ''), text: a.area + (a.state === 'done' ? ' ✓' : a.state ? ' (예정)' : '') }); })),
+        g.missing.length ? h('p', { cls: g.ok_if_plan ? 'jp-sub' : 'jp-warn', text: '없는 영역: ' + g.missing.join(' · ') + (g.ok_if_plan ? ' — 계획대로면 ' + g.need + '영역 채움 (계획 과목은 서로 다른 영역으로)' : '') }) : null));
+      box.appendChild(JP.card('군강좌 (P/NP · 평점 밖) ' + m.used + ' / ' + m.total + '학점', m.terms.map(function (t) { return h('div', { cls: t.over ? 'jp-warn' : 'jp-sub', text: t.term + ': ' + t.credits + '학점' + (t.over ? ' — 학기당 ' + m.per_term + ' 넘음' : '') }); }),
+        m.over ? h('p', { cls: 'jp-warn', text: '군강좌 상한을 넘어요' }) : null));
       box.appendChild(planCard(d));
       box.appendChild(retakeCard(d));
     }, function (e) { JP.busy(box, e.message); });
@@ -128,7 +148,7 @@
       x.cands.forEach(function (c) {
         auto.appendChild(h('div', { cls: 'jp-row' + (x.top.indexOf(c.id) >= 0 ? '' : ' jp-sub') }, h('span', { text: (x.top.indexOf(c.id) >= 0 ? '✓ ' : '') + c.name + ' ' + c.grade + ' · ' + c.credits + '학점 · +' + c.gain }))); 
       });
-      if (L.per_term !== null) auto.appendChild(h('p', { cls: L.over ? 'jp-warn' : 'jp-sub', text: '재수강은 학점이 늘지 않아요: 졸업까지 남은 ' + L.left_credits + '학점 + 재수강 ' + L.retake_credits +
+      if (L.per_term !== null) auto.appendChild(h('p', { cls: L.over ? 'jp-warn' : 'jp-sub', text: '재수강은 학점이 늘지 않아요: 실제로 남은 ' + L.left_credits + '학점 + 재수강 ' + L.retake_credits +
         '학점 ÷ ' + L.terms + '학기 = 학기당 ' + L.per_term + '학점' + (L.over ? ' — ' + L.term_max + '학점 넘음' : '') }));
     }
     drawAuto();

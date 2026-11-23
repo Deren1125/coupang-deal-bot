@@ -68,10 +68,12 @@
     try { document.execCommand('copy'); toast('복사했어요'); } catch (e) { toast('복사하지 못했어요'); }
     ta.remove();
   }
-  function bar(done, need, label) {
+  function bar(done, need, label, pending) {
     var pct = need > 0 ? Math.min(100, Math.round(done * 100 / need)) : 0;
-    return h('div', { cls: 'jp-bar' }, h('div', { cls: 'jp-bar-l', text: label }), h('div', { cls: 'jp-bar-t' }, h('div', { cls: 'jp-bar-f', style: 'width:' + pct + '%' })),
-      h('div', { cls: 'jp-bar-n', text: need > 0 ? done + '/' + need : String(done) }));
+    var pp = need > 0 && pending ? Math.min(100 - pct, Math.round(pending * 100 / need)) : 0;
+    return h('div', { cls: 'jp-bar' }, h('div', { cls: 'jp-bar-l', text: label }),
+      h('div', { cls: 'jp-bar-t' }, h('div', { cls: 'jp-bar-f', style: 'width:' + pct + '%' }), pp ? h('div', { cls: 'jp-bar-f pend', style: 'width:' + pp + '%' }) : null),
+      h('div', { cls: 'jp-bar-n', text: (need > 0 ? done + '/' + need : String(done)) + (pending ? ' (+' + pending + ' 예정)' : '') }));
   }
   function addToLib(item) { return api('lib/add', item).then(function () { toast('자료함에 넣었어요'); }, fail); }
 

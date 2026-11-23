@@ -45,8 +45,8 @@ details.jp-card>summary{cursor:pointer;font-weight:700;min-height:28px}
 .jp-box{display:inline-flex;width:22px;height:22px;border-radius:6px;border:1.5px solid var(--fline);align-items:center;justify-content:center;color:var(--gr);font-weight:800}
 .jp-dday{display:flex;flex-direction:column;gap:6px}.jp-dday b{font-size:22px}
 .jp-bar{display:grid;grid-template-columns:minmax(0,1.4fr) 2fr auto;gap:8px;align-items:center;margin:6px 0;font-size:13px}
-.jp-bar-t{height:10px;border-radius:5px;background:var(--grey);overflow:hidden}
-.jp-bar-f{height:100%;background:var(--chart);border-radius:5px}.jp-bar-f.me{background:var(--gr)}
+.jp-bar-t{height:10px;border-radius:5px;background:var(--grey);overflow:hidden;display:flex}
+.jp-bar-f{height:100%;background:var(--chart)}.jp-bar-f.me{background:var(--gr)}.jp-bar-f.pend{background:var(--chart);opacity:.35}
 .jp-bar-n{color:var(--sub);font-variant-numeric:tabular-nums}
 .jp-item{padding:8px 0;border-top:1px solid var(--line)}
 .jp-hint{background:var(--ac-soft);border-radius:8px;padding:8px 10px}

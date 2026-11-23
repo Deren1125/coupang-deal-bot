@@ -68,7 +68,7 @@ def test_retake_gpa_and_bars(jp) -> None:  # type: ignore[no-untyped-def]
                                            {"name": "실패", "credits": 3, "grade": "F", "area": "전선", "term": "2023-2"}]})
     academic.save_req(jp, {"교양": 30, "전필": 20, "총": 130})
     bars = {b["area"]: b for b in academic.view(jp)["bars"]}
-    assert bars["교양"] == {"area": "교양", "done": 3.0, "need": 30.0, "left": 27.0} and bars["전선"]["done"] == 0.0 and bars["총"]["done"] == 6.0
+    assert bars["교양"] == {"area": "교양", "done": 3.0, "pending": 0.0, "need": 30.0, "left": 27.0} and bars["전선"]["done"] == 0.0 and bars["총"]["done"] == 6.0
     errs = academic.check_plan({"2027-2": [{"credits": 21}], "2027-W": []}, 18)
     assert any("최대" in e for e in errs) and any("겨울" in e for e in errs)
 
@@ -208,3 +208,74 @@ def test_retake_top_n_limited_by_left(jp) -> None:  # type: ignore[no-untyped-de
     academic.save_courses(jp, {"courses": rows})
     r = academic.view(jp)["retake"]
     assert r["left"] == 1 and len(r["b0"]["top"]) == 1
+
+
+def test_acad_migration_adds_columns_and_sets_statuses(tmp_path: Path) -> None:
+    import sqlite3
+
+    from dealbot.dashboard.jobprep import store as st
+
+    d = tmp_path / "old"
+    d.mkdir()
+    c = sqlite3.connect(d / "jobprep.db")
+    c.execute("CREATE TABLE acad_courses (id INTEGER PRIMARY KEY, name TEXT, credits REAL, grade TEXT, area TEXT, term TEXT, retake INTEGER DEFAULT 0)")
+    c.execute("INSERT INTO acad_courses VALUES (34, 'YCA1101 기독교와세계문화', 3, 'P', '교양', '2026-여름', 0)")
+    c.execute("INSERT INTO acad_courses VALUES (35, 'YCE1251 전쟁과역사', 3, '', '교양', '2026-2', 0)")
+    c.execute("INSERT INTO acad_courses VALUES (36, '[계획] 군강좌', 3, '', '교양', '2027-1', 0)")
+    c.execute("INSERT INTO acad_courses VALUES (37, '[계획] 군강좌', 3, 'P', '교양', '2027-1', 0)")  # 성적이 있으면 안 바꿈
+    c.commit()
+    c.close()
+    s = st.Store(d)
+    rows = {r["id"]: r for r in s.q("SELECT * FROM acad_courses")}
+    assert (rows[35]["status"], rows[35]["military"]) == ("in_progress", 1) and rows[36]["status"] == "planned"
+    assert rows[37]["status"] == "done" and rows[34]["military"] == 1 and rows[34]["no_retake"] == 0
+    s.x("UPDATE acad_courses SET status='done' WHERE id=35")
+    s.close()
+    assert st.Store(d).one("SELECT status FROM acad_courses WHERE id=35")["status"] == "done"  # 한 번만
+
+
+def test_acad_check_real_shape(jp) -> None:  # type: ignore[no-untyped-def]
+    jp.conf.required_low_level = {"EEE2113": 3}
+    rows = [{"id": 1, "name": "EEE3313 기초디지털실험", "credits": 3, "grade": "A-", "area": "전필", "term": "2025-1"},
+            {"id": 2, "name": "YCD1602 대중음악의이해", "credits": 3, "grade": "B0", "area": "교양", "term": "2024-1", "no_retake": 1},
+            {"id": 3, "name": "EEE2040 디지털논리회로", "credits": 3, "grade": "C0", "area": "전필", "term": "2025-1"},
+            {"id": 4, "name": "YCE1251 전쟁과역사", "credits": 3, "grade": "", "area": "교양", "term": "2026-2", "status": "in_progress", "military": 1},
+            {"id": 5, "name": "[계획] 군강좌", "credits": 3, "grade": "", "area": "교양", "term": "2027-1", "status": "planned", "military": 1},
+            {"id": 6, "name": "AIC2100 인공지능", "credits": 3, "grade": "P", "area": "기타", "term": "2026-여름", "military": 1},
+            {"id": 7, "name": "YCG1804 감정", "credits": 3, "grade": "A+", "area": "교양", "term": "2026-여름", "military": 1}]
+    academic.save_courses(jp, {"courses": rows})
+    academic.save_req(jp, {"교양": 6, "전필": 9, "기타": 3, "총": 30})
+    v = academic.view(jp)
+    got = {r["id"]: r for r in v["courses"]}
+    assert got[2]["no_retake"] == 1 and got[4]["status"] == "in_progress" and got[5]["military"] == 1  # 저장해도 칸 유지
+    assert v["gpa"] == round((3.7 * 3 + 3.0 * 3 + 2.0 * 3) / 9, 2)  # 군강좌(7)·수강 중·계획은 평점 밖
+    bars = {b["area"]: b for b in v["bars"]}
+    assert (bars["교양"]["done"], bars["교양"]["pending"]) == (6.0, 6.0) and bars["총"]["done"] == 15.0 and bars["총"]["pending"] == 6.0
+    assert bars["기타"]["left"] == 0.0  # 교양 넘친 6 이 일반선택으로
+    assert v["upper"]["done"] == 3.0 and v["upper"]["short"] == 42.0
+    # 남은: 칸별 전필 3 (총 30−21=9 가 더 큼) · 3000+ 로 채울 수 있는 것 9−3(EEE2113) = 6 → 42−6 = 36 더 → 45
+    assert v["real_left"] == 9.0 + 36.0 and v["upper"]["extra"] == 36.0
+    assert v["ge"]["done"] == 2 and "인간과역사" not in v["ge"]["missing"] and v["ge"]["planned_unknown"] == 1
+    assert [a["state"] for a in v["ge"]["areas"] if a["area"] == "인간과역사"] == ["in_progress"]
+    m = v["military"]
+    assert m["used"] == 12.0 and [t["credits"] for t in m["terms"]] == [3.0, 6.0, 3.0] and not m["over"]
+    cands = [c["name"] for c in v["retake"]["bplus"]["cands"]]
+    assert cands == ["EEE2040 디지털논리회로", "EEE3313 기초디지털실험"] or cands == ["EEE2040 디지털논리회로"]  # no_retake·군강좌 A+ 빠짐
+    assert v["retake"]["b0"]["load"]["left_credits"] == 45.0
+    jp.conf.military_per_term = 5
+    assert academic.view(jp)["military"]["over"]
+
+
+def test_owner_rules_major_prefixes_and_required_missing(jp) -> None:  # type: ignore[no-untyped-def]
+    rows = [{"name": "EEE2010 기초회로이론", "credits": 3, "grade": "A0", "area": "전필", "term": "2024-1"},
+            {"name": "EEE3540 전공과목", "credits": 3, "grade": "A0", "area": "기타", "term": "2024-1"},  # 소속변경 전 EEE → 전공(전선)
+            {"name": "CEE3201 기초유체역학", "credits": 3, "grade": "A0", "area": "전선", "term": "2024-1"},  # CEE → 전선 아님
+            {"name": "EEE2060 신호및시스템", "credits": 3, "grade": "", "area": "전필", "term": "2027-2", "status": "planned"}]
+    academic.save_courses(jp, {"courses": rows})
+    academic.save_req(jp, {"전필": 30, "전선": 30, "기타": 21, "총": 130})
+    v = academic.view(jp)
+    bars = {b["area"]: b for b in v["bars"]}
+    assert bars["전선"]["done"] == 3.0 and bars["기타"]["done"] == 3.0
+    miss = {r["code"]: r for r in v["required_missing"]}
+    assert "EEE2010" not in miss and miss["EEE2060"]["pending"] and miss["EEE2113"]["note"] == "확인 필요 (학과 사무실)"
+    assert miss["EEE4610"]["note"] == ""

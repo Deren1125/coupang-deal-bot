@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS chat (id INTEGER PRIMARY KEY, tab TEXT, ctx TEXT, rol
 CREATE INDEX IF NOT EXISTS chat_tab ON chat (tab, ctx, at);
 CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK (id = 1), body TEXT, ver INTEGER, at REAL);
 CREATE TABLE IF NOT EXISTS acad_docs (id INTEGER PRIMARY KEY, file TEXT, at REAL, parsed TEXT);
-CREATE TABLE IF NOT EXISTS acad_courses (id INTEGER PRIMARY KEY, name TEXT, credits REAL, grade TEXT, area TEXT, term TEXT, retake INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS acad_courses (id INTEGER PRIMARY KEY, name TEXT, credits REAL, grade TEXT, area TEXT, term TEXT, retake INTEGER DEFAULT 0,
+  no_retake INTEGER DEFAULT 0, status TEXT DEFAULT 'done', military INTEGER DEFAULT 0, ge_area TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS acad_req (id INTEGER PRIMARY KEY CHECK (id = 1), body TEXT, at REAL);
 CREATE TABLE IF NOT EXISTS acad_plan (term TEXT PRIMARY KEY, body TEXT, at REAL);
 CREATE TABLE IF NOT EXISTS companies (id INTEGER PRIMARY KEY, name TEXT, norm TEXT UNIQUE, cat TEXT, region TEXT, ats TEXT, token TEXT,
@@ -88,6 +89,7 @@ class Store:
                 c.row_factory = sqlite3.Row
                 c.execute("PRAGMA journal_mode=WAL")
                 c.executescript(SCHEMA)
+                migrate(c)
                 self._conn = c
             return self._conn
 
@@ -197,6 +199,27 @@ class Store:
         except (OSError, PathError):
             pass
         return n
+
+
+# 표에 나중에 더한 칸 (예전 DB 에도 붙임 · 몇 번 돌려도 같음)
+COLUMNS = {"acad_courses": (("no_retake", "INTEGER DEFAULT 0"), ("status", "TEXT DEFAULT 'done'"), ("military", "INTEGER DEFAULT 0"),
+                            ("ge_area", "TEXT DEFAULT ''"))}
+
+
+def migrate(c: sqlite3.Connection) -> None:
+    for table, cols in COLUMNS.items():
+        have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols:
+            if name not in have:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+    # 11/23 학사: 수강 중(35 전쟁과역사 2026-2)·계획(36·37 2027-1 군강좌) — 그 줄이 아직 성적 없음일 때만, 한 번만
+    done = c.execute("SELECT v FROM kv WHERE k='mig:acad_1123'").fetchone()
+    if not done:
+        c.execute("UPDATE acad_courses SET status='in_progress', military=1 WHERE id=35 AND COALESCE(grade,'')='' AND term='2026-2'")
+        c.execute("UPDATE acad_courses SET status='planned', military=1 WHERE id IN (36, 37) AND COALESCE(grade,'')='' AND term='2027-1'")
+        c.execute("UPDATE acad_courses SET military=1 WHERE id IN (33, 34) AND term='2026-여름' AND grade='P'")  # 2026 여름 군강좌 (GD) 2과목
+        c.execute("INSERT OR REPLACE INTO kv (k, v) VALUES ('mig:acad_1123', '1')")
+    c.commit()
 
 
 def mem_free_mb(meminfo: str | None = None) -> int:
