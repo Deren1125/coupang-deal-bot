@@ -14,7 +14,8 @@ POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv a
   a=next b=블로그 [w=1]  {ok, next: {id, title, html, text, at, label, photos, disc} | None, n, m, left, wait(초), text, weekend?}
       그 블로그의 오늘 할 일 발행·예약 줄 가운데 '올려도 되는 글'만 (ready): 체크 안 됨 · 다 만든 묶음 · 올리기 전 자동 점검 통과(gate.ok 참 — 점검에 걸린 글·점검 안 된 글·
       새 방향과 안 맞는다고 적힌 글(Blog-Auto direction.fit 거짓 — 주인 11/23 · 줄 글 '새 방향' 도)은 주지 않음) · 제휴 링크가 있는데 고지 줄이 없는 글 뺌 · 오늘 이미 해 본 글(ok·unsure·hold·두 번 멈춘 글) 뺌. 차례는 예약 시각 → 화면 차례.
-      예약 시각 (v5 · 주인 11/23 13:45): 누른 때 기준 계획 schedule() — 첫 글 20~45분 뒤 · 다음은 70~160분씩 · 분은 10·20·40·50 · 07:30~23:00 · 토·일은 월요일로 ·
+      예약 시각 (v5 · 주인 11/23 13:45 · 간격 v6 11/24): 누른 때 기준 계획 schedule() — 첫 글 20~45분 뒤 · 다음은 짧게 40~60분·보통 75~140분·길게 2시간 반~4시간 섞음
+        (이웃 간격끼리 20분 넘게 차이) · 분은 10·20·40·50 (하루 같은 분 두 번까지 · 가끔 30) · 다른 블로그와 20분 넘게 · 07:30~23:00 · 토·일은 월요일로 ·
         이미 한 그 블로그 시각과 40분 넘게 · kv autopub:plan 에 남겨 다시 눌러도 같은 계획 (지났거나 없는 글만 새로) · plan = 맨 위 한 줄 '오늘 예약 14:20 · 16:10'.
       wait = 앞 글 뒤 40~120초(GAP · 무작위)가 되기까지 남은 초. 한 판(RUN_IDLE_S 안에 이어진 글)에 RUN_MAX(5)편까지 — 넘으면 next 없음.
       주말(토 00:00~일 21:00 · Blog-Auto 주말 쉼과 같은 때)에는 w=1(주인이 화면에서 '주말에도 시작'을 누름)일 때만 · 아니면 {next: None, weekend: True}.
@@ -344,10 +345,16 @@ def ready(rv: Any, blog: str, tried: dict[str, str] | None = None) -> list[dict[
 
 
 # ── 누른 때 기준 예약 계획 (주인 11/23 13:45 — "예약 시간이 다 똑같은 거 같다. 내가 책갈피를 언제 누를지 모르니까, 한 번에 넣기 누른 시간 기준으로 적당히 시간 분배해서 세팅해줘")
-# 그 판의 첫 누름에 그 블로그의 남은 글 모두: 첫 글 = 누른 때 + 20~45분 · 다음은 70~160분씩 들쭉날쭉 · 분은 네이버 예약 칸(10분 단위) 10·20·40·50 (정각·30분 없음 ·
-# 이웃 글과 같은 분 자리 피함) · 사람 시간 07:30~23:00 (넘으면 다음 날 아침 · 토·일은 월요일로 — 주인이 '주말에도 시작'을 눌렀을 때만 주말 자리) ·
+# v6 (주인 11/24 — "시간 간격도 좀 불규칙하게 바꿔줘. 시간 단위만 불규칙으로 하는 게 아니라"): 사람이 올린 것처럼 —
+# 간격: 짧게(40~60분 · 가끔 두 글이 붙음)·보통(75~140분)·길게(2시간 반~4시간) 섞음 · 이웃 간격끼리 20분 넘게 차이 · 날마다 전체 폭(배율)이 다름 ·
+# 분: 네이버 예약 칸(10분 단위) 10·20·40·50 · 하루 한 블로그에서 같은 분 두 번까지 · 이웃 글과 같은 분 아님 · 아주 가끔 30분 (정각은 없음) ·
+# 세 블로그: 같은 날 다른 블로그 예약과 20분 넘게 · 씨앗 = 블로그+날짜+누른 때 (날마다 다른 모양 · 고정 아님).
+# 그대로: 첫 글 = 누른 때 + 20~45분 · 사람 시간 07:30~23:00 (넘으면 다음 날 아침 · 토·일은 월요일로 — '주말에도 시작'이면 주말 자리) ·
 # 이미 예약·발행한 그 블로그 시각과 40분 넘게 · kv 에 남겨 새 글쓰기 화면에서 다시 눌러도 같은 계획 (자리가 지났거나 없는 글만 새로) · 블로그마다 따로.
-FIRST_MIN, NEXT_MIN, CLASH_MIN, LATE_MIN = (20, 45), (70, 160), 40, 12
+FIRST_MIN, CLASH_MIN, LATE_MIN = (20, 45), 40, 12
+GAPS = (("short", (40, 55), 0.25), ("mid", (75, 140), 0.40), ("long", (150, 240), 0.35))  # 간격 종류 (분 · 비율)
+GAP_DIFF, NEAR_MIN, MIN_REPEAT, ODD_30 = 20, 20, 2, 0.08  # 이웃 간격 차이 · 다른 블로그와 · 같은 분 하루 두 번까지 · 30분 자리 확률
+SPREAD = (0.85, 1.2)  # 날마다 보통·긴 간격 배율 (하루 전체 폭이 날마다 다르게)
 DAY_H = ((7, 30), (22, 50))  # 끝은 10분 자리로 올려도 23:00 을 넘지 않게
 MINUTES = (10, 20, 40, 50)
 
@@ -391,46 +398,93 @@ def _fit(d: datetime, wk: bool, rng: Any = random) -> datetime:
     return d
 
 
-def _round(d: datetime, avoid: set[int]) -> datetime:
-    """분을 10·20·40·50 가운데 d 뒤 가장 가까운 자리로 (네이버 예약 칸 10분 단위 · 정각·30분 없음 · avoid 분 자리는 건너뜀)."""
-    d = d.replace(second=0, microsecond=0)
-    for k in range(0, 120):
-        x = d + timedelta(minutes=k)
-        if x.minute in MINUTES and (x.minute not in avoid or k >= 60):
-            return x
-    return d
+def _ok_min(m: int, odd: bool) -> bool:
+    return m in MINUTES or (odd and m == 30)
+
+
+def _gap(rng: Any, prev: float | None, spread: float) -> float:
+    """다음 간격(분) — 종류를 섞고, 앞 간격과 GAP_DIFF 넘게 다르게."""
+    g = 0.0
+    for _ in range(20):
+        lo, hi = rng.choices([b for _n, b, _p in GAPS], weights=[p for *_x, p in GAPS])[0]
+        g = rng.uniform(lo, hi) * (1.0 if lo < 70 else spread)
+        if prev is None or abs(g - prev) > GAP_DIFF + 10:  # 10분 자리로 옮겨도 차이가 남게 여유
+            return g
+    return g
 
 
 def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: ZoneInfo, *, wk: bool = False,
-             taken: list[str] | None = None, rng: Any = random) -> dict[str, str]:
-    """그 블로그의 남은 글 rows 의 예약 시각 {줄 id: 'YYYY-MM-DDTHH:MM'} — 살아 있는 계획은 그대로, 지났거나 없는 글만 새로 (kv 에 남김)."""
+             taken: list[str] | None = None, near: list[str] | None = None, rng: Any = None) -> dict[str, str]:
+    """그 블로그의 남은 글 rows 의 예약 시각 {줄 id: 'YYYY-MM-DDTHH:MM'} — 살아 있는 계획은 그대로, 지났거나 없는 글만 새로 (kv 에 남김).
+    near = 다른 블로그의 이미 한 예약 시각 (계획에 든 다른 블로그 시각은 kv 에서 읽음) — 같은 날 NEAR_MIN 안에 두지 않음."""
     allp = _plans(db)
     pl = allp.get(blog, {"slots": {}, "used": []})
     n = datetime.fromtimestamp(now, tz).replace(tzinfo=None, second=0, microsecond=0)
+    if rng is None:  # 블로그+날짜+누른 때 씨앗 (날마다·블로그마다 다른 모양)
+        rng = random.Random(f"{blog}|{n:%Y-%m-%dT%H:%M}")
     late = n + timedelta(minutes=LATE_MIN)
     ids = [str(i["id"]) for i in rows]
     keep = {k: t for k, t in pl["slots"].items() if k in ids and (d := _dt(t)) is not None and d > late}
     used = [t for t in pl["used"] if (d := _dt(t)) is not None and d > n - timedelta(days=1)]
     busy = [d for t in (*used, *(taken or []), *keep.values()) if (d := _dt(t)) is not None]
+    others = [d for b, p in allp.items() if b != blog for t in (*p["slots"].values(), *p["used"]) if (d := _dt(t))]
+    others += [d for t in (near or []) if (d := _dt(t))]
     new = [k for k in ids if k not in keep]
     if new:
+        spread = rng.uniform(*SPREAD)
+        mine = sorted(busy)
         base = max([d for t in keep.values() if (d := _dt(t))], default=None)
-        cur = base + timedelta(minutes=rng.randint(*NEXT_MIN)) if base else n + timedelta(minutes=rng.randint(*FIRST_MIN))
-        last_m = base.minute if base else -1
+        ks = sorted(d for t in keep.values() if (d := _dt(t)))
+        prev_gap = (ks[-1] - ks[-2]).total_seconds() / 60 if len(ks) > 1 and ks[-1].date() == ks[-2].date() else None
+        prev = base
         for k in new:
-            d = cur
-            for _ in range(40):
-                d = _round(_fit(d, wk, rng), {last_m})
-                if all(abs((d - b).total_seconds()) > CLASH_MIN * 60 for b in busy):
-                    break
-                d += timedelta(minutes=CLASH_MIN + 10)
+            d = _place(rng, n, prev, prev_gap, spread, wk, mine, others)
             keep[k] = d.strftime("%Y-%m-%dT%H:%M")
-            busy.append(d)
-            last_m = d.minute
-            cur = d + timedelta(minutes=rng.randint(*NEXT_MIN))
+            mine.append(d)
+            prev_gap = (d - prev).total_seconds() / 60 if prev is not None and prev.date() == d.date() else None
+            prev = d
     allp[blog] = {"slots": keep, "used": used}
     db.kv_set(KV_PLAN, json.dumps(allp, separators=(",", ":")))
     return keep
+
+
+def _inday(x: datetime, wk: bool) -> bool:
+    return DAY_H[0] <= (x.hour, x.minute) <= (23, 0) and (wk or x.weekday() < 5)
+
+
+def _place(rng: Any, n: datetime, prev: datetime | None, prev_gap: float | None, spread: float, wk: bool,
+           mine: list[datetime], others: list[datetime]) -> datetime:
+    """다음 글 한 자리 — 규칙을 하나씩 풀어 가며 (40분·사람 시간·정각 없음은 끝까지 지킴).
+    단계 4: 모두 · 3: 같은 날 4시간 반 넘는 간격 허용 · 2: 간격 종류를 앞 간격과 상관없이 · 1: 넓게 훑기(다른 블로그 20분·분·이웃 간격 규칙은 지킴) · 0: 그것도 풀기."""
+    for strict in (4, 3, 2, 1, 0):
+        for _ in range(30 if strict >= 2 else 1):
+            if prev is None:
+                target = n + timedelta(minutes=rng.randint(*FIRST_MIN))
+            else:
+                target = prev + timedelta(minutes=_gap(rng, prev_gap if strict >= 3 else None, spread))
+            target = _fit(target.replace(second=0, microsecond=0), wk, rng)
+            odd = rng.random() < ODD_30
+            span = 40 if strict >= 2 else 3 * 24 * 60
+            cands = [x for j in range(span) if _ok_min((x := target + timedelta(minutes=j)).minute, odd) and _inday(x, wk)]
+            if prev is not None and strict >= 2 and rng.random() < 0.3 and len(cands) > 1:  # 가끔 한 칸 건너 (가장 가까운 자리만 고르지 않게 · 첫 글은 그대로)
+                cands = cands[1:] + cands[:1]
+            for x in cands:
+                if any(abs((x - b).total_seconds()) <= CLASH_MIN * 60 for b in mine):
+                    continue
+                if strict >= 1:
+                    if any(x.date() == b.date() and abs((x - b).total_seconds()) <= NEAR_MIN * 60 for b in others):
+                        continue
+                    if prev is not None and x.minute == prev.minute:
+                        continue
+                    if sum(1 for b in mine if b.date() == x.date() and b.minute == x.minute) >= MIN_REPEAT:
+                        continue
+                if strict >= 1 and prev is not None and prev_gap is not None and prev.date() == x.date() \
+                        and abs((x - prev).total_seconds() / 60 - prev_gap) <= GAP_DIFF:
+                    continue
+                if strict >= 4 and prev is not None and prev.date() == x.date() and (x - prev) > timedelta(hours=4, minutes=30):
+                    continue  # 같은 날 긴 간격도 4시간 반 넘지 않게
+                return x
+    raise AssertionError("no slot")  # 사흘을 훑어도 40분 자리가 없을 수는 없음 (한 블로그 글은 몇 편뿐)
 
 
 def _used(db: Any, blog: str, rid: str) -> None:
@@ -555,7 +609,8 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
         if n >= RUN_MAX:
             return {"ok": True, "next": None, "left": len(rows), "wait": 0,
                     "text": f"{name}: 한 번에 {RUN_MAX}편까지만 올려요 (남은 글 {len(rows)}) — {int(RUN_IDLE_S // 60)}분쯤 뒤에 다시 눌러 주세요"}
-        slots = schedule(db, blog, rows, now, tz, wk=weekend(now, tz), taken=_taken(rv, blog))
+        slots = schedule(db, blog, rows, now, tz, wk=weekend(now, tz), taken=_taken(rv, blog),
+                         near=[t for b in NAMES if b != blog for t in _taken(rv, b)])
         i = min(rows, key=lambda x: slots.get(str(x["id"]), "~"))  # 계획 시각이 이른 글부터
         p, at = i["paste"], slots[str(i["id"])]
         label = _label(at, now, tz)

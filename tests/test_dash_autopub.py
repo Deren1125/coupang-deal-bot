@@ -189,12 +189,12 @@ def test_act_serves_only_fit_posts_in_slot_order_with_their_reserve_times(bot: D
     assert d == {"ok": True, "checked": True, "text": "할 일 줄 체크 ✓", "left": 2} and "pub:issue:13" in routine.done_ids(bot.db, DAY)
     assert [(r["name"], r["args"], r["rid"]) for r in routine.relay_rows(bot.db)] == [("pasted", {"blog": "issue", "pid": 13, "done": True}, "pub:issue:13")]
     assert json.loads(bot.db.kv_get(autopub.DAY_KEY + DAY))["res"][-1]["u"] == "223000000001"
-    # 둘째 글: 같은 계획의 다음 자리 (70~160분 뒤 · 분 자리가 앞 글과 다름) · 앞 글 뒤 77초가 될 때까지 쉼
+    # 둘째 글: 같은 계획의 다음 자리 (v6 — 40분~4시간 남짓 · 들쭉날쭉 · 분 자리가 앞 글과 다름) · 앞 글 뒤 77초가 될 때까지 쉼
     q = _go(bot, t + 20, a="next", b="issue")
     nx = q["next"]
     assert (q["n"], q["m"], q["wait"]) == (2, 3, 67) and nx["id"] == "rsv:issue:12" and kkumi.stamped(nx["html"]) == nx["at"] != ""
     d12 = datetime.fromisoformat(nx["at"])
-    assert timedelta(minutes=60) <= d12 - d13 <= timedelta(minutes=180) and d12.minute in autopub.MINUTES and d12.minute != d13.minute and nx["label"] == f"오늘 {d12:%H:%M}"
+    assert timedelta(minutes=40) < d12 - d13 <= timedelta(minutes=330) and d12.minute in autopub.MINUTES and d12.minute != d13.minute and nx["label"] == f"오늘 {d12:%H:%M}"
     assert _go(bot, t + 100, a="next", b="issue")["wait"] == 0
     # 점검에 걸려 멈춘 글: 발행하지 않았으므로 다시 누르면 같은 글부터 · 두 번 멈추면 오늘은 주지 않음 (직접)
     _go(bot, t + 110, a="done", b="issue", id="rsv:issue:12", r="stop", n="사진 0/1 — 빠진 사진을 넣어 주세요")
@@ -235,7 +235,7 @@ def test_slots_come_from_the_tap_time_and_a_retap_keeps_the_plan(bot: DealBot, t
     q = _go(bot, t + 2, a="next", b="issue")
     a11 = q["next"]["at"]
     assert q["next"]["id"] == "rsv:issue:11" and a11.startswith("2026-11-18T") and q["wait"] == 76  # 오늘 안 (다음 날 아침으로 밀지 않음)
-    assert timedelta(minutes=60) <= datetime.fromisoformat(a11) - datetime.fromisoformat(a12) <= timedelta(minutes=180) and q["plan"] == f"오늘 예약 {a11[11:]}"
+    assert timedelta(minutes=40) < datetime.fromisoformat(a11) - datetime.fromisoformat(a12) <= timedelta(minutes=330) and q["plan"] == f"오늘 예약 {a11[11:]}"
     # 새 글쓰기 화면에서 다시 눌러도 (그날 기록이 없어도) 남은 글은 같은 시각
     bot.db.kv_set(autopub.DAY_KEY + DAY, "{}")
     q = _go(bot, t + 600, a="next", b="issue")
