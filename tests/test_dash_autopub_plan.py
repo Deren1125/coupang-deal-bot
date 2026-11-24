@@ -35,7 +35,7 @@ def _check(slots: dict[str, str], tap: datetime) -> list[datetime]:
     assert len(set(ds)) == len(ds)  # 같은 블로그 두 글이 같은 자리 아님
     for k, d in enumerate(ds):
         assert d.minute in (10, 20, 30, 40, 50), d  # 10분 단위 · 정각 없음 (30분은 v6 부터 아주 가끔)
-        assert (7, 30) <= (d.hour, d.minute) <= (23, 0) and d.weekday() < 5, d
+        assert (7, 30) <= (d.hour, d.minute) <= (23, 0), d  # 주인 11/24 — 토·일도 자리
         if k:
             assert d - ds[k - 1] > timedelta(minutes=40) and d.minute != ds[k - 1].minute, ds  # 이웃 글끼리 분 자리 다름
     assert ds[0] > tap + timedelta(minutes=12)
@@ -56,14 +56,16 @@ def test_four_posts_spread_from_the_tap_time_not_the_same_slot() -> None:
     assert len(seen) > 4
 
 
-def test_late_tap_rolls_to_next_morning_and_friday_night_rolls_to_monday() -> None:
+def test_late_tap_rolls_to_next_morning_and_friday_night_rolls_to_saturday() -> None:
     slots = autopub.schedule(FakeDb(), "issue", _rows(3), _ts(2026, 11, 23, 21, 50), TZ, rng=random.Random(1))
     ds = _check(slots, datetime(2026, 11, 23, 21, 50))
     nxt = [d for d in ds if d.date() == datetime(2026, 11, 24).date()]
     assert nxt and nxt[0].hour < 9 and len(nxt) >= 1  # 23시 넘는 글은 다음 날 아침 07:30~ 부터
     fri = autopub.schedule(FakeDb(), "issue", _rows(3), _ts(2026, 11, 27, 21, 30), TZ, rng=random.Random(2))  # 금요일 밤
     ds = _check(fri, datetime(2026, 11, 27, 21, 30))
-    assert {d.weekday() for d in ds} <= {0, 4} and ds[-1].weekday() == 0  # 토·일 없이 월요일 아침
+    assert {d.weekday() for d in ds} <= {4, 5} and ds[-1].weekday() == 5  # 주인 11/24 — 주말도 평일처럼: 금요일 밤에 넘치면 토요일 아침
+    sat0 = autopub.schedule(FakeDb(), "issue", _rows(3), _ts(2026, 11, 28, 10, 5), TZ, rng=random.Random(4))  # 토요일에 누르면 토요일 자리
+    assert all(_d(t).weekday() == 5 for t in sat0.values()) and all(_d(t).minute in (10, 20, 30, 40, 50) for t in sat0.values())
     # 주인이 주말에 '주말에도 시작'을 눌렀으면 그 주말 자리 그대로
     sat = autopub.schedule(FakeDb(), "issue", _rows(2), _ts(2026, 11, 28, 10, 5), TZ, wk=True, rng=random.Random(3))
     assert all(_d(t).weekday() == 5 for t in sat.values())

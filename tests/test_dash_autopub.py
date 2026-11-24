@@ -289,16 +289,15 @@ def test_run_cap_weekend_pause_and_protection_cooldown(bot: DealBot, tmp_path: P
     assert _go(bot, t2 + 60, a="done", b="issue", r="wall")["until"] == t2 + 86400  # 글 번호 없이 와도 · 이미 쉬는 중이면 늘리지 않음
     assert autopub.today(bot.db, t2 + 60, TZ, routine.view(bot, now=t2 + 60))["by"]["issue"]["line"].endswith("11/19 11:23까지 쉬어요 — 그동안은 직접 올려 주세요")
     assert _go(bot, t2 + 60, a="next", b="finance")["next"] is None  # 다른 블로그는 쉬지 않음 (올릴 글이 없을 뿐)
-    # 주말 (토 00:00 ~ 일 21:00): 주인이 '주말에도 시작'을 눌렀을 때만 (w=1) · 일요일 21시부터는 평소대로 (월 아침 글)
+    # 주인 11/24 — 주말도 평일처럼 (11/21 주말 쉼을 덮음): 토·일에도 '주말에도 시작' 없이 바로 · 옛 쉼은 WEEKEND_PAUSE 로만
     sat, sun = "2026-11-21", "2026-11-22"
+    assert autopub.WEEKEND_PAUSE is False
     assert [autopub.weekend(at(bot, d_, hm), TZ) for d_, hm in ((DAY, "10:00"), (sat, "00:10"), (sun, "20:59"), (sun, "21:00"), ("2026-11-23", "07:00"))] \
-        == [False, True, True, False, False]
+        == [False] * 5
     with_routine(tmp_path, {**rows, "day": sat})
     ts = at(bot, sat, "10:00")
     q = _go(bot, ts, a="next", b="finance")
-    assert q["next"] is None and q["weekend"] is True and "주말에도 시작" in q["text"]
-    q = _go(bot, ts, a="next", b="finance", w="1")
-    assert "weekend" not in q and q["next"] is None  # (드라마는 올릴 글이 없음 — 주말 막이는 지나감)
+    assert "weekend" not in q and q["next"] is None  # (드라마는 올릴 글이 없음 — 주말 막이 없음)
     # 오늘 목록이 아니면 아무것도 주지 않음
     with_routine(tmp_path, {**rows, "day": "2026-11-17"})
     q = _go(bot, at(bot, "2026-11-19", "12:00"), a="next", b="finance")
