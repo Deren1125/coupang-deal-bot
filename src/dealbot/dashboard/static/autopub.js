@@ -1,4 +1,4 @@
-/* '하루치 한 번에 (발행까지)' 진행기 v5 (v5: 11/23 13시 아이패드 v4 — 제목·본문·발행창은 됐는데 '포스트잇 글이 안 들어감': 주인 손이 본문에 남은 채(꾸미기는 붙여넣기 칸으로 손이 빠진 뒤) 붙여넣어 꾸미기 v7 의 포스트잇 칸 고르기가 안 먹음 → 본문을 누른 뒤 꾸미기처럼 편집 칸 밖 칸으로 포커스를 뺐다가 시작 · 포스트잇마다 화면에서 다시 읽어 빠진 글을 적고 「포스트잇 글 복사」 · 본문을 눌렀는데 첫 조각이 안 들어가면(13:40 3/4) 본문이 빈 때만 '한 번 더 눌러 주세요' · 예약 시각은 누른 때 기준 계획을 맨 위에 · v4: 11/23 12시 아이패드 v3 — 제목·본문 둘 다 빈 칸: 스크립트는 SE ONE 커서를 못 옮기고(새 창 포커스 → 본문) v3 는 본문에 든 제목을 DOM 에서 지워 에디터가 붙여넣기를 안 받음 → 글마다 주인이 제목 칸·본문을 한 번씩 누르면(진짜 누름) 그 자리에 붙여넣기 · 에디터 글을 스크립트로 지우지 않음 · v3: 11/23 11:36 아이패드 — v2 도 제목을 못 넣음: 아무것도 누르기 전에 처음 커서(제목)로 붙여넣기 · 늦게 그리는 제목을 기다려 두 번 읽음 · 끝내 안 되면 본문만 넣고 발행 전에 멈춤 + '제목 복사' · v2: 제목이 본문에 들어가던 것 · 주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지"). autopub.py 가 줄여 책갈피 주소에 통째로 넣는다
+/* '하루치 한 번에 (발행까지)' 진행기 v6 (v6: 11/24 주인 — 사진은 원고의 90% 넘고 2장까지 빠지면, 태그는 90% 넘거나 1개만 빠지면 발행하고 요약에 적음 (다시 점검도 같게) · 원고보다 사진이 많으면(같은 사진 겹침) 멈춤 · 가운데 블로그(드라마·데런픽)는 원고에서 가운데인 글 줄이 화면에서도 가운데인지 봄 (2줄 넘게 어긋나면 멈추고 '전체 선택 → 가운데 단추') · 꾸미기 v11: 사진이 30초 안에 다 안 올라가도 주소로 한 번 더 넣지 않음 (같은 사진 두 장의 원인) · 태그는 네이버처럼 글자·숫자만 남겨 넣고 비교·한 번 더 넣어 봄 · v5: 11/23 13시 아이패드 v4 — 제목·본문·발행창은 됐는데 '포스트잇 글이 안 들어감': 주인 손이 본문에 남은 채(꾸미기는 붙여넣기 칸으로 손이 빠진 뒤) 붙여넣어 꾸미기 v7 의 포스트잇 칸 고르기가 안 먹음 → 본문을 누른 뒤 꾸미기처럼 편집 칸 밖 칸으로 포커스를 뺐다가 시작 · 포스트잇마다 화면에서 다시 읽어 빠진 글을 적고 「포스트잇 글 복사」 · 본문을 눌렀는데 첫 조각이 안 들어가면(13:40 3/4) 본문이 빈 때만 '한 번 더 눌러 주세요' · 예약 시각은 누른 때 기준 계획을 맨 위에 · v4: 11/23 12시 아이패드 v3 — 제목·본문 둘 다 빈 칸: 스크립트는 SE ONE 커서를 못 옮기고(새 창 포커스 → 본문) v3 는 본문에 든 제목을 DOM 에서 지워 에디터가 붙여넣기를 안 받음 → 글마다 주인이 제목 칸·본문을 한 번씩 누르면(진짜 누름) 그 자리에 붙여넣기 · 에디터 글을 스크립트로 지우지 않음 · v3: 11/23 11:36 아이패드 — v2 도 제목을 못 넣음: 아무것도 누르기 전에 처음 커서(제목)로 붙여넣기 · 늦게 그리는 제목을 기다려 두 번 읽음 · 끝내 안 되면 본문만 넣고 발행 전에 멈춤 + '제목 복사' · v2: 제목이 본문에 들어가던 것 · 주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지"). autopub.py 가 줄여 책갈피 주소에 통째로 넣는다
    (대시보드에서 코드를 받지 않음 — 데이터만 · 화면에서 바로 받지 않는 파일). 서버는 네이버를 열지도 로그인하지도 않는다 — 모두 주인이 로그인한 자기 사파리에서.
    한 번 누르면: 그 블로그(로그인한 아이디 — 우리 블로그가 아니면 거절)의 준비된 글을 차례로 받아 → 새 글쓰기 화면 → 제목 → 본문·꾸미기·사진·태그·카테고리·예약 시각
    (아래 CORE = 꾸미기 책갈피 kkumi.js 그대로) → 스스로 점검 → 깨끗하면 '해 봄'을 먼저 남기고 마지막 발행 단추를 누름 → 발행 확인(저장 요청 답 · 글 주소 · 끝 알림)
@@ -11,7 +11,7 @@
    네이버가 자동입력 방지·보호조치·이용 제한·한도 안내를 보이면 풀지 않고 그 자리에서 멈춘다 → 대시보드가 그 블로그를 24시간 쉬게 함.
    알림·확인·입력 창은 쓰지 않는다 (사파리에서 멈춤 — 모두 화면의 한 줄과 단추 하나로). */
 async CFG => {
-const V = 5;
+const V = 6;
 const W = window, D0 = document, S = m => new Promise(r => setTimeout(r, m));
 // 한글 글은 autopub.py 가 Z('…') 로 줄여 넣는다 (seoi.pack — 한 번에 책갈피 one.js 와 같은 Z · 껍데기만 · 정규식 안에 따옴표 없음 · 한글 글 안에 역슬래시 없음)
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
@@ -23,13 +23,13 @@ const OKAY = /(발행|예약|등록)(이|을)?\s*(완료|되었|됐)/;
 const DISC = /수수료를\s*(받|제공|지급)/;
 const SB = 'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads';
 const DOWN = '대시보드에 닿지 못했어요 — 잠시 뒤 책갈피를 다시 눌러 주세요';
-const TAG = '하루치 한 번에 · ';
-const sp = t => (t || '').replace(/\s+/g, ' ').trim();
+const TAG = '하루치 한 번에 · ', BK = '발행창이 예약으로 되어 있어요 (지금 발행할 글)', NT = '태그 줄이 없어 발행창을 못 채웠어요';
+const sp = t => (t || '').replace(/\s+/g, ' ').trim(), QA = (e, q) => [...e.querySelectorAll(q)], mk = t => D0.createElement(t);
 let fr = null, K = null, sig = {}, sbOn = 1, DIR = 0;
 try { DIR = W.localStorage.getItem('apbd') === '1'; } catch (e) {}
 // 창과 그 안쪽 창들의 문서 (같은 출처만 — 못 읽는 창은 건너뜀)
 const docs = (w, o = []) => {
-  try { const d = w.document; if (d && d.body) { o.push(d); for (const f of d.querySelectorAll('iframe,frame')) docs(f.contentWindow, o); } } catch (e) {}
+  try { const d = w.document; if (d && d.body) { o.push(d); for (const f of QA(d, 'iframe,frame')) docs(f.contentWindow, o); } } catch (e) {}
   return o;
 };
 const ed = ds => ds.find(d => d.querySelector('.se-content')) || null;
@@ -40,19 +40,19 @@ const ask = async F => {
 };
 // ── 누른 화면 읽기: 글쓰기 화면 · 블로그 (주소의 블로그 아이디 = 로그인한 내 블로그 — 글쓰기는 내 블로그만 열림)
 const first = docs(W), E0 = ed(first);
-const ui = D0.createElement('div'), bar = D0.createElement('div'), list = D0.createElement('div'), btn = D0.createElement('button'), cp = D0.createElement('button');
+const ui = mk('div'), bar = mk('div'), list = mk('div'), btn = mk('button'), cp = mk('button');
 ui.id = 'apb';
-bar.style.cssText = 'padding:10px 14px;background:#111;color:#fff;font:600 15px/1.4 -apple-system,sans-serif';
-list.style.cssText = 'max-height:30vh;overflow:auto;padding:0 14px;background:#f4f5f7;color:#111;font:14px/1.6 -apple-system,sans-serif';
+bar.style.cssText = 'padding:10px 14px;background:#111;color:#fff;font:600 15px/1.4 system-ui';
+list.style.cssText = 'max-height:30vh;overflow:auto;padding:0 14px;background:#f4f5f7;color:#111;font:14px/1.6 system-ui';
 btn.type = 'button';
-btn.style.cssText = 'display:none;width:100%;min-height:48px;border:0;background:#03a94f;color:#fff;font:600 16px -apple-system,sans-serif';
+btn.style.cssText = 'display:none;width:100%;min-height:48px;border:0;background:#03a94f;color:#fff;font:600 16px system-ui';
 cp.type = 'button';
 cp.style.cssText = btn.style.cssText.replace('#03a94f', '#1b64da');
 ui.append(bar, list, btn, cp);
 // v5: 맨 위에 그 블로그 예약 계획 '오늘 예약 14:20 · 16:10' (대시보드가 누른 때 기준으로 나눔)
 let PL = '';
 const say = t => { bar.textContent = TAG + (PL ? PL + ' · ' : '') + t; };
-const line = t => { const p = D0.createElement('p'); p.style.margin = '8px 0'; p.textContent = t; list.append(p); };
+const line = t => { const p = mk('p'); p.style.margin = '8px 0'; p.textContent = t; list.append(p); };
 // 단추 하나 (고쳤어요 · 주말에도 시작) — 책갈피를 한 번 더 눌러도 같은 뜻 (W.__apb)
 const ask1 = t => { btn.textContent = t; btn.style.display = t ? 'block' : 'none'; sig.go = 0; };
 btn.onclick = W.__apb = () => { sig.go = 1; };
@@ -80,10 +80,10 @@ const mines = CFG.bl.filter(x => ids.includes(x[0])), mine = mines.length === 1 
 if (!mine) { put(1); say(mines.length ? '어느 블로그 계정인지 헷갈려요 — 그 블로그로 로그인한 글쓰기 화면에서 눌러 주세요' : '우리 블로그 계정의 글쓰기 화면이 아니에요' + (ids[0] ? ' (' + ids[0] + ')' : '') + ' — 아무것도 하지 않았어요'); setTimeout(() => ui.remove(), 9000); return; }
 const BLOG = mine[1], URL_ = E0.location.href.split('#')[0];
 // ── 화면: 이어가기(iframe) = 누른 화면을 비우고 위에 한 줄 + 아래 글쓰기 창 · 글마다 한 번(DIR) = 글쓰기 화면 아래쪽에 한 줄
-const box = D0.createElement('div');
+const box = mk('div');
 if (DIR) put(1);
 else {
-  const nb = D0.createElement('body');
+  const nb = mk('body');
   nb.style.cssText = 'margin:0;background:#fff';
   box.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;background:#fff;z-index:2147483647';
   ui.style.flex = 'none';
@@ -94,7 +94,7 @@ else {
 // ── 글쓰기 창 열기 (글마다 새로) → 글쓰기 문서 | 'login' | null
 const open = async sb => {
   if (fr) fr.remove();
-  fr = D0.createElement('iframe');
+  fr = mk('iframe');
   if (sb) fr.setAttribute('sandbox', SB);
   fr.style.cssText = 'flex:1;width:100%;border:0;background:#fff';
   fr.src = URL_;
@@ -113,7 +113,7 @@ const outer = d => {
   let t = '';
   try {
     t = d.body.innerText || '';
-    for (const c of d.querySelectorAll('.se-content,.se-documentTitle,#apb')) t = t.replace(c.innerText || '', '');
+    for (const c of QA(d, '.se-content,.se-documentTitle,#apb')) t = t.replace(c.innerText || '', '');
   } catch (e) {}
   return t.slice(0, 8000).toLowerCase();
 };
@@ -122,13 +122,13 @@ const wall = ds => {
   for (const d of ds) {
     const t = outer(d), h = WALL.find(w => t.includes(w));
     if (h) return h;
-    try { if ([...d.querySelectorAll('iframe[src*="captcha" i],img[src*="captcha" i],[id*="captcha" i],[class*="captcha" i]')].some(seen)) return 'captcha'; } catch (e) {}
+    try { if (QA(d, 'iframe[src*="captcha" i],img[src*="captcha" i],[id*="captcha" i],[class*="captcha" i]').some(seen)) return 'captcha'; } catch (e) {}
   }
   return '';
 };
 // 네이버 안내 창 (제목 없음 등)의 글 | ''
 const popup = ds => {
-  for (const d of ds) for (const e of d.querySelectorAll('.se-popup-alert,.se-popup-alert-confirm,[class*="layer_alert"],[role="alertdialog"]')) if (seen(e)) return sp(e.innerText) || '안내 창';
+  for (const d of ds) for (const e of QA(d, '.se-popup-alert,.se-popup-alert-confirm,[class*="layer_alert"],[role="alertdialog"]')) if (seen(e)) return sp(e.innerText) || '안내 창';
   return '';
 };
 // ── 지켜보기: 글쓰기 창의 저장 요청 답(글 번호) · 막힌 창 이동
@@ -166,9 +166,11 @@ const arm = d => {
 };
 // 제목 칸 (v2: .se-title-text · 안내 글 '제목' 으로도 찾음)
 const TTL = '.se-documentTitle,.se-section-documentTitle,.se-title-text';
-const TP = '.se-text-paragraph', ttl = () => { const d = K.D, t = d.querySelector(TTL.replace(/,/g, ' ' + TP + ',') + ' ' + TP + ',.se-title-text'), h = t || [...d.querySelectorAll('[class*=placeholder]')].find(e => sp(e.textContent) === '제목'); return h && (t || h.closest('p') || h.parentElement); };
+const TP = '.se-text-paragraph', ttl = () => { const d = K.D, t = d.querySelector(TTL.replace(/,/g, ' ' + TP + ',') + ' ' + TP + ',.se-title-text'), h = t || QA(d, '[class*=placeholder]').find(e => sp(e.textContent) === '제목'); return h && (t || h.closest('p') || h.parentElement); };
 // v3: 제목 칸의 글 = 제목 칸 안 글 줄을 모두 (SE ONE 은 넣은 글을 span 안에 나중에 다시 그림 — 늘 새로 찾아 읽음)
-const tt = () => { const t = ttl(), c = t && (t.closest(TTL) || t), q = c ? [...c.querySelectorAll(TP)] : []; return t ? sp((q.length ? q : [t]).map(K.real).join(' ')) : ''; };
+const tt = () => { const t = ttl(), c = t && (t.closest(TTL) || t), q = c ? QA(c, TP) : []; return t ? sp((q.length ? q : [t]).map(K.real).join(' ')) : ''; };
+// 가운데 글인가 (사진 줄 빼고 가운데 글 줄이 반 넘게)
+const MID = it => (it.html.match(/<p style="text-align:center">(?!<img)/g) || []).length * 2 > (it.html.match(/<p[ >]/g) || []).length;
 const TCP = '제목 칸이 비었어요 — 「제목 복사」 → 제목 칸을 길게 눌러 붙여넣은 뒤 초록 단추 (또는 책갈피 한 번 더)';
 // v4 (주인 11/23 12시 아이패드 v3 — 제목·본문 둘 다 빈 칸): 진짜 기기에서 SE ONE 커서는 사람의 진짜 누름으로만 옮겨짐 (꾸미기 10/29 — 꾸미기는 주인이 본문을 누른 뒤 돎).
 // 새로 연 글쓰기 창에는 누른 적이 없어 스크립트 포커스는 본문으로 가고, v3 는 본문에 든 제목을 DOM 에서 직접 지워 에디터가 그 뒤 붙여넣기를 받지 않음.
@@ -215,7 +217,7 @@ const pre = (it, name) => async k => {
   for (let n = 0; n < 3; n++) {
     const pop = k.vis(['.se-popup-alert-confirm', '.se-popup-alert', '.se-popup']);
     if (!pop || !/작성\s?중인\s?글|이어서\s?작성|임시저장된\s?글/.test(pop.innerText)) break;
-    const c = [...pop.querySelectorAll('button')].find(b => /cancel/i.test(b.className) || sp(b.innerText) === '취소');
+    const c = QA(pop, 'button').find(b => /cancel/i.test(b.className) || sp(b.innerText) === '취소');
     if (!c || /발행|확인|등록/.test(c.innerText)) break;
     k.press(c);
     await S(900);
@@ -257,6 +259,8 @@ const pre = (it, name) => async k => {
     }
     await S(1000);
     if (tt() !== T0) { K.why = '제목 칸이 원고와 달라요'; return false; }
+    // v6: 가운데 글이면 커서가 제목 칸에 있는 지금 도구줄 가운데 단추 (주인이 누른 자리라 먹음)
+    if (MID(it)) await k.titleMid();
   }
   // 본문: 꾸미기와 같게 주인이 본문을 한 번 누른 뒤 · v5: 선택이 제목 칸이면 다시 눌러 달라고 함
   for (let n = 0; n < 3; n++) {
@@ -265,6 +269,9 @@ const pre = (it, name) => async k => {
     await k.wait(sel, 1500);
     if (sel() !== 1) break;
   }
+  // v6: 가운데 글이면 주인이 누른 빈 본문 줄에서 도구줄 가운데 단추 — 붙여넣는 글이 가운데를 이어받음 (붙여넣기가 정렬을 잃어도)
+  const cb = MID(it) && k.vis(k.MAIN_CENTER);
+  if (cb) { k.press(cb); await S(400); }
   await settle(name, 1);
   return true;
 };
@@ -272,12 +279,12 @@ const pre = (it, name) => async k => {
 const booked = () => { const r = K.any(['label,[role=radio]'], e => e.innerText.replace(/\s/g, '') === '예약'); return !!r && (r.control ? r.control.checked : r.getAttribute('aria-checked') === 'true'); };
 // v5: 포스트잇 글 — 원고 인용구마다 첫 줄이 화면의 포스트잇 안에 있는지 · 밖(본문)에 더 있는지 (빈칸·안 보이는 글자 빼고)
 const tz = t => (t || '').replace(/[\s\u200b-\u200d\u2060-\u2064\ufeff]/g, ''), nn = (a, b) => a.split(b).length - 1;
-let miss = '';
+let miss = '', nt = [];
 const pits = (src, P) => {
-  const bq = [...src.querySelectorAll('blockquote')], qi = tz(K.quotes().map(q => q.textContent).join('|')), al = tz(K.D.querySelector('.se-content').textContent), st = tz(src.textContent), sq = tz(bq.map(q => q.textContent).join('|'));
+  const bq = QA(src, 'blockquote'), qi = tz(K.quotes().map(q => q.textContent).join('|')), al = tz(K.D.querySelector('.se-content').textContent), st = tz(src.textContent), sq = tz(bq.map(q => q.textContent).join('|'));
   miss = '';
   bq.forEach((q, i) => {
-    const l = [...q.querySelectorAll('p')].map(p => sp(p.textContent)).filter(Boolean), x = l[0] || sp(q.textContent), p = tz(x).slice(0, 16), out = nn(al, p) - nn(qi, p) > nn(st, p) - nn(sq, p), h = '포스트잇 ' + (i + 1) + ' 「' + x.slice(0, 14) + '」 ';
+    const l = QA(q, 'p').map(p => sp(p.textContent)).filter(Boolean), x = l[0] || sp(q.textContent), p = tz(x).slice(0, 16), out = nn(al, p) - nn(qi, p) > nn(st, p) - nn(sq, p), h = '포스트잇 ' + (i + 1) + ' 「' + x.slice(0, 14) + '」 ';
     if (!p) return;
     if (!qi.includes(p)) { P.push(h + (out ? '글이 포스트잇 밖(아래 줄)에 들어갔어요 — 그 줄을 지우고 ' : '글이 안 들어갔어요 — ') + '「포스트잇 글 복사」 → 빈 포스트잇 안을 눌러 붙여넣기'); miss = miss || (l.length ? l.join('\n') : x); }
     else if (out) P.push(h + '글이 포스트잇 밖에도 있어요 — 밖의 줄을 지워 주세요');
@@ -285,12 +292,18 @@ const pits = (src, P) => {
 };
 const lite = (it, R) => {
   const P = [], T = tt(), bt = sp(K.body_().map(p => p.textContent).join(' ')), src = new DOMParser().parseFromString(it.html, 'text/html').body;
-  const ls = [...src.querySelectorAll('p')].map(p => sp(p.textContent.replace(/[⁣⁤​-‍﻿]/g, ''))).filter(t => t && !/^https?:/.test(t));
-  const im = [...K.D.querySelectorAll('.se-component.se-image img')].filter(i => !/\/media\/blog_/.test(i.src)).length, need = Math.max(it.photos, R.pics[1]);
+  const ls = QA(src, 'p').map(p => sp(p.textContent.replace(/[⁣⁤​-‍﻿]/g, ''))).filter(t => t && !/^https?:/.test(t));
+  const im = QA(K.D, '.se-component.se-image img').filter(i => !/\/media\/blog_/.test(i.src)).length, need = Math.max(it.photos, R.pics[1]);
   if (T !== sp(it.title)) P.push(T ? '제목이 원고와 달라요' : TCP);
   else if (!sp(src.textContent).includes(sp(it.title)) && bt.includes(sp(it.title))) P.push('제목이 본문에 들어갔어요');
   for (const l of [ls[0], ls[ls.length - 1]]) if (l && !K.count(l.slice(0, 20))) P.push('본문이 원고와 달라요 (' + l.slice(0, 12) + '…)');
-  if (im < need) P.push('사진 ' + im + '/' + need + ' — 빠진 사진을 넣어 주세요');
+  // v6 (주인 11/24): 사진은 원고의 90% 넘고 2장까지 빠지면 발행 (요약에 적음) · 원고보다 많으면(같은 사진 겹침) 멈춤
+  if (im < need) { if (need - im > 2 || im < need * .9) P.push('사진 ' + im + '/' + need + ' — 빠진 사진을 넣어 주세요'); else nt.push('사진 ' + (need - im) + '장 빠짐'); }
+  if (K.nImg() > need) P.push('사진 ' + (K.nImg() - need) + '장 더 — 겹친 사진을 지워 주세요');
+  // v6 (주인 11/24 '드라마·데런픽 가운데 정렬이 제대로 안 됨'): 원고에서 가운데인 글 줄이 화면에서 가운데가 아니면 (포스트잇·빈 줄 빼고) — 1줄은 넘어감
+  const off = QA(src, 'p[style*=center]').filter(p => (x => x.length > 3 && !p.closest('blockquote') && K.body_().some(q => tz(q.textContent).startsWith(x) && !K.centered(q)))(tz(p.textContent).slice(0, 12))).length;
+  if (MID(it) && !K.centered(ttl())) nt.push('제목 가운데 아님');
+  if (off) (off > 1 ? P : nt).push('가운데 아닌 줄 ' + off + (off > 1 ? ' — 본문 「전체 선택」 → 위 가운데 단추' : ''));
   if (K.quotes().length < R.quotes[1]) P.push('포스트잇 ' + K.quotes().length + '/' + R.quotes[1]);
   else pits(src, P);
   if (K.cards() < R.cards[1]) P.push('링크 카드 ' + K.cards() + '/' + R.cards[1]);
@@ -298,22 +311,26 @@ const lite = (it, R) => {
   if (!!it.disc !== DISC.test(bt)) P.push(it.disc ? '제휴 고지 줄이 빠졌어요' : '원고에 없는 제휴 고지 줄이 있어요');
   return P;
 };
-const when = (it, R, w) => it.at ? (!R.book ? '예약 시각이 글에 없어요' : w ? '예약 ' + (R.at || '') + ' 못 채움 (' + w + ')' + (/날짜/.test(w) ? ' — 발행창 예약에서 그 날짜를 직접 고른 뒤 초록 단추 (시·분은 다시 채워요)' : '') : '') : booked() ? '발행창이 예약으로 되어 있어요 (지금 발행할 글)' : '';
+const when = (it, R, w) => it.at ? (!R.book ? '예약 시각이 글에 없어요' : w ? '예약 ' + (R.at || '') + ' 못 채움 (' + w + ')' + (/날짜/.test(w) ? ' — 발행창 예약에서 그 날짜를 직접 고른 뒤 초록 단추 (시·분은 다시 채워요)' : '') : '') : booked() ? BK : '';
+// v6 (주인 11/24): 태그는 90% 넘거나 1개만 빠지면 발행 (빠진 태그 이름을 요약에)
+const tg = (R, n, P) => { const m = R.tagList.length; if (n < m) (m - n > 1 && n < m * .9 ? P : nt).push('태그 ' + n + '/' + m + ' 빠짐 ' + (R.tagMiss || []).join(',')); };
 const chk = (it, R) => {
+  nt = [];
   const P = [...new Set(R.bad)].filter(x => x !== '포스트잇 글이 안 들어감'), w = when(it, R, R.why);
-  if (!R.tagList) P.push('태그 줄이 없어 발행창을 못 채웠어요');
-  else if (R.tags[0] < R.tags[1]) P.push('태그 ' + R.tags[0] + '/' + R.tags[1]);
+  if (!R.tagList) P.push(NT);
+  else tg(R, R.tags[0], P);
   if (R.tagList && w) P.push(w);
   return [...P, ...lite(it, R)];
 };
 const again = async (it, R) => {
   const P = [];
+  nt = [];
   say('「' + it.title + '」 다시 점검하는 중');
   try {
-    if (!R.tagList) P.push('태그 줄이 없어 발행창을 못 채웠어요');
+    if (!R.tagList) P.push(NT);
     else {
       const [n, why] = await K.tagsIn(R.tagList), c = R.cat ? await K.catIn(R.cat) : '', w = when(it, R, it.at && R.book ? await K.bookIn(R.book) : '');
-      if (n < R.tagList.length || why) P.push('태그 ' + n + '/' + R.tagList.length);
+      tg(R, n, P);
       if (c) P.push('카테고리 ' + c);
       if (w) P.push(w);
     }
@@ -343,7 +360,7 @@ const one = async (it, at) => {
   try { await CORE(DIR ? D0 : fr.contentDocument, t => { msgs.push(String(t)); }, () => false, {h: it.html, t: it.text, re: again1(name)}, k => { R = k.R; return pre(it, name)(k); }); } catch (e) { msgs.push('오류: ' + e); }
   if (!R || !R.finished) return {r: wall(root()) ? 'wall' : 'fail', n: wall(root()) || (K && K.why) || sp(msgs[msgs.length - 1] || '글을 넣지 못했어요').slice(0, 70)};
   let P = chk(it, R), held = 0, t0 = 0, gone = 0;
-  sig.fin = () => sig.sent = sig.sent || ask({a: 'done', b: BLOG, id: it.id, r: 'ok', u: sig.u || ''});
+  sig.fin = () => sig.sent = sig.sent || ask({a: 'done', b: BLOG, id: it.id, r: 'ok', u: sig.u || '', n: nt.join(' · ')});
   for (;;) {
     if (!P.length) {
       // 발행을 누르기 전에 대시보드에 '해 봄'을 먼저 남김 — 발행 뒤 화면이 닫혀도 같은 글을 또 주지 않게 (두 번 발행 막기)
@@ -353,7 +370,7 @@ const one = async (it, at) => {
       await S(300);
       if (tt() !== sp(it.title)) P = [tt() ? '제목이 원고와 달라요' : TCP];
       // v5 (주인 11/23 14:22 — 예약을 못 채운 글이 '현재'로 발행 중): 발행 바로 전에 발행창 '예약'/'현재'를 한 번 더 읽어 계획과 다르면 절대 안 누름
-      else if (!!it.at !== booked()) P = [it.at ? '발행창이 현재로 되어 있어요 — 예약 ' + (R.at || '') + ' 을 고른 뒤 초록 단추' : '발행창이 예약으로 되어 있어요 (지금 발행할 글)'];
+      else if (!!it.at !== booked()) P = [it.at ? '발행창이 현재로 되어 있어요 — 예약 ' + (R.at || '') + ' 을 고른 뒤 초록 단추' : BK];
       else if (!held) { const h = await ask({a: 'done', b: BLOG, id: it.id, r: 'hold'}); if (!h || !h.ok) return {r: 'fail', n: (h && h.text) || '대시보드에 닿지 못했어요 (발행 전)'}; held = 1; }
       const b = fin();
       if (!P.length) if (!b) P = ['마지막 발행 단추를 못 찾았어요'];
@@ -372,7 +389,7 @@ const one = async (it, at) => {
       for (const d of ds) arm(d);
       const m = ds.map(d => !WRITE.test(d.location.href) && PUB.exec(d.location.href)).find(Boolean), h = wall(ds);
       gone = ed(ds) ? 0 : gone + 1;
-      if (sig.net || m || (t0 && (sig.err >= t0 || ds.some(d => OKAY.test(outer(d))) || (gone > 3 && ds.length && ds.every(d => d.readyState === 'complete'))))) { ask1(''); return {r: 'ok', u: sig.u || (m && (m[1] || m[2])) || ''}; }
+      if (sig.net || m || (t0 && (sig.err >= t0 || ds.some(d => OKAY.test(outer(d))) || (gone > 3 && ds.length && ds.every(d => d.readyState === 'complete'))))) { ask1(''); return {r: 'ok', u: sig.u || (m && (m[1] || m[2])) || '', n: nt.join(' · ')}; }
       if (h) return {r: 'wall', n: h};
       if (sig.go) { ask1(''); copy(''); P = await again(it, R); break; }
       if (!t0) { if (gone > 8) return {r: 'fail', n: '글쓰기 화면이 닫혔어요'}; continue; }

@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v10 (v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v11 (v11: 11/24 사진이 30초 안에 다 안 올라가도 사진 칸이 생겼으면 주소로 또 넣지 않음 (라커룸 김혜성 글 같은 사진 두 장) · 태그는 네이버처럼 글자·숫자·_ 만 남기고 겹친 것 빼고 30개까지 · 안 들어간 태그는 한 번 더, 그래도 없으면 이름을 알림에 · v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -20,7 +20,7 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 10;
+const V = 11;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => qa(D, CARD).length;
@@ -100,8 +100,12 @@ const pic = async u => {
     dt.items.add(new W.File([b], 'p.jpg', {type: 'image/jpeg'}));
     setSel(body_().slice(-1)[0]);
     host().dispatchEvent(new W.ClipboardEvent('paste', {bubbles: true, cancelable: true, clipboardData: dt}));
-    if (await wait(() => { const a = qa(D, '.se-component.se-image img'), i = a[a.length - 1]; return a.length > n && /^https:/.test(i.src) && !i.src.includes(me); }, 30000)) return '';
+    const up = () => { const a = qa(D, '.se-component.se-image img'), i = a[a.length - 1]; return a.length > n && /^https:/.test(i.src) && !i.src.includes(me); };
+    if (await wait(up, 30000)) return '';
+// v11 (11/24 라커룸 김혜성 글 '같은 사진이 여러 개'): 30초 안에 다 안 올라가도 사진 칸이 생겼으면 그 사진은 올라가는 중 — 주소로 한 번 더 넣지 않음 (늦게 올라간 파일 + 주소 사진 = 같은 사진 두 장)
+    if (nImg() > n) return await wait(up, 60000) ? '' : 'slow';
   } catch (e) {}
+  if (nImg() > n) return 'slow';
   return await pasteIn('<p><img src="' + esc(u).replace(/"/g, '%22') + '"></p>', '', '') ? 'url' : 'x';
 };
 const shut = () => {
@@ -230,10 +234,12 @@ const quote = async b => {
 const any = (qs, f) => { for (const q of qs) for (const d of [document, D]) for (const e of qa(d, q)) if (seen(e) && (!f || f(e))) return e; return null; };
 const tagIn = () => any(["input[class*='tag_input'],input[placeholder*='태그']"]);
 const pubBtn = () => any(["button[class*='publish_btn']"], e => !e.closest("[class*='layer']"));
+// v11 (11/24 드라마 '태그 13/14'): 네이버 태그는 글자·숫자·_ 만 (빈칸·:·.·%·가운뎃점 등은 빠짐 · 영어 대소문자는 같은 태그) — 넣기 전·비교할 때 같은 식으로
+const tn = t => (t || '').replace(/[^\p{L}\p{N}_]/gu, '').toLowerCase();
 const chips = t => {
   let box = tagIn();
   for (let k = 0; box && k < 6 && !(box.innerText || '').includes('#'); k++) box = box.parentElement;
-  return !!box && (box.innerText || '').replace(/\s/g, '').includes('#' + t);
+  return !!box && (box.innerText || '').split('#').slice(1).some(x => tn(x.trim().split(/\s/)[0]) === tn(t));
 };
 // 발행창 카테고리 고르기 (서버 업로더 _select_category 와 같은 칸 · 띄어쓰기·'하위 카테고리' 말 무시하고 비교)
 // v10 (11/18 실제 이름 '레전드 다시 보기' · 글은 '레전드 다시보기'): 띄어쓰기를 다 빼고 가운뎃점(· ㆍ ・ ･ • ‧ ∙ ⋅)도 같게 — 똑같은 이름이 먼저, 없으면 띄어쓰기·점을 뺀 이름 (하위 카테고리도)
@@ -266,22 +272,24 @@ const tagsIn = async tags => {
     inp = await wait(tagIn, 4000);
     if (!inp) return [0, '태그 칸 없음'];
   }
-  let n = 0;
-  for (const t of tags) {
-    if (chips(t)) { n++; continue; }
+  for (const t of [...tags, ...tags]) {
+    if (chips(t)) continue;
     inp = tagIn() || inp;
     const IW = inp.ownerDocument.defaultView;
     inp.focus();
-    setV(inp, t);
+    setV(inp, t.replace(/[^\p{L}\p{N}_]/gu, ''));
     inp.dispatchEvent(new IW.Event('input', {bubbles: true}));
     await S(150);
     const o = {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true};
     for (const ty of ['keydown', 'keypress', 'keyup']) inp.dispatchEvent(new IW.KeyboardEvent(ty, o));
-    if (await wait(() => chips(t) || !(tagIn() || inp).value, 1500)) n++;
+    await wait(() => chips(t) || !(tagIn() || inp).value, 1500);
     await S(200 + Math.round(Math.random() * 200));
   }
-  const left = (tagIn() || inp).value;
-  return [n, left ? '남은 글 ' + left : ''];
+// v11: 안 들어간 태그는 한 번 더 넣어 보고(위 두 번째 돌기) 그래도 없으면 이름을 남김 (R.tagMiss) · 칸에 남은 글은 비움 (태그가 아님)
+  const i_ = tagIn() || inp;
+  if (i_.value) { setV(i_, ''); i_.dispatchEvent(new i_.ownerDocument.defaultView.Event('input', {bubbles: true})); }
+  R.tagMiss = tags.filter(t => !chips(t));
+  return [tags.length - R.tagMiss.length, ''];
 };
 // 예약 시각 채움 (v6 · 주인 11/14 '시간 고르는 수고 없게'): 발행 설정창에서 '예약'을 고르고 날짜·시·분을 채운 뒤 멈춘다 — 발행 단추는 주인이 직접.
 // 발행창 예약 칸은 로그인 없이 볼 수 없어 글자('현재'·'예약')와 모양(0~23 고르기 칸 · 분 고르기 칸 · 'YYYY. M. D' 날짜 칸 · 달력 표)으로 찾는다.
@@ -390,7 +398,7 @@ const tagsOf = t => {
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8).replace(/\u200c/g, '0').replace(/\u200d/g, '1'), 2);
   // 카테고리는 맨 앞 '\u0001' 앞에 (11/09 — 발행창 카테고리가 늘 지난번 것으로 남음)
   // v6: 카테고리와 태그 사이에 예약 시각 '@2026-11-15T19:00' 이 올 수 있음 (딜봇 kkumi.stamp — 옛 책갈피는 그 칸을 안 읽음)
-  try { const a = new TextDecoder('utf-8').decode(bytes).split('\u0001'), t_ = a.pop(); return {cat: a[0] || '', at: a[1] || '', tags: t_.split(/[\s,#]+/).filter(Boolean)}; } catch (e) { return {cat: '', at: '', tags: []}; }
+  try { const a = new TextDecoder('utf-8').decode(bytes).split('\u0001'), t_ = a.pop(); return {cat: a[0] || '', at: a[1] || '', tags: t_.split(/[\s,#]+/).filter((x, i, a) => tn(x) && a.findIndex(y => tn(y) === tn(x)) === i).slice(0, 30)}; } catch (e) { return {cat: '', at: '', tags: []}; }
 };
 // 붙여 넣은 HTML → 조각 [{k: text|rule|card|quote|tags}] (사파리가 감싼 div·span 은 풀어서 문단만)
 const BLOCK = /^(P|BLOCKQUOTE|HR|H[1-6]|UL|OL|TABLE|FIGURE|PRE)$/;
@@ -501,7 +509,7 @@ try {
     } else if (p.k === 'img') {
       R.pics[1]++;
       const why = await pic(p.u);
-      if (why === 'x') R.bad.push('사진 안 들어감'); else if (why) R.notes.push('사진 주소로'); else R.pics[0]++;
+      if (why === 'x') R.bad.push('사진 안 들어감'); else if (why === 'slow') R.notes.push('사진 올라가는 중'); else if (why) R.notes.push('사진 주소로'); else R.pics[0]++;
     } else if (p.k === 'rule') {
       R.lines[1]++;
       const [, why] = await rule();
@@ -528,6 +536,7 @@ try {
   if (R.tagList && R.done === ps.length) {
     const [n, why] = await tagsIn(R.tagList);
     R.tags[0] = n;
+    if (R.tagMiss.length) R.notes.push('태그 빠짐: ' + R.tagMiss.join(', '));
     if (why) R.bad.push('태그 ' + why);
     if (R.cat) { const w = await catIn(R.cat); if (w) R.bad.push('카테고리 ' + w); else R.catOk = 1; }
     if (R.book) R.why = await bookIn(R.book);

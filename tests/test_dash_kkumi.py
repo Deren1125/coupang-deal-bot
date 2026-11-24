@@ -45,7 +45,8 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     # 사파리 책갈피 주소 칸 (10/29 아이패드: v4 23KB · 11/09 25.9KB 돎 → 카테고리 넣으며 28KB 안 · 주인 확인)
     # 11/14 v6 예약 시각 채움 +5.5KB → 33.4KB (32KB 를 넘는 길이는 아이패드에서 저장해 본 적 없음) → 11/15 마지막 검토: 주소에 그대로 써도 되는
     # 글자(; / ? : @ & = + $ ,)를 % 로 바꾸지 않아(encode_short) 29.1KB — 아이패드에서 돈 v5(27.9KB)보다 1.3KB 김 · 주인 확인 필요
-    assert len(kkumi.bookmarklet()) < 29500
+    # 11/24 v11 (사진 두 번 막기·네이버 꼴 태그) +0.9KB → 30.1KB — 같은 코드를 통째로 담은 '하루치 한 번에'(49.8KB)가 11/23~ 주인 아이패드 사파리 책갈피로 돎
+    assert len(kkumi.bookmarklet()) < 30500
     body = kkumi.bookmarklet()[len("javascript:"):]
     assert not set(body) - set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'();/?:@&=+$,%")  # '#'·빈칸·줄바꿈·한글은 모두 %XX
     assert kkumi.encode(js) != body and unquote(kkumi.encode(js)) == js  # 옛 방식(encodeURIComponent)으로 싼 것과 풀면 같은 코드
@@ -446,3 +447,45 @@ async def test_new_version_banner_until_installed_is_sent(bot: DealBot, tmp_path
     assert v["ack"] is True and v["version"] == kkumi.version()
     bot.db.kv_set(kkumi.KV_ACK, "f" * 10)  # 코드가 바뀌면(지문이 달라지면) 다시 알림
     assert routine.view(bot)["kkumi_new"] is True
+
+
+def test_slow_upload_is_never_pasted_again_by_address() -> None:
+    """주인 11/24 10:28 라커룸 '하루치 한 번에' 5/5 김혜성 글 '똑같은 사진이 여러 개': 사진 파일이 30초 안에 다 안 올라가면 v10 은
+    주소로 한 번 더 붙였다 → 늦게 올라간 파일 + 주소 사진 = 같은 사진 두 장. v11: 사진 칸이 생겼으면 올라갈 때까지 기다리고 주소로 또 넣지 않음."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    ours = "https://52-79-136-64.sslip.io/media/blog_hotdeal_522_1_b6af4b78.jpg"
+    pasted = f'<p>첫 글이에요.</p><p style="text-align:center"><img src="{ours}"></p><p>끝 글이에요.</p>'
+    slow = INNER.replace("c.querySelector('img').src = 'https://blogfiles.pstatic.net/up.jpg'; }, 300)",
+                         "c.querySelector('img').src = 'https://blogfiles.pstatic.net/up.jpg'; }, 34000)")
+    assert slow != INNER
+    run = PHOTO_RUN.replace("for (let i = 0; i < 400 && !alerts.length; i++)", "for (let i = 0; i < 900 && !alerts.length; i++)")
+    assert run != PHOTO_RUN
+    out = subprocess.run([NODE, "-e", run, slow, code(), pasted], capture_output=True, text=True, timeout=180, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["imgs"] == ["https://blogfiles.pstatic.net/up.jpg"], got  # 한 장만 (주소로 또 붙인 사진 없음)
+    assert "사진 1/1" in got["alert"] and "사진 주소로" not in got["alert"], got["alert"]
+
+
+def test_tags_go_in_the_naver_form_and_a_dropped_tag_is_tried_once_more() -> None:
+    """주인 11/24 10:32 드라마 1/5 '태그 13/14': 네이버 태그 칸은 문장부호·빈칸이 든 태그를 받지 않고(칸에 글이 남음) 대소문자만 다른 태그는 하나로 —
+    v11: 넣기 전에 글자·숫자·_ 만 남기고 겹친 것 빼고 · 비교도 같은 꼴로 · 안 들어간 태그는 한 번 더 · 그래도 없으면 이름을 알림에."""
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    naver = INNER.replace(
+        "d.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') { d.querySelector('.chips').textContent += ' #' + e.target.value; e.target.value=''; } }); };",
+        "let late = 1; d.querySelector('input').addEventListener('keydown', e => { if (e.key !== 'Enter') return; const v = e.target.value, ch = d.querySelector('.chips');"
+        " if (/[^\\p{L}\\p{N}_]/u.test(v)) return;"  # 받지 않음 — 칸에 글이 남음
+        " if (v === '늦게' && late) { late = 0; return; }"  # 처음 한 번은 Enter 를 놓침
+        " if (ch.textContent.toLowerCase().split('#').map(x => x.trim()).includes(v.toLowerCase())) { e.target.value = ''; return; }"
+        " ch.textContent += ' #' + v; e.target.value = ''; }); };")
+    assert naver != INNER
+    pasted = '<p>첫 글이에요.</p><p>끝 글이에요.</p>' + _tags_line(["닥터X:하얀마피아의시대", "닥터x하얀마피아의시대", "15.2%최종회", "늦게", "#?"], "셀럽 소식")
+    out = subprocess.run([NODE, "-e", RUN, naver, code(), pasted], capture_output=True, text=True, timeout=120, env=env)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["tags"].split() == ["#닥터X하얀마피아의시대", "#152최종회", "#늦게"], got
+    assert "태그 3/3" in got["alert"] and "태그 빠짐" not in got["alert"], got["alert"]

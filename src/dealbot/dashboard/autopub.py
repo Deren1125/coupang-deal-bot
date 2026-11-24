@@ -80,7 +80,7 @@ AFF_HOSTS = ("link.coupang.com", "coupa.ng", "s.zigzag.kr", "a-bly.com", "ably.l
 _TAG = re.compile(r"<[^>]+>")
 U_RE = re.compile(r"\d{6,20}")
 # kkumi.js 의 옛 줄 → 진행기 안에서만 바뀌는 줄 (딱 한 번씩 나와야 함)
-TOOLS = ("D, W, R, S, vis, press, tap, wait, real, comps, body_, host, setSel, count, tagIn, pubBtn, BOTTOM, any, nImg, quotes, cards, shape, "
+TOOLS = ("D, W, R, S, vis, press, tap, wait, real, comps, body_, host, setSel, count, tagIn, pubBtn, BOTTOM, any, nImg, quotes, cards, shape, centered, titleMid, MAIN_CENTER, "
          "tagsIn, catIn, bookIn")
 PATCHES: tuple[tuple[str, str], ...] = (
     ("(async () => {\n", "async (document, alert, confirm, GOT, PRE) => {\n"),
@@ -97,6 +97,13 @@ PATCHES: tuple[tuple[str, str], ...] = (
     ("const fx = h => [/background-color/gi, /[^-]color\\s*:/gi, /<(b|strong)[\\s>]|font-weight:\\s*(bold|[6-9]00)|class=\"[^\"]*bold/gi].map(x => (h.match(x) || []).length);\n", ""),
     ("R.fx = [fx(ps.filter(p => p.k === 'text').map(p => p.html).join('')), [0, 0, 0]];\n", ""),
     ("  R.fx[1] = fx(body_().map(p => p.innerHTML).join(''));\n", ""),
+    # v6: 꾸미기 끝 알림에만 쓰던 한마디(R.notes)는 진행기에서 뺌 — 주소를 짧게 (점검은 R.bad·화면에서)
+    ("      if (probe && !await align(p.align)) R.notes.push('가운데 못 함: ' + probe);\n", "      if (probe) await align(p.align);\n"),
+    ("      if (why === 'x') R.bad.push('사진 안 들어감'); else if (why === 'slow') R.notes.push('사진 올라가는 중'); else if (why) R.notes.push('사진 주소로'); else R.pics[0]++;\n",
+     "      if (why === 'x') R.bad.push('사진 안 들어감'); else if (!why) R.pics[0]++;\n"),
+    ("    if (R.tagMiss.length) R.notes.push('태그 빠짐: ' + R.tagMiss.join(', '));\n", ""),
+    # v6: 제목 가운데는 주인이 제목 칸을 누른 그 자리에서 (진행기 pre) — 끝에서 제목을 스크립트로 누르는 길은 아이패드에서 안 먹음
+    ("  if (ps.some(p => p.align === 'center')) { R.title = await titleMid(); if (R.title) R.notes.push('제목 가운데 ' + R.title + ' — 직접'); }\n", ""),
     ("  const inside = P && await wait(has, 1500);\n", "  const inside = P && await wait(() => has() || tz((quotes().pop() || q).textContent).includes(P), 4000);\n"),
 )
 CUT = ("const ask = () => new Promise(res => {\n", "  setTimeout(() => box.focus(), 50);\n});\n")  # ⑤ 붙여넣기 칸 — 처음 줄부터 끝 줄까지 뺌
@@ -111,7 +118,8 @@ STEPS = (
     "글마다 화면 위 한 줄이 시키는 대로 ① 제목 칸을 한 번 ② 본문을 한 번 눌러 주세요 (아이패드 네이버 에디터는 사람이 누른 자리에만 글이 들어가요 — 꾸미기와 같아요) → "
     "그다음은 손대지 않으면 제목·본문·꾸미기·사진·태그·카테고리·예약 시각까지 채우고, 스스로 점검한 뒤 깨끗하면 발행(예약)까지 눌러요 → "
     f"{GAP[0]}~{GAP[1]}초 쉬고 다음 글 → 한 번에 {RUN_MAX}편까지 → 끝나면 할 일 줄이 체크되고 화면에 요약이 남아요. 화면을 켜 둔 채 그 탭에 두세요.",
-    "점검에 하나라도 걸리면 (사진 빠짐 · 제목/본문이 원고와 다름 · 포스트잇 · 카테고리 못 찾음 · 예약 시각 못 채움 · 제휴 고지 · 태그) 그 글은 발행하지 않고 멈춰요 — "
+    "점검에 하나라도 걸리면 (사진이 많이 빠짐 · 제목/본문이 원고와 다름 · 포스트잇 · 카테고리 못 찾음 · 예약 시각 못 채움 · 제휴 고지 · 태그가 여럿 빠짐 · 가운데 정렬) 그 글은 발행하지 않고 멈춰요 — "
+    "사진은 원고의 90% 넘고 2장까지, 태그는 1개(또는 10%)까지 빠진 것은 발행하고 요약 줄에 적어요. "
     "화면에 적힌 것을 고친 뒤 '고쳤어요 — 다시 점검하고 발행' 단추(또는 책갈피 한 번 더)를 누르면 다시 점검하고 이어 가요. 멈추려면 탭을 닫으면 돼요.",
     "예약 시각은 책갈피를 누른 때 기준으로 나눠요 — 첫 글은 20~45분 뒤, 다음 글은 1시간 10분~2시간 40분씩 들쭉날쭉 (분은 10·20·40·50 · 07:30~23:00 · 넘치면 다음 날 아침 · 토·일은 월요일). 화면 맨 위에 '오늘 예약 14:20 · 16:10 …'이 보여요. 멈춘 뒤 새 글쓰기 화면에서 다시 눌러도 남은 글은 같은 시각 그대로 (지난 시각만 새로).",
     "이 브라우저에서 스스로 이어가기가 안 되면 화면을 다시 열고 '글마다 한 번'으로 바꿔요 — 그때는 글 하나가 올라갈 때마다 '다음 글 N/M — 책갈피 한 번 더'가 뜨고, "
