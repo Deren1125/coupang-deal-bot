@@ -2,7 +2,7 @@
 한 번에 넣기 누른 시간 기준으로 적당히 시간 분배해서 세팅해줘" · 네이버 예약 칸은 10분 단위).
 
 autopub.schedule(): 첫 글 = 누른 때 + 20~45분 · 다음 70~160분 · 분은 10·20·40·50 (정각·30분 없음 · 이웃 글과 같은 분 자리 아님) · 07:30~23:00 ·
-넘치면 다음 날 아침 · 토·일은 월요일로 (주인이 '주말에도 시작'이면 주말 자리) · 이미 한 시각과 40분 넘게 · 같은 계획 다시 · 지난 자리만 새로 · 블로그마다 따로.
+넘치면 다음 날 아침 · 토·일도 평일과 같게 (주인 11/24 — 주말 쉼 없음) · 이미 한 시각과 40분 넘게 · 같은 계획 다시 · 지난 자리만 새로 · 블로그마다 따로.
 act(next): 계획에서 가장 이른 글 · 그 시각을 글에 · plan 한 줄 · 발행을 눌러 본 글의 시각은 '쓴 시각'으로.
 """
 
@@ -34,7 +34,7 @@ def _check(slots: dict[str, str], tap: datetime) -> list[datetime]:
     ds = sorted(_d(t) for t in slots.values())
     assert len(set(ds)) == len(ds)  # 같은 블로그 두 글이 같은 자리 아님
     for k, d in enumerate(ds):
-        assert d.minute in (10, 20, 30, 40, 50), d  # 10분 단위 · 정각 없음 (30분은 v6 부터 아주 가끔)
+        assert d.minute in (10, 20, 40, 50), d  # 10분 단위 · 정각·30분 없음 (주인 11/24)
         assert (7, 30) <= (d.hour, d.minute) <= (23, 0), d  # 주인 11/24 — 토·일도 자리
         if k:
             assert d - ds[k - 1] > timedelta(minutes=40) and d.minute != ds[k - 1].minute, ds  # 이웃 글끼리 분 자리 다름
@@ -65,10 +65,11 @@ def test_late_tap_rolls_to_next_morning_and_friday_night_rolls_to_saturday() -> 
     ds = _check(fri, datetime(2026, 11, 27, 21, 30))
     assert {d.weekday() for d in ds} <= {4, 5} and ds[-1].weekday() == 5  # 주인 11/24 — 주말도 평일처럼: 금요일 밤에 넘치면 토요일 아침
     sat0 = autopub.schedule(FakeDb(), "issue", _rows(3), _ts(2026, 11, 28, 10, 5), TZ, rng=random.Random(4))  # 토요일에 누르면 토요일 자리
-    assert all(_d(t).weekday() == 5 for t in sat0.values()) and all(_d(t).minute in (10, 20, 30, 40, 50) for t in sat0.values())
-    # 주인이 주말에 '주말에도 시작'을 눌렀으면 그 주말 자리 그대로
-    sat = autopub.schedule(FakeDb(), "issue", _rows(2), _ts(2026, 11, 28, 10, 5), TZ, wk=True, rng=random.Random(3))
-    assert all(_d(t).weekday() == 5 for t in sat.values())
+    assert all(_d(t).weekday() == 5 for t in sat0.values()) and all(_d(t).minute in (10, 20, 40, 50) for t in sat0.values())
+    # 일요일 밤에 넘쳐도 월요일 아침 (주말 쉼이 없으니 일요일 낮 자리도 그대로)
+    sun = autopub.schedule(FakeDb(), "issue", _rows(3), _ts(2026, 11, 29, 9, 5), TZ, rng=random.Random(3))
+    assert all(_d(t).weekday() == 6 for t in sun.values())
+    assert not hasattr(autopub, "weekend") and not hasattr(autopub, "WEEKEND_PAUSE") and not hasattr(autopub, "ODD_30")  # 옛 주말 쉼·30분 자리는 지움
 
 
 def test_same_plan_on_retap_only_past_or_new_posts_get_new_slots_and_blogs_are_separate() -> None:
@@ -155,7 +156,7 @@ def test_gaps_mix_short_and_long_and_neighbour_gaps_are_never_alike() -> None:
     assert min(allg) < 60 and max(allg) >= 220
 
 
-def test_minutes_spread_no_minute_more_than_twice_a_day_and_rarely_thirty_never_zero() -> None:
+def test_minutes_spread_no_minute_more_than_twice_a_day_never_thirty_or_zero() -> None:
     from collections import Counter
 
     mins: list[int] = []
@@ -164,7 +165,7 @@ def test_minutes_spread_no_minute_more_than_twice_a_day_and_rarely_thirty_never_
             mins += [d.minute for d in ds]
             assert max(Counter((d.date(), d.minute) for d in ds).values()) <= 2, ds  # 하루 한 블로그에서 같은 분 두 번까지
     c = Counter(mins)
-    assert c[0] == 0 and 0 < c[30] < 0.05 * len(mins), c  # 정각 없음 · 30분은 아주 가끔
+    assert c[0] == 0 and c[30] == 0 and set(c) <= {10, 20, 40, 50}, c  # 정각·30분 없음 (주인 11/24)
     assert all(c[m] > 0.15 * len(mins) for m in (10, 20, 40, 50)), c  # 네 자리를 고루
 
 

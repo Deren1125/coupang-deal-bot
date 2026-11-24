@@ -260,7 +260,7 @@ def test_a_post_whose_publish_was_pressed_is_never_served_again_even_after_the_d
     assert _go(bot, t + 12, a="done", b="issue", id="rsv:issue:12", r="ok")["checked"] is True  # 늦게 온 확인은 받음
 
 
-def test_run_cap_weekend_pause_and_protection_cooldown(bot: DealBot, tmp_path: Path) -> None:
+def test_run_cap_weekends_are_normal_days_and_protection_cooldown(bot: DealBot, tmp_path: Path) -> None:
     rows = {"day": DAY, "slots": SLOTS, "overflow": 0, "items": [
         item(f"pub:issue:{n}", "s1", group="발행", blog="issue", title=f"데런픽 발행 · {n}", paste=_paste(f"글 {n}"), gate=OK) for n in range(1, 8)]}
     with_routine(tmp_path, rows)
@@ -289,11 +289,9 @@ def test_run_cap_weekend_pause_and_protection_cooldown(bot: DealBot, tmp_path: P
     assert _go(bot, t2 + 60, a="done", b="issue", r="wall")["until"] == t2 + 86400  # 글 번호 없이 와도 · 이미 쉬는 중이면 늘리지 않음
     assert autopub.today(bot.db, t2 + 60, TZ, routine.view(bot, now=t2 + 60))["by"]["issue"]["line"].endswith("11/19 11:23까지 쉬어요 — 그동안은 직접 올려 주세요")
     assert _go(bot, t2 + 60, a="next", b="finance")["next"] is None  # 다른 블로그는 쉬지 않음 (올릴 글이 없을 뿐)
-    # 주인 11/24 — 주말도 평일처럼 (11/21 주말 쉼을 덮음): 토·일에도 '주말에도 시작' 없이 바로 · 옛 쉼은 WEEKEND_PAUSE 로만
-    sat, sun = "2026-11-21", "2026-11-22"
-    assert autopub.WEEKEND_PAUSE is False
-    assert [autopub.weekend(at(bot, d_, hm), TZ) for d_, hm in ((DAY, "10:00"), (sat, "00:10"), (sun, "20:59"), (sun, "21:00"), ("2026-11-23", "07:00"))] \
-        == [False] * 5
+    # 주인 11/24 — 주말도 평일처럼 (11/21 주말 쉼을 지움): 토·일에도 '주말에도 시작' 없이 바로 · 옛 주말 쉼 장치도 없음
+    sat = "2026-11-21"
+    assert not hasattr(autopub, "weekend") and not hasattr(autopub, "WEEKEND_PAUSE") and not hasattr(autopub, "WEEKEND_BACK_H")
     with_routine(tmp_path, {**rows, "day": sat})
     ts = at(bot, sat, "10:00")
     q = _go(bot, ts, a="next", b="finance")
@@ -346,11 +344,9 @@ async def test_connect_tab_entry_and_todo_card_progress_line(bot: DealBot, tmp_p
     assert "data.autopub[k]" in rt and "'data-id': 'autopub:' + k" in rt
     # 할 일 카드 한 줄: 준비된 글 수 → 올린 글 수 (GET /dashboard/api/routine 의 autopub — 블로그마다)
     now = datetime.now(TZ)
-    wk = autopub.weekend(now.timestamp(), TZ)
     with_routine(tmp_path, _rows(now.date().isoformat()))
     status, v, _ = await get_json(bot, "/dashboard/api/routine", session_headers(bot))
-    tail = " (주말 — '주말에도 시작'을 눌러야 해요)" if wk else ""
-    assert status == 200 and v["autopub"]["issue"] == "하루치 한 번에: 준비된 글 3편 — 글쓰기 화면에서 책갈피 한 번" + tail
+    assert status == 200 and v["autopub"]["issue"] == "하루치 한 번에: 준비된 글 3편 — 글쓰기 화면에서 책갈피 한 번"  # 토·일도 같은 줄
     assert v["autopub"]["finance"].startswith("하루치 한 번에: 준비된 글 1편") and "hotdeal" not in v["autopub"]
     k = autopub.key(bot.db)
     res = await _post(bot, {"k": k, "a": "done", "b": "issue", "id": "pub:issue:13", "r": "ok", "u": "223000000009"}, origin="https://blog.naver.com")

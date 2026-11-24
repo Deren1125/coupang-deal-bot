@@ -16,14 +16,18 @@ static/kkumi.js = Blog-Auto blogauto/naver/kkumi_v4.js (10/29 아이패드 시�
   '<카테고리>\x01<태그들>')의 가운데에 '@YYYY-MM-DDTHH:MM' 한 칸: '<카테고리>\x01@2026-11-15T19:00\x01<태그들>' (stamp).
   옛 책갈피(v5)와 Blog-Auto 는 첫 칸(카테고리)·끝 칸(태그)만 읽어 그대로 돈다.
   when_plan(items, day, now): '예약' 줄마다 채울 시각 {줄 id: {at, label, rule}} — Blog-Auto 가 고른 추천 시각(줄의 복사 칸 '예약 시각':
-  '19:30'·'내일 09:00'·'11/16(월) 09:00', 그 목록의 날 기준)을 그대로. 없거나 20분 안으로 다가왔으면(지났으면) 규칙으로 (rule 참):
-  블로그별 후보 시각(WHEN_TIMES — Blog-Auto routine.RESERVE_TIMES·BEST_TIMES 와 같은 값) 중 지금부터 30분 뒤 · 같은 블로그의 다른 예약 줄과
-  3시간(WHEN_GAP_MIN) 넘게 떨어진 첫 칸. '발행' 줄(바로 올리는 글)과 '바로 발행' 줄은 채우지 않는다. routine.view 가 줄에 when 을 달고 html 에 stamp.
+  '19:40'·'내일 09:10'·'11/16(월) 09:20', 그 목록의 날 기준 — Blog-Auto reserve_plan 이 주인 11/24 원칙으로 고른 들쭉날쭉한 시각)을 그대로
+  (분이 10·20·40·50 이 아니면 — 옛 07:30·09:00 같은 둥근 시각 — 다음 10·20·40·50 자리로 올림). 없거나 20분 안으로 다가왔으면(지났으면) 규칙으로 (rule 참):
+  주인 11/24 예약 시각 원칙 = 하루치 한 번에(autopub._place)와 같은 계획기 — 첫 글 20~45분 뒤 · 다음은 짧게·보통·길게 섞은 간격(이웃 간격끼리 20분 넘게 차이) ·
+  분은 10·20·40·50 만 · 07:30~23:00 (토·일도 같게) · 같은 블로그의 다른 예약과 40분 넘게 · 다른 블로그와 같은 날 20분 넘게.
+  (옛 둥근 후보표 WHEN_TIMES·3시간 간격 WHEN_GAP_MIN·흔들기 humanize 는 11/24 에 지움.) 시각을 정하는 기준 '지금'은 30분 단위로 올려 30분 동안은 같은 값.
+  '발행' 줄(바로 올리는 글)과 '바로 발행' 줄은 채우지 않는다. routine.view 가 줄에 when 을 달고 html 에 stamp.
 """
 
 from __future__ import annotations
 
 import hashlib
+import random
 import re
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -157,12 +161,7 @@ def view(db: Any = None) -> dict[str, Any]:
 # ── 예약 시각 자동 채움 (v6) ─────────────────────────────────────
 WHEN_COPY = "예약 시각"  # Blog-Auto routine 이 예약 줄에 싣는 복사 칸 이름
 WHEN_GROUP = "예약"
-WHEN_TIMES: dict[str, tuple[str, ...]] = {  # Blog-Auto routine.RESERVE_TIMES (데런픽 — 하루 3편 · 3시간 넘게) · BEST_TIMES (아카이브)
-    "issue": ("09:00", "12:30", "16:00", "19:30", "22:30"),
-    "finance": ("07:30", "12:10", "21:00"),
-}
-WHEN_GAP_MIN = 180  # 같은 블로그 예약끼리 (Blog-Auto routine.RESERVE_GAP_MIN)
-WHEN_LEAD_MIN = 30  # 규칙으로 고를 때 지금부터 이만큼 뒤 (Blog-Auto routine.RESERVE_LEAD)
+WHEN_BASE_MIN = 30  # 규칙의 '지금'을 이 단위로 올림 (볼 때마다 시각이 바뀌지 않게 · 첫 글은 그 뒤 20~45분 — autopub.FIRST_MIN)
 WHEN_SOON_MIN = 20  # 추천 시각이 이 안으로 다가왔으면 지난 것으로 보고 규칙으로 (복사 → 붙여넣기 → 꾸미기에 몇 분 걸림)
 MARK_TAGS, BIT0, BIT1 = "\u2064", "\u200c", "\u200d"  # Blog-Auto paste.py · static/kkumi.js 와 같은 글자
 _TAGS_LINE = re.compile(MARK_TAGS + "[" + BIT0 + BIT1 + "]+")
@@ -191,100 +190,67 @@ def parse_when(label: Any, day: str) -> datetime | None:
     return None
 
 
-def pick_when(blog: str, earliest: datetime, taken: list[datetime]) -> datetime:
-    """규칙으로 고른 예약 시각: 그 블로그 후보 시각 중 earliest 뒤 · taken 과 WHEN_GAP_MIN 넘게 떨어진 첫 칸 (8일 안 · 없으면 내일 마지막 후보)."""
-    times = WHEN_TIMES.get(blog) or WHEN_TIMES["issue"]
-    gap = timedelta(minutes=WHEN_GAP_MIN)
-    day0 = earliest.replace(hour=0, minute=0, second=0, microsecond=0)
-    for n in range(8):
-        for d in sorted(_hm(day0 + timedelta(days=n), t) for t in times):
-            if d >= earliest and all(abs(d - x) >= gap for x in taken):
-                return d
-    return _hm(day0 + timedelta(days=1), times[-1])
+def _snap(d: datetime) -> datetime:
+    """분이 10·20·40·50 이 아니면 다음 그런 자리로 (옛 둥근 추천 시각 07:30 → 07:40 · 09:00 → 09:10)."""
+    from dealbot.dashboard import autopub  # (autopub 이 이 모듈을 읽으므로 여기서)
+
+    d = d.replace(second=0, microsecond=0)
+    while d.minute not in autopub.MINUTES:
+        d += timedelta(minutes=1)
+    return d
+
+
+def pick_when(blog: str, now: datetime, mine: list[datetime], others: list[datetime], n: int = 1, seed: str = "") -> list[datetime]:
+    """규칙으로 고른 예약 시각 n 개 (차례대로) — 하루치 한 번에(autopub._place)와 같은 계획기 (주인 11/24 원칙).
+    mine = 같은 블로그의 이미 잡힌 시각 (40분 넘게) · others = 다른 블로그 시각 (같은 날 20분 넘게) · '지금'은 WHEN_BASE_MIN 단위로 올림."""
+    from dealbot.dashboard import autopub
+
+    base = now.replace(second=0, microsecond=0)
+    if over := base.minute % WHEN_BASE_MIN:
+        base += timedelta(minutes=WHEN_BASE_MIN - over)
+    rng = random.Random(f"kkumi|{blog}|{base:%Y-%m-%dT%H:%M}|{seed}")
+    spread = rng.uniform(*autopub.SPREAD)
+    busy, out = list(mine), []
+    prev: datetime | None = None
+    prev_gap: float | None = None
+    for _ in range(n):
+        d = autopub._place(rng, base, prev, prev_gap, spread, busy, list(others))
+        prev_gap = (d - prev).total_seconds() / 60 if prev is not None and prev.date() == d.date() else None
+        prev = d
+        busy.append(d)
+        out.append(d)
+    return out
 
 
 def when_plan(items: list[dict[str, Any]], day: str, now: datetime) -> dict[str, dict[str, Any]]:
-    """'예약' 줄마다 꾸미기가 채울 시각 {줄 id: {"at": "2026-11-15T19:00", "label": "11/15 19:00", "rule": 규칙으로 골랐나}}.
+    """'예약' 줄마다 꾸미기가 채울 시각 {줄 id: {"at": "2026-11-15T19:10", "label": "11/15 19:10", "rule": 규칙으로 골랐나}}.
     now = 그 목록 시간대(KST)의 지금 (tz 없는 시각). 다 한 줄(done)·복사할 글이 없는 줄(만드는 중)·'바로 발행' 줄은 뺀다 —
-    다만 그 줄들의 추천 시각도 '이미 잡힌 시각'으로 쳐서 규칙이 피해 간다."""
+    다만 그 줄들의 추천 시각도 '이미 잡힌 시각'으로 쳐서 규칙이 피해 간다 (같은 블로그 40분 · 다른 블로그 20분)."""
     rows = [i for i in items if isinstance(i, dict) and i.get("group") == WHEN_GROUP]
     known: dict[str, datetime] = {}
     for i in rows:
         t = next((c.get("text") for c in i.get("copy") or [] if isinstance(c, dict) and c.get("label") == WHEN_COPY), None)
         if (d := parse_when(t, day)) is not None:
-            known[i["id"]] = d
+            known[i["id"]] = _snap(d)
     soon = now + timedelta(minutes=WHEN_SOON_MIN)
     picked: dict[str, tuple[datetime, bool]] = {}
-    for by_rule in (False, True):  # 추천 시각이 살아 있는 줄 먼저 — 규칙으로 고를 줄이 그 시각들을 피하게
-        for i in rows:
-            p = i.get("paste")
-            if i.get("done") or not isinstance(p, dict) or p.get("stale") or not p.get("html") or "바로 발행" in str(i.get("title") or ""):
-                continue
-            d = known.get(i["id"])
-            if not by_rule:
-                if d is not None and d >= soon:
-                    picked[i["id"]] = (d, False)
-                continue
-            if i["id"] in picked:
-                continue
-            blog = str(i.get("blog") or "")
-            taken = [x for k, x in known.items() if k != i["id"] and x >= soon and _blog_of(rows, k) == blog]
-            taken += [x for k, (x, r) in picked.items() if r and _blog_of(rows, k) == blog]
-            picked[i["id"]] = (pick_when(blog, now + timedelta(minutes=WHEN_LEAD_MIN), taken), True)
-    # 사람처럼 (주인 11/23): 정각·30분 금지 — 글마다 정해진 흔들림(±10~25분) · 같은 블로그의 이웃한 글끼리 간격·분 자리(10분 단위)가 같지 않게
-    times = {k: humanize(d, k, soon) for k, (d, _r) in picked.items()}
-    for blog in {_blog_of(rows, k) for k in times}:
-        _uneven(times, sorted((k for k in times if _blog_of(rows, k) == blog), key=lambda k: (times[k], k)))
-    return {k: {"at": times[k].strftime("%Y-%m-%dT%H:%M"), "label": f"{times[k].month}/{times[k].day} {times[k]:%H:%M}", "rule": r} for k, (_d, r) in picked.items()}
-
-
-# ── 예약 시각을 사람처럼 (주인 11/23 — '예약 시각이 정각·30분이면 안 됨 · 07:13, 08:47, 10:22 처럼 · 글 사이 간격도 들쭉날쭉')
-# 네이버 발행창의 분 고르기 칸은 10분 단위로 알고 있다 (가짜 화면도 00·10·…·50) — 책갈피(bookIn)는 그 칸에 있는 값 중 '넣을 분보다 크지 않은 가장 큰 값'을
-# 고르므로 1분 단위 칸이면 07:13 그대로, 10분 단위 칸이면 07:10 이 된다. 그래서 분은 늘 10~29 · 40~59 안에서만 고른다 (내려도 :00·:30 이 되지 않게).
-JIT_MIN = (10, 25)  # 추천·규칙 시각에서 앞뒤로 흔드는 분
-
-
-def _round(d: datetime) -> bool:
-    """10분 단위로 내리면 정각·30분이 되는 시각인가 (:00~:09 · :30~:39)."""
-    return d.minute % 30 < 10
-
-
-def _f10(d: datetime) -> datetime:
-    return d.replace(minute=d.minute - d.minute % 10)
-
-
-def _step(d: datetime) -> datetime:
-    """10분 뒤로 (정각·30분 자리는 건너뜀)."""
-    d += timedelta(minutes=10)
-    return d + timedelta(minutes=10) if _round(d) else d
-
-
-def humanize(d: datetime, key: str, earliest: datetime | None = None) -> datetime:
-    """시각 d 를 글(key)마다 정해진 만큼 흔든다 — 같은 글·같은 시각이면 늘 같은 값 (볼 때마다 바뀌지 않게).
-    ±JIT_MIN 분 안에서 정각·30분 자리를 피하고 earliest 보다 이르지 않게 · 그런 자리가 없으면 뒤로 민다."""
-    h = int(hashlib.sha256(f"{key}|{d:%Y-%m-%dT%H:%M}".encode()).hexdigest()[:8], 16)
-    n = JIT_MIN[0] + h % (JIT_MIN[1] - JIT_MIN[0] + 1)
-    s = -1 if (h >> 12) & 1 else 1
-    for off in (s * n, s * n + 10, s * n - 10, -s * n, -s * n + 10, -s * n - 10):
-        c = d + timedelta(minutes=off)
-        if JIT_MIN[0] <= abs(off) <= JIT_MIN[1] and not _round(c) and (earliest is None or c >= earliest):
-            return c
-    c = max(d, earliest or d) + timedelta(minutes=n)
-    return _step(c - timedelta(minutes=10)) if _round(c) else c
-
-
-def _uneven(times: dict[str, datetime], ids: list[str]) -> None:
-    """한 블로그의 예약 시각(이른 차례 ids)을 차례로 보며, 앞 글과 분 자리(10분 단위)가 같거나 앞 간격과 같은 간격이면 10분씩 뒤로 민다."""
-    prev: datetime | None = None
-    gap: timedelta | None = None
-    for k in ids:
-        d = times[k]
-        for _ in range(8):
-            g = _f10(d) - _f10(prev) if prev is not None else None
-            if prev is None or (g is not None and g > timedelta(0) and g != gap and d.minute // 10 != prev.minute // 10):
-                break
-            d = _step(d)
-        times[k], gap, prev = d, (_f10(d) - _f10(prev) if prev is not None else None), d
+    need: dict[str, list[str]] = {}  # 블로그 → 규칙으로 고를 줄 (목록 차례)
+    for i in rows:
+        p = i.get("paste")
+        if i.get("done") or not isinstance(p, dict) or p.get("stale") or not p.get("html") or "바로 발행" in str(i.get("title") or ""):
+            continue
+        d = known.get(i["id"])
+        if d is not None and d >= soon:
+            picked[i["id"]] = (d, False)
+        else:
+            need.setdefault(str(i.get("blog") or ""), []).append(i["id"])
+    for blog, ids in need.items():  # 추천 시각이 살아 있는 줄 먼저 잡고 — 규칙으로 고를 줄이 그 시각들을 피하게
+        mine = [x for k, x in known.items() if k not in ids and _blog_of(rows, k) == blog]
+        others = [x for k, x in known.items() if _blog_of(rows, k) != blog]
+        others += [x for k, (x, _r) in picked.items() if _blog_of(rows, k) != blog and x not in others]
+        for k, d in zip(ids, pick_when(blog, now, mine, others, len(ids), seed=",".join(ids)), strict=True):
+            picked[k] = (d, True)
+    return {k: {"at": d.strftime("%Y-%m-%dT%H:%M"), "label": f"{d.month}/{d.day} {d:%H:%M}", "rule": r} for k, (d, r) in picked.items()}
 
 
 def _blog_of(rows: list[dict[str, Any]], iid: str) -> str:
