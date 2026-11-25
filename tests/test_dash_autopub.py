@@ -264,23 +264,38 @@ def test_a_post_whose_publish_was_pressed_is_never_served_again_even_after_the_d
     assert _go(bot, t + 12, a="done", b="issue", id="rsv:issue:12", r="ok")["checked"] is True  # 늦게 온 확인은 받음
 
 
-def test_run_cap_weekends_are_normal_days_and_protection_cooldown(bot: DealBot, tmp_path: Path) -> None:
+def test_run_cap_weekends_are_normal_days_and_protection_cooldown(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rows = {"day": DAY, "slots": SLOTS, "overflow": 0, "items": [
         item(f"pub:issue:{n}", "s1", group="발행", blog="issue", title=f"데런픽 발행 · {n}", paste=_paste(f"글 {n}"), gate=OK) for n in range(1, 13)]}
     with_routine(tmp_path, rows)
     t = at(bot, DAY, "10:00")
     ats = []
-    for n in range(1, 11):  # 한 판에 10편까지 (11/25 하루치 모드 — 예전 5)
+    m = None
+    for n in range(1, 11):  # 11/26: 낮에는 오늘 자리 글만 (블로그 하루 DAY_MAX) — 내일 자리 글은 저녁 8시 뒤 한 번에
         q = _go(bot, t + n * 200, a="next", b="issue")
-        assert q["next"]["id"] == f"pub:issue:{n}" and (q["n"], q["m"]) == (n, 10)
+        if q["next"] is None:
+            break
+        m = m or q["m"]
+        assert q["next"]["id"] == f"pub:issue:{n}" and (q["n"], q["m"]) == (n, m)
         ats.append(q["next"]["at"])
         _go(bot, t + n * 200 + 1, a="done", b="issue", id=f"pub:issue:{n}", r="ok")
-    assert all(ats) and ats == sorted(ats) and len(set(ats)) == 10  # 열 글 모두 다른 예약 자리 (차례대로)
-    assert sum(a.startswith(DAY) for a in ats) <= autopub.DAY_MAX  # 하루 상한 — 넘친 글은 다음 날
-    q = _go(bot, t + 2300, a="next", b="issue")
-    assert q["next"] is None and q["left"] == 2 and q["text"] == "데런픽: 한 번에 10편까지만 올려요 (남은 글 2) — 30분쯤 뒤에 다시 눌러 주세요"
-    q = _go(bot, t + 2001 + autopub.RUN_IDLE_S + 60, a="next", b="issue")  # 한참 뒤 다시 누르면 새 판
-    assert q["next"]["id"] == "pub:issue:11" and (q["n"], q["m"]) == (1, 2)
+    assert len(ats) == m <= autopub.DAY_MAX and ats == sorted(ats) and len(set(ats)) == m
+    assert all(a == "" or a.startswith(DAY) for a in ats)  # 오늘 것만 (첫 글은 지금 발행)
+    assert q["next"] is None and q["left"] == 0 and q["later"] > 0 and f"내일 글 {q['later']}편은 저녁 8시 뒤 한 번에" in q["text"], q
+    # 한 판 상한 (RUN_MAX — 시험에서는 작게)
+    monkeypatch.setattr(autopub, "RUN_MAX", 3)
+    with_routine(tmp_path, {**rows, "items": [item(f"pub:finance:{n}", "s1", group="발행", blog="finance", title=f"트로트 · {n}", paste=_paste(f"글 {n}"), gate=OK)
+                                              for n in range(1, 6)]})
+    for n in range(1, 4):
+        q = _go(bot, t + n * 200, a="next", b="finance")
+        assert q["next"]["id"] == f"pub:finance:{n}" and (q["n"], q["m"]) == (n, 3)
+        _go(bot, t + n * 200 + 1, a="done", b="finance", id=f"pub:finance:{n}", r="ok")
+    q = _go(bot, t + 900, a="next", b="finance")
+    assert q["next"] is None and q["left"] == 2 and q["text"] == "트로트: 한 번에 3편까지만 올려요 (남은 글 2) — 30분쯤 뒤에 다시 눌러 주세요"
+    q = _go(bot, t + 801 + autopub.RUN_IDLE_S + 60, a="next", b="finance")  # 한참 뒤 다시 누르면 새 판
+    assert q["next"]["id"] == "pub:finance:4" and q["n"] == 1
+    monkeypatch.undo()
+    with_routine(tmp_path, rows)
     # 네이버 보호·제한 안내 → 그 블로그만 24시간 쉼 (다시 눌러도 주지 않음 · 발행 전 '해 봄'도 거절 → 책갈피는 발행을 누르지 않음) · kv 에 until
     t2 = t + 5000
     d = _go(bot, t2, a="done", b="issue", id="pub:issue:11", r="wall", n="자동입력 방지")

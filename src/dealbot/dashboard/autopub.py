@@ -698,7 +698,8 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
         if unsure:
             bits.append(f"확인 필요 {unsure} (블로그에서 확인)")
         if stop:
-            bits.append(f"멈춘 글 {len(stop)} — {str(stop[-1].get('n') or '점검에 걸림')[:60]}")
+            sv = str(stop[-1].get("v") or "")  # 책갈피 판 (11/26 — 주인이 어느 판을 쓰는지 보이게)
+            bits.append(f"멈춘 글 {len(stop)} — {str(stop[-1].get('n') or '점검에 걸림')[:60]}" + (f" (v{sv})" if sv else ""))
         if skip:
             bits.append(f"제목 가운데 안 됨 {skip}편 보류 — 알려 주세요")
         if b in cl:
@@ -737,6 +738,12 @@ def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | N
 
 
 # ── 책갈피가 묻는 곳
+def ver(form: dict[str, str]) -> str:
+    """책갈피가 묻을 때마다 보내는 판 번호 v (autopub.js ask · 숫자만 · 없으면 '')."""
+    v = str(form.get("v") or "")[:6]
+    return v if v.isdigit() else ""
+
+
 def _blog(form: dict[str, str]) -> str:
     b = str(form.get("b") or "")
     if b not in NAMES:
@@ -770,6 +777,13 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
                          near=[t for b in NAMES if b != blog for t in _taken(rv, b)],
                          first_now=not published_today(db, blog, now, tz, rv, pub))
         fit = [x for x in rows if str(x["id"]) in slots]
+        # 낮에 누름 (11/26 데런픽 08:41 — 내일 자리 글에서 '예약 11/27 08:10 못 채움 (날짜 칸 못 찾음)'으로 멈춤): 내일 이후 자리의 글은 넣지 않고
+        # 저녁 8시 뒤 하루치 한 번에로 (계획 시각은 kv 에 남아 저녁에 그대로 · 날짜 바꾸기는 하루치 모드에서만)
+        later = [] if night(datetime.fromtimestamp(now, tz)) else [x for x in fit if slots[str(x["id"])][:10] > day]
+        fit = [x for x in fit if x not in later]
+        lt = f"내일 글 {len(later)}편은 저녁 8시 뒤 한 번에" if later else ""
+        if not fit and later:
+            return {"ok": True, "next": None, "left": 0, "later": len(later), "wait": 0, "text": f"{name}: 오늘 글은 다 했어요 · {lt}"}
         if not fit:  # 하루 상한·기한 안에 자리가 없음 (하루치 모드 11/25)
             return {"ok": True, "next": None, "left": len(rows), "wait": 0,
                     "text": f"{name}: 예약할 자리가 다 찼어요 (블로그마다 하루 {DAY_MAX}편 · {HORIZON_H}시간 안) — 남은 글 {len(rows)}편은 다음 날 저녁에 다시 누르면 돼요"}
@@ -778,7 +792,9 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
         label = _label(at, now, tz) if at else "지금"
         html = _stamped(str(p["html"]), at)
         last, gap = c["last"].get(blog, 0.0), c["gap"].get(blog, 0.0)
-        return {"ok": True, "left": len(fit), "n": n + 1, "plan": plan_text(slots, now, tz), "m": n + min(len(fit), RUN_MAX - n),
+        ids = {str(x["id"]) for x in fit}
+        plan = " · ".join(x for x in (plan_text({k: t for k, t in slots.items() if k in ids}, now, tz), lt) if x)
+        return {"ok": True, "left": len(fit), "n": n + 1, "plan": plan, "m": n + min(len(fit), RUN_MAX - n),
                 "wait": max(0, math.ceil(last + gap - now)) if last else 0, "text": f"{name}: 남은 글 {len(rows)}",
                 "next": {"id": i["id"], "title": p["title"], "html": html, "text": _stamped(str(p.get("text") or ""), at), "at": at, "label": label,
                          "photos": html.count("<img"), "disc": bool(DISC_RE.search(_TAG.sub("", html)))}}
@@ -826,10 +842,12 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
                 c["run"][blog] = {"n": _run_n(c, blog, now) + (r == "ok"), "last": now}
                 c["last"][blog], c["gap"][blog] = now, float(rng.randint(*GAP))
         u = str(form.get("u") or "")
-        c["res"] = [*c["res"], {"id": rid, "b": blog, "r": r, "n": note, "u": u if U_RE.fullmatch(u) else "", "at": int(now)}][-RES_MAX:]
+        c["res"] = [*c["res"], {"id": rid, "b": blog, "r": r, "n": note, "u": u if U_RE.fullmatch(u) else "", "at": int(now), "v": ver(form)}][-RES_MAX:]
         _save(db, day, c)
         if r == "ok":
-            left = len(ready(rv, blog, c["tried"]))
+            later = set() if night(datetime.fromtimestamp(now, tz)) else {
+                k for k, t in ((_plans(db).get(blog) or {}).get("slots") or {}).items() if t[:10] > day}  # 낮: 내일 자리 글은 남은 글로 세지 않음
+            left = sum(1 for i in ready(rv, blog, c["tried"]) if i["id"] not in later)
             out["left"] = min(left, max(0, RUN_MAX - _run_n(c, blog, now)))
         return out
     if a == "dg":  # 달력 모양 하나 (2,000자까지 · 보이는 글자만) — 대시보드 kv 에만 남김
@@ -839,7 +857,7 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
                 old = json.loads(db.kv_get(KV_DG) or "[]")
             except (TypeError, ValueError):
                 old = []
-            db.kv_set(KV_DG, json.dumps([*(old if isinstance(old, list) else [])[-4:], {"b": blog, "at": int(now), "v": str(form.get("v") or "")[:6], "h": h}],
+            db.kv_set(KV_DG, json.dumps([*(old if isinstance(old, list) else [])[-4:], {"b": blog, "at": int(now), "v": ver(form), "h": h}],
                                         ensure_ascii=False))
         return {"ok": True}
     raise CaptureError(400, "bad", "모르는 요청이에요")

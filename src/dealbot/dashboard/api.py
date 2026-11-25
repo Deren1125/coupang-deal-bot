@@ -995,9 +995,14 @@ class DashApi:
             if e.code == "key":
                 log.info("autopub_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
             return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
-        if form.get("a") == "done":
+        if form.get("a") == "done":  # v = 책갈피 판 (11/26 — 주인이 다시 깔았는지 로그로 보이게) · 멈춤·못 넣음은 까닭 앞부분도
             lv = log.warning if form.get("r") == "wall" else log.info
-            lv("autopub_act: done blog=%s id=%s r=%s u=%s checked=%s", form.get("b"), form.get("id"), form.get("r"), form.get("u"), got.get("checked"))
+            why = " n=" + " ".join(str(form.get("n") or "").split())[:80] if form.get("r") in ("stop", "fail") else ""
+            lv("autopub_act: done blog=%s id=%s r=%s u=%s checked=%s v=%s%s", form.get("b"), form.get("id"), form.get("r"), form.get("u"), got.get("checked"),
+               autopub.ver(form) or "-", why)
+        elif form.get("a") in ("next", "dg"):
+            log.info("autopub_act: %s blog=%s v=%s%s", form.get("a"), form.get("b"), autopub.ver(form) or "-",
+                     f" left={got.get('left')} later={got.get('later', 0)}" if form.get("a") == "next" else "")
         return jresp(200, got, cors)
 
     async def deal_hot(self, query: dict[str, str]) -> Any:

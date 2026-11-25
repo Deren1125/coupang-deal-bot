@@ -91,10 +91,12 @@ def test_daytime_press_keeps_first_post_now_and_daily_cap_spills_to_next_day(bot
     t = at(bot, DAY, "10:03")
     q = _go(bot, t, a="next", b="issue")
     assert q["next"]["at"] == "" and q["plan"].startswith("지금 발행")  # 낮에는 v7 그대로 (첫 글 지금)
-    assert (q["n"], q["m"]) == (1, autopub.RUN_MAX)  # 한 판 10편
     slots = autopub._plans(bot.db)["issue"]["slots"]
     today_n = sum(v.startswith(DAY) for v in slots.values()) + 1  # + 지금 발행
     assert today_n <= autopub.DAY_MAX and len(slots) + 1 <= 12
+    later = len(slots) + 1 - today_n
+    assert (q["n"], q["m"]) == (1, today_n) and later > 0 and q["left"] == today_n  # 11/26: 낮에는 오늘 자리 글만 (내일 글은 저녁에)
+    assert "내일" not in q["plan"].replace(f"내일 글 {later}편은 저녁 8시 뒤 한 번에", ""), q["plan"]
     end = datetime.fromtimestamp(t, TZ).replace(tzinfo=None) + timedelta(hours=autopub.HORIZON_H)
     assert all(_d(v) <= end for v in slots.values())
     _ok_spacing([_d(v) for v in slots.values()] + [datetime(2026, 11, 18, 10, 10)])
@@ -105,7 +107,24 @@ def test_daytime_press_keeps_first_post_now_and_daily_cap_spills_to_next_day(bot
         _go(bot, t + 300 * k + 1, a="done", b="issue", id=q["next"]["id"], r="hold")
         _go(bot, t + 300 * k + 2, a="done", b="issue", id=q["next"]["id"], r="ok")
     q = _go(bot, t + 300 * autopub.RUN_MAX + 10, a="next", b="issue")
-    assert q["next"] is None and (f"한 번에 {autopub.RUN_MAX}편까지만" in q["text"] or "자리가 다 찼어요" in q["text"]), q
+    assert q["next"] is None and f"내일 글 {later}편은 저녁 8시 뒤 한 번에" in q["text"] and q["later"] == later, q  # 날짜 오류로 멈추지 않고 깔끔히 끝
+    q = _go(bot, at(bot, DAY, "20:30"), a="next", b="issue")  # 저녁에 누르면 그 글들을 계획한 자리 그대로 예약
+    assert q["next"] and q["next"]["at"] > DAY + "T23:59" and q["next"]["at"] == slots[q["next"]["id"]], q
+
+
+def test_daytime_done_left_skips_tomorrow_posts_and_stop_shows_version(bot: DealBot, tmp_path: Path) -> None:
+    with_routine(tmp_path, _rows(list(range(41, 53))))
+    t = at(bot, DAY, "10:03")
+    q = _go(bot, t, a="next", b="issue", v="9")
+    m = q["m"]
+    _go(bot, t + 1, a="done", b="issue", id=q["next"]["id"], r="hold", v="9")
+    d = _go(bot, t + 2, a="done", b="issue", id=q["next"]["id"], r="ok", v="9")
+    assert d["left"] == m - 1, (d, m)  # 내일 자리 글은 남은 글로 세지 않음 ('글마다 한 번'이 내일 글 때문에 화면을 다시 열지 않게)
+    q = _go(bot, t + 300, a="next", b="issue", v="9")
+    _go(bot, t + 301, a="done", b="issue", id=q["next"]["id"], r="stop", n="예약 못 채움 (날짜 칸 못 찾음)", v="9")
+    line = autopub.today(bot.db, t + 302, TZ, routine.view(bot, now=t + 302))["by"]["issue"]["line"]
+    assert "날짜 칸 못 찾음) (v9)" in line, line
+    assert autopub.ver({"v": "9"}) == "9" and autopub.ver({"v": "<b>"}) == "" and autopub.ver({}) == ""
 
 
 def test_three_blogs_at_night_fill_tomorrow_apart_and_capped() -> None:
