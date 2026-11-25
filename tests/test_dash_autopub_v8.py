@@ -32,6 +32,10 @@ FLOW8 = FLOW.replace("closed = r => ['ok', 'unsure', 'wall', 'fail'].includes(r)
     " else await f.click('#apb button'); } continue; }\n"
     "    out.lines = lines;\n")
 assert FLOW8.count("도구줄 '가운데'") == 1 and "'fail', 'skip'" in FLOW8
+# 그날 앞선 판에서 연속 보류가 이미 h2 편이었던 브라우저 (localStorage aph2<블로그> = '날짜|수')
+_TAP = "if (opt.dir) await p.evaluate(() => localStorage.setItem('apbd', '1'));"
+assert FLOW8.count(_TAP) == 1
+FLOW8 = FLOW8.replace(_TAP, _TAP + " if (opt.h2) await p.evaluate(n => localStorage.setItem('aph2issue', new Date().toDateString() + '|' + n), opt.h2);")
 
 
 def _run(posts: list[dict], tm: dict | None = None, timeout: int = 300, **opt) -> dict:
@@ -163,3 +167,13 @@ def test_left_blog_title_is_never_touched() -> None:
     got = _run([_post(1, center=False)], tm={"need": 1})
     assert [d["r"] for d in got["done"]] == ["hold", "ok"] and not got.get("mid") and not got["done"][-1]["n"], got["done"]
     assert "제목 가운데" not in got["end"]
+
+
+@needs_node
+@pytest.mark.parametrize("dir_", [False, True])
+def test_two_holds_earlier_today_are_remembered_across_reloads(dir_: bool) -> None:
+    """v8 고침 (검토 M1): '글마다 한 번'(DIR)은 글마다 화면을 다시 열어 메모리 값이 0 — 그날 연속 보류 수는 브라우저에 남겨 메모만 모드가 이어짐."""
+    got = _run([_post(1)], tm={"never": 1}, h2=2, dir=dir_)
+    assert not got.get("mid"), got  # 주인에게 다시 멈추지 않음
+    oks = [d for d in got["done"] if d["r"] == "ok"]
+    assert oks and oks[-1]["n"] == "제목 가운데 아님", got["done"]

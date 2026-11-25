@@ -79,6 +79,9 @@ for (const d of first) {
 const mines = CFG.bl.filter(x => ids.includes(x[0])), mine = mines.length === 1 ? mines[0] : null;
 if (!mine) { put(1); say(mines.length ? '어느 블로그 계정인지 헷갈려요 — 그 블로그로 로그인한 글쓰기 화면에서 눌러 주세요' : '우리 블로그 계정의 글쓰기 화면이 아니에요' + (ids[0] ? ' (' + ids[0] + ')' : '') + ' — 아무것도 하지 않았어요'); setTimeout(() => ui.remove(), 9000); return; }
 const BLOG = mine[1], URL_ = E0.location.href.split('#')[0];
+// v8 고침: 연속 보류 수는 그날 그 블로그에 남김 — '글마다 한 번'(DIR)은 글마다 화면을 다시 열어 메모리 값이 0 이 됨
+const HK = 'aph2' + BLOG, DS = new Date().toDateString();
+try { const v = (W.localStorage.getItem(HK) || '').split('|'); if (v[0] === DS) h2 = +v[1] || 0; } catch (e) {}
 // ── 화면: 이어가기(iframe) = 누른 화면을 비우고 위에 한 줄 + 아래 글쓰기 창 · 글마다 한 번(DIR) = 글쓰기 화면 아래쪽에 한 줄
 const box = mk('div');
 if (DIR) put(1);
@@ -259,17 +262,18 @@ const pre = (it, name) => async k => {
     }
     await S(1000);
     if (tt() !== T0) { K.why = '제목 칸이 원고와 달라요'; return false; }
-    // v6: 가운데 글이면 커서가 제목 칸에 있는 지금 도구줄 가운데 단추 (주인이 누른 자리라 먹음) · v8: 안 되면 본문 넣기 전에 주인 손 · 그래도 왼쪽이면 보류 (2편 연속 보류 뒤엔 메모만)
-    const tm = MID(it) ? await k.titleMid() : '';
-    if (tm && h2 < 2) {
-      say(name + "제목 칸을 누른 채 도구줄 '가운데'를 눌러 주세요");
-      ask1('안 되면 이 글은 보류');
-      await hand(-1, () => K.centered(ttl()) || sig.go);
-      ask1('');
-      if (!K.centered(ttl())) { K.why = '제목 가운데 안 됨'; K.skip = 1; return false; }
-    }
-    if (tm && !K.centered(ttl())) tn++;
   }
+  // v6: 가운데 글이면 커서가 제목 칸에 있는 지금 도구줄 가운데 단추 (주인이 누른 자리라 먹음) · v8: 안 되면 본문 넣기 전에 주인 손 · 그래도 왼쪽이면 보류 (2편 연속 보류 뒤엔 메모만)
+  // v8 고침: 제목이 이미 든 화면에서 다시 눌러도 이 확인을 거침 (if 밖)
+  const tm = MID(it) ? await k.titleMid() : '';
+  if (tm && h2 < 2) {
+    say(name + "제목 칸을 누른 채 도구줄 '가운데'를 눌러 주세요");
+    ask1('안 되면 이 글은 보류');
+    await hand(-1, () => K.centered(ttl()) || sig.go);
+    ask1('');
+    if (!K.centered(ttl())) { K.why = '제목 가운데 안 됨'; K.skip = 1; return false; }
+  }
+  if (tm && !K.centered(ttl())) tn++;
   // 본문: 꾸미기와 같게 주인이 본문을 한 번 누른 뒤 · v5: 선택이 제목 칸이면 다시 눌러 달라고 함
   for (let n = 0; n < 3; n++) {
     say(name + (n ? '본문(아래 넓은 칸)을 눌러 주세요' : '② 본문을 한 번 눌러 주세요 — 그다음은 손대지 마세요 (1~2분)'));
@@ -429,6 +433,7 @@ for (;;) {
   }
   // v8: 2편 연속 보류면 이 판의 나머지는 메모만 (하루 발행 0 막기)
   if (res.r === 'skip') { h2++; tn++; } else if (h2 < 2) h2 = 0;
+  try { W.localStorage.setItem(HK, DS + '|' + h2); } catch (e) {}
   if (res.r === 'login') { end = '네이버 로그인이 풀렸어요 — 로그인한 뒤 글쓰기 화면에서 다시 눌러 주세요'; break; }
   const d = await (sig.sent || ask({a: 'done', b: BLOG, id: it.id, r: res.r, n: res.n || '', u: res.u || ''}));
   if (d && d.checked) chkn++;
