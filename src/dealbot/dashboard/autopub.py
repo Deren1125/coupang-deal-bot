@@ -75,13 +75,13 @@ DAY_MAX = 8  # 블로그마다 하루 예약·발행 (주인 11/25 '블로그마
 HORIZON_H = 28  # 네이버 예약 개수·기한 한도는 알려진 것이 없음 (코드·devlog·playbook) → 하루 남짓으로만
 COOL_S = 86400.0  # 네이버 보호·제한 안내 뒤 쉬는 시간 (이웃 관리 seoi.COOL_S 와 같게)
 STOP_MAX = 2  # 같은 글이 점검에서 이만큼 멈추면 오늘은 주지 않음 (꾸미기 책갈피로 직접)
-RESULTS = ("hold", "ok", "unsure", "stop", "fail", "wall")
+RESULTS = ("hold", "ok", "unsure", "stop", "fail", "wall", "skip")  # skip (v8): 가운데 글인데 제목이 끝내 왼쪽 — 발행 안 하고 오늘은 다시 주지 않음 (다음 글로)
 TRIED = ("hold", "ok", "unsure")  # 오늘은 다시 주지 않는 결과
 RES_MAX = 80
 NOTE_MAX = 300
 GROUPS = ("발행", "예약")
 ROW_RE = re.compile(r"^(?:pub|rsv):(finance|issue|hotdeal):(\d{1,9})$")  # actions.PASTE_ROW_RE 와 같게 (test_dash_autopub 이 지킴)
-NAMES = seoi.NAMES
+NAMES = {**seoi.NAMES, "finance": "트로트"}  # 주인 11/25 최종 주제 — derenlog = 트로트 (style_lock B6)
 # 올리면 안 되는 글 (대시보드 표시): 줄의 한마디·제목에 이런 말이 있으면 주지 않는다 (새 방향과 안 맞는 글 · 주인이 건너뛴 글 · 보류)
 UNFIT_RE = re.compile(r"새 방향|방향과 안|안 맞|건너뛰|건너뜀|올리지 마|올리지 않|보류|안 올림")
 DISC_RE = re.compile(r"수수료를\s*(받|제공|지급)")  # static/autopub.js DISC 와 같게
@@ -135,6 +135,8 @@ STEPS = (
     "그 뒤에 새로 쓴 글(속보·밤 글)은 할 일 탭에 '속보 n편 — 원하면 한 번 더'로만 보여요 — 안 눌러도 돼요.",
     "이 브라우저에서 스스로 이어가기가 안 되면 화면을 다시 열고 '글마다 한 번'으로 바꿔요 — 그때는 글 하나가 올라갈 때마다 '다음 글 N/M — 책갈피 한 번 더'가 뜨고, "
     "새 글쓰기 화면이 열리면 한 번씩만 눌러 주면 돼요 (나머지는 그대로 자동).",
+    "가운데 블로그(데런픽·트로트) 글은 제목도 가운데로 맞춰요 (v8) — 안 되면 본문을 넣기 전에 멈추고 '제목 칸을 누른 채 도구줄 가운데'를 부탁해요. "
+    "그래도 왼쪽이면 그 글은 발행하지 않고 보류한 뒤 다음 글로 가요 (같은 판에서 2편 연속 보류면 나머지는 요약에 적고 발행 — 끝 요약 '제목 가운데 안 됨 n편'). 라커룸(왼쪽)은 그대로예요.",
     "토·일도 평일처럼 올려요 (주인 11/24 — 토요일에 누르면 토요일 자리에 예약). 대시보드 점검에 걸린 글·새 방향과 안 맞는 글·이미 체크한 글은 올리지 않아요.",
     "네이버가 자동입력 방지·보호조치·이용 제한·한도 안내를 보이면 풀지 않고 바로 멈추고, 그 블로그의 하루치 한 번에는 24시간 쉬어요 (그동안 다시 눌러도 하지 않아요). "
     "다른 블로그는 그 블로그 프로필에서 같은 식으로 (한 번에 로그인된 블로그 하나의 글만 해요).",
@@ -199,10 +201,16 @@ def runner() -> str:
 @lru_cache(maxsize=1)
 def _code() -> str:
     """줄인 진행기: 껍데기는 한글 글을 Z('…') 로 (seoi.pack — 주소에서 한글 한 자가 9자 → 3자) · 꾸미기 코드는 줄이기만 (정규식 안에 따옴표가 있어 pack 하지 않음)."""
-    shell = seoi.pack(kkumi.minify(_shell()))
+    shell = seoi.pack(kkumi.minify(_shell(), let=True))  # v8: 'const' → 'let' (꾸미기 책갈피와 같게 · 한 번 도는 함수라 뜻이 같음 — 제목 가운데 멈춤을 넣을 자리 ~600자)
     if shell.count(SLOT) != 1:
         raise ValueError("autopub.js 에 꾸미기 자리가 없음")
-    return HEAD + shell.replace(SLOT, _zcore(kkumi.minify(_core()))) + TAIL
+    return HEAD + _join(shell.replace(SLOT, _zcore(kkumi.minify(_core(), let=True)))) + TAIL
+
+
+def _join(code: str) -> str:
+    """v8: '}' 로 끝난 줄은 다음 줄과 바로 붙임 (주소에서 줄바꿈은 %0A 세 글자 · ~330자). 다음 줄이 ( [ / + - ` 로 시작하면 뜻이 바뀔 수 있어 그대로 —
+    그 밖에 줄바꿈에 기대던 문장(객체·함수 식 끝의 ';' 빠짐)은 붙이면 문법 오류가 되어 시험(node 로 읽기)이 잡는다."""
+    return re.sub(r"\}\n(?![(\[/+\-`])", "}", code)
 
 
 # v5: 꾸미기 코드의 한글 '…' 글도 Z('…') 로 (주소에서 한 자 9자 → 3자 · 포스트잇·본문 다시 누름·예약 계획을 넣을 자리) — 정규식 안 따옴표가 있어 seoi.pack 은 못 씀 →
@@ -637,6 +645,7 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
         ok = sum(1 for r in mine if r.get("r") == "ok")
         unsure = sum(1 for r in mine if r.get("r") in ("unsure", "hold"))
         stop = [r for r in mine if r.get("r") == "stop"]
+        skip = sum(1 for r in mine if r.get("r") == "skip")
         rows = ready(rv, b, {**hd, **c["tried"]}) if rv is not None else []
         n = len(rows)
         mf = misfits(rv, b) if rv is not None else []
@@ -648,7 +657,7 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
         left = sum(1 for i in rows if i["id"] in planned)
         fresh = n - left
         bits = []
-        if ok or unsure or stop:
+        if ok or unsure or stop or skip:
             bits.append(f"올린 글 {ok}")
         if ahead:
             bits.append(f"내일 예약 {len(ahead)}편 넣음")
@@ -656,6 +665,8 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
             bits.append(f"확인 필요 {unsure} (블로그에서 확인)")
         if stop:
             bits.append(f"멈춘 글 {len(stop)} — {str(stop[-1].get('n') or '점검에 걸림')[:60]}")
+        if skip:
+            bits.append(f"제목 가운데 안 됨 {skip}편 보류 — 알려 주세요")
         if b in cl:
             bits.append(cool_text(b, cl[b], tz))
         elif n:
@@ -667,12 +678,12 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
         if mf:  # 주인 11/23 — 왜 안 올리는지 알게
             bits.append(f"새 방향과 안 맞아 올리지 않는 글 {len(mf)}편 ({str(mf[0]['direction'].get('why') or '')[:40]}"
                         + (f" 외 {len(mf) - 1}" if len(mf) > 1 else "") + ")")
-        by[b] = {"name": name, "ok": ok, "unsure": unsure, "stop": len(stop), "ready": n, "fresh": fresh if pressed else 0, "ahead": len(ahead),
+        by[b] = {"name": name, "ok": ok, "unsure": unsure, "stop": len(stop), "skip": skip, "ready": n, "fresh": fresh if pressed else 0, "ahead": len(ahead),
                  "cool": b in cl, "misfit": len(mf),
                  "line": "하루치 한 번에: " + " · ".join(bits) if bits else ""}
     done = [f"{v['name']} {v['ok']}" for v in by.values() if v["ok"]]
-    sums = {k: sum(v[k] for v in by.values()) for k in ("unsure", "stop")}
-    extra = [f"{t} {sums[k]}" for t, k in (("확인 필요", "unsure"), ("멈춘 글", "stop")) if sums[k]]
+    sums = {k: sum(v[k] for v in by.values()) for k in ("unsure", "stop", "skip")}
+    extra = [f"{t} {sums[k]}" for t, k in (("확인 필요", "unsure"), ("멈춘 글", "stop"), ("제목 가운데 안 됨 보류", "skip")) if sums[k]]
     return {"by": by, "note": "오늘 하루치 한 번에: " + " · ".join([*(done or ["올린 글 0"]), *extra]) if last else ""}
 
 
@@ -770,6 +781,8 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
                 c["tried"][rid] = r
                 _held_add(db, rid, r, now)
                 _used(db, blog, rid, now, tz)
+            if r == "skip" and rid not in c["tried"]:
+                c["tried"][rid] = "skip"
             if r == "stop":
                 c["stops"][rid] = c["stops"].get(rid, 0) + 1
                 if c["stops"][rid] >= STOP_MAX and rid not in c["tried"]:  # hold(발행을 눌러 봄)을 덮지 않음

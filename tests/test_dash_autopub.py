@@ -98,10 +98,10 @@ def test_bookmarklet_carries_the_whole_runner_and_fetches_no_code() -> None:
     v = autopub.view(db, "https://dash.example")
     js = unquote(v["code"][len("javascript:"):])
     assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= autopub.LEN_MAX == 50000 and v["steps"] == list(autopub.STEPS)
-    assert v["version"] == autopub.version() == 7 and "지금 판 v7" in v["note"]
+    assert v["version"] == autopub.version() == 8 and "지금 판 v8" in v["note"]
     assert "#" not in v["code"] and v["code"] == "javascript:" + kkumi.encode_short(js)
     assert "u:'https://dash.example/dashboard/api/autopub_act'" in js and f"k:'{autopub.key(db)}'" in js and "@@" not in js
-    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and autopub._zcore(kkumi.minify(autopub._core())) in js
+    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and autopub._join(autopub._zcore(kkumi.minify(autopub._core(), let=True))) in js
     # 원격 코드 실행 없음: 받은 글을 코드로 돌리는 길이 없고, 대시보드에 코드를 달라고 하지 않음 · 쿠키를 읽지 않음
     for word in ("new Function", "Function(", "eval(", "a:'code'", "import(", "createElement('script')", "prompt(", "cookie"):
         assert word not in js, word
@@ -128,7 +128,7 @@ def test_runner_reuses_kkumi_whole_and_kkumi_itself_is_untouched() -> None:
     for tool in autopub.TOOLS.split(", "):  # 껍데기가 쓰는 꾸미기 도구가 kkumi.js 에 그 이름으로 있음
         assert f"const {tool} = " in src or f"const {tool}=" in src or tool in ("D", "W", "R", "S"), tool
     # 꾸미기 책갈피는 혼자서도 그대로 (발행을 끝내는 단추를 누르지 않는 막이 포함 · 판 번호 그대로)
-    assert kkumi.version() == 11 and "throw 0;" in src and len(kkumi.bookmarklet()) < 30500
+    assert kkumi.version() == 12 and "throw 0;" in src and len(kkumi.bookmarklet()) < 30500
     # 껍데기: 알림·확인·입력 창 없음 · 마지막 발행 단추는 '해 봄'(hold)을 남긴 뒤 한 곳에서만 누름
     for word in (".click(", "requestSubmit", ".submit(", "alert(", "confirm(", "prompt(", "eval(", "document.cookie"):
         assert word not in shell, word
@@ -320,7 +320,7 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
     assert (await bot.web.dispatch("GET", "/dashboard/api/autopub", anon))[0] == 401
     status, v, hd = await get_json(bot, "/dashboard/api/autopub", session_headers(bot))
     k = autopub.key(bot.db)
-    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 7
+    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 8
     res = await _post(bot, {"k": k, "a": "code", "b": "issue"}, origin="https://blog.naver.com")
     assert res[0] == 400 and json.loads(res[1])["code"] == "bad" and res[3]["Access-Control-Allow-Origin"] == "https://blog.naver.com"
     res = await _post(bot, {"k": k, "a": "next", "b": "issue"}, origin="https://blog.naver.com")
@@ -590,7 +590,7 @@ host.addEventListener('focusout', () => { window.__sess = 0; });
 
 
 def _editor(rsv: str = "full", se1: str = "") -> str:
-    h = INNER.replace("</body></html>", RSV.replace("__MODE__", rsv)).replace("</body></html>", EXTRA).replace("</body></html>", PRE_WALL)
+    h = INNER.replace("</body></html>", RSV.replace("__MODE__", rsv)).replace("</body></html>", EXTRA).replace("</body></html>", PRE_WALL).replace("</body></html>", TITLE_MID)
     if se1 in ("real", "realnt"):
         return h.replace("</body></html>", SE1R.replace("__NT__", "1" if se1 == "realnt" else "0"))
     if se1 in ("realpi", "realpint", "realpidrop"):
@@ -599,6 +599,13 @@ def _editor(rsv: str = "full", se1: str = "") -> str:
             h = h.replace(a, b)
         return h.replace("</body></html>", SE1R.replace("__NT__", "0")).replace("</body></html>", PI.replace("__PINT__", "1" if se1 == "realpint" else "0").replace("__DROP__", "1" if se1 == "realpidrop" else "0"))
     return h.replace("</body></html>", SE1.replace("__STEAL__", {"steal": "1", "stuck": "2", "ipad": "3", "ipadbody": "4"}.get(se1, "0"))) if se1 else h
+
+
+# v8 (주인 11/25 '본문은 가운데인데 제목은 왼쪽'): SE ONE 처럼 도구줄 가운데는 커서가 있는 칸에 — 마지막으로 누른 곳(도구줄 밖)이 제목 칸이면 제목 줄을 가운데로,
+# 아니면 원래 단추 (지금 정렬 + 마지막 글 덩어리). window.__tm = {need: n} 이면 n 번째 누름부터 먹음 · {never: 1} 은 안 먹음 · ok 가 서면(주인 손) 먹음 — test_dash_autopub_v8
+TITLE_MID = r"""<script>(() => { const T = document.querySelector('.se-documentTitle'), b = document.querySelector("[data-value='center']"), f = b.onclick; let w = '', n = 0;
+document.addEventListener('pointerdown', e => { const t = e.target; if (t.closest && !t.closest('#tb')) w = t.closest('.se-documentTitle') ? 't' : t.closest('.se-content') ? 'b' : w; }, true);
+b.onclick = e => { if (w !== 't') return f(e); const o = window.__tm || {}; window.__tmN = ++n; if (o.ok || (!o.never && n >= (o.need || 1))) T.querySelector('.se-text-paragraph').style.textAlign = 'center'; }; })();</script></body></html>"""
 
 
 V4_SRC = Path(__file__).resolve().parent / "fixtures" / "autopub_v4.js"  # 주인 아이패드에서 '포스트잇 글이 안 들어감'으로 멈춘 v4 진행기 (fad77bf) 그대로
@@ -669,7 +676,7 @@ def test_one_tap_fills_checks_and_publishes_two_posts() -> None:
     assert b["book"] is True and (b["h"], b["m"]) == ("19", "40") and b["date"] == f"{when.year}. {when.month:02d}. {when.day:02d}"
     assert any("1/2 「첫 글 제목이에요」 지금 발행을 눌렀어요" in x for x in got["bars"]) and any("2/2 「둘째 글 제목」 예약 " in x and "19:40 발행을 눌렀어요" in x for x in got["bars"])
     assert any("다음 글 2/2 — 1초 쉬어요" in x for x in got["bars"])
-    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v7"), got["end"]
+    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v8"), got["end"]
     assert len(got["lines"]) == 2 and all(x.startswith("✓ 올렸어요") and "할 일 줄 체크 ✓" in x for x in got["lines"]) and "글 번호 223000000001" in got["lines"][0]
     # 네이버 화면이 맨 위 창을 글 주소로 옮기려 했지만 진행기는 누른 화면에 그대로 (sandbox) · 끝나면 글쓰기 창을 치움
     assert got["url"] == "https://blog.naver.com/derenpick/postwrite" and got["frames"] == 0 and got["next"] == ["", "", ""] and got["taps"] == 1
@@ -880,7 +887,7 @@ def test_v4_on_the_real_model_two_owner_taps_per_post_then_publishes_by_itself()
     assert b["title"] == "둘째 글 제목" and "둘째 글 제목" not in b["text"] and b["book"] is True and (b["h"], b["m"]) == ("19", "40")
     assert got["hands"] == 4 and not got.get("broken") and "cp" not in got  # 글마다 제목 칸 한 번 + 본문 한 번 · 에디터 글을 스크립트로 고친 적 없음
     assert any("1/2 「첫 글 제목이에요」 ① 제목 칸을 한 번 눌러 주세요" == x[len("하루치 한 번에 · "):] for x in got["bars"])
-    assert any("② 본문을 한 번 눌러 주세요" in x for x in got["bars"]) and got["end"].endswith(" · v7") and "올린 글 2" in got["end"]
+    assert any("② 본문을 한 번 눌러 주세요" in x for x in got["bars"]) and got["end"].endswith(" · v8") and "올린 글 2" in got["end"]
 
 
 @needs_node
@@ -980,7 +987,7 @@ def test_v5_on_the_real_postit_model_puts_both_postits_inside_and_publishes() ->
     assert a["title"] == "굿파트너2 2회 이야기" and a["tags"].split() == ["#굿파트너2"] and a["cat"] == "셀럽 소식"
     assert len(a["postits"]) == 2 and PIT_A in a["postits"][0] and "1회 · 4.0%" in a["postits"][1].replace("\xa0", " ") and "2회 · 5.1%" in a["postits"][1]
     assert "1회" not in a["outside"] and PIT_A not in a["outside"] and "표 앞 문단이에요." in a["outside"]  # 포스트잇 밖(본문)에는 없음
-    assert got["end"].endswith(" · v7") and "올린 글 1" in got["end"]
+    assert got["end"].endswith(" · v8") and "올린 글 1" in got["end"]
 
 
 @needs_node

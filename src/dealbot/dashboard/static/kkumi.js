@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v11 (v11: 11/24 사진이 30초 안에 다 안 올라가도 사진 칸이 생겼으면 주소로 또 넣지 않음 (라커룸 김혜성 글 같은 사진 두 장) · 태그는 네이버처럼 글자·숫자·_ 만 남기고 겹친 것 빼고 30개까지 · 안 들어간 태그는 한 번 더, 그래도 없으면 이름을 알림에 · v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v12 (v12: 11/25 가운데 글 제목 가운데 — 누른 뒤 다시 보고 3번까지 · 정렬 드롭다운이면 열고 누름 · v11: 11/24 사진이 30초 안에 다 안 올라가도 사진 칸이 생겼으면 주소로 또 넣지 않음 (라커룸 김혜성 글 같은 사진 두 장) · 태그는 네이버처럼 글자·숫자·_ 만 남기고 겹친 것 빼고 30개까지 · 안 들어간 태그는 한 번 더, 그래도 없으면 이름을 알림에 · v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -20,7 +20,7 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 11;
+const V = 12;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => qa(D, CARD).length;
@@ -129,14 +129,18 @@ const align = async want => {
   return centered(lastPara());
 };
 // 제목 가운데 (주인 11/06 '제목은 원래 가운데였잖아' — 서버가 올릴 땐 맞췄음): 본문이 가운데 글이면 끝에 제목 줄을 누르고 가운데 단추
-const titleMid = async () => {
+// v12 (주인 11/25 '책갈피로 올리면 본문은 가운데인데 제목은 왼쪽'): 누른 뒤 다시 보고, 아니면 제목을 다시 눌러 3번까지 (400·650·900ms) · 가운데 단추가 정렬 드롭다운에 접혀 있으면 여는 단추 먼저 · 누르기만 (글은 안 건드림 · 왼쪽으로 바꾸지 않음)
+const AL_OPEN = ['button[class*=se-align-]'];
+const titleMid = async (tries = 3) => {
   const t = qa(D, '.se-text-paragraph').find(inTitle);
-  if (!t || !txt(t)) return '제목 없음';
-  if (centered(t)) return '';
-  press(t); setSel(t); await S(400);
-  const b = vis(MAIN_CENTER);
-  if (!b) return '정렬 단추 없음';
-  press(b); await S(500);
+  if (!t || !txt(t)) return '못 함';
+  for (let n = 0; n < tries && !centered(t); n++) {
+    press(t); setSel(t); await S(300);
+    let b = vis(MAIN_CENTER);
+    if (!b && vis(AL_OPEN)) { press(vis(AL_OPEN)); b = await wait(() => vis(MAIN_CENTER), 1200); }
+    if (b) press(b);
+    await S(400 + 250 * n);
+  }
   return centered(t) ? '' : '못 함';
 };
 // 링크 카드: 툴바 링크 단추 → 주소 → 검색 → 미리보기 → 확인 (카드는 맨 끝 = 바로 위 주소 줄 다음)
@@ -173,7 +177,6 @@ const LINE_DEFAULT = ["button[data-value='default'][data-name*='horizontal']", "
 const QUOTE_OPENERS = ["button[data-name='quotation'] + button", "button[data-name='quotation-select']", '.se-toolbar-item-quotation button.se-document-toolbar-select-option-button', "[class*='quotation'] button[class*='select']", "[class*='quotation'] button[class*='arrow']"];
 const QUOTE_POSTIT = ["button[data-value='quotation_postit']", "button[class*='quotation_postit']", "[data-value*='postit']", "button[class*='postit']"];
 const short = e => /(^|\s)se-l-default(\s|$)/.test(e.className);
-const mid = e => /align-center/.test((e.querySelector('.se-section') || e).className);
 const postit = e => /se-l-quotation_postit/.test(e.className);
 const choose = async (open, pick) => {
   let c = vis(pick);
