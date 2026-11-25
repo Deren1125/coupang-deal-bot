@@ -2,7 +2,7 @@
 
 1) autopub.bookmarklet(): 진행기(autopub.js + kkumi.js 통째, PATCHES · 붙여넣기 칸 뺌)를 주소에 통째로 (원격 코드 없음) · 길이 한도 · node 로 읽힘 · 꾸미기 책갈피는 그대로.
 2) autopub.act(): 열쇠 · 그 블로그의 올려도 되는 글만 (점검 통과 · 새 방향과 안 맞는 글·고지 빠진 글 뺌) · 예약 시각(첫 글의 지난 자리만 지금) · 40~120초 ·
-   한 판 5편 · 발행 전 '해 봄' · 멈춘 글 다시 · 네이버 안내 뒤 24시간 쉼 · 발행 확인이면 할 일 줄 체크.
+   한 판 10편(11/25 — 예전 5) · 발행 전 '해 봄' · 멈춘 글 다시 · 네이버 안내 뒤 24시간 쉼 · 발행 확인이면 할 일 줄 체크.
 3) GET /dashboard/api/autopub (로그인 아래) · POST /dashboard/api/autopub_act (열쇠 · CORS 는 네이버 블로그 화면만) · 연결 탭 칸 · 할 일 카드 한 줄.
 4) 가짜 글쓰기 화면 (진짜 크롬, playwright 가 있을 때만): 한 번 눌러 글 2편을 채우고 발행까지 (지금 발행 + 예약) · 점검에 걸리면 발행하지 않고 멈춤 → 고치고
    단추를 누르면 이어서 발행 · 카테고리·예약 칸을 못 채우면 멈춤 · 네이버 보호 안내면 바로 멈춤 · 다른 블로그면 거절 · '글마다 한 번'(DIR) 길.
@@ -266,27 +266,28 @@ def test_a_post_whose_publish_was_pressed_is_never_served_again_even_after_the_d
 
 def test_run_cap_weekends_are_normal_days_and_protection_cooldown(bot: DealBot, tmp_path: Path) -> None:
     rows = {"day": DAY, "slots": SLOTS, "overflow": 0, "items": [
-        item(f"pub:issue:{n}", "s1", group="발행", blog="issue", title=f"데런픽 발행 · {n}", paste=_paste(f"글 {n}"), gate=OK) for n in range(1, 8)]}
+        item(f"pub:issue:{n}", "s1", group="발행", blog="issue", title=f"데런픽 발행 · {n}", paste=_paste(f"글 {n}"), gate=OK) for n in range(1, 13)]}
     with_routine(tmp_path, rows)
     t = at(bot, DAY, "10:00")
     ats = []
-    for n in range(1, 6):  # 한 판에 5편까지
+    for n in range(1, 11):  # 한 판에 10편까지 (11/25 하루치 모드 — 예전 5)
         q = _go(bot, t + n * 200, a="next", b="issue")
-        assert q["next"]["id"] == f"pub:issue:{n}" and (q["n"], q["m"]) == (n, 5)
+        assert q["next"]["id"] == f"pub:issue:{n}" and (q["n"], q["m"]) == (n, 10)
         ats.append(q["next"]["at"])
         _go(bot, t + n * 200 + 1, a="done", b="issue", id=f"pub:issue:{n}", r="ok")
-    assert all(ats) and ats == sorted(ats) and len(set(ats)) == 5  # 다섯 글 모두 다른 예약 자리 (차례대로)
-    q = _go(bot, t + 1300, a="next", b="issue")
-    assert q["next"] is None and q["left"] == 2 and q["text"] == "데런픽: 한 번에 5편까지만 올려요 (남은 글 2) — 30분쯤 뒤에 다시 눌러 주세요"
-    q = _go(bot, t + 1001 + autopub.RUN_IDLE_S + 60, a="next", b="issue")  # 한참 뒤 다시 누르면 새 판
-    assert q["next"]["id"] == "pub:issue:6" and (q["n"], q["m"]) == (1, 2)
+    assert all(ats) and ats == sorted(ats) and len(set(ats)) == 10  # 열 글 모두 다른 예약 자리 (차례대로)
+    assert sum(a.startswith(DAY) for a in ats) <= autopub.DAY_MAX  # 하루 상한 — 넘친 글은 다음 날
+    q = _go(bot, t + 2300, a="next", b="issue")
+    assert q["next"] is None and q["left"] == 2 and q["text"] == "데런픽: 한 번에 10편까지만 올려요 (남은 글 2) — 30분쯤 뒤에 다시 눌러 주세요"
+    q = _go(bot, t + 2001 + autopub.RUN_IDLE_S + 60, a="next", b="issue")  # 한참 뒤 다시 누르면 새 판
+    assert q["next"]["id"] == "pub:issue:11" and (q["n"], q["m"]) == (1, 2)
     # 네이버 보호·제한 안내 → 그 블로그만 24시간 쉼 (다시 눌러도 주지 않음 · 발행 전 '해 봄'도 거절 → 책갈피는 발행을 누르지 않음) · kv 에 until
     t2 = t + 5000
-    d = _go(bot, t2, a="done", b="issue", id="pub:issue:6", r="wall", n="자동입력 방지")
+    d = _go(bot, t2, a="done", b="issue", id="pub:issue:11", r="wall", n="자동입력 방지")
     assert d["checked"] is False and d["until"] == t2 + 86400 and d["text"] == "네이버 보호·제한 안내로 데런픽 하루치 한 번에는 11/19 11:23까지 쉬어요 — 그동안은 직접 올려 주세요"
     cool = json.loads(bot.db.kv_get(autopub.KV_COOL))
     assert cool["issue"]["until"] == t2 + 86400 and cool["issue"]["why"] == "자동입력 방지" and list(cool) == ["issue"]
-    for form in ({"a": "next"}, {"a": "done", "id": "pub:issue:6", "r": "hold"}):
+    for form in ({"a": "next"}, {"a": "done", "id": "pub:issue:11", "r": "hold"}):
         with pytest.raises(autopub.CaptureError) as e:
             _go(bot, t2 + 3600, b="issue", **form)
         assert e.value.status == 429 and e.value.code == "cool" and "11/19 11:23까지" in e.value.text

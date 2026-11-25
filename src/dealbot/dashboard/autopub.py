@@ -1,7 +1,7 @@
 """'하루치 한 번에 (발행까지)' 책갈피 (주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지 가능하게 만들자").
 
 주인이 그 블로그로 로그인한 자기 사파리의 PC 글쓰기 화면에서 한 번 누르면: 그 블로그의 준비된 대기 글을 차례로 — 제목·본문·꾸미기·사진·태그·카테고리·예약 시각
-(꾸미기 kkumi.js 통째) → 스스로 점검 → 깨끗하면 마지막 발행 단추까지 누름 → 발행 확인 → 할 일 줄 ✓ → 40~120초 쉬고 다음 글 (한 번에 5편까지).
+(꾸미기 kkumi.js 통째) → 스스로 점검 → 깨끗하면 마지막 발행 단추까지 누름 → 발행 확인 → 할 일 줄 ✓ → 40~120초 쉬고 다음 글 (한 번에 10편까지 · 저녁 8시 뒤에 누르면 내일 하루치를 모두 예약 — 주인 11/25).
 서버는 네이버를 열지도 로그인하지도 않는다 (모든 일은 주인 브라우저에서 · 서버는 글과 차례·간격·상한·쉼만 정해 줌).
 옛 '글쓰기 한 번에'(writebm.py — 11/16 접음 · 발행은 주인이 누름)와 다른 점: 마지막 발행 단추를 책갈피가 누른다 · 그래서 점검에 하나라도 걸리면 그 글에서 멈춘다.
 
@@ -20,7 +20,11 @@ POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv a
       첫 글 지금 발행 (v7 · 주인 11/16 '오늘 발행 글 없으면 1번 글 지금 발행' — v5 에서 빠졌던 것): 그 블로그에 오늘 발행·오늘 예약이 없으면
         (published_today — 계획의 쓴 시각 · 할 일 목록 체크 줄 · Blog-Auto 오늘 발행 수) 첫 글은 at '' = 발행창 '현재' · 나머지는 지금부터 40분 넘게 뒤 계획 ·
         07:30~23:00 일 때만 · plan = '지금 발행 · 오늘 예약 14:20 · 16:10'.
-      wait = 앞 글 뒤 40~120초(GAP · 무작위)가 되기까지 남은 초. 한 판(RUN_IDLE_S 안에 이어진 글)에 RUN_MAX(5)편까지 — 넘으면 next 없음.
+      하루치 모드 (주인 11/25 '하루에 한 번만 — 전날 밤에 눌러 그날 글을 다 예약'): 20:00 뒤(NIGHT_FROM)에 누르면 지금 발행 없이 모두 내일 07:30~23:00 에 예약 ·
+        블로그마다 하루 DAY_MAX(8)편까지 (그날 쓴 시각·체크한 예약·계획을 셈 — 낮에 눌러도 같은 상한, 넘치면 다음 날) · 누른 때부터 HORIZON_H(28)시간 안만
+        (네이버 예약 개수·기한 한도는 코드·기록에 알려진 것이 없어 하루 남짓으로 묶음) · 자리가 없는 글은 주지 않음 ('자리가 다 찼어요').
+        누른 뒤 Blog-Auto 가 새로 쓴 글(속보·밤 글)은 할 일 줄에 '속보 n편 — 원하면 한 번 더'로만 (조르지 않음).
+      wait = 앞 글 뒤 40~120초(GAP · 무작위)가 되기까지 남은 초. 한 판(RUN_IDLE_S 안에 이어진 글)에 RUN_MAX(10)편까지 — 넘으면 next 없음.
       주말 쉼 없음 (주인 11/24 '주말에도 글 쓰고 발행' — 11/21 주말 쉼은 지움 · 서버가 weekend 를 보내지 않음 · 책갈피 v7 에서
         '주말에도 시작' 단추·w 신호를 뺌 (옛 책갈피가 보내는 w 는 무시)).
       네이버 보호·제한 안내 뒤 24시간(kv autopub:cool)은 429 cool.
@@ -65,8 +69,10 @@ DAY_KEY = "autopub:day:"
 PATH = "/dashboard/api/autopub_act"
 OFF_TEXT = "하루치 한 번에는 꺼져 있어요 — 꾸미기 책갈피를 쓰세요"
 GAP = (40, 120)  # 글 사이 쉬는 초 (주인 11/23)
-RUN_MAX = 5  # 한 판에 블로그마다 올리는 글 수
+RUN_MAX = 10  # 한 판에 블로그마다 올리는 글 수 (11/25 하루치 모드 — 저녁에 한 번 눌러 내일 하루치를 다 예약 · 예전 5)
 RUN_IDLE_S = 1800.0  # 마지막 글 뒤 이만큼 지나면 새 판
+DAY_MAX = 8  # 블로그마다 하루 예약·발행 (주인 11/25 '블로그마다 하루 5~8편')
+HORIZON_H = 28  # 네이버 예약 개수·기한 한도는 알려진 것이 없음 (코드·devlog·playbook) → 하루 남짓으로만
 COOL_S = 86400.0  # 네이버 보호·제한 안내 뒤 쉬는 시간 (이웃 관리 seoi.COOL_S 와 같게)
 STOP_MAX = 2  # 같은 글이 점검에서 이만큼 멈추면 오늘은 주지 않음 (꾸미기 책갈피로 직접)
 RESULTS = ("hold", "ok", "unsure", "stop", "fail", "wall")
@@ -124,7 +130,9 @@ STEPS = (
     "점검에 하나라도 걸리면 (사진이 많이 빠짐 · 제목/본문이 원고와 다름 · 포스트잇 · 카테고리 못 찾음 · 예약 시각 못 채움 · 제휴 고지 · 태그가 여럿 빠짐 · 가운데 정렬) 그 글은 발행하지 않고 멈춰요 — "
     "사진은 원고의 90% 넘고 2장까지, 태그는 1개(또는 10%)까지 빠진 것은 발행하고 요약 줄에 적어요. "
     "화면에 적힌 것을 고친 뒤 '고쳤어요 — 다시 점검하고 발행' 단추(또는 책갈피 한 번 더)를 누르면 다시 점검하고 이어 가요. 멈추려면 탭을 닫으면 돼요.",
-    "예약 시각은 책갈피를 누른 때 기준으로 나눠요 — 첫 글은 20~45분 뒤, 다음 글은 1시간 10분~2시간 40분씩 들쭉날쭉 (분은 10·20·40·50 · 07:30~23:00 · 넘치면 다음 날 아침 · 토·일도 그날). 화면 맨 위에 '오늘 예약 14:20 · 16:10 …'이 보여요. 멈춘 뒤 새 글쓰기 화면에서 다시 눌러도 남은 글은 같은 시각 그대로 (지난 시각만 새로).",
+    "예약 시각은 책갈피를 누른 때 기준으로 나눠요 — 첫 글은 20~45분 뒤, 다음 글은 40분~4시간씩 들쭉날쭉 (분은 10·20·40·50 · 07:30~23:00 · 넘치면 다음 날 아침 · 토·일도 그날). 화면 맨 위에 '오늘 예약 14:20 · 16:10 …'이 보여요. 멈춘 뒤 새 글쓰기 화면에서 다시 눌러도 남은 글은 같은 시각 그대로 (지난 시각만 새로).",
+    f"하루 한 번이면 돼요: 저녁 8시 뒤에 누르면 지금 발행 없이 준비된 글을 모두 내일 07:30~23:00 에 예약해요 (블로그마다 하루 {DAY_MAX}편 · 한 번에 {RUN_MAX}편까지). "
+    "그 뒤에 새로 쓴 글(속보·밤 글)은 할 일 탭에 '속보 n편 — 원하면 한 번 더'로만 보여요 — 안 눌러도 돼요.",
     "이 브라우저에서 스스로 이어가기가 안 되면 화면을 다시 열고 '글마다 한 번'으로 바꿔요 — 그때는 글 하나가 올라갈 때마다 '다음 글 N/M — 책갈피 한 번 더'가 뜨고, "
     "새 글쓰기 화면이 열리면 한 번씩만 눌러 주면 돼요 (나머지는 그대로 자동).",
     "토·일도 평일처럼 올려요 (주인 11/24 — 토요일에 누르면 토요일 자리에 예약). 대시보드 점검에 걸린 글·새 방향과 안 맞는 글·이미 체크한 글은 올리지 않아요.",
@@ -362,6 +370,14 @@ GAP_DIFF, NEAR_MIN, MIN_REPEAT = 20, 20, 2  # 이웃 간격 차이 · 다른 블
 SPREAD = (0.85, 1.2)  # 날마다 보통·긴 간격 배율 (하루 전체 폭이 날마다 다르게)
 DAY_H = ((7, 30), (22, 50))  # 끝은 10분 자리로 올려도 23:00 을 넘지 않게
 MINUTES = (10, 20, 40, 50)  # 이것만 (주인 11/24 — 정각·30분 없음 · Blog-Auto reserve_plan.MINUTES 와 같게)
+# 하루치 모드 (주인 11/25): 이 시각 뒤에 누르면 지금 발행 없이 내일 하루치를 모두 예약 · 블로그마다 하루 상한 · 누른 때부터 이만큼 안만 예약
+NIGHT_FROM = (20, 0)
+NIGHT_FIRST = (7, 10, 35)  # 저녁에 누르면 내일 첫 글 = 07:10 + 0~35분 + FIRST_MIN (07:30~08:40 쯤)
+
+
+def night(x: datetime) -> bool:
+    """하루치 모드 — 20:00~23:59 에 누름 (내일 하루치를 모두 예약 · 지금 발행 없음)."""
+    return (x.hour, x.minute) >= NIGHT_FROM
 
 
 def _plans(db: Any) -> dict[str, dict[str, Any]]:
@@ -423,7 +439,9 @@ def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: Zon
     """그 블로그의 남은 글 rows 의 예약 시각 {줄 id: 'YYYY-MM-DDTHH:MM'} — 살아 있는 계획은 그대로, 지났거나 없는 글만 새로 (kv 에 남김).
     near = 다른 블로그의 이미 한 예약 시각 (계획에 든 다른 블로그 시각은 kv 에서 읽음) — 같은 날 NEAR_MIN 안에 두지 않음.
     first_now (v7 · 주인 11/16 '오늘 발행 글 없으면 1번 글 지금 발행'): 첫 글(rows[0])은 '' = 지금 발행 · 나머지는 지금부터 40분 넘게 뒤로
-    (07:30~23:00 일 때만 · 다시 눌러도 그날은 같은 글 · 아니면 전처럼 모두 예약)."""
+    (07:30~23:00 일 때만 · 다시 눌러도 그날은 같은 글 · 아니면 전처럼 모두 예약).
+    하루치 모드 (주인 11/25 · night): 20:00 뒤에 누르면 first_now 를 보지 않고 모두 예약 — 새 글은 내일 아침부터 (살아 있는 계획은 그대로).
+    늘: 블로그마다 하루 DAY_MAX 편 · 누른 때부터 HORIZON_H 시간 안 — 자리가 없는 글은 돌려주는 값에 없음 (주지 않음)."""
     allp = _plans(db)
     pl = allp.get(blog, {"slots": {}, "used": []})
     n = datetime.fromtimestamp(now, tz).replace(tzinfo=None, second=0, microsecond=0)
@@ -431,9 +449,10 @@ def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: Zon
     nw = pl.get("now") if isinstance(pl.get("now"), dict) else None
     if nw and (nw["day"] != f"{n:%Y-%m-%d}" or nw["id"] not in ids0):
         nw = None
-    if first_now and _inday(n) and ids0:
+    ngt = night(n)
+    if first_now and _inday(n) and ids0 and not ngt:
         nw = nw or {"id": ids0[0], "day": f"{n:%Y-%m-%d}"}
-    elif not first_now:
+    elif not first_now or ngt:
         nw = None
     if nw:
         rows = [i for i in rows if str(i["id"]) != nw["id"]]
@@ -454,12 +473,29 @@ def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: Zon
         ks = sorted(d for t in keep.values() if (d := _dt(t)))
         prev_gap = (ks[-1] - ks[-2]).total_seconds() / 60 if len(ks) > 1 and ks[-1].date() == ks[-2].date() else None
         prev = base
+        n0 = n  # 첫 글은 이때 + FIRST_MIN
+        if ngt:  # 하루치 모드: 새 글은 내일 아침부터 (오늘 밤 자리는 쓰지 않음 — 빈 자리 찾기도 내일부터)
+            h, m, j = NIGHT_FIRST
+            n0 = (n + timedelta(days=1)).replace(hour=h, minute=m) + timedelta(minutes=rng.randint(0, j))
+        if ngt and base is None:
+            # 내일 하루(첫 글 ~ 23:00)에 다 들게 보통·긴 간격 배율을 줄임 (평균 간격 ≈ 12 + 111×배율 분 · 하루의 65% 안 — 분 자리·간격 규칙으로 늘어나는 몫)
+            k = min(len(new), DAY_MAX)
+            if k > 2:
+                room = ((n0.replace(hour=23, minute=0) - n0).total_seconds() / 60 - FIRST_MIN[1]) * 0.65 / (k - 1)
+                spread = max(0.45, min(spread, (room - 12) / 111))
+        until = n + timedelta(hours=HORIZON_H)
         for k in new:
-            d = _place(rng, n, prev, prev_gap, spread, mine, others)
+            try:
+                d = _place(rng, n0, prev, prev_gap, spread, mine, others, cap=DAY_MAX, until=until)
+            except AssertionError:  # 하루 상한·기한 안에 자리가 없음 — 이 글부터는 주지 않음 (다음에 누를 때 다시)
+                break
             keep[k] = d.strftime("%Y-%m-%dT%H:%M")
             mine.append(d)
             prev_gap = (d - prev).total_seconds() / 60 if prev is not None and prev.date() == d.date() else None
             prev = d
+        got = [k for k in new if k in keep]  # 빈 자리 찾기가 앞쪽 빈칸을 채웠을 수 있음 → 새 시각은 글 차례대로 (앞 글이 이른 시각)
+        for k, t in zip(got, sorted(keep[k] for k in got), strict=True):
+            keep[k] = t
     allp[blog] = {"slots": keep, "used": used, **({"now": nw} if nw else {})}
     db.kv_set(KV_PLAN, json.dumps(allp, separators=(",", ":")))
     return {nw["id"]: "", **keep} if nw else keep
@@ -470,10 +506,12 @@ def _inday(x: datetime) -> bool:
 
 
 def _place(rng: Any, n: datetime, prev: datetime | None, prev_gap: float | None, spread: float,
-           mine: list[datetime], others: list[datetime]) -> datetime:
+           mine: list[datetime], others: list[datetime], *, cap: int | None = None, until: datetime | None = None) -> datetime:
     """다음 글 한 자리 — 규칙을 하나씩 풀어 가며 (40분·사람 시간·정각 없음은 끝까지 지킴).
-    단계 4: 모두 · 3: 같은 날 4시간 반 넘는 간격 허용 · 2: 간격 종류를 앞 간격과 상관없이 · 1: 넓게 훑기(다른 블로그 20분·분·이웃 간격 규칙은 지킴) · 0: 그것도 풀기."""
-    for strict in (4, 3, 2, 1, 0):
+    단계 4: 모두 · 3: 같은 날 4시간 반 넘는 간격 허용 · 2: 간격 종류를 앞 간격과 상관없이 · 1: 넓게 훑기(다른 블로그 20분·분·이웃 간격 규칙은 지킴) · 0: 그것도 풀기.
+    cap = 그날 mine 이 이만큼이면 그날은 안 됨 · until = 이 뒤 자리는 안 됨 (하루치 모드 11/25 — 끝까지 지킴 · 자리가 없으면 AssertionError)."""
+    day_mode = cap is not None or until is not None  # 하루치 모드는 0 단계(다른 블로그 20분도 풂) 대신 아래 빈 자리 찾기
+    for strict in (4, 3, 2, 1) if day_mode else (4, 3, 2, 1, 0):
         for _ in range(30 if strict >= 2 else 1):
             if prev is None:
                 target = n + timedelta(minutes=rng.randint(*FIRST_MIN))
@@ -485,7 +523,11 @@ def _place(rng: Any, n: datetime, prev: datetime | None, prev_gap: float | None,
             if prev is not None and strict >= 2 and rng.random() < 0.3 and len(cands) > 1:  # 가끔 한 칸 건너 (가장 가까운 자리만 고르지 않게 · 첫 글은 그대로)
                 cands = cands[1:] + cands[:1]
             for x in cands:
+                if until is not None and x > until:
+                    continue
                 if any(abs((x - b).total_seconds()) <= CLASH_MIN * 60 for b in mine):
+                    continue
+                if cap is not None and sum(1 for b in mine if b.date() == x.date()) >= cap:
                     continue
                 if strict >= 1:
                     if any(x.date() == b.date() and abs((x - b).total_seconds()) <= NEAR_MIN * 60 for b in others):
@@ -499,6 +541,20 @@ def _place(rng: Any, n: datetime, prev: datetime | None, prev_gap: float | None,
                     continue
                 if strict >= 4 and prev is not None and prev.date() == x.date() and (x - prev) > timedelta(hours=4, minutes=30):
                     continue  # 같은 날 긴 간격도 4시간 반 넘지 않게
+                return x
+    if day_mode:  # 하루치 모드: 간격 규칙을 다 풀어도 못 들면 빈 자리 — 앞 글 뒤부터, 그래도 없으면 첫 글 자리부터 사이 (40분·분·사람 시간·상한·기한은 지킴)
+        starts = ([prev + timedelta(minutes=CLASH_MIN + 1)] if prev is not None else []) + [n + timedelta(minutes=FIRST_MIN[0])]
+        for start in starts:
+            for j in range(3 * 24 * 60):  # 다른 블로그와 20분 '이상'은 지킴 (위 단계는 20분 넘게 · 여기만 꼭 20분도 됨 — 세 블로그 하루 24편이 들게 · 못 들면 주지 않음)
+                x = start + timedelta(minutes=j)
+                if until is not None and x > until:
+                    break
+                if not _ok_min(x.minute) or not _inday(x) or any(abs((x - b).total_seconds()) <= CLASH_MIN * 60 for b in mine):
+                    continue
+                if cap is not None and sum(1 for b in mine if b.date() == x.date()) >= cap:
+                    continue
+                if any(x.date() == b.date() and abs((x - b).total_seconds()) < NEAR_MIN * 60 for b in others):
+                    continue
                 return x
     raise AssertionError("no slot")  # 사흘을 훑어도 40분 자리가 없을 수는 없음 (한 블로그 글은 몇 편뿐)
 
@@ -571,20 +627,31 @@ def _stamped(text: str, at: str) -> str:
 # ── 화면 한 줄
 def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
     """오늘 한 것 {by: {블로그: {ok, unsure, stop, ready, cool, line}}, note} — line·note 는 보일 것이 없으면 ''. rv = routine.view 값 (준비된 글 수)."""
-    c = _load(db, _day(now, tz))
+    day = _day(now, tz)
+    c = _load(db, day)
     last = {str(r.get("id")): r for r in c["res"] if r.get("id")}  # 같은 글은 마지막 결과만
-    cl, hd = cooled(db, now), held(db, now)
+    cl, hd, plans = cooled(db, now), held(db, now), _plans(db)
     by: dict[str, dict[str, Any]] = {}
     for b, name in NAMES.items():
         mine = [r for r in last.values() if r.get("b") == b]
         ok = sum(1 for r in mine if r.get("r") == "ok")
         unsure = sum(1 for r in mine if r.get("r") in ("unsure", "hold"))
         stop = [r for r in mine if r.get("r") == "stop"]
-        n = len(ready(rv, b, {**hd, **c["tried"]})) if rv is not None else 0
+        rows = ready(rv, b, {**hd, **c["tried"]}) if rv is not None else []
+        n = len(rows)
         mf = misfits(rv, b) if rv is not None else []
+        # 하루치 모드 (주인 11/25): 이미 눌러 계획이 있는 블로그 — 계획에 든 글(못 마친 글)과 누른 뒤 새로 쓴 글(속보·밤 글)을 나눠, 새 글은 '원하면'으로만
+        pl = plans.get(b) or {"slots": {}, "used": []}
+        planned = set(pl["slots"]) | ({pl["now"]["id"]} if pl.get("now") else set())
+        ahead = [t for t in pl["used"] if t[:10] > day]  # 내일 이후로 예약해 둔 글
+        pressed = bool(planned) or any(t[:10] >= day for t in pl["used"])
+        left = sum(1 for i in rows if i["id"] in planned)
+        fresh = n - left
         bits = []
         if ok or unsure or stop:
             bits.append(f"올린 글 {ok}")
+        if ahead:
+            bits.append(f"내일 예약 {len(ahead)}편 넣음")
         if unsure:
             bits.append(f"확인 필요 {unsure} (블로그에서 확인)")
         if stop:
@@ -592,11 +659,16 @@ def today(db: Any, now: float, tz: ZoneInfo, rv: Any = None) -> dict[str, Any]:
         if b in cl:
             bits.append(cool_text(b, cl[b], tz))
         elif n:
-            bits.append(f"준비된 글 {n}편 — 글쓰기 화면에서 책갈피 한 번")
+            new_n = fresh if pressed else 0  # 누른 뒤 새로 쓴 글 (속보·밤 글) — 원하면
+            if n - new_n:
+                bits.append(f"준비된 글 {n - new_n}편 — 글쓰기 화면에서 책갈피 한 번")
+            if new_n:
+                bits.append(f"속보 {new_n}편 — 원하면 한 번 더 (안 눌러도 돼요)")
         if mf:  # 주인 11/23 — 왜 안 올리는지 알게
             bits.append(f"새 방향과 안 맞아 올리지 않는 글 {len(mf)}편 ({str(mf[0]['direction'].get('why') or '')[:40]}"
                         + (f" 외 {len(mf) - 1}" if len(mf) > 1 else "") + ")")
-        by[b] = {"name": name, "ok": ok, "unsure": unsure, "stop": len(stop), "ready": n, "cool": b in cl, "misfit": len(mf),
+        by[b] = {"name": name, "ok": ok, "unsure": unsure, "stop": len(stop), "ready": n, "fresh": fresh if pressed else 0, "ahead": len(ahead),
+                 "cool": b in cl, "misfit": len(mf),
                  "line": "하루치 한 번에: " + " · ".join(bits) if bits else ""}
     done = [f"{v['name']} {v['ok']}" for v in by.values() if v["ok"]]
     sums = {k: sum(v[k] for v in by.values()) for k in ("unsure", "stop")}
@@ -652,12 +724,16 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
         slots = schedule(db, blog, rows, now, tz, taken=_taken(rv, blog),
                          near=[t for b in NAMES if b != blog for t in _taken(rv, b)],
                          first_now=not published_today(db, blog, now, tz, rv, pub))
-        i = min(rows, key=lambda x: slots.get(str(x["id"]), "~"))  # 계획 시각이 이른 글부터
+        fit = [x for x in rows if str(x["id"]) in slots]
+        if not fit:  # 하루 상한·기한 안에 자리가 없음 (하루치 모드 11/25)
+            return {"ok": True, "next": None, "left": len(rows), "wait": 0,
+                    "text": f"{name}: 예약할 자리가 다 찼어요 (블로그마다 하루 {DAY_MAX}편 · {HORIZON_H}시간 안) — 남은 글 {len(rows)}편은 다음 날 저녁에 다시 누르면 돼요"}
+        i = min(fit, key=lambda x: slots[str(x["id"])] or "")  # 계획 시각이 이른 글부터 (지금 발행 '' 이 맨 앞)
         p, at = i["paste"], slots[str(i["id"])]
         label = _label(at, now, tz) if at else "지금"
         html = _stamped(str(p["html"]), at)
         last, gap = c["last"].get(blog, 0.0), c["gap"].get(blog, 0.0)
-        return {"ok": True, "left": len(rows), "n": n + 1, "plan": plan_text(slots, now, tz), "m": n + min(len(rows), RUN_MAX - n),
+        return {"ok": True, "left": len(fit), "n": n + 1, "plan": plan_text(slots, now, tz), "m": n + min(len(fit), RUN_MAX - n),
                 "wait": max(0, math.ceil(last + gap - now)) if last else 0, "text": f"{name}: 남은 글 {len(rows)}",
                 "next": {"id": i["id"], "title": p["title"], "html": html, "text": _stamped(str(p.get("text") or ""), at), "at": at, "label": label,
                          "photos": html.count("<img"), "disc": bool(DISC_RE.search(_TAG.sub("", html)))}}
