@@ -30,11 +30,11 @@ from zoneinfo import ZoneInfo
 from dealbot.dashboard import kkumi
 
 SRC = Path(__file__).resolve().parent / "static" / "statscap.js"
-DAY_SRC = SRC.parent / "statday.js"  # 11/18 한 번에 v3 의 통계 자리 (조회수 순위·유입분석·검색 유입 · 블로그 이름)
+DAY_SRC = SRC.parent / "statday.js"  # 11/18 한 번에 v3 의 통계 자리 (조회수 순위·유입분석·검색 유입 · 블로그 이름) · 11/25 v4: 지난 7일 + 오늘 · 조회수 순위 주간·월간
 KV_SECRET = "statscap_secret"
 PREFIX = "stats_capture:"
 KEEP_DAYS = 30
-DAY_MAX = 120  # 11/12 한 번 누르면 40개까지 (메뉴 화면 · 안쪽 탭 · 전날)
+DAY_MAX = 200  # 11/12 한 번 누르면 40개까지 (메뉴 화면 · 안쪽 탭 · 전날) · 11/25 한 번에 v4: 블로그마다 한 번에 28개 (8일 × 세 화면 + 주간 2 · 월간 2) — 세 블로그 두 번까지
 KIND_MAX = 40
 JSON_MAX = 30_000
 BODY_MAX = 1_500_000  # 폼으로 한 번 (글 4만 자 · 표 6만 자를 %XX 로 — 한글은 9바이트)
@@ -83,6 +83,8 @@ _DAY = re.compile(r"20\d\d-\d\d-\d\d")
 JSON_RAW_MAX = 400_000  # 표 줄로 바꾸기 전 책갈피가 보낸 JSON (저장은 JSON_MAX 까지만)
 # 11/18 '한 번에' v3 가 보내는 세 화면 (홈판 분석 세션 — 블로그·날짜마다 어느 화면이 왔는지 연결 탭 한 줄)
 VIEWS = ("조회수 순위", "유입분석", "검색 유입")
+# 11/25 한 번에 v4: 조회수 순위 주간·월간 (kind = '조회수 순위 · 주간' · day = 그 주 월요일 / 그달 1일) — 세 화면 줄에는 안 셈
+PERIODS = ("주간", "월간")
 
 
 class CaptureError(Exception):
@@ -337,13 +339,16 @@ def received(db: Any, now: float, tz: ZoneInfo, *, days: int = 7) -> dict[str, A
             b["today"] += 1
             n_today += 1
         b["last"] = max(b["last"], int(rec.get("at") or 0))
-        if isinstance(rec.get("day"), str) and len(rec["day"]) == 10:
+        per = _period(rec.get("kind"))
+        if per and isinstance(rec.get("day"), str) and len(rec["day"]) == 10:  # 주간·월간 순위 (v4) — 화면 날짜·세 화면에는 안 넣음
+            b.setdefault("periods", {}).setdefault(per, set()).add(rec["day"])
+        elif isinstance(rec.get("day"), str) and len(rec["day"]) == 10:
             b["dates"].add(rec["day"])
             v = _view(rec.get("kind"))
             if v:
                 b.setdefault("views", {}).setdefault(rec["day"], set()).add(v)
     md = lambda d: f"{int(d[5:7])}/{int(d[8:10])}"  # noqa: E731
-    parts, parts_today, views_line = [], [], []
+    parts, parts_today, views_line, per_line = [], [], [], []
     for name, b in sorted(by.items(), key=lambda x: -x[1]["last"]):
         ds = sorted(b["dates"])
         b["dates"] = ds
@@ -352,6 +357,11 @@ def received(db: Any, now: float, tz: ZoneInfo, *, days: int = 7) -> dict[str, A
         parts.append(f"{name} {b['n']}개 · 화면 날짜 {span} · 받은 때 {b['last_at']}")
         if b["today"]:
             parts_today.append(f"{name} {b['today']}개 · 받은 때 {b['last_at']}")
+        pr = b.pop("periods", {})
+        b["periods"] = {p: sorted(pr[p]) for p in PERIODS if p in pr}
+        if b["periods"]:
+            lab = {"주간": lambda d: md(d) + "~", "월간": lambda d: f"{int(d[5:7])}월"}  # 주간은 그 주 월요일부터
+            per_line.append(f"{name} " + " · ".join(f"{p} " + "·".join(lab[p](d) for d in ds_) for p, ds_ in b["periods"].items()))
         vw = b.pop("views", {})
         b["views"] = {d: [v for v in VIEWS if v in vw[d]] for d in sorted(vw)}
         for d in sorted(vw)[-2:]:  # 블로그·화면 날짜마다 세 화면 중 온 것 (최근 두 날)
@@ -365,10 +375,20 @@ def received(db: Any, now: float, tz: ZoneInfo, *, days: int = 7) -> dict[str, A
         line = f"최근 {days}일 받은 통계 0개 — 네이버 내 통계 화면(blog.stat.naver.com)에서 책갈피"
     if n:
         line += " · 세 화면: " + (" / ".join(views_line) if views_line else "아직 없음 (조회수 순위·유입분석·검색 유입 — 한 번에 v3)")
+        if per_line:
+            line += " · 순위 주간·월간: " + " / ".join(per_line)
     return {"today": n_today, "n": n, "by": by, "line": line}
 
 
+def _period(kind: Any) -> str | None:
+    """'조회수 순위 · 주간'/'· 월간' (한 번에 v4) → '주간'/'월간' · 그 밖은 None."""
+    parts = [x.strip() for x in str(kind or "").split(" · ")]
+    return parts[1] if len(parts) > 1 and parts[1] in PERIODS and re.sub(r"\s+", "", parts[0]) == "조회수순위" else None
+
+
 def _view(kind: Any) -> str | None:
-    """화면 종류 → VIEWS 중 하나 (옛 이름 '유입 분석'·'검색어' 도) · 전날·안쪽 탭 꼬리(' · …')는 뺌."""
+    """화면 종류 → VIEWS 중 하나 (옛 이름 '유입 분석'·'검색어' 도) · 전날·안쪽 탭 꼬리(' · …')는 뺌 · 주간·월간 순위는 None."""
+    if _period(kind):
+        return None
     k = re.sub(r"\s+", "", str(kind or "").split(" · ")[0])
     return {"조회수순위": VIEWS[0], "유입분석": VIEWS[1], "검색유입": VIEWS[2], "검색어": VIEWS[2]}.get(k)

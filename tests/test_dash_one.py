@@ -45,7 +45,7 @@ def built(db: Any, base: str = DASH) -> str:
 def test_one_holds_both_bookmarklets_with_their_own_endpoints_and_keys() -> None:
     db = FakeDb()
     v = one.view(db, DASH)
-    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 3
+    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 4
     js = built(db)
     assert f"U='{DASH}{seoi.PATH}',K='{seoi.key(db)}'" in js and f"U='{DASH}{statscap.PATH}',K='{statscap.key(db)}'" in js
     assert seoi.key(db) != statscap.key(db) and "@@" not in js and '["derenpick","issue","데런픽"]' in js
@@ -348,7 +348,7 @@ const {chromium} = require('playwright');
     if (u.hostname === 'dash.example') { out.bodies.push(r.request().postData() || '');
       return r.fulfill({status: 200, contentType: 'application/json', headers: {'Access-Control-Allow-Origin': '*'}, body: JSON.stringify({ok: true, label: 'x'})}); }
     if (u.pathname.startsWith('/api/')) { out.api.push(u.pathname + u.search);
-      const j = S.api[u.pathname];
+      const j = (S.bad || []).some(x => (u.pathname + u.search).indexOf(x) >= 0) ? '' : S.api[u.pathname];
       return j ? r.fulfill({status: 200, contentType: 'application/json', body: j}) : r.fulfill({status: 404, contentType: 'text/html', body: 'no'}); }
     if (u.hostname === 'blog.stat.naver.com' && u.pathname.endsWith('/blog/user/referer/total')) return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: S.page});
     return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: '<p>다른 화면</p>'});
@@ -358,7 +358,7 @@ const {chromium} = require('playwright');
   await p.waitForTimeout(500);
   p.evaluate(code).catch(() => {});
   let last = '';
-  for (let i = 0; i < 900 && new URL(p.url()).hostname === new URL(S.start).hostname; i++) {
+  for (let i = 0; i < 1800 && new URL(p.url()).hostname === new URL(S.start).hostname; i++) {
     const v = await p.evaluate(() => { const cd = document.getElementById('sb1card'); return cd ? cd.textContent : ''; }).catch(() => '');
     if (v && v !== last) out.cards.push(last = v);
     await p.waitForTimeout(100);
@@ -370,7 +370,7 @@ const {chromium} = require('playwright');
 """
 
 
-def _pw3(db: Any, blog_id: str, *, tab: bool = True, start: str = ST + "/m/blog/user/referer/total") -> dict[str, Any]:
+def _pw3(db: Any, blog_id: str, *, tab: bool = True, start: str = ST + "/m/blog/user/referer/total", bad: tuple[str, ...] = ()) -> dict[str, Any]:
     env = _playwright_env()
     if env is None:
         pytest.skip("node playwright·크롬 없음")
@@ -380,7 +380,7 @@ def _pw3(db: Any, blog_id: str, *, tab: bool = True, start: str = ST + "/m/blog/
            "/api/blog/user/referer/total": SD("refererTotal", ["date", "referrerDomain", "cv_p"], {"date": ["2026-11-17"], "referrerDomain": ["네이버 통합검색_모바일"], "cv_p": [82.1]}),
            "/api/blog/user/referer/search": SD("refererSearch", ["date", "keyword", "cv"], {"date": ["2026-11-17"], "keyword": ["에이티즈 대상"], "cv": [7]})}
     page = STAT_APP.replace("__TAB__", "<ul><li><a href='#' id='st' role='tab'>검색 유입</a></li></ul>" if tab else "")
-    res = subprocess.run([NODE, "-e", PW3, built(db), json.dumps({"api": api, "page": page, "start": start})], capture_output=True, text=True, timeout=300, env=env)
+    res = subprocess.run([NODE, "-e", PW3, built(db), json.dumps({"api": api, "page": page, "start": start, "bad": list(bad)})], capture_output=True, text=True, timeout=300, env=env)
     assert res.returncode == 0, res.stderr
     got = json.loads(res.stdout)
     got["sent"] = [dict(parse_qsl(x, keep_blank_values=True)) for x in got["bodies"]]
@@ -389,29 +389,55 @@ def _pw3(db: Any, blog_id: str, *, tab: bool = True, start: str = ST + "/m/blog/
 
 @needs_node
 def test_stats_app_sends_rank_referer_and_search_by_day_with_the_blog_and_moves_to_the_feed() -> None:
+    """11/25 v4: 지난 7일 + 오늘 (8일) · 조회수 순위는 주간(그 주 월요일 · 지난주·이번 주)·월간(그달 1일 · 지난달·이번 달)도."""
     db = FakeDb()
     got = _pw3(db, "derenpick")
     assert got["dialogs"] == []
     sent = got["sent"]
-    assert [f["n"] for f in sent] == ["조회수 순위"] * 2 + ["유입분석"] * 2 + ["검색 유입"] * 2, sent
-    days = [f["d"] for f in sent[:2]]
-    assert days[0] < days[1] and [f["d"] for f in sent] == days * 3
+    assert [f["n"] for f in sent] == (["조회수 순위"] * 8 + ["유입분석"] * 8 + ["조회수 순위 · 주간"] * 2 + ["조회수 순위 · 월간"] * 2
+                                      + ["검색 유입"] * 8), [f["n"] for f in sent]
+    days = [f["d"] for f in sent[:8]]
+    assert days == sorted(days) and len(set(days)) == 8 and [f["d"] for f in sent[8:16]] == days and [f["d"] for f in sent[20:]] == days
+    d0, d7 = (datetime.strptime(d, "%Y-%m-%d") for d in (days[0], days[-1]))
+    assert (d7 - d0).days == 7  # 오늘과 지난 7일
+    wk, mo = [f["d"] for f in sent[16:18]], [f["d"] for f in sent[18:20]]
+    wd = [datetime.strptime(d, "%Y-%m-%d") for d in wk]
+    assert all(w.weekday() == 0 for w in wd) and (wd[1] - wd[0]).days == 7 and wd[1] <= d7 and (d7 - wd[1]).days < 7  # 지난주·이번 주 월요일
+    assert all(d.endswith("-01") for d in mo) and mo[1][:7] == days[-1][:7] and mo[0] < mo[1]  # 지난달·이번 달 1일
     assert all(f["k"] == statscap.key(db) and f["b"] == "derenpick" for f in sent)
     # 화면이 부르는 같은 출처 JSON 주소 그대로 · 일간 · 그날 · 검색 유입은 탭을 눌러 배운 주소 (주간 → 일간)
     assert sent[0]["u"] == f"{ST}/api/blog/rank/cvContentPc?timeDimension=DATE&startDate={days[0]}&exclude="
-    assert sent[4]["u"] == f"{ST}/api/blog/user/referer/search?timeDimension=DATE&startDate={days[0]}&exclude="
-    assert not any("rank" in a and "WEEK" in a for a in got["api"]) and sum(a.startswith("/api/blog/user/referer/search") for a in got["api"]) == 3
-    recs = [statscap.save(db, f, now=1_795_000_000, tz=ZoneInfo("Asia/Seoul")) for f in sent]
-    assert {r["blog"] for r in recs} == {"issue"} and [r["day"] for r in recs] == days * 3
+    assert sent[16]["u"] == f"{ST}/api/blog/rank/cvContentPc?timeDimension=WEEK&startDate={wk[0]}&exclude="
+    assert sent[19]["u"] == f"{ST}/api/blog/rank/cvContentPc?timeDimension=MONTH&startDate={mo[1]}&exclude="
+    assert sent[20]["u"] == f"{ST}/api/blog/user/referer/search?timeDimension=DATE&startDate={days[0]}&exclude="
+    assert sum(a.startswith("/api/blog/user/referer/search") for a in got["api"]) == 9  # 탭 한 번 + 8일
+    now = datetime.strptime(days[-1] + " 21:00", "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Asia/Seoul")).timestamp()
+    recs = [statscap.save(db, f, now=now, tz=ZoneInfo("Asia/Seoul")) for f in sent]
+    assert {r["blog"] for r in recs} == {"issue"} and [r["day"] for r in recs] == [f["d"] for f in sent]
+    assert [r["kind"] for r in recs[16:20]] == ["조회수 순위 · 주간"] * 2 + ["조회수 순위 · 월간"] * 2
     rank = json.loads(next(v for k, v in sorted(db.kv.items()) if k.startswith(statscap.PREFIX) and "조회수 순위" in v))
     assert rank["rows"][0][0] == ["date", "uri", "cv", "rank", "title"] and rank["rows"][0][1][4] == "에이티즈 3년 연속 대상 받은 이유"
     md = lambda d: f"{int(d[5:7])}/{int(d[8:10])}"  # noqa: E731
+    mn = lambda d: f"{int(d[5:7])}월"  # noqa: E731
     assert got["end"].startswith(seoi.FEED_URL + "#sb1=")
     end = unquote(got["end"].split("#sb1=")[1])
-    assert end == f"통계 보냄 ✓ 데런픽 6개 — 조회수 순위 {md(days[0])}·{md(days[1])}, 유입분석 {md(days[0])}·{md(days[1])}, 검색 유입 {md(days[0])}·{md(days[1])}", end
+    span = f"{md(days[0])}~{md(days[-1])} 8개"
+    assert end == (f"통계 보냄 ✓ 데런픽 28개 — 조회수 순위 {span}, 유입분석 {span}, 검색 유입 {span}, "
+                   f"주간 순위 {md(wk[0])}·{md(wk[1])}, 월간 순위 {mn(mo[0])}·{mn(mo[1])}"), end
     assert got["cards"][0] == "한 번에: 통계를 모아 보내요 — 이 탭을 켜 두세요"
-    line = statscap.received(db, 1_795_000_000, ZoneInfo("Asia/Seoul"))["line"]
-    assert f"세 화면: 데런픽 {md(days[0])} 조회수 순위·유입분석·검색 유입 ✓ / 데런픽 {md(days[1])} 조회수 순위·유입분석·검색 유입 ✓" in line, line
+    line = statscap.received(db, now, ZoneInfo("Asia/Seoul"))["line"]
+    assert f"세 화면: 데런픽 {md(days[-2])} 조회수 순위·유입분석·검색 유입 ✓ / 데런픽 {md(days[-1])} 조회수 순위·유입분석·검색 유입 ✓" in line, line
+    assert f"순위 주간·월간: 데런픽 주간 {md(wk[0])}~·{md(wk[1])}~ · 월간 {mn(mo[0])}·{mn(mo[1])}" in line, line
+
+
+@needs_node
+def test_stats_app_weekly_monthly_rank_that_the_app_does_not_answer_is_only_noted() -> None:
+    """주간·월간 순위 주소(WEEK·MONTH)는 다른 통계 화면에서만 본 꼴 — 통계 앱이 통계 꼴로 답하지 않으면 '못 읽음'으로만 (다른 주소로 안 돌아감)."""
+    got = _pw3(FakeDb(), "demiyum", bad=("cvContentPc?timeDimension=WEEK", "cvContentPc?timeDimension=MONTH"))
+    assert [f["n"] for f in got["sent"]] == ["조회수 순위"] * 8 + ["유입분석"] * 8 + ["검색 유입"] * 8
+    assert sum("timeDimension=WEEK" in a and "rank" in a for a in got["api"]) == 2 and sum("timeDimension=MONTH" in a for a in got["api"]) == 2
+    end = unquote(got["end"].split("#sb1=")[1])
+    assert end.startswith("통계 보냄 ✓ 라커룸 24개 — ") and " · 못 읽음: 주간 순위 " in end and ", 월간 순위 " in end, end
 
 
 @needs_node
@@ -424,9 +450,9 @@ def test_stats_app_sends_nothing_when_the_blog_is_not_ours_and_says_which_view_f
     assert any(c.startswith("한 번에: 통계 못 보냄: 어느 블로그인지 못 알아봐서") for c in got["cards"]), got["cards"]
     # 검색 유입 탭이 없으면 그것만 '못 읽음'으로 (나머지는 보냄)
     got = _pw3(FakeDb(), "demiyum", tab=False)
-    assert [f["n"] for f in got["sent"]] == ["조회수 순위"] * 2 + ["유입분석"] * 2 and all(f["b"] == "demiyum" for f in got["sent"])
+    assert [f["n"] for f in got["sent"]] == ["조회수 순위"] * 8 + ["유입분석"] * 8 + ["조회수 순위 · 주간"] * 2 + ["조회수 순위 · 월간"] * 2 and all(f["b"] == "demiyum" for f in got["sent"])
     end = unquote(got["end"].split("#sb1=")[1])
-    assert end.startswith("통계 보냄 ✓ 라커룸 4개 — ") and end.endswith(" · 못 읽음: 검색 유입 새 주소 없음"), end  # 탭이 없으면 '통합검색' 줄을 눌러 봄 — 새 주소가 없으면 그렇게
+    assert end.startswith("통계 보냄 ✓ 라커룸 20개 — ") and end.endswith(" · 못 읽음: 검색 유입 새 주소 없음"), end  # 탭이 없으면 '통합검색' 줄을 눌러 봄 — 새 주소가 없으면 그렇게
 
 
 @needs_node
