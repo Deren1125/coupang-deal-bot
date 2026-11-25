@@ -947,6 +947,25 @@ class DashApi:
         except ValueError:
             return err(503, "failed", "대시보드 공개 주소가 이상해요")
 
+    def _autopub_pub(self) -> dict[str, float] | None:
+        """Blog-Auto 활동 기록의 오늘 발행 수 {블로그: 수} — 하루치 한 번에 v7 '오늘 발행 글 없으면 첫 글 지금 발행' (오늘 쓴 기록만 · 못 읽으면 None)."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import autopub
+
+        try:
+            st = getattr(self.bot, "dash_state", None)
+            ex = st._export() if st is not None else None
+            w = getattr(ex, "written_at", None)
+            tz = ZoneInfo(self.bot.settings.app.timezone)
+            if ex is None or not ex.ok or w is None or w.astimezone(tz).date() != datetime.now(tz).date():
+                return None
+            return {b: float((ex.blog(b) or {}).get("posts_today") or 0) for b in autopub.NAMES}
+        except Exception as e:  # noqa: BLE001 — 못 읽으면 딜봇 기록·할 일 목록만 봄
+            log.warning("autopub_act: Blog-Auto 오늘 발행 수를 못 읽음: %s", type(e).__name__)
+            return None
+
     async def autopub_act(self, form: dict[str, str], headers: dict[str, str]) -> Any:
         """'하루치 한 번에' 책갈피가 묻는 곳 (주인 11/23). 열쇠 → 다음에 올릴 준비된 글 · 결과 (발행 확인이면 할 일 줄 체크 · 네이버 안내면 24시간 쉼).
         서버는 네이버를 열지 않는다 — 글은 주인 브라우저가 가져가 넣고 발행한다. 응답 CORS 는 네이버 블로그 화면에만 (이 길만)."""
@@ -970,7 +989,8 @@ class DashApi:
             except Exception as e:  # noqa: BLE001 — 못 읽으면 '목록이 아직 없어요'
                 log.warning("autopub_act: routine view failed: %s", type(e).__name__)
         try:
-            got = autopub.act(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone), rv=rv)
+            got = autopub.act(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone), rv=rv,
+                              pub=self._autopub_pub() if form.get("a") == "next" and rv is not None else None)
         except autopub.CaptureError as e:
             if e.code == "key":
                 log.info("autopub_act: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])

@@ -17,9 +17,12 @@ POST /dashboard/api/autopub_act (폼 · 로그인 없이 · 열쇠 k = HMAC(kv a
       예약 시각 (v5 · 주인 11/23 13:45 · 간격 v6 11/24): 누른 때 기준 계획 schedule() — 첫 글 20~45분 뒤 · 다음은 짧게 40~60분·보통 75~140분·길게 2시간 반~4시간 섞음
         (이웃 간격끼리 20분 넘게 차이) · 분은 10·20·40·50 (하루 같은 분 두 번까지 · 30분·정각 없음 — 주인 11/24) · 다른 블로그와 20분 넘게 · 07:30~23:00 · 토·일도 평일과 같게 (주인 11/24) ·
         이미 한 그 블로그 시각과 40분 넘게 · kv autopub:plan 에 남겨 다시 눌러도 같은 계획 (지났거나 없는 글만 새로) · plan = 맨 위 한 줄 '오늘 예약 14:20 · 16:10'.
+      첫 글 지금 발행 (v7 · 주인 11/16 '오늘 발행 글 없으면 1번 글 지금 발행' — v5 에서 빠졌던 것): 그 블로그에 오늘 발행·오늘 예약이 없으면
+        (published_today — 계획의 쓴 시각 · 할 일 목록 체크 줄 · Blog-Auto 오늘 발행 수) 첫 글은 at '' = 발행창 '현재' · 나머지는 지금부터 40분 넘게 뒤 계획 ·
+        07:30~23:00 일 때만 · plan = '지금 발행 · 오늘 예약 14:20 · 16:10'.
       wait = 앞 글 뒤 40~120초(GAP · 무작위)가 되기까지 남은 초. 한 판(RUN_IDLE_S 안에 이어진 글)에 RUN_MAX(5)편까지 — 넘으면 next 없음.
-      주말 쉼 없음 (주인 11/24 '주말에도 글 쓰고 발행' — 11/21 주말 쉼은 지움 · 서버가 weekend 를 보내지 않으니 책갈피 v6 의 '주말에도 시작' 단추는
-        뜨지 않음 (다음 판을 낼 때 static/autopub.js 에서 뺌 — 그 하나로 다시 깔게 하지 않음) · 책갈피가 보내는 w 는 무시).
+      주말 쉼 없음 (주인 11/24 '주말에도 글 쓰고 발행' — 11/21 주말 쉼은 지움 · 서버가 weekend 를 보내지 않음 · 책갈피 v7 에서
+        '주말에도 시작' 단추·w 신호를 뺌 (옛 책갈피가 보내는 w 는 무시)).
       네이버 보호·제한 안내 뒤 24시간(kv autopub:cool)은 429 cool.
   a=done b id r [n] [u]  r: hold(발행 단추를 누르기 직전 — '해 봄'으로 적어 같은 글을 다시 주지 않음 · 두 번 발행 막기) · ok(발행·예약 확인 — 할 일 줄 체크 +
       블로그 프로그램에 pasted · u = 글 번호) · unsure(눌렀는데 확인 못 함 — 체크하지 않고 다시 주지 않음) · stop(점검에 걸려 발행하지 않음 · n = 걸린 것 —
@@ -371,7 +374,10 @@ def _plans(db: Any) -> dict[str, dict[str, Any]]:
         if b in NAMES and isinstance(x, dict):
             sl = x.get("slots") if isinstance(x.get("slots"), dict) else {}
             us = x.get("used") if isinstance(x.get("used"), list) else []
+            nw = x.get("now") if isinstance(x.get("now"), dict) else {}
             out[b] = {"slots": {str(k): str(t) for k, t in sl.items() if _dt(t)}, "used": [str(t) for t in us if _dt(t)]}
+            if nw.get("id") and nw.get("day"):  # 지금 발행할 첫 글 (v7 · 그날만)
+                out[b]["now"] = {"id": str(nw["id"]), "day": str(nw["day"])}
     return out
 
 
@@ -413,26 +419,38 @@ def _gap(rng: Any, prev: float | None, spread: float) -> float:
 
 
 def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: ZoneInfo, *,
-             taken: list[str] | None = None, near: list[str] | None = None, rng: Any = None) -> dict[str, str]:
+             taken: list[str] | None = None, near: list[str] | None = None, rng: Any = None, first_now: bool = False) -> dict[str, str]:
     """그 블로그의 남은 글 rows 의 예약 시각 {줄 id: 'YYYY-MM-DDTHH:MM'} — 살아 있는 계획은 그대로, 지났거나 없는 글만 새로 (kv 에 남김).
-    near = 다른 블로그의 이미 한 예약 시각 (계획에 든 다른 블로그 시각은 kv 에서 읽음) — 같은 날 NEAR_MIN 안에 두지 않음."""
+    near = 다른 블로그의 이미 한 예약 시각 (계획에 든 다른 블로그 시각은 kv 에서 읽음) — 같은 날 NEAR_MIN 안에 두지 않음.
+    first_now (v7 · 주인 11/16 '오늘 발행 글 없으면 1번 글 지금 발행'): 첫 글(rows[0])은 '' = 지금 발행 · 나머지는 지금부터 40분 넘게 뒤로
+    (07:30~23:00 일 때만 · 다시 눌러도 그날은 같은 글 · 아니면 전처럼 모두 예약)."""
     allp = _plans(db)
     pl = allp.get(blog, {"slots": {}, "used": []})
     n = datetime.fromtimestamp(now, tz).replace(tzinfo=None, second=0, microsecond=0)
+    ids0 = [str(i["id"]) for i in rows]
+    nw = pl.get("now") if isinstance(pl.get("now"), dict) else None
+    if nw and (nw["day"] != f"{n:%Y-%m-%d}" or nw["id"] not in ids0):
+        nw = None
+    if first_now and _inday(n) and ids0:
+        nw = nw or {"id": ids0[0], "day": f"{n:%Y-%m-%d}"}
+    elif not first_now:
+        nw = None
+    if nw:
+        rows = [i for i in rows if str(i["id"]) != nw["id"]]
     if rng is None:  # 블로그+날짜+누른 때 씨앗 (날마다·블로그마다 다른 모양)
         rng = random.Random(f"{blog}|{n:%Y-%m-%dT%H:%M}")
     late = n + timedelta(minutes=LATE_MIN)
     ids = [str(i["id"]) for i in rows]
     keep = {k: t for k, t in pl["slots"].items() if k in ids and (d := _dt(t)) is not None and d > late}
     used = [t for t in pl["used"] if (d := _dt(t)) is not None and d > n - timedelta(days=1)]
-    busy = [d for t in (*used, *(taken or []), *keep.values()) if (d := _dt(t)) is not None]
+    busy = [d for t in (*used, *(taken or []), *keep.values()) if (d := _dt(t)) is not None] + ([n] if nw else [])
     others = [d for b, p in allp.items() if b != blog for t in (*p["slots"].values(), *p["used"]) if (d := _dt(t))]
     others += [d for t in (near or []) if (d := _dt(t))]
     new = [k for k in ids if k not in keep]
     if new:
         spread = rng.uniform(*SPREAD)
         mine = sorted(busy)
-        base = max([d for t in keep.values() if (d := _dt(t))], default=None)
+        base = max([d for t in keep.values() if (d := _dt(t))], default=n if nw else None)
         ks = sorted(d for t in keep.values() if (d := _dt(t)))
         prev_gap = (ks[-1] - ks[-2]).total_seconds() / 60 if len(ks) > 1 and ks[-1].date() == ks[-2].date() else None
         prev = base
@@ -442,9 +460,9 @@ def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: Zon
             mine.append(d)
             prev_gap = (d - prev).total_seconds() / 60 if prev is not None and prev.date() == d.date() else None
             prev = d
-    allp[blog] = {"slots": keep, "used": used}
+    allp[blog] = {"slots": keep, "used": used, **({"now": nw} if nw else {})}
     db.kv_set(KV_PLAN, json.dumps(allp, separators=(",", ":")))
-    return keep
+    return {nw["id"]: "", **keep} if nw else keep
 
 
 def _inday(x: datetime) -> bool:
@@ -485,13 +503,38 @@ def _place(rng: Any, n: datetime, prev: datetime | None, prev_gap: float | None,
     raise AssertionError("no slot")  # 사흘을 훑어도 40분 자리가 없을 수는 없음 (한 블로그 글은 몇 편뿐)
 
 
-def _used(db: Any, blog: str, rid: str) -> None:
-    """발행을 눌러 본 글의 예약 시각은 계획에서 빼 '쓴 시각'으로 (다른 글이 그 시각 40분 안에 오지 않게)."""
+def _used(db: Any, blog: str, rid: str, now: float | None = None, tz: ZoneInfo | None = None) -> None:
+    """발행을 눌러 본 글의 예약 시각은 계획에서 빼 '쓴 시각'으로 (다른 글이 그 시각 40분 안에 오지 않게).
+    v7: 지금 발행한 첫 글은 누른 때를 '쓴 시각'으로 (= 오늘 발행한 글이 있음 → 다음 글부터 예약)."""
     allp = _plans(db)
     pl = allp.get(blog)
     if pl and rid in pl["slots"]:
         pl["used"] = [*pl["used"], pl["slots"].pop(rid)][-20:]
         db.kv_set(KV_PLAN, json.dumps(allp, separators=(",", ":")))
+    elif pl and (pl.get("now") or {}).get("id") == rid and now is not None and tz is not None:
+        pl.pop("now")
+        pl["used"] = [*pl["used"], datetime.fromtimestamp(now, tz).strftime("%Y-%m-%dT%H:%M")][-20:]
+        db.kv_set(KV_PLAN, json.dumps(allp, separators=(",", ":")))
+
+
+def published_today(db: Any, blog: str, now: float, tz: ZoneInfo, rv: Any = None, pub: dict[str, Any] | None = None) -> bool:
+    """그 블로그에 오늘(KST) 발행했거나 오늘 올라갈 예약이 이미 있는지 (v7 · 첫 글 지금 발행을 정함) — 하나라도 있으면 참:
+    하루치 한 번에 계획의 '쓴 시각'(발행을 눌러 본 글의 예약 시각 · 지금 발행이면 누른 때 — 오늘 날짜만) · 오늘 할 일 목록에서 체크된 그 블로그 발행·예약 줄(예약은 오늘 시각만) ·
+    Blog-Auto 활동 기록의 오늘 발행 수 (pub = {블로그: 수} · 없으면 안 봄)."""
+    day = _day(now, tz)
+    if any(t.startswith(day) for t in (_plans(db).get(blog) or {}).get("used", [])):
+        return True
+    if isinstance(rv, dict) and rv.get("day") == day:
+        for s in rv.get("slots") or []:
+            for i in s.get("items") or []:
+                if i.get("blog") == blog and i.get("group") in GROUPS and i.get("done"):
+                    w = i.get("when") if isinstance(i.get("when"), dict) else {}
+                    if not w.get("at") or str(w["at"]).startswith(day):
+                        return True
+    try:
+        return float((pub or {}).get(blog) or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _label(t: str, now: float, tz: ZoneInfo) -> str:
@@ -503,9 +546,9 @@ def _label(t: str, now: float, tz: ZoneInfo) -> str:
 
 
 def plan_text(slots: dict[str, str], now: float, tz: ZoneInfo) -> str:
-    """'오늘 예약 14:20 · 16:10 · 내일 07:50' — 진행기 맨 위 한 줄."""
-    out, day = [], None
-    for t in sorted(slots.values()):
+    """'오늘 예약 14:20 · 16:10 · 내일 07:50' — 진행기 맨 위 한 줄 (v7: 지금 발행할 글이 있으면 맨 앞 '지금 발행')."""
+    out, day = (["지금 발행"] if "" in slots.values() else []), None
+    for t in sorted(v for v in slots.values() if v):
         lab = _label(t, now, tz)
         head, hm = lab.rsplit(" ", 1)
         out.append(hm if head == day else (f"{head} 예약 {hm}" if day is None else f"{head} {hm}"))
@@ -584,8 +627,10 @@ def _blog(form: dict[str, str]) -> str:
     return b
 
 
-def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None, rv: Any = None, rng: Any = random) -> dict[str, Any]:
-    """책갈피가 보낸 폼 하나 (데이터만 — 코드는 내려 주지 않음). rv = routine.view() 값 (호출하는 쪽이 열쇠를 본 뒤 읽어 넘김)."""
+def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None, rv: Any = None, rng: Any = random,
+        pub: dict[str, Any] | None = None) -> dict[str, Any]:
+    """책갈피가 보낸 폼 하나 (데이터만 — 코드는 내려 주지 않음). rv = routine.view() 값 (호출하는 쪽이 열쇠를 본 뒤 읽어 넘김).
+    pub = Blog-Auto 활동 기록의 오늘 발행 수 {블로그: 수} (없으면 None — 첫 글 지금 발행은 딜봇 기록·할 일 목록만 보고 정함)."""
     if not key_ok(db, form.get("k")):
         raise CaptureError(403, "key", "열쇠가 맞지 않아요 — 대시보드 연결 탭에서 '하루치 한 번에' 책갈피를 다시 설치해 주세요")
     now = now or time.time()
@@ -605,10 +650,11 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
             return {"ok": True, "next": None, "left": len(rows), "wait": 0,
                     "text": f"{name}: 한 번에 {RUN_MAX}편까지만 올려요 (남은 글 {len(rows)}) — {int(RUN_IDLE_S // 60)}분쯤 뒤에 다시 눌러 주세요"}
         slots = schedule(db, blog, rows, now, tz, taken=_taken(rv, blog),
-                         near=[t for b in NAMES if b != blog for t in _taken(rv, b)])
+                         near=[t for b in NAMES if b != blog for t in _taken(rv, b)],
+                         first_now=not published_today(db, blog, now, tz, rv, pub))
         i = min(rows, key=lambda x: slots.get(str(x["id"]), "~"))  # 계획 시각이 이른 글부터
         p, at = i["paste"], slots[str(i["id"])]
-        label = _label(at, now, tz)
+        label = _label(at, now, tz) if at else "지금"
         html = _stamped(str(p["html"]), at)
         last, gap = c["last"].get(blog, 0.0), c["gap"].get(blog, 0.0)
         return {"ok": True, "left": len(rows), "n": n + 1, "plan": plan_text(slots, now, tz), "m": n + min(len(rows), RUN_MAX - n),
@@ -647,7 +693,7 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
             if r in TRIED:
                 c["tried"][rid] = r
                 _held_add(db, rid, r, now)
-                _used(db, blog, rid)
+                _used(db, blog, rid, now, tz)
             if r == "stop":
                 c["stops"][rid] = c["stops"].get(rid, 0) + 1
                 if c["stops"][rid] >= STOP_MAX and rid not in c["tried"]:  # hold(발행을 눌러 봄)을 덮지 않음
