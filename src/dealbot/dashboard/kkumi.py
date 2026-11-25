@@ -100,7 +100,66 @@ def minify(src: str, let: bool = False) -> str:
         if (s := line.strip()) and not s.startswith("//"):
             # ';'·'{' 로 끝난 줄 다음은 줄바꿈 없이 (책갈피 주소에서 줄바꿈은 %0A 세 글자 — 11/09 사진 올리기 넣으며 26KB 안으로)
             out += ("" if not out or out[-1] in ";{,([&|+?:=" else "\n") + _squeeze(s, let)
-    return out
+    return _merge_let(out) if let else out
+
+
+def _merge_let(code: str) -> str:
+    """v13 (11/25): 같은 묶음 안에서 'let …;' 바로 다음 'let …' 은 ',' 로 이음 (주소에서 'let ' 은 '%20' 이라 여섯 자 → 한 자 · 다음 날 예약 달력 고침 자리).
+    따옴표 글은 건너뛰고 괄호 깊이마다 '지금 문장이 let 으로 시작했나'를 들고 다님 — 문장 시작(; { } 줄바꿈 뒤)에 다른 말이 오면 끔.
+    정규식 안 괄호 때문에 깊이가 맞지 않으면(음수·끝에 0 아님) 아무것도 바꾸지 않는다."""
+    out: list[str] = []
+    st, q, i, n, start = [False], "", 0, len(code), True
+    while i < n:
+        c = code[i]
+        if q:
+            out.append(c)
+            if c == "\\":
+                out.append(code[i + 1] if i + 1 < n else "")
+                i += 1
+            elif c == q:
+                q = ""
+            i += 1
+            continue
+        if start and c != ";":
+            start = False
+            if code.startswith("let ", i):
+                if st[-1] and out and out[-1] == ";":
+                    out[-1] = ","
+                else:
+                    out.append("let ")
+                st[-1] = True
+                i += 4
+                continue
+            st[-1] = False
+        if c == "/" and (not out or out[-1][-1] in "(,=:[!&|?{};+-*%<>~^\n" or "".join(out[-6:]).endswith("return")):
+            # 정규식 글: 끝 '/' 까지 그대로 (안의 [..] · 역슬래시 다음 글자는 끝이 아님)
+            j, cls = i + 1, False
+            while j < n and (cls or code[j] != "/"):
+                if code[j] == "\\":
+                    j += 1
+                elif code[j] in "[]":
+                    cls = code[j] == "["
+                j += 1
+            out.append(code[i:j + 1])
+            i = j + 1
+            continue
+        if c in "'\"`":
+            q = c
+        elif c == "\\":
+            out.append(c + (code[i + 1] if i + 1 < n else ""))
+            i += 2
+            continue
+        elif c in "([{":
+            st.append(False)
+        elif c in ")]}":
+            st.pop()
+            if not st:
+                return code
+        out.append(c)
+        if c in ";{}\n":
+            start = True
+        i += 1
+    return "".join(out) if len(st) == 1 and not q else code
 
 
 def encode(code: str) -> str:

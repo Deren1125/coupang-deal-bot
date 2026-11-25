@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from urllib.parse import unquote
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -62,12 +64,12 @@ def _post(n: int = 1, center: bool = True) -> dict:
 def test_v8_bookmarklet_fits_with_the_real_dashboard_address() -> None:
     db = FakeDb()
     v = autopub.view(db, "https://52-79-136-64.sslip.io")  # config.yaml dashboard.public_url 길이
-    assert v["version"] == autopub.version() == 8 and v["len"] <= autopub.LEN_MAX == 50000, v["len"]
+    assert v["version"] == autopub.version() == 9 and v["len"] <= autopub.LEN_MAX == 50000, v["len"]
     assert len(autopub.view(db, "https://dash.example")["code"]) <= 50000
-    assert kkumi.version() == 12 and len(kkumi.bookmarklet()) < 30500
+    assert kkumi.version() == 13 and len(kkumi.bookmarklet()) < 30500
     js = unquote(v["code"][len("javascript:"):])
     assert "\n" not in js  # v8: '}' 뒤 줄바꿈도 붙임 (주소 %0A)
-    assert "let CORE=" in js and "const CORE" not in js  # v8: 'const' → 'let'
+    assert re.search(r"(let |,)CORE=", js) and "const CORE" not in js  # v8: 'const' → 'let' (v9: 이어진 let 은 ',' 로)
 
 
 def test_v8_title_mid_retries_three_times_and_never_aligns_left() -> None:
@@ -149,7 +151,7 @@ def test_title_still_left_holds_the_post_and_goes_to_the_next() -> None:
     assert [(d["id"], d["r"]) for d in got["done"]] == [("pub:issue:11", "skip"), ("pub:issue:12", "hold"), ("pub:issue:12", "ok")], got["done"]
     assert got["done"][0]["n"] == "제목 가운데 안 됨" and got["done"][0]["pub"] == 0 and len(got["pub"]) == 1
     assert got["mid"] == 1 and got["lines"][0].startswith("보류 · 「1번 글 제목이에요」 — 제목 가운데 안 됨"), got["lines"]
-    assert "제목 가운데 안 됨 1편 — 알려 주세요" in got["end"] and got["end"].endswith(" · v8"), got["end"]
+    assert "제목 가운데 안 됨 1편 — 알려 주세요" in got["end"] and got["end"].endswith(" · v9"), got["end"]
 
 
 @needs_node
@@ -177,3 +179,20 @@ def test_two_holds_earlier_today_are_remembered_across_reloads(dir_: bool) -> No
     assert not got.get("mid"), got  # 주인에게 다시 멈추지 않음
     oks = [d for d in got["done"] if d["r"] == "ok"]
     assert oks and oks[-1]["n"] == "제목 가운데 아님", got["done"]
+
+
+# ---------------------------------------------------------------- v9 (11/25 하루치 '예약 11/26 08:10 못 채움 (날짜 칸 못 찾음)')
+def test_v9_calendar_sketch_is_kept_only_with_the_key_last_five() -> None:
+    """날짜를 못 고르면 책갈피가 달력 모양(R.dg)을 a=dg 로 보냄 → kv autopub:dg 에 최근 5개만 (보이는 글자만 · 2,000자) · 열쇠가 틀리면 403."""
+    db = FakeDb()
+    tz = ZoneInfo("Asia/Seoul")
+    with pytest.raises(autopub.CaptureError) as e:
+        autopub.act(db, {"k": "wrong", "a": "dg", "b": "issue", "n": "<table>"}, tz=tz)
+    assert e.value.status == 403 and db.kv_get(autopub.KV_DG) is None
+    for i in range(7):
+        assert autopub.act(db, {"k": autopub.key(db), "a": "dg", "b": "issue", "v": "9", "n": f"@x,INPUT,true,<td>{i}</td>\x00" + "x" * 3000}, tz=tz, now=1e9 + i) == {"ok": True}
+    got = json.loads(db.kv_get(autopub.KV_DG))
+    assert [g["h"][:19] for g in got] == [f"@x,INPUT,true,<td>{i}" for i in range(2, 7)] and all(len(g["h"]) == 2000 and "\x00" not in g["h"] for g in got)
+    assert got[-1]["b"] == "issue" and got[-1]["v"] == "9" and got[-1]["at"] == int(1e9 + 6)
+    js = autopub.runner()
+    assert "R.dg && ask({a: 'dg', b: BLOG, n: R.dg}), R.dg = 0" in js and "R.dg = [at, D_.tagName" in js

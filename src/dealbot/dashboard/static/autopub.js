@@ -11,7 +11,7 @@
    네이버가 자동입력 방지·보호조치·이용 제한·한도 안내를 보이면 풀지 않고 그 자리에서 멈춘다 → 대시보드가 그 블로그를 24시간 쉬게 함.
    알림·확인·입력 창은 쓰지 않는다 (사파리에서 멈춤 — 모두 화면의 한 줄과 단추 하나로). */
 async CFG => {
-const V = 8;
+const V = 9;
 const W = window, D0 = document, S = m => new Promise(r => setTimeout(r, m));
 // 한글 글은 autopub.py 가 Z('…') 로 줄여 넣는다 (seoi.pack — 한 번에 책갈피 one.js 와 같은 Z · 껍데기만 · 정규식 안에 따옴표 없음 · 한글 글 안에 역슬래시 없음)
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
@@ -325,7 +325,8 @@ const lite = (it, R) => {
   if (!!it.disc !== DISC.test(bt)) P.push(it.disc ? '제휴 고지 줄이 빠졌어요' : '원고에 없는 제휴 고지 줄이 있어요');
   return P;
 };
-const when = (it, R, w) => it.at ? (!R.book ? '예약 시각이 글에 없어요' : w ? '예약 ' + (R.at || '') + ' 못 채움 (' + w + ')' + (/날짜/.test(w) ? ' — 발행창 예약에서 그 날짜를 직접 고른 뒤 초록 단추 (시·분은 다시 채워요)' : '') : '') : booked() ? BK : '';
+// v9 (11/25): 날짜를 못 고르면 꾸미기가 남긴 달력 모양(R.dg — 글 없음)을 대시보드로 한 번 (다음에 진짜 달력을 보고 고치게)
+const when = (it, R, w) => (R.dg && ask({a: 'dg', b: BLOG, n: R.dg}), R.dg = 0, it.at ? (!R.book ? '예약 시각이 글에 없어요' : w ? '예약 ' + (R.at || '') + ' 못 채움 (' + w + ')' + (/날짜/.test(w) ? ' — 발행창 예약에서 그 날짜를 직접 고른 뒤 초록 단추 (시·분은 다시 채워요)' : '') : '') : booked() ? BK : '');
 // v6 (주인 11/24): 태그는 90% 넘거나 1개만 빠지면 발행 (빠진 태그 이름을 요약에)
 const tg = (R, n, P) => { const m = R.tagList.length; if (n < m) (m - n > 1 && n < m * .9 ? P : nt).push('태그 ' + n + '/' + m + ' 빠짐 ' + (R.tagMiss || []).join(',')); };
 const chk = (it, R) => {

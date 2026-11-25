@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -63,7 +64,7 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     assert kkumi.check_line().endswith(f"맨 아래가 v{kkumi.version()} 이면 새 판이에요.") and "'\\nv' + V);" in kkumi.SRC.read_text(encoding="utf-8")  # 끝 알림 맨 아래 v8 (11/17)
     assert [s.split()[0] for s in kkumi.STEPS] == ["사파리에서", "'책갈피", "책갈피"] and "공유 단추" in kkumi.STEPS[0] and "주소 칸" in kkumi.STEPS[2]  # 쉬운 3단계
     # 판 번호 (주인 11/14 — 끝 알림 'v5' · 지문은 코드가 바뀌면 달라짐) · 글꼴 살피기(나눔명조 — 주인이 취소)는 넣지 않음
-    assert kkumi.version() >= 5 and f"let V={kkumi.version()};" in js and "const " not in js and "'\\nv'+V" in js
+    assert kkumi.version() >= 5 and re.search(rf"let V={kkumi.version()}[;,]", js) and "const " not in js and "'\\nv'+V" in js
     assert len(kkumi.ver()) == 10 and kkumi.ver() == __import__("hashlib").sha256(kkumi.bookmarklet().encode()).hexdigest()[:10]
     assert "se-ff-" not in js and "글꼴" not in js
 
@@ -76,6 +77,11 @@ def test_minify_keeps_strings_and_word_gaps() -> None:
     # v9: 따옴표 밖 'const ' 만 'let ' 으로 (따옴표 안·이름 끝은 그대로)
     assert kkumi.minify("const t = 'const a'; for (const k of x) myconst = 1;", let=True) == "let t='const a';for(let k of x)myconst=1;"
     assert kkumi.minify("const a = 1;") == "const a=1;"  # 다른 책갈피(통계·한 번에·서이추 등)는 그대로
+    # v13 (11/25): 같은 묶음의 이어진 let 은 ',' 로 (안쪽 묶음·for 머리·let 아닌 문장 뒤·정규식 안 따옴표는 그대로)
+    assert kkumi.minify("const a = 1;\nconst b = () => { const c = 2; const d = 3; return c; };\nconst e = /\"/g;\nconst f = 'x;let y';", let=True) == \
+        "let a=1,b=()=>{let c=2,d=3;return c;},e=/\"/g,f='x;let y';"
+    assert kkumi.minify("let a = 1;\nfoo();\nlet b = 2;\nfor (let i = 0; i < 2; i++) {}\nlet c = 3;", let=True) == "let a=1;foo();let b=2;for(let i=0;i<2;i++){}\nlet c=3;"
+    assert kkumi._merge_let("let a=(1;let b=2;") == "let a=(1;let b=2;"  # 괄호가 안 맞으면 그대로
 
 
 @needs_node

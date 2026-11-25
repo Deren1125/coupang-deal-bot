@@ -20,7 +20,7 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 12;
+const V = 13;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => qa(D, CARD).length;
@@ -357,29 +357,41 @@ const bookIn = async at => {
     // v9: 달력은 발행창 밖(문서 맨 끝)에 붙을 수 있음 · 눌러도 안 뜨면 한 번 더 · 날짜 칸을 다시 찾아 확인 — 안 되면 '날짜 칸 못 찾음'
     if (ymd(D_) !== want) {
       why = DT;
+      // v13 (11/25 하루치 '예약 11/26 08:10 못 채움 (날짜 칸 못 찾음)'): 달력 = 문서 어디든(발행창 밖·바깥 문서도) 표·격자·div 어느 모양이든 1~31 숫자 칸(가장 안쪽 · 고르기 칸 빼고) 28개가 모인 가장 작은 묶음
+      // 달 = 년·월 고르기 칸(12칸) 또는 위로 다섯 겹 안 글자 'YYYY.M' 'YYYY년 M월' (20xx 만 — 붙은 날 숫자 '4567\n89' 를 해로 읽지 않게) · 날 칸 글자가 그 수 하나(안쪽 a·button·span 도) · 다른 달 날이 섞이면 15일 전은 앞, 뒤는 뒤 것
+      const T = e => (e.innerText + '').trim(), dn = e => !e.closest('select') && /^\d{1,2}$/.test(T(e)) && +T(e);
+      const mon = (c, t) => { const s = qa(c, 'select'), Y = s.find(x => num(x.selectedOptions[0]) > 999), M_ = s.find(x => x !== Y && x.options.length === 12), a = /(20\d\d)\D{1,3}([01]?\d)(?!\d)/.exec(T(c).replace(c === t ? '' : T(t), '')); return Y && M_ ? num(Y.selectedOptions[0]) * 12 + num(M_.selectedOptions[0]) : a && a[1] * 12 + a[2] * 1; };
       const cal = () => {
-        for (const t of qa(box.ownerDocument, 'table,[role=grid]')) {
-          // 본문에 넣은 표는 달력이 아님
-          if (!seen(t) || t.closest('.se-content') || qa(t, 'td,[role=gridcell]').length < 28) continue;
-          for (let c = t, k = 0; k < 4 && (c = c.parentElement); k++) {
-            const a = /(\d{4})\D{1,3}(\d{1,2})/.exec(c.innerText.replace(t.innerText, ''));
-            if (a) return [t, c, a[1] * 12 + a[2] * 1];
+        for (const d_ of [D, document]) {
+          // 본문(.se-content) 밖 · 보이는 · 자식이 하나 이하인 칸 중 글자가 1~31 인 것 → 가장 안쪽만 → '1' 칸에서 여섯 겹 위까지 올라가며 서로 다른 수 28개가 든 첫 묶음
+          const L = qa(d_, '*').filter(e => e.childElementCount < 2 && seen(e) && !e.closest('.se-content') && dn(e)), ds = L.filter(e => !L.some(o => o !== e && e.contains(o)));
+          for (const one of ds.filter(e => dn(e) === 1)) for (let c = one, k = 0; c && k < 6; k++, c = c.parentElement) {
+            const x = ds.filter(e => c.contains(e));
+            if (new Set(x.map(dn)).size > 27) for (let h = c, j = 0; h && j < 5; j++, h = h.parentElement) { const n = mon(h, c); if (n) return [x, h, n]; }
           }
         }
       };
-      let c;
-      for (let k = 0; !c && k < 2; k++) { D_ = sels()[2]; D_.focus(); await tap(D_); c = await wait(cal, 2500); }
-      for (let k = 0; c[2] < ym && k < 2; k++) {
-        const was_ = c[2];
-        await tap(qa(c[1], 'button,a').find(e => seen(e) && /next|다음/i.test(e.outerHTML)));
-        c = await wait(() => { const x = cal(); return x && x[2] > was_ && x; }, 2000);
-      }
-      // 고를 수 없는 날(지난날·다른 달·막힌 날)은 칸 안 어디에든 other·disabled·outside·unselectable 이 있음
-      const ds = qa(c[0], 'td,[role=gridcell]').filter(e => e.innerText.trim() === '' + d && !/other|disabled|outside|unselect/i.test(e.outerHTML));
-      if (c[2] !== ym || ds.length !== 1) throw 0;
-      await tap(ds[0].querySelector('button,a') || ds[0]);
-      if (!await wait(() => (s = sels()) && ymd(s[2]) === want, 2500)) throw 0;
-      [H, M] = s;
+      // 고를 수 없는 날(지난날·다른 달·막힌 날)은 그 칸·감싼 칸 이름에 other·disabled·outside·unselectable (aria-disabled=false 는 빼고)
+      const bad = x => x.disabled || /other|disabled|outside|unselect/i.test(((x.closest('td,[role=gridcell]') || x).outerHTML + x.parentElement.className).replace(/aria-disabled=.false./g, ''));
+      let c, ok = 0;
+      try {
+        // 날짜 칸을 눌러도 안 뜨면 한 번 더 (커서로 열린 달력을 누름이 닫는 것)
+        for (let k = 0; !c && k < 2; k++) { D_ = sels()[2]; D_.focus(); await tap(D_); c = await wait(cal, 2500); }
+        for (let k = 0; c[2] < ym && k < 2; k++) {
+          const was_ = c[2];
+          await tap(qa(c[1], 'button,a').find(e => seen(e) && /next|다음/i.test(e.outerHTML)));
+          c = await wait(() => { const x = cal(); return x && x[2] > was_ && x; }, 2000);
+        }
+        const ds = c[0].filter(e => dn(e) === d && !bad(e));
+        if (c[2] !== ym || !ds.length) throw 0;
+        await tap(ds[d < 15 ? 0 : ds.length - 1]);
+        ok = await wait(() => (s = sels()) && ymd(s[2]) === want, 2500);
+      } catch (e) {}
+      // 그래도 안 되고 날짜 칸이 손으로 쓰는 칸(읽기 전용 아님)이면 원래 모양 그대로 날짜만 바꿔 넣음 — 뒤에서 그 날로 바뀐 것을 꼭 확인
+      D_ = sels()[2];
+      if (!ok && D_.readOnly === false) { put(D_, D_.value.replace(/\d{4}(\D{1,3})\d{1,2}(\D{1,3})\d{1,2}/, (a, x, z) => y + x + p2(mo) + z + p2(d))); D_.blur(); ok = await wait(() => (s = sels()) && ymd(s[2]) === want, 2500); }
+      // 못 했으면 달력(없으면 날짜 칸 둘레) 모양을 R.dg 에 (열 자 넘는 글은 ~ · 앞 1,500자 — 하루치가 대시보드로 보냄, 다음에 진짜 달력을 보고 고치게)
+      if (!ok) { R.dg = [at, D_.tagName, D_.readOnly, D_.value, c && c[2]] + (c ? c[1] : D_.parentElement.parentElement.parentElement).outerHTML.replace(/>[^<]{10,}</g, '>~<').replace(/\s+/g, ' ').slice(0, 1500); throw 0; } [H, M] = s;
       why = '칸 못 찾음';
     }
     if (!opt(H, h) || !opt(M, mm)) throw 0;
@@ -459,14 +471,13 @@ const ask = () => new Promise(res => {
   const T = D, wrap = T.createElement('div'), box = T.createElement('div'), no = T.createElement('button'), msg = T.createElement('p');
   wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
   const card_ = T.createElement('div');
-  card_.style.cssText = 'background:#fff;color:#111;border-radius:16px;padding:20px;width:min(520px,100%);font:16px -apple-system,sans-serif;display:grid;gap:12px';
+  card_.style.cssText = 'background:#fff;color:#111;border-radius:16px;padding:20px;width:min(520px,100%);font:16px system-ui;display:grid;gap:12px';
   msg.textContent = '꾸미기: 아래 칸에 길게 눌러 붙여넣고 기다려요';
-  msg.style.margin = '0';
   box.contentEditable = 'true';
-  box.style.cssText = 'min-height:120px;border:2px dashed #03a94f;border-radius:12px;padding:12px;outline:none;color:#555';
+  box.style.cssText = 'min-height:120px;border:2px dashed #03a94f;border-radius:12px;padding:12px;color:#555';
   box.setAttribute('aria-label', '여기에 붙여넣기');
   no.textContent = '닫기';
-  no.style.cssText = 'min-height:44px;border:0;border-radius:10px;background:#eee;font:600 16px -apple-system,sans-serif';
+  no.style.cssText = 'min-height:44px;border:0;border-radius:10px;background:#eee;font:600 16px system-ui';
   box.addEventListener('paste', e => {
     e.stopPropagation();
     const dt = e.clipboardData;

@@ -225,12 +225,12 @@ def test_dashboard_texts_mention_the_auto_fill() -> None:
     assert "it.when ?" in rt and "도 채워 줘요" in rt and "발행 단추만 직접" in rt and "새로 고름" in rt
     assert "예약 시각 자동 채움" in (STATIC / "logins.js").read_text(encoding="utf-8")
     assert "예약 날짜·시각도 채워 줘요" in kkumi.USE and "발행 단추는 직접" in kkumi.USE
-    assert kkumi.version() == 12
+    assert kkumi.version() == 13
 
 
 def test_bookmarklet_never_names_or_presses_the_final_publish_button() -> None:
     js = code()
-    book = js[js.index("let p2="):js.index("let tagsOf=")]  # 예약 채움 코드
+    book = js[js.index("p2=n=>"):js.index("tagsOf=t=>")]  # 예약 채움 코드
     # 발행을 끝내는 단추를 찾는 선택자가 없고, 누르는 곳은 모두 tap 을 거친다 — 누를 것이나 그것을 감싼 단추·링크의 이름에
     # confirm·publish·submit 이 들었거나 종류가 submit 이거나 글자에 발행·확인·등록이 있으면 멈춤
     for word in ("confirm_btn", "seOnePublishBtn", "button[class*='confirm']", "requestSubmit", ".submit(", ".click("):
@@ -325,6 +325,40 @@ document.querySelector('.publish_btn').addEventListener('click', () => {
     cal.querySelector('.ui-datepicker-prev').onclick = () => { view = m === 1 ? [y - 1, 12] : [y, m - 1]; draw(); };
     for (const a of cal.querySelectorAll('a[data-d]')) a.onclick = () => { sel = [y, m, +a.dataset.d]; show(); cal.style.display = 'none'; };
   };
+  // v13 (11/25 하루치 '예약 11/26 08:10 못 채움 (날짜 칸 못 찾음)' — 진짜 달력 모양은 아직 못 봄): 다른 모양 넷
+  //   nj = 문서 끝 position:fixed 표 · 칸 안 button · 머리 '2026.11' · aria-disabled="false" · 다른 달 날도 숫자(ui-datepicker-other-month)
+  //   div = 표 없는 div 격자 · 머리 '2026년 11월' · 지난날은 disabled 단추 · 다른 달 날은 표시 없는 숫자 (앞·뒤) · 다음 단추는 aria-label '다음 달'
+  //   ysel = jQuery UI changeMonth/changeYear (머리에 월 고르기 칸 12개·년 고르기 칸 2016~2036) · edit = 달력 없이 손으로 쓰는 날짜 칸 (change 로 읽음)
+  if (/^(nj|div|ysel|edit)$/.test(MODE)) {
+    const c2 = document.body.appendChild(Object.assign(document.createElement('div'), {className: MODE === 'div' ? 'cal_wrap__z' : 'ui-datepicker', style: 'display:none;' + (MODE === 'nj' ? 'position:fixed;top:0;left:0;background:#fff' : '')}));
+    if (MODE === 'edit') { inp.readOnly = false; inp.addEventListener('change', () => { const a = /(\d{4})\D+(\d+)\D+(\d+)/.exec(inp.value); if (a) { sel = [+a[1], +a[2], +a[3]]; redraw(); } }); }
+    const d2 = () => {
+      const [y, m] = view, start = new Date(y, m - 1, 1 - new Date(y, m - 1, 1).getDay()), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let h = MODE === 'div' ? '<div class="head__z"><button type="button" class="nav__z" aria-label="이전 달">‹</button><strong>' + y + '년 ' + m + '월</strong><button type="button" class="nav__z nx" aria-label="다음 달">›</button></div><div class="grid__z">'
+        : MODE === 'nj' ? '<div class="ui-datepicker-header"><a class="ui-datepicker-prev" title="Prev">‹</a><a class="ui-datepicker-next nx" title="Next">›</a><div class="ui-datepicker-title"><span class="ui-datepicker-year">' + y + '</span>.<span class="ui-datepicker-month">' + p2(m) + '</span></div></div><table class="ui-datepicker-calendar"><tbody>'
+        : '<div class="ui-datepicker-header"><a class="ui-datepicker-next nx" title="다음달"><span>다음달</span></a><div class="ui-datepicker-title"><select class="ui-datepicker-month">' + [...Array(12)].map((_, i) => '<option value="' + i + '"' + (i === m - 1 ? ' selected' : '') + '>' + (i + 1) + '월</option>').join('')
+          + '</select><select class="ui-datepicker-year">' + [...Array(21)].map((_, i) => '<option value="' + (2016 + i) + '"' + (2016 + i === y ? ' selected' : '') + '>' + (2016 + i) + '</option>').join('') + '</select></div></div><table class="ui-datepicker-calendar"><tbody>';
+      for (let r = 0; r < 6; r++) {
+        h += MODE === 'div' ? '<div class="week__z">' : '<tr>';
+        for (let c = 0; c < 7; c++) {
+          const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + r * 7 + c), other = d.getMonth() !== m - 1, n = d.getDate();
+          h += MODE === 'div' ? '<button type="button" class="day__z' + (other ? ' dim__z' : '') + '"' + (d < today ? ' disabled' : ' data-d="' + (other ? '' : n) + '"') + '>' + n + '</button>'
+            : MODE === 'nj' ? (other ? '<td class="ui-datepicker-other-month"><button type="button" class="ui-state-default" aria-disabled="true">' + n + '</button></td>'
+              : d < today ? '<td class="ui-datepicker-unselectable ui-state-disabled"><button type="button" class="ui-state-default">' + n + '</button></td>'
+              : '<td aria-disabled="false" data-handler="selectDay"><button type="button" class="ui-state-default" data-d="' + n + '">' + n + '</button></td>')
+            : other ? '<td class="ui-datepicker-other-month ui-datepicker-unselectable ui-state-disabled">&nbsp;</td>'
+              : d < today ? '<td class="ui-datepicker-unselectable ui-state-disabled"><span class="ui-state-default">' + n + '</span></td>'
+              : '<td data-handler="selectDay"><a class="ui-state-default" href="#" data-d="' + n + '">' + n + '</a></td>';
+        }
+        h += MODE === 'div' ? '</div>' : '</tr>';
+      }
+      c2.innerHTML = h + (MODE === 'div' ? '</div>' : '</tbody></table>');
+      c2.querySelector('.nx').onclick = () => { view = m === 12 ? [y + 1, 1] : [y, m + 1]; d2(); };
+      // 다른 달 날(div 의 dim__z)을 누르면 그 달 날이 들어감 (진짜 달력처럼) — 그래서 잘못 누르면 날짜 확인이 막음
+      for (const b of c2.querySelectorAll('[data-d]')) b.onclick = e => { e.preventDefault(); sel = b.dataset.d ? [y, m, +b.dataset.d] : [m === 12 ? y + 1 : y, m === 12 ? 1 : m + 1, +b.textContent]; show(); c2.style.display = 'none'; redraw(); };
+    };
+    inp.onclick = () => { if (MODE === 'edit') return; view = [sel[0], sel[1]]; d2(); c2.style.display = 'block'; };
+  } else
   inp.onclick = () => { if (MODE === 'nocal' || MODE === 'jq') return; view = [sel[0], sel[1]]; const f = () => { (jq ? jqDraw : draw)(); cal.style.display = jq && cal.style.display === 'block' ? 'none' : 'block'; }; if (MODE === 'late') setTimeout(f, 900); else f(); };
   if (jq) {
     inp.addEventListener('focus', () => { view = [sel[0], sel[1]]; jqDraw(); cal.style.display = 'block'; });
@@ -336,7 +370,8 @@ document.querySelector('.publish_btn').addEventListener('click', () => {
 });
 </script></body></html>
 """
-RSV_RUN = RUN.replace("out.tags =", "out.rsv = await frame.evaluate(() => window.rsvState ? window.rsvState() : null);out.tags =")
+RSV_RUN = RUN.replace("out.tags =", "out.rsv = await frame.evaluate(() => window.rsvState ? window.rsvState() : null);"
+                      "out.report = await p.evaluate(() => ({dg: (window.__kkumiReport || {}).dg || ''}));out.tags =")
 
 
 def _inner(mode: str) -> str:
@@ -497,3 +532,33 @@ def test_v9_missing_category_still_fills_the_reservation() -> None:
     assert r["catOpen"] is False, r  # 연 목록은 닫음
     assert r["book"] is True and r["date"] == _date(when) and r["h"] == "7" and r["m"] == "30" and r["confirm"] == 0, r
     assert f"예약 {_lab(when)} 채움 — 발행은 직접" in got["alert"], got["alert"]
+
+
+# ── v13 (11/25 하루치 '예약 11/26 08:10 못 채움 (날짜 칸 못 찾음)' — 저녁에 누른 하루치가 모두 다음 날 예약) ─────────────────
+def _v13_days() -> list[datetime]:
+    now = datetime.now()
+    tmr = (now + timedelta(days=1)).replace(hour=8, minute=10, second=0, microsecond=0)  # 내일 (보통 같은 달 · 말일이면 다음 달)
+    nxt = (now.replace(day=1) + timedelta(days=32)).replace(day=2, hour=21, minute=20, second=0, microsecond=0)  # 다음 달 2일 (다음 단추)
+    return [tmr, nxt]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+@pytest.mark.parametrize("mode", ["nj", "div", "ysel", "edit"])
+def test_v13_fills_tomorrow_and_next_month_in_other_picker_shapes(mode: str) -> None:
+    """표·div 격자·년월 고르기 칸·손으로 쓰는 칸 어느 모양이든 내일·다음 달 날짜를 채우고 날짜 칸이 그 날로 바뀐 것을 확인 — 발행 단추는 0번."""
+    for when in _v13_days():
+        got = _run(mode, when)
+        r = got["rsv"]
+        assert r["book"] is True and r["now"] is False and r["date"] == _date(when) and r["h"] == str(when.hour), (mode, when, r, got["alert"])
+        assert r["m"] == str(when.minute) and r["confirm"] == 0, r
+        assert f"예약 {_lab(when)} 채움 — 발행은 직접" in got["alert"] and "못 채움" not in got["alert"] and "날짜 칸" not in got["alert"], got["alert"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
+def test_v13_failure_leaves_a_calendar_sketch_without_text() -> None:
+    """달력에서 고른 날이 안 들어가면(wrongday) '현재'로 되돌리고, 다음 고침을 위해 달력 모양(R.dg)을 남김 — 긴 글은 ~ · 1,500자까지."""
+    when = (datetime.now() + timedelta(days=1)).replace(hour=7, minute=30, second=0, microsecond=0)
+    got = _run("wrongday", when)
+    assert got["rsv"]["now"] is True and got["rsv"]["confirm"] == 0, got["rsv"]
+    dg = got["report"]["dg"]
+    assert dg.startswith(when.strftime("@%Y-%m-%dT%H:%M") + ",INPUT,true,") and "ui-datepicker" in dg and len(dg) < 1700, dg

@@ -63,6 +63,7 @@ SRC = STATIC / "autopub.js"
 KV_SECRET = "autopub_secret"
 KV_COOL = "autopub:cool"
 KV_PLAN = "autopub:plan"  # 누른 때 기준 예약 계획 {블로그: {slots: {줄 id: 'YYYY-MM-DDTHH:MM'}, used: [시각…]}} (주인 11/23 13:45)
+KV_DG = "autopub:dg"  # v9 (11/25): 예약 날짜를 못 골랐을 때 책갈피가 보낸 달력 모양 (최근 5개 · 글 없음 — 다음 고침에 진짜 달력 DOM 을 보려고)
 KV_HELD = "autopub:held"  # 발행을 눌러 본 글 {줄 id: {r, at}} — 날이 바뀌어도 다시 주지 않음 (두 번 발행 막기 · 검토 11/23)
 HELD_S = 14 * 86400.0
 DAY_KEY = "autopub:day:"
@@ -113,6 +114,9 @@ PATCHES: tuple[tuple[str, str], ...] = (
     ("    if (R.tagMiss.length) R.notes.push('태그 빠짐: ' + R.tagMiss.join(', '));\n", ""),
     # v6: 제목 가운데는 주인이 제목 칸을 누른 그 자리에서 (진행기 pre) — 끝에서 제목을 스크립트로 누르는 길은 아이패드에서 안 먹음
     ("  if (ps.some(p => p.align === 'center')) { R.title = await titleMid(); if (R.title) R.notes.push('제목 가운데 ' + R.title + ' — 직접'); }\n", ""),
+    # v9 (11/25): 끝 알림에만 쓰던 한마디 둘도 뺌 — 다음 날 예약 달력 고침(꾸미기 v13) 자리
+    ("  if (!short(e)) R.notes.push('선 모양 ' + (e.className.match(/se-l-[\\w-]+/) || [''])[0]);\n", ""),
+    ("    if (mm !== m[4]) R.notes.push('분 내림');\n", ""),
     ("  const inside = P && await wait(has, 1500);\n", "  const inside = P && await wait(() => has() || tz((quotes().pop() || q).textContent).includes(P), 4000);\n"),
 )
 CUT = ("const ask = () => new Promise(res => {\n", "  setTimeout(() => box.focus(), 50);\n});\n")  # ⑤ 붙여넣기 칸 — 처음 줄부터 끝 줄까지 뺌
@@ -798,4 +802,14 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
             left = len(ready(rv, blog, c["tried"]))
             out["left"] = min(left, max(0, RUN_MAX - _run_n(c, blog, now)))
         return out
+    if a == "dg":  # 달력 모양 하나 (2,000자까지 · 보이는 글자만) — 대시보드 kv 에만 남김
+        h = "".join(ch for ch in str(form.get("n") or "") if ch.isprintable())[:2000]
+        if h:
+            try:
+                old = json.loads(db.kv_get(KV_DG) or "[]")
+            except (TypeError, ValueError):
+                old = []
+            db.kv_set(KV_DG, json.dumps([*(old if isinstance(old, list) else [])[-4:], {"b": blog, "at": int(now), "v": str(form.get("v") or "")[:6], "h": h}],
+                                        ensure_ascii=False))
+        return {"ok": True}
     raise CaptureError(400, "bad", "모르는 요청이에요")
