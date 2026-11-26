@@ -395,6 +395,24 @@ def night(x: datetime) -> bool:
     return (x.hour, x.minute) >= NIGHT_FROM
 
 
+def _old(i: dict[str, Any], day: str, tz: ZoneInfo) -> bool:
+    """누른 날(day, 대시보드 시간대)보다 앞날에 쓴 글 — 줄의 saved(Blog-Auto v2 posts saved_at · 임시저장 시각)로만 봄. 모르면 새 글."""
+    s = str(i.get("saved") or "")
+    try:
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    d = d.astimezone(tz) if d.tzinfo else d
+    return f"{d:%Y-%m-%d}" < day
+
+
+def late_last(rows: list[dict[str, Any]], day: str, tz: ZoneInfo) -> tuple[list[dict[str, Any]], set[str]]:
+    """하루치 모드 차례 (주인 11/26 '하루 지난 속보는 내일 예약 맨 뒤로'): 앞날에 쓰고 못 올린 글(속보·🔥·남은 글)은 그날 쓴 새 글 뒤로 —
+    두 묶음 안 차례는 그대로. (새 차례, 뒤로 보낸 글 id)."""
+    old = [i for i in rows if _old(i, day, tz)]
+    return [i for i in rows if i not in old] + old, {str(i["id"]) for i in old}
+
+
 def _plans(db: Any) -> dict[str, dict[str, Any]]:
     try:
         v = json.loads(db.kv_get(KV_PLAN) or "{}")
@@ -450,13 +468,15 @@ def _gap(rng: Any, prev: float | None, spread: float) -> float:
 
 
 def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: ZoneInfo, *,
-             taken: list[str] | None = None, near: list[str] | None = None, rng: Any = None, first_now: bool = False) -> dict[str, str]:
+             taken: list[str] | None = None, near: list[str] | None = None, rng: Any = None, first_now: bool = False,
+             back: set[str] | None = None) -> dict[str, str]:
     """그 블로그의 남은 글 rows 의 예약 시각 {줄 id: 'YYYY-MM-DDTHH:MM'} — 살아 있는 계획은 그대로, 지났거나 없는 글만 새로 (kv 에 남김).
     near = 다른 블로그의 이미 한 예약 시각 (계획에 든 다른 블로그 시각은 kv 에서 읽음) — 같은 날 NEAR_MIN 안에 두지 않음.
     first_now (v7 · 주인 11/16 '오늘 발행 글 없으면 1번 글 지금 발행'): 첫 글(rows[0])은 '' = 지금 발행 · 나머지는 지금부터 40분 넘게 뒤로
     (07:30~23:00 일 때만 · 다시 눌러도 그날은 같은 글 · 아니면 전처럼 모두 예약).
     하루치 모드 (주인 11/25 · night): 20:00 뒤에 누르면 first_now 를 보지 않고 모두 예약 — 새 글은 내일 아침부터 (살아 있는 계획은 그대로).
-    늘: 블로그마다 하루 DAY_MAX 편 · 누른 때부터 HORIZON_H 시간 안 — 자리가 없는 글은 돌려주는 값에 없음 (주지 않음)."""
+    늘: 블로그마다 하루 DAY_MAX 편 · 누른 때부터 HORIZON_H 시간 안 — 자리가 없는 글은 돌려주는 값에 없음 (주지 않음).
+    back (하루치 모드 · late_last 가 뒤로 보낸 앞날 글 id — 주인 11/26): 자리 없는 새 글이 있으면 그 글들의 살아 있는 자리를 풀어 새 글 뒤에 다시 잡음."""
     allp = _plans(db)
     pl = allp.get(blog, {"slots": {}, "used": []})
     n = datetime.fromtimestamp(now, tz).replace(tzinfo=None, second=0, microsecond=0)
@@ -476,6 +496,8 @@ def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: Zon
     late = n + timedelta(minutes=LATE_MIN)
     ids = [str(i["id"]) for i in rows]
     keep = {k: t for k, t in pl["slots"].items() if k in ids and (d := _dt(t)) is not None and d > late}
+    if ngt and back and any(k not in keep and k not in back for k in ids):  # 새로 쓴 글이 앞날 글 앞에 들게 (자리·상한을 새 글이 먼저)
+        keep = {k: t for k, t in keep.items() if k not in back}
     used = [t for t in pl["used"] if (d := _dt(t)) is not None and d > n - timedelta(days=1)]
     busy = [d for t in (*used, *(taken or []), *keep.values()) if (d := _dt(t)) is not None] + ([n] if nw else [])
     others = [d for b, p in allp.items() if b != blog for t in (*p["slots"].values(), *p["used"]) if (d := _dt(t))]
@@ -773,9 +795,12 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
         if n >= RUN_MAX:
             return {"ok": True, "next": None, "left": len(rows), "wait": 0,
                     "text": f"{name}: 한 번에 {RUN_MAX}편까지만 올려요 (남은 글 {len(rows)}) — {int(RUN_IDLE_S // 60)}분쯤 뒤에 다시 눌러 주세요"}
+        back: set[str] = set()
+        if night(datetime.fromtimestamp(now, tz)):  # 하루치 모드: 앞날에 쓴 못 올린 글은 내일 예약 맨 뒤 (주인 11/26 · 낮에 누름은 그대로)
+            rows, back = late_last(rows, day, tz)
         slots = schedule(db, blog, rows, now, tz, taken=_taken(rv, blog),
                          near=[t for b in NAMES if b != blog for t in _taken(rv, b)],
-                         first_now=not published_today(db, blog, now, tz, rv, pub))
+                         first_now=not published_today(db, blog, now, tz, rv, pub), back=back)
         fit = [x for x in rows if str(x["id"]) in slots]
         # 낮에 누름 (11/26 데런픽 08:41 — 내일 자리 글에서 '예약 11/27 08:10 못 채움 (날짜 칸 못 찾음)'으로 멈춤): 내일 이후 자리의 글은 넣지 않고
         # 저녁 8시 뒤 하루치 한 번에로 (계획 시각은 kv 에 남아 저녁에 그대로 · 날짜 바꾸기는 하루치 모드에서만)

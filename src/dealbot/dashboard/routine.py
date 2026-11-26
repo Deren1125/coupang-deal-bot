@@ -352,6 +352,26 @@ def post_scores(bot: Any) -> dict[tuple[str, int], tuple[int, bool]]:
     return out
 
 
+def post_saved(bot: Any) -> dict[tuple[str, int], str]:
+    """(블로그, 글 번호) → 임시저장(쓴) 시각 saved_at (v2 posts · 있는 글만) — 하루치 한 번에가 '지난날 쓴 글'을 내일 예약 맨 뒤로 (주인 11/26)."""
+    st = getattr(bot, "dash_state", None)
+    export = st._export() if st is not None else None
+    posts = (getattr(export, "v2", None) or {}).get("posts") or {}
+    out: dict[tuple[str, int], str] = {}
+    for blog, rows in posts.items():
+        for p in rows if isinstance(rows, list) else []:
+            if isinstance(p, dict) and isinstance(p.get("pid"), int) and isinstance(p.get("saved_at"), str) and p["saved_at"]:
+                out[(blog, p["pid"])] = p["saved_at"]
+    return out
+
+
+def with_saved(it: dict[str, Any], saved: dict[tuple[str, int], str]) -> dict[str, Any]:
+    """발행·예약 줄에 쓴 시각(saved)을 단다. 모르면 그대로."""
+    m = POST_ROW.match(str(it.get("id") or ""))
+    s = saved.get((m.group(1), int(m.group(2)))) if m else None
+    return {**it, "saved": s} if s else it
+
+
 def with_score(it: dict[str, Any], scores: dict[tuple[str, int], tuple[int, bool]]) -> dict[str, Any]:
     """발행·예약 줄에 점수(sco)와 제목 옆 칩 글자(sc '🔥 88점'·'62점', hot)를 단다. 글 줄이 아니거나 점수를 모르면 그대로."""
     m = POST_ROW.match(str(it.get("id") or ""))
@@ -406,6 +426,11 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001 — 점수를 못 읽어도 할 일은 원래 차례로
         log.warning("routine scores failed: %s", type(e).__name__)
         scores = {}
+    try:
+        saved = post_saved(bot)
+    except Exception as e:  # noqa: BLE001 — 쓴 시각을 못 읽어도 할 일은 그대로
+        log.warning("routine saved failed: %s", type(e).__name__)
+        saved = {}
     try:  # '이웃 관리' 책갈피로 한 오늘 서이추·이웃 들르기 수 (주인 11/14 — 블로그 칸 한 줄 · 목록이 있을 때만)
         from dealbot.dashboard import seoi
 
@@ -416,7 +441,7 @@ def view(bot: Any, now: float | None = None) -> dict[str, Any]:
         ex["seoi"] = None
     slots = []
     for s in r["slots"]:
-        its = by_score([with_score({**i, "done": i["id"] in done, "tag": " · ".join(x for x in (i["group"], NV_BLOGS.get(i["blog"], "")) if x)}, scores)
+        its = by_score([with_saved(with_score({**i, "done": i["id"] in done, "tag": " · ".join(x for x in (i["group"], NV_BLOGS.get(i["blog"], "")) if x)}, scores), saved)
                         for i in r["items"] if i["slot"] == s["key"]])
         slots.append({**s, "items": its, "done": sum(i["done"] for i in its), "total": len(its),
                       "min_left": sum(i["min"] for i in its if not i["done"]), "current": s["key"] == cur})

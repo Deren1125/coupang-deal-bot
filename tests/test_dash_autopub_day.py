@@ -182,3 +182,79 @@ def test_night_mode_is_from_20_and_retap_keeps_the_plan() -> None:
     a = autopub.schedule(db, "issue", rows, t, TZ, rng=random.Random(1))
     assert autopub.schedule(db, "issue", rows, t + 900, TZ, rng=random.Random(2)) == a
     json.dumps(a)
+
+
+# ── 주인 11/26 '하루 지난 속보는 내일 예약 맨 뒤로': 앞날에 쓰고 못 올린 글은 그날 쓴 새 글 뒤 · 하루 상한 남은 자리만
+def _rows_saved(saved: dict[int, str], blog: str = "issue") -> dict:
+    """v2 posts 의 쓴 시각 (saved_at · Blog-Auto 임시저장 시각)."""
+    from dash_helpers import fixture
+
+    data = fixture("export_v2.json")
+    tpl = data["posts"]["issue"][0]
+    posts = {**data["posts"], blog: [{**tpl, "pid": n, "saved_at": s, "status": "saved"} for n, s in saved.items()]}
+    return posts
+
+
+def _with_saved(tmp_path: Path, ids: list[int], saved: dict[int, str]) -> None:
+    from dash_helpers import fixture
+    from test_dash_state import write_export
+
+    st = fixture("export_v2.json")["status"]
+    write_export(tmp_path / "blogauto.json", posts=_rows_saved(saved), status={**st, "routine": _rows(ids)})
+
+
+def test_late_last_puts_earlier_day_posts_after_fresh_keeping_order() -> None:
+    rows = [{"id": "a", "saved": "2026-11-17T23:50:00+09:00"}, {"id": "b", "saved": "2026-11-18T08:00:00+09:00"},
+            {"id": "c", "saved": "2026-11-17T14:59:00Z"},  # = 11/17 23:59 KST → 앞날
+            {"id": "d"}, {"id": "e", "saved": "2026-11-17T15:10:00Z"},  # = 11/18 00:10 KST → 그날
+            {"id": "f", "saved": "2026-11-16T10:00"}, {"id": "g", "saved": "틀림"}]
+    got, back = autopub.late_last(rows, DAY, TZ)
+    assert [i["id"] for i in got] == ["b", "d", "e", "g", "a", "c", "f"] and back == {"a", "c", "f"}  # 모르는 쓴 시각 = 새 글
+    assert autopub.late_last([], DAY, TZ) == ([], set())
+
+
+def test_evening_press_reserves_fresh_posts_first_and_yesterdays_leftovers_only_in_spare_room(bot: DealBot, tmp_path: Path) -> None:
+    ids = list(range(31, 41))  # 10편: 31~35 어제 쓴 속보·🔥·남은 글 (화면 차례로는 앞) · 36~40 오늘 쓴 밤·새벽·자리 글
+    saved = {n: (f"2026-11-17T{10 + n - 31}:00:00+09:00" if n <= 35 else f"2026-11-18T{n - 20}:00:00+09:00") for n in ids}
+    _with_saved(tmp_path, ids, saved)
+    rv = routine.view(bot, now=at(bot, DAY, "21:10"))
+    assert {i["id"]: i.get("saved") for s in rv["slots"] for i in s["items"]}["rsv:issue:31"] == saved[31]  # 줄에 쓴 시각이 실림
+    t = at(bot, DAY, "21:10")
+    q = _go(bot, t, a="next", b="issue")
+    slots = autopub._plans(bot.db)["issue"]["slots"]
+    fresh, old = [f"rsv:issue:{n}" for n in range(36, 41)], [f"rsv:issue:{n}" for n in range(31, 36)]
+    assert all(k in slots for k in fresh) and len(slots) == autopub.DAY_MAX  # 새 글 5편 다 · 지난 글은 남은 3자리만
+    got_old = [k for k in old if k in slots]
+    assert got_old == old[:3], slots  # 지난 글 안 차례 그대로
+    assert max(slots[k] for k in fresh) < min(slots[k] for k in got_old), slots  # 새 글 뒤에
+    assert [slots[k] for k in fresh] == sorted(slots[k] for k in fresh)  # 새 글 안 차례 그대로
+    assert q["next"]["id"] == fresh[0]
+    order = []
+    for k in range(autopub.DAY_MAX):
+        nx = _go(bot, t + 300 * k, a="next", b="issue")["next"]
+        order.append(nx["id"])
+        _go(bot, t + 300 * k + 1, a="done", b="issue", id=nx["id"], r="hold")
+        _go(bot, t + 300 * k + 2, a="done", b="issue", id=nx["id"], r="ok")
+    assert order == fresh + old[:3]
+
+
+def test_fresh_post_written_after_first_evening_press_goes_before_yesterdays_planned_posts(bot: DealBot, tmp_path: Path) -> None:
+    saved = {n: "2026-11-17T18:00:00+09:00" for n in (31, 32, 33)}
+    _with_saved(tmp_path, [31, 32, 33], saved)
+    t = at(bot, DAY, "20:05")
+    q = _go(bot, t, a="next", b="issue")  # 지난 글만 — 그대로 계획 (아직 넣지 않고 화면을 닫음)
+    assert q["next"]["id"] == "rsv:issue:31"
+    _with_saved(tmp_path, [31, 32, 33, 34], {**saved, 34: "2026-11-18T20:40:00+09:00"})  # 밤에 새 글
+    _go(bot, t + 3600, a="next", b="issue")
+    slots = autopub._plans(bot.db)["issue"]["slots"]
+    assert slots["rsv:issue:34"] < min(slots[f"rsv:issue:{n}"] for n in (31, 32, 33)), slots
+    assert [slots[f"rsv:issue:{n}"] for n in (31, 32, 33)] == sorted(slots[f"rsv:issue:{n}"] for n in (31, 32, 33))
+    again = _go(bot, t + 3700, a="next", b="issue")  # 다시 눌러도 같은 계획
+    assert autopub._plans(bot.db)["issue"]["slots"] == slots and again["next"]["id"] == "rsv:issue:34"
+
+
+def test_daytime_press_order_unchanged_by_written_day(bot: DealBot, tmp_path: Path) -> None:
+    saved = {31: "2026-11-17T18:00:00+09:00", 32: "2026-11-18T08:00:00+09:00", 33: "2026-11-18T09:00:00+09:00"}
+    _with_saved(tmp_path, [31, 32, 33], saved)
+    q = _go(bot, at(bot, DAY, "10:03"), a="next", b="issue")
+    assert q["next"]["id"] == "rsv:issue:31" and q["next"]["at"] == ""  # 낮: 예전처럼 화면 차례 (첫 글 지금 발행)
