@@ -64,6 +64,8 @@ KV_SECRET = "autopub_secret"
 KV_COOL = "autopub:cool"
 KV_PLAN = "autopub:plan"  # 누른 때 기준 예약 계획 {블로그: {slots: {줄 id: 'YYYY-MM-DDTHH:MM'}, used: [시각…]}} (주인 11/23 13:45)
 KV_DG = "autopub:dg"  # v9 (11/25): 예약 날짜를 못 골랐을 때 책갈피가 보낸 달력 모양 (최근 5개 · 글 없음 — 다음 고침에 진짜 달력 DOM 을 보려고)
+DG_MAX = 9000  # v10: 꾸미기 v14 진단 (날짜 칸 · 찾은 달력 · 이름 칸 60개 · 누른 뒤 새로 보인 것)
+DG_STRIP = (re.compile(r"\s(?:d|style|src|srcset|href)=\"[^\"]*\""), re.compile(r"https?:[^\s\"'<>]+"))
 KV_HELD = "autopub:held"  # 발행을 눌러 본 글 {줄 id: {r, at}} — 날이 바뀌어도 다시 주지 않음 (두 번 발행 막기 · 검토 11/23)
 HELD_S = 14 * 86400.0
 DAY_KEY = "autopub:day:"
@@ -90,8 +92,8 @@ AFF_HOSTS = ("link.coupang.com", "coupa.ng", "s.zigzag.kr", "a-bly.com", "ably.l
 _TAG = re.compile(r"<[^>]+>")
 U_RE = re.compile(r"\d{6,20}")
 # kkumi.js 의 옛 줄 → 진행기 안에서만 바뀌는 줄 (딱 한 번씩 나와야 함)
-TOOLS = ("D, W, R, S, vis, press, tap, wait, real, comps, body_, host, setSel, count, tagIn, pubBtn, BOTTOM, any, nImg, quotes, cards, shape, centered, titleMid, MAIN_CENTER, "
-         "tagsIn, catIn, bookIn")
+# v10: 껍데기가 쓰지 않는 도구(S·tap·tagIn·pubBtn)는 넘기지 않음 — 주소를 짧게 (BOTTOM·setSel 은 옛 껍데기 시험 tests/fixtures/autopub_v3.js 가 씀)
+TOOLS = "D, W, R, vis, press, wait, real, comps, body_, host, setSel, count, BOTTOM, any, nImg, quotes, cards, shape, centered, titleMid, MAIN_CENTER, tagsIn, catIn, bookIn"
 PATCHES: tuple[tuple[str, str], ...] = (
     ("(async () => {\n", "async (document, alert, confirm, GOT, PRE) => {\n"),
     ("const got = await ask();\n", "const got = GOT;\n"),
@@ -117,6 +119,10 @@ PATCHES: tuple[tuple[str, str], ...] = (
     # v9 (11/25): 끝 알림에만 쓰던 한마디 둘도 뺌 — 다음 날 예약 달력 고침(꾸미기 v13) 자리
     ("  if (!short(e)) R.notes.push('선 모양 ' + (e.className.match(/se-l-[\\w-]+/) || [''])[0]);\n", ""),
     ("    if (mm !== m[4]) R.notes.push('분 내림');\n", ""),
+    # v10 (11/26): 꾸미기 끝 알림에만 쓰던 포스트잇 차례(R.q)도 뺌 — 다음 날 예약 날짜 고침(꾸미기 v14) 자리
+    ("W.__kkumiReport = R;\n", ""), ("R.pieces = ps.length;\n", ""), ("  R.shape = shape();\n", ""), ("R.ok = R.shape === R.want && !R.bad.length;\n", ""),
+    ("  R.q.push('글 ' + (inside ? '안' : '밖'));\n", ""),
+    ("  R.q.push(out ? '나옴' : '못 나옴' + (bt ? '' : ' (본문 추가 칸 없음)'));\n", ""),
     ("  const inside = P && await wait(has, 1500);\n", "  const inside = P && await wait(() => has() || tz((quotes().pop() || q).textContent).includes(P), 4000);\n"),
 )
 CUT = ("const ask = () => new Promise(res => {\n", "  setTimeout(() => box.focus(), 50);\n});\n")  # ⑤ 붙여넣기 칸 — 처음 줄부터 끝 줄까지 뺌
@@ -875,8 +881,9 @@ def act(db: Any, form: dict[str, str], *, tz: ZoneInfo, now: float | None = None
             left = sum(1 for i in ready(rv, blog, c["tried"]) if i["id"] not in later)
             out["left"] = min(left, max(0, RUN_MAX - _run_n(c, blog, now)))
         return out
-    if a == "dg":  # 달력 모양 하나 (2,000자까지 · 보이는 글자만) — 대시보드 kv 에만 남김
-        h = "".join(ch for ch in str(form.get("n") or "") if ch.isprintable())[:2000]
+    if a == "dg":  # 달력 모양 하나 (v10: 지운 뒤 9,000자까지 · 보이는 글자만 · 주소·style·svg d 는 지우고 빈칸은 하나로) — 대시보드 kv 에만 남김
+        h = DG_STRIP[1].sub("~", DG_STRIP[0].sub("", "".join(ch for ch in str(form.get("n") or "") if ch.isprintable())))
+        h = re.sub(r"\s+", " ", h)[:DG_MAX]
         if h:
             try:
                 old = json.loads(db.kv_get(KV_DG) or "[]")

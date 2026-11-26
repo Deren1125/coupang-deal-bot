@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v12 (v12: 11/25 가운데 글 제목 가운데 — 누른 뒤 다시 보고 3번까지 · 정렬 드롭다운이면 열고 누름 · v11: 11/24 사진이 30초 안에 다 안 올라가도 사진 칸이 생겼으면 주소로 또 넣지 않음 (라커룸 김혜성 글 같은 사진 두 장) · 태그는 네이버처럼 글자·숫자·_ 만 남기고 겹친 것 빼고 30개까지 · 안 들어간 태그는 한 번 더, 그래도 없으면 이름을 알림에 · v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v14 (v14: 11/26 실제 발행창(읽기 전용 날짜 칸 · CSS 모듈 이름) — 누른 뒤 새로 보인 달력에서 날 이름(aria-label·data-date)으로 다음 날 고르기 · 달력 단추 · 못 하면 진단 넷 · v12: 11/25 가운데 글 제목 가운데 — 누른 뒤 다시 보고 3번까지 · 정렬 드롭다운이면 열고 누름 · v11: 11/24 사진이 30초 안에 다 안 올라가도 사진 칸이 생겼으면 주소로 또 넣지 않음 (라커룸 김혜성 글 같은 사진 두 장) · 태그는 네이버처럼 글자·숫자·_ 만 남기고 겹친 것 빼고 30개까지 · 안 들어간 태그는 한 번 더, 그래도 없으면 이름을 알림에 · v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -18,9 +18,9 @@ const look = d => {
 const D = look(document);
 if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
-if (W.__kkumi) { alert('꾸미기: 이미 도는 중'); return; }
+if (W.__kkumi) { alert('꾸미기: 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 13;
+const V = 14;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => qa(D, CARD).length;
@@ -322,8 +322,7 @@ const opt = (s, n) => {
 };
 const atOf = a => a.slice(1).split(/\D/).map(Number);
 const atLabel = (m, mm) => m[1] + '/' + m[2] + ' ' + p2(m[3]) + ':' + p2(mm);
-// v9: 날짜를 못 바꾸면 끝 알림에 '날짜 칸 못 찾음 — 11/19 07:30 직접 골라요' (예약은 건드리지 않음 — 틀린 날짜를 넣지 않게)
-const DT = '날짜 칸 못 찾음';
+// v9: 날짜를 못 바꾸면 끝 알림에 '예약 11/19 07:30 못 채움 (날짜 칸 못 찾음)' (예약은 건드리지 않음 — 틀린 날짜를 넣지 않게)
 const bookIn = async at => {
   const m = atOf(at), [y, mo, d, h] = m, want = y * 372 + mo * 31 + d, ym = y * 12 + mo, late = n => new Date(y, mo - 1, d, h, n) - Date.now() < 3e5;
   if (late(m[4])) return '지난 시각';
@@ -356,42 +355,56 @@ const bookIn = async at => {
     // 날짜: 이미 그 날이면 그대로 · 아니면 달력을 열어 다음 달 단추(두 번까지)·그 날을 누르고 날짜 칸이 그 날로 바뀐 것을 본다
     // v9: 달력은 발행창 밖(문서 맨 끝)에 붙을 수 있음 · 눌러도 안 뜨면 한 번 더 · 날짜 칸을 다시 찾아 확인 — 안 되면 '날짜 칸 못 찾음'
     if (ymd(D_) !== want) {
-      why = DT;
-      // v13 (11/25 하루치 '예약 11/26 08:10 못 채움 (날짜 칸 못 찾음)'): 달력 = 문서 어디든(발행창 밖·바깥 문서도) 표·격자·div 어느 모양이든 1~31 숫자 칸(가장 안쪽 · 고르기 칸 빼고) 28개가 모인 가장 작은 묶음
-      // 달 = 년·월 고르기 칸(12칸) 또는 위로 다섯 겹 안 글자 'YYYY.M' 'YYYY년 M월' (20xx 만 — 붙은 날 숫자 '4567\n89' 를 해로 읽지 않게) · 날 칸 글자가 그 수 하나(안쪽 a·button·span 도) · 다른 달 날이 섞이면 15일 전은 앞, 뒤는 뒤 것
+      why = '날짜 칸 못 찾음';
+      // v14 (11/26 실제 발행창 진단: 날짜 칸 = 읽기 전용 INPUT '2026. 11. 26' · 이름은 '<이름>__<해시>' · v13 은 큰 묶음을 달력으로 봄): 누르기 전 보이는 것을 적어 두고
+      // 누른 뒤 새로 보인 것(발행창 밖에 붙은 달력도)에서 찾음 (두 번째 누름 뒤에도 새것에 숫자 칸이 없으면 문서 전체 — 발행창에 늘 보이는 숫자 줄을 달력으로 보지 않게) · 달력 = 1~31 숫자 칸(가장 안쪽 · 고르기 칸 빼고) 서로 다른 28개가 모인 가장 작은 묶음
+      // 달 = 위로 다섯 겹 안 글자 (v14: 년·월 고르기 칸 길은 뺌) 'YYYY.M' 'YYYY년 M월' (20xx 만) · 날 칸 글자가 그 수 하나 · 다른 달 날이 섞이면 15일 전은 앞, 뒤는 뒤 것
       const T = e => (e.innerText + '').trim(), dn = e => !e.closest('select') && /^\d{1,2}$/.test(T(e)) && +T(e);
-      const mon = (c, t) => { const s = qa(c, 'select'), Y = s.find(x => num(x.selectedOptions[0]) > 999), M_ = s.find(x => x !== Y && x.options.length === 12), a = /(20\d\d)\D{1,3}([01]?\d)(?!\d)/.exec(T(c).replace(c === t ? '' : T(t), '')); return Y && M_ ? num(Y.selectedOptions[0]) * 12 + num(M_.selectedOptions[0]) : a && a[1] * 12 + a[2] * 1; };
+      const vs = () => new Set([D, document].flatMap(d => qa(d, '*').filter(seen))), pre = vs();
       const cal = () => {
-        for (const d_ of [D, document]) {
-          // 본문(.se-content) 밖 · 보이는 · 자식이 하나 이하인 칸 중 글자가 1~31 인 것 → 가장 안쪽만 → '1' 칸에서 여섯 겹 위까지 올라가며 서로 다른 수 28개가 든 첫 묶음
-          const L = qa(d_, '*').filter(e => e.childElementCount < 2 && seen(e) && !e.closest('.se-content') && dn(e)), ds = L.filter(e => !L.some(o => o !== e && e.contains(o)));
-          for (const one of ds.filter(e => dn(e) === 1)) for (let c = one, k = 0; c && k < 6; k++, c = c.parentElement) {
-            const x = ds.filter(e => c.contains(e));
-            if (new Set(x.map(dn)).size > 27) for (let h = c, j = 0; h && j < 5; j++, h = h.parentElement) { const n = mon(h, c); if (n) return [x, h, n]; }
-          }
-        }
+        const N = [...vs()], n = N.filter(e => !pre.has(e)), L = (n.some(dn) || !F ? n : N).filter(e => e.childElementCount < 2 && !e.closest('.se-content') && dn(e)), ds = L.filter(e => !L.some(o => o !== e && e.contains(o)));
+        let b, a;
+        for (const one of ds.filter(e => dn(e) === 1)) for (let c = one, k = 0; c && k < 6; k++, c = c.parentElement) { const x = ds.filter(e => c.contains(e)); if (new Set(x.map(dn)).size > 27) { if (!b || b[1].contains(c)) b = [x, c]; break; } }
+        for (let h = b && b[1], j = 0; h && j < 5 && !b[2]; j++, h = h.parentElement) b[2] = (a = /(20\d\d)\D{1,3}([01]?\d)(?!\d)/.exec(T(h).replace(j ? T(b[1]) : '', ''))) && a[1] * 12 + a[2] * 1;
+        return b;
       };
+      // 그 날을 통째로 적은 이름(aria-label·data-date 등 '2026-11-27' '20261127' '2026년 11월 27일' '11월 27일' 'November 27th')이 붙은 칸을 먼저 — 없으면 그 달일 때만 숫자 글자
+      const K = new RegExp(y + '\\D{0,3}0?' + mo + '\\D{0,3}0?' + d + '(?!\\d)|' + mo + '월\\s?' + d + '일|' + new Date(y, mo - 1).toLocaleString('en', {month: 'long'}) + '\\s' + d + '(?!\\d)');
       // 고를 수 없는 날(지난날·다른 달·막힌 날)은 그 칸·감싼 칸 이름에 other·disabled·outside·unselectable (aria-disabled=false 는 빼고)
       const bad = x => x.disabled || /other|disabled|outside|unselect/i.test(((x.closest('td,[role=gridcell]') || x).outerHTML + x.parentElement.className).replace(/aria-disabled=.false./g, ''));
-      let c, ok = 0;
+      const tc = e => e.tagName + '.' + e.getAttribute('class') + (e.getAttribute('aria-label') || '');
+      let c, ok = 0, ic, F;
       try {
-        // 날짜 칸을 눌러도 안 뜨면 한 번 더 (커서로 열린 달력을 누름이 닫는 것)
-        for (let k = 0; !c && k < 2; k++) { D_ = sels()[2]; D_.focus(); await tap(D_); c = await wait(cal, 2500); }
-        for (let k = 0; c[2] < ym && k < 2; k++) {
-          const was_ = c[2];
-          await tap(qa(c[1], 'button,a').find(e => seen(e) && /next|다음/i.test(e.outerHTML)));
-          c = await wait(() => { const x = cal(); return x && x[2] > was_ && x; }, 2000);
+        // 날짜 칸을 눌러도 안 뜨면 둘레(세 겹 위까지)의 달력 단추(이름·aria·data-click-area 에 calendar·date·picker·달력) · 없으면 날짜 칸을 한 번 더
+        for (let k = 0; !c && k < 2; k++) {
+          D_ = sels()[2];
+          for (let p = D_, j = 0; k && !ic && j < 3; j++) ic = qa(p = p.parentElement, 'button,i,span,[role=button]').find(e => !e.contains(D_) && seen(e) && /calendar|date|picker|달력/i.test(tc(e) + e.getAttribute('data-click-area')));
+          D_.focus();
+          await tap(ic || D_);
+          F = k;
+          c = await wait(cal, 2500);
         }
-        const ds = c[0].filter(e => dn(e) === d && !bad(e));
-        if (c[2] !== ym || !ds.length) throw 0;
-        await tap(ds[d < 15 ? 0 : ds.length - 1]);
+        for (let k = 0; ; k++) {
+          const hit = qa(c[1], '*').find(e => T(e) == d && !bad(e) && K.test([...e.attributes].map(a => a.value))), pl = c[0].filter(e => c[2] === ym && dn(e) === d && !bad(e));
+          if (hit || pl[0]) { await tap(hit || pl[d < 15 ? 0 : pl.length - 1]); break; }
+          // 다음 달 단추 (달력에서 다섯 겹 위까지 · 이름·aria 에 next·다음) — 두 번까지 · 달을 못 읽은 달력(영어 머리 'November 2026' 등)도 이름 붙은 칸을 찾아 넘김 (숫자 글자로는 누르지 않음)
+          if (c[2] >= ym || k > 1) throw 0;
+          let nb, was_ = c[1].outerHTML;
+          for (let h = c[1], j = 0; h && !nb && j < 5; j++, h = h.parentElement) nb = qa(h, 'button,a,[role=button]').find(e => seen(e) && /next|다음/i.test(e.outerHTML));
+          await tap(nb);
+          c = await wait(() => { const x = cal(); return x && x[1].outerHTML !== was_ && x; }, 2000);
+        }
         ok = await wait(() => (s = sels()) && ymd(s[2]) === want, 2500);
       } catch (e) {}
-      // 그래도 안 되고 날짜 칸이 손으로 쓰는 칸(읽기 전용 아님)이면 원래 모양 그대로 날짜만 바꿔 넣음 — 뒤에서 그 날로 바뀐 것을 꼭 확인
+      // v14: 손으로 쓰는 날짜 칸 길(v9)은 뺌 — 실제 발행창 날짜 칸은 읽기 전용 (주소를 짧게)
       D_ = sels()[2];
-      if (!ok && D_.readOnly === false) { put(D_, D_.value.replace(/\d{4}(\D{1,3})\d{1,2}(\D{1,3})\d{1,2}/, (a, x, z) => y + x + p2(mo) + z + p2(d))); D_.blur(); ok = await wait(() => (s = sels()) && ymd(s[2]) === want, 2500); }
-      // 못 했으면 달력(없으면 날짜 칸 둘레) 모양을 R.dg 에 (열 자 넘는 글은 ~ · 앞 1,500자 — 하루치가 대시보드로 보냄, 다음에 진짜 달력을 보고 고치게)
-      if (!ok) { R.dg = [at, D_.tagName, D_.readOnly, D_.value, c && c[2]] + (c ? c[1] : D_.parentElement.parentElement.parentElement).outerHTML.replace(/>[^<]{10,}</g, '>~<').replace(/\s+/g, ' ').slice(0, 1500); throw 0; } [H, M] = s;
+      // v14: 못 했으면 R.dg 에 (하루치가 대시보드로 보냄 · 글 없음 — 열 자 넘는 글은 ~ · 주소·style·d 는 뺌): A 날짜 칸과 세 겹 위 · C 발행창 안 calendar·date·picker·day 이름 칸 60개 · B 누른 뒤 새로 보인 것 6,000자 (주소·style·svg d·빈칸은 대시보드가 지움)
+      if (!ok) {
+        const nw = [...vs()].filter(e => !pre.has(e)), cl = h => h.replace(/>[^<]{10,}</g, '>~<');
+        let p = D_;
+        R.dg = [at, D_.readOnly, D_.value, c && c[2], !!ic] + '|A' + cl(D_.outerHTML) + '<' + [1, 2, 3].map(() => tc(p = p.parentElement || p)) + '|C' + qa(D_.closest('[class*=layer_publish]') || box, '*').filter(e => /calendar|date|picker|day/i.test(tc(e))).slice(0, 60).map(tc) + '|B' + cl(nw.filter(e => !nw.includes(e.parentElement)).map(e => e.outerHTML).join('')).slice(0, 6000);
+        throw 0;
+      } [H, M] = s;
       why = '칸 못 찾음';
     }
     if (!opt(H, h) || !opt(M, mm)) throw 0;
@@ -472,7 +485,7 @@ const ask = () => new Promise(res => {
   wrap.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px';
   const card_ = T.createElement('div');
   card_.style.cssText = 'background:#fff;color:#111;border-radius:16px;padding:20px;width:min(520px,100%);font:16px system-ui;display:grid;gap:12px';
-  msg.textContent = '꾸미기: 아래 칸에 길게 눌러 붙여넣고 기다려요';
+  msg.textContent = '꾸미기: 붙여넣기';
   box.contentEditable = 'true';
   box.style.cssText = 'min-height:120px;border:2px dashed #03a94f;border-radius:12px;padding:12px;color:#555';
   box.setAttribute('aria-label', '여기에 붙여넣기');
@@ -501,7 +514,7 @@ const fx = h => [/background-color/gi, /[^-]color\s*:/gi, /<(b|strong)[\s>]|font
 const R = {pieces: 0, done: 0, pics: [0, 0], cards: [0, 0], lines: [0, 0], quotes: [0, 0], tags: [0, 0], q: [], bad: [], notes: []};
 W.__kkumiReport = R;
 try { window.__kkumiReport = R; } catch (e) {}
-if (!empty() && !confirm('꾸미기: 글이 있어요. 아래에 이을까요?')) return;
+if (!empty() && !confirm('꾸미기: 아래에 이을까요?')) return;
 const got = await ask();
 if (!got) return;
 const ps = pieces(got.h, got.t);
@@ -564,10 +577,10 @@ nm(R.lines, '구분선');
 nm(R.quotes, '포스트잇');
 nm(R.tags, '태그');
 if (R.catOk) out.push('카테고리 ' + R.cat);
-const fs = a => `형광펜 ${a[0]}·색 ${a[1]}·굵게 ${a[2]}`;
-if (R.fx[0].some(Boolean)) { out.push('꾸밈 ' + fs(R.fx[0]) + ' → ' + fs(R.fx[1])); if (R.fx[0][0] && !R.fx[1][0]) R.notes.push('형광펜 빠짐'); }
+// 꾸밈 수 [형광펜, 색, 굵게] 받은 것 → 들어간 것 (v14: 낱말을 줄임)
+if (R.fx[0].some(Boolean)) out.push('꾸밈 ' + R.fx[0] + ' → ' + R.fx[1]);
 else R.notes.push('꾸밈 없음');
 R.ok = R.shape === R.want && !R.bad.length;
 R.finished = true;
-alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + [...new Set(R.bad)].map(x => (n => n > 1 ? x + ' ×' + n : x)(R.bad.filter(y => y === x).length)).join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.book ? '\n' + (R.why === DT ? DT + ' — ' + R.at + ' 직접 골라요' : '예약 ' + R.at + (R.why ? ' 못 채움 (' + R.why + ') — 직접 골라요' : ' 채움 — 발행은 직접')) : '') + (R.tags[1] ? '\n발행창에서 확인 뒤 발행' : '') + '\nv' + V);
+alert((R.ok ? '모두 됐어요' : '확인해 주세요') + '\n' + out.join(' · ') + '\n차례: ' + R.shape + (R.ok ? '' : '\n원래: ' + R.want) + (R.q.length ? '\n포스트잇: ' + R.q.join(' → ') : '') + (R.bad.length ? '\n못 한 것:\n' + [...new Set(R.bad)].map(x => (n => n > 1 ? x + ' ×' + n : x)(R.bad.filter(y => y === x).length)).join('\n') : '') + (R.notes.length ? '\n' + R.notes.join(' · ') : '') + (R.book ? '\n예약 ' + R.at + (R.why ? ' 못 채움 (' + R.why + ')' : ' 채움') : '') + '\nv' + V);
 })().catch(e => alert('꾸미기 오류: ' + e));

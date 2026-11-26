@@ -225,7 +225,7 @@ def test_dashboard_texts_mention_the_auto_fill() -> None:
     assert "it.when ?" in rt and "도 채워 줘요" in rt and "발행 단추만 직접" in rt and "새로 고름" in rt
     assert "예약 시각 자동 채움" in (STATIC / "logins.js").read_text(encoding="utf-8")
     assert "예약 날짜·시각도 채워 줘요" in kkumi.USE and "발행 단추는 직접" in kkumi.USE
-    assert kkumi.version() == 13
+    assert kkumi.version() == 14
 
 
 def test_bookmarklet_never_names_or_presses_the_final_publish_button() -> None:
@@ -412,7 +412,7 @@ def test_bookmarklet_fills_the_reservation_and_stops_before_publish() -> None:
     r = got["rsv"]
     assert r["book"] is True and r["now"] is False and r["date"] == _date(when) and r["h"] == "19" and r["m"] == "0", r
     assert r["confirm"] == 0  # 발행 단추는 주인이 직접
-    assert f"예약 {_lab(when, 0)} 채움 — 발행은 직접" in got["alert"] and "분 내림" in got["alert"], got["alert"]
+    assert f"예약 {_lab(when, 0)} 채움" in got["alert"] and "분 내림" in got["alert"], got["alert"]
     assert "못 채움" not in got["alert"]
 
 
@@ -436,17 +436,17 @@ def test_bookmarklet_changes_nothing_when_the_layer_looks_different() -> None:
     hint = f"예약 {_lab(when)} 못 채움"
     # 예약 칸이 아예 없는 발행 설정창 (지금 시험 화면 그대로) → 안내만
     got = _go("", when, inner=INNER)
-    assert got["rsv"] is None and f"{hint} (예약 칸 없음) — 직접 골라요" in got["alert"] and " 채움 —" not in got["alert"], got["alert"]
+    assert got["rsv"] is None and f"{hint} (예약 칸 없음)" in got["alert"] and " 채움\n" not in got["alert"], got["alert"]
     # 시·분이 고르기 칸이 아님 → 골랐던 '예약'을 '현재'로 되돌리고 안내만
     got = _go("nosel", when)
     r = got["rsv"]
-    assert r["now"] is True and r["book"] is False and r["confirm"] == 0 and f"{hint} (칸 못 찾음) — 직접 골라요" in got["alert"], (r, got["alert"])
+    assert r["now"] is True and r["book"] is False and r["confirm"] == 0 and f"{hint} (칸 못 찾음)" in got["alert"], (r, got["alert"])
     # 달력이 안 뜸 → 시·분 고르기 칸도 처음 값 그대로 · '현재'로
     got = _go("nocal", when)
     r = got["rsv"]
     assert r["now"] is True and r["book"] is False and r["h"] == "9" and r["m"] == "0" and r["confirm"] == 0, r
-    assert r["date"] == _date(datetime.now()) and f"날짜 칸 못 찾음 — {_lab(when)} 직접 골라요" in got["alert"], (r, got["alert"])
-    assert hint not in got["alert"] and " 채움 —" not in got["alert"], got["alert"]
+    assert r["date"] == _date(datetime.now()) and f"예약 {_lab(when)} 못 채움 (날짜 칸 못 찾음)" in got["alert"], (r, got["alert"])
+    assert " 채움\n" not in got["alert"], got["alert"]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
@@ -456,7 +456,7 @@ def test_bookmarklet_refuses_a_button_that_says_publish() -> None:
     got = _go("trap", when)
     r = got["rsv"]
     assert r["confirm"] == 0 and r["now"] is True and r["book"] is False and r["h"] == "9" and r["date"] == _date(datetime.now()), r
-    assert f"날짜 칸 못 찾음 — {_lab(when)} 직접 골라요" in got["alert"], got["alert"]  # v9: 날짜 칸을 누르다 멈춤
+    assert f"예약 {_lab(when)} 못 채움 (날짜 칸 못 찾음)" in got["alert"], got["alert"]  # v9: 날짜 칸을 누르다 멈춤
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
@@ -468,7 +468,7 @@ def test_bookmarklet_does_not_round_the_minute_down_into_the_past() -> None:
     assert r["confirm"] == 0, r
     if when.minute % 10 >= 2:  # 내린 시각이 지금부터 5분 안
         assert r["now"] is True and r["book"] is False and r["h"] == "9" and r["m"] == "0", r
-        assert f"예약 {_lab(when)} 못 채움 (지난 시각) — 직접 골라요" in got["alert"], got["alert"]
+        assert f"예약 {_lab(when)} 못 채움 (지난 시각)" in got["alert"], got["alert"]
     else:  # 내려도 5분 넘게 남음 (10번에 2번꼴)
         assert r["book"] is True and r["h"] == str(when.hour) and r["m"] == str(when.minute - when.minute % 10), r
 
@@ -479,7 +479,7 @@ def test_bookmarklet_leaves_the_layer_alone_for_a_past_time_or_no_time() -> None
     got = _go("full", past)
     r = got["rsv"]
     assert r["now"] is True and r["book"] is False and r["radio"] == 0 and r["confirm"] == 0 and r["h"] == "9", r  # 아무것도 누르지 않음
-    assert f"예약 {_lab(past)} 못 채움 (지난 시각) — 직접 골라요" in got["alert"], got["alert"]
+    assert f"예약 {_lab(past)} 못 채움 (지난 시각)" in got["alert"], got["alert"]
     got = _go("full", None)  # 시각이 안 실린 글 (발행 줄 · 옛 묶음) — 예약 칸을 건드리지 않고 알림에도 없음
     r = got["rsv"]
     assert r["now"] is True and r["radio"] == 0 and r["confirm"] == 0 and "예약" not in got["alert"], (r, got["alert"])
@@ -504,7 +504,7 @@ def test_v9_fills_a_next_day_reservation_in_a_jquery_ui_like_picker() -> None:
     got = _run("jq", when)
     r = got["rsv"]
     assert r["book"] is True and r["now"] is False and r["date"] == _date(when) and r["h"] == "7" and r["m"] == "30" and r["confirm"] == 0, r
-    assert got["alert"].startswith("모두 됐어요") and f"예약 {_lab(when)} 채움 — 발행은 직접" in got["alert"] and "못 채움" not in got["alert"], got["alert"]
+    assert got["alert"].startswith("모두 됐어요") and f"예약 {_lab(when)} 채움" in got["alert"] and "못 채움" not in got["alert"], got["alert"]
     nxt = (datetime.now().replace(day=1) + timedelta(days=32)).replace(day=3, hour=21, minute=0, second=0, microsecond=0)  # 다음 달 (다음달 단추)
     r = _run("jq", nxt)["rsv"]
     assert r["book"] is True and r["date"] == _date(nxt) and r["h"] == "21" and r["m"] == "0" and r["confirm"] == 0, r
@@ -514,12 +514,12 @@ def test_v9_fills_a_next_day_reservation_in_a_jquery_ui_like_picker() -> None:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
 def test_v9_never_leaves_a_wrong_date() -> None:
-    """누른 날과 다른 날이 들어가면 예약을 '현재'로 되돌리고 '날짜 칸 못 찾음 — 11/19 07:30 직접 골라요' 만."""
+    """누른 날과 다른 날이 들어가면 예약을 '현재'로 되돌리고 '예약 11/19 07:30 못 채움 (날짜 칸 못 찾음)' 만."""
     when = (datetime.now() + timedelta(days=1)).replace(hour=7, minute=30, second=0, microsecond=0)
     got = _run("wrongday", when)
     r = got["rsv"]
     assert r["now"] is True and r["book"] is False and r["confirm"] == 0, r
-    assert f"\n날짜 칸 못 찾음 — {_lab(when)} 직접 골라요" in got["alert"] and "채움 —" not in got["alert"] and "못 채움" not in got["alert"], got["alert"]
+    assert f"\n예약 {_lab(when)} 못 채움 (날짜 칸 못 찾음)" in got["alert"] and " 채움\n" not in got["alert"], got["alert"]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
@@ -531,7 +531,7 @@ def test_v9_missing_category_still_fills_the_reservation() -> None:
     assert "카테고리 목록에 없음 (명작 다시 보기)" in got["alert"] and got["cat"] == "셀럽 패션", got["alert"]
     assert r["catOpen"] is False, r  # 연 목록은 닫음
     assert r["book"] is True and r["date"] == _date(when) and r["h"] == "7" and r["m"] == "30" and r["confirm"] == 0, r
-    assert f"예약 {_lab(when)} 채움 — 발행은 직접" in got["alert"], got["alert"]
+    assert f"예약 {_lab(when)} 채움" in got["alert"], got["alert"]
 
 
 # ── v13 (11/25 하루치 '예약 11/26 08:10 못 채움 (날짜 칸 못 찾음)' — 저녁에 누른 하루치가 모두 다음 날 예약) ─────────────────
@@ -543,7 +543,7 @@ def _v13_days() -> list[datetime]:
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
-@pytest.mark.parametrize("mode", ["nj", "div", "ysel", "edit"])
+@pytest.mark.parametrize("mode", ["nj", "div"])  # v14: 년·월 고르기 칸(ysel)·손으로 쓰는 날짜 칸(edit) 길은 뺌 — 실제 발행창 날짜 칸은 읽기 전용 INPUT
 def test_v13_fills_tomorrow_and_next_month_in_other_picker_shapes(mode: str) -> None:
     """표·div 격자·년월 고르기 칸·손으로 쓰는 칸 어느 모양이든 내일·다음 달 날짜를 채우고 날짜 칸이 그 날로 바뀐 것을 확인 — 발행 단추는 0번."""
     for when in _v13_days():
@@ -551,7 +551,7 @@ def test_v13_fills_tomorrow_and_next_month_in_other_picker_shapes(mode: str) -> 
         r = got["rsv"]
         assert r["book"] is True and r["now"] is False and r["date"] == _date(when) and r["h"] == str(when.hour), (mode, when, r, got["alert"])
         assert r["m"] == str(when.minute) and r["confirm"] == 0, r
-        assert f"예약 {_lab(when)} 채움 — 발행은 직접" in got["alert"] and "못 채움" not in got["alert"] and "날짜 칸" not in got["alert"], got["alert"]
+        assert f"예약 {_lab(when)} 채움" in got["alert"] and "못 채움" not in got["alert"] and "날짜 칸" not in got["alert"], got["alert"]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
@@ -561,4 +561,5 @@ def test_v13_failure_leaves_a_calendar_sketch_without_text() -> None:
     got = _run("wrongday", when)
     assert got["rsv"]["now"] is True and got["rsv"]["confirm"] == 0, got["rsv"]
     dg = got["report"]["dg"]
-    assert dg.startswith(when.strftime("@%Y-%m-%dT%H:%M") + ",INPUT,true,") and "ui-datepicker" in dg and len(dg) < 1700, dg
+    assert dg.startswith(when.strftime("@%Y-%m-%dT%H:%M") + ",true,") and "|A<input" in dg and "ui-datepicker" in dg, dg
+    assert all(k in dg for k in ("|C", "|B")) and len(dg) < 9000 and "첫 글이에요" not in dg, dg

@@ -133,7 +133,7 @@ def test_fake_editor_first_post_now_with_current_then_second_reserved(bot: DealB
     assert [d["r"] for d in got["done"]] == ["hold", "ok", "hold", "ok"], got["done"]
     p1, p2 = got["pub"]
     assert p1["book"] is False and p2["book"] is True, got["pub"]
-    assert any("「첫 글 제목이에요」 지금 발행을 눌렀어요" in x for x in got["bars"]) and any("「둘째 글 제목」 예약 " in x for x in got["bars"])
+    assert any("「첫 글 제목이에요」 지금 발행 — 확인하는 중" in x for x in got["bars"]) and any("「둘째 글 제목」 예약 " in x for x in got["bars"])
 
 
 def test_api_reads_blog_auto_published_today(bot: DealBot, tmp_path: Path) -> None:
