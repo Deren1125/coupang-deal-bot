@@ -33,10 +33,10 @@ def _go(bot: DealBot, now: float, **form: str) -> dict:
                        pub={"issue": 0, "finance": 0, "hotdeal": 0} if form.get("a") == "next" else None)
 
 
-def _ok_spacing(ds: list[datetime]) -> None:
+def _ok_spacing(ds: list[datetime], first_soft: bool = False) -> None:
     ds = sorted(ds)
     for k, d in enumerate(ds):
-        assert d.minute in autopub.MINUTES and (7, 30) <= (d.hour, d.minute) <= (23, 0), d
+        assert (d.minute in autopub.MINUTES or (first_soft and k == 0 and d.minute % 10 == 0)) and (7, 30) <= (d.hour, d.minute) <= (23, 0), d
         if k:
             assert d - ds[k - 1] > timedelta(minutes=40), ds
 
@@ -121,12 +121,38 @@ def test_three_blogs_at_night_fill_tomorrow_apart_and_capped() -> None:
             assert "" not in s.values() and len(ds) == autopub.DAY_MAX, (seed, b, s)  # 저녁: 지금 발행 없음 · 내일 하루 상한까지 다 들어감
             assert {d.date() for d in ds} == {(base + timedelta(days=1)).date()}, (seed, b, ds)
             assert max(ds) <= tap.replace(tzinfo=None) + timedelta(hours=autopub.HORIZON_H)
-            _ok_spacing(ds)
+            _ok_spacing(ds, first_soft=True)  # 첫 글은 08:40 을 넘기느니 분 규칙을 풀 수 있음 (주인 11/26)
+            assert (min(ds).hour, min(ds).minute) <= autopub.FIRST_BY, (seed, b, min(ds))  # 블로그마다 첫 글 07:30~08:40
             plans[b] = ds
         names = list(plans)
         for i, a in enumerate(names):
             for b in names[i + 1:]:
-                assert all(abs((x - y).total_seconds()) >= 20 * 60 for x in plans[a] for y in plans[b]), (seed, a, b)  # 20분 이상 (빈 자리 찾기는 꼭 20분도)
+                assert all(abs((x - y).total_seconds()) >= 20 * 60 for x in plans[a] for y in plans[b]
+                           if x != min(plans[a]) and y != min(plans[b])), (seed, a, b)  # 20분 이상 (빈 자리 찾기는 꼭 20분도 · 첫 글끼리는 아래)
+                assert min(plans[a]) != min(plans[b])
+
+
+def test_every_blogs_first_night_reserve_is_by_0840_whoever_presses_last() -> None:
+    """주인 11/26: 하루치 모드에서 데런픽(마지막에 누른 블로그) 첫 글이 09시 넘어 나감 → 블로그마다 첫 글은 꼭 07:30~08:40, 날마다 다르게."""
+    import itertools
+
+    firsts: dict[str, set] = {b: set() for b in autopub.NAMES}
+    soft = total = 0
+    for day in range(20):
+        for order in itertools.permutations(autopub.NAMES):
+            db = FakeDb()
+            base = datetime(2026, 11, 1, 20, 30, tzinfo=TZ) + timedelta(days=day, minutes=7 * day % 50)
+            for k, b in enumerate(order):
+                rows = [{"id": f"rsv:{b}:{80 + j}"} for j in range(5 + (day + k) % 4)]
+                s = autopub.schedule(db, b, rows, (base + timedelta(minutes=6 * k)).timestamp(), TZ)
+                f = min(_d(v) for v in s.values())
+                assert f.date() == (base + timedelta(days=1)).date() and (7, 30) <= (f.hour, f.minute) <= (8, 40), (day, order, b, f)
+                assert f.minute % 10 == 0
+                firsts[b].add(f.strftime("%H:%M"))
+                soft += f.minute not in autopub.MINUTES
+                total += 1
+    assert all(len(v) >= 4 for v in firsts.values()), firsts  # 날마다 다른 시각
+    assert soft <= total * 0.15  # 분 10·20·40·50 은 되도록 지킴
 
 
 def test_night_mode_is_from_20_and_retap_keeps_the_plan() -> None:

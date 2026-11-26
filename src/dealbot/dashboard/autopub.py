@@ -385,6 +385,9 @@ MINUTES = (10, 20, 40, 50)  # 이것만 (주인 11/24 — 정각·30분 없음 �
 # 하루치 모드 (주인 11/25): 이 시각 뒤에 누르면 지금 발행 없이 내일 하루치를 모두 예약 · 블로그마다 하루 상한 · 누른 때부터 이만큼 안만 예약
 NIGHT_FROM = (20, 0)
 NIGHT_FIRST = (7, 10, 35)  # 저녁에 누르면 내일 첫 글 = 07:10 + 0~35분 + FIRST_MIN (07:30~08:40 쯤)
+# 주인 11/26 '출근길 홈판' — 하루치 모드에서 블로그마다 그날 첫 글은 꼭 07:30~08:40 (데런픽 첫 글이 09시 넘어 나감 — 세 번째로 누른 블로그가
+# 앞 블로그 글을 피하느라 밀림). 분 10·20·40·50 · 다른 블로그 20분은 되도록 지키되, 08:40 을 넘기느니 그것부터 풂 (날마다 다른 시각은 그대로)
+FIRST_BY = (8, 40)
 
 
 def night(x: datetime) -> bool:
@@ -498,7 +501,8 @@ def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: Zon
         until = n + timedelta(hours=HORIZON_H)
         for k in new:
             try:
-                d = _place(rng, n0, prev, prev_gap, spread, mine, others, cap=DAY_MAX, until=until)
+                d = (_morning(rng, n0, mine, others, until) if ngt and prev is None else None) \
+                    or _place(rng, n0, prev, prev_gap, spread, mine, others, cap=DAY_MAX, until=until)
             except AssertionError:  # 하루 상한·기한 안에 자리가 없음 — 이 글부터는 주지 않음 (다음에 누를 때 다시)
                 break
             keep[k] = d.strftime("%Y-%m-%dT%H:%M")
@@ -515,6 +519,32 @@ def schedule(db: Any, blog: str, rows: list[dict[str, Any]], now: float, tz: Zon
 
 def _inday(x: datetime) -> bool:
     return DAY_H[0] <= (x.hour, x.minute) <= (23, 0)
+
+
+def _morning(rng: Any, n: datetime, mine: list[datetime], others: list[datetime], until: datetime) -> datetime | None:
+    """하루치 모드 첫 글 (주인 11/26): 그날 07:30~FIRST_BY 안 한 자리 — 차례대로 풀어 가며 (분 10·20·40·50 + 다른 블로그와 20분 이상 (빈 자리 찾기와 같음) →
+    10분 자리 + 20분 → 분 자리 + 10분 → 10분 자리 + 10분 → 같은 시각만 아니게 → 10분 자리). 같은 블로그 40분·하루 상한·기한은 지킴.
+    그 블로그 그날 글이 이미 이 창 앞(07:30~)에 있으면 None (첫 글이 이미 이름 — 보통 자리 찾기로)."""
+    (h0, m0), (h1, m1) = DAY_H[0], FIRST_BY
+    lo, hi = n.replace(hour=h0, minute=m0), n.replace(hour=h1, minute=m1)
+    if any(b.date() == n.date() and b <= hi for b in mine):
+        return None
+    target = min(hi, max(lo, n + timedelta(minutes=rng.randint(*FIRST_MIN))))
+    grid = [lo + timedelta(minutes=10 * j) for j in range(int((hi - lo).total_seconds() // 600) + 1)]
+    grid = [x for x in grid if x <= until and not any(abs((x - b).total_seconds()) <= CLASH_MIN * 60 for b in mine)
+            and sum(1 for b in mine if b.date() == x.date()) < DAY_MAX]
+    jit = {x: rng.random() for x in grid}
+    grid.sort(key=lambda x: abs((x - target).total_seconds()) / 60 + 25 * jit[x])
+
+    def far(x: datetime, m: int) -> bool:
+        return all(not (x.date() == b.date() and abs((x - b).total_seconds()) < m * 60) for b in others)
+
+    for ok in (lambda x: _ok_min(x.minute) and far(x, NEAR_MIN), lambda x: far(x, NEAR_MIN),
+               lambda x: _ok_min(x.minute) and far(x, 10), lambda x: far(x, 10), lambda x: far(x, 1), lambda x: True):
+        for x in grid:
+            if ok(x):
+                return x
+    return None
 
 
 def _place(rng: Any, n: datetime, prev: datetime | None, prev_gap: float | None, spread: float,
