@@ -50,5 +50,6 @@
  "keyzard_login": "DIGEST",
  "restyle_done": "DIGEST",
  "ably_rank": "URGENT",
- "kz_rss": "URGENT"
+ "kz_rss": "URGENT",
+ "breaking": "URGENT"
 }

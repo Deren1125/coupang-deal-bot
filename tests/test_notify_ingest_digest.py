@@ -179,3 +179,31 @@ def test_sentence_builders() -> None:
 
 def test_unused_imports_are_fine() -> None:
     assert Clock and PushServer and subscription
+
+
+def _breaking(i: str = "2") -> dict:
+    """Blog-Auto breaking_alert._send_push 가 쓰는 모양 (주인 11/26 — 큰 속보를 텔레그램 대신 앱 푸시로)."""
+    return {"v": 1, "id": f"n_{i * 26}", "at": 0, "src": "blogauto", "op": "open", "key": "breaking:hotdeal:412",
+            "kind": "breaking", "blog": "hotdeal", "iid": "post-hotdeal-412", "urgent": True, "quiet": False, "sev": "hot",
+            "title": "[속보] 라커룸", "body": "「두산, FA 김OO 80억 계약 공식 발표」 · 지금 책갈피 한 번 누르면 바로 올라가요 (못 보면 밤에 알아서)",
+            "short": "[속보] 라커룸 두산, FA 김OO 80억", "ttl_h": 12.0, "group": "", "wait": None, "delay_s": 0}
+
+
+async def test_breaking_notice_is_pushed_and_tap_opens_the_post(env: Env) -> None:
+    env.device()
+    put(env.tmp, f"n_{'2' * 26}", dict(_breaking(), at=env.clock()))
+    assert ingest.ingest(env.tmp, env.router)["open"] == 1
+    env.clock.tick(21)
+    await env.router.tick()
+    [p] = env.pushes()
+    assert p["type"] == "item" and p["title"] == "[속보] 라커룸" and p["url"] == "/dashboard/go/post-hotdeal-412"
+    assert p["body"].startswith("「두산, FA 김OO 80억 계약 공식 발표」 · 지금 책갈피 한 번 누르면") and p["urgent"] is True
+
+
+async def test_breaking_without_device_never_falls_back_to_kakao(env: Env) -> None:
+    put(env.tmp, f"n_{'3' * 26}", dict(_breaking("3"), at=env.clock()))
+    ingest.ingest(env.tmp, env.router)
+    env.clock.tick(21)
+    await env.router.tick()
+    await env.router.tick()
+    assert env.server.requests == [] and env.kakao_files() == []
