@@ -285,7 +285,8 @@ async def test_telegram_error_and_missing_bot_never_crash(db: Database, tmp_path
 def _ig(db: Database, handler: Any) -> InstagramPublisher:
     db.kv_set(ig.KV_TOKEN, "IG-SECRET-TOKEN")
     db.kv_set(ig.KV_USER_ID, "17841")
-    db.kv_set(ig.KV_TOKEN_EXPIRES, (NOW + timedelta(days=50)).isoformat())
+    # 토큰 갱신(만료 7일 전)은 실제 시계(utcnow)로 봄 — 고정 NOW(10/14)+50일은 11/26부터 갱신 요청이 나가 깨졌음
+    db.kv_set(ig.KV_TOKEN_EXPIRES, (datetime.now(UTC) + timedelta(days=50)).isoformat())
     client = InstagramClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)), app_id="A", app_secret="S",
                              max_retries=2, retry_backoff=0.01)
     return InstagramPublisher(client, db, None, enabled=True)  # type: ignore[arg-type]
@@ -354,7 +355,8 @@ async def test_instagram_token_problem_and_network_error(db: Database, tmp_path:
 def _th(db: Database, handler: Any) -> ThreadsPublisher:
     db.kv_set(th.KV_TOKEN, "TH-SECRET-TOKEN")
     db.kv_set(th.KV_USER_ID, "42")
-    db.kv_set(th.KV_TOKEN_EXPIRES, (NOW + timedelta(days=50)).isoformat())
+    # 토큰 갱신(만료 7일 전)은 실제 시계(utcnow)로 봄 — 고정 NOW(10/14)+50일은 11/26부터 갱신 요청이 나가 깨졌음
+    db.kv_set(th.KV_TOKEN_EXPIRES, (datetime.now(UTC) + timedelta(days=50)).isoformat())
     client = ThreadsClient(httpx.AsyncClient(transport=httpx.MockTransport(handler)), app_id="A", app_secret="S",
                            max_retries=2, retry_backoff=0.01)
     return ThreadsPublisher(client, db, None, enabled=True)  # type: ignore[arg-type]
