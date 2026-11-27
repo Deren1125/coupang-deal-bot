@@ -11,6 +11,9 @@ kv:
                                     KEEP_DAYS 지나면 지움 · 다시 오면 replied·title·last 만 바뀜
   reader_cmt_last:<블로그>        = {at, day, n, new, posts, diag} 마지막으로 받은 때 (diag = 책갈피가 못 읽은 단계의 짧은 진단 — 화면 글 없음)
   reader_cmt_day:<블로그>:<날>    = 그날 받은 횟수 (DAY_MAX)
+  reader_cite:<블로그>:<날>       = {blog, day, n, raw, at} 그날 AI 브리핑 인용 수 (11/27 v6 — 같은 POST 의 qn·qt · 블로그 프로필 '7.2천 인용' ·
+                                    천=1,000 만=10,000 · 같은 날 다시 오면 덮어씀 · CITE_KEEP_DAYS)
+  reader_cite_last:<블로그>       = {at, day, n?, raw?, diag?} 마지막 시도 (못 찾았으면 diag = '인용'이 든 칸 짧은 진단)
 Blog-Auto reader_comments.py 가 읽기 전용으로 읽어 나눠 본다 (오류 지적·요청·말투·칭찬) — stats_capture 와 같은 길 (딜봇 DB kv)."""
 
 from __future__ import annotations
@@ -38,6 +41,11 @@ TEXT_MAX = 600
 TITLE_MAX = 100
 DIAG_MAX = 600
 BODY_MAX = 400_000
+CITE_PREFIX = "reader_cite:"
+CITE_LAST_PREFIX = "reader_cite_last:"
+CITE_KEEP_DAYS = 120
+CITE_MAX = 100_000_000
+_CITE = re.compile(r"(\d[\d,.]*)\s?([천만])?\s?인용|인용\s?(\d[\d,.]*)\s?([천만])?")
 _NUM = re.compile(r"\d{1,20}")
 
 
@@ -58,6 +66,39 @@ def _items(raw: str) -> list[dict[str, Any]]:
     except ValueError:
         return []
     return [x for x in data if isinstance(x, dict)][:PER_BLOG_MAX * 2] if isinstance(data, list) else []
+
+
+def cite_num(raw: Any) -> int | None:
+    """'7.2천 인용' → 7200 · '1.2만 인용' → 12000 · '인용 1,345' → 1345 · 'citeCount:345' (JSON 칸) → 345. 못 읽으면 None."""
+    t = " ".join(str(raw or "").split())
+    m = _CITE.search(t)
+    num, unit = (m.group(1) or m.group(3), m.group(2) or m.group(4)) if m else ((re.search(r"[:=](\d[\d,]*)$", t) or [None, None])[1], None)
+    try:
+        v = float(str(num).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    n = round(v * (10000 if unit == "만" else 1000 if unit == "천" else 1))
+    return n if 0 <= n <= CITE_MAX else None
+
+
+def _save_cite(db: Any, blog: str, form: dict[str, str], now: float, day: str) -> int | None:
+    """책갈피가 같이 보낸 인용 수 (qn·qt·qg). 글(qt)을 여기서 다시 읽고, 못 읽으면 책갈피 정수(qn). 아무 칸도 없으면 (옛 책갈피) 아무것도 안 함."""
+    raw = statscap.clean(form.get("qt"), 120)[:60]
+    diag = statscap.clean(form.get("qg"), 800)[:400]
+    if not raw and not diag and not form.get("qn"):
+        return None
+    n = cite_num(raw) if raw else None
+    if n is None and raw and re.fullmatch(r"\d{1,9}", str(form.get("qn") or "")) and int(form["qn"]) <= CITE_MAX:
+        n = int(form["qn"])
+    last: dict[str, Any] = {"at": int(now), "day": day}
+    if n is not None:
+        rec = {"blog": blog, "day": day, "n": n, "raw": raw, "at": int(now)}
+        db.kv_set(f"{CITE_PREFIX}{blog}:{day}", json.dumps(rec, ensure_ascii=False, separators=(",", ":")))
+        last.update(n=n, raw=raw)
+    else:
+        last["diag"] = diag or (f"못 읽음: {raw}" if raw else "없음")
+    db.kv_set(f"{CITE_LAST_PREFIX}{blog}", json.dumps(last, ensure_ascii=False, separators=(",", ":")))
+    return n
 
 
 def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInfo) -> dict[str, Any]:
@@ -106,9 +147,11 @@ def save(db: Any, form: dict[str, str], *, now: float | None = None, tz: ZoneInf
     last = {"at": int(now), "day": day, "n": got, "new": new, "posts": len(posts), **({"diag": diag} if diag else {})}
     db.kv_set(f"{LAST_PREFIX}{blog}", json.dumps(last, ensure_ascii=False, separators=(",", ":")))
     db.kv_set(dk, str(sent + 1))
+    cite = _save_cite(db, blog, form, now, day)
     prune(db, now, tz)
     name = statscap.BLOG_NAMES.get(blog, blog)
-    return {"ok": True, "label": f"{name} 댓글 {got}개 (새 {new})", "blog": blog, "n": got, "new": new}
+    return {"ok": True, "label": f"{name} 댓글 {got}개 (새 {new})" + (f" · 인용 {cite:,}" if cite is not None else ""), "blog": blog, "n": got, "new": new,
+            **({"cite": cite} if cite is not None else {})}
 
 
 def prune(db: Any, now: float, tz: ZoneInfo) -> int:
@@ -122,6 +165,8 @@ def prune(db: Any, now: float, tz: ZoneInfo) -> int:
 
     day_cut = (datetime.fromtimestamp(now, tz) - timedelta(days=3)).strftime("%Y-%m-%d")
     n = db.kv_delete_prefix(PREFIX, keep=keep)
+    cite_cut = (datetime.fromtimestamp(now, tz) - timedelta(days=CITE_KEEP_DAYS)).strftime("%Y-%m-%d")
+    n += db.kv_delete_prefix(CITE_PREFIX, keep=lambda k, _v: k.rsplit(":", 1)[-1] >= cite_cut)
     return n + db.kv_delete_prefix(DAY_PREFIX, keep=lambda k, _v: k.rsplit(":", 1)[-1] >= day_cut)
 
 
@@ -138,5 +183,10 @@ def received_line(db: Any, now: float, tz: ZoneInfo) -> str:
             parts.append(f"{name} 아직")
             continue
         at = datetime.fromtimestamp(float(last.get("at") or 0), tz).strftime("%m/%d %H:%M")
-        parts.append(f"{name} {at} {int(last.get('n') or 0)}개" + (" (못 읽은 것 있음)" if last.get("diag") else ""))
+        try:
+            q = json.loads(db.kv_get(f"{CITE_LAST_PREFIX}{blog}") or "null")
+        except ValueError:
+            q = None
+        qs = "" if not isinstance(q, dict) else f" · 인용 {int(q['n']):,}" if q.get("n") is not None else " · 인용 못 찾음"
+        parts.append(f"{name} {at} {int(last.get('n') or 0)}개" + (" (못 읽은 것 있음)" if last.get("diag") else "") + qs)
     return "댓글: " + " · ".join(parts)

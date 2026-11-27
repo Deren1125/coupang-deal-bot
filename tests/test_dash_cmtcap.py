@@ -99,6 +99,37 @@ def test_old_comments_are_pruned_and_cap_per_blog() -> None:
     assert f"{cmtcap.PREFIX}issue:1" not in keys and len(keys) == cmtcap.PER_BLOG_MAX
 
 
+def test_cite_number_formats() -> None:
+    cases = {"7.2천 인용 ⓘ": 7200, "1.2만 인용": 12000, "인용 345": 345, "인용 1,234": 1234, "15만 인용": 150000, "8 인용": 8,
+             "result.aiBriefing.citeCount:7200": 7200, "AI 브리핑 인용": None, "": None, "1억 인용": None}
+    assert {k: cmtcap.cite_num(k) for k in cases} == cases
+
+
+def test_save_keeps_daily_citation_with_diag_and_120_days() -> None:
+    db = FakeDb()
+    got = cmtcap.save(db, cform(db, [], qn="7200", qt="7.2천 인용", qg=""), now=NOW, tz=TZ)
+    assert got["cite"] == 7200 and got["label"].endswith("· 인용 7,200")
+    rec = json.loads(db.kv[f"{cmtcap.CITE_PREFIX}issue:2026-11-26"])
+    assert rec == {"blog": "issue", "day": "2026-11-26", "n": 7200, "raw": "7.2천 인용", "at": int(NOW)}
+    # 같은 날 다시 → 덮어씀 · 책갈피 정수와 글이 다르면 글을 믿음
+    cmtcap.save(db, cform(db, [], qn="1", qt="7.3천 인용"), now=NOW + 60, tz=TZ)
+    assert json.loads(db.kv[f"{cmtcap.CITE_PREFIX}issue:2026-11-26"])["n"] == 7300
+    # 못 찾음 → 기록 없이 진단만 (마지막 시도)
+    got = cmtcap.save(db, cform(db, [], b="derenlog", qn="", qt="", qg="info 404 / home span.x:AI 브리핑 인용"), now=NOW, tz=TZ)
+    assert "cite" not in got and not [k for k in db.kv if k.startswith(f"{cmtcap.CITE_PREFIX}finance:")]
+    assert json.loads(db.kv[f"{cmtcap.CITE_LAST_PREFIX}finance"])["diag"].startswith("info 404")
+    # 옛 책갈피(칸 없음) → 인용은 건드리지 않음
+    cmtcap.save(db, cform(db, [], b="demiyum"), now=NOW, tz=TZ)
+    assert f"{cmtcap.CITE_LAST_PREFIX}hotdeal" not in db.kv
+    line = cmtcap.received_line(db, NOW, TZ)
+    assert "데런픽 11/26" in line and "인용 7,300" in line and "인용 못 찾음" in line
+    # 120일 지나면 지움 (다른 날 기록은 남음)
+    later = NOW + (cmtcap.CITE_KEEP_DAYS + 1) * 86400
+    cmtcap.save(db, cform(db, [], qn="9000", qt="9천 인용"), now=later, tz=TZ)
+    keys = sorted(k for k in db.kv if k.startswith(cmtcap.CITE_PREFIX))
+    assert len(keys) == 1 and json.loads(db.kv[keys[0]])["n"] == 9000
+
+
 # ---------------------------------------------------------------- 2) 받는 곳
 @pytest.fixture
 def bot(settings: Settings, tmp_path: Path):  # type: ignore[no-untyped-def]
@@ -119,13 +150,15 @@ async def test_api_comments_capture(bot: DealBot) -> None:
     now = time.time()
     good = {"k": statscap.key(bot.db), "u": "https://m.blog.naver.com/FeedList.naver", "b": "derenlog",
             "c": json.dumps([{"no": "9", "p": "224", "t": "트로트", "at": iso(now - 600), "x": "좋아요", "lv": 1, "r": 0}], ensure_ascii=False), "g": ""}
-    res = await _post(bot, good, origin="https://m.blog.naver.com")
-    assert res[0] == 200 and json.loads(res[1])["n"] == 1 and res[3]["Access-Control-Allow-Origin"] == "https://m.blog.naver.com"
+    res = await _post(bot, {**good, "qn": "12000", "qt": "1.2만 인용", "qg": ""}, origin="https://m.blog.naver.com")
+    assert res[0] == 200 and json.loads(res[1])["n"] == 1 and json.loads(res[1])["cite"] == 12000 and res[3]["Access-Control-Allow-Origin"] == "https://m.blog.naver.com"
     res = await _post(bot, {**good, "k": seoi.key(bot.db)}, origin="https://m.blog.naver.com")
     assert res[0] == 403 and json.loads(res[1])["code"] == "key"
     res = await _post(bot, good, origin="https://evil.example")
     assert res[0] == 200 and "Access-Control-Allow-Origin" not in res[3]
     assert json.loads(bot.db.kv_get(f"{cmtcap.PREFIX}finance:9"))["text"] == "좋아요"
+    day = __import__("datetime").datetime.fromtimestamp(now, TZ).strftime("%Y-%m-%d")
+    assert json.loads(bot.db.kv_get(f"{cmtcap.CITE_PREFIX}finance:{day}"))["n"] == 12000
     assert cmtcap.PATH in bot.dashboard.api.public_paths()
     anon = {":peer": "127.0.0.1", "x-forwarded-for": "203.0.113.7"}
     assert (await bot.web.dispatch("GET", cmtcap.PATH, anon))[0] == 405
@@ -134,7 +167,7 @@ async def test_api_comments_capture(bot: DealBot) -> None:
 def test_one_bookmarklet_holds_the_comment_hop_with_the_stats_key() -> None:
     db = FakeDb()
     js = unquote(one.view(db, DASH)["code"][len("javascript:"):])
-    assert f"U='{DASH}{cmtcap.PATH}',K='{statscap.key(db)}'" in js and one.version() == 5
+    assert f"U='{DASH}{cmtcap.PATH}',K='{statscap.key(db)}'" in js and one.version() == 6
     assert js.index("__sbc1") < js.index("U='" + DASH + seoi.PATH)  # 댓글이 이웃 관리 앞
 
 
@@ -142,7 +175,7 @@ def test_one_bookmarklet_holds_the_comment_hop_with_the_stats_key() -> None:
 PW = r"""
 const {chromium} = require('playwright');
 (async () => {
-  const [code, sj] = process.argv.slice(1), S = JSON.parse(sj), out = {bodies: [], api: [], cb: []};
+  const [code, sj] = process.argv.slice(1), S = JSON.parse(sj), out = {bodies: [], api: [], cb: [], home: []};
   const b = await chromium.launch(), c = await b.newContext(), p = await c.newPage();
   await p.route('**/*', async r => {
     const u = new URL(r.request().url());
@@ -150,6 +183,10 @@ const {chromium} = require('playwright');
       return r.fulfill({status: 200, contentType: 'application/json', headers: {'Access-Control-Allow-Origin': '*'}, body: JSON.stringify({ok: true, label: 'x'})}); }
     if (u.hostname === 'apis.naver.com') { const o = u.searchParams.get('objectId'); out.cb.push(o);
       const j = S.cbox[o]; return r.fulfill({status: 200, contentType: 'text/javascript', body: j ? u.searchParams.get('_callback') + '(' + j + ');' : 'oops('}); }
+    if (/^\/api\/blogs\/[^/]+$/.test(u.pathname)) { out.api.push(u.pathname); const j = (S.info || {})[u.pathname.split('/')[3]];
+      return j ? r.fulfill({status: 200, contentType: 'application/json', body: j}) : r.fulfill({status: 404, contentType: 'text/html', body: 'no'}); }
+    if ((S.home || {})[u.pathname.slice(1)]) { out.home.push(u.pathname);
+      return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: S.home[u.pathname.slice(1)]}); }
     if (u.pathname.startsWith('/api/blogs/')) { out.api.push(u.pathname); const j = S.lists[u.pathname.split('/')[3]];
       return j ? r.fulfill({status: 200, contentType: 'application/json', body: j}) : r.fulfill({status: 403, contentType: 'text/html', body: 'no'}); }
     return r.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: '<html><head></head><body>이웃새글</body></html>'});
@@ -166,6 +203,12 @@ const {chromium} = require('playwright');
   await b.close();
 })().catch(e => { console.error(String(e)); process.exit(2); });
 """
+
+
+HOME = "<html><head></head><body><header>블로그</header><section>%s</section></body></html>"
+# 모바일 홈은 스크립트가 프로필을 늦게 그림 (1.2초 뒤)
+HOME_SPA = ("<html><head></head><body><div id=\"root\">불러오는 중</div><script>setTimeout(function () {"
+            "document.getElementById('root').innerHTML = '<div class=\"profile\">%s</div>'; }, 1200);</script></body></html>")
 
 
 def _code(db: FakeDb) -> str:
@@ -190,6 +233,8 @@ def test_fake_mobile_blog_reads_public_lists_and_comment_boxes_and_sends_per_blo
                                    dict(base, commentNo=3, contents="오래된 댓글", regTime=iso(now - 9 * 86400)),
                                    dict(base, commentNo=4, contents="비밀", secret=True, regTime=iso(now - 60)),
                                    dict(base, commentNo=5, contents="콘서트 일정도 써 주세요", regTime=iso(now - 60))])}}
+    S["info"] = {"derenpick": json.dumps({"isSuccess": True, "result": {"blogName": "데런픽", "aiBriefing": {"citeCount": 7200}}})}
+    S["home"] = {"derenlog": HOME_SPA % "<b>1.2만</b> <span>인용</span>", "demiyum": HOME % "<p class=\"pf\">AI 브리핑 인용 ⓘ</p>"}
     db = FakeDb()
     res = subprocess.run([NODE, "-e", PW, _code(db), json.dumps(S, ensure_ascii=False)], capture_output=True, text=True, timeout=180, env=env)
     assert res.returncode == 0, res.stderr
@@ -202,7 +247,33 @@ def test_fake_mobile_blog_reads_public_lists_and_comment_boxes_and_sends_per_blo
     assert set(cs[0]) == {"no", "p", "t", "at", "x", "lv", "r"} and "홍길동" not in sent[0]["c"] and "fan1" not in sent[0]["c"]
     assert json.loads(sent[1]["c"]) == [] and sent[1]["g"].startswith("cbox ")  # 댓글창이 이상하면 진단만
     assert sent[2]["g"].startswith("list 403")
-    assert got["line"] == "데런픽 2개 · 드라마 0개(일부 못 읽음) · 라커룸 0개(일부 못 읽음)" and got["ls"]
-    assert got["again"] == [0, "오늘 보냈어요"]  # 하루 한 번
+    assert got["line"] == "데런픽 2개 · 인용 7200 · 드라마 0개(일부 못 읽음) · 인용 12000 · 라커룸 0개(일부 못 읽음) · 인용 못 찾음" and got["ls"]
+    assert got["again"] == [0, "오늘 보냈어요"]  # 하루 한 번 (인용 수도)
+    # 인용 수: ① 블로그 정보 JSON 칸 → 홈은 안 엶 ② 정보에 없으면 그 블로그 모바일 홈(늦게 그려지는 프로필도) ③ 못 찾으면 '인용'이 든 칸 진단
+    assert [(f["qn"], f["qt"]) for f in sent] == [("7200", "result.aiBriefing.citeCount:7200"), ("12000", "1.2만 인용"), ("", "")]
+    assert got["home"] == ["/derenlog", "/demiyum"] and sent[0]["qg"] == ""
+    assert sent[1]["qg"].startswith("info 404") and "home p.pf:AI 브리핑 인용" in sent[2]["qg"]
     recs = [cmtcap.save(db, f, now=now, tz=TZ) for f in sent]
-    assert [r["n"] for r in recs] == [2, 0, 0]
+    assert [r["n"] for r in recs] == [2, 0, 0] and [r.get("cite") for r in recs] == [7200, 12000, None]
+    from datetime import datetime
+
+    day = datetime.fromtimestamp(now, TZ).strftime("%Y-%m-%d")
+    assert json.loads(db.kv[f"{cmtcap.CITE_PREFIX}finance:{day}"])["n"] == 12000 and f"{cmtcap.CITE_PREFIX}hotdeal:{day}" not in db.kv
+    assert "AI 브리핑 인용" in json.loads(db.kv[f"{cmtcap.CITE_LAST_PREFIX}hotdeal"])["diag"]
+
+
+@needs_node
+def test_fake_mobile_blog_home_citation_text_formats() -> None:
+    env = _playwright_env()
+    if env is None:
+        pytest.skip("node playwright·크롬 없음")
+    S = {"lists": {}, "cbox": {}, "info": {},
+         "home": {"derenpick": HOME % "<div class=\"nick\">데런</div><div>7.2천 인용 ⓘ</div><ul><li>글 1</li></ul>",
+                  "derenlog": HOME_SPA % "<span>인용</span> <strong>1,345</strong>",
+                  "demiyum": HOME % "<div>이웃 <b>88</b></div><div><b>345</b> 인용</div>"}}
+    db = FakeDb()
+    res = subprocess.run([NODE, "-e", PW, _code(db), json.dumps(S, ensure_ascii=False)], capture_output=True, text=True, timeout=180, env=env)
+    assert res.returncode == 0, res.stderr
+    sent = [dict(parse_qsl(x, keep_blank_values=True)) for x in json.loads(res.stdout)["bodies"]]
+    assert [(f["b"], f["qn"]) for f in sent] == [("derenpick", "7200"), ("derenlog", "1345"), ("demiyum", "345")]
+    assert [cmtcap.cite_num(f["qt"]) for f in sent] == [7200, 1345, 345]

@@ -45,7 +45,7 @@ def built(db: Any, base: str = DASH) -> str:
 def test_one_holds_both_bookmarklets_with_their_own_endpoints_and_keys() -> None:
     db = FakeDb()
     v = one.view(db, DASH)
-    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 5
+    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 6
     js = built(db)
     assert f"U='{DASH}{seoi.PATH}',K='{seoi.key(db)}'" in js and f"U='{DASH}{statscap.PATH}',K='{statscap.key(db)}'" in js
     assert seoi.key(db) != statscap.key(db) and "@@" not in js and '["derenpick","issue","데런픽"]' in js
@@ -320,7 +320,7 @@ async def test_pc_blog_page_moves_itself_to_the_mobile_feed_without_asking(bot: 
 
 
 async def test_unknown_account_ends_with_a_line_instead_of_a_chooser(bot: DealBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    got = await drive1(bot, monkeypatch, tmp_path, [nb_row("issue", "nb0", "멘트")], {"me": "someoneelse", "max_s": 30})
+    got = await drive1(bot, monkeypatch, tmp_path, [nb_row("issue", "nb0", "멘트")], {"me": "someoneelse", "max_s": 90})  # v6: 댓글 자리 인용 수가 블로그마다 홈을 15초까지 기다림
     run = got["runs"][0]
     assert got["dialogs"] == [] and run["asked"] == [] and got["reqs"] == [] and ev(got, "submit") == []
     card = run["last"]["card"].split("\n")
