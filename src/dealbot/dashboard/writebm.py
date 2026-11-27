@@ -132,7 +132,7 @@ def runner() -> str:
 
 @lru_cache(maxsize=1)
 def _code() -> str:
-    return HEAD + kkumi.minify(runner()) + TAIL
+    return HEAD + kkumi.minify(runner(), let=True) + TAIL  # 11/27: 'const' → 'let' (꾸미기 v15 로 50KB 를 넘어 — 하루치·꾸미기와 같게)
 
 
 def bookmarklet(endpoint: str, k: str) -> str:

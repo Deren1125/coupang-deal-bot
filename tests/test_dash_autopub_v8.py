@@ -64,9 +64,9 @@ def _post(n: int = 1, center: bool = True) -> dict:
 def test_v8_bookmarklet_fits_with_the_real_dashboard_address() -> None:
     db = FakeDb()
     v = autopub.view(db, "https://52-79-136-64.sslip.io")  # config.yaml dashboard.public_url 길이
-    assert v["version"] == autopub.version() == 10 and v["len"] <= autopub.LEN_MAX == 50000, v["len"]
+    assert v["version"] == autopub.version() == 11 and v["len"] <= autopub.LEN_MAX == 50000, v["len"]
     assert len(autopub.view(db, "https://dash.example")["code"]) <= 50000
-    assert kkumi.version() == 14 and len(kkumi.bookmarklet()) < 30500
+    assert kkumi.version() == 15 and len(kkumi.bookmarklet()) < 31000
     js = unquote(v["code"][len("javascript:"):])
     assert "\n" not in js  # v8: '}' 뒤 줄바꿈도 붙임 (주소 %0A)
     assert re.search(r"(let |,)CORE=", js) and "const CORE" not in js  # v8: 'const' → 'let' (v9: 이어진 let 은 ',' 로)
@@ -151,7 +151,7 @@ def test_title_still_left_holds_the_post_and_goes_to_the_next() -> None:
     assert [(d["id"], d["r"]) for d in got["done"]] == [("pub:issue:11", "skip"), ("pub:issue:12", "hold"), ("pub:issue:12", "ok")], got["done"]
     assert got["done"][0]["n"] == "제목 가운데 안 됨" and got["done"][0]["pub"] == 0 and len(got["pub"]) == 1
     assert got["mid"] == 1 and got["lines"][0].startswith("보류 · 「1번 글 제목이에요」 — 제목 가운데 안 됨"), got["lines"]
-    assert "제목 가운데 안 됨 1편 — 알려 주세요" in got["end"] and got["end"].endswith(" · v10"), got["end"]
+    assert "제목 가운데 안 됨 1편 — 알려 주세요" in got["end"] and got["end"].endswith(" · v11"), got["end"]
 
 
 @needs_node

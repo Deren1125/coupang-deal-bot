@@ -1,4 +1,4 @@
-/* 꾸미기 책갈피 v14 (v14: 11/26 실제 발행창(읽기 전용 날짜 칸 · CSS 모듈 이름) — 누른 뒤 새로 보인 달력에서 날 이름(aria-label·data-date)으로 다음 날 고르기 · 달력 단추 · 못 하면 진단 넷 · v12: 11/25 가운데 글 제목 가운데 — 누른 뒤 다시 보고 3번까지 · 정렬 드롭다운이면 열고 누름 · v11: 11/24 사진이 30초 안에 다 안 올라가도 사진 칸이 생겼으면 주소로 또 넣지 않음 (라커룸 김혜성 글 같은 사진 두 장) · 태그는 네이버처럼 글자·숫자·_ 만 남기고 겹친 것 빼고 30개까지 · 안 들어간 태그는 한 번 더, 그래도 없으면 이름을 알림에 · v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
+/* 꾸미기 책갈피 v15 (v15: 11/27 링크 카드 — 확인 뒤 20초까지·창이 남았으면 확인 한 번 더·안 되면 한 번 더 (아이패드에서 8초 넘게 걸려 '카드 안 생김'·늦은 카드로 차례 어긋남) · 우리 주소 줄 끝 Enter 먼저 · 끝내 안 되면 그 주소 줄만 지우고 원래 차례에서도 빼고 메모 (못 지우면 지워 달라고) · v14: 11/26 실제 발행창(읽기 전용 날짜 칸 · CSS 모듈 이름) — 누른 뒤 새로 보인 달력에서 날 이름(aria-label·data-date)으로 다음 날 고르기 · 달력 단추 · 못 하면 진단 넷 · v12: 11/25 가운데 글 제목 가운데 — 누른 뒤 다시 보고 3번까지 · 정렬 드롭다운이면 열고 누름 · v11: 11/24 사진이 30초 안에 다 안 올라가도 사진 칸이 생겼으면 주소로 또 넣지 않음 (라커룸 김혜성 글 같은 사진 두 장) · 태그는 네이버처럼 글자·숫자·_ 만 남기고 겹친 것 빼고 30개까지 · 안 들어간 태그는 한 번 더, 그래도 없으면 이름을 알림에 · v10: 11/18 카테고리 이름 띄어쓰기·가운뎃점 달라도 찾기 · v9: 11/18 다음 날 예약 날짜 채움 · v8: 11/17 포스트잇 빠져나오기·안 확인 다시 찾기 · v7: 11/16 글 바로 다음 포스트잇도 안에 · v4: 주인 10/29 아이패드 시험 뒤 — 위에서부터 차례로 쌓기 · v6: 11/14 예약 날짜·시각 채움 — 발행 단추는 누르지 않음). 네이버 블로그 글쓰기(아이패드 사파리)에서 본문을 한 번 누른 뒤 누르면:
    작은 칸이 뜨고 → 주인이 대시보드에서 복사한 본문을 그 칸에 붙여 넣으면 → 글을 위에서부터 조각마다 에디터에 붙여 넣으며
    구분선 자리(\u2063 만 든 빈 줄)에는 짧은 가운데 구분선 · 주소만 있는 줄 다음엔 링크 카드 · 인용구는 포스트잇 · 끝의 태그 줄(\u2064)은 발행 설정창 태그 칸에.
    아이패드 시험(10/29): 스크립트로 커서를 옮기는 방법 6가지 모두 안 됨 (넣은 것은 늘 글 맨 끝) · 스크립트 붙여넣기 신호는 됨 (맨 끝에).
@@ -20,10 +20,10 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 14;
+const V = 15;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
-const cards = () => qa(D, CARD).length;
+const cards = () => qa(content(), CARD).length;
 const raw = p => (p.textContent || '').replace(/[\u200b\ufeff]/g, '');
 const txt = p => raw(p).replace(/[\u2063\u2064\u200c\u200d]/g, '').trim();
 const isUrl = t => /^https?:\/\/[^\s]+$/i.test(t);
@@ -144,18 +144,19 @@ const titleMid = async (tries = 3) => {
   return centered(t) ? '' : '못 함';
 };
 // 링크 카드: 툴바 링크 단추 → 주소 → 검색 → 미리보기 → 확인 (카드는 맨 끝 = 바로 위 주소 줄 다음)
-const card = async u => {
-  const before = cards();
+// v15 (11/27 아이패드 데런픽 '카드 안 생김' · 늦게 생긴 카드로 '글 차례가 원고와 달라요'): 확인 뒤 20초까지 · 창이 남았으면 확인 한 번 더
+const ENT = {key: 'Enter', keyCode: 13, bubbles: true};
+const card1 = async (u, ok) => {
   const b = vis(["button[data-name='oglink']", 'button.se-oglink-toolbar-button', "button[class*='oglink']"]);
-  if (!b) return '링크 단추 없음';
+  if (!b) return 1;
   press(b);
-  const i = await wait(() => vis(['.se-popup-oglink input', "input[class*='oglink']", "input[placeholder*='URL']", "input[placeholder*='url']", "input[placeholder*='링크']"]), 3000);
-  if (!i) return '주소 칸 없음';
+  const i = await wait(() => vis(['.se-popup-oglink input', "input[class*='oglink']", 'input[placeholder*=url i]', "input[placeholder*='링크']"]), 3000);
+  if (!i) return 1;
   i.focus();
   put(i, u);
   await S(200);
   const s = vis(['button.se-popup-oglink-button', ".se-popup-oglink button[class*='search']", "button[class*='oglink'][class*='search']"]);
-  if (s) press(s); else i.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 13, bubbles: true}));
+  if (s) press(s); else i.dispatchEvent(new KeyboardEvent('keydown', ENT));
   await S(600);
   const pv = await wait(() => {
     const pop = D.querySelector('.se-popup-oglink');
@@ -164,13 +165,26 @@ const card = async u => {
     const prev = pop.querySelector('[class*="preview"],[class*="oglink-info"],img,[class*="thumbnail"]');
     return (!busy || busy.offsetParent === null) && prev ? prev : null;
   }, 15000);
-  if (!pv) { shut(); return '미리보기 없음'; }
-  const c = vis(['.se-popup-oglink .se-popup-button-confirm', 'button.se-popup-button-confirm']);
-  if (!c) { shut(); return '확인 단추 없음'; }
-  press(c);
-  if (!await wait(() => cards() > before, 8000)) { shut(); return '카드 안 생김'; }
-  await S(400);
-  return '';
+  for (let k = 0; pv && k < 2; k++) {
+    const c = vis(['.se-popup-oglink .se-popup-button-confirm', 'button.se-popup-button-confirm']);
+    if (c) press(c);
+    if (await wait(ok, 12000 - k * 4000)) return 0;
+  }
+  return 1;
+};
+// v15: 우리가 방금 붙인 주소 줄(본문 끝 · 글이 그 주소 하나) 끝에서 Enter 먼저 (네이버가 주소를 카드로 바꿀 수 있음) → 툴바 두 번까지 →
+// 끝내 안 되면 그 줄만 골라 지움 (다른 줄은 안 건드림) · '' 됨 · 'x' 줄 지움 · 'u' 줄 남음
+const card = async u => {
+  const before = cards(), ok = () => cards() > before, L = lastPara(), my = () => L && L.isConnected && txt(L);
+  if (my() === u) { setSel(L); host().dispatchEvent(new W.KeyboardEvent('keydown', ENT)); }
+  for (let n = await wait(ok, 3000) ? 0 : 2; n && !ok(); n--) if (await card1(u, ok)) { shut(); await wait(ok, 1500); }
+  if (ok()) { await S(400); return ''; }
+  if (my() === u) {
+    W.getSelection().selectAllChildren(L);
+    host().dispatchEvent(new W.KeyboardEvent('keydown', {key: 'Backspace', keyCode: 8, bubbles: true}));
+    await wait(() => !my(), 2000);
+  }
+  return my() ? 'u' : 'x';
 };
 const LINE_OPENERS = ["button[data-name='horizontal-line'] + button", "button[data-name='horizontal-line-select']", '.se-toolbar-item-horizontal-line button.se-document-toolbar-select-option-button', "[class*='horizontal'] button[class*='select']"];
 const LINE_DEFAULT = ["button[data-value='default'][data-name*='horizontal']", "[class*='horizontal'] button[data-value='default']", "button[data-value='horizontal-line-default']", "button[class*='horizontal-line-default']", "button[data-value='default']"];
@@ -398,11 +412,10 @@ const bookIn = async at => {
       } catch (e) {}
       // v14: 손으로 쓰는 날짜 칸 길(v9)은 뺌 — 실제 발행창 날짜 칸은 읽기 전용 (주소를 짧게)
       D_ = sels()[2];
-      // v14: 못 했으면 R.dg 에 (하루치가 대시보드로 보냄 · 글 없음 — 열 자 넘는 글은 ~ · 주소·style·d 는 뺌): A 날짜 칸과 세 겹 위 · C 발행창 안 calendar·date·picker·day 이름 칸 60개 · B 누른 뒤 새로 보인 것 6,000자 (주소·style·svg d·빈칸은 대시보드가 지움)
+      // v14: 못 했으면 R.dg 에 (하루치가 대시보드로 보냄 · 글 없음 — 열 자 넘는 글은 ~ · 주소·style·d 는 뺌): 날짜 칸 이름 · (v15: 11/27 날짜 고르기가 돼서 A 세 겹 위·C 이름 칸 60개는 뺌) · B 누른 뒤 새로 보인 것 6,000자 (주소·style·svg d·빈칸은 대시보드가 지움)
       if (!ok) {
         const nw = [...vs()].filter(e => !pre.has(e)), cl = h => h.replace(/>[^<]{10,}</g, '>~<');
-        let p = D_;
-        R.dg = [at, D_.readOnly, D_.value, c && c[2], !!ic] + '|A' + cl(D_.outerHTML) + '<' + [1, 2, 3].map(() => tc(p = p.parentElement || p)) + '|C' + qa(D_.closest('[class*=layer_publish]') || box, '*').filter(e => /calendar|date|picker|day/i.test(tc(e))).slice(0, 60).map(tc) + '|B' + cl(nw.filter(e => !nw.includes(e.parentElement)).map(e => e.outerHTML).join('')).slice(0, 6000);
+        R.dg = [at, D_.readOnly, D_.value, c && c[2], !!ic, tc(D_)] + '|B' + cl(nw.filter(e => !nw.includes(e.parentElement)).map(e => e.outerHTML).join('')).slice(0, 6000);
         throw 0;
       } [H, M] = s;
       why = '칸 못 찾음';
@@ -544,7 +557,8 @@ try {
     } else if (p.k === 'card') {
       R.cards[1]++;
       const why = await card(p.u);
-      if (why) R.bad.push('카드 ' + why); else R.cards[0]++;
+// v15: 못 만든 카드는 원래 차례에서 빼고(R.want) 넘어감 · 주소 줄을 못 지웠으면 그 줄을 지워 달라고
+      if (why) { R.cards[1]--; p.k = ''; R.want = want(ps); if (why === 'x') R.notes.push('카드 안 됨 (주소 줄 뺌)'); else R.bad.push('카드 안 됨 — 주소 줄을 지워 주세요 ' + p.u.slice(8, 40)); } else R.cards[0]++;
     } else if (p.k === 'quote') {
       R.quotes[1]++;
       const why = await quote(p);

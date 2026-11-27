@@ -225,7 +225,7 @@ def test_dashboard_texts_mention_the_auto_fill() -> None:
     assert "it.when ?" in rt and "도 채워 줘요" in rt and "발행 단추만 직접" in rt and "새로 고름" in rt
     assert "예약 시각 자동 채움" in (STATIC / "logins.js").read_text(encoding="utf-8")
     assert "예약 날짜·시각도 채워 줘요" in kkumi.USE and "발행 단추는 직접" in kkumi.USE
-    assert kkumi.version() == 14
+    assert kkumi.version() == 15
 
 
 def test_bookmarklet_never_names_or_presses_the_final_publish_button() -> None:
@@ -561,5 +561,5 @@ def test_v13_failure_leaves_a_calendar_sketch_without_text() -> None:
     got = _run("wrongday", when)
     assert got["rsv"]["now"] is True and got["rsv"]["confirm"] == 0, got["rsv"]
     dg = got["report"]["dg"]
-    assert dg.startswith(when.strftime("@%Y-%m-%dT%H:%M") + ",true,") and "|A<input" in dg and "ui-datepicker" in dg, dg
-    assert all(k in dg for k in ("|C", "|B")) and len(dg) < 9000 and "첫 글이에요" not in dg, dg
+    assert dg.startswith(when.strftime("@%Y-%m-%dT%H:%M") + ",true,") and "INPUT." in dg.split("|B")[0], dg  # v15: A(날짜 칸·세 겹 위)·C(이름 칸) 대신 날짜 칸 이름만
+    assert "|B" in dg and "|A" not in dg and "|C" not in dg and len(dg) < 9000 and "첫 글이에요" not in dg, dg

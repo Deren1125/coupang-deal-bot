@@ -115,7 +115,7 @@ def test_v14_picks_the_next_day_on_the_real_layer_shape(mode: str) -> None:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node 없음")
 def test_v14_failure_reverts_and_sends_the_new_nodes() -> None:
-    """날을 눌러도 안 바뀌면 '현재'로 되돌림 · 진단에 A 날짜 칸(읽기 전용 INPUT·세 겹 위 이름) · K 달력 · C 발행창 이름 칸 · B 새로 보인 portal — 글은 없음."""
+    """날을 눌러도 안 바뀌면 '현재'로 되돌림 · 진단에 날짜 칸(읽기 전용 INPUT) 이름 · B 새로 보인 portal (v15) — 글은 없음."""
     when = _days()[0]
     got = _go("mute", when)
     r = got["rsv"]
@@ -123,16 +123,15 @@ def test_v14_failure_reverts_and_sends_the_new_nodes() -> None:
     assert f"예약 {_lab(when)} 못 채움 (날짜 칸 못 찾음)" in got["alert"], got["alert"]
     dg = got["report"]["dg"]
     assert dg.startswith(when.strftime("@%Y-%m-%dT%H:%M") + ",true," + _date(datetime.now())), dg
-    a, rest = dg.split("|A", 1)[1].split("|C", 1)
-    assert a.startswith('<input type="text" class="input_date__Qd7Rt" readonly') and "DIV.input_wrap__z0" in a and "DIV.date_area__Hh2k" in a and "DIV.time_setting__vB8" in a, a
-    c, b = rest.split("|B", 1)
-    assert "INPUT.input_date__Qd7Rt" in c and "DIV.date_area__Hh2k" in c, c
+    # v15 (11/27 날짜 고르기가 돼서): 진단은 머리(날짜 칸 이름까지)와 B 새로 보인 것만 — A 세 겹 위 · C 이름 칸 60개는 뺌 (주소를 짧게)
+    head, b = dg.split("|B", 1)
+    assert "INPUT.input_date__Qd7Rt" in head and "|A" not in dg and "|C" not in dg, head
     assert b.startswith('<div id="dp_portal">') and "Choose" in b and len(b) <= 6000, b
     assert "첫 글이에요" not in dg and "끝 글이에요" not in dg
 
 
 def test_v14_sizes_and_labels() -> None:
-    assert kkumi.version() == 14 and autopub.version() == 10 and len(kkumi.bookmarklet()) < 30500
+    assert kkumi.version() == 15 and autopub.version() == 11 and len(kkumi.bookmarklet()) < 31000
     assert len(autopub.bookmarklet("https://dash.example.com/dashboard/api/autopub_act", "k" * 43)) <= autopub.LEN_MAX
 
 

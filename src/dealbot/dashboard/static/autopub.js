@@ -1,4 +1,4 @@
-/* '하루치 한 번에 (발행까지)' 진행기 v10 (v10: 11/26 다음 날 예약 날짜를 실제 네이버 발행창 모양으로 고름 — 꾸미기 v14 · 진단 9,000자 · v8: v8: 11/25 주인 '본문은 가운데인데 제목은 왼쪽' — 가운데 글은 제목을 넣은 뒤 꾸미기 v12 titleMid(3번까지) · 안 되면 본문 넣기 전에 주인이 도구줄 '가운데'를 누를 때까지 멈춤 · 그래도 왼쪽이면 그 글은 보류(발행 안 함 · 다음 글로) · 같은 판에서 2편 연속 보류면 나머지는 메모만 남기고 발행 · 끝 요약에 '제목 가운데 안 됨 n편' · 왼쪽 글(라커룸)은 안 건드림 · v7: 11/24 밤 아이패드 v6 — 제목에 포스트잇 글과 같은 말(「120억 그다음」)이 있으면 '포스트잇 밖에도 있어요'로 잘못 멈춤: 에디터의 .se-content 글에는 제목 칸도 들어 있음 → 포스트잇 밖 세기에서 제목 칸 글을 뺌 (원고 쪽엔 제목이 없으니 같은 것끼리) · 서버가 안 보내는 주말 신호의 단추를 뺌 · v6: 11/24 주인 — 사진은 원고의 90% 넘고 2장까지 빠지면, 태그는 90% 넘거나 1개만 빠지면 발행하고 요약에 적음 (다시 점검도 같게) · 원고보다 사진이 많으면(같은 사진 겹침) 멈춤 · 가운데 블로그(드라마·데런픽)는 원고에서 가운데인 글 줄이 화면에서도 가운데인지 봄 (2줄 넘게 어긋나면 멈추고 '전체 선택 → 가운데 단추') · 꾸미기 v11: 사진이 30초 안에 다 안 올라가도 주소로 한 번 더 넣지 않음 (같은 사진 두 장의 원인) · 태그는 네이버처럼 글자·숫자만 남겨 넣고 비교·한 번 더 넣어 봄 · v5: 11/23 13시 아이패드 v4 — 제목·본문·발행창은 됐는데 '포스트잇 글이 안 들어감': 주인 손이 본문에 남은 채(꾸미기는 붙여넣기 칸으로 손이 빠진 뒤) 붙여넣어 꾸미기 v7 의 포스트잇 칸 고르기가 안 먹음 → 본문을 누른 뒤 꾸미기처럼 편집 칸 밖 칸으로 포커스를 뺐다가 시작 · 포스트잇마다 화면에서 다시 읽어 빠진 글을 적고 「포스트잇 글 복사」 · 본문을 눌렀는데 첫 조각이 안 들어가면(13:40 3/4) 본문이 빈 때만 '한 번 더 눌러 주세요' · 예약 시각은 누른 때 기준 계획을 맨 위에 · v4: 11/23 12시 아이패드 v3 — 제목·본문 둘 다 빈 칸: 스크립트는 SE ONE 커서를 못 옮기고(새 창 포커스 → 본문) v3 는 본문에 든 제목을 DOM 에서 지워 에디터가 붙여넣기를 안 받음 → 글마다 주인이 제목 칸·본문을 한 번씩 누르면(진짜 누름) 그 자리에 붙여넣기 · 에디터 글을 스크립트로 지우지 않음 · v3: 11/23 11:36 아이패드 — v2 도 제목을 못 넣음: 아무것도 누르기 전에 처음 커서(제목)로 붙여넣기 · 늦게 그리는 제목을 기다려 두 번 읽음 · 끝내 안 되면 본문만 넣고 발행 전에 멈춤 + '제목 복사' · v2: 제목이 본문에 들어가던 것 · 주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지"). autopub.py 가 줄여 책갈피 주소에 통째로 넣는다
+/* '하루치 한 번에 (발행까지)' 진행기 v11 (v11: 11/27 꾸미기 v15 링크 카드 — 늦은 카드 기다림 · 못 만든 카드는 주소 줄을 지우고 요약에 메모만, 차례 점검에서 뺌 · 줄을 못 지우면 그 줄만 지워 달라고 멈춤 · 주소를 짧게 하려고 안내 글 몇 개를 줄임 · v10: 11/26 다음 날 예약 날짜를 실제 네이버 발행창 모양으로 고름 — 꾸미기 v14 · 진단 9,000자 · v8: v8: 11/25 주인 '본문은 가운데인데 제목은 왼쪽' — 가운데 글은 제목을 넣은 뒤 꾸미기 v12 titleMid(3번까지) · 안 되면 본문 넣기 전에 주인이 도구줄 '가운데'를 누를 때까지 멈춤 · 그래도 왼쪽이면 그 글은 보류(발행 안 함 · 다음 글로) · 같은 판에서 2편 연속 보류면 나머지는 메모만 남기고 발행 · 끝 요약에 '제목 가운데 안 됨 n편' · 왼쪽 글(라커룸)은 안 건드림 · v7: 11/24 밤 아이패드 v6 — 제목에 포스트잇 글과 같은 말(「120억 그다음」)이 있으면 '포스트잇 밖에도 있어요'로 잘못 멈춤: 에디터의 .se-content 글에는 제목 칸도 들어 있음 → 포스트잇 밖 세기에서 제목 칸 글을 뺌 (원고 쪽엔 제목이 없으니 같은 것끼리) · 서버가 안 보내는 주말 신호의 단추를 뺌 · v6: 11/24 주인 — 사진은 원고의 90% 넘고 2장까지 빠지면, 태그는 90% 넘거나 1개만 빠지면 발행하고 요약에 적음 (다시 점검도 같게) · 원고보다 사진이 많으면(같은 사진 겹침) 멈춤 · 가운데 블로그(드라마·데런픽)는 원고에서 가운데인 글 줄이 화면에서도 가운데인지 봄 (2줄 넘게 어긋나면 멈추고 '전체 선택 → 가운데 단추') · 꾸미기 v11: 사진이 30초 안에 다 안 올라가도 주소로 한 번 더 넣지 않음 (같은 사진 두 장의 원인) · 태그는 네이버처럼 글자·숫자만 남겨 넣고 비교·한 번 더 넣어 봄 · v5: 11/23 13시 아이패드 v4 — 제목·본문·발행창은 됐는데 '포스트잇 글이 안 들어감': 주인 손이 본문에 남은 채(꾸미기는 붙여넣기 칸으로 손이 빠진 뒤) 붙여넣어 꾸미기 v7 의 포스트잇 칸 고르기가 안 먹음 → 본문을 누른 뒤 꾸미기처럼 편집 칸 밖 칸으로 포커스를 뺐다가 시작 · 포스트잇마다 화면에서 다시 읽어 빠진 글을 적고 「포스트잇 글 복사」 · 본문을 눌렀는데 첫 조각이 안 들어가면(13:40 3/4) 본문이 빈 때만 '한 번 더 눌러 주세요' · 예약 시각은 누른 때 기준 계획을 맨 위에 · v4: 11/23 12시 아이패드 v3 — 제목·본문 둘 다 빈 칸: 스크립트는 SE ONE 커서를 못 옮기고(새 창 포커스 → 본문) v3 는 본문에 든 제목을 DOM 에서 지워 에디터가 붙여넣기를 안 받음 → 글마다 주인이 제목 칸·본문을 한 번씩 누르면(진짜 누름) 그 자리에 붙여넣기 · 에디터 글을 스크립트로 지우지 않음 · v3: 11/23 11:36 아이패드 — v2 도 제목을 못 넣음: 아무것도 누르기 전에 처음 커서(제목)로 붙여넣기 · 늦게 그리는 제목을 기다려 두 번 읽음 · 끝내 안 되면 본문만 넣고 발행 전에 멈춤 + '제목 복사' · v2: 제목이 본문에 들어가던 것 · 주인 11/23 — "책갈피 누르면 한 번에 글 여러 개를 넣고, 발행 누르는 것까지"). autopub.py 가 줄여 책갈피 주소에 통째로 넣는다
    (대시보드에서 코드를 받지 않음 — 데이터만 · 화면에서 바로 받지 않는 파일). 서버는 네이버를 열지도 로그인하지도 않는다 — 모두 주인이 로그인한 자기 사파리에서.
    한 번 누르면: 그 블로그(로그인한 아이디 — 우리 블로그가 아니면 거절)의 준비된 글을 차례로 받아 → 새 글쓰기 화면 → 제목 → 본문·꾸미기·사진·태그·카테고리·예약 시각
    (아래 CORE = 꾸미기 책갈피 kkumi.js 그대로) → 스스로 점검 → 깨끗하면 '해 봄'을 먼저 남기고 마지막 발행 단추를 누름 → 발행 확인(저장 요청 답 · 글 주소 · 끝 알림)
@@ -11,7 +11,7 @@
    네이버가 자동입력 방지·보호조치·이용 제한·한도 안내를 보이면 풀지 않고 그 자리에서 멈춘다 → 대시보드가 그 블로그를 24시간 쉬게 함.
    알림·확인·입력 창은 쓰지 않는다 (사파리에서 멈춤 — 모두 화면의 한 줄과 단추 하나로). */
 async CFG => {
-const V = 10;
+const V = 11;
 const W = window, D0 = document, S = m => new Promise(r => setTimeout(r, m));
 // 한글 글은 autopub.py 가 Z('…') 로 줄여 넣는다 (seoi.pack — 한 번에 책갈피 one.js 와 같은 Z · 껍데기만 · 정규식 안에 따옴표 없음 · 한글 글 안에 역슬래시 없음)
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
@@ -67,7 +67,7 @@ const put = fixed => {
   if (fixed) ui.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;box-shadow:0 -2px 12px rgba(0,0,0,.3)';
   (d.body || d.documentElement).appendChild(ui);
 };
-if (!E0) { put(1); say('네이버 블로그 글쓰기 화면에서 눌러 주세요'); setTimeout(() => ui.remove(), 9000); return; }
+if (!E0) { put(1); say('블로그 글쓰기 화면에서 눌러 주세요'); setTimeout(() => ui.remove(), 9000); return; }
 const ids = [];
 for (const d of first) {
   try {
@@ -77,7 +77,7 @@ for (const d of first) {
 }
 // 우리 블로그 하나로만 읽혀야 함 (둘 이상이면 어느 블로그 글을 넣을지 모름 — 멈춤)
 const mines = CFG.bl.filter(x => ids.includes(x[0])), mine = mines.length === 1 ? mines[0] : null;
-if (!mine) { put(1); say(mines.length ? '어느 블로그인지 헷갈려요 — 그 블로그 글쓰기 화면에서 눌러 주세요' : '우리 블로그 계정의 글쓰기 화면이 아니에요' + (ids[0] ? ' (' + ids[0] + ')' : '') + ' — 아무것도 하지 않았어요'); setTimeout(() => ui.remove(), 9000); return; }
+if (!mine) { put(1); say(mines.length ? '어느 블로그인지 몰라요 — 그 블로그에서 눌러 주세요' : '우리 블로그 계정의 글쓰기 화면이 아니에요' + (ids[0] ? ' (' + ids[0] + ')' : '') + ' — 아무것도 하지 않았어요'); setTimeout(() => ui.remove(), 9000); return; }
 const BLOG = mine[1], URL_ = E0.location.href.split('#')[0];
 // v8 고침: 연속 보류 수는 그날 그 블로그에 남김 — '글마다 한 번'(DIR)은 글마다 화면을 다시 열어 메모리 값이 0 이 됨
 const HK = 'aph2' + BLOG, DS = new Date().toDateString();
@@ -186,7 +186,7 @@ const hand = (w, ok) => new Promise(res => {
   for (const y of ev) D.addEventListener(y, f, true);
   const t = setInterval(() => { if (ok && ok()) end(2); else if (Date.now() - t0 > 6e5) end(0); }, 300);
 });
-const NOHAND = '10분 동안 누르지 않아 멈췄어요 — 책갈피 다시';
+const NOHAND = '10분 동안 안 눌러 멈췄어요';
 // v5 (11/23 13:40 아이패드 v4 3/4 — 본문을 눌렀는데 첫 조각이 안 들어감 · 커서는 빈 본문 안내 글 앞): 누른 뒤 에디터 선택이 본문 안에 올 때까지(1.5초까지) + 0.6초 기다림
 // away: 꾸미기는 주인이 본문을 누른 뒤 붙여넣기 칸(편집 칸 밖)으로 손이 빠졌다가 시작 — 그래야 포스트잇 칸 고르기(꾸미기 v7)가 먹음 (v4 는 손이 본문에 남아 표 포스트잇 글이 밖으로) → 같은 차례로
 const settle = async (name, away) => {
@@ -203,7 +203,7 @@ const settle = async (name, away) => {
     fb.remove();
     await S(300);
   }
-  say(name + '넣는 중 — 화면을 건드리지 마세요');
+  say(name + '넣는 중 — 손대지 마세요');
 };
 // v5: 첫 조각이 본문에 안 들어갔고 본문이 아직 비었을 때만 (지우지 않음 · 두 번 넣지 않음) 주인에게 본문을 한 번 더 눌러 달라고 해 다시 (2번까지 · 첫 번은 손 빼기 그대로, 둘째는 손 빼기 없이)
 const again1 = name => { let n = 0; return async () => {
@@ -228,10 +228,10 @@ const pre = (it, name) => async k => {
   const hp = k.vis(['.se-help-panel-close-button', 'button.se-help-close']);
   if (hp) { k.press(hp); await S(400); }
   const T0 = sp(it.title), W_ = k.W, bs = () => k.body_().map(k.real).filter(Boolean).join(' '), b0 = bs(), body0 = !k.comps().some(c => k.real(c));
-  if (!ttl()) { K.why = '제목 칸을 못 찾았어요'; return false; }
+  if (!ttl()) { K.why = '제목 칸 없음'; return false; }
   // 다시 누름: 주인이 제목만 넣어 둔 빈 글이면 그대로 · v5: 본문에 제목만 든 화면(제목이 본문으로 감)도 같은 화면에서 이어 감
   if (!(tt() === T0 && body0)) {
-    if (tt() || !body0 && b0 !== sp(T0)) { K.why = '쓰던 글이 있어요 — 빈 글쓰기 화면에서 눌러 주세요'; return false; }
+    if (tt() || !body0 && b0 !== sp(T0)) { K.why = '쓰던 글이 있어요 — 빈 글쓰기에서 눌러 주세요'; return false; }
     // v5 (주인 11/23 13:58 — 본문을 눌렀는데 제목이 본문으로 · '창을 닫지 않고 제목 칸을 누르면 이어 가게'): 누른 곳이 제목 칸이고 에디터 선택이 본문이 아닐 때만 붙여넣음 ·
     // 본문에 들어가면 지우지 않고(스크립트로 지우면 에디터가 망가짐 — v3) 주인이 지울 때까지 기다렸다가 ① 부터 다시
     for (let n = 0; n < 5; n++) {
@@ -255,7 +255,7 @@ const pre = (it, name) => async k => {
     }
     if (!tt()) {
       copy(it.title);
-      say(name + '제목이 안 들어갔어요 — 「제목 복사」 → 제목 칸을 길게 눌러 붙여넣기 (그대로 기다려요)');
+      say(name + '제목이 안 들어갔어요 — 「제목 복사」 → 제목 칸을 길게 눌러 붙여넣기');
       const h2 = await hand(-1, tt);
       copy('');
       if (!h2) { K.why = NOHAND; return false; }
@@ -268,7 +268,7 @@ const pre = (it, name) => async k => {
   const tm = MID(it) ? await k.titleMid() : '';
   if (tm && h2 < 2) {
     say(name + "제목 칸을 누른 채 도구줄 '가운데'를 눌러 주세요");
-    ask1('안 되면 이 글은 보류');
+    ask1('안 되면 보류');
     await hand(-1, () => K.centered(ttl()) || sig.go);
     ask1('');
     if (!K.centered(ttl())) { K.why = '제목 가운데 안 됨'; K.skip = 1; return false; }
@@ -276,7 +276,7 @@ const pre = (it, name) => async k => {
   if (tm && !K.centered(ttl())) tn++;
   // 본문: 꾸미기와 같게 주인이 본문을 한 번 누른 뒤 · v5: 선택이 제목 칸이면 다시 눌러 달라고 함
   for (let n = 0; n < 3; n++) {
-    say(name + (n ? '본문(아래 넓은 칸)을 눌러 주세요' : '② 본문을 한 번 눌러 주세요 — 그다음은 손대지 마세요'));
+    say(name + (n ? '본문(아래 넓은 칸)을 눌러 주세요' : '② 본문을 한 번 눌러 주세요 — 그 뒤 손대지 마세요'));
     if (!await hand(2)) { K.why = NOHAND; return false; }
     await k.wait(sel, 1500);
     if (sel() !== 1) break;
@@ -322,7 +322,7 @@ const lite = (it, R) => {
   else pits(src, P);
   if (K.cards() < R.cards[1]) P.push('링크 카드 ' + K.cards() + '/' + R.cards[1]);
   if (K.shape() !== R.want) P.push('글 차례가 원고와 달라요');
-  if (!!it.disc !== DISC.test(bt)) P.push(it.disc ? '제휴 고지가 빠졌어요' : '원고에 없는 제휴 고지가 있어요');
+  if (!!it.disc !== DISC.test(bt)) P.push(it.disc ? '제휴 고지가 빠졌어요' : '원고에 없는 제휴 고지');
   return P;
 };
 // v9 (11/25): 날짜를 못 고르면 꾸미기가 남긴 달력 모양(R.dg — 글 없음)을 대시보드로 한 번 (다음에 진짜 달력을 보고 고치게)
@@ -330,7 +330,7 @@ const when = (it, R, w) => (R.dg && ask({a: 'dg', b: BLOG, n: R.dg}), R.dg = 0, 
 // v6 (주인 11/24): 태그는 90% 넘거나 1개만 빠지면 발행 (빠진 태그 이름을 요약에)
 const tg = (R, n, P) => { const m = R.tagList.length; if (n < m) (m - n > 1 && n < m * .9 ? P : nt).push('태그 ' + n + '/' + m + ' 빠짐 ' + (R.tagMiss || []).join(',')); };
 const chk = (it, R) => {
-  nt = [];
+  nt = [...R.notes];
   const P = [...new Set(R.bad)].filter(x => x !== '포스트잇 글이 안 들어감'), w = when(it, R, R.why);
   if (!R.tagList) P.push(NT);
   else tg(R, R.tags[0], P);
@@ -339,7 +339,7 @@ const chk = (it, R) => {
 };
 const again = async (it, R) => {
   const P = [];
-  nt = [];
+  nt = [...R.notes];
   say('「' + it.title + '」 다시 점검하는 중');
   try {
     if (!R.tagList) P.push(NT);
@@ -350,7 +350,7 @@ const again = async (it, R) => {
       if (w) P.push(w);
     }
     return [...P, ...lite(it, R)];
-  } catch (e) { return ['다시 점검하지 못했어요 (' + e + ')']; }
+  } catch (e) { return ['다시 점검 못 함 (' + e + ')']; }
 };
 // 마지막 발행 단추 (발행 설정창 안 — 창을 여는 위쪽 '발행' 단추가 아님)
 const fin = () => K.any(["button[data-testid='seOnePublishBtn']", "button[class*='confirm_btn']"]) || K.any(['button'], e => !/publish_btn/.test(e.className) && !!e.closest("[class*='layer']") && /^(예약\s*)?발행$/.test(sp(e.innerText)));
@@ -368,7 +368,7 @@ const one = async (it, at) => {
   if (E === 'login') return {r: 'login'};
   const w0 = wall(root());
   if (w0) return {r: 'wall', n: w0};
-  if (!E) return {r: DIR ? 'fail' : 'dir', n: '글쓰기 화면이 안 열려요'};
+  if (!E) return {r: DIR ? 'fail' : 'dir', n: '글쓰기 창이 안 열림'};
   for (const d of root()) arm(d);
   const msgs = [];
   let R = null;
@@ -408,7 +408,7 @@ const one = async (it, at) => {
       if (sig.net || m || (t0 && (sig.err >= t0 || ds.some(d => OKAY.test(outer(d))) || (gone > 3 && ds.length && ds.every(d => d.readyState === 'complete'))))) { ask1(''); return {r: 'ok', u: sig.u || (m && (m[1] || m[2])) || '', n: nt.join(' · ')}; }
       if (h) return {r: 'wall', n: h};
       if (sig.go) { ask1(''); copy(''); P = await again(it, R); break; }
-      if (!t0) { if (gone > 8) return {r: 'fail', n: '글쓰기 화면이 닫혔어요'}; continue; }
+      if (!t0) { if (gone > 8) return {r: 'fail', n: '글쓰기 창 닫힘'}; continue; }
       const age = Date.now() - t0, pt = popup(ds);
       if (age > 4000 && !gone && pt) { P = ['네이버 안내: ' + pt.slice(0, 80)]; break; }
       if (age > 30000) return {r: 'unsure'};
@@ -416,7 +416,7 @@ const one = async (it, at) => {
   }
 };
 // ── 차례로
-const MARK = {skip: '보류', ok: '✓ 올렸어요', unsure: '? 확인 못 함 — 블로그에서 확인', wall: '네이버 안내로 멈춤', fail: '못 넣음'};
+const MARK = {skip: '보류', ok: '✓ 올렸어요', unsure: '? 확인 못 함', wall: '네이버 안내로 멈춤', fail: '못 넣음'};
 let end = '', okn = 0, chkn = 0, last = null;
 for (;;) {
   const q = await ask({a: 'next', b: BLOG});
@@ -427,7 +427,7 @@ for (;;) {
   const it = q.next, res = await one(it, q.n + '/' + q.m);
   if (res.r === 'dir') {
     try { W.localStorage.setItem('apbd', '1'); } catch (e) {}
-    say('여기선 스스로 이어가기가 안 돼요 — 다시 열게요. 열리면 책갈피 한 번 더 (이제 글마다 한 번)');
+    say('스스로 이어가기가 안 돼요 — 화면을 다시 열게요. 열리면 책갈피를 한 번 더');
     await S(4000);
     W.location.reload();
     return;
@@ -438,18 +438,18 @@ for (;;) {
   if (res.r === 'login') { end = '네이버 로그인이 풀렸어요 — 로그인 뒤 다시 눌러 주세요'; break; }
   const d = await (sig.sent || ask({a: 'done', b: BLOG, id: it.id, r: res.r, n: res.n || '', u: res.u || ''}));
   if (d && d.checked) chkn++;
-  line(MARK[res.r] + ' · 「' + it.title + '」' + (res.u ? ' · 글 번호 ' + res.u : '') + (res.n ? ' — ' + res.n : '') + (d && d.checked ? ' · 할 일 줄 체크 ✓' : res.r === 'ok' ? ' · 할 일 줄은 직접 체크' : ''));
-  if (res.r === 'wall') { end = '네이버가 보호·제한 안내(' + res.n + ')를 보여 바로 멈췄어요 — 풀지 않아요. ' + ((d && d.text) || '이 블로그 자동 발행은 24시간 쉬어요'); break; }
-  if (res.r === 'unsure') { end = '발행 확인을 못 해 멈췄어요 — 블로그에서 올라갔는지 봐 주세요 (다시 넣지 않아요)'; break; }
-  if (res.r === 'fail') { end = '글을 넣지 못해 멈췄어요 (' + (res.n || '') + ') — 발행 안 됨'; break; }
-  if (res.r === 'skip') { if (DIR) { end = '보류했어요 — 새 화면에서 책갈피 한 번 더'; break; } continue; }
+  line(MARK[res.r] + ' · 「' + it.title + '」' + (res.u ? ' · 글 번호 ' + res.u : '') + (res.n ? ' — ' + res.n : '') + (d && d.checked ? ' · 할 일 줄 체크 ✓' : res.r === 'ok' ? ' · 할 일 줄 직접 체크' : ''));
+  if (res.r === 'wall') { end = '네이버 안내(' + res.n + ')로 멈췄어요 — 풀지 않아요. ' + ((d && d.text) || '이 블로그 자동 발행은 24시간 쉬어요'); break; }
+  if (res.r === 'unsure') { end = '발행 확인 못 해 멈췄어요 — 블로그에서 봐 주세요 (다시 넣지 않아요)'; break; }
+  if (res.r === 'fail') { end = '글을 넣지 못해 멈췄어요 (' + (res.n || '') + ')'; break; }
+  if (res.r === 'skip') { if (DIR) { end = '보류 — 새 화면에서 책갈피 한 번 더'; break; } continue; }
   okn++;
   last = d;
   if (!d) { end = DOWN; break; }
   if (DIR) {
     // 글마다 한 번: 발행 뒤 네이버가 화면을 옮기면 진행기는 사라짐 — 남은 글이 있으면 새 글쓰기 화면을 스스로 열고 한 번 더 누르게
     if (!d.left) break;
-    say('✓ 올렸어요 · 다음 글 ' + (q.n + 1) + '/' + q.m + ' — 새 화면이 열리면 책갈피 한 번 더');
+    say('✓ 올렸어요 · 다음 글 ' + (q.n + 1) + '/' + q.m + ' — 새 화면에서 책갈피 한 번 더');
     await S(5000);
     W.location.reload();
     return;

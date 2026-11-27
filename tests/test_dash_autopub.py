@@ -98,7 +98,7 @@ def test_bookmarklet_carries_the_whole_runner_and_fetches_no_code() -> None:
     v = autopub.view(db, "https://dash.example")
     js = unquote(v["code"][len("javascript:"):])
     assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= autopub.LEN_MAX == 50000 and v["steps"] == list(autopub.STEPS)
-    assert v["version"] == autopub.version() == 10 and "지금 판 v10" in v["note"]
+    assert v["version"] == autopub.version() == 11 and "지금 판 v11" in v["note"]
     assert "#" not in v["code"] and v["code"] == "javascript:" + kkumi.encode_short(js)
     assert "u:'https://dash.example/dashboard/api/autopub_act'" in js and f"k:'{autopub.key(db)}'" in js and "@@" not in js
     assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and autopub._join(autopub._zcore(kkumi.minify(autopub._core(), let=True))) in js
@@ -128,7 +128,7 @@ def test_runner_reuses_kkumi_whole_and_kkumi_itself_is_untouched() -> None:
     for tool in autopub.TOOLS.split(", "):  # 껍데기가 쓰는 꾸미기 도구가 kkumi.js 에 그 이름으로 있음
         assert f"const {tool} = " in src or f"const {tool}=" in src or tool in ("D", "W", "R", "S"), tool
     # 꾸미기 책갈피는 혼자서도 그대로 (발행을 끝내는 단추를 누르지 않는 막이 포함 · 판 번호 그대로)
-    assert kkumi.version() == 14 and "throw 0;" in src and len(kkumi.bookmarklet()) < 30500
+    assert kkumi.version() == 15 and "throw 0;" in src and len(kkumi.bookmarklet()) < 31000
     # 껍데기: 알림·확인·입력 창 없음 · 마지막 발행 단추는 '해 봄'(hold)을 남긴 뒤 한 곳에서만 누름
     for word in (".click(", "requestSubmit", ".submit(", "alert(", "confirm(", "prompt(", "eval(", "document.cookie"):
         assert word not in shell, word
@@ -335,7 +335,7 @@ async def test_api_code_needs_login_and_act_takes_key_only(bot: DealBot, tmp_pat
     assert (await bot.web.dispatch("GET", "/dashboard/api/autopub", anon))[0] == 401
     status, v, hd = await get_json(bot, "/dashboard/api/autopub", session_headers(bot))
     k = autopub.key(bot.db)
-    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 10
+    assert status == 200 and k in unquote(v["code"]) and hd["Cache-Control"] == "no-store" and v["version"] == 11
     res = await _post(bot, {"k": k, "a": "code", "b": "issue"}, origin="https://blog.naver.com")
     assert res[0] == 400 and json.loads(res[1])["code"] == "bad" and res[3]["Access-Control-Allow-Origin"] == "https://blog.naver.com"
     res = await _post(bot, {"k": k, "a": "next", "b": "issue"}, origin="https://blog.naver.com")
@@ -691,7 +691,7 @@ def test_one_tap_fills_checks_and_publishes_two_posts() -> None:
     assert b["book"] is True and (b["h"], b["m"]) == ("19", "40") and b["date"] == f"{when.year}. {when.month:02d}. {when.day:02d}"
     assert any("1/2 「첫 글 제목이에요」 지금 발행 — 확인하는 중" in x for x in got["bars"]) and any("2/2 「둘째 글 제목」 예약 " in x and "19:40 발행 — 확인하는 중" in x for x in got["bars"])
     assert any("다음 글 2/2 — 1초 쉬어요" in x for x in got["bars"])
-    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v10"), got["end"]
+    assert got["end"].startswith("하루치 한 번에 · 데런픽: 지금 올릴 준비된 글이 없어요 · 올린 글 2 · 할 일 체크 2") and got["end"].endswith(" · v11"), got["end"]
     assert len(got["lines"]) == 2 and all(x.startswith("✓ 올렸어요") and "할 일 줄 체크 ✓" in x for x in got["lines"]) and "글 번호 223000000001" in got["lines"][0]
     # 네이버 화면이 맨 위 창을 글 주소로 옮기려 했지만 진행기는 누른 화면에 그대로 (sandbox) · 끝나면 글쓰기 창을 치움
     assert got["url"] == "https://blog.naver.com/derenpick/postwrite" and got["frames"] == 0 and got["next"] == ["", "", ""] and got["taps"] == 1
@@ -736,12 +736,12 @@ def test_protection_notice_stops_at_once_and_reports_for_the_cooldown() -> None:
     got = _flow(_posts(_tomorrow()), mode="wall")
     assert got["dialogs"] == [] and [(d["id"], d["r"], d["n"]) for d in got["done"]] == [("pub:issue:11", "hold", None), ("pub:issue:11", "wall", "자동입력 방지")], got
     assert got["next"] == [""] and len(got["pub"]) == 1
-    assert "네이버가 보호·제한 안내(자동입력 방지)를 보여 바로 멈췄어요 — 풀지 않아요. 데런픽 하루치 한 번에는 24시간 쉬어요" in got["end"] and "올린 글 0" in got["end"]
+    assert "네이버 안내(자동입력 방지)로 멈췄어요 — 풀지 않아요. 데런픽 하루치 한 번에는 24시간 쉬어요" in got["end"] and "올린 글 0" in got["end"]
     assert got["lines"] == ["네이버 안내로 멈춤 · 「첫 글 제목이에요」 — 자동입력 방지"]
     # 글쓰기 화면을 열자마자 보호 안내 → 글을 넣지도 발행하지도 않음
     got = _flow(_posts(_tomorrow()), mode="prewall")
     assert got["pub"] == [] and [(d["id"], d["r"], d["n"]) for d in got["done"]] == [("pub:issue:11", "wall", "보호하고 있습니다")], got
-    assert got["next"] == [""] and "바로 멈췄어요" in got["end"]
+    assert got["next"] == [""] and "안내(보호하고 있습니다)로 멈췄어요" in got["end"]
 
 
 @needs_node
@@ -902,7 +902,7 @@ def test_v4_on_the_real_model_two_owner_taps_per_post_then_publishes_by_itself()
     assert b["title"] == "둘째 글 제목" and "둘째 글 제목" not in b["text"] and b["book"] is True and (b["h"], b["m"]) == ("19", "40")
     assert got["hands"] == 4 and not got.get("broken") and "cp" not in got  # 글마다 제목 칸 한 번 + 본문 한 번 · 에디터 글을 스크립트로 고친 적 없음
     assert any("1/2 「첫 글 제목이에요」 ① 제목 칸을 한 번 눌러 주세요" == x[len("하루치 한 번에 · "):] for x in got["bars"])
-    assert any("② 본문을 한 번 눌러 주세요" in x for x in got["bars"]) and got["end"].endswith(" · v10") and "올린 글 2" in got["end"]
+    assert any("② 본문을 한 번 눌러 주세요" in x for x in got["bars"]) and got["end"].endswith(" · v11") and "올린 글 2" in got["end"]
 
 
 @needs_node
@@ -1002,7 +1002,7 @@ def test_v5_on_the_real_postit_model_puts_both_postits_inside_and_publishes() ->
     assert a["title"] == "굿파트너2 2회 이야기" and a["tags"].split() == ["#굿파트너2"] and a["cat"] == "셀럽 소식"
     assert len(a["postits"]) == 2 and PIT_A in a["postits"][0] and "1회 · 4.0%" in a["postits"][1].replace("\xa0", " ") and "2회 · 5.1%" in a["postits"][1]
     assert "1회" not in a["outside"] and PIT_A not in a["outside"] and "표 앞 문단이에요." in a["outside"]  # 포스트잇 밖(본문)에는 없음
-    assert got["end"].endswith(" · v10") and "올린 글 1" in got["end"]
+    assert got["end"].endswith(" · v11") and "올린 글 1" in got["end"]
 
 
 @needs_node

@@ -78,7 +78,7 @@ def test_bookmarklet_carries_the_whole_runner_and_fetches_no_code() -> None:
     assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= writebm.LEN_MAX and v["steps"] == list(writebm.STEPS) and v["version"] == 1
     assert "#" not in v["code"] and v["code"] == "javascript:" + kkumi.encode_short(js)
     assert "u:'https://dash.example/dashboard/api/write_act'" in js and f"k:'{writebm.key(db)}'" in js and "@@" not in js
-    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and kkumi.minify(writebm.runner()) in js
+    assert '["derenpick","issue","데런픽"]' in js and "credentials:'omit'" in js and kkumi.minify(writebm.runner(), let=True) in js
     # 원격 코드 실행 없음: 받은 글을 코드로 돌리는 길이 없고, 대시보드에 코드를 달라고 하지 않음
     for word in ("new Function", "Function(", "eval(", "a:'code'", "import(", "createElement('script')", "prompt(", "cookie", "localStorage"):
         assert word not in js, word

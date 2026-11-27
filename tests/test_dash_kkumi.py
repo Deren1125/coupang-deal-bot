@@ -47,7 +47,8 @@ def test_bookmarklet_is_minified_encoded_and_has_no_network() -> None:
     # 11/14 v6 예약 시각 채움 +5.5KB → 33.4KB (32KB 를 넘는 길이는 아이패드에서 저장해 본 적 없음) → 11/15 마지막 검토: 주소에 그대로 써도 되는
     # 글자(; / ? : @ & = + $ ,)를 % 로 바꾸지 않아(encode_short) 29.1KB — 아이패드에서 돈 v5(27.9KB)보다 1.3KB 김 · 주인 확인 필요
     # 11/24 v11 (사진 두 번 막기·네이버 꼴 태그) +0.9KB → 30.1KB — 같은 코드를 통째로 담은 '하루치 한 번에'(49.8KB)가 11/23~ 주인 아이패드 사파리 책갈피로 돎
-    assert len(kkumi.bookmarklet()) < 30500
+    # 11/27 v15 (링크 카드 다시 하기 · 못 만들면 주소 줄 지움) +0.3KB → 30.7KB — 같은 코드를 담은 '하루치 한 번에'(49.9KB)가 아이패드에서 돌아 한도를 31KB 로
+    assert len(kkumi.bookmarklet()) < 31000
     body = kkumi.bookmarklet()[len("javascript:"):]
     assert not set(body) - set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'();/?:@&=+$,%")  # '#'·빈칸·줄바꿈·한글은 모두 %XX
     assert kkumi.encode(js) != body and unquote(kkumi.encode(js)) == js  # 옛 방식(encodeURIComponent)으로 싼 것과 풀면 같은 코드
