@@ -1,4 +1,4 @@
-/* '한 번에' 책갈피 v4 (11/25 v4: 통계를 지난 7일 + 오늘로 · 조회수 순위는 주간(이번 주·지난주)·월간(이번 달·지난달)도 — statday.js · 11/18 v3: 통계 자리가 statday.js — 조회수 순위(일간)·유입분석(일간)·검색 유입을 블로그 이름과 같이 · 못 알아보면 안 보냄 · 11/18 v2: 안에 든 이웃 관리 v3 — 서이추 20~60초·10명마다 쉼·한도 안내 뒤 24시간 · 주인 11/16 — '책갈피 버튼 합치자 · 켜놓고 놔두면 한 번에' · '내가 누를 버튼이 없어야 한다 · 한 번 누르면 순차적으로 모든 게').
+/* '한 번에' 책갈피 v5 (11/27 v5: 이웃새글 화면에서 이웃 관리 앞에 독자 댓글 모으기 — cmtcap.js · 하루 한 번 · 세 블로그 지난 7일 댓글 · 자동 답글 없음 · 11/25 v4: 통계를 지난 7일 + 오늘로 · 조회수 순위는 주간(이번 주·지난주)·월간(이번 달·지난달)도 — statday.js · 11/18 v3: 통계 자리가 statday.js — 조회수 순위(일간)·유입분석(일간)·검색 유입을 블로그 이름과 같이 · 못 알아보면 안 보냄 · 11/18 v2: 안에 든 이웃 관리 v3 — 서이추 20~60초·10명마다 쉼·한도 안내 뒤 24시간 · 주인 11/16 — '책갈피 버튼 합치자 · 켜놓고 놔두면 한 번에' · '내가 누를 버튼이 없어야 한다 · 한 번 누르면 순차적으로 모든 게').
    '통계 보내기'(v3 부터 세 화면 statday.js)와 '이웃 관리'(seoi.js)의 코드를 그대로 안에 넣은 껍데기 — 딜봇 one.py 가 아래 두 자리('@@STAT@@'·'@@SEOI@@')에
    두 책갈피의 줄인 코드를 통째로 넣는다 (간격·상한·멈춤 규칙·공감·댓글 코드는 한 글자도 다시 쓰지 않음 · 옛 두 책갈피는 그대로 돎).
    누르는 화면을 보고:
@@ -16,7 +16,7 @@
    대시보드에는 옛 두 길만 쓴다 (통계 /dashboard/api/stats_capture · 이웃 /dashboard/api/seoi_act — 열쇠도 그대로 · 쿠키 없음).
    one.py 가 kkumi.minify 로 줄이고 한글 글은 Z('…') 로 바꾼다 — 줄마다 문장이 끝나게 (// 주석은 줄 맨 앞에만 · 정규식 안에 공백·따옴표 없음 · 한글 글 안에 역슬래시 없음). */
 (async function () {
-const V1 = 4;
+const V1 = 5;
 const Z = s => s.replace(/([A-I])(..)|J(....)|\.(..)|_/g, (m, a, b, c, d) => a ? String.fromCharCode(44032 + (a.charCodeAt(0) - 65) * 1296 + parseInt(b, 36)) : c || d ? String.fromCharCode(parseInt(c || d, 16)) : ' ');
 const W = window, D = document, L = location, FEED = 'https://m.blog.naver.com/FeedList.naver', TAG = '한 번에: ', NL = String.fromCharCode(10);
 if (W.__sb1) return;
@@ -83,6 +83,8 @@ if (L.hostname !== 'm.blog.naver.com') {
 }
 const st = (/[#&]sb1=([^&]*)/.exec(L.hash) || [])[1];
 show(TAG + '서이추·들르기를 차례로 해요 — 화면을 켜 둔 채 이 탭에 두세요');
+// 독자 댓글 (v5 — 하루 한 번 · 이웃 관리 앞 · 결과는 W.__sbcl 한 줄)
+'@@CMT@@';
 '@@SEOI@@';
 // 끝 요약 (누를 것 없음 · 칸을 누르면 닫힘)
 const q = ONE.q, stop = !ONE.ran || ONE.line.indexOf('다 했어요') < 0, o = ['한 번에 끝' + (stop ? ' — 다 하지는 못했어요' : ' ✓') + ' · 오늘 여기서 ' + sum()];
@@ -96,6 +98,7 @@ if (q&&q.stats_line) o.push('통계: '+q.stats_line+(s1?' · 이번: '+s1:''));
 else if (s1) o.push('통계: ' + s1);
 else if (q && q.stats === true) o.push('통계: 오늘 받았어요 ✓');
 else if (q && q.stats === false) o.push('통계: 오늘은 아직이에요 — 내 통계 화면에서 이 책갈피를 한 번');
+if (W.__sbcl) o.push('댓글: ' + W.__sbcl);
 if (n.bad.length) o.push('안 된 것: ' + n.bad.slice(-5).join(' / '));
 if (n.hand.length || (ONE.ran && stop)) o.push('폰에서 직접: ' + (n.hand.length ? n.hand.join(' / ') + ' · ' : '') + '남은 줄은 대시보드 할 일에서');
 o.push('결과표는 대시보드 할 일 탭 · 이 칸은 누르면 닫혀요');

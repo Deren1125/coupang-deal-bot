@@ -5,10 +5,12 @@
   one.js 의 '@@SEOI@@'; 자리 ← 줄인 seoi.js (주소·열쇠·블로그 표는 이웃 관리 것) + 아래 PATCHES 네 군데 (사람이 누를 것을 없애는 것만):
     ① 블로그 고르기 창을 띄우지 않음 ② 한 명·한 편이 끝날 때마다 껍데기에 알림 ③ [시작]·[멈춤]을 숨기고 바로 돌고 끝나면 껍데기에 알림
     ④ 화면이 무엇이든 자동으로 (한 단계 모드 없음 — 한 단계는 마지막 단추를 주인이 눌러야 하므로)
+  one.js 의 '@@CMT@@'; 자리 ← 줄인 cmtcap.js (11/27 v5 독자 댓글 — 이웃새글 화면에서 이웃 관리 앞 · 하루 한 번 · 주소는 통계 주소의 옆 길
+    /dashboard/api/comments_capture · 열쇠는 통계 것 · cmtcap.py)
   간격·한 시간·하루 상한·멈춤 규칙은 seoi.py(대시보드)와 seoi.js 그대로 — 여기에는 숫자가 하나도 없다. PATCHES 의 옛 줄이 seoi.js 에서 사라지면
   ValueError (test_dash_one 이 지킴 — seoi.js 를 고칠 때 같이 고침).
-알림·묻기·적기 창은 껍데기의 같은 이름 함수가 받아 화면 아래 칸에 적는다 (창 없음). 새 POST 길은 없다 — 받는 곳은 옛 두 길 그대로
-(/dashboard/api/stats_capture · /dashboard/api/seoi_act · 열쇠·CORS·크기 한도·횟수 한도 그대로). a=queue 답에 stats(오늘 그 블로그 통계가 왔는지) 한 칸만 더함 (api.seoi_act).
+알림·묻기·적기 창은 껍데기의 같은 이름 함수가 받아 화면 아래 칸에 적는다 (창 없음). 받는 곳은 옛 두 길 그대로
+(/dashboard/api/stats_capture · /dashboard/api/seoi_act · 열쇠·CORS·크기 한도·횟수 한도 그대로) + 11/27 댓글 길 comments_capture (같은 한도). a=queue 답에 stats(오늘 그 블로그 통계가 왔는지) 한 칸만 더함 (api.seoi_act).
 옛 두 책갈피는 그대로 돈다. 이웃 관리 판 번호(seoi V)는 이 책갈피도 실어 보내므로 '다시 깔기' 안내는 같이 꺼지고 같이 켜진다.
 길이: 한글 글은 seoi.pack (Z) · 주소는 kkumi.encode_short (꾸미기와 같게) — 그래도 두 책갈피를 합친 길이라 지금까지의 책갈피(29KB)보다 길다 (LEN_MAX).
 """
@@ -22,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from dealbot.dashboard import kkumi, seoi, statscap
+from dealbot.dashboard import cmtcap, kkumi, seoi, statscap
 
 SRC = Path(__file__).resolve().parent / "static" / "one.js"
 LEN_MAX = 47000  # (11/18 v3: 통계 자리가 statday.js 라 약 30KB) · 통계 20KB + 이웃 관리 28KB 를 합쳐 줄인 것 (11/17 통계 길 고침 +0.6KB 로 46000 → 47000) (아이패드 사파리에서 돈 가장 긴 책갈피는 29KB — 저장이 안 되면 옛 두 책갈피로)
@@ -43,7 +45,7 @@ STEPS = (
     "책갈피 목록 → '편집' → '한 번에'의 주소 칸을 모두 지우고, 복사한 코드를 붙여 넣은 뒤 '저장'. (코드가 길어요 — 저장이 안 되면 아래 '따로 쓰고 싶을 때'의 두 버튼을 쓰세요)",
     "쓰는 법: 네이버에 로그인한 사파리에서 내 통계 화면(즐겨찾기해 둔 blog.stat.naver.com)을 열고 '한 번에' → 조회수 순위·유입분석·검색 유입(지난 7일 + 오늘 · 조회수 순위는 주간·월간도 · 1분 남짓)을 "
     "어느 블로그 것인지 붙여 보내면 스스로 이웃새글 화면으로 옮겨 가요 (블로그를 못 알아보면 보내지 않고 그렇게 적어요) → "
-    "거기서 '한 번에'를 한 번 더 → 서로이웃 신청·이웃 글 들르기(공감·댓글 등록)·결과 기록·할 일 줄 체크까지 끝까지 스스로 해요. "
+    "거기서 '한 번에'를 한 번 더 → (하루 한 번) 세 블로그 지난 7일 독자 댓글을 읽어 보내고(답글·공감은 안 함) → 서로이웃 신청·이웃 글 들르기(공감·댓글 등록)·결과 기록·할 일 줄 체크까지 끝까지 스스로 해요. "
     "누른 뒤에는 누를 단추도 확인 창도 없어요 — 화면을 켜 둔 채 그 탭에 두세요. 끝나면 화면 아래 칸에 요약이 남아요.",
     "왜 두 번인가요: 통계 화면과 블로그 화면은 네이버 주소가 달라 브라우저가 한 화면에서 둘을 못 하게 막아요 — 책갈피는 하나, 화면마다 한 번씩이에요. "
     "통계만·이웃만 하려면 그 화면에서만 누르면 돼요 (이웃새글이나 내 블로그 화면에서 바로 눌러도 돼요).",
@@ -77,14 +79,15 @@ def _inner(code: str) -> str:
 def _code() -> str:
     one = kkumi.minify(SRC.read_text(encoding="utf-8"))
     st = kkumi.minify(statscap.DAY_SRC.read_text(encoding="utf-8")).replace("@@URL@@", "@@SURL@@").replace("@@KEY@@", "@@SKEY@@")
+    cm = kkumi.minify(cmtcap.SRC.read_text(encoding="utf-8"))
     so = kkumi.minify(_patched_seoi())
     zl = "const Z=" + one.split("const Z=", 1)[1].split(";", 1)[0] + ";" if "const Z=" in one else ""
     if not zl or so.count(zl) != 1:
         raise ValueError("bad Z")
     so = so.replace(zl, "", 1)  # seoi.js 의 Z 는 껍데기의 Z 와 똑같음 — 한 번만 (안쪽 코드는 바깥 Z 를 씀)
-    if one.count("'@@STAT@@';") != 1 or one.count("'@@SEOI@@';") != 1:
+    if one.count("'@@STAT@@';") != 1 or one.count("'@@SEOI@@';") != 1 or one.count("'@@CMT@@';") != 1:
         raise ValueError("bad one.js")
-    return seoi.pack(one.replace("'@@STAT@@';", _inner(st)).replace("'@@SEOI@@';", _inner(so)))
+    return seoi.pack(one.replace("'@@STAT@@';", _inner(st)).replace("'@@CMT@@';", _inner(cm)).replace("'@@SEOI@@';", _inner(so)))
 
 
 @lru_cache(maxsize=1)
@@ -101,7 +104,8 @@ def bookmarklet(seoi_url: str, seoi_key: str, stat_url: str, stat_key: str) -> s
     """javascript: 주소 — 이웃 관리·통계의 주소·열쇠를 저마다 넣는다 (따옴표·역슬래시 없는 글자만)."""
     if not all(_URL_OK.fullmatch(u) for u in (seoi_url, stat_url)) or not all(_KEY_OK.fullmatch(k) for k in (seoi_key, stat_key)):
         raise ValueError("bad endpoint or key")
-    code = (_code().replace("@@SURL@@", stat_url).replace("@@SKEY@@", stat_key)
+    cmt_url = stat_url.rsplit("/", 1)[0] + "/" + cmtcap.PATH.rsplit("/", 1)[1]  # 통계 길 옆 (/dashboard/api/comments_capture)
+    code = (_code().replace("@@CURL@@", cmt_url).replace("@@SURL@@", stat_url).replace("@@SKEY@@", stat_key)
             .replace("@@URL@@", seoi_url).replace("@@KEY@@", seoi_key).replace("@@BLOGS@@", seoi.blogs_json()))
     return "javascript:" + kkumi.encode_short(code)
 
@@ -119,4 +123,5 @@ def view(db: Any, public_url: str, *, now: float | None = None, tz: ZoneInfo | N
             if sv.get(k):
                 out[k] = sv[k]
         out["got"] = statscap.received(db, now or time.time(), tz)["line"]  # 11/17 통계 확인 한 줄 (블로그·화면 날짜)
+        out["cmt"] = cmtcap.received_line(db, now or time.time(), tz)  # 11/27 댓글 마지막으로 받은 때
     return out

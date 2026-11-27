@@ -45,7 +45,7 @@ def built(db: Any, base: str = DASH) -> str:
 def test_one_holds_both_bookmarklets_with_their_own_endpoints_and_keys() -> None:
     db = FakeDb()
     v = one.view(db, DASH)
-    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 4
+    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= one.LEN_MAX and v["steps"] == seoi.steps(one.STEPS) and v["version"] == 5
     js = built(db)
     assert f"U='{DASH}{seoi.PATH}',K='{seoi.key(db)}'" in js and f"U='{DASH}{statscap.PATH}',K='{statscap.key(db)}'" in js
     assert seoi.key(db) != statscap.key(db) and "@@" not in js and '["derenpick","issue","데런픽"]' in js

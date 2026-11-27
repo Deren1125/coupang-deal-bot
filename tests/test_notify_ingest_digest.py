@@ -207,3 +207,16 @@ async def test_breaking_without_device_never_falls_back_to_kakao(env: Env) -> No
     await env.router.tick()
     await env.router.tick()
     assert env.server.requests == [] and env.kakao_files() == []
+
+
+async def test_reader_weekly_notice_is_pushed_without_kakao(env: Env) -> None:
+    """Blog-Auto reader_comments.weekly (주인 11/27 — 일요일 저녁 '독자 반응 주간' 한 통): 바로 푸시 · 기기 없으면 카톡 예비 없음."""
+    env.device()
+    n = dict(_breaking("4"), key="reader_weekly:2026-W48", kind="reader_weekly", blog="", iid="sys-blogauto", sev="", title="독자 반응 주간",
+             body="오류 지적 2 · 요청 1 · 칭찬 3 · 바꾼 것: 배운 것 2줄", short="독자 반응 주간", at=env.clock())
+    put(env.tmp, f"n_{'4' * 26}", n)
+    assert ingest.ingest(env.tmp, env.router)["open"] == 1
+    env.clock.tick(21)
+    await env.router.tick()
+    [p] = env.pushes()
+    assert p["title"] == "독자 반응 주간" and p["body"].startswith("오류 지적 2")

@@ -31,6 +31,8 @@
   GET  /dashboard/api/statscap          '통계 보내기' 책갈피 {code, len, steps} (statscap.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
   POST /dashboard/api/stats_capture     책갈피가 네이버 내 통계 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 — 본문 열쇠 k 로만 받음 ·
                                         CORS 는 https://*.naver.com 만 · via=form 이면 HTML 한 장) → statscap.save
+  POST /dashboard/api/comments_capture  '한 번에' 책갈피(11/27 v5)가 모바일 블로그 화면에서 보낸 우리 블로그 독자 댓글 한 블로그치
+                                        (열쇠·CORS·크기·횟수는 stats_capture 와 같게 · 댓글 쓴 사람 아이디·별명은 받지 않음) → cmtcap.save
   GET  /dashboard/api/ablyrank          'Ably 랭킹 보내기' 책갈피 {code, len, steps} (ablyrank.view — 열쇠가 든 코드 · 연결 탭 설치 칸을 펼칠 때만)
   POST /dashboard/api/ably_rank_capture 책갈피가 에이블리 랭킹 화면에서 보낸 폼 (로그인 없이 · 교차 사이트 · 열쇠 k · CORS 는 https://*.a-bly.com 만)
                                         → ablyrank.save (kv) → Blog-Auto 가 알리면 일 ably_rank_capture 로 넘김 · 서버는 에이블리를 열지 않음
@@ -154,6 +156,7 @@ ACTION_BODY_MAX = 64 * 1024
 PUSH_BODY_MAX = 4096
 TEST_BODY_MAX = 1024
 STATSCAP_BODY_MAX = 1_500_000  # statscap.BODY_MAX 와 같게
+CMTCAP_BODY_MAX = 400_000  # cmtcap.BODY_MAX 와 같게 (댓글 100개 × 600자)
 NAVER_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*naver\.com$")
 ABLY_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*a-bly\.com$")
 SEOI_ORIGIN_RE = re.compile(r"^https://([a-z0-9-]+\.)*blog\.naver\.com$")  # 이웃 관리 책갈피가 도는 화면만 (seoi.js 의 hostname 확인과 같게)
@@ -209,6 +212,7 @@ class DashApi:
         self.today_rate = RateWindow(30, 60.0)
         self.upload_rate = RateWindow(60, 600.0)
         self.sub_rate = RateWindow(10, 3600.0)
+        self.cmtcap_rate = RateWindow(120, 600.0)  # 독자 댓글 (11/27 — 통계 보내기와 같은 한도 · 책갈피는 하루 한 번 블로그 셋)
         self.statscap_rate = RateWindow(120, 600.0)  # 통계 보내기 (손님마다 10분에 120번 — 11/12 한 번 누르면 40개까지)
         self.ablyrank_rate = RateWindow(20, 600.0)  # Ably 랭킹 보내기 (손님마다 10분에 20번)
         self.writebm_rate = RateWindow(WRITEBM_RATE_N, 600.0)
@@ -301,6 +305,7 @@ class DashApi:
         web.route(f"{API}/kkumi", self.kkumi)
         web.route(f"{API}/statscap", self.statscap)
         web.route_post(f"{API}/stats_capture", self.stats_capture, max_body=STATSCAP_BODY_MAX, with_headers=True, cross_site=True)
+        web.route_post(f"{API}/comments_capture", self.comments_capture, max_body=CMTCAP_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/ablyrank", self.ablyrank)
         web.route_post(f"{API}/ably_rank_capture", self.ably_rank_capture, max_body=ABLYRANK_BODY_MAX, with_headers=True, cross_site=True)
         web.route(f"{API}/seoi", self.seoi)
@@ -377,7 +382,7 @@ class DashApi:
         from dealbot.dashboard.ssalmuk import PUBLIC_PATHS as SSALMUK_PUBLIC
         from dealbot.dashboard.xstudio import PUBLIC_PATHS as XSTUDIO_PUBLIC
 
-        return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture",
+        return [SW_PATH, *(webapp.STATIC_PREFIX + n for n in APP_FILES), f"{API}/stats_capture", f"{API}/comments_capture",
                 f"{API}/ably_rank_capture", f"{API}/seoi_act",  # stats_capture·ably_rank_capture·seoi_act: 열쇠로 직접 확인
                 f"{API}/write_act",  # 글쓰기 한 번에 책갈피: 열쇠로 직접 확인
                 f"{API}/autopub_act",  # 하루치 한 번에 책갈피: 열쇠로 직접 확인
@@ -760,6 +765,26 @@ class DashApi:
             return answer(e.status, {"ok": False, "code": e.code, "text": e.text})
         log.info("stats_capture saved: %s", got["label"])
         return answer(200, got)
+
+    async def comments_capture(self, form: dict[str, str], headers: dict[str, str]) -> Any:
+        """책갈피가 보낸 한 블로그의 독자 댓글 (주인 11/27). 열쇠(통계 것)·크기·하루 횟수 → kv reader_cmt:* → {ok, label, n, new}.
+        서버는 네이버를 열지 않는다 · 자동 답글 없음. 응답 CORS 는 네이버 화면에만."""
+        from zoneinfo import ZoneInfo
+
+        from dealbot.dashboard import cmtcap, statscap
+
+        origin = (headers.get("origin") or "").strip().rstrip("/")
+        cors = {"Access-Control-Allow-Origin": origin, "Vary": "Origin"} if NAVER_ORIGIN_RE.match(origin) else {"Vary": "Origin"}
+        if not self.cmtcap_rate.hit(client_key(headers)):
+            return jresp(429, {"ok": False, "code": "rate", "text": "너무 자주 보냈어요 — 잠시 뒤 다시"}, cors)
+        try:
+            got = cmtcap.save(self.bot.db, form, tz=ZoneInfo(self.bot.settings.app.timezone))
+        except statscap.CaptureError as e:
+            if e.code == "key":
+                log.info("comments_capture: wrong key from %s", hashlib.sha256(client_key(headers).encode()).hexdigest()[:8])
+            return jresp(e.status, {"ok": False, "code": e.code, "text": e.text}, cors)
+        log.info("comments_capture saved: %s", got["label"])
+        return jresp(200, got, cors)
 
     async def ablyrank(self, query: dict[str, str]) -> Any:
         """'Ably 랭킹 보내기' 책갈피 코드 (주인 11/12 — 열쇠가 들어 있어 로그인 아래에서만 · 캐시 안 함)."""
