@@ -20,7 +20,7 @@ if (!D) { alert('꾸미기: 글쓰기 화면이 아니에요'); return; }
 const W = D.defaultView;
 if (W.__kkumi) { alert('꾸미기: 도는 중'); return; }
 // 판 번호 (11/14 — 끝 알림에 'v6' · 대시보드가 '책갈피가 바뀌었어요'를 알릴 때 같이 보임 · 고칠 때마다 올림)
-const V = 15;
+const V = 16;
 const ZL = '\u2063', ZT = '\u2064';
 const CARD = '.se-oglink,.se-module-oglink,[class*="se-component-oglink"]';
 const cards = () => qa(content(), CARD).length;
@@ -47,6 +47,8 @@ const wait = async (f, ms) => {
   return null;
 };
 const nImg = () => qa(D, '.se-component.se-image').length;
+// v16 (주인 11/28 데런픽 아이유 글 '대표'가 두 장): 사진을 다 넣은 뒤 켜진 '대표'는 맨 앞 하나만 남기고 끔
+const rep1 = async () => { for (const b of qa(D, '.se-image button[class*=rep-image]').filter(b => /selected|active|is-on/.test(b.className)).slice(1)) { press(b); await S(500); } };
 const content = () => D.querySelector('.se-content') || D.body;
 const host = () => content().closest('[contenteditable="true"]') || content().querySelector('[contenteditable="true"]') || D.querySelector('[contenteditable="true"]');
 const TT = '.se-documentTitle,.se-section-documentTitle', inTitle = e => !!e.closest(TT);
@@ -571,6 +573,7 @@ try {
     }
     R.done++;
   }
+  await rep1();
   R.shape = shape();
   R.fx[1] = fx(body_().map(p => p.innerHTML).join(''));
   if (ps.some(p => p.align === 'center')) { R.title = await titleMid(); if (R.title) R.notes.push('제목 가운데 ' + R.title + ' — 직접'); }

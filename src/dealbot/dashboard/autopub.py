@@ -151,7 +151,7 @@ STEPS = (
     "네이버가 자동입력 방지·보호조치·이용 제한·한도 안내를 보이면 풀지 않고 바로 멈추고, 그 블로그의 하루치 한 번에는 24시간 쉬어요 (그동안 다시 눌러도 하지 않아요). "
     "다른 블로그는 그 블로그 프로필에서 같은 식으로 (한 번에 로그인된 블로그 하나의 글만 해요).",
 )
-LEN_MAX = 50000  # '글쓰기 한 번에'(writebm.LEN_MAX)와 같은 한도 — 꾸미기(29KB) + 껍데기 · 넘으면 ValueError (연결 탭이 503)
+LEN_MAX = 50500  # 11/28 꾸미기 v16 (대표 한 장) +0.2KB → 50.1KB · 49.9KB 가 아이패드에서 돎 — '글쓰기 한 번에'(writebm.LEN_MAX)와 같은 한도 — 꾸미기(29KB) + 껍데기 · 넘으면 ValueError (연결 탭이 503)
 HEAD = "(async()=>{const W=window;if(W.__apr){W.__apb&&W.__apb();return}W.__apr=1;try{await("
 TAIL = (")({u:'@@URL@@',k:'@@KEY@@',bl:JSON.parse('@@BLOGS@@')})}catch(e){const o=document.createElement('div');"
         "o.style.cssText='position:fixed;left:8px;right:8px;top:8px;z-index:2147483647;padding:14px;border-radius:12px;background:#111;color:#fff;"

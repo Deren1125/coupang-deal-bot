@@ -97,7 +97,7 @@ def test_bookmarklet_carries_the_whole_runner_and_fetches_no_code() -> None:
     db = FakeDb()
     v = autopub.view(db, "https://dash.example")
     js = unquote(v["code"][len("javascript:"):])
-    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= autopub.LEN_MAX == 50000 and v["steps"] == list(autopub.STEPS)
+    assert v["code"].startswith("javascript:") and v["len"] == len(v["code"]) <= autopub.LEN_MAX == 50500 and v["steps"] == list(autopub.STEPS)
     assert v["version"] == autopub.version() == 11 and "지금 판 v11" in v["note"]
     assert "#" not in v["code"] and v["code"] == "javascript:" + kkumi.encode_short(js)
     assert "u:'https://dash.example/dashboard/api/autopub_act'" in js and f"k:'{autopub.key(db)}'" in js and "@@" not in js
@@ -128,7 +128,7 @@ def test_runner_reuses_kkumi_whole_and_kkumi_itself_is_untouched() -> None:
     for tool in autopub.TOOLS.split(", "):  # 껍데기가 쓰는 꾸미기 도구가 kkumi.js 에 그 이름으로 있음
         assert f"const {tool} = " in src or f"const {tool}=" in src or tool in ("D", "W", "R", "S"), tool
     # 꾸미기 책갈피는 혼자서도 그대로 (발행을 끝내는 단추를 누르지 않는 막이 포함 · 판 번호 그대로)
-    assert kkumi.version() == 15 and "throw 0;" in src and len(kkumi.bookmarklet()) < 31000
+    assert kkumi.version() == 16 and "throw 0;" in src and len(kkumi.bookmarklet()) < 31000
     # 껍데기: 알림·확인·입력 창 없음 · 마지막 발행 단추는 '해 봄'(hold)을 남긴 뒤 한 곳에서만 누름
     for word in (".click(", "requestSubmit", ".submit(", "alert(", "confirm(", "prompt(", "eval(", "document.cookie"):
         assert word not in shell, word

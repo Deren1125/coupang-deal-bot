@@ -131,7 +131,7 @@ def test_v14_failure_reverts_and_sends_the_new_nodes() -> None:
 
 
 def test_v14_sizes_and_labels() -> None:
-    assert kkumi.version() == 15 and autopub.version() == 11 and len(kkumi.bookmarklet()) < 31000
+    assert kkumi.version() == 16 and autopub.version() == 11 and len(kkumi.bookmarklet()) < 31000
     assert len(autopub.bookmarklet("https://dash.example.com/dashboard/api/autopub_act", "k" * 43)) <= autopub.LEN_MAX
 
 

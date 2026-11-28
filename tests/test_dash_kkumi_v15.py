@@ -102,7 +102,7 @@ def test_v15_card_code_touches_only_our_url_line() -> None:
     assert "L = lastPara()" in c and "txt(L)" in c and c.count("my() === u") == 2  # Enter·지우기 모두 글이 그 주소 하나인 본문 끝 줄에서만
     for word in ("execCommand", ".remove(", "innerHTML", "textContent =", "deleteContents"):  # 스크립트로 글을 지우지 않음 (키만)
         assert word not in c, word
-    assert kkumi.version() == 15 and autopub.version() == 11 and len(kkumi.bookmarklet()) < 31000
+    assert kkumi.version() == 16 and autopub.version() == 11 and len(kkumi.bookmarklet()) < 31000
 
 
 # ---------------------------------------------------------------- 하루치 (점검·발행)

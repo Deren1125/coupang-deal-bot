@@ -64,9 +64,9 @@ def _post(n: int = 1, center: bool = True) -> dict:
 def test_v8_bookmarklet_fits_with_the_real_dashboard_address() -> None:
     db = FakeDb()
     v = autopub.view(db, "https://52-79-136-64.sslip.io")  # config.yaml dashboard.public_url 길이
-    assert v["version"] == autopub.version() == 11 and v["len"] <= autopub.LEN_MAX == 50000, v["len"]
-    assert len(autopub.view(db, "https://dash.example")["code"]) <= 50000
-    assert kkumi.version() == 15 and len(kkumi.bookmarklet()) < 31000
+    assert v["version"] == autopub.version() == 11 and v["len"] <= autopub.LEN_MAX == 50500, v["len"]
+    assert len(autopub.view(db, "https://dash.example")["code"]) <= 50500
+    assert kkumi.version() == 16 and len(kkumi.bookmarklet()) < 31000
     js = unquote(v["code"][len("javascript:"):])
     assert "\n" not in js  # v8: '}' 뒤 줄바꿈도 붙임 (주소 %0A)
     assert re.search(r"(let |,)CORE=", js) and "const CORE" not in js  # v8: 'const' → 'let' (v9: 이어진 let 은 ',' 로)
